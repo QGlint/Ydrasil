@@ -12,6 +12,8 @@ include $(PROJECT_ROOT)/hw/ip/Makefile
 SIM_TOOL ?= verilator
 TOP ?= $(IP)_tb
 RANDOM_SEED ?= 42
+USE_BENDER ?= 0
+BENDER ?= bender
 
 ##################################
 # Paths
@@ -20,6 +22,11 @@ RANDOM_SEED ?= 42
 OBJ_DIR := $(BUILD_DIR)/$(TOP)
 TB_SRCS := $(wildcard $(IP_DIR)/dv/*.sv)
 INC_DIRS += $(PROJECT_ROOT)/hw/include
+
+ifeq ($(USE_BENDER),1)
+FLIST_DIR := $(OBJ_DIR)/flist
+FLIST_FILE := $(FLIST_DIR)/$(IP)_verilator.f
+endif
 
 ##################################
 # Defines

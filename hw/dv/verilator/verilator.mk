@@ -53,6 +53,10 @@ VERILATOR_FLAGS += $(addprefix -I,$(INC_DIRS))
 VERILATOR_FLAGS += $(addprefix -D,$(DEFINES))
 VERILATOR_FLAGS += -CFLAGS "-DTB_NAME=$(TOP)"
 
+ifeq ($(USE_BENDER),1)
+VERILATOR_FLAGS += -f $(FLIST_FILE)
+endif
+
 
 
 
@@ -64,9 +68,20 @@ VERILATOR_FLAGS += -CFLAGS "-DTB_NAME=$(TOP)"
 sim:
 	@mkdir -p $(OBJ_DIR) $(LOG_DIR) $(WAVE_DIR) $(OBJ_DIR_SIM) 
 
+ifeq ($(USE_BENDER),1)
+	@mkdir -p $(FLIST_DIR)
+	@echo "[BENDER FLIST]"
+	@if [ -f $(PROJECT_ROOT)/Bender.yml ] || [ -f $(PROJECT_ROOT)/Bender.yaml ]; then \
+		$(BENDER) script flist -t verilator > $(FLIST_FILE); \
+	else \
+		echo "ERROR: USE_BENDER=1 but Bender.yml/Bender.yaml not found at project root"; \
+		exit 1; \
+	fi
+endif
+
 	@echo "[VERILATOR COMPILE]"
 	$(VERILATOR) $(VERILATOR_FLAGS) \
-	    $(RTL_SRCS) \
+	    $(if $(filter 1,$(USE_BENDER)),,$(RTL_SRCS)) \
 	    $(TB_SRCS) \
 	    $(SIM_CSRCS)\
 	    >$(LOG_DIR)/$(TOP).ver.comp_$(TIME_TAG).log 2>$(LOG_DIR)/$(TOP).ver.comp.err_$(TIME_TAG).log
