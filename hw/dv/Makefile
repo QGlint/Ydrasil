@@ -1,9 +1,8 @@
 ##################################
-# Load IP Description
+# IP Description
 ##################################
 
 IP_DIR := $(PROJECT_ROOT)/hw/ip/$(IP)
-include $(PROJECT_ROOT)/hw/ip/Makefile
 
 ##################################
 # Options
@@ -22,6 +21,12 @@ ifeq ($(BENDER_INCLUDE_TB),1)
 BENDER_TARGET_ARGS += -t $(BENDER_TB_TARGET)
 endif
 
+ifeq ($(USE_BENDER),0)
+include $(PROJECT_ROOT)/hw/ip/Makefile
+else
+RTL_SRCS :=
+endif
+
 ##################################
 # Paths
 ##################################
@@ -29,6 +34,8 @@ endif
 OBJ_DIR := $(BUILD_DIR)/$(TOP)
 TB_SRCS := $(wildcard $(IP_DIR)/dv/*.sv)
 INC_DIRS += $(PROJECT_ROOT)/hw/include
+INC_DIRS += $(IP_DIR)/rtl
+INC_DIRS += $(IP_DIR)/include
 
 ifeq ($(USE_BENDER),1)
 FLIST_DIR := $(OBJ_DIR)/flist
