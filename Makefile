@@ -5,16 +5,14 @@ WAVE_DIR  := $(BUILD_DIR)/wave
 LOG_DIR   := $(BUILD_DIR)/log
 
 SIM_TOOL ?= verilator
-IP  ?= rate_adapter
+IP  ?= if
 VERILATOR_MOD ?= sv
 UVM ?= 0
-USE_BENDER ?= 0
+USE_BENDER ?= 1
 BENDER ?= bender
 
-USE_WINDOW_68_80_GEARBOX ?= 1
-USE_WINDOW_80_68_GEARBOX ?= 1
 
-export PROJECT_ROOT BUILD_DIR WAVE_DIR LOG_DIR SIM_TOOL IP VERILATOR_MOD UVM USE_BENDER BENDER USE_WINDOW_68_80_GEARBOX USE_WINDOW_80_68_GEARBOX
+export PROJECT_ROOT BUILD_DIR WAVE_DIR LOG_DIR SIM_TOOL IP VERILATOR_MOD UVM USE_BENDER BENDER  
 
 .PHONY: all sim clean wave resim
 
@@ -23,14 +21,14 @@ all: sim wave
 
 sim:
 	@mkdir -p $(BUILD_DIR) $(WAVE_DIR) $(LOG_DIR)
-	@$(MAKE) -C hw/dv sim
+	@$(MAKE) -C hw/dv -f Makefile sim
 
 resim:
 	@mkdir -p $(BUILD_DIR) $(WAVE_DIR) $(LOG_DIR)
-	@$(MAKE) -C hw/dv resim
+	@$(MAKE) -C hw/dv -f Makefile resim
 
 wave:
-	@$(MAKE) -C hw/dv wave
+	@$(MAKE) -C hw/dv -f Makefile wave
 
 clean:
 	rm -rf $(BUILD_DIR)

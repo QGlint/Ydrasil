@@ -65,10 +65,21 @@ all: sim wave
 sim:
 	@mkdir -p $(OBJ_DIR) $(LOG_DIR) $(WAVE_DIR) $(OBJ_DIR_SIM) 
 
+ifeq ($(USE_BENDER),1)
+	@mkdir -p $(FLIST_DIR)
+	@echo "[BENDER FLIST]"
+	@if [ -f $(IP_DIR)/Bender.yml ] || [ -f $(IP_DIR)/Bender.yaml ]; then \
+		cd $(IP_DIR) && $(BENDER) script flist $(BENDER_TARGET_ARGS) > $(FLIST_FILE); \
+	else \
+		echo "ERROR: USE_BENDER=1 but Bender.yml/Bender.yaml not found at $(IP_DIR)"; \
+		exit 1; \
+	fi
+endif
+
 	@echo "[VCS COMPILE]"
 	@cd $(OBJ_DIR_SIM) && $(VCS) $(VFLAGS) \
 	    -o $(SIMV) \
-	    $(RTL_SRCS) $(TB_SRCS) \
+	    $(if $(filter 1,$(USE_BENDER)),-f $(FLIST_FILE),$(RTL_SRCS)) $(if $(and $(filter 1,$(USE_BENDER)),$(filter 1,$(BENDER_INCLUDE_TB))),,$(TB_SRCS)) \
 	    -top $(TOP) \
 	    -l $(LOG_DIR)/$(TOP).vcs_compile_$(TIME_TAG).log 2>$(LOG_DIR)/$(TOP).vcs_compile.err_$(TIME_TAG).log
 

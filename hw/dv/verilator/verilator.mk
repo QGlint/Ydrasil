@@ -71,10 +71,10 @@ sim:
 ifeq ($(USE_BENDER),1)
 	@mkdir -p $(FLIST_DIR)
 	@echo "[BENDER FLIST]"
-	@if [ -f $(PROJECT_ROOT)/Bender.yml ] || [ -f $(PROJECT_ROOT)/Bender.yaml ]; then \
-		$(BENDER) script flist -t verilator > $(FLIST_FILE); \
+	@if [ -f $(IP_DIR)/Bender.yml ] || [ -f $(IP_DIR)/Bender.yaml ]; then \
+		cd $(IP_DIR) && $(BENDER) script flist $(BENDER_TARGET_ARGS) > $(FLIST_FILE); \
 	else \
-		echo "ERROR: USE_BENDER=1 but Bender.yml/Bender.yaml not found at project root"; \
+		echo "ERROR: USE_BENDER=1 but Bender.yml/Bender.yaml not found at $(IP_DIR)"; \
 		exit 1; \
 	fi
 endif
@@ -82,7 +82,7 @@ endif
 	@echo "[VERILATOR COMPILE]"
 	$(VERILATOR) $(VERILATOR_FLAGS) \
 	    $(if $(filter 1,$(USE_BENDER)),,$(RTL_SRCS)) \
-	    $(TB_SRCS) \
+	    $(if $(and $(filter 1,$(USE_BENDER)),$(filter 1,$(BENDER_INCLUDE_TB))),,$(TB_SRCS)) \
 	    $(SIM_CSRCS)\
 	    >$(LOG_DIR)/$(TOP).ver.comp_$(TIME_TAG).log 2>$(LOG_DIR)/$(TOP).ver.comp.err_$(TIME_TAG).log
 

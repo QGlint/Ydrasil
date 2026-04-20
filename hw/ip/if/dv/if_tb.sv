@@ -1,6 +1,6 @@
 `timescale 1ns/1ps
 
-module if_stage_tb;
+module if_tb;
 
     logic        clk;
     logic        rst_n;
@@ -121,8 +121,8 @@ module if_stage_tb;
 
         // Case 3: ID 停顿，IF/ID 保持，但 PC 继续前进
         i_stall_id = 1'b1;
-        step_and_check(RESET_PC+32'd12,32'hA000_0000 | ((RESET_PC+32'd12)>>2),1'b1, "stall_id_hold0");
-        step_and_check(RESET_PC+32'd12,32'hA000_0000 | ((RESET_PC+32'd12)>>2),1'b1, "stall_id_hold1");
+        step_and_check(RESET_PC+32'd8,32'hA000_0000 | ((RESET_PC+32'd8)>>2),1'b1, "stall_id_hold0");
+        step_and_check(RESET_PC+32'd8,32'hA000_0000 | ((RESET_PC+32'd8)>>2),1'b1, "stall_id_hold1");
         i_stall_id = 1'b0;
 
         // Case 4: 冲刷，输出应为 NOP + invalid
