@@ -1,3 +1,8 @@
+`ifndef DEFINE_ALU_SVH
+`define DEFINE_ALU_SVH
+
+`include "config.svh"
+
 // ALU操作信息位定义
 `define ALU_OP_WIDTH 13
 `define ALU_OP_ADD 0
@@ -23,3 +28,5 @@
 `define EX_INFO_BJP 3'b100
 `define EX_INFO_LOAD 3'b101
 `define EX_INFO_OTHER 3'b110
+
+`endif
