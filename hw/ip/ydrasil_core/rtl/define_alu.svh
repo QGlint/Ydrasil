@@ -1,7 +1,8 @@
 `ifndef DEFINE_ALU_SVH
 `define DEFINE_ALU_SVH
 
-`include "config.svh"
+//exu_alu的数据通路
+`define DATAPATH_MUX_WIDTH (32+32+16)
 
 // ALU操作信息位定义
 `define ALU_OP_WIDTH 13
@@ -19,14 +20,5 @@
 `define ALU_OP_AUIPC 11
 `define ALU_OP_JUMP 12
 
-`define EX_INFO_BUS_WIDTH 3
-`define EX_INFO_BYPASS_BIT 2
-`define EX_INFO_ALU 3'b000
-`define EX_INFO_MUL 3'b001
-`define EX_INFO_DIV 3'b010
-`define EX_INFO_CSR 3'b011
-`define EX_INFO_BJP 3'b100
-`define EX_INFO_LOAD 3'b101
-`define EX_INFO_OTHER 3'b110
 
 `endif

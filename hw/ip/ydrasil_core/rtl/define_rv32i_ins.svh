@@ -1,0 +1,78 @@
+`ifndef DEFINE_RV32I_INS_SVH
+`define DEFINE_RV32I_INS_SVH
+
+// I type inst
+`define RV32I_INS_TYPE_I 7'b0010011
+`define RV32I_INS_ADDI 3'b000
+`define RV32I_INS_SLTI 3'b010
+`define RV32I_INS_SLTIU 3'b011
+`define RV32I_INS_XORI 3'b100
+`define RV32I_INS_ORI 3'b110
+`define RV32I_INS_ANDI 3'b111
+`define RV32I_INS_SLLI 3'b001
+`define RV32I_INS_SRI 3'b101
+
+// L type inst
+`define RV32I_INS_TYPE_L 7'b0000011
+`define RV32I_INS_LB 3'b000
+`define RV32I_INS_LH 3'b001
+`define RV32I_INS_LW 3'b010
+`define RV32I_INS_LBU 3'b100
+`define RV32I_INS_LHU 3'b101
+
+// S type inst
+`define RV32I_INS_TYPE_S 7'b0100011
+`define RV32I_INS_SB 3'b000
+`define RV32I_INS_SH 3'b001
+`define RV32I_INS_SW 3'b010
+
+// R and M type inst
+`define RV32I_INS_TYPE_R_M 7'b0110011
+// R type inst
+`define RV32I_INS_ADD_SUB 3'b000
+`define RV32I_INS_SLL 3'b001
+`define RV32I_INS_SLT 3'b010
+`define RV32I_INS_SLTU 3'b011
+`define RV32I_INS_XOR 3'b100
+`define RV32I_INS_SR 3'b101
+`define RV32I_INS_OR 3'b110
+`define RV32I_INS_AND 3'b111
+// M type inst
+`define RV32I_INS_MUL 3'b000
+`define RV32I_INS_MULH 3'b001
+`define RV32I_INS_MULHSU 3'b010
+`define RV32I_INS_MULHU 3'b011
+`define RV32I_INS_DIV 3'b100
+`define RV32I_INS_DIVU 3'b101
+`define RV32I_INS_REM 3'b110
+`define RV32I_INS_REMU 3'b111
+
+// J type inst
+`define RV32I_INS_JAL 7'b1101111
+`define RV32I_INS_JALR 7'b1100111
+
+`define RV32I_INS_LUI 7'b0110111
+`define RV32I_INS_AUIPC 7'b0010111
+`define RV32I_INS_RET 32'h00008067
+
+`define RV32I_INS_FENCE 7'b0001111
+// `define RV32I_INS_ECALL  32'h73
+// `define RV32I_INS_EBREAK 32'h00100073
+
+// J type inst
+`define RV32I_INS_TYPE_B 7'b1100011
+`define RV32I_INS_BEQ 3'b000
+`define RV32I_INS_BNE 3'b001
+`define RV32I_INS_BLT 3'b100
+`define RV32I_INS_BGE 3'b101
+`define RV32I_INS_BLTU 3'b110
+`define RV32I_INS_BGEU 3'b111
+
+`define RV32I_INS_NOP 32'h00000013
+`define RVMISA_INS_MRET 32'h30200073
+`define RV32I_INS_ECALL 32'h00000073
+`define RV32I_INS_EBREAK 32'h00100073
+`define RVDEBUG_INS_DRET 32'h7b200073
+
+
+`endif

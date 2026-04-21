@@ -14,7 +14,7 @@
 
 // 内存初始化控制
 `define INIT_ITCM 0       // 控制ITCM是否初始化，1表示初始化，0表示不初始化
-`define ITCM_INIT_FILE "/media/5/Projects/RISC-V/alioth_simulator/deps/tools/prog.mem" // ITCM初始化文件路径
+`define ITCM_INIT_FILE  // ITCM初始化文件路径
 
 // 总线宽度定义
 `define BUS_DATA_WIDTH 32
