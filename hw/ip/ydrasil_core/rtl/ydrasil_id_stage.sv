@@ -30,6 +30,11 @@ module ydrasil_id_stage #(
     output logic [DATA_WIDTH-1:0]   alu_op2_o,
     output logic [`ALU_OP_WIDTH-1:0] alu_op_info_o,
 
+    // 统一 EX 主数据通路
+    output logic [`ALU_OP_WIDTH-1:0] alu_operator_ex_o,
+    output logic [DATA_WIDTH-1:0]   alu_operand_a_ex_o,
+    output logic [DATA_WIDTH-1:0]   alu_operand_b_ex_o,
+
     // dispatch 到 BRU
     output logic                    bru_valid_o,
     output logic [2:0]              bru_funct3_o,
@@ -45,7 +50,7 @@ module ydrasil_id_stage #(
     output logic [2:0]              lsu_funct3_o,
     output logic [DATA_WIDTH-1:0]   lsu_base_o,
     output logic [DATA_WIDTH-1:0]   lsu_offset_o,
-    output logic [DATA_WIDTH-1:0]   lsu_store_data_o,
+    output logic [DATA_WIDTH-1:0]   lsu_st
 
     // 通用写回信息
     output logic                    rd_wen_o,
@@ -99,30 +104,13 @@ module ydrasil_id_stage #(
 
     logic [`ALU_OP_WIDTH-1:0] dec_alu_op_info;
 
-    logic is_addi;
-    logic is_slti;
-    logic is_sltiu;
-    logic is_xori;
-    logic is_ori;
-    logic is_andi;
-    logic is_slli;
-    logic is_srli;
-    logic is_srai;
-    logic is_add;
-    logic is_sub;
-    logic is_sll;
-    logic is_slt;
-    logic is_sltu;
-    logic is_xor;
-    logic is_srl;
-    logic is_sra;
-    logic is_or;
-    logic is_and;
-
     logic                    alu_valid_n;
     logic [DATA_WIDTH-1:0]   alu_op1_n;
     logic [DATA_WIDTH-1:0]   alu_op2_n;
     logic [`ALU_OP_WIDTH-1:0] alu_op_info_n;
+    logic [`ALU_OP_WIDTH-1:0] alu_operator_ex_n;
+    logic [DATA_WIDTH-1:0]   alu_operand_a_ex_n;
+    logic [DATA_WIDTH-1:0]   alu_operand_b_ex_n;
 
     logic                    bru_valid_n;
     logic [2:0]              bru_funct3_n;
@@ -176,65 +164,29 @@ module ydrasil_id_stage #(
         .is_load_o(is_load),
         .is_store_o(is_store),
         .is_branch_o(is_branch),
+        .is_beq_o(is_beq),
+        .is_bne_o(is_bne),
+        .is_blt_o(is_blt),
+        .is_bge_o(is_bge),
+        .is_bltu_o(is_bltu),
+        .is_bgeu_o(is_bgeu),
+        .is_lb_o(is_lb),
+        .is_lh_o(is_lh),
+        .is_lw_o(is_lw),
+        .is_lbu_o(is_lbu),
+        .is_lhu_o(is_lhu),
+        .is_sb_o(is_sb),
+        .is_sh_o(is_sh),
+        .is_sw_o(is_sw),
         .is_jal_o(is_jal),
         .is_jalr_o(is_jalr),
         .is_lui_o(is_lui),
-        .is_auipc_o(is_auipc)
+        .is_auipc_o(is_auipc),
+        .alu_op_info_o(dec_alu_op_info)
     );
 
     assign rs1_addr_o = rs1;
     assign rs2_addr_o = rs2;
-
-    assign is_beq  = is_branch & (funct3 == `RV32I_INS_BEQ);
-    assign is_bne  = is_branch & (funct3 == `RV32I_INS_BNE);
-    assign is_blt  = is_branch & (funct3 == `RV32I_INS_BLT);
-    assign is_bge  = is_branch & (funct3 == `RV32I_INS_BGE);
-    assign is_bltu = is_branch & (funct3 == `RV32I_INS_BLTU);
-    assign is_bgeu = is_branch & (funct3 == `RV32I_INS_BGEU);
-
-    assign is_lb   = is_load & (funct3 == `RV32I_INS_LB);
-    assign is_lh   = is_load & (funct3 == `RV32I_INS_LH);
-    assign is_lw   = is_load & (funct3 == `RV32I_INS_LW);
-    assign is_lbu  = is_load & (funct3 == `RV32I_INS_LBU);
-    assign is_lhu  = is_load & (funct3 == `RV32I_INS_LHU);
-    assign is_sb   = is_store & (funct3 == `RV32I_INS_SB);
-    assign is_sh   = is_store & (funct3 == `RV32I_INS_SH);
-    assign is_sw   = is_store & (funct3 == `RV32I_INS_SW);
-
-    assign is_addi  = is_op_imm & (funct3 == `RV32I_INS_ADDI);
-    assign is_slti  = is_op_imm & (funct3 == `RV32I_INS_SLTI);
-    assign is_sltiu = is_op_imm & (funct3 == `RV32I_INS_SLTIU);
-    assign is_xori  = is_op_imm & (funct3 == `RV32I_INS_XORI);
-    assign is_ori   = is_op_imm & (funct3 == `RV32I_INS_ORI);
-    assign is_andi  = is_op_imm & (funct3 == `RV32I_INS_ANDI);
-    assign is_slli  = is_op_imm & (funct3 == `RV32I_INS_SLLI) & (funct7 == 7'b0000000);
-    assign is_srli  = is_op_imm & (funct3 == `RV32I_INS_SRI) & (funct7 == 7'b0000000);
-    assign is_srai  = is_op_imm & (funct3 == `RV32I_INS_SRI) & (funct7 == 7'b0100000);
-
-    assign is_add   = is_op & (funct3 == `RV32I_INS_ADD_SUB) & (funct7 == 7'b0000000);
-    assign is_sub   = is_op & (funct3 == `RV32I_INS_ADD_SUB) & (funct7 == 7'b0100000);
-    assign is_sll   = is_op & (funct3 == `RV32I_INS_SLL) & (funct7 == 7'b0000000);
-    assign is_slt   = is_op & (funct3 == `RV32I_INS_SLT) & (funct7 == 7'b0000000);
-    assign is_sltu  = is_op & (funct3 == `RV32I_INS_SLTU) & (funct7 == 7'b0000000);
-    assign is_xor   = is_op & (funct3 == `RV32I_INS_XOR) & (funct7 == 7'b0000000);
-    assign is_srl   = is_op & (funct3 == `RV32I_INS_SR) & (funct7 == 7'b0000000);
-    assign is_sra   = is_op & (funct3 == `RV32I_INS_SR) & (funct7 == 7'b0100000);
-    assign is_or    = is_op & (funct3 == `RV32I_INS_OR) & (funct7 == 7'b0000000);
-    assign is_and   = is_op & (funct3 == `RV32I_INS_AND) & (funct7 == 7'b0000000);
-
-    assign dec_alu_op_info[`ALU_OP_ADD]   = is_addi | is_add | is_auipc | is_lui;
-    assign dec_alu_op_info[`ALU_OP_SUB]   = is_sub;
-    assign dec_alu_op_info[`ALU_OP_SLL]   = is_slli | is_sll;
-    assign dec_alu_op_info[`ALU_OP_SLT]   = is_slti | is_slt;
-    assign dec_alu_op_info[`ALU_OP_SLTU]  = is_sltiu | is_sltu;
-    assign dec_alu_op_info[`ALU_OP_XOR]   = is_xori | is_xor;
-    assign dec_alu_op_info[`ALU_OP_SRL]   = is_srli | is_srl;
-    assign dec_alu_op_info[`ALU_OP_SRA]   = is_srai | is_sra;
-    assign dec_alu_op_info[`ALU_OP_OR]    = is_ori | is_or;
-    assign dec_alu_op_info[`ALU_OP_AND]   = is_andi | is_and;
-    assign dec_alu_op_info[`ALU_OP_LUI]   = is_lui;
-    assign dec_alu_op_info[`ALU_OP_AUIPC] = is_auipc;
-    assign dec_alu_op_info[`ALU_OP_JUMP]  = is_jal | is_jalr;
 
     assign pc_plus4 = if_id_pc_i + DATA_WIDTH'(32'd4);
 
@@ -267,12 +219,22 @@ module ydrasil_id_stage #(
     assign funct3_n = funct3;
     assign funct7_n = funct7;
 
+    // 统一 operand A/B：ALU/LSU/BRU 均复用该通道
+    assign alu_operand_a_ex_n = (is_lui) ? '0 :
+                                ((is_auipc | is_jal | is_branch) ? if_id_pc_i : rs1_rdata_i);
+
+    assign alu_operand_b_ex_n = (is_jal | is_jalr) ? DATA_WIDTH'(32'd4) :
+                                (is_branch ? imm_b :
+                                ((is_load) ? imm_i :
+                                ((is_store) ? imm_s :
+                                ((is_op) ? rs2_rdata_i : imm_i))));
+
+    assign alu_operator_ex_n  = dec_alu_op_info;
+
     assign alu_valid_n   = is_op | is_op_imm | is_lui | is_auipc | is_jal | is_jalr;
-    assign alu_op1_n     = (is_lui) ? 32'd0 :
-                           ((is_auipc | is_jal | is_jalr) ? if_id_pc_i : rs1_rdata_i);
-    assign alu_op2_n     = (is_jal | is_jalr) ? pc_plus4 - if_id_pc_i :
-                           ((is_op) ? rs2_rdata_i : imm_i);
-    assign alu_op_info_n = dec_alu_op_info;
+    assign alu_op1_n     = alu_operand_a_ex_n;
+    assign alu_op2_n     = alu_operand_b_ex_n;
+    assign alu_op_info_n = alu_operator_ex_n;
 
     assign bru_valid_n   = is_branch | is_jal | is_jalr;
     assign bru_funct3_n  = funct3;
@@ -287,9 +249,8 @@ module ydrasil_id_stage #(
     assign lsu_is_load_n    = is_load;
     assign lsu_is_store_n   = is_store;
     assign lsu_funct3_n     = funct3;
-    assign lsu_base_n       = rs1_rdata_i;
-    assign lsu_offset_n     = is_store ? imm_s :
-                              (is_load ? imm_i : 32'd0);
+    assign lsu_base_n       = alu_operand_a_ex_n;
+    assign lsu_offset_n     = (is_store | is_load) ? alu_operand_b_ex_n : '0;
     assign lsu_store_data_n = rs2_rdata_i;
 
     assign rd_wen_n  = ((is_op | is_op_imm | is_lui | is_auipc | is_jal | is_jalr | is_load) & (rd != 5'd0));
@@ -301,6 +262,9 @@ module ydrasil_id_stage #(
             alu_op1_o        <= '0;
             alu_op2_o        <= '0;
             alu_op_info_o    <= '0;
+            alu_operator_ex_o <= '0;
+            alu_operand_a_ex_o <= '0;
+            alu_operand_b_ex_o <= '0;
 
             bru_valid_o      <= 1'b0;
             bru_funct3_o     <= 3'b000;
@@ -328,6 +292,9 @@ module ydrasil_id_stage #(
             alu_op1_o        <= '0;
             alu_op2_o        <= '0;
             alu_op_info_o    <= '0;
+            alu_operator_ex_o <= '0;
+            alu_operand_a_ex_o <= '0;
+            alu_operand_b_ex_o <= '0;
 
             bru_valid_o      <= 1'b0;
             bru_funct3_o     <= 3'b000;
@@ -355,6 +322,9 @@ module ydrasil_id_stage #(
             alu_op1_o        <= alu_op1_n;
             alu_op2_o        <= alu_op2_n;
             alu_op_info_o    <= alu_op_info_n;
+            alu_operator_ex_o <= alu_operator_ex_n;
+            alu_operand_a_ex_o <= alu_operand_a_ex_n;
+            alu_operand_b_ex_o <= alu_operand_b_ex_n;
 
             bru_valid_o      <= bru_valid_n;
             bru_funct3_o     <= bru_funct3_n;

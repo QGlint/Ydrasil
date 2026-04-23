@@ -24,10 +24,10 @@
 `define INST_ADDR_WIDTH 32
 
 // 寄存器配置
-`define REG_ADDR_WIDTH 5
-`define REG_DATA_WIDTH 32
+`define REGS_ADDR_WIDTH 5
+`define REGS_DATA_WIDTH 32
 `define DOUBLE_REG_WIDTH 64
-`define REG_NUM 32
+`define REGS_NUM 32
 
 
 `endif
