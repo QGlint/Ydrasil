@@ -6,16 +6,19 @@ module ydrasil_ex_block #(
 )(
 	input  logic                         rst_n_i,
 	input  logic                         ex_valid_i,
-	input  logic [DATA_WIDTH-1:0]        pc_i,
-	input  logic [DATA_WIDTH-1:0]        imm_b_i,
-	input  logic [DATA_WIDTH-1:0]        alu_operand_a_i,
+
+    input  logic [DATA_WIDTH-1:0]        bt_a_operand_i,
+    input  logic [DATA_WIDTH-1:0]        bt_b_operand_i,
+	
+    input  logic [DATA_WIDTH-1:0]        alu_operand_a_i,
 	input  logic [DATA_WIDTH-1:0]        alu_operand_b_i,
 	input  logic [`ALU_OP_INFO_WIDTH-1:0] alu_operator_i,
 	input  logic [4:0]                   alu_rd_i,
 	input  logic                         int_assert_i,
 
-	output logic [DATA_WIDTH-1:0]        bt_addr_o,
-	output logic                         comp_result_o,
+	output logic                         branch_decision_o,     // to ID
+    output logic [DATA_WIDTH-1:0]        branch_target_o, // to IF
+
 	output logic [`REG_DATA_WIDTH-1:0]   result_o,
 	output logic                         register_we_o,
 	output logic [`REG_ADDR_WIDTH-1:0]   register_waddr_o
@@ -24,8 +27,10 @@ module ydrasil_ex_block #(
 	logic [DATA_WIDTH-1:0] bt_addr_n;
 
 	// 分支目标地址：EX 内部单独加法器计算 PC + imm_b
-	assign bt_addr_n = pc_i + imm_b_i;
-	assign bt_addr_o = bt_addr_n;
+	logic [32:0] bt_alu_result;
+    assign bt_alu_result = bt_a_operand_i + bt_b_operand_i;
+	
+    assign branch_target_o = bt_alu_result;
 
 	// 内部例化 ALU，EX 直接透传控制和操作数
 	ydrasil_alu #(
