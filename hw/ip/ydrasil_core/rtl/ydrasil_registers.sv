@@ -25,7 +25,7 @@
 `include "define_specal_ins.svh"
 `include "config.svh"
 // 通用寄存器模块
-module ydriail_logicisters (
+module ydrasil_registers (
 
     input logic clk,
     input logic rst_n,

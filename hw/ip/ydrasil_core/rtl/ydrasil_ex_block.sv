@@ -4,24 +4,25 @@
 module ydrasil_ex_block #(
 	parameter int DATA_WIDTH = 32
 )(
-	input  logic                         rst_n_i,
-	input  logic                         ex_valid_i,
+	input  logic                            clk_i,
+    input  logic                            rst_n_i,
+	input  logic                            ex_valid_i,
 
-    input  logic [DATA_WIDTH-1:0]        bt_a_operand_i,
-    input  logic [DATA_WIDTH-1:0]        bt_b_operand_i,
+    input  logic [DATA_WIDTH-1:0]           bt_a_operand_i,
+    input  logic [DATA_WIDTH-1:0]           bt_b_operand_i,
 	
-    input  logic [DATA_WIDTH-1:0]        alu_operand_a_i,
-	input  logic [DATA_WIDTH-1:0]        alu_operand_b_i,
-	input  logic [`ALU_OP_INFO_WIDTH-1:0] alu_operator_i,
-	input  logic [4:0]                   alu_rd_i,
-	input  logic                         int_assert_i,
+    input  logic [DATA_WIDTH-1:0]           alu_operand_a_i,
+	input  logic [DATA_WIDTH-1:0]           alu_operand_b_i,
+	input  logic [`ALU_OP_INFO_WIDTH-1:0]   alu_operator_i,
+	input  logic [4:0]                      alu_rd_i,
+	input  logic                            int_assert_i,
 
-	output logic                         branch_decision_o,     // to ID
-    output logic [DATA_WIDTH-1:0]        branch_target_o, // to IF
+	output logic                            branch_decision_o,     // to ID
+    output logic [DATA_WIDTH-1:0]           branch_target_o, // to IF
 
-	output logic [`REG_DATA_WIDTH-1:0]   result_o,
-	output logic                         register_we_o,
-	output logic [`REG_ADDR_WIDTH-1:0]   register_waddr_o
+	output logic [`REG_DATA_WIDTH-1:0]      result_o,
+	output logic                            register_we_o,
+	output logic [`REG_ADDR_WIDTH-1:0]      register_waddr_o
 );
 
 	logic [DATA_WIDTH-1:0] bt_addr_n;

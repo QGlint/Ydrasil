@@ -1,48 +1,53 @@
 `ifndef DEFINE_DECODE_SVH
 `define DEFINE_DECODE_SVH
 
-`define EX_INFO_BUS_WIDTH 2
-`define EX_INFO_BYPASS_BIT 2
-`define EX_INFO_ALU EX_INFO_BUS_WIDTH'd0
-// `define EX_INFO_MUL EX_INFO_BUS_WIDTH'd1
-// `define EX_INFO_DIV EX_INFO_BUS_WIDTH'd2
-// `define EX_INFO_CSR EX_INFO_BUS_WIDTH'd3
-`define EX_INFO_BJP EX_INFO_BUS_WIDTH'd1
-`define EX_INFO_LOAD EX_INFO_BUS_WIDTH'd2
-`define EX_INFO_OTHER EX_INFO_BUS_WIDTH'd3
+`define OPERATOR_TYPE_WIDTH 3
+`define OPERATOR_TYPE_ALU 0
+`define OPERATOR_TYPE_BJP 1
+`define OPERATOR_TYPE_LOAD 2
+`define OPERATOR_TYPE_STORE 3
 
+`define OPERATOR_WIDTH 12
 
+`define OP_ALU_INFO_WIDTH    12
 
-`define ISA_DECODE_GRP_BUS 2:0
-`define ISA_DECODE_GRP_WIDTH 3
-`define ISA_DECODE_GRP_ALU `ISA_DECODE_GRP_WIDTH'd1
-`define ISA_DECODE_GRP_BJP `ISA_DECODE_GRP_WIDTH'd2
+`define OP_ALU_LUI          0
+`define OP_ALU_AUIPC        1
+`define OP_ALU_ADD          2
+`define OP_ALU_SUB          3
+`define OP_ALU_SLL          4
+`define OP_ALU_SLT          5
+`define OP_ALU_SLTU         6
+`define OP_ALU_XOR          7
+`define OP_ALU_SRL          8
+`define OP_ALU_SRA          9
+`define OP_ALU_OR           10
+`define OP_ALU_AND          11
+// `define OP_ALU_OP2IMM       12
+// `define OP_ALU_OP1PC        13
 
-`define ISA_DECODE_ALU_BUS_WIDTH (`ISA_DECODE_GRP_WIDTH+14)
-`define ISA_DECODE_ALU_LUI (`ISA_DECODE_GRP_WIDTH+0)
-`define ISA_DECODE_ALU_AUIPC (`ISA_DECODE_GRP_WIDTH+1)
-`define ISA_DECODE_ALU_ADD (`ISA_DECODE_GRP_WIDTH+2)
-`define ISA_DECODE_ALU_SUB (`ISA_DECODE_GRP_WIDTH+3)
-`define ISA_DECODE_ALU_SLL (`ISA_DECODE_GRP_WIDTH+4)
-`define ISA_DECODE_ALU_SLT (`ISA_DECODE_GRP_WIDTH+5)
-`define ISA_DECODE_ALU_SLTU (`ISA_DECODE_GRP_WIDTH+6)
-`define ISA_DECODE_ALU_XOR (`ISA_DECODE_GRP_WIDTH+7)
-`define ISA_DECODE_ALU_SRL (`ISA_DECODE_GRP_WIDTH+8)
-`define ISA_DECODE_ALU_SRA (`ISA_DECODE_GRP_WIDTH+9)
-`define ISA_DECODE_ALU_OR (`ISA_DECODE_GRP_WIDTH+10)
-`define ISA_DECODE_ALU_AND (`ISA_DECODE_GRP_WIDTH+11)
-`define ISA_DECODE_ALU_OP2IMM (`ISA_DECODE_GRP_WIDTH+12)
-`define ISA_DECODE_ALU_OP1PC (`ISA_DECODE_GRP_WIDTH+13)
+`define OP_BJP_INFO_WIDTH    6
 
-`define ISA_DECODE_BJP_BUS_WIDTH (`ISA_DECODE_GRP_WIDTH+8)
-`define ISA_DECODE_BJP_JUMP (`ISA_DECODE_GRP_WIDTH+0)
-`define ISA_DECODE_BJP_BEQ (`ISA_DECODE_GRP_WIDTH+1)
-`define ISA_DECODE_BJP_BNE (`ISA_DECODE_GRP_WIDTH+2)
-`define ISA_DECODE_BJP_BLT (`ISA_DECODE_GRP_WIDTH+3)
-`define ISA_DECODE_BJP_BGE (`ISA_DECODE_GRP_WIDTH+4)
-`define ISA_DECODE_BJP_BLTU (`ISA_DECODE_GRP_WIDTH+5)
-`define ISA_DECODE_BJP_BGEU (`ISA_DECODE_GRP_WIDTH+6)
-`define ISA_DECODE_BJP_OP1RS1 (`ISA_DECODE_GRP_WIDTH+7)
+`define OP_BJP_JUMP         0
+`define OP_BJP_BEQ          1
+`define OP_BJP_BNE          2
+`define OP_BJP_BLT          3
+`define OP_BJP_BGE          4
+`define OP_BJP_BLTU         5
+`define OP_BJP_BGEU         6
+// `define OP_BJP_OP1RS1       7
+
+`define OP_LSU_INFO_WIDTH    5
+
+`define OP_LSU_LB           0
+`define OP_LSU_LH           1
+`define OP_LSU_LW           2
+`define OP_LSU_LBU          3
+`define OP_LSU_LHU          4
+`define OP_LSU_SB           5
+`define OP_LSU_SH           6
+`define OP_LSU_SW           7
+
 
 
 `endif

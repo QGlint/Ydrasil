@@ -1,4 +1,4 @@
-`include "define_alu.svh"
+`include "define_decode.svh"
 `include "config.svh"
 module ydrasil_alu#(
     parameter   DATAWIDTH = 32   
@@ -8,7 +8,8 @@ module ydrasil_alu#(
     input logic        req_alu_i,
     input logic [31:0] operand_a_i,
     input logic [31:0] operand_b_i,
-    input logic [`ALU_OP_INFO_WIDTH-1:0] operator_i,  // 统一的ALU操作信息信号
+    input logic [`OPERATOR_WIDTH-1:0] operator_i,  // 统一的ALU操作信息信号
+    input logic [1:0]  operatior_type_i, // 操作类型信号
     input logic [ 4:0] alu_rd_i,
 
     // 中断信号
@@ -28,25 +29,28 @@ module ydrasil_alu#(
     logic [31:0] mux_op2 = operand_b_i;
 
     // ALU运算类型选择(包括R与I类型)
-    logic        op_add   = operator_i == `OP_ADD;
-    logic        op_sub   = operator_i == `OP_SUB;
-    logic        op_sll   = operator_i == `OP_SLL;
-    logic        op_slt   = operator_i == `OP_SLT;
-    logic        op_sltu  = operator_i == `OP_SLTU;
-    logic        op_xor   = operator_i == `OP_XOR;
-    logic        op_srl   = operator_i == `OP_SRL;
-    logic        op_sra   = operator_i == `OP_SRA;
-    logic        op_or    = operator_i == `OP_OR;
-    logic        op_and   = operator_i == `OP_AND;
-    logic        op_lui   = operator_i == `OP_LUI;
-    logic        op_auipc = operator_i == `OP_AUIPC;
-    logic        op_jump  = operator_i == `OP_JUMP;
-    logic        op_beq   = operator_i == `OP_BEQ;
-    logic        op_bne   = operator_i == `OP_BNE;
-    logic        op_blt   = operator_i == `OP_BLT;
-    logic        op_bge   = operator_i == `OP_BGE;
-    logic        op_bltu  = operator_i == `OP_BLTU;
-    logic        op_bgeu  = operator_i == `OP_BGEU;
+    logic        op_add   = operator_i [`OP_ALU_ADD] &  operatior_type_i[`OPERATOR_TYPE_ALU];
+    logic        op_sub   = operator_i [`OP_ALU_SUB] &  operatior_type_i[`OPERATOR_TYPE_ALU];
+    logic        op_sll   = operator_i [`OP_ALU_SLL] &  operatior_type_i[`OPERATOR_TYPE_ALU];
+    logic        op_sub   = operator_i [`OP_ALU_SUB] &  operatior_type_i[`OPERATOR_TYPE_ALU];
+    logic        op_sll   = operator_i [`OP_ALU_SLL] &  operatior_type_i[`OPERATOR_TYPE_ALU];
+    logic        op_slt   = operator_i [`OP_ALU_SLT] &  operatior_type_i[`OPERATOR_TYPE_ALU];
+    logic        op_sltu  = operator_i [`OP_ALU_SLTU] &  operatior_type_i[`OPERATOR_TYPE_ALU];
+    logic        op_xor   = operator_i [`OP_ALU_XOR] &  operatior_type_i[`OPERATOR_TYPE_ALU];
+    logic        op_srl   = operator_i [`OP_ALU_SRL] &  operatior_type_i[`OPERATOR_TYPE_ALU];
+    logic        op_sra   = operator_i [`OP_ALU_SRA] &  operatior_type_i[`OPERATOR_TYPE_ALU];
+    logic        op_or    = operator_i [`OP_ALU_OR] &  operatior_type_i[`OPERATOR_TYPE_ALU];
+    logic        op_and   = operator_i [`OP_ALU_AND] &  operatior_type_i[`OPERATOR_TYPE_ALU];
+    logic        op_lui   = operator_i [`OP_ALU_LUI] &  operatior_type_i[`OPERATOR_TYPE_ALU];
+    logic        op_auipc = operator_i [`OP_ALU_AUIPC] &  operatior_type_i[`OPERATOR_TYPE_ALU];
+    
+    logic        op_jump  = operator_i [`OP_ALU_JUMP] &  operatior_type_i[`OPERATOR_TYPE_BJP];
+    logic        op_beq   = operator_i [`OP_ALU_BEQ] &  operatior_type_i[`OPERATOR_TYPE_BJP];
+    logic        op_bne   = operator_i [`OP_ALU_BNE] &  operatior_type_i[`OPERATOR_TYPE_BJP];
+    logic        op_blt   = operator_i [`OP_ALU_BLT] &  operatior_type_i[`OPERATOR_TYPE_BJP];
+    logic        op_bge   = operator_i [`OP_ALU_BGE] &  operatior_type_i[`OPERATOR_TYPE_BJP];
+    logic        op_bltu  = operator_i [`OP_ALU_BLTU] &  operatior_type_i[`OPERATOR_TYPE_BJP];
+    logic        op_bgeu  = operator_i [`OP_ALU_BGEU] &  operatior_type_i[`OPERATOR_TYPE_BJP]   ;
 
     // 指令分类信号 - 便于复用运算器
     logic        op_addsub = op_add | op_sub;  // 加减法操作
