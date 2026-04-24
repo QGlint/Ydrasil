@@ -22,34 +22,21 @@
  SOFTWARE.
  */
 
-`include "defines.svh"
+`include "defines_decoder.svh"
+`include "config.svh"
 
 // 地址生成单元 - 处理内存访问和相关寄存器操作
 module ydrasil_load_store_unit (
     input logic clk,  // 时钟输入
     input logic rst_n,
 
-    input logic        req_mem_i,
-    input logic [31:0] mem_op1_i,
-    input logic [31:0] mem_op2_i,
-    input logic [31:0] mem_rs2_data_i,
-    input logic        mem_op_lb_i,
-    input logic        mem_op_lh_i,
-    input logic        mem_op_lw_i,
-    input logic        mem_op_lbu_i,
-    input logic        mem_op_lhu_i,
-    input logic        mem_op_sb_i,
-    input logic        mem_op_sh_i,
-    input logic        mem_op_sw_i,
-    input logic        mem_op_load_i,
-    input logic        mem_op_store_i,
+    input logic [1:0]  lsu_type_i;,
+    input logic        mem_addr_i,
     input logic [ 4:0] rd_addr_i,
+    input logic [`OP_LSU_INFO_WIDTH-1:0] operator_lsu_i,
 
     // 内存数据输入
     input logic [`BUS_DATA_WIDTH-1:0] mem_rdata_i,
-
-    // 中断信号
-    input logic int_assert_i,
 
     // 内存接口输出
     output logic [`BUS_DATA_WIDTH-1:0] mem_wdata_o,
@@ -70,12 +57,7 @@ module ydrasil_load_store_unit (
     logic        valid_op;  // 有效操作信号（无中断且有内存请求）
 
     // 打一拍后的信号
-    logic        valid_op_ff;
-    logic        mem_op_lb_ff;
-    logic        mem_op_lh_ff;
-    logic        mem_op_lw_ff;
-    logic        mem_op_lbu_ff;
-    logic        mem_op_lhu_ff;
+    logic        operator_lsu_ff;
     logic [4:0]  rd_addr_ff;
     // 存储mem_op1_i和mem_op2_i打一拍后的信号
     logic [31:0] mem_op1_ff;
@@ -95,32 +77,15 @@ module ydrasil_load_store_unit (
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            valid_op_ff    <= 1'b0;
-            mem_op_lb_ff   <= 1'b0;
-            mem_op_lh_ff   <= 1'b0;
-            mem_op_lw_ff   <= 1'b0;
-            mem_op_lbu_ff  <= 1'b0;
-            mem_op_lhu_ff  <= 1'b0;
             rd_addr_ff     <= 0;
-            mem_op1_ff     <= 0;
-            mem_op2_ff     <= 0;
+            operator_lsu_ff <= 0;
         end
         else begin
             valid_op_ff    <= valid_op;
-            mem_op_lb_ff   <= mem_op_lb_i;
-            mem_op_lh_ff   <= mem_op_lh_i;
-            mem_op_lw_ff   <= mem_op_lw_i;
-            mem_op_lbu_ff  <= mem_op_lbu_i;
-            mem_op_lhu_ff  <= mem_op_lhu_i;
+            operator_lsu_ff <= operator_lsu_i;
             rd_addr_ff     <= rd_addr_i;
-            mem_op1_ff     <= mem_op1_i;
-            mem_op2_ff     <= mem_op2_i;
         end
     end
-
-    // 计算打一拍后的地址及索引
-    assign mem_addr_ff = mem_op1_ff + mem_op2_ff;
-    assign mem_addr_index_ff = mem_addr_ff[1:0];
 
     // 使用并行选择逻辑生成内存请求信号
     assign mem_req_o      = (valid_op & (is_load_op | is_store_op)) ? 1'b1 : 1'b0;

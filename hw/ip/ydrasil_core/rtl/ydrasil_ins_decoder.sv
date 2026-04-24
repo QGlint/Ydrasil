@@ -15,11 +15,11 @@ module ydrasil_ins_decoder #(
 	output logic [31:0] imm_i_o,
 
 	output logic       operand_b_rs_sel_o, // 选择ALU操作数B的来源：0表示来自寄存器，1表示来自立即数
-	output logic       operamd_a_pc_sel_o, // 选择ALU操作数A的来源：0表示来自寄存器，1表示来自PC（用于AUIPC指令）
+	output logic       operand_a_pc_sel_o, // 选择ALU操作数A的来源：0表示来自寄存器，1表示来自PC（用于AUIPC指令）
 	output logic       bt_a_rs_sel_o, // 选择分支目标地址计算的操作数A的来源：0表示来自寄存器，1表示来自PC（用于JALR指令）
 
 	output logic [`OPERATOR_WIDTH-1:0] operator_o,
-	output logic [`OP_LSU_INFO_WIDTH-1:0] operator_lsu_o
+	output logic [`OP_LSU_INFO_WIDTH-1:0] operator_lsu_o,
 	output logic [`OPERATOR_TYPE_WIDTH-1:0] operator_type_o
 );
 
@@ -171,11 +171,11 @@ module ydrasil_ins_decoder #(
 	assign operator_lsu_o = lsu_op_info;
 
 	logic operand_b_rs_sel = is_branch | is_store |is_op_r_m;
-	logic operamd_a_pc_sel = is_auipc  ;
+	logic operand_a_pc_sel = is_auipc  ;
 	logic bt_a_rs_sel = is_jalr;
 
 	assign operand_b_rs_sel_o = operand_b_rs_sel;
-	assign operamd_a_pc_sel_o = operamd_a_pc_sel;
+	assign operand_a_pc_sel_o = operand_a_pc_sel;
 	assign bt_a_rs_sel_o = bt_a_rs_sel;
 
 endmodule

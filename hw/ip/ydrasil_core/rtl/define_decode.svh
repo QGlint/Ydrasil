@@ -7,6 +7,8 @@
 `define OPERATOR_TYPE_LOAD 2
 `define OPERATOR_TYPE_STORE 3
 
+`define OPERATOR_TYPE_LSU_BASE 2
+
 `define OPERATOR_WIDTH 12
 
 `define OP_ALU_INFO_WIDTH    12
@@ -37,7 +39,7 @@
 `define OP_BJP_BGEU         6
 // `define OP_BJP_OP1RS1       7
 
-`define OP_LSU_INFO_WIDTH    5
+`define OP_LSU_INFO_WIDTH    8
 
 `define OP_LSU_LB           0
 `define OP_LSU_LH           1

@@ -43,7 +43,7 @@ module ydrasil_alu#(
     logic        op_and   = operator_i [`OP_ALU_AND] &  operatior_type_i[`OPERATOR_TYPE_ALU];
     logic        op_lui   = operator_i [`OP_ALU_LUI] &  operatior_type_i[`OPERATOR_TYPE_ALU];
     logic        op_auipc = operator_i [`OP_ALU_AUIPC] &  operatior_type_i[`OPERATOR_TYPE_ALU];
-    
+
     logic        op_jump  = operator_i [`OP_ALU_JUMP] &  operatior_type_i[`OPERATOR_TYPE_BJP];
     logic        op_beq   = operator_i [`OP_ALU_BEQ] &  operatior_type_i[`OPERATOR_TYPE_BJP];
     logic        op_bne   = operator_i [`OP_ALU_BNE] &  operatior_type_i[`OPERATOR_TYPE_BJP];
@@ -52,8 +52,10 @@ module ydrasil_alu#(
     logic        op_bltu  = operator_i [`OP_ALU_BLTU] &  operatior_type_i[`OPERATOR_TYPE_BJP];
     logic        op_bgeu  = operator_i [`OP_ALU_BGEU] &  operatior_type_i[`OPERATOR_TYPE_BJP]   ;
 
+    logic        op_lsu   = operator_type_i[`OPERATOR_TYPE_LOAD] | operator_type_i[`OPERATOR_TYPE_STORE];
+
     // 指令分类信号 - 便于复用运算器
-    logic        op_addsub = op_add | op_sub;  // 加减法操作
+    logic        op_addsub = op_add | op_sub |op_lsu;  // 加减法操作
     logic        op_shift = op_sll | op_srl | op_sra; // 移位操作
     logic        op_logic = op_xor | op_or | op_and; // 逻辑操作
     logic        op_compare = op_slt | op_sltu; // 比较操作
@@ -157,7 +159,7 @@ module ydrasil_alu#(
     logic [31:0] alu_res =
         ({32{int_assert_i}} & 32'h0) |
         ({32{!req_alu_i && !op_jump}} & 32'h0) |
-        ({32{op_add | op_auipc | op_jump}} & adder_res[31:0]) |
+        ({32{op_add | op_auipc | op_jump | op_lsu}} & adder_res[31:0]) |
         ({32{op_sub}} & adder_res[31:0]) |
         ({32{op_xor}} & xor_res) |
         ({32{op_or}} & or_res) |

@@ -11,10 +11,10 @@ module ydrasil_ex_block #(
     input  logic [DATA_WIDTH-1:0]           bt_a_operand_i,
     input  logic [DATA_WIDTH-1:0]           bt_b_operand_i,
 	
-    input  logic [DATA_WIDTH-1:0]           alu_operand_a_i,
-	input  logic [DATA_WIDTH-1:0]           alu_operand_b_i,
-	input  logic [`ALU_OP_INFO_WIDTH-1:0]   alu_operator_i,
-	input  logic [4:0]                      alu_rd_i,
+    input  logic [DATA_WIDTH-1:0]           operand_a_i,
+	input  logic [DATA_WIDTH-1:0]           operand_b_i,
+	input  logic [`OPERATOR_WIDTH-1:0]      operator_i,
+	input  logic [4:0]                      rd_i,
 	input  logic                            int_assert_i,
 
 	output logic                            branch_decision_o,     // to ID
@@ -39,9 +39,9 @@ module ydrasil_ex_block #(
 	) u_ydrasil_alu (
 		.rst_n            (rst_n_i),
 		.req_alu_i        (ex_valid_i),
-		.operand_a_i      (alu_operand_a_i),
-		.operand_b_i      (alu_operand_b_i),
-		.operator_i       (alu_operator_i),
+		.operand_a_i      (operand_a_i),
+		.operand_b_i      (operand_b_i),
+		.operator_i       (operator_i),
 		.alu_rd_i         (alu_rd_i),
 		.int_assert_i     (int_assert_i),
 		.comp_result_o    (comp_result_o),
