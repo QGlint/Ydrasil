@@ -1,5 +1,5 @@
 `include "define_mem_reg.svh"
-module ctrl (
+module ydrasil_ctrl (
 
     input logic rst_n,
 

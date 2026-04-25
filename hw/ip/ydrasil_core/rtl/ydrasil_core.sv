@@ -6,6 +6,13 @@ module ydrasil_core #(
 )(
 	input  logic clk_i,
 	input  logic rst_n_i
+    
+    
+    ,output logic [31:0]  perip_addr,
+    output logic         perip_wen,
+	output logic [ 1:0]  perip_mask,
+    output logic [31:0]  perip_wdata,
+    input  logic [31:0]  perip_rdata
 );
 
 	// IF <-> MEMS
@@ -77,7 +84,7 @@ module ydrasil_core #(
 		.clk               (clk_i),
 		.rst_n             (rst_n_i),
 		.ex_lsu_mem_addr_i (ex_lsu_mem_addr),
-		.id_rd_addr_i      (alu_rf_waddr_rd),
+		.id_rd_waddr_i      (id_rf_waddr_rd),
 		.operator_lsu_i    (operator_lsu),
 		.operator_lsu_type_i(operator_lsu_type),
 		.id_lsu_rs2_data_i (id_lsu_rs2_data),
@@ -97,7 +104,7 @@ module ydrasil_core #(
 	) u_ydrasil_if_stage (
 		.clk_i           (clk_i),
 		.rst_n_i         (rst_n_i),
-		.stall_if_i      (stall_if | hold_flag),
+		.stall_if_i      (stall_if),
 		.flush_if_i      (flush_if),
 		.branch_jump_i   (branch_jump),
 		.branch_target_i (branch_target),
@@ -110,7 +117,7 @@ module ydrasil_core #(
 	ydrasil_id_stage u_ydrasil_id_stage (
 		.clk_i              (clk_i),
 		.rst_n_i            (rst_n_i),
-		.stall_id_i         (stall_id | hold_flag),
+		.stall_id_i         (stall_id),
 		.flush_id_i         (flush_id),
 		.if_id_pc_i         (if_id_pc),
 		.if_id_instr_i      (if_id_instr),
@@ -190,7 +197,7 @@ module ydrasil_core #(
 		.rf_rdata_rs2_o(rf_rdata_rs2)
 	);
 
-	ctrl u_ctrl (
+	ydrasil_ctrl u_ctrl (
 		.rst_n             (rst_n_i),
 		.ex_branch_jump_i  (ex_branch_jump),
 		.ex_branch_target_i(ex_branch_target),

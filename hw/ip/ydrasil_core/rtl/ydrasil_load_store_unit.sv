@@ -7,7 +7,7 @@ module ydrasil_load_store_unit (
     input logic rst_n,
 
     input logic [`BUS_ADDR_WIDTH-1:0]       ex_lsu_mem_addr_i,
-    input logic [ 4:0]                      id_rd_addr_i,
+    input logic [ 4:0]                      id_rd_waddr_i,
     input logic [`OP_LSU_INFO_WIDTH-1:0]    operator_lsu_i,
     input logic [1:0]                       operator_lsu_type_i,
     input logic [`REGS_DATA_WIDTH-1:0]      id_lsu_rs2_data_i, // 存储操作的源寄存器数据
@@ -51,7 +51,7 @@ module ydrasil_load_store_unit (
         end
         else begin
             operator_load_ff        <= operator_lsu_i[`OP_LOAD_INFO_WIDTH-1:0];
-            rd_addr_ff              <= id_rd_addr_i;
+            rd_addr_ff              <= id_rd_waddr_i;
             is_load_ff              <= is_load;
             mem_addr_index_ff       <= mem_addr_index;
         end
