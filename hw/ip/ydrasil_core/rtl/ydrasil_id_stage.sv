@@ -13,10 +13,10 @@ module ydrasil_id_stage #(
     input  logic [DATA_WIDTH-1:0]           if_id_instr_i,
 
     // Register file read ports 
-    output logic [4:0]                      rf_rs1_addr_o,
-    output logic [4:0]                      rf_rs2_addr_o,
-    input  logic [DATA_WIDTH-1:0]           rf_rs1_rdata_i,
-    input  logic [DATA_WIDTH-1:0]           rf_rs2_rdata_i,
+    output logic [4:0]                      rf_addr_rs1_o,
+    output logic [4:0]                      rf_addr_rs2_o,
+    input  logic [DATA_WIDTH-1:0]           rf_rdata_rs1_i,
+    input  logic [DATA_WIDTH-1:0]           rf_rdata_rs2_i,
 
     // Dispatch to EX   
     // output logic                            alu_valid_o,
@@ -33,8 +33,8 @@ module ydrasil_id_stage #(
     output logic [`OPERATOR_TYPE_WIDTH-1:0] operator_type_o, // 操作类型信号
 
     // Generic writeback information
-    output logic                          rf_wen_rd_o,
-    output logic [4:0]                    rf_waddr_rd_o
+    output logic                            id_rf_wen_rd_o,
+    output logic [4:0]                      id_rf_waddr_rd_o
 
 
 );
@@ -92,14 +92,14 @@ module ydrasil_id_stage #(
         .operator_type_o    (operator_type)
     );
 
-    assign rf_rs1_addr_o = rf_raddr_rs1;
-    assign rf_rs2_addr_o = rf_raddr_rs2;
+    assign rf_addr_rs1_o = rf_raddr_rs1;
+    assign rf_addr_rs2_o = rf_raddr_rs2;
 
     // Keep ALU source selection consistent with decoder control outputs.
-    assign operand_a     = operand_a_pc_sel ? if_id_pc_i : rf_rs1_rdata_i;
-    assign operand_b     = operand_b_rs_sel ? rf_rs2_rdata_i : DATA_WIDTH'(imm_i);
+    assign operand_a     = operand_a_pc_sel ? if_id_pc_i : rf_rdata_rs1_i;
+    assign operand_b     = operand_b_rs_sel ? rf_rdata_rs2_i : DATA_WIDTH'(imm_i);
 
-    assign bt_a_operand_o = bt_a_rs_sel ? rf_rs1_rdata_i : if_id_pc_i;
+    assign bt_a_operand_o = bt_a_rs_sel ? rf_rdata_rs1_i : if_id_pc_i;
     assign bt_b_operand_o = imm_i;
 
 
@@ -127,20 +127,20 @@ module ydrasil_id_stage #(
         else if (!stall_id_i) begin
             operand_a_ff        <= operand_a;
             operand_b_ff        <= operand_b;
-            operator_ff         <= operator_o;
+            operator_ff         <= operator;
             operator_type_ff    <= operator_type;
             rf_wen_rd_ff        <= rf_wen_rd;
             rf_waddr_rd_ff      <= rf_waddr_rd;
             operator_lsu_ff     <= operator_lsu;
-            id_lsu_rs2_data_ff  <= rf_rs2_rdata_i; // 直接传递寄存器数据，供LSU使用
+            id_lsu_rs2_data_ff  <= rf_rdata_rs2_i; // 直接传递寄存器数据，供LSU使用
         end
     end
 
     assign operand_a_o          = operand_a_ff;
     assign operand_b_o          = operand_b_ff;
     assign operator_o           = operator_ff;
-    assign rf_wen_rd_o          = rf_wen_rd_ff;
-    assign rf_waddr_rd_o        = rf_waddr_rd_ff;
+    assign id_rf_wen_rd_o       = rf_wen_rd_ff;
+    assign id_rf_waddr_rd_o     = rf_waddr_rd_ff;
     assign operator_lsu_o       = operator_lsu_ff;
     assign operator_type_o      = operator_type_ff;
     assign id_lsu_rs2_data_o    = id_lsu_rs2_data_ff; // 直接传递寄存器数据，供LSU使用

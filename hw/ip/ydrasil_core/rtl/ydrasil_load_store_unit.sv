@@ -22,8 +22,8 @@ module ydrasil_load_store_unit (
 
     // 寄存器写回接口
     output logic [`REGS_DATA_WIDTH-1:0]     lsu_wb_result_o,
-    output logic                            lsu_rf_wen_rd_o,
-    output logic [`REGS_ADDR_WIDTH-1:0]     lsu_rf_waddr_rd_o
+    output logic                            lsu_rf_rd_wen_o,
+    output logic [`REGS_ADDR_WIDTH-1:0]     lsu_rf_rd_waddr_o
 );
     // 内部信号定义
     logic [ 1:0] mem_addr_index;
@@ -79,8 +79,8 @@ module ydrasil_load_store_unit (
     assign mem_wen_o       = is_store ;
 
     // 并行选择逻辑生成寄存器写回控制 - 使用打一拍后的信号
-    assign lsu_rf_wen_rd_o      = is_load_ff;
-    assign lsu_rf_waddr_rd_o    = is_load_ff? rd_addr_ff : '0;
+    assign lsu_rf_rd_wen_o      = is_load_ff;
+    assign lsu_rf_rd_waddr_o    = is_load_ff? rd_addr_ff : '0;
 
     // 字节加载数据 - 使用并行选择逻辑
     logic [31:0] lb_data, lh_data, lw_data, lbu_data, lhu_data;

@@ -1,5 +1,5 @@
 `include "define_decode.svh"
-`include "config.svh"
+`include "define_mem_reg.svh"
 
 module ydrasil_ex_block #(
 	parameter int DATA_WIDTH = 32
@@ -14,15 +14,17 @@ module ydrasil_ex_block #(
     input  logic [DATA_WIDTH-1:0]           operand_a_i,
 	input  logic [DATA_WIDTH-1:0]           operand_b_i,
 	input  logic [`OPERATOR_WIDTH-1:0]      operator_i,
-	input  logic [4:0]                      rd_i,
-	input  logic                            int_assert_i,
+	input  logic [`OPERATOR_TYPE_WIDTH-1:0] operator_type_i,
+    input  logic [ 4:0]                     id_rf_waddr_rd_i,
+    input  logic                            id_rf_wen_rd_i,
 
-	output logic                            branch_decision_o,     // to ID
+	output logic                            branch_jump_o,      // to IF
+	// output logic                            branch_decision_o,     // to ID
     output logic [DATA_WIDTH-1:0]           branch_target_o, // to IF
 
-	output logic [`REGS_DATA_WIDTH-1:0]      result_o,
-	output logic                            register_we_o,
-	output logic [`REGS_ADDR_WIDTH-1:0]      register_waddr_o
+    output logic [`REGS_DATA_WIDTH-1:0]     alu_result_o,
+    output logic                            alu_rf_wen_rd_o,
+    output logic [`REGS_ADDR_WIDTH-1:0]     alu_rf_waddr_rd_o
 );
 
 	logic [DATA_WIDTH-1:0] bt_addr_n;
@@ -42,12 +44,13 @@ module ydrasil_ex_block #(
 		.operand_a_i      (operand_a_i),
 		.operand_b_i      (operand_b_i),
 		.operator_i       (operator_i),
-		.alu_rd_i         (alu_rd_i),
-		.int_assert_i     (int_assert_i),
-		.comp_result_o    (comp_result_o),
-		.result_o         (result_o),
-		.register_we_o    (register_we_o),
-		.register_waddr_o (register_waddr_o)
+		.operator_type_i  (operator_type_i),
+		.id_rf_waddr_rd_i (id_rf_waddr_rd_i),
+		.id_rf_wen_rd_i   (id_rf_wen_rd_i),
+		.comp_result_o    (branch_jump_o),
+		.alu_result_o     (alu_result_o),
+		.alu_rf_wen_rd_o  (alu_rf_wen_rd_o),
+		.alu_rf_waddr_rd_o (alu_rf_waddr_rd_o)
 	);
 
 endmodule

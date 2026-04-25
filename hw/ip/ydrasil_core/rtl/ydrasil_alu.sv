@@ -11,8 +11,8 @@ module ydrasil_alu#(
     input logic [`OPERATOR_WIDTH-1:0]       operator_i,  // 统一的ALU操作信息信号
     input logic [`OPERATOR_TYPE_WIDTH-1:0]  operator_type_i, // 操作类型信号
     
-    input logic [ 4:0]                      rf_waddr_rd_i,
-    input logic                             rf_wen_rd_i,
+    input logic [ 4:0]                      id_rf_waddr_rd_i,
+    input logic                             id_rf_wen_rd_i,
     // 中断信号
     // input logic                             int_assert_i,
 
@@ -20,7 +20,7 @@ module ydrasil_alu#(
     output logic                            comp_result_o,
 
     // 结果输出
-    output logic [`REGS_DATA_WIDTH-1:0]     alu_wb_result_o,
+    output logic [`REGS_DATA_WIDTH-1:0]     alu_result_o,
     output logic                            alu_rf_wen_rd_o,
     output logic [`REGS_ADDR_WIDTH-1:0]     alu_rf_waddr_rd_o
 );
@@ -170,7 +170,7 @@ module ydrasil_alu#(
         ({32{op_sl_alu}} & sl_alu_res) |
         ({32{op_lui}} & lui_res);
 
-    assign alu_wb_result_o = alu_res;
+    assign alu_result_o = alu_res;
 
     // 所有算术逻辑操作都需要写回寄存器
     logic alu_rf_wen_rd = 
