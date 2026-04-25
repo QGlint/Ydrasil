@@ -12,7 +12,6 @@ sources:
       - rtl/seg7.sv
       - rtl/display_seg.sv
       - rtl/counter.sv
-      - rtl/dram_driver.sv
       - rtl/perip_bridge.sv
       - rtl/twin_controller.sv
       - rtl/uart.sv
