@@ -6,16 +6,16 @@ module ydrasil_mems (
     input logic rst_n,
 
     // PC访问接口
-    input  logic [`INST_ADDR_WIDTH-1:0] pc_i,   // PC地址
-    output logic [`INST_DATA_WIDTH-1:0] inst_o, // 指令输出
+    input  logic [`INST_ADDR_WIDTH-1:0] if_mem_addr_o,   // PC地址
+    output logic [`INST_DATA_WIDTH-1:0] if_mem_rdata_i, // 指令输出
 
     // EX访问接口
-    input  logic [`BUS_ADDR_WIDTH-1:0] ex_addr_i,  // EX访问地址
-    input  logic [`BUS_DATA_WIDTH-1:0] ex_data_i,  // EX写入数据
-    output logic [`BUS_DATA_WIDTH-1:0] ex_data_o,  // EX读出数据
-    input  logic                       ex_we_i,    // EX写使能
-    input  logic                       ex_req_i,   // EX访问请求
-    input  logic [                3:0] ex_wmask_i, // EX字节写入掩码
+    input  logic [`BUS_ADDR_WIDTH-1:0] lsu_mem_addr_i,  // EX访问地址
+    input  logic [`BUS_DATA_WIDTH-1:0] lsu_mem_data_i,  // EX写入数据
+    output logic [`BUS_DATA_WIDTH-1:0] lsu_mem_data_o,  // EX读出数据
+    input  logic                       lsu_mem_we_i,    // EX写使能
+    input  logic                       lsu_mem_req_i,   // EX访问请求
+    input  logic [                3:0] lsu_mem_wmask_i, // EX字节写入掩码
 
     // 暂停信号
     output logic hold_flag_o  // 暂停流水线信号
@@ -31,7 +31,7 @@ module ydrasil_mems (
     logic                        pc_itcm_req;
     logic                        ex_itcm_req;
     logic                        itcm_grant_to_ex;
-    logic                       itcm_grant_to_ex_ff;  // 打一拍后的信号
+    logic                           itcm_grant_to_ex_ff;  // 打一拍后的信号
 
     // ITCM接口
     logic [`ITCM_ADDR_WIDTH-1:0] itcm_addr;
@@ -50,8 +50,8 @@ module ydrasil_mems (
     logic [`INST_DATA_WIDTH-1:0] dtcm_data_in;
 
     // 地址译码 - 确定EX访问的是ITCM还是DTCM
-    assign ex_access_itcm   = (ex_addr_i >= `ITCM_BASE_ADDR && ex_addr_i < (`ITCM_BASE_ADDR + `ITCM_SIZE)) && ex_req_i;
-    assign ex_access_dtcm   = (ex_addr_i >= `DTCM_BASE_ADDR && ex_addr_i < (`DTCM_BASE_ADDR + `DTCM_SIZE)) && ex_req_i;
+    assign ex_access_itcm   = (lsu_mem_addr_i >= `ITCM_BASE_ADDR && lsu_mem_addr_i < (`ITCM_BASE_ADDR + `ITCM_SIZE)) && lsu_mem_req_i;
+    assign ex_access_dtcm   = (lsu_mem_addr_i >= `DTCM_BASE_ADDR && lsu_mem_addr_i < (`DTCM_BASE_ADDR + `DTCM_SIZE)) && lsu_mem_req_i;
 
     // 为访问类型和ITCM授权信号打一拍
     always_ff @(posedge clk or negedge rst_n) begin
@@ -75,24 +75,24 @@ module ydrasil_mems (
     assign itcm_grant_to_ex = ex_itcm_req;
 
     // 根据仲裁结果设置ITCM地址和控制信号
-    assign itcm_addr        = itcm_grant_to_ex ? (ex_addr_i - `ITCM_BASE_ADDR) : (pc_i - `ITCM_BASE_ADDR);
+    assign itcm_addr        = itcm_grant_to_ex ? (lsu_mem_addr_i - `ITCM_BASE_ADDR) : (if_mem_addr_o - `ITCM_BASE_ADDR);
     assign itcm_ce          = itcm_grant_to_ex ? 1'b1 : pc_itcm_req;
-    assign itcm_we          = itcm_grant_to_ex ? ex_we_i : 1'b0;
-    assign itcm_wmask       = itcm_grant_to_ex ? ex_wmask_i : 4'b0000;
-    assign itcm_data_in     = ex_data_i;
+    assign itcm_we          = itcm_grant_to_ex ? lsu_mem_we_i : 1'b0;
+    assign itcm_wmask       = itcm_grant_to_ex ? lsu_mem_wmask_i : 4'b0000;
+    assign itcm_data_in     = lsu_mem_data_i;
 
     // 设置DTCM地址和控制信号
-    assign dtcm_addr        = ex_addr_i - `DTCM_BASE_ADDR;
-    assign dtcm_ce          = ex_access_dtcm;
-    assign dtcm_we          = ex_access_dtcm & ex_we_i;
-    assign dtcm_wmask       = ex_access_dtcm ? ex_wmask_i : 4'b0000;
-    assign dtcm_data_in     = ex_data_i;
+    assign dtcm_addr        = lsu_mem_addr_i - `DTCM_BASE_ADDR;
+    assign dtcm_ce          = lsu_mem_req_i && ex_access_dtcm;
+    assign dtcm_we          = lsu_mem_req_i && ex_access_dtcm && lsu_mem_we_i;
+    assign dtcm_wmask       = lsu_mem_req_i && ex_access_dtcm ? lsu_mem_wmask_i : 4'b0000;
+    assign dtcm_data_in     = lsu_mem_req_i && ex_access_dtcm ? lsu_mem_data_i : 32'h0;
 
     // 选择正确的数据返回给EX - 使用打一拍后的信号
-    assign ex_data_o        = ex_access_itcm_ff ? itcm_data_out : ex_access_dtcm_ff ? dtcm_data_out : 32'h0;
+    assign lsu_mem_data_o        = ex_access_itcm_ff ? itcm_data_out : ex_access_dtcm_ff ? dtcm_data_out : 32'h0;
 
     // 选择正确的指令返回给IF - 使用打一拍后的信号
-    assign inst_o           = itcm_grant_to_ex_ff ? 32'h00000013 : itcm_data_out;  // 如果EX使用ITCM，返回NOP指令
+    assign if_mem_rdata_i           = itcm_grant_to_ex_ff ? 32'h00000013 : itcm_data_out;  // 如果EX使用ITCM，返回NOP指令
 
     // 设置暂停信号 - 这里不打拍，保持原样以便立即暂停流水线
     assign hold_flag_o      = itcm_grant_to_ex;
@@ -106,10 +106,7 @@ module ydrasil_mems (
     ) u_itcm (
         .clk      (clk),
         .rst_n    (rst_n),
-        .we_i     (itcm_we),
-        .we_mask_i(itcm_wmask),
         .addr_i   (itcm_addr),
-        .data_i   (itcm_data_in),
         .data_o   (itcm_data_out)
     );
 

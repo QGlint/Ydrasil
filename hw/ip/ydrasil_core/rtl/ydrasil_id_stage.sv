@@ -33,7 +33,7 @@ module ydrasil_id_stage #(
     output logic [`OPERATOR_TYPE_WIDTH-1:0] operator_type_o, // 操作类型信号
 
     // Generic writeback information
-    output logic                            id_rf_wen_rd_o,
+    output logic                            id_alu_rf_wen_rd_o,
     output logic [4:0]                      id_rf_waddr_rd_o
 
 
@@ -139,7 +139,7 @@ module ydrasil_id_stage #(
     assign operand_a_o          = operand_a_ff;
     assign operand_b_o          = operand_b_ff;
     assign operator_o           = operator_ff;
-    assign id_rf_wen_rd_o       = rf_wen_rd_ff;
+    assign id_alu_rf_wen_rd_o   = rf_wen_rd_ff;
     assign id_rf_waddr_rd_o     = rf_waddr_rd_ff;
     assign operator_lsu_o       = operator_lsu_ff;
     assign operator_type_o      = operator_type_ff;

@@ -5,20 +5,19 @@ module ydrasil_alu#(
 )(
     // input logic rst_n,
     // ALU
-    input logic                             req_alu_i,
+    // input logic                             req_alu_i,
     input logic [DATAWIDTH-1:0]             operand_a_i,
     input logic [DATAWIDTH-1:0]             operand_b_i,
     input logic [`OPERATOR_WIDTH-1:0]       operator_i,  // 统一的ALU操作信息信号
     input logic [`OPERATOR_TYPE_WIDTH-1:0]  operator_type_i, // 操作类型信号
     
     input logic [ 4:0]                      id_rf_waddr_rd_i,
-    input logic                             id_rf_wen_rd_i,
+    input logic                             id_alu_rf_wen_rd_i,
     // 中断信号
     // input logic                             int_assert_i,
 
     //比较输出
     output logic                            comp_result_o,
-
     // 结果输出
     output logic [`REGS_DATA_WIDTH-1:0]     alu_result_o,
     output logic                            alu_rf_wen_rd_o,
@@ -28,6 +27,8 @@ module ydrasil_alu#(
     // ALU操作数选择 - 统一的运算器输入
     logic [31:0] mux_op1 = operand_a_i;
     logic [31:0] mux_op2 = operand_b_i;
+
+    logic        req_alu = operator_type_i[`OPERATOR_TYPE_ALU];
 
     // ALU运算类型选择(包括R与I类型)
     logic        op_add   = operator_i [`OP_ALU_ADD] &  operator_type_i[`OPERATOR_TYPE_ALU];
@@ -157,8 +158,6 @@ module ydrasil_alu#(
     logic [31:0] lui_res = mux_op2;
 
     logic [31:0] alu_res =
-        // ({32{int_assert_i}} & 32'h0) |
-        ({32{!req_alu_i && !op_jump}} & 32'h0) |
         ({32{op_add | op_auipc | op_jump | op_lsu}} & adder_res[31:0]) |
         ({32{op_sub}} & adder_res[31:0]) |
         ({32{op_xor}} & xor_res) |
@@ -173,16 +172,14 @@ module ydrasil_alu#(
     assign alu_result_o = alu_res;
 
     // 所有算术逻辑操作都需要写回寄存器
-    logic alu_rf_wen_rd = 
-            // (int_assert_i) ? 0 : 
-            (rf_wen_rd_i);
+    logic alu_rf_wen_rd =(id_alu_rf_wen_rd_i);
 
     assign alu_rf_wen_rd_o = alu_rf_wen_rd;
 
     // 目标寄存器地址逻辑
     logic [4:0] alu_rf_waddr_rd = 
         //(int_assert_i) ? 5'b0 :
-         rf_waddr_rd_i;
+         id_rf_waddr_rd_i;
 
     assign alu_rf_waddr_rd_o = alu_rf_waddr_rd;
 

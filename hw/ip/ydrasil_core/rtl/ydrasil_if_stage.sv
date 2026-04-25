@@ -10,12 +10,12 @@ module ydrasil_if_stage #(
 	input  logic        flush_if_i,
 
 	// 后级重定向
-	input  logic        redirect_valid_i,
-	input  logic [31:0] redirect_pc_i,
+	input  logic        branch_jump_i,
+	input  logic [31:0] branch_target_i,
 
 	// 指令存储器接口
-	output logic [31:0] imem_addr_o,
-	input  logic [31:0] imem_rdata_i,
+	output logic [31:0] if_mem_addr_o,
+	input  logic [31:0] if_mem_rdata_i,
 
 	// IF/ID 流水寄存器输出
 	output logic [31:0] if_id_pc_o,
@@ -41,14 +41,14 @@ module ydrasil_if_stage #(
 	// 默认顺序取指地址：PC + 4
 	assign pc_plus4   = pc_q + 32'd4;
 	// 若发生重定向则跳转到目标 PC，否则顺序执行
-	assign pc_n       = redirect_valid_i ? redirect_pc_i : pc_plus4;
+	assign pc_n       = branch_jump_i ? branch_target_i : pc_plus4;
 
-	assign imem_addr_o = pc_q;
+	assign if_mem_addr_o = pc_q;
 
 	assign if_id_pc_o    = if_id_pc_q;
 
 	assign if_id_instr_o = if_id_instr_q;
-	assign if_id_instr_n = flush_if_i ? RV32I_NOP : imem_rdata_i;
+	assign if_id_instr_n = flush_if_i ? RV32I_NOP : if_mem_rdata_i;
 
 
 

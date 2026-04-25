@@ -6,19 +6,19 @@ module ydrasil_load_store_unit (
     input logic clk,  // 时钟输入
     input logic rst_n,
 
-    input logic [`BUS_ADDR_WIDTH-1:0]       mem_addr_i,
-    input logic [ 4:0]                      rd_addr_i,
+    input logic [`BUS_ADDR_WIDTH-1:0]       ex_lsu_mem_addr_i,
+    input logic [ 4:0]                      id_rd_addr_i,
     input logic [`OP_LSU_INFO_WIDTH-1:0]    operator_lsu_i,
     input logic [1:0]                       operator_lsu_type_i,
     input logic [`REGS_DATA_WIDTH-1:0]      id_lsu_rs2_data_i, // 存储操作的源寄存器数据
     
     // 内存接口
-    input logic [`BUS_DATA_WIDTH-1:0]       mem_rdata_i,
-    output logic [`BUS_DATA_WIDTH-1:0]      mem_wdata_o,
-    output logic [`BUS_ADDR_WIDTH-1:0]      mem_addr_o,
-    output logic                            mem_wen_o,
-    output logic                            mem_req_o,
-    output logic [                3:0]      mem_wmask_o,  // 字节写入掩码，4位分别对应4个字节
+    input logic [`BUS_DATA_WIDTH-1:0]       lsu_mem_rdata_i,
+    output logic [`BUS_DATA_WIDTH-1:0]      lsu_mem_wdata_o,
+    output logic [`BUS_ADDR_WIDTH-1:0]      lsu_mem_addr_o,
+    output logic                            lsu_mem_wen_o,
+    output logic                            lsu_mem_req_o,
+    output logic [                3:0]      lsu_mem_wmask_o,  // 字节写入掩码，4位分别对应4个字节
 
     // 寄存器写回接口
     output logic [`REGS_DATA_WIDTH-1:0]     lsu_wb_result_o,
@@ -27,7 +27,7 @@ module ydrasil_load_store_unit (
 );
     // 内部信号定义
     logic [ 1:0] mem_addr_index;
-    logic [31:0] mem_addr = mem_addr_i; // 内存访问的地址
+    logic [31:0] mem_addr = ex_lsu_mem_addr_i; // 内存访问的地址
 
     logic [31:0] mem_rs2_data = id_lsu_rs2_data_i; // 存储操作的源寄存器数据
 
@@ -51,7 +51,7 @@ module ydrasil_load_store_unit (
         end
         else begin
             operator_load_ff        <= operator_lsu_i[`OP_LOAD_INFO_WIDTH-1:0];
-            rd_addr_ff              <= rd_addr_i;
+            rd_addr_ff              <= id_rd_addr_i;
             is_load_ff              <= is_load;
             mem_addr_index_ff       <= mem_addr_index;
         end
@@ -69,14 +69,14 @@ module ydrasil_load_store_unit (
 
 
     // 使用并行选择逻辑生成内存请求信号
-    assign mem_req_o      = is_load | is_store;
+    assign lsu_mem_req_o      = is_load | is_store;
 
     // 并行选择逻辑生成地址
-    assign mem_addr_o    = mem_addr;
-    // assign mem_waddr_o    = (valid_op & is_store_op) ? mem_addr ;
+    assign lsu_mem_addr_o    = mem_addr;
+    // assign lsu_mem_waddr_o    = (valid_op & is_store_op) ? mem_addr ;
 
     // 并行选择逻辑生成写使能信号
-    assign mem_wen_o       = is_store ;
+    assign lsu_mem_wen_o       = is_store ;
 
     // 并行选择逻辑生成寄存器写回控制 - 使用打一拍后的信号
     assign lsu_rf_rd_wen_o      = is_load_ff;
@@ -89,24 +89,24 @@ module ydrasil_load_store_unit (
     logic [31:0] lh_low, lh_high, lhu_low, lhu_high;
 
     // 有符号字节加载 - 并行准备所有可能的字节值
-    assign lb_byte0 = {{24{mem_rdata_i[7]}}, mem_rdata_i[7:0]};
-    assign lb_byte1 = {{24{mem_rdata_i[15]}}, mem_rdata_i[15:8]};
-    assign lb_byte2 = {{24{mem_rdata_i[23]}}, mem_rdata_i[23:16]};
-    assign lb_byte3 = {{24{mem_rdata_i[31]}}, mem_rdata_i[31:24]};
+    assign lb_byte0 = {{24{lsu_mem_rdata_i[7]}}, lsu_mem_rdata_i[7:0]};
+    assign lb_byte1 = {{24{lsu_mem_rdata_i[15]}}, lsu_mem_rdata_i[15:8]};
+    assign lb_byte2 = {{24{lsu_mem_rdata_i[23]}}, lsu_mem_rdata_i[23:16]};
+    assign lb_byte3 = {{24{lsu_mem_rdata_i[31]}}, lsu_mem_rdata_i[31:24]};
 
     // 无符号字节加载 - 并行准备所有可能的字节值
-    assign lbu_byte0 = {24'h0, mem_rdata_i[7:0]};
-    assign lbu_byte1 = {24'h0, mem_rdata_i[15:8]};
-    assign lbu_byte2 = {24'h0, mem_rdata_i[23:16]};
-    assign lbu_byte3 = {24'h0, mem_rdata_i[31:24]};
+    assign lbu_byte0 = {24'h0, lsu_mem_rdata_i[7:0]};
+    assign lbu_byte1 = {24'h0, lsu_mem_rdata_i[15:8]};
+    assign lbu_byte2 = {24'h0, lsu_mem_rdata_i[23:16]};
+    assign lbu_byte3 = {24'h0, lsu_mem_rdata_i[31:24]};
 
     // 有符号半字加载 - 并行准备所有可能的半字值
-    assign lh_low = {{16{mem_rdata_i[15]}}, mem_rdata_i[15:0]};
-    assign lh_high = {{16{mem_rdata_i[31]}}, mem_rdata_i[31:16]};
+    assign lh_low = {{16{lsu_mem_rdata_i[15]}}, lsu_mem_rdata_i[15:0]};
+    assign lh_high = {{16{lsu_mem_rdata_i[31]}}, lsu_mem_rdata_i[31:16]};
 
     // 无符号半字加载 - 并行准备所有可能的半字值
-    assign lhu_low = {16'h0, mem_rdata_i[15:0]};
-    assign lhu_high = {16'h0, mem_rdata_i[31:16]};
+    assign lhu_low = {16'h0, lsu_mem_rdata_i[15:0]};
+    assign lhu_high = {16'h0, lsu_mem_rdata_i[31:16]};
 
     // 使用并行选择逻辑选择正确的字节/半字/字 - 使用打一拍后的地址索引
     assign lb_data = ({32{mem_addr_index_ff == 2'b00}} & lb_byte0) |
@@ -123,7 +123,7 @@ module ydrasil_load_store_unit (
 
     assign lhu_data = ({32{mem_addr_index_ff[1] == 1'b0}} & lhu_low) | ({32{mem_addr_index_ff[1] == 1'b1}} & lhu_high);
 
-    assign lw_data = mem_rdata_i;
+    assign lw_data = lsu_mem_rdata_i;
 
     // 并行选择最终的寄存器写回数据 - 使用打一拍后的信号
     assign lsu_wb_result_o =    ({32{is_lb}} & lb_data) |
@@ -160,11 +160,11 @@ module ydrasil_load_store_unit (
 
 
     // 并行选择最终的存储掩码和数据
-    assign mem_wmask_o = ({ 4{is_sb}} & sb_mask) |
+    assign lsu_mem_wmask_o = ({ 4{is_sb}} & sb_mask) |
                          ({ 4{is_sh}} & sh_mask) |
                          ({ 4{is_sw}} & sw_mask);
 
-    assign mem_wdata_o = ({32{is_sb}} & sb_data) |
+    assign lsu_mem_wdata_o = ({32{is_sb}} & sb_data) |
                          ({32{is_sh}} & sh_data) |
                          ({32{is_sw}} & sw_data);
 

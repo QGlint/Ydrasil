@@ -1,6 +1,6 @@
 
 // 通用RAM模块 - 参数化设计
-module gnrl_ram #(
+module ydrmem_ram #(
     parameter ADDR_WIDTH = 16,  // 地址宽度参数
     parameter DATA_WIDTH = 32,  // 数据宽度参数
     parameter INIT_MEM = 1,  // 是否初始化内存，1表示初始化，0表示不初始化
