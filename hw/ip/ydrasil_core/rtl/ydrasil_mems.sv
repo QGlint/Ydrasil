@@ -1,4 +1,4 @@
-`include "configs.svh"
+`include "define_mem_reg.svh"
 
 // 内存管理模块，包含ITCM和DTCM
 module ydrasil_mems (

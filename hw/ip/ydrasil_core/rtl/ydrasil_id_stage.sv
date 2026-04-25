@@ -19,7 +19,7 @@ module ydrasil_id_stage #(
     input  logic [DATA_WIDTH-1:0]         rf_rs2_rdata_i,
 
     // Dispatch to EX
-    output logic                          alu_valid_o,
+    // output logic                          alu_valid_o,
     output logic [DATA_WIDTH-1:0]         operand_a_o,
     output logic [DATA_WIDTH-1:0]         operand_b_o,
     output logic [`OPERATOR_WIDTH-1:0]    operator_o, // 统一的ALU操作信息信号
@@ -29,20 +29,25 @@ module ydrasil_id_stage #(
 
     output logic [`OP_LSU_INFO_WIDTH-1:0] operator_lsu_o,
 
-
+    output logic [`OPERATOR_TYPE_WIDTH-1:0] operator_type_o, // 操作类型信号
 
     // Generic writeback information
-    output logic                          rd_wen_o,
-    output logic [4:0]                    rd_addr_o,
+    output logic                          rf_wen_rd_o,
+    output logic [4:0]                    rf_waddr_rd_o
 
 
 );
 
-    logic [4:0]                           rf_waddr_rd;
+
     logic [4:0]                           rf_raddr_rs1;
     logic [4:0]                           rf_raddr_rs2;
     logic                                 rf_ren_rs1;
     logic                                 rf_ren_rs2;
+
+    logic [4:0]                           rf_waddr_rd;
+    logic                                 rf_wen_rd;
+    logic [4:0]                           rf_waddr_rd_ff;
+    logic                                 rf_wen_rd_ff;
 
     logic [DATA_WIDTH-1:0]                imm_i;
     logic                                 operand_b_rs_sel;
@@ -51,23 +56,18 @@ module ydrasil_id_stage #(
 
 
     logic [`OPERATOR_TYPE_WIDTH-1:0]      operator_type;
+    logic [`OPERATOR_TYPE_WIDTH-1:0]      operator_type_ff;
 
-    logic                                 valid_n;
     logic [DATA_WIDTH-1:0]                operand_a;
     logic [DATA_WIDTH-1:0]                operand_b;
-
-    logic                                 rd_wen;
-    logic [4:0]                           rd_addr;
+    logic [`OPERATOR_WIDTH-1:0]           operator;
 
 
-    logic                                 valid_ff;
     logic [DATA_WIDTH-1:0]                operand_a_ff;
     logic [DATA_WIDTH-1:0]                operand_b_ff;
     logic [`OPERATOR_WIDTH-1:0]           operator_ff;
 
-    logic                                 rd_wen_ff;
-    logic [4:0]                           rd_addr_ff;
-
+    logic [`OP_LSU_INFO_WIDTH-1:0]        operator_lsu;
     logic [`OP_LSU_INFO_WIDTH-1:0]        operator_lsu_ff;
 
 
@@ -80,6 +80,7 @@ module ydrasil_id_stage #(
         .rf_raddr_rs2_o     (rf_raddr_rs2),
         .rf_ren_rs1_o       (rf_ren_rs1),
         .rf_ren_rs2_o       (rf_ren_rs2),
+        .rf_wen_rd_o        (rf_wen_rd),
         .imm_i_o            (imm_i),
         .operand_b_rs_sel_o (operand_b_rs_sel),
         .operand_a_pc_sel_o (operand_a_pc_sel),
@@ -105,33 +106,37 @@ module ydrasil_id_stage #(
             operand_a_ff    <= '0;
             operand_b_ff    <= '0;
             operator_ff     <= '0;
-            rd_wen_ff       <= '0;
-            rd_addr_ff      <= '0;
+            operator_type_ff  <= '0;
+            rf_wen_rd_ff       <= '0;
+            rf_waddr_rd_ff      <= '0;
             operator_lsu_ff <= '0;
         end
         else if (flush_id_i) begin
             operand_a_ff    <= '0;
             operand_b_ff    <= '0;
             operator_ff     <= '0;
-            rd_wen_ff       <= '0;
-            rd_addr_ff      <= '0;
+            operator_type_ff  <= '0;
+            rf_wen_rd_ff       <= '0;
+            rf_waddr_rd_ff      <= '0;
             operator_lsu_ff <= '0;
         end
         else if (!stall_id_i) begin
             operand_a_ff    <= operand_a;
             operand_b_ff    <= operand_b;
             operator_ff     <= operator_o;
-            rd_wen_ff       <= rf_wen_rd;
-            rd_addr_ff      <= rf_waddr_rd;
+            operator_type_ff  <= operator_type;
+            rf_wen_rd_ff       <= rf_wen_rd;
+            rf_waddr_rd_ff      <= rf_waddr_rd;
             operator_lsu_ff <= operator_lsu;
         end
     end
 
-    assign operand_a_0 <= operand_a_ff;
-    assign operand_b_0 <= operand_b_ff;
-    assign operator_0  <= operator_ff;
-    assign rd_wen_0    <= rd_wen_ff;
-    assign rd_addr_0   <= rd_addr_ff;
-    assign operator_lsu_0 <= operator_lsu_ff;
+    assign operand_a_o = operand_a_ff;
+    assign operand_b_o = operand_b_ff;
+    assign operator_o  = operator_ff;
+    assign rf_wen_rd_o    = rf_wen_rd_ff;
+    assign rf_waddr_rd_o   = rf_waddr_rd_ff;
+    assign operator_lsu_o = operator_lsu_ff;
+    assign operator_type_o = operator_type_ff;
 
 endmodule

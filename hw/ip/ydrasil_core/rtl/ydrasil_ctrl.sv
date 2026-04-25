@@ -1,3 +1,4 @@
+`include "config.svh"
 module ctrl (
 
     input wire rst_n,
@@ -24,8 +25,8 @@ module ctrl (
     assign jump_addr_o = jump_addr_i;
     assign jump_flag_o = jump_flag_i;
 
-    assign hold_flag_o = (jump_flag_i == `JumpEnable || hold_flag_ex_i == `HoldEnable || hold_flag_clint_i == `HoldEnable) ? `Hold_Id :
-                         (hold_flag_mems_i == `HoldEnable) ? `Hold_Pc :
+    assign hold_flag_o = (jump_flag_i || hold_flag_ex_i  || hold_flag_clint_i ) ? `Hold_Id :
+                         (hold_flag_mems_i ) ? `Hold_Pc :
                          `Hold_None;
 
 endmodule

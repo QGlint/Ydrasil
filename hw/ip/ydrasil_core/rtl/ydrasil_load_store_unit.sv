@@ -22,18 +22,18 @@
  SOFTWARE.
  */
 
-`include "defines_decoder.svh"
-`include "config.svh"
+`include "define_decode.svh"
+`include "define_mem_reg.svh"
 
 // 地址生成单元 - 处理内存访问和相关寄存器操作
 module ydrasil_load_store_unit (
     input logic clk,  // 时钟输入
     input logic rst_n,
 
-    input logic [1:0]  lsu_type_i;,
-    input logic        mem_addr_i,
-    input logic [ 4:0] rd_addr_i,
-    input logic [`OP_LSU_INFO_WIDTH-1:0] operator_lsu_i,
+    input logic [1:0]                       lsu_type_i,
+    input logic                             mem_addr_i,
+    input logic [ 4:0]                      rd_addr_i,
+    input logic [`OP_LSU_INFO_WIDTH-1:0]    operator_lsu_i,
 
     // 内存数据输入
     input logic [`BUS_DATA_WIDTH-1:0] mem_rdata_i,
@@ -47,9 +47,9 @@ module ydrasil_load_store_unit (
     output logic [                3:0] mem_wmask_o,  // 字节写入掩码，4位分别对应4个字节
 
     // 寄存器写回接口
-    output logic [`REG_DATA_WIDTH-1:0] reg_wdata_o,
+    output logic [`REGS_DATA_WIDTH-1:0] reg_wdata_o,
     output logic                       reg_we_o,
-    output logic [`REG_ADDR_WIDTH-1:0] reg_waddr_o
+    output logic [`REGS_ADDR_WIDTH-1:0] reg_waddr_o
 );
     // 内部信号定义
     logic [ 1:0] mem_addr_index;
@@ -73,7 +73,7 @@ module ydrasil_load_store_unit (
     // 并行计算基本信号
     assign mem_addr       = mem_op1_i + mem_op2_i;
     assign mem_addr_index = mem_addr[1:0];
-    assign valid_op       = req_mem_i & (int_assert_i != `INT_ASSERT);
+    assign valid_op       = req_mem_i & (!int_assert_i);
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -91,15 +91,15 @@ module ydrasil_load_store_unit (
     assign mem_req_o      = (valid_op & (is_load_op | is_store_op)) ? 1'b1 : 1'b0;
 
     // 并行选择逻辑生成地址
-    assign mem_raddr_o    = (valid_op & is_load_op) ? mem_addr : `ZeroWord;
-    assign mem_waddr_o    = (valid_op & is_store_op) ? mem_addr : `ZeroWord;
+    assign mem_raddr_o    = (valid_op & is_load_op) ? mem_addr : '0;
+    assign mem_waddr_o    = (valid_op & is_store_op) ? mem_addr : '0;
 
     // 并行选择逻辑生成写使能信号
-    assign mem_we_o       = (valid_op & is_store_op) ? `WriteEnable : `WriteDisable;
+    assign mem_we_o       = (valid_op & is_store_op) ;
 
     // 并行选择逻辑生成寄存器写回控制 - 使用打一拍后的信号
-    assign reg_we_o       = (valid_op_ff & is_load_op_ff) ? `WriteEnable : `WriteDisable;
-    assign reg_waddr_o    = (valid_op_ff & is_load_op_ff) ? rd_addr_ff : `ZeroWord;
+    assign reg_we_o       = (valid_op_ff & is_load_op_ff) ;
+    assign reg_waddr_o    = (valid_op_ff & is_load_op_ff) ? rd_addr_ff : '0;
 
     // 字节加载数据 - 使用并行选择逻辑
     logic [31:0] lb_data, lh_data, lw_data, lbu_data, lhu_data;
@@ -167,20 +167,16 @@ module ydrasil_load_store_unit (
                      ({32{mem_addr_index == 2'b11}} & {mem_rs2_data_i[7:0], 24'b0});
 
     // 半字存储掩码和数据
-    logic [ 3:0] sh_mask;
+    logic [ 3:0] sh_mask= ({4{mem_addr_index[1] == 1'b0}} & 4'b0011) | ({4{mem_addr_index[1] == 1'b1}} & 4'b1100);
     logic [31:0] sh_data;
-
-    assign sh_mask = ({4{mem_addr_index[1] == 1'b0}} & 4'b0011) | ({4{mem_addr_index[1] == 1'b1}} & 4'b1100);
 
     assign sh_data = ({32{mem_addr_index[1] == 1'b0}} & {16'b0, mem_rs2_data_i[15:0]}) |
                      ({32{mem_addr_index[1] == 1'b1}} & {mem_rs2_data_i[15:0], 16'b0});
 
     // 字存储掩码和数据
-    logic [ 3:0] sw_mask;
-    logic [31:0] sw_data;
+    logic [ 3:0] sw_mask = 4'b1111;
+    logic [31:0] sw_data = mem_rs2_data_i;
 
-    assign sw_mask = 4'b1111;
-    assign sw_data = mem_rs2_data_i;
 
     // 并行选择最终的存储掩码和数据
     assign mem_wmask_o = ({4{valid_op & mem_op_sb_i}} & sb_mask) |

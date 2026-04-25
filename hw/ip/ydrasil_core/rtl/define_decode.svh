@@ -1,7 +1,7 @@
 `ifndef DEFINE_DECODE_SVH
 `define DEFINE_DECODE_SVH
 
-`define OPERATOR_TYPE_WIDTH 3
+`define OPERATOR_TYPE_WIDTH 4
 `define OPERATOR_TYPE_ALU 0
 `define OPERATOR_TYPE_BJP 1
 `define OPERATOR_TYPE_LOAD 2
@@ -28,7 +28,7 @@
 // `define OP_ALU_OP2IMM       12
 // `define OP_ALU_OP1PC        13
 
-`define OP_BJP_INFO_WIDTH    6
+`define OP_BJP_INFO_WIDTH    7
 
 `define OP_BJP_JUMP         0
 `define OP_BJP_BEQ          1

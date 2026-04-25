@@ -3,25 +3,26 @@
 module ydrasil_alu#(
     parameter   DATAWIDTH = 32   
 )(
-    input logic rst_n,
+    // input logic rst_n,
     // ALU
-    input logic        req_alu_i,
-    input logic [31:0] operand_a_i,
-    input logic [31:0] operand_b_i,
-    input logic [`OPERATOR_WIDTH-1:0] operator_i,  // 统一的ALU操作信息信号
-    input logic [1:0]  operatior_type_i, // 操作类型信号
-    input logic [ 4:0] alu_rd_i,
-
+    input logic                             req_alu_i,
+    input logic [DATAWIDTH-1:0]             operand_a_i,
+    input logic [DATAWIDTH-1:0]             operand_b_i,
+    input logic [`OPERATOR_WIDTH-1:0]       operator_i,  // 统一的ALU操作信息信号
+    input logic [`OPERATOR_TYPE_WIDTH-1:0]  operator_type_i, // 操作类型信号
+    
+    input logic [ 4:0]                      rf_waddr_rd_i,
+    input logic                             rf_wen_rd_i,
     // 中断信号
-    input logic int_assert_i,
+    // input logic                             int_assert_i,
 
     //比较输出
-    output logic comp_result_o,
+    output logic                            comp_result_o,
 
     // 结果输出
-    output logic [`REG_DATA_WIDTH-1:0] result_o,
-    output logic                       register_we_o,
-    output logic [`REG_ADDR_WIDTH-1:0] register_waddr_o
+    output logic [`REGS_DATA_WIDTH-1:0]     alu_wb_result_o,
+    output logic                            alu_rf_wen_rd_o,
+    output logic [`REGS_ADDR_WIDTH-1:0]     alu_rf_waddr_rd_o
 );
 
     // ALU操作数选择 - 统一的运算器输入
@@ -29,37 +30,35 @@ module ydrasil_alu#(
     logic [31:0] mux_op2 = operand_b_i;
 
     // ALU运算类型选择(包括R与I类型)
-    logic        op_add   = operator_i [`OP_ALU_ADD] &  operatior_type_i[`OPERATOR_TYPE_ALU];
-    logic        op_sub   = operator_i [`OP_ALU_SUB] &  operatior_type_i[`OPERATOR_TYPE_ALU];
-    logic        op_sll   = operator_i [`OP_ALU_SLL] &  operatior_type_i[`OPERATOR_TYPE_ALU];
-    logic        op_sub   = operator_i [`OP_ALU_SUB] &  operatior_type_i[`OPERATOR_TYPE_ALU];
-    logic        op_sll   = operator_i [`OP_ALU_SLL] &  operatior_type_i[`OPERATOR_TYPE_ALU];
-    logic        op_slt   = operator_i [`OP_ALU_SLT] &  operatior_type_i[`OPERATOR_TYPE_ALU];
-    logic        op_sltu  = operator_i [`OP_ALU_SLTU] &  operatior_type_i[`OPERATOR_TYPE_ALU];
-    logic        op_xor   = operator_i [`OP_ALU_XOR] &  operatior_type_i[`OPERATOR_TYPE_ALU];
-    logic        op_srl   = operator_i [`OP_ALU_SRL] &  operatior_type_i[`OPERATOR_TYPE_ALU];
-    logic        op_sra   = operator_i [`OP_ALU_SRA] &  operatior_type_i[`OPERATOR_TYPE_ALU];
-    logic        op_or    = operator_i [`OP_ALU_OR] &  operatior_type_i[`OPERATOR_TYPE_ALU];
-    logic        op_and   = operator_i [`OP_ALU_AND] &  operatior_type_i[`OPERATOR_TYPE_ALU];
-    logic        op_lui   = operator_i [`OP_ALU_LUI] &  operatior_type_i[`OPERATOR_TYPE_ALU];
-    logic        op_auipc = operator_i [`OP_ALU_AUIPC] &  operatior_type_i[`OPERATOR_TYPE_ALU];
+    logic        op_add   = operator_i [`OP_ALU_ADD] &  operator_type_i[`OPERATOR_TYPE_ALU];
+    logic        op_sub   = operator_i [`OP_ALU_SUB] &  operator_type_i[`OPERATOR_TYPE_ALU];
+    logic        op_sll   = operator_i [`OP_ALU_SLL] &  operator_type_i[`OPERATOR_TYPE_ALU];
+    logic        op_slt   = operator_i [`OP_ALU_SLT] &  operator_type_i[`OPERATOR_TYPE_ALU];
+    logic        op_sltu  = operator_i [`OP_ALU_SLTU] &  operator_type_i[`OPERATOR_TYPE_ALU];
+    logic        op_xor   = operator_i [`OP_ALU_XOR] &  operator_type_i[`OPERATOR_TYPE_ALU];
+    logic        op_srl   = operator_i [`OP_ALU_SRL] &  operator_type_i[`OPERATOR_TYPE_ALU];
+    logic        op_sra   = operator_i [`OP_ALU_SRA] &  operator_type_i[`OPERATOR_TYPE_ALU];
+    logic        op_or    = operator_i [`OP_ALU_OR] &  operator_type_i[`OPERATOR_TYPE_ALU];
+    logic        op_and   = operator_i [`OP_ALU_AND] &  operator_type_i[`OPERATOR_TYPE_ALU];
+    logic        op_lui   = operator_i [`OP_ALU_LUI] &  operator_type_i[`OPERATOR_TYPE_ALU];
+    logic        op_auipc = operator_i [`OP_ALU_AUIPC] &  operator_type_i[`OPERATOR_TYPE_ALU];
 
-    logic        op_jump  = operator_i [`OP_ALU_JUMP] &  operatior_type_i[`OPERATOR_TYPE_BJP];
-    logic        op_beq   = operator_i [`OP_ALU_BEQ] &  operatior_type_i[`OPERATOR_TYPE_BJP];
-    logic        op_bne   = operator_i [`OP_ALU_BNE] &  operatior_type_i[`OPERATOR_TYPE_BJP];
-    logic        op_blt   = operator_i [`OP_ALU_BLT] &  operatior_type_i[`OPERATOR_TYPE_BJP];
-    logic        op_bge   = operator_i [`OP_ALU_BGE] &  operatior_type_i[`OPERATOR_TYPE_BJP];
-    logic        op_bltu  = operator_i [`OP_ALU_BLTU] &  operatior_type_i[`OPERATOR_TYPE_BJP];
-    logic        op_bgeu  = operator_i [`OP_ALU_BGEU] &  operatior_type_i[`OPERATOR_TYPE_BJP]   ;
+    logic        op_jump  = operator_i [`OP_BJP_JUMP] &  operator_type_i[`OPERATOR_TYPE_BJP];
+    logic        op_beq   = operator_i [`OP_BJP_BEQ] &  operator_type_i[`OPERATOR_TYPE_BJP];
+    logic        op_bne   = operator_i [`OP_BJP_BNE] &  operator_type_i[`OPERATOR_TYPE_BJP];
+    logic        op_blt   = operator_i [`OP_BJP_BLT] &  operator_type_i[`OPERATOR_TYPE_BJP];
+    logic        op_bge   = operator_i [`OP_BJP_BGE] &  operator_type_i[`OPERATOR_TYPE_BJP];
+    logic        op_bltu  = operator_i [`OP_BJP_BLTU] &  operator_type_i[`OPERATOR_TYPE_BJP];
+    logic        op_bgeu  = operator_i [`OP_BJP_BGEU] &  operator_type_i[`OPERATOR_TYPE_BJP]   ;
 
     logic        op_lsu   = operator_type_i[`OPERATOR_TYPE_LOAD] | operator_type_i[`OPERATOR_TYPE_STORE];
 
     // 指令分类信号 - 便于复用运算器
-    logic        op_addsub = op_add | op_sub |op_lsu;  // 加减法操作
+    // logic        op_addsub = op_add | op_sub |op_lsu;  // 加减法操作
     logic        op_shift = op_sll | op_srl | op_sra; // 移位操作
-    logic        op_logic = op_xor | op_or | op_and; // 逻辑操作
+    // logic        op_logic = op_xor | op_or | op_and; // 逻辑操作
     logic        op_compare = op_slt | op_sltu; // 比较操作
-    logic        op_mvop2 = op_lui; // 直接使用操作数2
+    // logic        op_mvop2 = op_lui; // 直接使用操作数2
 
     //////////////////////////////////////////////////////////////
     // 1. 实现移位器 - 统一实现左移，右移通过输入翻转实现
@@ -117,7 +116,7 @@ module ydrasil_alu#(
 
 
     // 加减法操作 - 复用于加减法、比较、地址计算等
-    logic adder_op = op_addsub | op_compare | op_auipc | op_jump;
+    // logic adder_op = op_addsub | op_compare | op_auipc | op_jump;
 
     // 无符号操作时不进行符号扩展
     assign adder_in1 = mux_op1;
@@ -146,18 +145,19 @@ module ydrasil_alu#(
 
     logic op_sl_alu = op_slt | op_sltu;
 
-    logic comp_result = (op_beq) ? is_equal :
-                    (op_bne) ? ~is_equal :
-                    (op_ge_alu) ? is_greater_equal :
-                    (op_lt_alu) ? is_greater_equal :is_equal;
-    
+    logic comp_result = (op_beq & is_equal )|
+                        (op_bne & (!is_equal)) |
+                        (op_ge_alu & is_greater_equal) |
+                        (op_lt_alu & (!is_greater_equal)) |
+                        (op_jump);
+
     assign comp_result_o = comp_result;
 
 
     logic [31:0] lui_res = mux_op2;
 
     logic [31:0] alu_res =
-        ({32{int_assert_i}} & 32'h0) |
+        // ({32{int_assert_i}} & 32'h0) |
         ({32{!req_alu_i && !op_jump}} & 32'h0) |
         ({32{op_add | op_auipc | op_jump | op_lsu}} & adder_res[31:0]) |
         ({32{op_sub}} & adder_res[31:0]) |
@@ -170,19 +170,21 @@ module ydrasil_alu#(
         ({32{op_sl_alu}} & sl_alu_res) |
         ({32{op_lui}} & lui_res);
 
-    assign result_o = alu_res;
-    logic [4:0] rd = alu_rd_i;
+    assign alu_wb_result_o = alu_res;
 
     // 所有算术逻辑操作都需要写回寄存器
-    logic alu_reg_we = (int_assert_i) ? 0:
-                      (req_alu_i | op_jump) ? 1 : 0;
+    logic alu_rf_wen_rd = 
+            // (int_assert_i) ? 0 : 
+            (rf_wen_rd_i);
 
-    assign register_we_o = alu_reg_we;
+    assign alu_rf_wen_rd_o = alu_rf_wen_rd;
 
     // 目标寄存器地址逻辑
-    logic [4:0] alu_reg_waddr = (int_assert_i) ? 5'b0 : rd;
+    logic [4:0] alu_rf_waddr_rd = 
+        //(int_assert_i) ? 5'b0 :
+         rf_waddr_rd_i;
 
-    assign register_waddr_o = alu_reg_waddr;
+    assign alu_rf_waddr_rd_o = alu_rf_waddr_rd;
 
 
 

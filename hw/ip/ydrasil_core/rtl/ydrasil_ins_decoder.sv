@@ -1,18 +1,19 @@
-`include "define_alu.svh"
+`include "define_decode.svh"
 `include "define_rv32i_ins.svh"
 
 module ydrasil_ins_decoder #(
 	parameter int DATA_WIDTH = 32
 )(
-	input  logic [31:0] instr_i,
+	input  logic [DATA_WIDTH-1:0] instr_i,
 
 	output logic [4:0] rf_waddr_rd_o,
 	output logic [4:0] rf_raddr_rs1_o,
 	output logic [4:0] rf_raddr_rs2_o,
 	output logic       rf_ren_rs1_o,
 	output logic       rf_ren_rs2_o,
+	output logic       rf_wen_rd_o,
 
-	output logic [31:0] imm_i_o,
+	output logic [DATA_WIDTH-1:0] imm_i_o,
 
 	output logic       operand_b_rs_sel_o, // 选择ALU操作数B的来源：0表示来自寄存器，1表示来自立即数
 	output logic       operand_a_pc_sel_o, // 选择ALU操作数A的来源：0表示来自寄存器，1表示来自PC（用于AUIPC指令）
@@ -28,18 +29,18 @@ module ydrasil_ins_decoder #(
 	logic [`OP_BJP_INFO_WIDTH-1:0] bjp_op_info;
 	logic [`OP_LSU_INFO_WIDTH-1:0] lsu_op_info;
 
-    logic func7_is_0000000 = (funct7 == 7'b0000000);
-	logic func7_is_0100000 = (funct7 == 7'b0100000);
-    logic func3_is_000 = (funct3 == 3'b000);
-	logic func3_is_001 = (funct3 == 3'b001);
+    logic funct7_is_0000000 = (funct7 == 7'b0000000);
+	logic funct7_is_0100000 = (funct7 == 7'b0100000);
+    logic funct3_is_000 = (funct3 == 3'b000);
+	logic funct3_is_001 = (funct3 == 3'b001);
 
 
-	logic opcode = instr_i[6:0];
-	logic waddr_rd     = instr_i[11:7];
-	logic funct3 = instr_i[14:12];
-	logic raddr_rs1    = instr_i[19:15];
-	logic raddr_rs2    = instr_i[24:20];
-	logic funct7 = instr_i[31:25];
+	logic [6:0] opcode 		= instr_i[6:0];
+	logic [4:0] waddr_rd    = instr_i[11:7];
+	logic [2:0] funct3 		= instr_i[14:12];
+	logic [4:0] raddr_rs1   = instr_i[19:15];
+	logic [4:0] raddr_rs2   = instr_i[24:20];
+	logic [6:0] funct7 		= instr_i[31:25];
 
 	logic [31:0] imm_i = {{20{instr_i[31]}}, instr_i[31:20]};
 	logic [31:0] imm_s = {{20{instr_i[31]}}, instr_i[31:25], instr_i[11:7]};
@@ -54,7 +55,7 @@ module ydrasil_ins_decoder #(
     logic is_store    = (opcode == `RV32I_INS_TYPE_S);
     logic is_branch   = (opcode == `RV32I_INS_TYPE_B);
 	logic is_jal      = (opcode == `RV32I_INS_JAL);
-	logic is_jalr     = (opcode == `RV32I_INS_JALR) & func3_is_000;
+	logic is_jalr     = (opcode == `RV32I_INS_JALR) & funct3_is_000;
 	logic is_lui      = (opcode == `RV32I_INS_LUI);
 	logic is_auipc    = (opcode == `RV32I_INS_AUIPC);
   
@@ -62,8 +63,8 @@ module ydrasil_ins_decoder #(
 	logic is_bne      = is_branch & (funct3 == `RV32I_INS_BNE);
 	logic is_blt      = is_branch & (funct3 == `RV32I_INS_BLT);
 	logic is_bge      = is_branch & (funct3 == `RV32I_INS_BGE);
-	logic is_blto     = is_branch & (funct3 == `RV32I_INS_BLTU);
-	logic is_bgeo     = is_branch & (funct3 == `RV32I_INS_BGEU);
+	logic is_bltu     = is_branch & (funct3 == `RV32I_INS_BLTU);
+	logic is_bgeu     = is_branch & (funct3 == `RV32I_INS_BGEU);
 
 	logic is_lb     = is_load & (funct3 == `RV32I_INS_LB);
 	logic is_lh     = is_load & (funct3 == `RV32I_INS_LH);
@@ -81,29 +82,28 @@ module ydrasil_ins_decoder #(
 	logic is_xori  = is_op_imm & (funct3 == `RV32I_INS_XORI);
 	logic is_ori   = is_op_imm & (funct3 == `RV32I_INS_ORI);
 	logic is_andi  = is_op_imm & (funct3 == `RV32I_INS_ANDI);
-	logic is_slli  = is_op_imm & (funct3 == `RV32I_INS_SLLI) 	& func7_is_0000000;
-	logic is_srli  = is_op_imm & (funct3 == `RV32I_INS_SRI) 	& func7_is_0000000;
-	logic is_srai  = is_op_imm & (funct3 == `RV32I_INS_SRI) 	& func7_is_0100000;
+	logic is_slli  = is_op_imm & (funct3 == `RV32I_INS_SLLI) 	& funct7_is_0000000;
+	logic is_srli  = is_op_imm & (funct3 == `RV32I_INS_SRI) 	& funct7_is_0000000;
+	logic is_srai  = is_op_imm & (funct3 == `RV32I_INS_SRI) 	& funct7_is_0100000;
 
 	logic is_shift = is_slli | is_srli | is_srai;
 
-	logic is_add   = is_op_r_m & (funct3 == `RV32I_INS_ADD_SUB) 	& func7_is_0000000;
-	logic is_sub   = is_op_r_m & (funct3 == `RV32I_INS_ADD_SUB) 	& func7_is_0100000;
-	logic is_sll   = is_op_r_m & (funct3 == `RV32I_INS_SLL) 		& func7_is_0000000;
-	logic is_slt   = is_op_r_m & (funct3 == `RV32I_INS_SLT) 		& func7_is_0000000;
-	logic is_sltu  = is_op_r_m & (funct3 == `RV32I_INS_SLTU) 		& func7_is_0000000;
-	logic is_xor   = is_op_r_m & (funct3 == `RV32I_INS_XOR) 		& func7_is_0000000;
-	logic is_srl   = is_op_r_m & (funct3 == `RV32I_INS_SR) 			& func7_is_0000000;
-	logic is_sra   = is_op_r_m & (funct3 == `RV32I_INS_SR) 			& func7_is_0100000;
-	logic is_or    = is_op_r_m & (funct3 == `RV32I_INS_OR) 			& func7_is_0000000;
-	logic is_and   = is_op_r_m & (funct3 == `RV32I_INS_AND) 		& func7_is_0000000;
+	logic is_add   = is_op_r_m & (funct3 == `RV32I_INS_ADD_SUB) 	& funct7_is_0000000;
+	logic is_sub   = is_op_r_m & (funct3 == `RV32I_INS_ADD_SUB) 	& funct7_is_0100000;
+	logic is_sll   = is_op_r_m & (funct3 == `RV32I_INS_SLL) 		& funct7_is_0000000;
+	logic is_slt   = is_op_r_m & (funct3 == `RV32I_INS_SLT) 		& funct7_is_0000000;
+	logic is_sltu  = is_op_r_m & (funct3 == `RV32I_INS_SLTU) 		& funct7_is_0000000;
+	logic is_xor   = is_op_r_m & (funct3 == `RV32I_INS_XOR) 		& funct7_is_0000000;
+	logic is_srl   = is_op_r_m & (funct3 == `RV32I_INS_SR) 			& funct7_is_0000000;
+	logic is_sra   = is_op_r_m & (funct3 == `RV32I_INS_SR) 			& funct7_is_0100000;
+	logic is_or    = is_op_r_m & (funct3 == `RV32I_INS_OR) 			& funct7_is_0000000;
+	logic is_and   = is_op_r_m & (funct3 == `RV32I_INS_AND) 		& funct7_is_0000000;
 
 	logic is_fence  = (opcode == `RV32I_INS_FENCE) & funct3_is_000;
 	logic is_fence_i = (opcode == `RV32I_INS_FENCE) & funct3_is_001;
 
 
 	logic is_nop    = (instr_i == `RV32I_INS_NOP); 
-	logic is_fence = (instr_i == `RV32I_INS_FENCE);
 	logic is_ecall = (instr_i == `RV32I_INS_ECALL);
 	logic is_ebreak = (instr_i == `RV32I_INS_EBREAK);
 
@@ -111,52 +111,53 @@ module ydrasil_ins_decoder #(
 
 
 
-	assign alu_op_info[`ALU_OP_ADD]   = is_addi | is_add | is_auipc_o | is_lui_o;
-	assign alu_op_info[`ALU_OP_SUB]   = is_sub;
-	assign alu_op_info[`ALU_OP_SLL]   = is_slli | is_sll;
-	assign alu_op_info[`ALU_OP_SLT]   = is_slti | is_slt;
-	assign alu_op_info[`ALU_OP_SLTU]  = is_sltiu | is_sltu;
-	assign alu_op_info[`ALU_OP_XOR]   = is_xori | is_xor;
-	assign alu_op_info[`ALU_OP_SRL]   = is_srli | is_srl;
-	assign alu_op_info[`ALU_OP_SRA]   = is_srai | is_sra;
-	assign alu_op_info[`ALU_OP_OR]    = is_ori | is_or;
-	assign alu_op_info[`ALU_OP_AND]   = is_andi | is_and;
-	assign alu_op_info[`ALU_OP_LUI]   = is_lui;
-	assign alu_op_info[`ALU_OP_AUIPC] = is_auipc;
+	assign alu_op_info[`OP_ALU_ADD]   = is_addi | is_add | is_auipc | is_lui;
+	assign alu_op_info[`OP_ALU_SUB]   = is_sub;
+	assign alu_op_info[`OP_ALU_SLL]   = is_slli | is_sll;
+	assign alu_op_info[`OP_ALU_SLT]   = is_slti | is_slt;
+	assign alu_op_info[`OP_ALU_SLTU]  = is_sltiu | is_sltu;
+	assign alu_op_info[`OP_ALU_XOR]   = is_xori | is_xor;
+	assign alu_op_info[`OP_ALU_SRL]   = is_srli | is_srl;
+	assign alu_op_info[`OP_ALU_SRA]   = is_srai | is_sra;
+	assign alu_op_info[`OP_ALU_OR]    = is_ori | is_or;
+	assign alu_op_info[`OP_ALU_AND]   = is_andi | is_and;
+	assign alu_op_info[`OP_ALU_LUI]   = is_lui;
+	assign alu_op_info[`OP_ALU_AUIPC] = is_auipc;
 
-	assign bjp_op_info[`BJP_OP_JUMP] = is_jal | is_jalr;
-	assign bjp_op_info[`BJP_OP_BEQ]  = is_beq;
-	assign bjp_op_info[`BJP_OP_BNE]  = is_bne;
-	assign bjp_op_info[`BJP_OP_BLT]  = is_blt;
-	assign bjp_op_info[`BJP_OP_BGE]  = is_bge;
-	assign bjp_op_info[`BJP_OP_BLTU] = is_bltu;
-	assign bjp_op_info[`BJP_OP_BGEU] = is_bgeu;
+	assign bjp_op_info[`OP_BJP_JUMP] = is_jal | is_jalr;
+	assign bjp_op_info[`OP_BJP_BEQ]  = is_beq;
+	assign bjp_op_info[`OP_BJP_BNE]  = is_bne;
+	assign bjp_op_info[`OP_BJP_BLT]  = is_blt;
+	assign bjp_op_info[`OP_BJP_BGE]  = is_bge;
+	assign bjp_op_info[`OP_BJP_BLTU] = is_bltu;
+	assign bjp_op_info[`OP_BJP_BGEU] = is_bgeu;
 
-	assign lsu_op_info[`LSU_OP_LB]  = is_lb;
-	assign lsu_op_info[`LSU_OP_LH]  = is_lh;
-	assign lsu_op_info[`LSU_OP_LW]  = is_lw;
-	assign lsu_op_info[`LSU_OP_LBU] = is_lbu;
-	assign lsu_op_info[`LSU_OP_LHU] = is_lhu;
-	assign lsu_op_info[`LSU_OP_SB]  = is_sb;
-	assign lsu_op_info[`LSU_OP_SH]  = is_sh;
-	assign lsu_op_info[`LSU_OP_SW]  = is_sw;
+	assign lsu_op_info[`OP_LSU_LB]  = is_lb;
+	assign lsu_op_info[`OP_LSU_LH]  = is_lh;
+	assign lsu_op_info[`OP_LSU_LW]  = is_lw;
+	assign lsu_op_info[`OP_LSU_LBU] = is_lbu;
+	assign lsu_op_info[`OP_LSU_LHU] = is_lhu;
+	assign lsu_op_info[`OP_LSU_SB]  = is_sb;
+	assign lsu_op_info[`OP_LSU_SH]  = is_sh;
+	assign lsu_op_info[`OP_LSU_SW]  = is_sw;
 
-	assign rf_waddr_rd_o = waddr_rd;
-	assign rf_raddr_rs1_o = raddr_rs1;
-	assign rf_raddr_rs2_o = raddr_rs2;
-	assign rf_ren_rs1_o =	(~is_lui) 	& (~is_auipc) 	& (~is_jal) & 
-                      		(~is_ecall) & (~is_ebreak) 	& (~is_fence) & 
-                      		(~is_nop) 	;// U类型指令不需要rs1
-	assign rf_ren_rs2_o = is_op_r_m | is_branch | is_store; // R类型和分支指令需要rs2
+	logic [4:0]	rf_waddr_rd = waddr_rd;
+	logic [4:0]	rf_raddr_rs1 = raddr_rs1;
+	logic [4:0]	rf_raddr_rs2 = raddr_rs2;
+	logic rf_ren_rs1 =	(~is_lui) 	& (~is_auipc) 	& (~is_jal) &  
+       					(~is_ecall) & (~is_ebreak) 	& (~is_fence) & 
+       					(~is_nop) 	& (~is_fence_i);// U类型指令不需要rs1
+	logic rf_ren_rs2 = is_op_r_m | is_branch | is_store; // R类型和分支指令需要rs2
 
+	logic rf_wen_rd = is_lui | is_auipc | is_jal | is_jalr | is_op_imm | is_op_r_m ; // 需要写回寄存器的指令类型 
 
-	assign operator_type_o [OPERATOR_TYPE_ALU] = is_op_imm | is_op_r_m | is_lui | is_auipc;
-	assign operator_type_o [OPERATOR_TYPE_BJP] = is_branch | is_jal | is_jalr;
-	assign operator_type_o [OPERATOR_TYPE_LOAD] = is_load;
-	assign operator_type_o [OPERATOR_TYPE_STORE] = is_store;
+	assign operator_type_o [`OPERATOR_TYPE_ALU] = is_op_imm | is_op_r_m | is_lui | is_auipc;
+	assign operator_type_o [`OPERATOR_TYPE_BJP] = is_branch | is_jal | is_jalr;
+	assign operator_type_o [`OPERATOR_TYPE_LOAD] = is_load;
+	assign operator_type_o [`OPERATOR_TYPE_STORE] = is_store;
 	
-	logic [`OPERATOR_WIDTH-1:0] alu_op_info_mark =  operator_type_o [OPERATOR_TYPE_ALU] 	? {{`OPERATOR_WIDTH-`OP_ALU_INFO_WIDTH{1'b0}},alu_op_info} : '0;
-	logic [`OPERATOR_WIDTH-1:0] bjp_op_info_mark =  operator_type_o [OPERATOR_TYPE_BJP] 	? {{`OPERATOR_WIDTH-`OP_BJP_INFO_WIDTH{1'b0}},bjp_op_info} : '0;
+	logic [`OPERATOR_WIDTH-1:0] alu_op_info_mark =  operator_type_o [`OPERATOR_TYPE_ALU] 	? {{`OPERATOR_WIDTH-`OP_ALU_INFO_WIDTH{1'b0}},alu_op_info} : '0;
+	logic [`OPERATOR_WIDTH-1:0] bjp_op_info_mark =  operator_type_o [`OPERATOR_TYPE_BJP] 	? {{`OPERATOR_WIDTH-`OP_BJP_INFO_WIDTH{1'b0}},bjp_op_info} : '0;
 	// assign lsu_op_info_mark =  operator_type_o [OPERATOR_TYPE_LOAD] ? {{`OPERATOR_WIDTH-`OP_LSU_INFO_WIDTH{1'b0}},lsu_op_info} : '0;
 	logic [31:0] imm_i_mask = ((is_op_r_m & ! is_shift) | is_jalr | is_load) ? imm_i : '0;
 	logic [31:0] imm_s_mask = is_store ? imm_s : '0;
@@ -177,5 +178,12 @@ module ydrasil_ins_decoder #(
 	assign operand_b_rs_sel_o = operand_b_rs_sel;
 	assign operand_a_pc_sel_o = operand_a_pc_sel;
 	assign bt_a_rs_sel_o = bt_a_rs_sel;
+
+	assign rf_waddr_rd_o = rf_waddr_rd;
+	assign rf_raddr_rs1_o = rf_raddr_rs1;
+	assign rf_raddr_rs2_o = rf_raddr_rs2;
+	assign rf_ren_rs1_o = rf_ren_rs1;
+	assign rf_ren_rs2_o = rf_ren_rs2;
+	assign rf_wen_rd_o = rf_wen_rd;
 
 endmodule

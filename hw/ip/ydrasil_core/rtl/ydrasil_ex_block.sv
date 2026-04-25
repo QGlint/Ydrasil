@@ -1,4 +1,4 @@
-`include "define_alu.svh"
+`include "define_decode.svh"
 `include "config.svh"
 
 module ydrasil_ex_block #(
@@ -20,9 +20,9 @@ module ydrasil_ex_block #(
 	output logic                            branch_decision_o,     // to ID
     output logic [DATA_WIDTH-1:0]           branch_target_o, // to IF
 
-	output logic [`REG_DATA_WIDTH-1:0]      result_o,
+	output logic [`REGS_DATA_WIDTH-1:0]      result_o,
 	output logic                            register_we_o,
-	output logic [`REG_ADDR_WIDTH-1:0]      register_waddr_o
+	output logic [`REGS_ADDR_WIDTH-1:0]      register_waddr_o
 );
 
 	logic [DATA_WIDTH-1:0] bt_addr_n;
@@ -37,7 +37,7 @@ module ydrasil_ex_block #(
 	ydrasil_alu #(
 		.DATAWIDTH(DATA_WIDTH)
 	) u_ydrasil_alu (
-		.rst_n            (rst_n_i),
+		// .rst_n            (rst_n_i),
 		.req_alu_i        (ex_valid_i),
 		.operand_a_i      (operand_a_i),
 		.operand_b_i      (operand_b_i),
