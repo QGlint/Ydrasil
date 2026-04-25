@@ -1,0 +1,14 @@
+packages:
+  ydrasil::core:
+    revision: null
+    version: null
+    source:
+      Path: ../ydrasil_core
+    dependencies:
+    - ydrasil::memory
+  ydrasil::memory:
+    revision: null
+    version: null
+    source:
+      Path: ../ydrasil_core/../ydrmem
+    dependencies: []

@@ -36,6 +36,7 @@ TB_SRCS := $(wildcard $(IP_DIR)/dv/*.sv)
 INC_DIRS += $(PROJECT_ROOT)/hw/include
 INC_DIRS += $(IP_DIR)/rtl
 INC_DIRS += $(IP_DIR)/include
+INC_DIRS += $(PROJECT_ROOT)/hw/ip/ydrmem/rtl
 
 ifeq ($(USE_BENDER),1)
 FLIST_DIR := $(OBJ_DIR)/flist
@@ -47,6 +48,10 @@ endif
 ##################################
 
 DEFINES := RANDOM_SEED=$(RANDOM_SEED)
+DEFINES += INIT_ITCM=1
+DEFINES += INIT_DTCM=1
+DEFINES += ITCM_INIT_FILE=\"$(abspath $(ITCM_MEM))\"
+DEFINES += DTCM_INIT_FILE=\"$(abspath $(DTCM_MEM))\"
 ifeq ($(USE_WINDOW_68_80_GEARBOX),1)
 DEFINES += USE_WINDOW_68_80_GEARBOX
 endif

@@ -26,20 +26,18 @@ module ydrasil_mems (
 `ifndef FPGA
 
     // ITCM模块例化 - 使用参数化和宏定义控制初始化
-    ydrasil_rom #(
+    ydrmem_rom #(
         .ADDR_WIDTH(`ITCM_ADDR_WIDTH),
         .DATA_WIDTH(`BUS_DATA_WIDTH),
         .INIT_MEM  (`INIT_ITCM),        // 使用宏定义控制是否初始化
         .INIT_FILE (`ITCM_INIT_FILE)    // 使用宏定义指定初始化文件
     ) u_itcm (
-        .clk      (clk),
-        .rst_n    (rst_n),
         .addr_i   (if_mem_addr_o),
         .data_o   (if_mem_rdata_i)
     );
 
     // DTCM模块例化 - 使用参数化，默认不初始化
-    ydrasil_ram #(
+    ydrmem_ram #(
         .ADDR_WIDTH(`DTCM_ADDR_WIDTH),
         .DATA_WIDTH(`BUS_DATA_WIDTH),
         .INIT_MEM  (`INIT_DTCM),        // 使用宏定义控制是否初始化

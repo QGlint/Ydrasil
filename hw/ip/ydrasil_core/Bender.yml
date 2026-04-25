@@ -1,27 +1,26 @@
 package:
-	name: ydrasil::core
-	description: Core IP for Ydrasil RV32I core
+  name: ydrasil::core
+  description: Core IP for Ydrasil RV32I core
 
-# 仅声明直接依赖；递归依赖由 Bender 自动展开。
-dependencies: {}
-
-sources:
-	- target: any(verilator, iverilog, vcs)
-		files:
-			- rtl/define_mem_reg.svh
-			- rtl/define_decode.svh
-			- rtl/define_rv32i_ins.svh
-			- rtl/ydrasil_mems.sv
-			- rtl/ydrasil_registers.sv
-			- rtl/ydrasil_decode.sv
-			- rtl/ydrasil_alu.sv
-			- rtl/ydrasil_if_stage.sv
-			- rtl/ydrasil_id_stage.sv
-			- rtl/ydrasil_ex_stage.sv
-			- rtl/ydrasil_wb_stage.sv
-			- rtl/ydrasil_load_store.sv
-			- rtl/ydrasil_core.sv
+dependencies:
+  ydrasil::memory:
+    path: ../ydrmem
 
 sources:
-	- target: any(verilator, iverilog, vcs)
-		files:
+  - target: any(verilator, iverilog, vcs)
+    files:
+      - rtl/config.svh
+      - rtl/define_mem_reg.svh
+      - rtl/define_decode.svh
+      - rtl/define_rv32i_ins.svh
+      - rtl/ydrasil_alu.sv
+      - rtl/ydrasil_if_stage.sv
+      - rtl/ydrasil_id_stage.sv
+      - rtl/ydrasil_ins_decoder.sv
+      - rtl/ydrasil_ex_block.sv
+      - rtl/ydrasil_load_store_unit.sv
+      - rtl/ydrasil_mems.sv
+      - rtl/ydrasil_wb_stage.sv
+      - rtl/ydrasil_registers.sv
+      - rtl/ydrasil_ctrl.sv
+      - rtl/ydrasil_core.sv

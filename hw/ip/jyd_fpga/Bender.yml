@@ -1,0 +1,24 @@
+package:
+  name: jyd_fpga
+  description: Top-level FPGA design for Ydrasil RV32I core
+
+dependencies:
+  ydrasil::core:
+    path: ../ydrasil_core
+
+sources:
+  - target: any(verilator, iverilog, vcs)
+    files:
+      - rtl/seg7.sv
+      - rtl/display_seg.sv
+      - rtl/counter.sv
+      - rtl/dram_driver.sv
+      - rtl/perip_bridge.sv
+      - rtl/twin_controller.sv
+      - rtl/uart.sv
+      - rtl/student_top.sv
+      - rtl/jyd_fpga.sv
+
+  - target: ip_tb
+    files:
+      - dv/jyd_fpga_tb.sv

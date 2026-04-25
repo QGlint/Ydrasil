@@ -12,11 +12,18 @@
 `define DTCM_SIZE (1 << `DTCM_ADDR_WIDTH)     // DTCM大小：64KB
 
 // 内存初始化控制
-`define INIT_ITCM 1       // 控制ITCM是否初始化，1表示初始化，0表示不初始化
-`define ITCM_INIT_FILE "itcm_init.mem"  // ITCM初始化文件路径
-`define INIT_DTCM 1       // 控制DTCM是否初始化，1表示初始化，0表示不初始化
-`define DTCM_INIT_FILE "dtcm_init.mem"  // DTCM初始化文件路径
-
+`ifndef INIT_ITCM
+`define INIT_ITCM 0       // 控制ITCM是否初始化，1表示初始化，0表示不初始化
+`endif
+`ifndef ITCM_INIT_FILE
+`define ITCM_INIT_FILE "hw/dv/test_data/mem/irom0.mem"  // ITCM初始化文件路径
+`endif
+`ifndef INIT_DTCM
+`define INIT_DTCM 0
+`endif
+`ifndef DTCM_INIT_FILE
+`define DTCM_INIT_FILE "hw/dv/test_data/mem/dram0.mem"
+`endif
 // 总线宽度定义
 `define BUS_DATA_WIDTH 32
 `define BUS_ADDR_WIDTH 32

@@ -1,0 +1,11 @@
+package:
+  name: ydrasil::memory
+  description: Memory IP for Ydrasil RV32I core
+
+dependencies: {}
+
+sources:
+  - target: any(verilator, iverilog, vcs)
+    files:
+      - rtl/ydrmem_ram.sv
+      - rtl/ydrmem_rom.sv
