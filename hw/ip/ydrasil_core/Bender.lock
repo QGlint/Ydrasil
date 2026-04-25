@@ -1,0 +1,7 @@
+packages:
+  ydrasil::memory:
+    revision: null
+    version: null
+    source:
+      Path: ../ydrmem
+    dependencies: []

@@ -36,7 +36,16 @@ TB_SRCS := $(wildcard $(IP_DIR)/dv/*.sv)
 INC_DIRS += $(PROJECT_ROOT)/hw/include
 INC_DIRS += $(IP_DIR)/rtl
 INC_DIRS += $(IP_DIR)/include
-INC_DIRS += $(PROJECT_ROOT)/hw/ip/ydrmem/rtl
+
+ifeq ($(USE_BENDER),1)
+BENDER_INCDIRS := $(shell \
+	if [ -f $(IP_DIR)/Bender.yml ] || [ -f $(IP_DIR)/Bender.yaml ]; then \
+		cd $(IP_DIR) && $(BENDER) script flist-plus $(BENDER_TARGET_ARGS) | sed -n 's/^+incdir+//p'; \
+	fi)
+INC_DIRS += $(BENDER_INCDIRS)
+endif
+
+INC_DIRS := $(sort $(INC_DIRS))
 
 ifeq ($(USE_BENDER),1)
 FLIST_DIR := $(OBJ_DIR)/flist

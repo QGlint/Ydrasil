@@ -1,4 +1,5 @@
 VERILATOR ?= verilator
+VERILATOR_TRACE ?= 1
 
 
 ##################################
@@ -35,17 +36,20 @@ VERILATOR_FLAGS += --build -o $(abspath $(BIN))
 
 VERILATOR_FLAGS += -Wno-fatal -Wno-TIMESCALEMOD 
 
-# VERILATOR_FLAGS += \
-#  -Wno-INITIALDLY \
-#  -Wno-WIDTHTRUNC \
-#  -Wno-WIDTHCONCAT \
-#  -Wno-WIDTHEXPAND \
-#  -Wno-UNOPTFLAT \
-#  -Wno-PINMISSING \
-#  -Wno-UNSIGNED 
+VERILATOR_FLAGS += \
+ -Wno-INITIALDLY \
+ -Wno-WIDTHTRUNC \
+ -Wno-WIDTHCONCAT \
+ -Wno-WIDTHEXPAND \
+ -Wno-UNOPTFLAT \
+ -Wno-PINMISSING \
+ -Wno-UNSIGNED 
 
+VERILATOR_FLAGS += -CFLAGS -DVL_DEBUG
+
+ifeq ($(VERILATOR_TRACE),1)
 VERILATOR_FLAGS += --trace --trace-structs --trace-params --trace-max-array 1024
-VERILATOR_FLAGS += --prof-cfuncs -CFLAGS -DVL_DEBUG
+endif
 VERILATOR_FLAGS += -j  $(shell nproc)
 VERILATOR_FLAGS += --top-module $(TOP)
 
@@ -72,7 +76,7 @@ ifeq ($(USE_BENDER),1)
 	@mkdir -p $(FLIST_DIR)
 	@echo "[BENDER FLIST]"
 	@if [ -f $(IP_DIR)/Bender.yml ] || [ -f $(IP_DIR)/Bender.yaml ]; then \
-		cd $(IP_DIR) && $(BENDER) script flist $(BENDER_TARGET_ARGS) > $(FLIST_FILE); \
+		cd $(IP_DIR) && $(BENDER) script flist-plus $(BENDER_TARGET_ARGS) | sed '/^+define+/d' > $(FLIST_FILE); \
 	else \
 		echo "ERROR: USE_BENDER=1 but Bender.yml/Bender.yaml not found at $(IP_DIR)"; \
 		exit 1; \

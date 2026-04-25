@@ -8,11 +8,9 @@ dependencies:
 
 sources:
   - target: any(verilator, iverilog, vcs)
+    include_dirs:
+      - rtl
     files:
-      - rtl/config.svh
-      - rtl/define_mem_reg.svh
-      - rtl/define_decode.svh
-      - rtl/define_rv32i_ins.svh
       - rtl/ydrasil_alu.sv
       - rtl/ydrasil_if_stage.sv
       - rtl/ydrasil_id_stage.sv
@@ -24,3 +22,8 @@ sources:
       - rtl/ydrasil_registers.sv
       - rtl/ydrasil_ctrl.sv
       - rtl/ydrasil_core.sv
+
+
+  - target: ip_tb
+    files:
+      - dv/ydrasil_core_tb.sv

@@ -5,7 +5,7 @@ WAVE_DIR  := $(BUILD_DIR)/wave
 LOG_DIR   := $(BUILD_DIR)/log
 
 SIM_TOOL ?= verilator
-IP  ?= jyd_fpga
+IP  ?= ydrasil_core
 VERILATOR_MOD ?= sv
 UVM ?= 0
 USE_BENDER ?= 1
@@ -28,14 +28,6 @@ sim:
 resim:
 	@mkdir -p $(BUILD_DIR) $(WAVE_DIR) $(LOG_DIR)
 	@$(MAKE) -C hw/dv -f Makefile resim
-
-sim_jyd_fpga:
-	@mkdir -p $(BUILD_DIR) $(WAVE_DIR) $(LOG_DIR)
-	@$(MAKE) -C hw/dv -f Makefile sim IP=jyd_fpga TOP=top_tb
-
-resim_jyd_fpga:
-	@mkdir -p $(BUILD_DIR) $(WAVE_DIR) $(LOG_DIR)
-	@$(MAKE) -C hw/dv -f Makefile resim IP=jyd_fpga TOP=top_tb
 
 wave:
 	@$(MAKE) -C hw/dv -f Makefile wave

@@ -131,13 +131,13 @@ module jyd_fpga_tb;
     initial begin
         `ifdef VERILATOR_SV
             $dumpfile("wave.vcd");
-            $dumpvars(0, rate_adapter_tb);
+            $dumpvars(0, jyd_fpga_tb);
         `elsif VCS_FSDB
-            $fsdbDumpfile("rate_adapter_tb.fsdb");
-            $fsdbDumpvars(0, rate_adapter_tb, "+all");
+            $fsdbDumpfile("jyd_fpga_tb.fsdb");
+            $fsdbDumpvars(0, jyd_fpga_tb, "+all");
         `elsif IVERILOG_VCD
             $dumpfile("wave.vcd");
-            $dumpvars(0, rate_adapter_tb);
+            $dumpvars(0, jyd_fpga_tb);
         `endif
     end
 
