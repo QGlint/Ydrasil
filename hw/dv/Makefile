@@ -52,12 +52,7 @@ DEFINES += INIT_ITCM=1
 DEFINES += INIT_DTCM=1
 DEFINES += ITCM_INIT_FILE=\"$(abspath $(ITCM_MEM))\"
 DEFINES += DTCM_INIT_FILE=\"$(abspath $(DTCM_MEM))\"
-ifeq ($(USE_WINDOW_68_80_GEARBOX),1)
-DEFINES += USE_WINDOW_68_80_GEARBOX
-endif
-ifeq ($(USE_WINDOW_80_68_GEARBOX),1)
-DEFINES += USE_WINDOW_80_68_GEARBOX
-endif
+
 
 ##################################
 # Timestamp
