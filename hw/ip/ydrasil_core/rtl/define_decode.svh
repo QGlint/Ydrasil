@@ -40,6 +40,7 @@
 // `define OP_BJP_OP1RS1       7
 
 `define OP_LSU_INFO_WIDTH    8
+`define OP_LOAD_INFO_WIDTH   5
 
 `define OP_LSU_LB           0
 `define OP_LSU_LH           1
@@ -49,7 +50,6 @@
 `define OP_LSU_SB           5
 `define OP_LSU_SH           6
 `define OP_LSU_SW           7
-
 
 
 `endif

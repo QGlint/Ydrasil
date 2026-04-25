@@ -1,5 +1,5 @@
 `include "define_decode.svh"
-`include "config.svh"
+`include "define_mem_reg.svh"
 module ydrasil_alu#(
     parameter   DATAWIDTH = 32   
 )(

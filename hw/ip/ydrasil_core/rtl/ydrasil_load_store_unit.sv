@@ -1,27 +1,3 @@
-/*         
- The MIT License (MIT)
-
- Copyright © 2025 Yusen Wang @yusen.w@qq.com
-                                                                         
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-                                                                         
- The above copyright notice and this permission notice shall be included in all
- copies or substantial portions of the Software.
-                                                                         
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- SOFTWARE.
- */
-
 `include "define_decode.svh"
 `include "define_mem_reg.svh"
 
@@ -30,76 +6,81 @@ module ydrasil_load_store_unit (
     input logic clk,  // 时钟输入
     input logic rst_n,
 
-    input logic [1:0]                       lsu_type_i,
-    input logic                             mem_addr_i,
+    input logic [`BUS_ADDR_WIDTH-1:0]       mem_addr_i,
     input logic [ 4:0]                      rd_addr_i,
     input logic [`OP_LSU_INFO_WIDTH-1:0]    operator_lsu_i,
-
-    // 内存数据输入
-    input logic [`BUS_DATA_WIDTH-1:0] mem_rdata_i,
-
-    // 内存接口输出
-    output logic [`BUS_DATA_WIDTH-1:0] mem_wdata_o,
-    output logic [`BUS_ADDR_WIDTH-1:0] mem_raddr_o,
-    output logic [`BUS_ADDR_WIDTH-1:0] mem_waddr_o,
-    output logic                       mem_we_o,
-    output logic                       mem_req_o,
-    output logic [                3:0] mem_wmask_o,  // 字节写入掩码，4位分别对应4个字节
+    input logic [1:0]                       operator_lsu_type_i,
+    input logic [`REGS_DATA_WIDTH-1:0]      id_lsu_rs2_data_i, // 存储操作的源寄存器数据
+    
+    // 内存接口
+    input logic [`BUS_DATA_WIDTH-1:0]       mem_rdata_i,
+    output logic [`BUS_DATA_WIDTH-1:0]      mem_wdata_o,
+    output logic [`BUS_ADDR_WIDTH-1:0]      mem_addr_o,
+    output logic                            mem_wen_o,
+    output logic                            mem_req_o,
+    output logic [                3:0]      mem_wmask_o,  // 字节写入掩码，4位分别对应4个字节
 
     // 寄存器写回接口
-    output logic [`REGS_DATA_WIDTH-1:0] reg_wdata_o,
-    output logic                       reg_we_o,
-    output logic [`REGS_ADDR_WIDTH-1:0] reg_waddr_o
+    output logic [`REGS_DATA_WIDTH-1:0]     lsu_wb_result_o,
+    output logic                            lsu_rf_wen_rd_o,
+    output logic [`REGS_ADDR_WIDTH-1:0]     lsu_rf_waddr_rd_o
 );
     // 内部信号定义
     logic [ 1:0] mem_addr_index;
-    logic [31:0] mem_addr;
-    logic        valid_op;  // 有效操作信号（无中断且有内存请求）
+    logic [31:0] mem_addr = mem_addr_i; // 内存访问的地址
 
-    // 打一拍后的信号
-    logic        operator_lsu_ff;
+    logic [31:0] mem_rs2_data = id_lsu_rs2_data_i; // 存储操作的源寄存器数据
+
+    logic is_load   = operator_lsu_type_i [`OPERATOR_TYPE_LOAD - `OPERATOR_TYPE_LSU_BASE] ;
+    logic is_store  = operator_lsu_type_i [`OPERATOR_TYPE_STORE - `OPERATOR_TYPE_LSU_BASE] ;
+
+    logic [`OP_LOAD_INFO_WIDTH-1:0]  operator_load_ff;
     logic [4:0]  rd_addr_ff;
-    // 存储mem_op1_i和mem_op2_i打一拍后的信号
-    logic [31:0] mem_op1_ff;
-    logic [31:0] mem_op2_ff;
-    logic [31:0] mem_addr_ff;
-    logic [ 1:0] mem_addr_index_ff;
-
-    // 直接使用输入的load和store信号，不需要在内部重新计算
-    logic        is_load_op = mem_op_load_i;
-    logic        is_store_op = mem_op_store_i;
-    logic        is_load_op_ff;
-
+    logic        is_load_ff;
+    logic [1:0]  mem_addr_index_ff;
     // 并行计算基本信号
-    assign mem_addr       = mem_op1_i + mem_op2_i;
     assign mem_addr_index = mem_addr[1:0];
-    assign valid_op       = req_mem_i & (!int_assert_i);
+    // assign valid_op       = req_mem_i & (!int_assert_i);
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            rd_addr_ff     <= 0;
-            operator_lsu_ff <= 0;
+            rd_addr_ff              <= 0;
+            operator_load_ff        <= 0;
+            is_load_ff              <= 0;
+            mem_addr_index_ff       <= 0;
         end
         else begin
-            valid_op_ff    <= valid_op;
-            operator_lsu_ff <= operator_lsu_i;
-            rd_addr_ff     <= rd_addr_i;
+            operator_load_ff        <= operator_lsu_i[`OP_LOAD_INFO_WIDTH-1:0];
+            rd_addr_ff              <= rd_addr_i;
+            is_load_ff              <= is_load;
+            mem_addr_index_ff       <= mem_addr_index;
         end
     end
 
+    logic is_lb = operator_load_ff[`OP_LSU_LB];
+    logic is_lh = operator_load_ff[`OP_LSU_LH];
+    logic is_lw = operator_load_ff[`OP_LSU_LW];
+    logic is_lbu = operator_load_ff[`OP_LSU_LBU];
+    logic is_lhu = operator_load_ff[`OP_LSU_LHU];
+
+    logic is_sb = operator_lsu_i[`OP_LSU_SB];
+    logic is_sh = operator_lsu_i[`OP_LSU_SH];
+    logic is_sw = operator_lsu_i[`OP_LSU_SW];
+
+
     // 使用并行选择逻辑生成内存请求信号
-    assign mem_req_o      = (valid_op & (is_load_op | is_store_op)) ? 1'b1 : 1'b0;
+    assign mem_req_o      = is_load | is_store;
 
     // 并行选择逻辑生成地址
-    assign mem_raddr_o    = (valid_op & is_load_op) ? mem_addr : '0;
-    assign mem_waddr_o    = (valid_op & is_store_op) ? mem_addr : '0;
+    assign mem_addr_o    = mem_addr;
+    // assign mem_waddr_o    = (valid_op & is_store_op) ? mem_addr ;
 
     // 并行选择逻辑生成写使能信号
-    assign mem_we_o       = (valid_op & is_store_op) ;
+    assign mem_wen_o       = is_store ;
 
     // 并行选择逻辑生成寄存器写回控制 - 使用打一拍后的信号
-    assign reg_we_o       = (valid_op_ff & is_load_op_ff) ;
-    assign reg_waddr_o    = (valid_op_ff & is_load_op_ff) ? rd_addr_ff : '0;
+    assign lsu_rf_wen_rd_o      = is_load_ff;
+    assign lsu_rf_waddr_rd_o    = is_load_ff? rd_addr_ff : '0;
 
     // 字节加载数据 - 使用并行选择逻辑
     logic [31:0] lb_data, lh_data, lw_data, lbu_data, lhu_data;
@@ -145,11 +126,11 @@ module ydrasil_load_store_unit (
     assign lw_data = mem_rdata_i;
 
     // 并行选择最终的寄存器写回数据 - 使用打一拍后的信号
-    assign reg_wdata_o = ({32{valid_op_ff & mem_op_lb_ff}} & lb_data) |
-                         ({32{valid_op_ff & mem_op_lbu_ff}} & lbu_data) |
-                         ({32{valid_op_ff & mem_op_lh_ff}} & lh_data) |
-                         ({32{valid_op_ff & mem_op_lhu_ff}} & lhu_data) |
-                         ({32{valid_op_ff & mem_op_lw_ff}} & lw_data);
+    assign lsu_wb_result_o =    ({32{is_lb}} & lb_data) |
+                                ({32{is_lbu}} & lbu_data) |
+                                ({32{is_lh}} & lh_data) |
+                                ({32{is_lhu}} & lhu_data) |
+                                ({32{is_lw}} & lw_data);
 
     // 存储操作的掩码和数据 - 使用并行选择逻辑
     // 字节存储掩码和数据
@@ -161,30 +142,30 @@ module ydrasil_load_store_unit (
                      ({4{mem_addr_index == 2'b10}} & 4'b0100) |
                      ({4{mem_addr_index == 2'b11}} & 4'b1000);
 
-    assign sb_data = ({32{mem_addr_index == 2'b00}} & {24'b0, mem_rs2_data_i[7:0]}) |
-                     ({32{mem_addr_index == 2'b01}} & {16'b0, mem_rs2_data_i[7:0], 8'b0}) |
-                     ({32{mem_addr_index == 2'b10}} & {8'b0, mem_rs2_data_i[7:0], 16'b0}) |
-                     ({32{mem_addr_index == 2'b11}} & {mem_rs2_data_i[7:0], 24'b0});
+    assign sb_data = ({32{mem_addr_index == 2'b00}} & {24'b0, mem_rs2_data[7:0]}) |
+                     ({32{mem_addr_index == 2'b01}} & {16'b0, mem_rs2_data[7:0], 8'b0}) |
+                     ({32{mem_addr_index == 2'b10}} & {8'b0, mem_rs2_data[7:0], 16'b0}) |
+                     ({32{mem_addr_index == 2'b11}} & {mem_rs2_data[7:0], 24'b0});
 
     // 半字存储掩码和数据
     logic [ 3:0] sh_mask= ({4{mem_addr_index[1] == 1'b0}} & 4'b0011) | ({4{mem_addr_index[1] == 1'b1}} & 4'b1100);
     logic [31:0] sh_data;
 
-    assign sh_data = ({32{mem_addr_index[1] == 1'b0}} & {16'b0, mem_rs2_data_i[15:0]}) |
-                     ({32{mem_addr_index[1] == 1'b1}} & {mem_rs2_data_i[15:0], 16'b0});
+    assign sh_data = ({32{mem_addr_index[1] == 1'b0}} & {16'b0, mem_rs2_data[15:0]}) |
+                     ({32{mem_addr_index[1] == 1'b1}} & {mem_rs2_data[15:0], 16'b0});
 
     // 字存储掩码和数据
     logic [ 3:0] sw_mask = 4'b1111;
-    logic [31:0] sw_data = mem_rs2_data_i;
+    logic [31:0] sw_data = mem_rs2_data;
 
 
     // 并行选择最终的存储掩码和数据
-    assign mem_wmask_o = ({4{valid_op & mem_op_sb_i}} & sb_mask) |
-                         ({4{valid_op & mem_op_sh_i}} & sh_mask) |
-                         ({4{valid_op & mem_op_sw_i}} & sw_mask);
+    assign mem_wmask_o = ({ 4{is_sb}} & sb_mask) |
+                         ({ 4{is_sh}} & sh_mask) |
+                         ({ 4{is_sw}} & sw_mask);
 
-    assign mem_wdata_o = ({32{valid_op & mem_op_sb_i}} & sb_data) |
-                         ({32{valid_op & mem_op_sh_i}} & sh_data) |
-                         ({32{valid_op & mem_op_sw_i}} & sw_data);
+    assign mem_wdata_o = ({32{is_sb}} & sb_data) |
+                         ({32{is_sh}} & sh_data) |
+                         ({32{is_sw}} & sw_data);
 
 endmodule
