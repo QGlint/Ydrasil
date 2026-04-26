@@ -42,7 +42,15 @@ module jyd_fpga(
     wire [7:0] tx_data;
     wire tx_busy;
 
-`ifdef FPGA
+`ifdef SYNTHESIS
+    pll pll_inst(
+        .clk_in1_p(i_sys_clk_p),
+        .clk_in1_n(i_sys_clk_n),
+        .clk_out1(w_clk_50Mhz),
+        .clk_out2(cpu_clk),
+        .locked(w_clk_rst)
+    );
+`elsif __XILINX_SIMULATOR__
         pll pll_inst(
         .clk_in1_p(i_sys_clk_p),
         .clk_in1_n(i_sys_clk_n),

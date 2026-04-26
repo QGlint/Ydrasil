@@ -1,23 +1,23 @@
 `include "define_mem_reg.svh"
 module ydrasil_ctrl (
 
-    input logic rst_n,
+    input wire rst_n,
 
     // from ex
-    input logic                          ex_branch_jump_i,
-    input logic [`INST_ADDR_WIDTH-1:0]   ex_branch_target_i,
-    // input logic                          stall_ex_i,
-    // input logic                          stall_mems_i,
-    output logic                         stall_if_o,
-    output logic                         stall_id_o,
+    input wire                          ex_branch_jump_i,
+    input wire [`INST_ADDR_WIDTH-1:0]   ex_branch_target_i,
+    // input wire                          stall_ex_i,
+    // input wire                          stall_mems_i,
+    output wire                         stall_if_o,
+    output wire                         stall_id_o,
     // flush
-    output logic                         flush_if_o,
-    output logic                         flush_id_o,
-    output logic                         flush_ex_o,
-    // output logic                         flush_mems_o, --- IGNORE ---
+    output wire                         flush_if_o,
+    output wire                         flush_id_o,
+    output wire                         flush_ex_o,
+    // output wire                         flush_mems_o, --- IGNORE ---
     //跳转
-    output logic                         branch_jump_o,
-    output logic [`INST_ADDR_WIDTH-1:0]  branch_target_o
+    output wire                         branch_jump_o,
+    output wire [`INST_ADDR_WIDTH-1:0]  branch_target_o
 
 );
 
