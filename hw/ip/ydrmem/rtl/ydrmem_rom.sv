@@ -18,9 +18,34 @@ module ydrmem_rom #(
     // 使用计算出的深度定义存储器
     (* ram_style = "block" *) reg [DATA_WIDTH-1:0] mem_r[0:DEPTH-1];
 
+    task automatic load_mem_file;
+        string candidates [0:4];
+        int fd;
+        int idx;
+        begin
+            candidates[0] = INIT_FILE;
+            candidates[1] = {"../", INIT_FILE};
+            candidates[2] = {"../../", INIT_FILE};
+            candidates[3] = {"../../../", INIT_FILE};
+            candidates[4] = {"../../../../", INIT_FILE};
+
+            for (idx = 0; idx < 5; idx = idx + 1) begin
+                fd = $fopen(candidates[idx], "r");
+                if (fd != 0) begin
+                    $fclose(fd);
+                    $display("[ydrmem_rom] load mem from: %s", candidates[idx]);
+                    $readmemh(candidates[idx], mem_r);
+                    return;
+                end
+            end
+
+            $warning("$readmem file not found: %s", INIT_FILE);
+        end
+    endtask
+
     initial begin
         if (INIT_MEM) begin
-            $readmemh(INIT_FILE, mem_r);
+            load_mem_file();
         end
     end
 

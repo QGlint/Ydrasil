@@ -29,18 +29,17 @@ module ydrasil_ins_decoder #(
 	logic [`OP_BJP_INFO_WIDTH-1:0] bjp_op_info;
 	logic [`OP_LSU_INFO_WIDTH-1:0] lsu_op_info;
 
-    logic funct7_is_0000000 = (funct7 == 7'b0000000);
-	logic funct7_is_0100000 = (funct7 == 7'b0100000);
-    logic funct3_is_000 = (funct3 == 3'b000);
-	logic funct3_is_001 = (funct3 == 3'b001);
-
-
 	logic [6:0] opcode 		= instr_i[6:0];
 	logic [4:0] waddr_rd    = instr_i[11:7];
 	logic [2:0] funct3 		= instr_i[14:12];
 	logic [4:0] raddr_rs1   = instr_i[19:15];
 	logic [4:0] raddr_rs2   = instr_i[24:20];
 	logic [6:0] funct7 		= instr_i[31:25];
+
+    logic funct7_is_0000000 = (funct7 == 7'b0000000);
+	logic funct7_is_0100000 = (funct7 == 7'b0100000);
+    logic funct3_is_000 = (funct3 == 3'b000);
+	logic funct3_is_001 = (funct3 == 3'b001);
 
 	logic [31:0] imm_i = {{20{instr_i[31]}}, instr_i[31:20]};
 	logic [31:0] imm_s = {{20{instr_i[31]}}, instr_i[31:25], instr_i[11:7]};

@@ -30,21 +30,20 @@ module ydrasil_ex_block #(
 
 	// 分支目标地址：EX 内部单独加法器计算 PC + imm_b
 	logic [31:0] bt_alu_result;
-    assign bt_alu_result = bt_a_operand_i + bt_b_operand_i;
-	assign ex_lsu_mem_addr_o = alu_result;
-    assign ex_branch_target_o = bt_alu_result;
-
-	// 内部例化 ALU，EX 直接透传控制和操作数
-
-
 	logic [`REGS_DATA_WIDTH-1:0]     alu_result;
 	logic                            alu_rf_wen_rd;
 	logic [`REGS_ADDR_WIDTH-1:0]     alu_rf_waddr_rd;
 	logic [`REGS_DATA_WIDTH-1:0]     alu_result_ff;
 	logic                            alu_rf_wen_rd_ff;
 	logic [`REGS_ADDR_WIDTH-1:0]     alu_rf_waddr_rd_ff;
-
 	logic ex_branch_jump;
+
+    assign bt_alu_result = bt_a_operand_i + bt_b_operand_i;
+	assign ex_lsu_mem_addr_o = alu_result;
+    assign ex_branch_target_o = bt_alu_result;
+
+	// 内部例化 ALU，EX 直接透传控制和操作数
+
 
 	assign ex_branch_jump_o = ex_branch_jump;
 

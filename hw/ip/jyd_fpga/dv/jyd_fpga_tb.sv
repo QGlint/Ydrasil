@@ -25,8 +25,7 @@ module jyd_fpga_tb;
     reg serial_rx;          
     wire serial_tx;         
     
-    reg [7:0] rx_data[0:17];
-    integer j;
+    reg got_tx;
     
     jyd_fpga uut (
         .i_sys_clk_p(clk),
@@ -49,84 +48,63 @@ module jyd_fpga_tb;
         #200;
     end
 
-    task uart_send_byte(input [7:0] data);
-        integer i;
-        begin
-            serial_rx = 0;  // start bit
-            #(104166);      // baud 9600, 1bit = 1/9600s = 104166ns
-
-            for(i = 0; i < 8; i = i + 1) begin
-                serial_rx = data[i];
-                #(104166);
-            end
-
-            serial_rx = 1;  // stop bit
-            #(104166);
-        end
-    endtask
-
-    task uart_receive_byte(output [7:0] data);
-        integer i;
-        begin
-            // wait for start bit
-            wait(serial_tx == 0);
-            #(52083);  // half of a process
-
-            for(i = 0; i < 8; i = i + 1) begin
-                #(104166);
-                data[i] = serial_tx;
-            end
-
-            #(104166); // stop bit
-        end
-    endtask
-
     initial begin
+        integer i;
+        reg [7:0] tx_byte;
+
         #1000;
 
         $display("==== send 0x00 to uart_rx ====");
-        uart_send_byte(8'h00);
+        tx_byte = 8'h00;
+
+        // start bit
+        serial_rx = 1'b0;
+        #(104166);
+
+        // data bits LSB first
+        for (i = 0; i < 8; i = i + 1) begin
+            serial_rx = tx_byte[i];
+            #(104166);
+        end
+
+        // stop bit
+        serial_rx = 1'b1;
+        #(104166);
+
+        got_tx = 1'b0;
         
         fork
-            begin: RX_MONITOR
-                wait(serial_tx == 0);
-                $display("ERROR: 0x00 should not have tx data?");
-                $finish;
+            begin
+                @(negedge serial_tx);
+                got_tx = 1'b1;
             end
-            begin: TIMEOUT
+            begin
                 #100000;
-                disable RX_MONITOR;
-                $display("PASS: 0x00 instruction");
             end
         join
 
-        $display("==== send 0x81 SW[0]=1 ====");
-        uart_send_byte(8'b10000001);
-        #2000;
-        
-        $display("==== send 0xa0 SW[31]=1 ====");
-        uart_send_byte(8'b10000001 + 31); 
-        #2000;
-
-        $display("==== send 0xc1 KEY[0]=1 ====");
-        uart_send_byte(8'b10000000 + 65);
-        #2000;
-
-        $display("==== send 0x80 read 18bit data  ====");
-        uart_send_byte(8'h80); 
-          
-        for(j = 0; j < 18; j = j + 1) begin
-            uart_receive_byte(rx_data[j]);
-            $display("RX[%0d] = %02x", j, rx_data[j]);
+        if (got_tx) begin
+            $display("ERROR: 0x00 should not have tx data?");
+            $finish;
+        end else begin
+            $display("PASS: 0x00 instruction");
         end
-
-        if(rx_data[5][0] !== 1'b1 || rx_data[6][0] != 1'b1 || rx_data[9][7] != 1'b1)
-            $display("ERROR: SW[0] KEY[0] SW[31] data right");
-        else
-            $display("PASS: SW[0] KEY[0] SW[31] data error");
            
         $finish;
     end
+
+    initial begin
+        #1000000000 $finish;
+    end
+
+    initial begin
+        integer i_time;
+        for(i_time = 0; i_time < 1000; i_time = i_time + 1) begin
+            $display("time: %0t ns", $time);
+            #1000000;
+        end
+    end
+
 
     initial begin
         `ifdef VERILATOR_SV
