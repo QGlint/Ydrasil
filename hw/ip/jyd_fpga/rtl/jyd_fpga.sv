@@ -18,7 +18,7 @@
 // Additional Comments:
 // 
 //////////////////////////////////////////////////////////////////////////////////
-
+`define FPGA
 
 module jyd_fpga(
     input  wire i_sys_clk_p         ,
@@ -42,17 +42,31 @@ module jyd_fpga(
     wire [7:0] tx_data;
     wire tx_busy;
 
-    // pll pll_inst(
-    //     .clk_in1_p(i_sys_clk_p),
-    //     .clk_in1_n(i_sys_clk_n),
-    //     .clk_out1(w_clk_50Mhz),
-    //     .clk_out2(cpu_clk),
-    //     .locked(w_clk_rst)
-    // );
+`ifdef FPGA
+        pll pll_inst(
+        .clk_in1_p(i_sys_clk_p),
+        .clk_in1_n(i_sys_clk_n),
+        .clk_out1(w_clk_50Mhz),
+        .clk_out2(cpu_clk),
+        .locked(w_clk_rst)
+    );
+`else
+//else
+    logic [2:0]cnt = 0;
 
-    assign w_clk_50Mhz = i_sys_clk_p;  // 直接使用输入时钟，假设它是50MHz
+    always_ff @(posedge i_sys_clk_p) begin
+        cnt <= cnt + 1;
+    end
+
+    assign w_clk_50Mhz = cnt[2];  // 直接使用输入时钟，假设它是50MHz
     assign cpu_clk = i_sys_clk_p;      // 直接使用输入时钟，
     assign w_clk_rst = 1'b1;          // 永远不复位，假设系统上电后一直正常工作
+
+`endif
+
+
+
+
 
     uart #(
         .CLK_FREQ(50000000),

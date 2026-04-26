@@ -1,6 +1,6 @@
 `include "define_mem_reg.svh"
 
-// `define FPGA
+`define FPGA
 
 // 内存管理模块，包含ITCM和DTCM
 module ydrasil_mems (
@@ -52,6 +52,21 @@ module ydrasil_mems (
         .data_o   (lsu_mem_data_o)
     );
 `else
+
+IROM u_itcm (
+  .a(if_mem_addr_o),      // input wire [11 : 0] a
+  .spo(if_mem_rdata_i)  // output wire [31 : 0] spo
+);
+
+blk_mem_gen_0 u_dtcm (
+  .clka(clk),    // input wire clka
+  .ena(lsu_mem_req_i),      // input wire ena
+  .wea(lsu_mem_wmask_i),      // input wire [3 : 0] wea
+  .addra(lsu_mem_addr_i),  // input wire [15 : 0] addra
+  .dina(lsu_mem_data_i),    // input wire [31 : 0] dina
+  .douta(lsu_mem_data_o)  // output wire [31 : 0] douta
+);
+
 
 `endif
 
