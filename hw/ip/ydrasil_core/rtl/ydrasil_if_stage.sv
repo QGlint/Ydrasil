@@ -29,7 +29,7 @@ module ydrasil_if_stage #(
 
 	wire [31:0] pc_n;
 	wire [31:0] pc_plus4;
-
+	wire [31:0] if_id_instr;
 	reg [31:0] pc_ff;
 	reg [31:0] if_id_pc_ff;
 	reg [31:0] if_id_instr_ff;
@@ -45,7 +45,7 @@ module ydrasil_if_stage #(
 	assign if_id_pc_o    = if_id_pc_ff;
 
 	assign if_id_instr_o = if_id_instr_ff;
-	assign if_id_instr_n = flush_if_i ? `RV32I_INS_NOP : if_mem_rdata_i;
+	assign if_id_instr = flush_if_i ? `RV32I_INS_NOP : if_mem_rdata_i;
 
 
 
@@ -69,7 +69,7 @@ module ydrasil_if_stage #(
 		end 
 		else begin
 			if_id_pc_ff    <= pc_ff;
-			if_id_instr_ff <= if_id_instr_n;
+			if_id_instr_ff <= if_id_instr;
 		end
 	end
 
