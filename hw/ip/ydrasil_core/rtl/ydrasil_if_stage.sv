@@ -1,7 +1,6 @@
 `include "define_rv32i_ins.svh"
 
 module ydrasil_if_stage #(
-	parameter [31:0] RESET_PC = 32'h0000_0000
 )(
 	input  wire        clk_i,
 	input  wire        rst_n_i,
@@ -65,8 +64,8 @@ module ydrasil_if_stage #(
 	// IF/ID 流水寄存器：支持复位、冲刷和停顿
 	always_ff @(posedge clk_i or negedge rst_n_i) begin
 		if (!rst_n_i) begin
-			if_id_pc_ff    <= RESET_PC;
-			if_id_instr_ff <= RV32I_NOP;
+			if_id_pc_ff    <= `RESET_INS;
+			if_id_instr_ff <= `RV32I_INS_NOP;
 		end 
 		else begin
 			if_id_pc_ff    <= pc_ff;

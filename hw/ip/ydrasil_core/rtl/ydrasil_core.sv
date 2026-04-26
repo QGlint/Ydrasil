@@ -2,7 +2,6 @@
 `include "define_mem_reg.svh"
 
 module ydrasil_core #(
-	parameter wire [31:0] RESET_PC = 32'h0000_0000
 )(
 	input  wire clk_i,
 	input  wire rst_n_i
@@ -99,9 +98,7 @@ module ydrasil_core #(
 		.lsu_rf_rd_waddr_o (lsu_rf_waddr_rd)
 	);
 
-	ydrasil_if_stage #(
-		.RESET_PC(RESET_PC)
-	) u_ydrasil_if_stage (
+	ydrasil_if_stage u_ydrasil_if_stage (
 		.clk_i           (clk_i),
 		.rst_n_i         (rst_n_i),
 		.stall_if_i      (stall_if),
