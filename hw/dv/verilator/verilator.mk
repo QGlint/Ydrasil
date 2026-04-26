@@ -1,5 +1,5 @@
 VERILATOR ?= verilator
-VERILATOR_TRACE ?= 1
+VERILATOR_TRACE ?= 0
 
 
 ##################################
@@ -27,6 +27,8 @@ VERILATOR_FLAGS += --binary --timing --exe
 VERILATOR_FLAGS += -DVERILATOR_SV
 endif
 
+VERILATOR_FLAGS += -O3
+
 VERILATOR_FLAGS += -MAKEFLAGS "-j$(shell nproc)"
 
 VERILATOR_FLAGS += --sv
@@ -45,10 +47,14 @@ VERILATOR_FLAGS += \
  -Wno-PINMISSING \
  -Wno-UNSIGNED 
 
-VERILATOR_FLAGS += -CFLAGS -DVL_DEBUG
+# VERILATOR_FLAGS += -CFLAGS -DVL_DEBUG
+
+VERILATOR_FLAGS += --no-assert
+VERILATOR_FLAGS += -CFLAGS "-O3 -march=native -DNDEBUG"
 
 ifeq ($(VERILATOR_TRACE),1)
-VERILATOR_FLAGS += --trace --trace-structs --trace-params --trace-max-array 1024
+VERILATOR_FLAGS += --trace --trace-depth 2
+# --trace-structs --trace-params --trace-max-array 1024
 endif
 VERILATOR_FLAGS += -j  $(shell nproc)
 VERILATOR_FLAGS += --top-module $(TOP)
