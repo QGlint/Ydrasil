@@ -1,87 +1,113 @@
 `timescale 1ns / 1ns
-//////////////////////////////////////////////////////////////////////////////////
-// Company: 
-// Engineer: 
-// 
-// Create Date: 04/16/2025 06:28:41 PM
-// Design Name: 
-// Module Name: tb_top
-// Project Name: 
-// Target Devices: 
-// Tool Versions: 
-// Description: 
-// 
-// Dependencies: 
-// 
-// Revision:
-// Revision 0.01 - File Created
-// Additional Comments:
-// 
-//////////////////////////////////////////////////////////////////////////////////
 
 module jyd_fpga_tb;
-    reg clk;
 
-    reg serial_rx;          
-    wire serial_tx;         
-    
-    reg got_tx;
-    
+    logic clk;
+    logic serial_rx;
+    logic serial_tx;
+    logic got_tx;
+    logic [7:0] rx_data[0:17];
+    integer j;
+
+    // 常量定义，方便维护
+    localparam CLK_PERIOD = 5; 
+    localparam BIT_CYCLES = 20833; // 104166ns / 5ns
+    localparam HALF_BIT_CYCLES = 10416;
+
     jyd_fpga uut (
         .i_sys_clk_p(clk),
         .i_sys_clk_n(~clk),
         .i_uart_rx(serial_rx),
         .o_uart_tx(serial_tx),
-        .virtual_led(),  
+        .virtual_led(),
         .virtual_seg()
     );
-    
 
-    //  clock 50MHz=2.5 20ns
+    //================================================
+    // clock: Verilator 支持这种基本的时钟生成
+    //================================================
     initial begin
         clk = 0;
-        forever #2.5 clk = ~clk;
+        forever #2.5 clk = ~clk; 
     end
 
-    initial begin
-        serial_rx = 1;
-        #200;
-    end
-
-    initial begin
+    //================================================
+    // UART SEND (修改为基于时钟周期)
+    //================================================
+    task uart_send_byte(input [7:0] data);
         integer i;
-        reg [7:0] tx_byte;
+        begin
+            // Start bit
+            serial_rx = 0;
+            repeat(BIT_CYCLES) @(posedge clk);
 
-        #1000;
+            // Data bits
+            for(i = 0; i < 8; i = i + 1) begin
+                serial_rx = data[i];
+                repeat(BIT_CYCLES) @(posedge clk);
+            end
+
+            // Stop bit
+            serial_rx = 1;
+            repeat(BIT_CYCLES) @(posedge clk);
+        end
+    endtask
+
+    //================================================
+    // UART RECEIVE (修改为基于时钟周期)
+    //================================================
+    task uart_receive_byte(output [7:0] data);
+        integer i;
+        begin
+            // 等待 start bit (检测下降沿或低电平)
+            while (serial_tx == 1) begin
+                @(posedge clk);
+            end
+
+            // 对齐到数据位的中心
+            repeat(HALF_BIT_CYCLES) @(posedge clk); 
+
+            for(i = 0; i < 8; i = i + 1) begin
+                repeat(BIT_CYCLES) @(posedge clk);
+                data[i] = serial_tx;
+            end
+
+            // 等待停止位周期结束
+            repeat(BIT_CYCLES) @(posedge clk);
+        end
+    endtask
+
+    //================================================
+    // 等待 TX 或超时 (Verilator 支持命名块和 disable)
+    //================================================
+    task wait_tx_or_timeout(output logic got_tx);
+        integer cycle;
+        begin : wait_loop
+            got_tx = 0;
+            for (cycle = 0; cycle < 50000; cycle = cycle + 1) begin
+                @(posedge clk);
+                if (serial_tx == 0) begin
+                    got_tx = 1;
+                    disable wait_loop;
+                end
+            end
+        end
+    endtask
+
+    //================================================
+    // MAIN TEST
+    //================================================
+    initial begin
+
+        serial_rx = 1;
+        
+        // 等待复位或稳定
+        repeat(200) @(posedge clk);
 
         $display("==== send 0x00 to uart_rx ====");
-        tx_byte = 8'h00;
+        uart_send_byte(8'h00);
 
-        // start bit
-        serial_rx = 1'b0;
-        #(104166);
-
-        // data bits LSB first
-        for (i = 0; i < 8; i = i + 1) begin
-            serial_rx = tx_byte[i];
-            #(104166);
-        end
-
-        // stop bit
-        serial_rx = 1'b1;
-        #(104166);
-
-        got_tx = 1'b0;
-        
-        fork
-            begin
-                @(negedge serial_tx);
-                got_tx = 1'b1;
-            end
-            begin
-                #100000;
-            end
-        join
+        wait_tx_or_timeout(got_tx);
 
         if (got_tx) begin
             $display("ERROR: 0x00 should not have tx data?");
@@ -89,35 +115,50 @@ module jyd_fpga_tb;
         end else begin
             $display("PASS: 0x00 instruction");
         end
-           
+
+        $display("==== send 0x81 SW[0]=1 ====");
+        uart_send_byte(8'b10000001);
+        repeat(400) @(posedge clk);
+
+        $display("==== send 0xa0 SW[31]=1 ====");
+        uart_send_byte(8'b10100000); // 修正了你的原始位运算逻辑以提高可读性
+        repeat(400) @(posedge clk);
+
+        $display("==== send 0xc1 KEY[0]=1 ====");
+        uart_send_byte(8'hC1);
+        repeat(400) @(posedge clk);
+
+        $display("==== send 0x80 read 18bit data ====");
+        uart_send_byte(8'h80);
+
+        for(j = 0; j < 18; j = j + 1) begin
+            uart_receive_byte(rx_data[j]);
+            $display("RX[%0d] = %02x", j, rx_data[j]);
+        end
+
+        // 简化的校验逻辑
+        if(rx_data[5][0] !== 1'b1 || rx_data[6][0] != 1'b1 || rx_data[9][7] != 1'b1)
+            $display("ERROR: Data mismatch in SW/KEY status");
+        else
+            $display("PASS: SW[0] KEY[0] SW[31] data correct");
+
         $finish;
     end
 
+    // Watchdog
     initial begin
-        #1000000000 $finish;
+        // 增加足够长的周期防止意外退出
+        repeat(2000000) @(posedge clk);
+        $display("TIMEOUT EXIT");
+        $finish;
     end
 
+    // 波形输出
     initial begin
-        integer i_time;
-        for(i_time = 0; i_time < 1000; i_time = i_time + 1) begin
-            $display("time: %0t ns", $time);
-            #1000000;
+        if ($test$plusargs("trace") != 0) begin
+            $dumpfile("wave.vcd");
+            $dumpvars(0, jyd_fpga_tb);
         end
     end
 
-
-    initial begin
-        `ifdef VERILATOR_SV
-            $dumpfile("wave.vcd");
-            $dumpvars(0, jyd_fpga_tb);
-        `elsif VCS_FSDB
-            $fsdbDumpfile("jyd_fpga_tb.fsdb");
-            $fsdbDumpvars(0, jyd_fpga_tb, "+all");
-        `elsif IVERILOG_VCD
-            $dumpfile("wave.vcd");
-            $dumpvars(0, jyd_fpga_tb);
-        `endif
-    end
-
 endmodule
-
