@@ -4,111 +4,181 @@
 module ydrasil_ins_decoder #(
 	parameter int DATA_WIDTH = 32
 )(
-	input  logic [DATA_WIDTH-1:0] instr_i,
+	input  wire [DATA_WIDTH-1:0] instr_i,
 
-	output logic [4:0] rf_waddr_rd_o,
-	output logic [4:0] rf_raddr_rs1_o,
-	output logic [4:0] rf_raddr_rs2_o,
-	output logic       rf_ren_rs1_o,
-	output logic       rf_ren_rs2_o,
-	output logic       rf_wen_rd_o,
+	output wire [4:0] rf_waddr_rd_o,
+	output wire [4:0] rf_raddr_rs1_o,
+	output wire [4:0] rf_raddr_rs2_o,
+	output wire       rf_ren_rs1_o,
+	output wire       rf_ren_rs2_o,
+	output wire       rf_wen_rd_o,
 
-	output logic [DATA_WIDTH-1:0] imm_i_o,
+	output wire [DATA_WIDTH-1:0] imm_i_o,
 
-	output logic       operand_b_rs_sel_o, // 选择ALU操作数B的来源：0表示来自寄存器，1表示来自立即数
-	output logic       operand_a_pc_sel_o, // 选择ALU操作数A的来源：0表示来自寄存器，1表示来自PC（用于AUIPC指令）
-	output logic       bt_a_rs_sel_o, // 选择分支目标地址计算的操作数A的来源：0表示来自寄存器，1表示来自PC（用于JALR指令）
+	output wire       operand_b_rs_sel_o, // 选择ALU操作数B的来源：0表示来自寄存器，1表示来自立即数
+	output wire       operand_a_pc_sel_o, // 选择ALU操作数A的来源：0表示来自寄存器，1表示来自PC（用于AUIPC指令）
+	output wire       bt_a_rs_sel_o, // 选择分支目标地址计算的操作数A的来源：0表示来自寄存器，1表示来自PC（用于JALR指令）
 
-	output logic [`OPERATOR_WIDTH-1:0] operator_o,
-	output logic [`OP_LSU_INFO_WIDTH-1:0] operator_lsu_o,
-	output logic [`OPERATOR_TYPE_WIDTH-1:0] operator_type_o
+	output wire [`OPERATOR_WIDTH-1:0] operator_o,
+	output wire [`OP_LSU_INFO_WIDTH-1:0] operator_lsu_o,
+	output wire [`OPERATOR_TYPE_WIDTH-1:0] operator_type_o
 );
 
 
-	logic [`OP_ALU_INFO_WIDTH-1:0] alu_op_info;
-	logic [`OP_BJP_INFO_WIDTH-1:0] bjp_op_info;
-	logic [`OP_LSU_INFO_WIDTH-1:0] lsu_op_info;
+	wire [`OP_ALU_INFO_WIDTH-1:0] alu_op_info;
+	wire [`OP_BJP_INFO_WIDTH-1:0] bjp_op_info;
+	wire [`OP_LSU_INFO_WIDTH-1:0] lsu_op_info;
 
-	logic [6:0] opcode 		= instr_i[6:0];
-	logic [4:0] waddr_rd    = instr_i[11:7];
-	logic [2:0] funct3 		= instr_i[14:12];
-	logic [4:0] raddr_rs1   = instr_i[19:15];
-	logic [4:0] raddr_rs2   = instr_i[24:20];
-	logic [6:0] funct7 		= instr_i[31:25];
+	wire [6:0] opcode 		;
+	wire [4:0]	rf_waddr_rd ;
+	wire [2:0] funct3 		;
+	wire [4:0]	rf_raddr_rs1;
+	wire [4:0]	rf_raddr_rs2;
+	wire [6:0] funct7 		;
 
-    logic funct7_is_0000000 = (funct7 == 7'b0000000);
-	logic funct7_is_0100000 = (funct7 == 7'b0100000);
-    logic funct3_is_000 = (funct3 == 3'b000);
-	logic funct3_is_001 = (funct3 == 3'b001);
-
-	logic [31:0] imm_i = {{20{instr_i[31]}}, instr_i[31:20]};
-	logic [31:0] imm_s = {{20{instr_i[31]}}, instr_i[31:25], instr_i[11:7]};
-	logic [31:0] imm_b = {{19{instr_i[31]}}, instr_i[31], instr_i[7], instr_i[30:25], instr_i[11:8], 1'b0};
-	logic [31:0] imm_u = {instr_i[31:12], 12'b0};
-	logic [31:0] imm_j = {{11{instr_i[31]}}, instr_i[31], instr_i[19:12], instr_i[20], instr_i[30:21], 1'b0};
-	logic [31:0] imm_shamt ={27'h0, instr_i[24:20]}; // 用于I类型中的移位指令，表示移位量
-
-	logic is_op_imm   = (opcode == `RV32I_INS_TYPE_I);
-	logic is_op_r_m   = (opcode == `RV32I_INS_TYPE_R_M);
-    logic is_load     = (opcode == `RV32I_INS_TYPE_L);
-    logic is_store    = (opcode == `RV32I_INS_TYPE_S);
-    logic is_branch   = (opcode == `RV32I_INS_TYPE_B);
-	logic is_jal      = (opcode == `RV32I_INS_JAL);
-	logic is_jalr     = (opcode == `RV32I_INS_JALR) & funct3_is_000;
-	logic is_lui      = (opcode == `RV32I_INS_LUI);
-	logic is_auipc    = (opcode == `RV32I_INS_AUIPC);
-  
-	logic is_beq      = is_branch & (funct3 == `RV32I_INS_BEQ);
-	logic is_bne      = is_branch & (funct3 == `RV32I_INS_BNE);
-	logic is_blt      = is_branch & (funct3 == `RV32I_INS_BLT);
-	logic is_bge      = is_branch & (funct3 == `RV32I_INS_BGE);
-	logic is_bltu     = is_branch & (funct3 == `RV32I_INS_BLTU);
-	logic is_bgeu     = is_branch & (funct3 == `RV32I_INS_BGEU);
-
-	logic is_lb     = is_load & (funct3 == `RV32I_INS_LB);
-	logic is_lh     = is_load & (funct3 == `RV32I_INS_LH);
-	logic is_lw     = is_load & (funct3 == `RV32I_INS_LW);
-	logic is_lbu    = is_load & (funct3 == `RV32I_INS_LBU);
-	logic is_lhu    = is_load & (funct3 == `RV32I_INS_LHU);
-
-	logic is_sb     = is_store & (funct3 == `RV32I_INS_SB);
-	logic is_sh     = is_store & (funct3 == `RV32I_INS_SH);
-	logic is_sw     = is_store & (funct3 == `RV32I_INS_SW);
-
-	logic is_addi  = is_op_imm & (funct3 == `RV32I_INS_ADDI);
-	logic is_slti  = is_op_imm & (funct3 == `RV32I_INS_SLTI);
-	logic is_sltiu = is_op_imm & (funct3 == `RV32I_INS_SLTIU);
-	logic is_xori  = is_op_imm & (funct3 == `RV32I_INS_XORI);
-	logic is_ori   = is_op_imm & (funct3 == `RV32I_INS_ORI);
-	logic is_andi  = is_op_imm & (funct3 == `RV32I_INS_ANDI);
-	logic is_slli  = is_op_imm & (funct3 == `RV32I_INS_SLLI) 	& funct7_is_0000000;
-	logic is_srli  = is_op_imm & (funct3 == `RV32I_INS_SRI) 	& funct7_is_0000000;
-	logic is_srai  = is_op_imm & (funct3 == `RV32I_INS_SRI) 	& funct7_is_0100000;
-
-	logic is_shift = is_slli | is_srli | is_srai;
-
-	logic is_add   = is_op_r_m & (funct3 == `RV32I_INS_ADD_SUB) 	& funct7_is_0000000;
-	logic is_sub   = is_op_r_m & (funct3 == `RV32I_INS_ADD_SUB) 	& funct7_is_0100000;
-	logic is_sll   = is_op_r_m & (funct3 == `RV32I_INS_SLL) 		& funct7_is_0000000;
-	logic is_slt   = is_op_r_m & (funct3 == `RV32I_INS_SLT) 		& funct7_is_0000000;
-	logic is_sltu  = is_op_r_m & (funct3 == `RV32I_INS_SLTU) 		& funct7_is_0000000;
-	logic is_xor   = is_op_r_m & (funct3 == `RV32I_INS_XOR) 		& funct7_is_0000000;
-	logic is_srl   = is_op_r_m & (funct3 == `RV32I_INS_SR) 			& funct7_is_0000000;
-	logic is_sra   = is_op_r_m & (funct3 == `RV32I_INS_SR) 			& funct7_is_0100000;
-	logic is_or    = is_op_r_m & (funct3 == `RV32I_INS_OR) 			& funct7_is_0000000;
-	logic is_and   = is_op_r_m & (funct3 == `RV32I_INS_AND) 		& funct7_is_0000000;
-
-	logic is_fence  = (opcode == `RV32I_INS_FENCE) & funct3_is_000;
-	logic is_fence_i = (opcode == `RV32I_INS_FENCE) & funct3_is_001;
+	assign opcode 		= instr_i[6:0];
+	assign rf_waddr_rd  = instr_i[11:7];
+	assign funct3 		= instr_i[14:12];
+	assign rf_raddr_rs1 = instr_i[19:15];
+	assign rf_raddr_rs2 = instr_i[24:20];
+	assign funct7 		= instr_i[31:25];
 
 
-	logic is_nop    = (instr_i == `RV32I_INS_NOP); 
-	logic is_ecall = (instr_i == `RV32I_INS_ECALL);
-	logic is_ebreak = (instr_i == `RV32I_INS_EBREAK);
+    wire funct7_is_0000000 ;
+	wire funct7_is_0100000 ;
+    wire funct3_is_000 	;
+	wire funct3_is_001 	;
 
+	assign funct7_is_0000000 = (funct7 == 7'b0000000);
+	assign funct7_is_0100000 = (funct7 == 7'b0100000);
+	assign funct3_is_000 	= (funct3 == 3'b000);
+	assign funct3_is_001 	= (funct3 == 3'b001);
 
+	wire [31:0] imm_i 		;
+	wire [31:0] imm_s 		;
+	wire [31:0] imm_b 		;
+	wire [31:0] imm_u 		;
+	wire [31:0] imm_j 		;
+	wire [31:0] imm_shamt 	;
 
+	assign imm_i 		= {{20{instr_i[31]}}, instr_i[31:20]};
+	assign imm_s 		= {{20{instr_i[31]}}, instr_i[31:25], instr_i[11:7]};
+	assign imm_b 		= {{19{instr_i[31]}}, instr_i[31], instr_i[7], instr_i[30:25], instr_i[11:8], 1'b0};
+	assign imm_u 		= {instr_i[31:12], 12'b0};
+	assign imm_j 		= {{11{instr_i[31]}}, instr_i[31], instr_i[19:12], instr_i[20], instr_i[30:21], 1'b0};
+	assign imm_shamt 	= {27'h0, instr_i[24:20]}; // 用于I类型中的移位指令，表示移位量
 
+	wire is_op_imm   ;
+	wire is_op_r_m   ;
+    wire is_load     ;
+    wire is_store    ;
+    wire is_branch   ;
+	wire is_jal      ;
+	wire is_jalr     ;
+	wire is_lui      ;
+	wire is_auipc    ;
+
+	assign is_op_imm   = (opcode == `RV32I_INS_TYPE_I);
+	assign is_op_r_m   = (opcode == `RV32I_INS_TYPE_R_M);
+	assign is_load     = (opcode == `RV32I_INS_TYPE_L);
+	assign is_store    = (opcode == `RV32I_INS_TYPE_S);
+	assign is_branch   = (opcode == `RV32I_INS_TYPE_B);
+	assign is_jal      = (opcode == `RV32I_INS_JAL);
+	assign is_jalr     = (opcode == `RV32I_INS_JALR) & funct3_is_000;
+	assign is_lui      = (opcode == `RV32I_INS_LUI);
+	assign is_auipc    = (opcode == `RV32I_INS_AUIPC);
+
+	wire is_beq      ;
+	wire is_bne      ;
+	wire is_blt      ;
+	wire is_bge      ;
+	wire is_bltu     ;
+	wire is_bgeu     ;
+
+	assign is_beq      = is_branch & (funct3 == `RV32I_INS_BEQ);
+	assign is_bne      = is_branch & (funct3 == `RV32I_INS_BNE);
+	assign is_blt      = is_branch & (funct3 == `RV32I_INS_BLT);
+	assign is_bge      = is_branch & (funct3 == `RV32I_INS_BGE);
+	assign is_bltu     = is_branch & (funct3 == `RV32I_INS_BLTU);
+	assign is_bgeu     = is_branch & (funct3 == `RV32I_INS_BGEU);
+
+	wire is_lb     ;
+	wire is_lh     ;
+	wire is_lw     ;
+	wire is_lbu    ;
+	wire is_lhu    ;
+
+	assign is_lb     = is_load & (funct3 == `RV32I_INS_LB);
+	assign is_lh     = is_load & (funct3 == `RV32I_INS_LH);
+	assign is_lw     = is_load & (funct3 == `RV32I_INS_LW);
+	assign is_lbu    = is_load & (funct3 == `RV32I_INS_LBU);
+	assign is_lhu    = is_load & (funct3 == `RV32I_INS_LHU);
+
+	wire is_sb     ;
+	wire is_sh     ;
+	wire is_sw     ;
+
+	assign is_sb     = is_store & (funct3 == `RV32I_INS_SB);
+	assign is_sh     = is_store & (funct3 == `RV32I_INS_SH);
+	assign is_sw     = is_store & (funct3 == `RV32I_INS_SW);
+
+	wire is_addi  ;
+	wire is_slti  ;
+	wire is_sltiu ;
+	wire is_xori  ;
+	wire is_ori   ;
+	wire is_andi  ;
+	wire is_slli  ;
+	wire is_srli  ;
+	wire is_srai  ;
+
+	assign is_addi  = is_op_imm & (funct3 == `RV32I_INS_ADDI);
+	assign is_slti  = is_op_imm & (funct3 == `RV32I_INS_SLTI);
+	assign is_sltiu = is_op_imm & (funct3 == `RV32I_INS_SLTIU);
+	assign is_xori  = is_op_imm & (funct3 == `RV32I_INS_XORI);
+	assign is_ori   = is_op_imm & (funct3 == `RV32I_INS_ORI);
+	assign is_andi  = is_op_imm & (funct3 == `RV32I_INS_ANDI);
+	assign is_slli  = is_op_imm & (funct3 == `RV32I_INS_SLLI) 	& funct7_is_0000000;
+	assign is_srli  = is_op_imm & (funct3 == `RV32I_INS_SRI) 	& funct7_is_0000000;
+	assign is_srai  = is_op_imm & (funct3 == `RV32I_INS_SRI) 	& funct7_is_0100000;
+
+	wire is_shift ;
+
+	wire is_add   ;
+	wire is_sub   ;
+	wire is_sll   ;
+	wire is_slt   ;
+	wire is_sltu  ;
+	wire is_xor   ;
+	wire is_srl   ;
+	wire is_sra   ;
+	wire is_or    ;
+	wire is_and   ;
+
+	assign is_shift = is_slli | is_srli | is_srai;
+	assign is_add   = is_op_r_m & (funct3 == `RV32I_INS_ADD_SUB) 	& funct7_is_0000000;
+	assign is_sub   = is_op_r_m & (funct3 == `RV32I_INS_ADD_SUB) 	& funct7_is_0100000;
+	assign is_sll   = is_op_r_m & (funct3 == `RV32I_INS_SLL) 		& funct7_is_0000000;
+	assign is_slt   = is_op_r_m & (funct3 == `RV32I_INS_SLT) 		& funct7_is_0000000;
+	assign is_sltu  = is_op_r_m & (funct3 == `RV32I_INS_SLTU) 		& funct7_is_0000000;
+	assign is_xor   = is_op_r_m & (funct3 == `RV32I_INS_XOR) 		& funct7_is_0000000;
+	assign is_srl   = is_op_r_m & (funct3 == `RV32I_INS_SR) 			& funct7_is_0000000;
+	assign is_sra   = is_op_r_m & (funct3 == `RV32I_INS_SR) 			& funct7_is_0100000;
+	assign is_or    = is_op_r_m & (funct3 == `RV32I_INS_OR) 			& funct7_is_0000000;
+	assign is_and   = is_op_r_m & (funct3 == `RV32I_INS_AND) 		& funct7_is_0000000;
+
+	wire is_fence  ;
+	wire is_fence_i;
+	assign is_fence  = (opcode == `RV32I_INS_FENCE) & funct3_is_000;
+	assign is_fence_i = (opcode == `RV32I_INS_FENCE) & funct3_is_001;
+
+	wire is_nop    ;
+	wire is_ecall  ;
+	wire is_ebreak ;
+
+	assign is_nop    = (instr_i == `RV32I_INS_NOP);
+	assign is_ecall  = (instr_i == `RV32I_INS_ECALL);
+	assign is_ebreak = (instr_i == `RV32I_INS_EBREAK);
 
 	assign alu_op_info[`OP_ALU_ADD]   = is_addi | is_add | is_auipc | is_lui;
 	assign alu_op_info[`OP_ALU_SUB]   = is_sub;
@@ -140,18 +210,18 @@ module ydrasil_ins_decoder #(
 	assign lsu_op_info[`OP_LSU_SH]  = is_sh;
 	assign lsu_op_info[`OP_LSU_SW]  = is_sw;
 
-	logic [4:0]	rf_waddr_rd = waddr_rd;
-	logic [4:0]	rf_raddr_rs1 = raddr_rs1;
-	logic [4:0]	rf_raddr_rs2 = raddr_rs2;
-	logic rf_ren_rs1 =	(~is_lui) 	& (~is_auipc) 	& (~is_jal) &  
+
+
+
+	wire rf_ren_rs1 =	(~is_lui) 	& (~is_auipc) 	& (~is_jal) &  
        					(~is_ecall) & (~is_ebreak) 	& (~is_fence) & 
        					(~is_nop) 	& (~is_fence_i);// U类型指令不需要rs1
-	logic rf_ren_rs2 = is_op_r_m | is_branch | is_store; // R类型和分支指令需要rs2
+	wire rf_ren_rs2 = is_op_r_m | is_branch | is_store; // R类型和分支指令需要rs2
 
-	logic rf_wen_rd = is_lui | is_auipc | is_jal | is_jalr | is_op_imm | is_op_r_m ; // 需要写回寄存器的指令类型 
+	wire rf_wen_rd = is_lui | is_auipc | is_jal | is_jalr | is_op_imm | is_op_r_m ; // 需要写回寄存器的指令类型 
 
-	logic is_alu_use = is_op_imm | is_op_r_m | is_lui | is_auipc;
-	logic is_bjp_use = is_branch | is_jal | is_jalr;
+	wire is_alu_use = is_op_imm | is_op_r_m | is_lui | is_auipc;
+	wire is_bjp_use = is_branch | is_jal | is_jalr;
 
 
 	assign operator_type_o [`OPERATOR_TYPE_ALU] = is_alu_use;
@@ -159,15 +229,22 @@ module ydrasil_ins_decoder #(
 	assign operator_type_o [`OPERATOR_TYPE_LOAD] = is_load;
 	assign operator_type_o [`OPERATOR_TYPE_STORE] = is_store;
 	
-	// logic [`OPERATOR_WIDTH-1:0] alu_op_info_mark = ({`OPERATOR_WIDTH{is_alu_use }}& {{{`OPERATOR_WIDTH-`OP_ALU_INFO_WIDTH}{1'b0}},alu_op_info});
-	// logic [`OPERATOR_WIDTH-1:0] bjp_op_info_mark = ({`OPERATOR_WIDTH{is_bjp_use }}& {{{`OPERATOR_WIDTH-`OP_BJP_INFO_WIDTH}{1'b0}},bjp_op_info});
+	// wire [`OPERATOR_WIDTH-1:0] alu_op_info_mark = ({`OPERATOR_WIDTH{is_alu_use }}& {{{`OPERATOR_WIDTH-`OP_ALU_INFO_WIDTH}{1'b0}},alu_op_info});
+	// wire [`OPERATOR_WIDTH-1:0] bjp_op_info_mark = ({`OPERATOR_WIDTH{is_bjp_use }}& {{{`OPERATOR_WIDTH-`OP_BJP_INFO_WIDTH}{1'b0}},bjp_op_info});
 	// assign lsu_op_info_mark =  operator_type_o [OPERATOR_TYPE_LOAD] ? {{`OPERATOR_WIDTH-`OP_LSU_INFO_WIDTH{1'b0}},lsu_op_info} : '0;
-	logic [31:0] imm_i_mask = ((is_op_r_m & ! is_shift) | is_jalr | is_load) ? imm_i : '0;
-	logic [31:0] imm_s_mask = is_store ? imm_s : '0;
-	logic [31:0] imm_b_mask = is_branch ? imm_b : '0;
-	logic [31:0] imm_u_mask = (is_lui | is_auipc) ? imm_u : '0;
-	logic [31:0] imm_j_mask = is_jal ? imm_j : '0;
-	logic [31:0] imm_shamt_mask = is_shift ? imm_shamt : '0;
+	wire [31:0] imm_i_mask 		;
+	wire [31:0] imm_s_mask 		;
+	wire [31:0] imm_b_mask 		;
+	wire [31:0] imm_u_mask 		;
+	wire [31:0] imm_j_mask 		;
+	wire [31:0] imm_shamt_mask ;
+
+	assign imm_i_mask 	= ((is_op_r_m & ! is_shift) | is_jalr | is_load) ? imm_i : '0;
+	assign imm_s_mask 	= is_store ? imm_s : '0;
+	assign imm_b_mask 	= is_branch ? imm_b : '0;
+	assign imm_u_mask 	= (is_lui | is_auipc) ? imm_u : '0;
+	assign imm_j_mask 	= is_jal ? imm_j : '0;
+	assign imm_shamt_mask = is_shift ? imm_shamt : '0;
 
 	assign imm_i_o = imm_i_mask | imm_s_mask | imm_b_mask | imm_u_mask | imm_j_mask | imm_shamt_mask;
 
@@ -175,9 +252,13 @@ module ydrasil_ins_decoder #(
 						({`OPERATOR_WIDTH{is_bjp_use }}& {{5{1'b0}},bjp_op_info});
 	assign operator_lsu_o = lsu_op_info;
 
-	logic operand_b_rs_sel = is_branch | is_store |is_op_r_m;
-	logic operand_a_pc_sel = is_auipc  ;
-	logic bt_a_rs_sel = is_jalr;
+	wire operand_b_rs_sel 	;
+	wire operand_a_pc_sel 	;
+	wire bt_a_rs_sel 		;
+
+	assign operand_b_rs_sel_o = is_branch | is_store |is_op_r_m;
+	assign operand_a_pc_sel_o = is_auipc  ;
+	assign bt_a_rs_sel_o = is_jalr;
 
 	assign operand_b_rs_sel_o = operand_b_rs_sel;
 	assign operand_a_pc_sel_o = operand_a_pc_sel;
