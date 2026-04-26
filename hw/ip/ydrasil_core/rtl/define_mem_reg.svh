@@ -1,5 +1,5 @@
-`ifndef DEFINE_MEM_REG_SVH
-`define DEFINE_MEM_REG_SVH
+// `ifndef DEFINE_MEM_REG_SVH
+// `define DEFINE_MEM_REG_SVH
 
 // 内存和地址配置
 `define ITCM_ADDR_WIDTH 16  // ITCM地址宽度，16位对应64KB
@@ -16,13 +16,13 @@
 `define INIT_ITCM 0       // 控制ITCM是否初始化，1表示初始化，0表示不初始化
 `endif
 `ifndef ITCM_INIT_FILE
-`define ITCM_INIT_FILE "hw/dv/test_data/mem/irom0.mem"  // ITCM初始化文件路径
+`define ITCM_INIT_FILE "hw/dv/test_data/mem/irom.mem"  // ITCM初始化文件路径
 `endif
 `ifndef INIT_DTCM
 `define INIT_DTCM 0
 `endif
 `ifndef DTCM_INIT_FILE
-`define DTCM_INIT_FILE "hw/dv/test_data/mem/dram0.mem"
+`define DTCM_INIT_FILE "hw/dv/test_data/mem/dram.mem"
 `endif
 // 总线宽度定义
 `define BUS_DATA_WIDTH 32
@@ -40,4 +40,4 @@
 
 
 
-`endif
+// `endif

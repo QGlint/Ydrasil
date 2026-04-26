@@ -18,7 +18,7 @@
 // Additional Comments:
 // 
 //////////////////////////////////////////////////////////////////////////////////
-`define FPGA
+// `define FPGA
 
 module jyd_fpga(
     input  wire i_sys_clk_p         ,
@@ -58,9 +58,27 @@ module jyd_fpga(
         cnt <= cnt + 1;
     end
 
+    logic rst_n = 0;
+
+    logic [16:0] rst_cnt = 0;
+
+    always_ff @(posedge i_sys_clk_p) begin
+        if (rst_cnt < 30) begin
+            rst_cnt <= rst_cnt + 1;
+        end
+    end
+
+    always_ff @(posedge i_sys_clk_p) begin
+        if (rst_cnt < 30) begin
+            rst_n <= 0;
+        end else begin
+            rst_n <= 1;
+        end
+    end
+
     assign w_clk_50Mhz = cnt[2];  // 直接使用输入时钟，假设它是50MHz
     assign cpu_clk = i_sys_clk_p;      // 直接使用输入时钟，
-    assign w_clk_rst = 1'b1;          // 永远不复位，假设系统上电后一直正常工作
+    assign w_clk_rst = rst_n;          // 永远不复位，假设系统上电后一直正常工作
 
 `endif
 

@@ -150,13 +150,17 @@ module ydrasil_ins_decoder #(
 
 	logic rf_wen_rd = is_lui | is_auipc | is_jal | is_jalr | is_op_imm | is_op_r_m ; // 需要写回寄存器的指令类型 
 
-	assign operator_type_o [`OPERATOR_TYPE_ALU] = is_op_imm | is_op_r_m | is_lui | is_auipc;
-	assign operator_type_o [`OPERATOR_TYPE_BJP] = is_branch | is_jal | is_jalr;
+	logic is_alu_use = is_op_imm | is_op_r_m | is_lui | is_auipc;
+	logic is_bjp_use = is_branch | is_jal | is_jalr;
+
+
+	assign operator_type_o [`OPERATOR_TYPE_ALU] = is_alu_use;
+	assign operator_type_o [`OPERATOR_TYPE_BJP] = is_bjp_use;
 	assign operator_type_o [`OPERATOR_TYPE_LOAD] = is_load;
 	assign operator_type_o [`OPERATOR_TYPE_STORE] = is_store;
 	
-	logic [`OPERATOR_WIDTH-1:0] alu_op_info_mark =  operator_type_o [`OPERATOR_TYPE_ALU] 	? {{`OPERATOR_WIDTH-`OP_ALU_INFO_WIDTH{1'b0}},alu_op_info} : '0;
-	logic [`OPERATOR_WIDTH-1:0] bjp_op_info_mark =  operator_type_o [`OPERATOR_TYPE_BJP] 	? {{`OPERATOR_WIDTH-`OP_BJP_INFO_WIDTH{1'b0}},bjp_op_info} : '0;
+	// logic [`OPERATOR_WIDTH-1:0] alu_op_info_mark = ({`OPERATOR_WIDTH{is_alu_use }}& {{{`OPERATOR_WIDTH-`OP_ALU_INFO_WIDTH}{1'b0}},alu_op_info});
+	// logic [`OPERATOR_WIDTH-1:0] bjp_op_info_mark = ({`OPERATOR_WIDTH{is_bjp_use }}& {{{`OPERATOR_WIDTH-`OP_BJP_INFO_WIDTH}{1'b0}},bjp_op_info});
 	// assign lsu_op_info_mark =  operator_type_o [OPERATOR_TYPE_LOAD] ? {{`OPERATOR_WIDTH-`OP_LSU_INFO_WIDTH{1'b0}},lsu_op_info} : '0;
 	logic [31:0] imm_i_mask = ((is_op_r_m & ! is_shift) | is_jalr | is_load) ? imm_i : '0;
 	logic [31:0] imm_s_mask = is_store ? imm_s : '0;
@@ -167,7 +171,8 @@ module ydrasil_ins_decoder #(
 
 	assign imm_i_o = imm_i_mask | imm_s_mask | imm_b_mask | imm_u_mask | imm_j_mask | imm_shamt_mask;
 
-	assign operator_o = alu_op_info_mark | bjp_op_info_mark ;
+	assign operator_o = ({`OPERATOR_WIDTH{is_alu_use }}& {{0{1'b0}},alu_op_info})|
+						({`OPERATOR_WIDTH{is_bjp_use }}& {{5{1'b0}},bjp_op_info});
 	assign operator_lsu_o = lsu_op_info;
 
 	logic operand_b_rs_sel = is_branch | is_store |is_op_r_m;

@@ -148,7 +148,7 @@ module jyd_fpga_tb;
     // Watchdog
     initial begin
         // 增加足够长的周期防止意外退出
-        repeat(2000000) @(posedge clk);
+        repeat(1000) @(posedge clk);
         $display("TIMEOUT EXIT");
         $finish;
     end

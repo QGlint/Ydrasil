@@ -44,7 +44,9 @@ module ydrasil_alu#(
     logic        op_lui   = operator_i [`OP_ALU_LUI] &  operator_type_i[`OPERATOR_TYPE_ALU];
     logic        op_auipc = operator_i [`OP_ALU_AUIPC] &  operator_type_i[`OPERATOR_TYPE_ALU];
 
-    logic        op_jump  = operator_i [`OP_BJP_JUMP] &  operator_type_i[`OPERATOR_TYPE_BJP];
+    // logic        op_jump  = operator_i [`OP_BJP_JUMP] &  operator_type_i[`OPERATOR_TYPE_BJP];
+    logic       op_jump;
+    assign  op_jump = operator_i [0] &  operator_type_i[1]   ;
     logic        op_beq   = operator_i [`OP_BJP_BEQ] &  operator_type_i[`OPERATOR_TYPE_BJP];
     logic        op_bne   = operator_i [`OP_BJP_BNE] &  operator_type_i[`OPERATOR_TYPE_BJP];
     logic        op_blt   = operator_i [`OP_BJP_BLT] &  operator_type_i[`OPERATOR_TYPE_BJP];

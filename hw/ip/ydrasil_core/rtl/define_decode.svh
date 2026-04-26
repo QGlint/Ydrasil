@@ -1,5 +1,5 @@
-`ifndef DEFINE_DECODE_SVH
-`define DEFINE_DECODE_SVH
+// `ifndef DEFINE_DECODE_SVH
+// `define DEFINE_DECODE_SVH
 
 `define OPERATOR_TYPE_WIDTH 4
 `define OPERATOR_TYPE_ALU 0
@@ -52,4 +52,4 @@
 `define OP_LSU_SW           7
 
 
-`endif
+// `endif

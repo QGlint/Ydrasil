@@ -1,5 +1,5 @@
-`ifndef DEFINE_RV32I_INS_SVH
-`define DEFINE_RV32I_INS_SVH
+// `ifndef DEFINE_RV32I_INS_SVH
+// `define DEFINE_RV32I_INS_SVH
 
 // I type inst
 `define RV32I_INS_TYPE_I 7'b0010011
@@ -77,4 +77,4 @@
 `define RVDEBUG_INS_DRET 32'h7b200073
 
 
-`endif
+// `endif

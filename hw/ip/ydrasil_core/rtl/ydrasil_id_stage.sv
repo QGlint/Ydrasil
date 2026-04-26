@@ -72,6 +72,10 @@ module ydrasil_id_stage #(
     logic [`OP_LSU_INFO_WIDTH-1:0]        operator_lsu;
     logic [`OP_LSU_INFO_WIDTH-1:0]        operator_lsu_ff;
 
+    logic [DATA_WIDTH-1:0]                bt_a_operand;
+    logic [DATA_WIDTH-1:0]                bt_b_operand;
+    logic [DATA_WIDTH-1:0]                bt_a_operand_ff;
+    logic [DATA_WIDTH-1:0]                bt_b_operand_ff;
 
     ydrasil_ins_decoder #(
         .DATA_WIDTH(DATA_WIDTH)
@@ -99,8 +103,8 @@ module ydrasil_id_stage #(
     assign operand_a     = operand_a_pc_sel ? if_id_pc_i : rf_rdata_rs1_i;
     assign operand_b     = operand_b_rs_sel ? rf_rdata_rs2_i : DATA_WIDTH'(imm_i);
 
-    assign bt_a_operand_o = bt_a_rs_sel ? rf_rdata_rs1_i : if_id_pc_i;
-    assign bt_b_operand_o = imm_i;
+    assign bt_a_operand = bt_a_rs_sel ? rf_rdata_rs1_i : if_id_pc_i;
+    assign bt_b_operand = imm_i;
 
 
     always_ff @(posedge clk_i or negedge rst_n_i) begin
@@ -113,6 +117,8 @@ module ydrasil_id_stage #(
             rf_waddr_rd_ff      <= '0;
             operator_lsu_ff     <= '0;
             id_lsu_rs2_data_ff  <= '0;
+            bt_a_operand_ff     <= '0;
+            bt_b_operand_ff     <= '0;
         end
         else if (flush_id_i) begin
             operand_a_ff        <= '0;
@@ -123,6 +129,8 @@ module ydrasil_id_stage #(
             rf_waddr_rd_ff      <= '0;
             operator_lsu_ff     <= '0;
             id_lsu_rs2_data_ff  <= '0;
+            bt_a_operand_ff     <= '0;
+            bt_b_operand_ff     <= '0;
         end
         else if (!stall_id_i) begin
             operand_a_ff        <= operand_a;
@@ -133,6 +141,8 @@ module ydrasil_id_stage #(
             rf_waddr_rd_ff      <= rf_waddr_rd;
             operator_lsu_ff     <= operator_lsu;
             id_lsu_rs2_data_ff  <= rf_rdata_rs2_i; // 直接传递寄存器数据，供LSU使用
+            bt_a_operand_ff     <= bt_a_operand;
+            bt_b_operand_ff     <= bt_b_operand;
         end
     end
 
@@ -144,5 +154,9 @@ module ydrasil_id_stage #(
     assign operator_lsu_o       = operator_lsu_ff;
     assign operator_type_o      = operator_type_ff;
     assign id_lsu_rs2_data_o    = id_lsu_rs2_data_ff; // 直接传递寄存器数据，供LSU使用
+    assign bt_a_operand_o       = bt_a_operand_ff;
+    assign bt_b_operand_o       = bt_b_operand_ff;
+
+
 
 endmodule

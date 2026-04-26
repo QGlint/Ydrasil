@@ -34,3 +34,6 @@ wave:
 
 clean:
 	rm -rf $(BUILD_DIR)
+
+tran_coe:
+	bash hw/dv/test_data/coe_to_mem.sh

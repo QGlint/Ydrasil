@@ -1,6 +1,6 @@
 `include "define_mem_reg.svh"
 
-`define FPGA
+// `define FPGA
 
 // 内存管理模块，包含ITCM和DTCM
 module ydrasil_mems (
