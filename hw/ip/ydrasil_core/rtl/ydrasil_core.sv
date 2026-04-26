@@ -2,80 +2,80 @@
 `include "define_mem_reg.svh"
 
 module ydrasil_core #(
-	parameter logic [31:0] RESET_PC = 32'h0000_0000
+	parameter wire [31:0] RESET_PC = 32'h0000_0000
 )(
-	input  logic clk_i,
-	input  logic rst_n_i
+	input  wire clk_i,
+	input  wire rst_n_i
     
     
-    ,output logic [31:0]  perip_addr,
-    output logic         perip_wen,
-	output logic [ 1:0]  perip_mask,
-    output logic [31:0]  perip_wdata,
-    input  logic [31:0]  perip_rdata
+    ,output wire [31:0]  perip_addr,
+    output wire         perip_wen,
+	output wire [ 1:0]  perip_mask,
+    output wire [31:0]  perip_wdata,
+    input  wire [31:0]  perip_rdata
 );
 
 	// IF <-> MEMS
-	logic [`INST_ADDR_WIDTH-1:0] if_mem_addr;
-	logic [`INST_DATA_WIDTH-1:0] if_mem_rdata;
+	wire [`INST_ADDR_WIDTH-1:0] if_mem_addr;
+	wire [`INST_DATA_WIDTH-1:0] if_mem_rdata;
 
 	// IF/ID pipeline
-	logic [31:0] if_id_pc;
-	logic [31:0] if_id_instr;
+	wire [31:0] if_id_pc;
+	wire [31:0] if_id_instr;
 
 	// CTRL signals
-	logic                        stall_if;
-	logic                        stall_id;
-	logic                        flush_if;
-	logic                        flush_id;
-	logic                        flush_ex;
-	logic                        branch_jump;
-	logic [`INST_ADDR_WIDTH-1:0] branch_target;
+	wire                        stall_if;
+	wire                        stall_id;
+	wire                        flush_if;
+	wire                        flush_id;
+	wire                        flush_ex;
+	wire                        branch_jump;
+	wire [`INST_ADDR_WIDTH-1:0] branch_target;
 
 	// ID <-> RF
-	logic [`REGS_ADDR_WIDTH-1:0] rf_raddr_rs1;
-	logic [`REGS_ADDR_WIDTH-1:0] rf_raddr_rs2;
-	logic [`REGS_DATA_WIDTH-1:0] rf_rdata_rs1;
-	logic [`REGS_DATA_WIDTH-1:0] rf_rdata_rs2;
+	wire [`REGS_ADDR_WIDTH-1:0] rf_raddr_rs1;
+	wire [`REGS_ADDR_WIDTH-1:0] rf_raddr_rs2;
+	wire [`REGS_DATA_WIDTH-1:0] rf_rdata_rs1;
+	wire [`REGS_DATA_WIDTH-1:0] rf_rdata_rs2;
 
 	// ID -> EX
-	logic [31:0]                    operand_a;
-	logic [31:0]                    operand_b;
-	logic [`OPERATOR_WIDTH-1:0]     operator;
-	logic [31:0]                    bt_a_operand;
-	logic [31:0]                    bt_b_operand;
-	logic [`OP_LSU_INFO_WIDTH-1:0]  operator_lsu;
-	logic [31:0]                    id_lsu_rs2_data;
-	logic [`OPERATOR_TYPE_WIDTH-1:0] operator_type;
-	logic                           id_alu_rf_wen_rd;
-	logic [`REGS_ADDR_WIDTH-1:0]    id_rf_waddr_rd;
+	wire [31:0]                    operand_a;
+	wire [31:0]                    operand_b;
+	wire [`OPERATOR_WIDTH-1:0]     operator;
+	wire [31:0]                    bt_a_operand;
+	wire [31:0]                    bt_b_operand;
+	wire [`OP_LSU_INFO_WIDTH-1:0]  operator_lsu;
+	wire [31:0]                    id_lsu_rs2_data;
+	wire [`OPERATOR_TYPE_WIDTH-1:0] operator_type;
+	wire                           id_alu_rf_wen_rd;
+	wire [`REGS_ADDR_WIDTH-1:0]    id_rf_waddr_rd;
 
 	// EX outputs
-	logic                        ex_branch_jump;
-	logic [`INST_ADDR_WIDTH-1:0] ex_branch_target;
-	logic [`BUS_ADDR_WIDTH-1:0]  ex_lsu_mem_addr;
-	logic [`REGS_DATA_WIDTH-1:0] alu_result;
-	logic                        alu_rf_wen_rd;
-	logic [`REGS_ADDR_WIDTH-1:0] alu_rf_waddr_rd;
+	wire                        ex_branch_jump;
+	wire [`INST_ADDR_WIDTH-1:0] ex_branch_target;
+	wire [`BUS_ADDR_WIDTH-1:0]  ex_lsu_mem_addr;
+	wire [`REGS_DATA_WIDTH-1:0] alu_result;
+	wire                        alu_rf_wen_rd;
+	wire [`REGS_ADDR_WIDTH-1:0] alu_rf_waddr_rd;
 
 	// LSU request path
-	logic [1:0]                  operator_lsu_type;
-	logic [`BUS_DATA_WIDTH-1:0]  lsu_mem_wdata;
-	logic [`BUS_ADDR_WIDTH-1:0]  lsu_mem_addr;
-	logic                        lsu_mem_we;
-	logic                        lsu_mem_req;
-	logic [3:0]                  lsu_mem_wmask;
-	logic [`BUS_DATA_WIDTH-1:0]  lsu_mem_rdata;
-	logic                        hold_flag;
+	wire [1:0]                  operator_lsu_type;
+	wire [`BUS_DATA_WIDTH-1:0]  lsu_mem_wdata;
+	wire [`BUS_ADDR_WIDTH-1:0]  lsu_mem_addr;
+	wire                        lsu_mem_we;
+	wire                        lsu_mem_req;
+	wire [3:0]                  lsu_mem_wmask;
+	wire [`BUS_DATA_WIDTH-1:0]  lsu_mem_rdata;
+	wire                        hold_flag;
 
-	logic [`REGS_DATA_WIDTH-1:0] lsu_wb_result;
-	logic                        lsu_rf_wen_rd;
-	logic [`REGS_ADDR_WIDTH-1:0] lsu_rf_waddr_rd;
+	wire [`REGS_DATA_WIDTH-1:0] lsu_wb_result;
+	wire                        lsu_rf_wen_rd;
+	wire [`REGS_ADDR_WIDTH-1:0] lsu_rf_waddr_rd;
 
 	// WB -> RF
-	logic [`REGS_DATA_WIDTH-1:0] rf_wdata_rd;
-	logic                        rf_wen_rd;
-	logic [`REGS_ADDR_WIDTH-1:0] rf_waddr_rd;
+	wire [`REGS_DATA_WIDTH-1:0] rf_wdata_rd;
+	wire                        rf_wen_rd;
+	wire [`REGS_ADDR_WIDTH-1:0] rf_waddr_rd;
 
 	assign operator_lsu_type[0] = operator_type[`OPERATOR_TYPE_LOAD];
 	assign operator_lsu_type[1] = operator_type[`OPERATOR_TYPE_STORE];

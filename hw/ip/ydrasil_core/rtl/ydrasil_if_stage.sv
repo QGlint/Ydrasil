@@ -1,63 +1,61 @@
+`include "define_rv32i_ins.svh"
 
 module ydrasil_if_stage #(
-	parameter logic [31:0] RESET_PC = 32'h0000_0000
+	parameter [31:0] RESET_PC = 32'h0000_0000
 )(
-	input  logic        clk_i,
-	input  logic        rst_n_i,
+	input  wire        clk_i,
+	input  wire        rst_n_i,
 
 	// 流水线控制信号
-	input  logic        stall_if_i,
-	input  logic        flush_if_i,
+	input  wire        stall_if_i,
+	input  wire        flush_if_i,
 
-	// 后级重定向
-	input  logic        branch_jump_i,
-	input  logic [31:0] branch_target_i,
+	// 后级跳转
+	input  wire        branch_jump_i,
+	input  wire [31:0] branch_target_i,
 
 	// 指令存储器接口
-	output logic [31:0] if_mem_addr_o,
-	input  logic [31:0] if_mem_rdata_i,
+	output wire [31:0] if_mem_addr_o,
+	input  wire [31:0] if_mem_rdata_i,
 
 	// IF/ID 流水寄存器输出
-	output logic [31:0] if_id_pc_o,
+	output wire [31:0] if_id_pc_o,
 
-	output logic [31:0] if_id_instr_o
+	output wire [31:0] if_id_instr_o
 
 );
 
 	// RV32I 标准 NOP 指令：addi x0, x0, 0
-	localparam logic [31:0] RV32I_NOP = 32'h0000_0013;
-
 	// 当前 PC、下一拍 PC、以及 PC+4
-	logic [31:0] pc_q;
-	logic [31:0] pc_n;
-	logic [31:0] pc_plus4;
 
-	logic [31:0] if_id_pc_q;
+	wire [31:0] pc_n;
+	wire [31:0] pc_plus4;
 
-	logic [31:0] if_id_instr_q;
-	logic [31:0] if_id_instr_n;
+	reg [31:0] pc_ff;
+	reg [31:0] if_id_pc_ff;
+	reg [31:0] if_id_instr_ff;
 
 
 	// 默认顺序取指地址：PC + 4
-	assign pc_plus4   = pc_q + 32'd4;
+	assign pc_plus4   = pc_ff + 32'd4;
 	// 若发生重定向则跳转到目标 PC，否则顺序执行
 	assign pc_n       = branch_jump_i ? branch_target_i : pc_plus4;
 
-	assign if_mem_addr_o = pc_q;
+	assign if_mem_addr_o = pc_ff;
 
-	assign if_id_pc_o    = if_id_pc_q;
+	assign if_id_pc_o    = if_id_pc_ff;
 
-	assign if_id_instr_o = if_id_instr_q;
-	assign if_id_instr_n = flush_if_i ? RV32I_NOP : if_mem_rdata_i;
+	assign if_id_instr_o = if_id_instr_ff;
+	assign if_id_instr_n = flush_if_i ? `RV32I_INS_NOP : if_mem_rdata_i;
 
 
 
 	// IF 级 PC 寄存器：复位置初值，非停顿时更新
 	always_ff @(posedge clk_i or negedge rst_n_i) begin
 		if (!rst_n_i) begin
-			pc_q <= RESET_PC;
+			pc_ff <= `RESET_INS;
 		end else if (!stall_if_i) begin
-			pc_q <= pc_n;
+			pc_ff <= pc_n;
 		end
 	end
 
@@ -67,12 +65,12 @@ module ydrasil_if_stage #(
 	// IF/ID 流水寄存器：支持复位、冲刷和停顿
 	always_ff @(posedge clk_i or negedge rst_n_i) begin
 		if (!rst_n_i) begin
-			if_id_pc_q    <= RESET_PC;
-			if_id_instr_q <= RV32I_NOP;
+			if_id_pc_ff    <= RESET_PC;
+			if_id_instr_ff <= RV32I_NOP;
 		end 
 		else begin
-			if_id_pc_q    <= pc_q;
-			if_id_instr_q <= if_id_instr_n;
+			if_id_pc_ff    <= pc_ff;
+			if_id_instr_ff <= if_id_instr_n;
 		end
 	end
 

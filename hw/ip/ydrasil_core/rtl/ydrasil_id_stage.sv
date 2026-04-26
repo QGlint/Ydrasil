@@ -3,79 +3,80 @@
 module ydrasil_id_stage #(
     parameter int DATA_WIDTH = 32
 )(
-    input  logic                            clk_i,
-    input  logic                            rst_n_i,
-    input  logic                            stall_id_i,
-    input  logic                            flush_id_i,
+    input  wire                            clk_i,
+    input  wire                            rst_n_i,
+    input  wire                            stall_id_i,
+    input  wire                            flush_id_i,
 
     // IF/ID input  
-    input  logic [DATA_WIDTH-1:0]           if_id_pc_i,
-    input  logic [DATA_WIDTH-1:0]           if_id_instr_i,
+    input  wire [DATA_WIDTH-1:0]           if_id_pc_i,
+    input  wire [DATA_WIDTH-1:0]           if_id_instr_i,
 
     // Register file read ports 
-    output logic [4:0]                      rf_addr_rs1_o,
-    output logic [4:0]                      rf_addr_rs2_o,
-    input  logic [DATA_WIDTH-1:0]           rf_rdata_rs1_i,
-    input  logic [DATA_WIDTH-1:0]           rf_rdata_rs2_i,
+    output wire [4:0]                      rf_addr_rs1_o,
+    output wire [4:0]                      rf_addr_rs2_o,
+    input  wire [DATA_WIDTH-1:0]           rf_rdata_rs1_i,
+    input  wire [DATA_WIDTH-1:0]           rf_rdata_rs2_i,
 
     // Dispatch to EX   
-    // output logic                            alu_valid_o,
-    output logic [DATA_WIDTH-1:0]           operand_a_o,
-    output logic [DATA_WIDTH-1:0]           operand_b_o,
-    output logic [`OPERATOR_WIDTH-1:0]      operator_o, // 统一的ALU操作信息信号
+    // output wire                            alu_valid_o,
+    output wire [DATA_WIDTH-1:0]           operand_a_o,
+    output wire [DATA_WIDTH-1:0]           operand_b_o,
+    output wire [`OPERATOR_WIDTH-1:0]      operator_o, // 统一的ALU操作信息信号
 
-    output logic [DATA_WIDTH-1:0]           bt_a_operand_o,
-    output logic [DATA_WIDTH-1:0]           bt_b_operand_o,
+    output wire [DATA_WIDTH-1:0]           bt_a_operand_o,
+    output wire [DATA_WIDTH-1:0]           bt_b_operand_o,
 
-    output logic [`OP_LSU_INFO_WIDTH-1:0]   operator_lsu_o,
-    output logic [DATA_WIDTH-1:0]           id_lsu_rs2_data_o, // 操作类型信号
+    output wire [`OP_LSU_INFO_WIDTH-1:0]   operator_lsu_o,
+    output wire [DATA_WIDTH-1:0]           id_lsu_rs2_data_o, // 操作类型信号
 
-    output logic [`OPERATOR_TYPE_WIDTH-1:0] operator_type_o, // 操作类型信号
+    output wire [`OPERATOR_TYPE_WIDTH-1:0] operator_type_o, // 操作类型信号
 
     // Generic writeback information
-    output logic                            id_alu_rf_wen_rd_o,
-    output logic [4:0]                      id_rf_waddr_rd_o
+    output wire                            id_alu_rf_wen_rd_o,
+    output wire [4:0]                      id_rf_waddr_rd_o
 
 
 );
 
 
-    logic [4:0]                           rf_raddr_rs1;
-    logic [4:0]                           rf_raddr_rs2;
-    logic                                 rf_ren_rs1;
-    logic                                 rf_ren_rs2;
+    wire [4:0]                           rf_raddr_rs1;
+    wire [4:0]                           rf_raddr_rs2;
+    wire                                 rf_ren_rs1;
+    wire                                 rf_ren_rs2;
 
-    logic [4:0]                           rf_waddr_rd;
-    logic                                 rf_wen_rd;
-    logic [4:0]                           rf_waddr_rd_ff;
-    logic                                 rf_wen_rd_ff;
+    wire [4:0]                           rf_waddr_rd;
+    wire                                 rf_wen_rd;
 
-    logic [DATA_WIDTH-1:0]                imm_i;
-    logic                                 operand_b_rs_sel;
-    logic                                 operand_a_pc_sel;
-    logic                                 bt_a_rs_sel;
+    reg [4:0]                           rf_waddr_rd_ff;
+    reg                                 rf_wen_rd_ff;
 
-    logic [DATA_WIDTH-1:0]                id_lsu_rs2_data_ff;
+    wire [DATA_WIDTH-1:0]                imm_i;
+    wire                                 operand_b_rs_sel;
+    wire                                 operand_a_pc_sel;
+    wire                                 bt_a_rs_sel;
 
-    logic [`OPERATOR_TYPE_WIDTH-1:0]      operator_type;
-    logic [`OPERATOR_TYPE_WIDTH-1:0]      operator_type_ff;
+    reg [DATA_WIDTH-1:0]                id_lsu_rs2_data_ff;
 
-    logic [DATA_WIDTH-1:0]                operand_a;
-    logic [DATA_WIDTH-1:0]                operand_b;
-    logic [`OPERATOR_WIDTH-1:0]           operator;
+    wire [`OPERATOR_TYPE_WIDTH-1:0]      operator_type;
+    reg [`OPERATOR_TYPE_WIDTH-1:0]       operator_type_ff;
+
+    wire [DATA_WIDTH-1:0]                operand_a;
+    wire [DATA_WIDTH-1:0]                operand_b;
+    wire [`OPERATOR_WIDTH-1:0]           operator;
 
 
-    logic [DATA_WIDTH-1:0]                operand_a_ff;
-    logic [DATA_WIDTH-1:0]                operand_b_ff;
-    logic [`OPERATOR_WIDTH-1:0]           operator_ff;
+    reg [DATA_WIDTH-1:0]                operand_a_ff;
+    reg [DATA_WIDTH-1:0]                operand_b_ff;
+    reg [`OPERATOR_WIDTH-1:0]           operator_ff;
 
-    logic [`OP_LSU_INFO_WIDTH-1:0]        operator_lsu;
-    logic [`OP_LSU_INFO_WIDTH-1:0]        operator_lsu_ff;
+    wire [`OP_LSU_INFO_WIDTH-1:0]        operator_lsu;
+    reg [`OP_LSU_INFO_WIDTH-1:0]         operator_lsu_ff;
 
-    logic [DATA_WIDTH-1:0]                bt_a_operand;
-    logic [DATA_WIDTH-1:0]                bt_b_operand;
-    logic [DATA_WIDTH-1:0]                bt_a_operand_ff;
-    logic [DATA_WIDTH-1:0]                bt_b_operand_ff;
+    wire [DATA_WIDTH-1:0]                bt_a_operand;
+    wire [DATA_WIDTH-1:0]                bt_b_operand;
+    reg [DATA_WIDTH-1:0]                 bt_a_operand_ff;
+    reg [DATA_WIDTH-1:0]                 bt_b_operand_ff;
 
     ydrasil_ins_decoder #(
         .DATA_WIDTH(DATA_WIDTH)

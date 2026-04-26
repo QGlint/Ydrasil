@@ -2,30 +2,30 @@
 
 // 写回单元 - 负责寄存器写回逻辑和延迟
 module ydrasil_wb_stage (
-    input logic clk,
-    input logic rst_n,
+    input wire clk,
+    input wire rst_n,
 
     // 来自EXU的ALU数据
-    input logic [`REGS_DATA_WIDTH-1:0]  alu_wdata_rd_i,
-    input logic                         alu_rf_wen_rd_i,
-    input logic [`REGS_ADDR_WIDTH-1:0]  alu_rf_waddr_rd_i,
+    input wire [`REGS_DATA_WIDTH-1:0]  alu_wdata_rd_i,
+    input wire                         alu_rf_wen_rd_i,
+    input wire [`REGS_ADDR_WIDTH-1:0]  alu_rf_waddr_rd_i,
 
     // 来自EXU的AGU/LSU数据
-    input logic [`REGS_DATA_WIDTH-1:0]  lsu_wb_result_i,
-    input logic                         lsu_rf_wen_rd_i,
-    input logic [`REGS_ADDR_WIDTH-1:0]  lsu_rf_waddr_rd_i,
+    input wire [`REGS_DATA_WIDTH-1:0]  lsu_wb_result_i,
+    input wire                         lsu_rf_wen_rd_i,
+    input wire [`REGS_ADDR_WIDTH-1:0]  lsu_rf_waddr_rd_i,
 
     // 寄存器写回接口
-    output logic [`REGS_DATA_WIDTH-1:0] rf_wdata_rd_o,
-    output logic                        rf_wen_rd_o,
-    output logic [`REGS_ADDR_WIDTH-1:0] rf_waddr_rd_o
+    output wire [`REGS_DATA_WIDTH-1:0] rf_wdata_rd_o,
+    output wire                        rf_wen_rd_o,
+    output wire [`REGS_ADDR_WIDTH-1:0] rf_waddr_rd_o
 
     );
 
     // 延迟信号声明
-    logic [`REGS_DATA_WIDTH-1:0]    alu_wdata_rd_ff;
-    logic [`REGS_ADDR_WIDTH-1:0]    alu_rf_waddr_rd_ff;
-    logic                           alu_pending_ff;  
+    reg [`REGS_DATA_WIDTH-1:0]    alu_wdata_rd_ff;
+    reg [`REGS_ADDR_WIDTH-1:0]    alu_rf_waddr_rd_ff;
+    reg                           alu_pending_ff;  
 
 
 
@@ -44,13 +44,17 @@ module ydrasil_wb_stage (
     end
 
 
-    logic [`REGS_DATA_WIDTH-1:0]    rf_wdata_rd;
-    logic                           rf_wen_rd;
-    logic [`REGS_ADDR_WIDTH-1:0]    rf_waddr_rd;
+    wire [`REGS_DATA_WIDTH-1:0]    rf_wdata_rd;
+    wire                           rf_wen_rd;
+    wire [`REGS_ADDR_WIDTH-1:0]    rf_waddr_rd;
 
-    logic sel_lsu       = lsu_rf_wen_rd_i;
-    logic sel_alu_i     = (~sel_lsu) & (~alu_pending_ff) & alu_rf_wen_rd_i;
-    logic sel_alu_ff    = (~sel_lsu) & alu_pending_ff;
+    wire sel_lsu       ;
+    wire sel_alu_i     ;
+    wire sel_alu_ff    ;
+
+    assign sel_lsu       = lsu_rf_wen_rd_i;
+    assign sel_alu_i     = (~sel_lsu) & (~alu_pending_ff) & alu_rf_wen_rd_i;
+    assign sel_alu_ff    = (~sel_lsu) & alu_pending_ff;
 
 
     assign rf_wen_rd    =   sel_lsu | sel_alu_i | sel_alu_ff;

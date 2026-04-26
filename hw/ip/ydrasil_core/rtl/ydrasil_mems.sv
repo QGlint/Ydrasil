@@ -2,23 +2,23 @@
 
 // 内存管理模块，包含ITCM和DTCM
 module ydrasil_mems (
-    input logic clk,
-    input logic rst_n,
+    input wire clk,
+    input wire rst_n,
 
     // PC访问接口
-    input  logic [`INST_ADDR_WIDTH-1:0] if_mem_addr_o,   // PC地址
-    output logic [`INST_DATA_WIDTH-1:0] if_mem_rdata_i, // 指令输出
+    input  wire [`INST_ADDR_WIDTH-1:0] if_mem_addr_o,   // PC地址
+    output wire [`INST_DATA_WIDTH-1:0] if_mem_rdata_i, // 指令输出
 
     // EX访问接口
-    input  logic [`BUS_ADDR_WIDTH-1:0] lsu_mem_addr_i,  
-    input  logic [`BUS_DATA_WIDTH-1:0] lsu_mem_data_i,  
-    output logic [`BUS_DATA_WIDTH-1:0] lsu_mem_data_o,  
-    input  logic                       lsu_mem_we_i,    
-    input  logic                       lsu_mem_req_i,   
-    input  logic [                3:0] lsu_mem_wmask_i, 
+    input  wire [`BUS_ADDR_WIDTH-1:0] lsu_mem_addr_i,  
+    input  wire [`BUS_DATA_WIDTH-1:0] lsu_mem_data_i,  
+    output wire [`BUS_DATA_WIDTH-1:0] lsu_mem_data_o,  
+    input  wire                       lsu_mem_we_i,    
+    input  wire                       lsu_mem_req_i,   
+    input  wire [                3:0] lsu_mem_wmask_i, 
 
     // 暂停信号
-    output logic hold_flag_o  // 暂停流水线信号
+    output wire hold_flag_o  // 暂停流水线信号
 );
 
 

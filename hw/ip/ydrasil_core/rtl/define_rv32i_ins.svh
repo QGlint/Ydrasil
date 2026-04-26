@@ -76,5 +76,7 @@
 `define RVMISA_INS_MRET 32'h30200073
 `define RVDEBUG_INS_DRET 32'h7b200073
 
+`define RESET_INS 32'h0000_0000
+
 
 // `endif
