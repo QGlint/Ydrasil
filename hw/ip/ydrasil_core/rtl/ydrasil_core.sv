@@ -97,6 +97,38 @@ module ydrasil_core #(
     wire [`REGS_ADDR_WIDTH-1:0]    id_ctrl_rs1_addr;
     wire [`REGS_ADDR_WIDTH-1:0]    id_ctrl_rs2_addr;
 
+    wire [`CSR_ADDR_WIDTH-1:0]       id_csr_raddr;
+    wire [`CSR_ADDR_WIDTH-1:0]       id_ex_csr_waddr;
+    wire [`OP_CSR_INFO_WIDTH-1:0]    id_op_csr_info;
+
+	wire [`REGS_DATA_WIDTH-1:0]      csr_ex_rdata;
+	wire 					    ex_csr_wen;
+	wire [`REGS_DATA_WIDTH-1:0]      ex_csr_wdata;
+	wire [`CSR_ADDR_WIDTH-1:0]       ex_csr_waddr;
+
+	// CSR <-> CLINT wires
+	wire                             clint_csr_we;
+	wire [`BUS_ADDR_WIDTH-1:0]       clint_csr_waddr;
+	wire [`BUS_ADDR_WIDTH-1:0]       clint_csr_raddr;
+	wire [`REGS_DATA_WIDTH-1:0]      clint_csr_wdata;
+	wire [`REGS_DATA_WIDTH-1:0]      csr_clint_data;
+	wire [`REGS_DATA_WIDTH-1:0]      csr_clint_mtvec;
+	wire [`REGS_DATA_WIDTH-1:0]      csr_clint_mepc;
+	wire [`REGS_DATA_WIDTH-1:0]      csr_clint_mstatus;
+	wire                             global_int_en;
+	wire                             clint_int_assert;
+	wire [`INST_ADDR_WIDTH-1:0]      clint_int_addr;
+	wire                             clint_hold_flag;
+
+	// TODO: connect real decoded system op signals from EX/ID path
+	wire                             sys_op_ecall;
+	wire                             sys_op_ebreak;
+	wire                             sys_op_mret;
+	assign sys_op_ecall = 1'b0;
+	assign sys_op_ebreak = 1'b0;
+	assign sys_op_mret = 1'b0;
+
+
     assign dram_sel = (lsu_mem_addr >= DRAM_ADDR_START) && (lsu_mem_addr <= DRAM_ADDR_END);
 
 	assign operator_lsu_type[0] = operator_type[`OPERATOR_TYPE_LOAD];
@@ -170,6 +202,9 @@ module ydrasil_core #(
 		.id_lsu_rs2_rd_forward_o (id_lsu_rs2_rd_forward),
 		.id_ctrl_rs1_addr_o (id_ctrl_rs1_addr),
 		.id_ctrl_rs2_addr_o (id_ctrl_rs2_addr),
+		.id_csr_raddr_o     (id_csr_raddr),
+		.id_ex_csr_waddr_o  (id_ex_csr_waddr),
+		.id_op_csr_info_o   (id_op_csr_info),
 		.id_alu_rf_wen_rd_o (id_alu_rf_wen_rd),
 		.id_rf_waddr_rd_o   (id_rf_waddr_rd)
 	);
@@ -188,6 +223,12 @@ module ydrasil_core #(
 		.id_alu_rf_wen_rd_i (id_alu_rf_wen_rd),
         .id_ex_rs2_rd_forward_i (id_ex_rs2_rd_forward),
         .id_ex_rs1_rd_forward_i (id_ex_rs1_rd_forward),
+		.id_ex_csr_waddr_i  (id_ex_csr_waddr) ,
+        .id_op_csr_info_i(id_op_csr_info) ,
+        .csr_ex_rdata_i(csr_ex_rdata) ,
+        .ex_csr_wen_o(ex_csr_wen),
+        .ex_csr_wdata_o(ex_csr_wdata),
+        .ex_csr_waddr_o(ex_csr_waddr),
 		.ex_branch_jump_o   (ex_branch_jump),
 		.ex_branch_target_o (ex_branch_target),
 		.ex_lsu_mem_addr_o  (ex_lsu_mem_addr),
@@ -256,5 +297,50 @@ module ydrasil_core #(
 		.branch_jump_o     (branch_jump),
 		.branch_target_o   (branch_target)
 	);
+
+	ydrasil_registers_csr u_ydrasil_registers_csr (
+		.clk               (clk_i),
+		.rst_n             (rst_n_i),
+		.ex_csr_wen_i      (ex_csr_wen),
+		.id_csr_raddr_i    (id_csr_raddr),
+		.ex_csr_waddr_i    (ex_csr_waddr),
+		.ex_csr_data_i     (ex_csr_wdata),
+		.clint_csr_we_i    (clint_csr_we),
+		.clint_csr_raddr_i (clint_csr_raddr),
+		.clint_csr_waddr_i (clint_csr_waddr),
+		.clint_csr_data_i  (clint_csr_wdata),
+		.global_int_en_o   (global_int_en),
+		.csr_clint_data_o  (csr_clint_data),
+		.csr_clint_mtvec   (csr_clint_mtvec),
+		.csr_clint_mepc    (csr_clint_mepc),
+		.csr_clint_mstatus (csr_clint_mstatus),
+		.csr_ex_data_o     (csr_ex_rdata)
+	);
+
+	clint u_clint (
+		.clk               (clk_i),
+		.rst_n             (rst_n_i),
+		.inst_addr_i       (if_id_pc),
+		.ex_branch_jump_i       (ex_branch_jump),
+		.ex_branch_target_i       (ex_branch_target),
+		.sys_op_ecall_i    (sys_op_ecall),
+		.sys_op_ebreak_i   (sys_op_ebreak),
+		.sys_op_mret_i     (sys_op_mret),
+		.stall_if_i       (stall_if),
+		.csr_clint_data_i  (csr_clint_data),
+		.csr_clint_mtvec   (csr_clint_mtvec),
+		.csr_clint_mepc    (csr_clint_mepc),
+		.csr_clint_mstatus (csr_clint_mstatus),
+		.global_int_en_i   (global_int_en),
+		.hold_flag_o       (clint_hold_flag),
+		.clint_csr_we_o    (clint_csr_we),
+		.clint_csr_waddr_o (clint_csr_waddr),
+		.clint_csr_raddr_o (clint_csr_raddr),
+		.clint_csr_data_o  (clint_csr_wdata),
+		.int_addr_o        (clint_int_addr),
+		.int_assert_o      (clint_int_assert)
+	);
+
+
 
 endmodule

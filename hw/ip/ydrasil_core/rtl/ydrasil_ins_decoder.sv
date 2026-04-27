@@ -1,6 +1,6 @@
 `include "define_decode.svh"
 `include "define_rv32i_ins.svh"
-
+`include "define_mem_reg.svh"
 module ydrasil_ins_decoder #(
 	parameter int DATA_WIDTH = 32
 )(
@@ -18,11 +18,13 @@ module ydrasil_ins_decoder #(
 	output wire       operand_b_rs_sel_o, // 选择ALU操作数B的来源：0表示来自寄存器，1表示来自立即数
 	output wire       operand_a_pc_sel_o, // 选择ALU操作数A的来源：0表示来自寄存器，1表示来自PC（用于AUIPC指令）
 	output wire       bt_a_rs_sel_o, // 选择分支目标地址计算的操作数A的来源：0表示来自寄存器，1表示来自PC（用于JALR指令）
+	output wire       operand_a_imm_sel_o, // 选择ALU操作数A的立即数来源：0表示不使用，1表示使用
 
-	output wire [`BUS_ADDR_WIDTH-1:0] 	csr_reg_raddr_o,  // 读CSR寄存器地址
-    output wire                        	csr_ex_we_o,        // 写CSR寄存器标志
-    output wire [`BUS_ADDR_WIDTH-1:0] 	csr_ex_waddr_o,      // 写CSR寄存器地址
-	output 	wire [`op_CSR_INFO_WIDTH-1:0] csr_op_info,
+	output wire [`CSR_ADDR_WIDTH-1:0] 	 csr_reg_raddr_o,  // 读CSR寄存器地址
+    output wire                        	 csr_ex_we_o,        // 写CSR寄存器标志
+    output wire [`CSR_ADDR_WIDTH-1:0] 	 csr_ex_waddr_o,      // 写CSR寄存器地址
+	output wire [`OP_CSR_INFO_WIDTH-1:0] csr_op_info_o,
+
 
 	output wire [`OPERATOR_WIDTH-1:0] operator_o,
 	output wire [`OP_LSU_INFO_WIDTH-1:0] operator_lsu_o,
@@ -33,7 +35,7 @@ module ydrasil_ins_decoder #(
 	wire [`OP_ALU_INFO_WIDTH-1:0] alu_op_info;
 	wire [`OP_BJP_INFO_WIDTH-1:0] bjp_op_info;
 	wire [`OP_LSU_INFO_WIDTH-1:0] lsu_op_info;
-	wire [`op_CSR_INFO_WIDTH-1:0] csr_op_info;
+	wire [`OP_CSR_INFO_WIDTH-1:0] csr_op_info;
 
 	wire [6:0] opcode 		;
 	wire [4:0]	rf_waddr_rd ;
@@ -235,7 +237,9 @@ module ydrasil_ins_decoder #(
 	assign lsu_op_info[`OP_LSU_SH]  = is_sh;
 	assign lsu_op_info[`OP_LSU_SW]  = is_sw;
 
-
+	assign csr_op_info[`OP_CSR_CSRRW]  = is_csrrw | is_csrrwi;
+	assign csr_op_info[`OP_CSR_CSRRS]  = is_csrrs | is_csrrsi;
+	assign csr_op_info[`OP_CSR_CSRRC]  = is_csrrc | is_csrrci;
 
 
 	wire rf_ren_rs1 =	(~is_lui) 	& (~is_auipc) 	& (~is_jal) &  
@@ -253,21 +257,7 @@ module ydrasil_ins_decoder #(
 	assign operator_type_o [`OPERATOR_TYPE_BJP] = is_bjp_use;
 	assign operator_type_o [`OPERATOR_TYPE_LOAD] = is_load;
 	assign operator_type_o [`OPERATOR_TYPE_STORE] = is_store;
-	
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+	assign operator_type_o [`OPERATOR_TYPE_CSR] = is_csr;
 	// wire [`OPERATOR_WIDTH-1:0] alu_op_info_mark = ({`OPERATOR_WIDTH{is_alu_use }}& {{{`OPERATOR_WIDTH-`OP_ALU_INFO_WIDTH}{1'b0}},alu_op_info});
 	// wire [`OPERATOR_WIDTH-1:0] bjp_op_info_mark = ({`OPERATOR_WIDTH{is_bjp_use }}& {{{`OPERATOR_WIDTH-`OP_BJP_INFO_WIDTH}{1'b0}},bjp_op_info});
 	// assign lsu_op_info_mark =  operator_type_o [OPERATOR_TYPE_LOAD] ? {{`OPERATOR_WIDTH-`OP_LSU_INFO_WIDTH{1'b0}},lsu_op_info} : '0;
@@ -287,7 +277,7 @@ module ydrasil_ins_decoder #(
 	assign imm_shamt_mask = is_shift ? imm_shamt : '0;
 	assign imm_csr_mask = is_csr ? imm_csr : '0;
 
-	assign imm_i_o = imm_i_mask | imm_s_mask | imm_b_mask | imm_u_mask | imm_j_mask | imm_shamt_mask;
+	assign imm_i_o = imm_i_mask | imm_s_mask | imm_b_mask | imm_u_mask | imm_j_mask | imm_shamt_mask | imm_csr_mask;
 
 	assign operator_o = ({`OPERATOR_WIDTH{is_alu_use }}& {{0{1'b0}},alu_op_info})|
 						({`OPERATOR_WIDTH{is_bjp_use }}& {{5{1'b0}},bjp_op_info});
@@ -295,7 +285,10 @@ module ydrasil_ins_decoder #(
 
 	wire operand_b_rs_sel 	;
 	wire operand_a_pc_sel 	;
+	wire operand_a_imm_sel	;
 	wire bt_a_rs_sel 		;
+
+	wire operand_a_imm_sel = is_csrrwi | is_csrrsi | is_csrrci;
 
 	assign operand_b_rs_sel_o = is_branch | is_store |is_op_r_m;
 	assign operand_a_pc_sel_o = is_auipc  ;
@@ -303,6 +296,7 @@ module ydrasil_ins_decoder #(
 
 	assign operand_b_rs_sel_o = operand_b_rs_sel;
 	assign operand_a_pc_sel_o = operand_a_pc_sel;
+	assign operand_a_imm_sel_o = operand_a_imm_sel;
 	assign bt_a_rs_sel_o = bt_a_rs_sel;
 
 	assign rf_waddr_rd_o = rf_waddr_rd;
@@ -311,5 +305,10 @@ module ydrasil_ins_decoder #(
 	assign rf_ren_rs1_o = rf_ren_rs1;
 	assign rf_ren_rs2_o = rf_ren_rs2;
 	assign rf_wen_rd_o = rf_wen_rd;
+
+	assign csr_reg_raddr_o = instr_i[31:20];
+	assign csr_ex_we_o = is_csr;
+	assign csr_ex_waddr_o = instr_i[31:20];
+	assign csr_op_info_o = csr_op_info;
 
 endmodule

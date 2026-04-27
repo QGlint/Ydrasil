@@ -34,10 +34,9 @@
 // 寄存器配置
 `define REGS_ADDR_WIDTH 5
 `define REGS_DATA_WIDTH 32
-`define DOUBLE_REG_WIDTH 64
+`define DOUBLE_REGS_WIDTH 64
 `define REGS_NUM 32
-
-
+`define CSR_ADDR_WIDTH 12
 
 
 // `endif

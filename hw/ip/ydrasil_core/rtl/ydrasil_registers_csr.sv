@@ -32,15 +32,15 @@ module ydrasil_registers_csr (
     input wire rst_n,
 
     // form ex
-    input wire                          we_i,     // ex模块写寄存器标志
-    input wire [`BUS_ADDR_WIDTH-1:0]    raddr_i,  // ex模块读寄存器地址
-    input wire [`BUS_ADDR_WIDTH-1:0]    waddr_i,  // ex模块写寄存器地址
-    input wire [`REGS_DATA_WIDTH-1:0]   data_i,   // ex模块写寄存器数据
+    input wire                          ex_csr_wen_i,     // ex模块写寄存器标志
+    input wire [`CSR_ADDR_WIDTH-1:0]    id_csr_raddr_i,  // ex模块读寄存器地址
+    input wire [`CSR_ADDR_WIDTH-1:0]    ex_csr_waddr_i,  // ex模块写寄存器地址
+    input wire [`REGS_DATA_WIDTH-1:0]   ex_csr_data_i,   // ex模块写寄存器数据
 
     // from clint
     input wire                          clint_csr_we_i,     // clint模块写寄存器标志
-    input wire [`BUS_ADDR_WIDTH-1:0]    clint_csr_raddr_i,  // clint模块读寄存器地址
-    input wire [`BUS_ADDR_WIDTH-1:0]    clint_csr_waddr_i,  // clint模块写寄存器地址
+    input wire [`CSR_ADDR_WIDTH-1:0]    clint_csr_raddr_i,  // clint模块读寄存器地址
+    input wire [`CSR_ADDR_WIDTH-1:0]    clint_csr_waddr_i,  // clint模块写寄存器地址
     input wire [`REGS_DATA_WIDTH-1:0]   clint_csr_data_i,   // clint模块写寄存器数据
 
     output wire global_int_en_o,  // 全局中断使能标志
@@ -52,7 +52,7 @@ module ydrasil_registers_csr (
     output wire [`REGS_DATA_WIDTH-1:0] csr_clint_mstatus, // mstatus
 
     // to ex
-    output wire [`REGS_DATA_WIDTH-1:0] data_o  // ex模块读寄存器数据
+    output wire [`REGS_DATA_WIDTH-1:0] csr_ex_data_o  // ex模块读寄存器数据
 
 );
 
@@ -114,34 +114,34 @@ module ydrasil_registers_csr (
 
     // 计算寄存器写使能信号和下一个值
     // 优先响应ex模块的写操作，其次是clint模块
-    assign mtvec_we = (we_i  && waddr_i[11:0] == `CSR_MTVEC) || 
+    assign mtvec_we = (ex_csr_wen_i  && ex_csr_waddr_i[11:0] == `CSR_MTVEC) || 
                       (clint_csr_we_i  && clint_csr_waddr_i[11:0] == `CSR_MTVEC);
-    assign mtvec_next = (we_i  && waddr_i[11:0] == `CSR_MTVEC) ? data_i : clint_csr_data_i;
+    assign mtvec_next = (ex_csr_wen_i  && ex_csr_waddr_i[11:0] == `CSR_MTVEC) ? ex_csr_data_i : clint_csr_data_i;
 
-    assign mcause_we = (we_i  && waddr_i[11:0] == `CSR_MCAUSE) || 
+    assign mcause_we = (ex_csr_wen_i  && ex_csr_waddr_i[11:0] == `CSR_MCAUSE) || 
                        (clint_csr_we_i  && clint_csr_waddr_i[11:0] == `CSR_MCAUSE);
-    assign mcause_next = (we_i  && waddr_i[11:0] == `CSR_MCAUSE) ? data_i : clint_csr_data_i;
+    assign mcause_next = (ex_csr_wen_i  && ex_csr_waddr_i[11:0] == `CSR_MCAUSE) ? ex_csr_data_i : clint_csr_data_i;
 
-    assign mepc_we = (we_i  && waddr_i[11:0] == `CSR_MEPC) || 
+    assign mepc_we = (ex_csr_wen_i  && ex_csr_waddr_i[11:0] == `CSR_MEPC) || 
                      (clint_csr_we_i  && clint_csr_waddr_i[11:0] == `CSR_MEPC);
-    assign mepc_next = (we_i  && waddr_i[11:0] == `CSR_MEPC) ? data_i : clint_csr_data_i;
+    assign mepc_next = (ex_csr_wen_i  && ex_csr_waddr_i[11:0] == `CSR_MEPC) ? ex_csr_data_i : clint_csr_data_i;
 
-    assign mie_we = (we_i  && waddr_i[11:0] == `CSR_MIE) || 
+    assign mie_we = (ex_csr_wen_i  && ex_csr_waddr_i[11:0] == `CSR_MIE) || 
                     (clint_csr_we_i  && clint_csr_waddr_i[11:0] == `CSR_MIE);
-    assign mie_next = (we_i  && waddr_i[11:0] == `CSR_MIE) ? data_i : clint_csr_data_i;
+    assign mie_next = (ex_csr_wen_i  && ex_csr_waddr_i[11:0] == `CSR_MIE) ? ex_csr_data_i : clint_csr_data_i;
 
-    assign mstatus_we = (we_i  && waddr_i[11:0] == `CSR_MSTATUS) || 
+    assign mstatus_we = (ex_csr_wen_i  && ex_csr_waddr_i[11:0] == `CSR_MSTATUS) || 
                         (clint_csr_we_i  && clint_csr_waddr_i[11:0] == `CSR_MSTATUS);
-    assign mstatus_next = (we_i  && waddr_i[11:0] == `CSR_MSTATUS) ? data_i : clint_csr_data_i;
+    assign mstatus_next = (ex_csr_wen_i  && ex_csr_waddr_i[11:0] == `CSR_MSTATUS) ? ex_csr_data_i : clint_csr_data_i;
 
-    assign mscratch_we = (we_i  && waddr_i[11:0] == `CSR_MSCRATCH) || 
+    assign mscratch_we = (ex_csr_wen_i  && ex_csr_waddr_i[11:0] == `CSR_MSCRATCH) || 
                          (clint_csr_we_i  && clint_csr_waddr_i[11:0] == `CSR_MSCRATCH);
-    assign mscratch_next = (we_i  && waddr_i[11:0] == `CSR_MSCRATCH) ? data_i : clint_csr_data_i;
+    assign mscratch_next = (ex_csr_wen_i  && ex_csr_waddr_i[11:0] == `CSR_MSCRATCH) ? ex_csr_data_i : clint_csr_data_i;
 
 
 
     // ex模块读CSR寄存器
-    assign data_o = ((waddr_i[11:0] == raddr_i[11:0]) && (we_i )) ? data_i :
+    assign data_o = ((ex_csr_waddr_i[11:0] == raddr_i[11:0]) && (ex_csr_wen_i )) ? ex_csr_data_i :
                    (raddr_i[11:0] == `CSR_CYCLE) ? cycle[31:0] :
                    (raddr_i[11:0] == `CSR_CYCLEH) ? cycle[63:32] :
                    (raddr_i[11:0] == `CSR_MTVEC) ? mtvec :
