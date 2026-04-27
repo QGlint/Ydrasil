@@ -52,8 +52,8 @@ VERILATOR_FLAGS += --no-assert
 VERILATOR_FLAGS += -CFLAGS "-O3 -march=native -DNDEBUG"
 
 ifeq ($(VERILATOR_TRACE),1)
-VERILATOR_FLAGS += --trace --trace-depth 2
-# --trace-structs --trace-params --trace-max-array 1024
+# VERILATOR_FLAGS += --trace --trace-depth 2
+VERILATOR_FLAGS +=--trace  --trace-structs --trace-params --trace-max-array 1024
 endif
 VERILATOR_FLAGS += -j  $(shell nproc)
 VERILATOR_FLAGS += --top-module $(TOP)
