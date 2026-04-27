@@ -98,7 +98,7 @@ endif
 sim:
 	@echo "[VERILATOR RUN]"
 	cd $(OBJ_DIR_SIM) && $(BIN) +trace \
-	    >$(LOG_DIR)/$(TOP).ver.sim_$(TIME_TAG).log 2>$(LOG_DIR)/$(TOP).ver.sim.err.log
+	    >$(LOG_DIR)/$(TOP).ver.sim.log 2>$(LOG_DIR)/$(TOP).ver.sim.err.log
 	
 ifeq ($(VERILATOR_TRACE),1)
 	@echo "[MOVE WAVE]"
