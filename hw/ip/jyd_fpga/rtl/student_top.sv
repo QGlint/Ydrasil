@@ -38,7 +38,7 @@ module student_top#(
 
     // IROM
     logic [31:0] pc;
-    logic [11:0] inst_addr;
+    // logic [11:0] inst_addr;
     logic [31:0] instruction;
 
     // perip
@@ -47,7 +47,7 @@ module student_top#(
     logic [1:0] perip_mask;
 
     // 16KB = 2^12 * 32bit
-    assign inst_addr = pc[13:2];
+    // assign inst_addr = pc[13:2];
 
     ydrasil_core Core_cpu (
         .clk_i              (w_cpu_clk),

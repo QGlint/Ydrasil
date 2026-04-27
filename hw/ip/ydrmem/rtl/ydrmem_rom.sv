@@ -10,10 +10,10 @@ module ydrmem_rom #(
 );
 
     // 字节地址到字地址转换的偏移量（每个字4字节，需要右移2位）
-    localparam ADDR_OFFSET = 2;
+    // localparam ADDR_OFFSET = 2;
 
     // 自动计算深度 = 2^(ADDR_WIDTH - ADDR_OFFSET)，因为是按字寻址
-    localparam DEPTH = (1 << (ADDR_WIDTH - ADDR_OFFSET));
+    localparam DEPTH = (1 << (ADDR_WIDTH));
 
     // 使用计算出的深度定义存储器
     (* ram_style = "block" *) reg [DATA_WIDTH-1:0] mem_r[0:DEPTH-1];
@@ -49,7 +49,7 @@ module ydrmem_rom #(
         end
     end
 
-    logic [ADDR_WIDTH-ADDR_OFFSET-1:0] word_addr = addr_i[ADDR_WIDTH-1:ADDR_OFFSET];
+    logic [ADDR_WIDTH-1:0] word_addr = addr_i[ADDR_WIDTH-1:0];
 
     assign data_o = mem_r[word_addr];
 

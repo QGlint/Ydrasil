@@ -27,6 +27,14 @@ module ydrasil_wb_stage (
     reg [`REGS_ADDR_WIDTH-1:0]    alu_rf_waddr_rd_ff;
     reg                           alu_pending_ff;  
 
+    wire sel_lsu       ;
+    wire sel_alu_i     ;
+    wire sel_alu_ff    ;
+
+    assign sel_lsu       = lsu_rf_wen_rd_i;
+    assign sel_alu_i     = (~sel_lsu) & (~alu_pending_ff) & alu_rf_wen_rd_i;
+    assign sel_alu_ff    = (~sel_lsu) & alu_pending_ff;
+
 
 
     // 统一打一拍寄存器
@@ -48,13 +56,7 @@ module ydrasil_wb_stage (
     wire                           rf_wen_rd;
     wire [`REGS_ADDR_WIDTH-1:0]    rf_waddr_rd;
 
-    wire sel_lsu       ;
-    wire sel_alu_i     ;
-    wire sel_alu_ff    ;
 
-    assign sel_lsu       = lsu_rf_wen_rd_i;
-    assign sel_alu_i     = (~sel_lsu) & (~alu_pending_ff) & alu_rf_wen_rd_i;
-    assign sel_alu_ff    = (~sel_lsu) & alu_pending_ff;
 
 
     assign rf_wen_rd    =   sel_lsu | sel_alu_i | sel_alu_ff;

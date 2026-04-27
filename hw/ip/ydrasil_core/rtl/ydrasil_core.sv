@@ -14,6 +14,10 @@ module ydrasil_core #(
     input  wire [31:0]  perip_rdata
 );
 
+
+    localparam DRAM_ADDR_START = 32'h8010_0000;
+    localparam DRAM_ADDR_END   = 32'h8013_FFFF;
+
 	// IF <-> MEMS
 	wire [`INST_ADDR_WIDTH-1:0] if_mem_addr;
 	wire [`INST_DATA_WIDTH-1:0] if_mem_rdata;
@@ -76,8 +80,20 @@ module ydrasil_core #(
 	wire                        rf_wen_rd;
 	wire [`REGS_ADDR_WIDTH-1:0] rf_waddr_rd;
 
+    wire                        dram_sel; 
+    wire [`BUS_DATA_WIDTH-1:0]  lsu_mem_rdata_m; // 从DRAM读取的数据
+
+
+    assign dram_sel = (lsu_mem_addr >= DRAM_ADDR_START) && (lsu_mem_addr <= DRAM_ADDR_END);
+
 	assign operator_lsu_type[0] = operator_type[`OPERATOR_TYPE_LOAD];
 	assign operator_lsu_type[1] = operator_type[`OPERATOR_TYPE_STORE];
+
+	assign perip_addr = lsu_mem_addr;
+	assign perip_wen = lsu_mem_req && lsu_mem_we;
+	assign perip_mask = lsu_mem_wmask;
+	assign perip_wdata = lsu_mem_wdata;
+	assign lsu_mem_rdata = dram_sel ? lsu_mem_rdata_m : perip_rdata ; 
 
 	ydrasil_load_store_unit u_ydrasil_load_store_unit (
 		.clk               (clk_i),
@@ -157,15 +173,16 @@ module ydrasil_core #(
 	ydrasil_mems u_ydrasil_mems (
 		.clk           (clk_i),
 		.rst_n         (rst_n_i),
-		.if_mem_addr_o (if_mem_addr),
-		.if_mem_rdata_i(if_mem_rdata),
+		.if_mem_addr_i (if_mem_addr),
+		.if_mem_rdata_o(if_mem_rdata),
 		.lsu_mem_addr_i(lsu_mem_addr),
 		.lsu_mem_data_i(lsu_mem_wdata),
-		.lsu_mem_data_o(lsu_mem_rdata),
+		.lsu_mem_data_o(lsu_mem_rdata_m),
 		.lsu_mem_we_i  (lsu_mem_we),
 		.lsu_mem_req_i (lsu_mem_req),
 		.lsu_mem_wmask_i(lsu_mem_wmask),
-		.hold_flag_o   (hold_flag)
+        .dram_sel_i     (dram_sel),
+		// .hold_flag_o   (hold_flag)
 	);
 
 	ydrasil_wb_stage u_ydrasil_wb_stage (

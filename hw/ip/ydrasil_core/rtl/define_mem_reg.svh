@@ -2,14 +2,14 @@
 // `define DEFINE_MEM_REG_SVH
 
 // 内存和地址配置
-`define ITCM_ADDR_WIDTH 16  // ITCM地址宽度，16位对应64KB
-`define DTCM_ADDR_WIDTH 16  // DTCM地址宽度，16位对应64KB
+`define ITCM_ADDR_WIDTH 12  // ITCM地址宽度，12位对应16KB
+`define DTCM_ADDR_WIDTH 16  // DTCM地址宽度，16位对应256KB
 
 // 内存映射地址
-`define ITCM_BASE_ADDR 32'h0         // ITCM基地址
-`define ITCM_SIZE (1 << `ITCM_ADDR_WIDTH)     // ITCM大小：64KB
-`define DTCM_BASE_ADDR 32'h9000_0000 // DTCM基地址
-`define DTCM_SIZE (1 << `DTCM_ADDR_WIDTH)     // DTCM大小：64KB
+`define ITCM_BASE_ADDR 32'h8000_0000         // ITCM基地址
+`define ITCM_SIZE (1 << `ITCM_ADDR_WIDTH)     // ITCM大小：16KB
+`define DTCM_BASE_ADDR 32'h8010_0000 // DTCM基地址
+`define DTCM_SIZE (1 << `DTCM_ADDR_WIDTH)     // DTCM大小：256KB
 
 // 内存初始化控制
 `ifndef INIT_ITCM
