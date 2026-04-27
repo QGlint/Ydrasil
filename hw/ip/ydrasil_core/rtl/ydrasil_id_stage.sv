@@ -42,7 +42,9 @@ module ydrasil_id_stage #(
 	output wire [`CSR_ADDR_WIDTH-1:0] 	    id_csr_raddr_o,  
     output wire [`CSR_ADDR_WIDTH-1:0] 	    id_ex_csr_waddr_o,  
 	output wire [`OP_CSR_INFO_WIDTH-1:0]    id_op_csr_info_o,
+	output wire [`OP_SYS_INFO_WIDTH-1:0]    id_op_sys_info_o,
 
+    output wire [DATA_WIDTH-1:0]           id_instr_addr_o, // 当前指令地址，供CLINT使用
     // Generic writeback information
     output wire                            id_alu_rf_wen_rd_o,
     output wire [4:0]                      id_rf_waddr_rd_o
@@ -101,16 +103,20 @@ module ydrasil_id_stage #(
     wire [DATA_WIDTH-1:0]                bt_b_operand;
     reg [DATA_WIDTH-1:0]                 bt_a_operand_ff;
     reg [DATA_WIDTH-1:0]                 bt_b_operand_ff;
+    reg [DATA_WIDTH-1:0]                 id_instr_addr_ff;
+	wire [`CSR_ADDR_WIDTH-1:0] 	 csr_reg_raddr;
+   
+    wire [`CSR_ADDR_WIDTH-1:0] 	  csr_ex_waddr;
+	wire [`OP_CSR_INFO_WIDTH-1:0]  csr_op_info;
 
-	wire [`CSR_ADDR_WIDTH-1:0] 	 csr_reg_raddr, 
-    // wire                        	 csr_ex_we,     
-    wire [`CSR_ADDR_WIDTH-1:0] 	  csr_ex_waddr,  
-	wire [`OP_CSR_INFO_WIDTH-1:0]  csr_op_info,
+	reg [`CSR_ADDR_WIDTH-1:0] 	 csr_reg_raddr_ff;
 
-	reg [`CSR_ADDR_WIDTH-1:0] 	 csr_reg_raddr_ff, 
-    // reg                        	 csr_ex_we_ff,     
-    reg [`CSR_ADDR_WIDTH-1:0] 	  csr_ex_waddr_ff,  
-	reg [`OP_CSR_INFO_WIDTH-1:0]  csr_op_info_ff,
+    reg [`CSR_ADDR_WIDTH-1:0] 	  csr_ex_waddr_ff; 
+	reg [`OP_CSR_INFO_WIDTH-1:0]  csr_op_info_ff;
+
+    wire [`OP_SYS_INFO_WIDTH-1:0]  sys_op_info;
+    reg [`OP_SYS_INFO_WIDTH-1:0]   sys_op_info_ff;
+
 
 
     ydrasil_ins_decoder #(
@@ -129,9 +135,10 @@ module ydrasil_id_stage #(
         .operand_a_imm_sel_o(operand_a_imm_sel),
         .bt_a_rs_sel_o      (bt_a_rs_sel),
         .csr_reg_raddr_o    (csr_reg_raddr),
-        .csr_ex_we_o        (csr_ex_we),
+        // .csr_ex_we_o        (csr_ex_we),
         .csr_ex_waddr_o     (csr_ex_waddr),
         .csr_op_info_o      (csr_op_info),
+        .sys_op_info_o      (sys_op_info),
         .operator_o         (operator),
         .operator_lsu_o     (operator_lsu),
         .operator_type_o    (operator_type)
@@ -175,7 +182,8 @@ module ydrasil_id_stage #(
             // csr_ex_we_ff <= 1'b0;
             csr_ex_waddr_ff <= '0;
             csr_op_info_ff <= '0;
-            // id_lsu_rs1_rd_forward_ff <= 1'b0;
+            sys_op_info_ff <= '0;
+            id_instr_addr_ff <= '0;
         end
         else if (flush_id_i) begin
             operand_a_ff        <= '0;
@@ -196,6 +204,8 @@ module ydrasil_id_stage #(
             // csr_ex_we_ff <= 1'b0;
             csr_ex_waddr_ff <= '0;
             csr_op_info_ff <= '0;
+            sys_op_info_ff <= '0;
+            id_instr_addr_ff <= '0;
         end
         else if (!stall_id_i) begin
             operand_a_ff        <= operand_a;
@@ -215,7 +225,8 @@ module ydrasil_id_stage #(
             // csr_ex_we_ff <= csr_ex_we;
             csr_ex_waddr_ff <= csr_ex_waddr;
             csr_op_info_ff <= csr_op_info;
-            // id_lsu_rs1_rd_forward_ff <= id_lsu_rs1_rd_forward;
+            sys_op_info_ff <= sys_op_info;
+            id_instr_addr_ff <= if_id_pc_i;
         end
     end
 
@@ -233,11 +244,12 @@ module ydrasil_id_stage #(
     assign id_ex_rs1_rd_forward_o = id_ex_rs1_rd_forward_ff;
     assign id_lsu_rs2_rd_forward_o = id_lsu_rs2_rd_forward_ff;
     // assign id_lsu_rs1_rd_forward_o = id_lsu_rs1_rd_forward_ff;
-    assign  id_csr_raddr_o <= csr_reg_raddr_ff;
-    // assign  id_ex_csr_we_o <= csr_ex_we_ff;
-    assign  id_ex_csr_waddr_o <= csr_ex_waddr_ff;
-    assign  id_op_csr_info_o <= csr_op_info_ff;
-
+    assign  id_csr_raddr_o = csr_reg_raddr_ff;
+    // assign  id_ex_csr_we_o = csr_ex_we_ff;
+    assign  id_ex_csr_waddr_o = csr_ex_waddr_ff;
+    assign  id_op_csr_info_o = csr_op_info_ff;
+    assign  id_op_sys_info_o = sys_op_info_ff;
+    assign id_instr_addr_o = id_instr_addr_ff;
 
     assign id_ctrl_rs1_addr_o = rf_raddr_rs1;
     assign id_ctrl_rs2_addr_o = rf_raddr_rs2;

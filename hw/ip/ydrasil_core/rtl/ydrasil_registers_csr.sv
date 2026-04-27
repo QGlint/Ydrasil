@@ -83,9 +83,10 @@ module ydrasil_registers_csr (
 
     assign global_int_en_o   = (mstatus[3] == 1'b1) ? 1'b1 : 1'b0;
 
-    assign clint_csr_mtvec   = mtvec;
-    assign clint_csr_mepc    = mepc;
-    assign clint_csr_mstatus = mstatus;
+
+    assign csr_clint_mtvec   = mtvec;
+    assign csr_clint_mepc    = mepc;
+    assign csr_clint_mstatus = mstatus;
 
     // cycle counter
     // 复位撤销后就一直计数
@@ -141,27 +142,27 @@ module ydrasil_registers_csr (
 
 
     // ex模块读CSR寄存器
-    assign data_o = ((ex_csr_waddr_i[11:0] == raddr_i[11:0]) && (ex_csr_wen_i )) ? ex_csr_data_i :
-                   (raddr_i[11:0] == `CSR_CYCLE) ? cycle[31:0] :
-                   (raddr_i[11:0] == `CSR_CYCLEH) ? cycle[63:32] :
-                   (raddr_i[11:0] == `CSR_MTVEC) ? mtvec :
-                   (raddr_i[11:0] == `CSR_MCAUSE) ? mcause :
-                   (raddr_i[11:0] == `CSR_MEPC) ? mepc :
-                   (raddr_i[11:0] == `CSR_MIE) ? mie :
-                   (raddr_i[11:0] == `CSR_MSTATUS) ? mstatus :
-                   (raddr_i[11:0] == `CSR_MSCRATCH) ? mscratch :
+    assign csr_ex_data_o = ((ex_csr_waddr_i[11:0] == id_csr_raddr_i[11:0]) && (ex_csr_wen_i )) ? ex_csr_data_i :
+                   (id_csr_raddr_i[11:0] == `CSR_CYCLE) ? cycle[31:0] :
+                   (id_csr_raddr_i[11:0] == `CSR_CYCLEH) ? cycle[63:32] :
+                   (id_csr_raddr_i[11:0] == `CSR_MTVEC) ? mtvec :
+                   (id_csr_raddr_i[11:0] == `CSR_MCAUSE) ? mcause :
+                   (id_csr_raddr_i[11:0] == `CSR_MEPC) ? mepc :
+                   (id_csr_raddr_i[11:0] == `CSR_MIE) ? mie :
+                   (id_csr_raddr_i[11:0] == `CSR_MSTATUS) ? mstatus :
+                   (id_csr_raddr_i[11:0] == `CSR_MSCRATCH) ? mscratch :
                    '0;
 
     // clint模块读CSR寄存器
-    assign clint_data_o = ((clint_waddr_i[11:0] == clint_raddr_i[11:0]) && (clint_we_i )) ? clint_data_i :
-                         (clint_raddr_i[11:0] == `CSR_CYCLE) ? cycle[31:0] :
-                         (clint_raddr_i[11:0] == `CSR_CYCLEH) ? cycle[63:32] :
-                         (clint_raddr_i[11:0] == `CSR_MTVEC) ? mtvec :
-                         (clint_raddr_i[11:0] == `CSR_MCAUSE) ? mcause :
-                         (clint_raddr_i[11:0] == `CSR_MEPC) ? mepc :
-                         (clint_raddr_i[11:0] == `CSR_MIE) ? mie :
-                         (clint_raddr_i[11:0] == `CSR_MSTATUS) ? mstatus :
-                         (clint_raddr_i[11:0] == `CSR_MSCRATCH) ? mscratch :
+    assign csr_clint_data_o = ((clint_csr_waddr_i[11:0] == clint_csr_raddr_i[11:0]) && (clint_csr_we_i )) ? clint_csr_data_i :
+                         (clint_csr_raddr_i[11:0] == `CSR_CYCLE) ? cycle[31:0] :
+                         (clint_csr_raddr_i[11:0] == `CSR_CYCLEH) ? cycle[63:32] :
+                         (clint_csr_raddr_i[11:0] == `CSR_MTVEC) ? mtvec :
+                         (clint_csr_raddr_i[11:0] == `CSR_MCAUSE) ? mcause :
+                         (clint_csr_raddr_i[11:0] == `CSR_MEPC) ? mepc :
+                         (clint_csr_raddr_i[11:0] == `CSR_MIE) ? mie :
+                         (clint_csr_raddr_i[11:0] == `CSR_MSTATUS) ? mstatus :
+                         (clint_csr_raddr_i[11:0] == `CSR_MSCRATCH) ? mscratch :
                          '0;
 
 endmodule

@@ -21,9 +21,10 @@ module ydrasil_ins_decoder #(
 	output wire       operand_a_imm_sel_o, // 选择ALU操作数A的立即数来源：0表示不使用，1表示使用
 
 	output wire [`CSR_ADDR_WIDTH-1:0] 	 csr_reg_raddr_o,  // 读CSR寄存器地址
-    output wire                        	 csr_ex_we_o,        // 写CSR寄存器标志
+    // output wire                        	 csr_ex_we_o,        // 写CSR寄存器标志
     output wire [`CSR_ADDR_WIDTH-1:0] 	 csr_ex_waddr_o,      // 写CSR寄存器地址
 	output wire [`OP_CSR_INFO_WIDTH-1:0] csr_op_info_o,
+	output wire [`OP_SYS_INFO_WIDTH-1:0] sys_op_info_o,
 
 
 	output wire [`OPERATOR_WIDTH-1:0] operator_o,
@@ -36,6 +37,7 @@ module ydrasil_ins_decoder #(
 	wire [`OP_BJP_INFO_WIDTH-1:0] bjp_op_info;
 	wire [`OP_LSU_INFO_WIDTH-1:0] lsu_op_info;
 	wire [`OP_CSR_INFO_WIDTH-1:0] csr_op_info;
+	wire [`OP_SYS_INFO_WIDTH-1:0] sys_op_info;
 
 	wire [6:0] opcode 		;
 	wire [4:0]	rf_waddr_rd ;
@@ -87,6 +89,7 @@ module ydrasil_ins_decoder #(
 	wire is_lui      ;
 	wire is_auipc    ;
 	wire is_csr	  ;
+	wire is_sys		;
 
 	assign is_op_imm   = (opcode == `RV32I_INS_TYPE_I);
 	assign is_op_r_m   = (opcode == `RV32I_INS_TYPE_R_M);
@@ -186,10 +189,14 @@ module ydrasil_ins_decoder #(
 	wire is_nop    ;
 	wire is_ecall  ;
 	wire is_ebreak ;
+	wire is_mret    ;
 
 	assign is_nop    = (instr_i == `RV32I_INS_NOP);
 	assign is_ecall  = (instr_i == `RV32I_INS_ECALL);
 	assign is_ebreak = (instr_i == `RV32I_INS_EBREAK);
+	assign is_mret    = (instr_i == `RV32I_INS_MRET);
+
+	assign is_sys = is_ecall | is_ebreak | is_mret;
 
 	wire is_csrrw ;
     wire is_csrrs ;
@@ -241,6 +248,10 @@ module ydrasil_ins_decoder #(
 	assign csr_op_info[`OP_CSR_CSRRS]  = is_csrrs | is_csrrsi;
 	assign csr_op_info[`OP_CSR_CSRRC]  = is_csrrc | is_csrrci;
 
+	assign sys_op_info[`OP_SYS_ECALL]  = is_ecall;
+	assign sys_op_info[`OP_SYS_EBREAK] = is_ebreak;
+	assign sys_op_info[`OP_SYS_MRET]   = is_mret;
+
 
 	wire rf_ren_rs1 =	(~is_lui) 	& (~is_auipc) 	& (~is_jal) &  
        					(~is_ecall) & (~is_ebreak) 	& (~is_fence) & 
@@ -258,6 +269,7 @@ module ydrasil_ins_decoder #(
 	assign operator_type_o [`OPERATOR_TYPE_LOAD] = is_load;
 	assign operator_type_o [`OPERATOR_TYPE_STORE] = is_store;
 	assign operator_type_o [`OPERATOR_TYPE_CSR] = is_csr;
+	assign operator_type_o [`OPERATOR_TYPE_SYS] = is_sys;
 	// wire [`OPERATOR_WIDTH-1:0] alu_op_info_mark = ({`OPERATOR_WIDTH{is_alu_use }}& {{{`OPERATOR_WIDTH-`OP_ALU_INFO_WIDTH}{1'b0}},alu_op_info});
 	// wire [`OPERATOR_WIDTH-1:0] bjp_op_info_mark = ({`OPERATOR_WIDTH{is_bjp_use }}& {{{`OPERATOR_WIDTH-`OP_BJP_INFO_WIDTH}{1'b0}},bjp_op_info});
 	// assign lsu_op_info_mark =  operator_type_o [OPERATOR_TYPE_LOAD] ? {{`OPERATOR_WIDTH-`OP_LSU_INFO_WIDTH{1'b0}},lsu_op_info} : '0;
@@ -288,7 +300,7 @@ module ydrasil_ins_decoder #(
 	wire operand_a_imm_sel	;
 	wire bt_a_rs_sel 		;
 
-	wire operand_a_imm_sel = is_csrrwi | is_csrrsi | is_csrrci;
+	assign operand_a_imm_sel = is_csrrwi | is_csrrsi | is_csrrci;
 
 	assign operand_b_rs_sel_o = is_branch | is_store |is_op_r_m;
 	assign operand_a_pc_sel_o = is_auipc  ;
@@ -307,8 +319,9 @@ module ydrasil_ins_decoder #(
 	assign rf_wen_rd_o = rf_wen_rd;
 
 	assign csr_reg_raddr_o = instr_i[31:20];
-	assign csr_ex_we_o = is_csr;
+	// assign csr_ex_we_o = is_csr;
 	assign csr_ex_waddr_o = instr_i[31:20];
 	assign csr_op_info_o = csr_op_info;
+	assign sys_op_info_o = sys_op_info;
 
 endmodule

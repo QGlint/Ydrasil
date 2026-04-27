@@ -1,12 +1,13 @@
 // `ifndef DEFINE_DECODE_SVH
 // `define DEFINE_DECODE_SVH
 
-`define OPERATOR_TYPE_WIDTH 5
+`define OPERATOR_TYPE_WIDTH 6
 `define OPERATOR_TYPE_ALU 0
 `define OPERATOR_TYPE_BJP 1
 `define OPERATOR_TYPE_LOAD 2
 `define OPERATOR_TYPE_STORE 3
 `define OPERATOR_TYPE_CSR 4
+`define OPERATOR_TYPE_SYS 5
 
 `define OPERATOR_TYPE_LSU_BASE 2
 
@@ -60,5 +61,9 @@
 // `define OP_CSR_RS1IMM       3
 // `define OP_CSR_CSRADDR_WIDTH      12
 
+`define OP_SYS_INFO_WIDTH   3
+`define OP_SYS_ECALL         0
+`define OP_SYS_EBREAK        1
+`define OP_SYS_MRET          2
 
 // `endif

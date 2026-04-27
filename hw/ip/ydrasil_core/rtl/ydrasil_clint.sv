@@ -22,8 +22,8 @@
  SOFTWARE.
  */
 
-`include "defines.svh"
-
+`include "define_mem_reg.svh"
+`include "define_decode.svh"
 // core local interruptor module
 module clint (
 
@@ -39,12 +39,11 @@ module clint (
     // input wire                        muldiv_started_i,
     
     // 添加系统操作输入端口
-    input wire                        sys_op_ecall_i,
-    input wire                        sys_op_ebreak_i,
-    input wire                        sys_op_mret_i,
+    input wire [`OP_SYS_INFO_WIDTH-1:0] sys_op_info_i,
+    input wire                          sys_op_i,
 
     // from ctrl
-    input wire                        stall_if_i,
+    // input wire                        stall_if_i,
 
     // from csr_reg
     input wire [`REGS_DATA_WIDTH-1:0] csr_clint_data_i,
@@ -68,6 +67,13 @@ module clint (
     output wire                        int_assert_o  //ecall和ebreak的中断信号
 );
 
+    wire    sys_op_ecall_i;
+    wire    sys_op_ebreak_i;
+    wire    sys_op_mret_i;
+
+    assign sys_op_ecall_i = sys_op_info_i[`OP_SYS_ECALL] & sys_op_i;
+    assign sys_op_ebreak_i = sys_op_info_i[`OP_SYS_EBREAK] & sys_op_i;
+    assign sys_op_mret_i = sys_op_info_i[`OP_SYS_MRET] & sys_op_i;
 
     // interrupt state machine
     localparam S_INT_IDLE = 4'b0001;  // 空闲状态

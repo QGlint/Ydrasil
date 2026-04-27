@@ -15,6 +15,8 @@ module ydrasil_ctrl (
     input wire [`REGS_ADDR_WIDTH-1:0]    id_ctrl_rs1_addr_i,
     input wire [`REGS_ADDR_WIDTH-1:0]    id_ctrl_rs2_addr_i,
 
+    input wire                          clint_stall_i,
+
     output wire                         stall_if_o,
     output wire                         stall_id_o,
     // flush
@@ -34,8 +36,8 @@ module ydrasil_ctrl (
     assign branch_target_o = ex_branch_target_i;
     assign branch_jump_o = ex_branch_jump_i;
 
-    assign flush_id_o = branch_jump_o | lsu_ctrl_stall_i | lsu_ctrl_stall_wb_i;
-    assign flush_if_o = branch_jump_o;
+    assign flush_id_o = branch_jump_o | lsu_ctrl_stall_i | lsu_ctrl_stall_wb_i|clint_stall_i;
+    assign flush_if_o = branch_jump_o |clint_stall_i;
     assign flush_ex_o = 1'b0; 
     // assign flush_mems_o = 1'b0;
     assign lsu_stall_rs_rd = ((id_ctrl_rs1_addr_i == lsu_ctrl_waddr_rd_i) || (id_ctrl_rs2_addr_i == lsu_ctrl_waddr_rd_i)) && lsu_ctrl_stall_i;
@@ -43,7 +45,7 @@ module ydrasil_ctrl (
 
 
     assign stall_id_o = 1'b0; 
-    assign stall_if_o = lsu_stall_rs_rd | lsu_stall_rs_rd_wb;
+    assign stall_if_o = lsu_stall_rs_rd | lsu_stall_rs_rd_wb |clint_stall_i;
 
 
 endmodule

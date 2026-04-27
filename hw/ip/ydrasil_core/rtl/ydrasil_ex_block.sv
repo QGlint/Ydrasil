@@ -112,23 +112,23 @@ module ydrasil_ex_block #(
 
 		wire op_csr = operator_type_i[`OPERATOR_TYPE_CSR] ;
 
-		wire csr_csrrw = op_csr & id_op_csr_info_i[`OP_CSR_RW];
-		wire csr_csrrs = op_csr & id_op_csr_info_i[`OP_CSR_RS];
-		wire csr_csrrc = op_csr & id_op_csr_info_i[`OP_CSR_RC];
+		wire csr_csrrw = op_csr & id_op_csr_info_i[`OP_CSR_CSRRW];
+		wire csr_csrrs = op_csr & id_op_csr_info_i[`OP_CSR_CSRRS];
+		wire csr_csrrc = op_csr & id_op_csr_info_i[`OP_CSR_CSRRC];
 
 		wire [31:0]csr_reg_wdata ;
 		wire [31:0]csr_wdata ;
 
 	assign csr_reg_wdata = csr_ex_rdata_i;
-	assign csr_wdata = 	({`REG_DATA_WIDTH{csr_csrrw}} & operand_a_i) |
-                          	({`REG_DATA_WIDTH{csr_csrrs}} & (operand_a_i | csr_ex_rdata_i)) |
-                          	({`REG_DATA_WIDTH{csr_csrrc}} & (csr_ex_rdata_i & (~operand_a_i)));
+	assign csr_wdata = 	({`REGS_DATA_WIDTH{csr_csrrw}} & operand_a_i) |
+                          	({`REGS_DATA_WIDTH{csr_csrrs}} & (operand_a_i | csr_ex_rdata_i)) |
+                          	({`REGS_DATA_WIDTH{csr_csrrc}} & (csr_ex_rdata_i & (~operand_a_i)));
 	assign csr_wen = op_csr;
 	assign ex_csr_wdata_o = csr_wdata;
 	assign ex_csr_wen_o = csr_wen;
 	assign ex_csr_waddr_o = id_ex_csr_waddr_i;
-	assign alu_csr_result = 32{csr_wen} & csr_reg_wdata |
-							32{alu_rf_wen_rd} & alu_result;
+	assign alu_csr_result = ({32{csr_wen}} & csr_reg_wdata )|
+							({32{alu_rf_wen_rd} }& alu_result) ;
 
 
 endmodule

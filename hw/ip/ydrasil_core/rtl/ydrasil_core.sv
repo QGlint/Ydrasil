@@ -118,15 +118,11 @@ module ydrasil_core #(
 	wire                             global_int_en;
 	wire                             clint_int_assert;
 	wire [`INST_ADDR_WIDTH-1:0]      clint_int_addr;
-	wire                             clint_hold_flag;
+	wire                             clint_stall;
 
-	// TODO: connect real decoded system op signals from EX/ID path
-	wire                             sys_op_ecall;
-	wire                             sys_op_ebreak;
-	wire                             sys_op_mret;
-	assign sys_op_ecall = 1'b0;
-	assign sys_op_ebreak = 1'b0;
-	assign sys_op_mret = 1'b0;
+    wire [`BUS_ADDR_WIDTH-1:0] id_instr_addr;
+
+    wire [`OP_SYS_INFO_WIDTH-1:0] id_op_sys_info;
 
 
     assign dram_sel = (lsu_mem_addr >= DRAM_ADDR_START) && (lsu_mem_addr <= DRAM_ADDR_END);
@@ -205,6 +201,8 @@ module ydrasil_core #(
 		.id_csr_raddr_o     (id_csr_raddr),
 		.id_ex_csr_waddr_o  (id_ex_csr_waddr),
 		.id_op_csr_info_o   (id_op_csr_info),
+        .id_op_sys_info_o   (id_op_sys_info),
+        .id_instr_addr_o     (id_instr_addr),
 		.id_alu_rf_wen_rd_o (id_alu_rf_wen_rd),
 		.id_rf_waddr_rd_o   (id_rf_waddr_rd)
 	);
@@ -289,6 +287,7 @@ module ydrasil_core #(
 		.lsu_ctrl_waddr_rd_wb_i (lsu_ctrl_waddr_rd_wb),
 		.id_ctrl_rs1_addr_i     (id_ctrl_rs1_addr),
 		.id_ctrl_rs2_addr_i     (id_ctrl_rs2_addr),
+        .clint_stall_i        (clint_stall),
 		.stall_if_o        (stall_if),
 		.stall_id_o        (stall_id),
 		.flush_if_o        (flush_if),
@@ -320,19 +319,17 @@ module ydrasil_core #(
 	clint u_clint (
 		.clk               (clk_i),
 		.rst_n             (rst_n_i),
-		.inst_addr_i       (if_id_pc),
+		.instr_addr_i       (id_instr_addr),
 		.ex_branch_jump_i       (ex_branch_jump),
 		.ex_branch_target_i       (ex_branch_target),
-		.sys_op_ecall_i    (sys_op_ecall),
-		.sys_op_ebreak_i   (sys_op_ebreak),
-		.sys_op_mret_i     (sys_op_mret),
-		.stall_if_i       (stall_if),
+        .sys_op_info_i      (id_op_sys_info),
+        .sys_op_i           (operator_type[`OPERATOR_TYPE_SYS]), // 只要有任意
 		.csr_clint_data_i  (csr_clint_data),
 		.csr_clint_mtvec   (csr_clint_mtvec),
 		.csr_clint_mepc    (csr_clint_mepc),
 		.csr_clint_mstatus (csr_clint_mstatus),
 		.global_int_en_i   (global_int_en),
-		.hold_flag_o       (clint_hold_flag),
+		.clint_stall_o     (clint_stall),
 		.clint_csr_we_o    (clint_csr_we),
 		.clint_csr_waddr_o (clint_csr_waddr),
 		.clint_csr_raddr_o (clint_csr_raddr),
