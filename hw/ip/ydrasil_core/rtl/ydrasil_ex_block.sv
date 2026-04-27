@@ -24,7 +24,7 @@ module ydrasil_ex_block #(
 	output wire [DATA_WIDTH-1:0]           ex_branch_target_o, // to CTRL
     output wire [`BUS_ADDR_WIDTH-1:0]      ex_lsu_mem_addr_o,      // to EX 
 
-	output wire [DATA_WIDTH-1:0]           ex_alu_result_o,        // to EX
+	output wire [DATA_WIDTH-1:0]           ex_lsu_result_o,        // to EX
 
     output wire [`REGS_DATA_WIDTH-1:0]     alu_result_o,
     output wire                            alu_rf_wen_rd_o,
@@ -55,6 +55,7 @@ module ydrasil_ex_block #(
 	assign operand_a = id_ex_rs1_rd_forward_i ? alu_result_ff : operand_a_i;
 	assign operand_b = id_ex_rs2_rd_forward_i ? alu_result_ff : operand_b_i;
 
+	assign ex_alu_result_o = alu_result_ff;
 
 	assign ex_branch_jump_o = ex_branch_jump;
 

@@ -1,5 +1,5 @@
 VERILATOR ?= verilator
-VERILATOR_TRACE ?= 1
+VERILATOR_TRACE ?= 0
 
 
 ##################################

@@ -48,6 +48,9 @@ module ydrasil_core #(
 	wire [31:0]                    bt_a_operand;
 	wire [31:0]                    bt_b_operand;
 	wire [`OP_LSU_INFO_WIDTH-1:0]  operator_lsu;
+    wire                           id_lsu_rs2_rd_forward;
+    wire id_ex_rs2_rd_forward;
+    wire id_ex_rs1_rd_forward;
 	wire [31:0]                    id_lsu_rs2_data;
 	wire [`OPERATOR_TYPE_WIDTH-1:0] operator_type;
 	wire                           id_alu_rf_wen_rd;
@@ -57,6 +60,7 @@ module ydrasil_core #(
 	wire                        ex_branch_jump;
 	wire [`INST_ADDR_WIDTH-1:0] ex_branch_target;
 	wire [`BUS_ADDR_WIDTH-1:0]  ex_lsu_mem_addr;
+    wire [31:0]                 ex_lsu_result;
 	wire [`REGS_DATA_WIDTH-1:0] alu_result;
 	wire                        alu_rf_wen_rd;
 	wire [`REGS_ADDR_WIDTH-1:0] alu_rf_waddr_rd;
@@ -102,7 +106,9 @@ module ydrasil_core #(
 		.id_rd_waddr_i      (id_rf_waddr_rd),
 		.operator_lsu_i    (operator_lsu),
 		.operator_lsu_type_i(operator_lsu_type),
+        .ex_lsu_rd_data_i (ex_lsu_result),
 		.id_lsu_rs2_data_i (id_lsu_rs2_data),
+        .id_lsu_rs2_rd_forward_i(id_lsu_rs2_rd_forward),
 		.lsu_mem_rdata_i   (lsu_mem_rdata),
 		.lsu_mem_wdata_o   (lsu_mem_wdata),
 		.lsu_mem_addr_o    (lsu_mem_addr),
@@ -146,6 +152,9 @@ module ydrasil_core #(
 		.operator_lsu_o     (operator_lsu),
 		.id_lsu_rs2_data_o  (id_lsu_rs2_data),
 		.operator_type_o    (operator_type),
+		.id_ex_rs2_rd_forward_o (id_ex_rs2_rd_forward),
+		.id_ex_rs1_rd_forward_o (id_ex_rs1_rd_forward),
+		.id_lsu_rs2_rd_forward_o (id_lsu_rs2_rd_forward),
 		.id_alu_rf_wen_rd_o (id_alu_rf_wen_rd),
 		.id_rf_waddr_rd_o   (id_rf_waddr_rd)
 	);
@@ -162,9 +171,12 @@ module ydrasil_core #(
 		.operator_type_i    (operator_type),
 		.id_rf_waddr_rd_i   (id_rf_waddr_rd),
 		.id_alu_rf_wen_rd_i (id_alu_rf_wen_rd),
+        .id_ex_rs2_rd_forward_i (id_ex_rs2_rd_forward),
+        .id_ex_rs1_rd_forward_i (id_ex_rs1_rd_forward),
 		.ex_branch_jump_o   (ex_branch_jump),
 		.ex_branch_target_o (ex_branch_target),
 		.ex_lsu_mem_addr_o  (ex_lsu_mem_addr),
+        .ex_lsu_result_o     (ex_lsu_result),
 		.alu_result_o       (alu_result),
 		.alu_rf_wen_rd_o    (alu_rf_wen_rd),
 		.alu_rf_waddr_rd_o  (alu_rf_waddr_rd)

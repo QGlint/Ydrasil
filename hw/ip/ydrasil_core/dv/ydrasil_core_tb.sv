@@ -1,4 +1,7 @@
 `timescale 1ns/1ns
+parameter CNT_s = 40;
+parameter CNT_us = 50;
+parameter time_end = CNT_s * 1000 * 1000 * CNT_us; // 40s
 
 module ydrasil_core_tb;
 
@@ -38,7 +41,7 @@ module ydrasil_core_tb;
 	assign rst = ~rst_n;
 
 	initial begin
-		repeat (2000000) @(posedge clk);
+		repeat (time_end) @(posedge clk);
 		$display("[TB] timeout reached, finish simulation");
 		$finish;
 	end
