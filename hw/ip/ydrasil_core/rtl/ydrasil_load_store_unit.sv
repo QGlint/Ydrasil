@@ -11,6 +11,8 @@ module ydrasil_load_store_unit (
     input wire [`OP_LSU_INFO_WIDTH-1:0]    operator_lsu_i,
     input wire [1:0]                       operator_lsu_type_i,
     input wire [`REGS_DATA_WIDTH-1:0]      id_lsu_rs2_data_i, // 存储操作的源寄存器数据
+    input wire [`REGS_ADDR_WIDTH-1:0]      ex_lsu_rd_data_i, // 存储操作的源寄存器数据
+    input wire                             id_mem_rs2_rd_forward_i,
     
     // 内存接口
     input wire [`BUS_DATA_WIDTH-1:0]       lsu_mem_rdata_i,
@@ -29,21 +31,46 @@ module ydrasil_load_store_unit (
     wire [ 1:0] mem_addr_index;
     wire [31:0] mem_addr        ;
     wire [31:0] mem_rs2_data    ;
-    
-    assign mem_addr_index = mem_addr[1:0];
-    assign mem_addr        = ex_lsu_mem_addr_i; // 内存访问的地址
-    assign mem_rs2_data    = id_lsu_rs2_data_i; // 存储操作的源寄存器数据
 
     wire is_load   ;
     wire is_store  ;
+    wire  [`REGS_DATA_WIDTH-1:0] lsu_rs2_data ;
 
-    assign is_load   = operator_lsu_type_i [`OPERATOR_TYPE_LOAD - `OPERATOR_TYPE_LSU_BASE] ;
-    assign is_store  = operator_lsu_type_i [`OPERATOR_TYPE_STORE - `OPERATOR_TYPE_LSU_BASE] ;
-
+    // reg id_rd_waddr_i_ff;
+    // reg [`OP_LSU_INFO_WIDTH-1:0] operator_lsu_i_ff;
+    // reg [1:0] operator_lsu_type_i_ff;
+    // reg [`REGS_DATA_WIDTH-1:0] id_lsu_rs2_data_i_ff;
+    
     reg [`OP_LOAD_INFO_WIDTH-1:0]  operator_load_ff;
     reg [4:0]  rd_addr_ff;
     reg        is_load_ff;
     reg [1:0]  mem_addr_index_ff;
+
+    assign lsu_rs2_data = id_mem_rs2_rd_forward_i ? ex_lsu_rd_data_i : id_lsu_rs2_data_i; // 前递后的源寄存器数据
+
+    assign is_load   = operator_lsu_type_i [`OPERATOR_TYPE_LOAD - `OPERATOR_TYPE_LSU_BASE] ;
+    assign is_store  = operator_lsu_type_i [`OPERATOR_TYPE_STORE - `OPERATOR_TYPE_LSU_BASE] ;
+
+    
+    assign mem_addr_index = mem_addr[1:0];
+    assign mem_addr        = ex_lsu_mem_addr_i; // 内存访问的地址
+    assign mem_rs2_data    = lsu_rs2_data; // 存储操作的源寄存器数据
+
+
+    // always_ff @(posedge clk or negedge rst_n) begin
+    //     if (!rst_n) begin
+    //         id_rd_waddr_i_ff      <= 0;
+    //         operator_lsu_i_ff    <= 0;
+    //         operator_lsu_type_i_ff <= 0;
+    //         id_lsu_rs2_data_i_ff <= 0;
+    //     end
+    //     else begin
+    //         id_rd_waddr_i_ff      <= id_rd_waddr_i;
+    //         operator_lsu_i_ff    <= operator_lsu_i;
+    //         operator_lsu_type_i_ff <= operator_lsu_type_i;
+    //         id_lsu_rs2_data_i_ff <= lsu_rs2_data;
+    //     end
+    // end
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin

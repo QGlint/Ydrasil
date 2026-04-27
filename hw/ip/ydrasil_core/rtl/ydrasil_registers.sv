@@ -53,20 +53,9 @@ module ydrasil_registers (
         end
     endgenerate
 
-    // 读寄存器1
-    // 如果读地址为零寄存器，则返回零
-    // 如果读地址等于写地址，并且正在写操作，则直接返回写数据
-    // 否则返回寄存器值
-    assign rf_rdata_rs1_o = (rf_raddr_rs1_i == '0) ? '0 :
-                      ((rf_raddr_rs1_i == rf_waddr_rd_i) && (rf_wen_rd_i )) ? rf_wdata_rd_i :
-                      registers[rf_raddr_rs1_i];
 
-    // 读寄存器2
-    // 如果读地址为零寄存器，则返回零
-    // 如果读地址等于写地址，并且正在写操作，则直接返回写数据
-    // 否则返回寄存器值
-    assign rf_rdata_rs2_o = (rf_raddr_rs2_i == '0) ? '0 :
-                      ((rf_raddr_rs2_i == rf_waddr_rd_i) && (rf_wen_rd_i)) ? rf_wdata_rd_i :
-                      registers[rf_raddr_rs2_i];
+    assign rf_rdata_rs1_o = registers[rf_raddr_rs1_i];
+
+    assign rf_rdata_rs2_o = registers[rf_raddr_rs2_i];
 
 endmodule

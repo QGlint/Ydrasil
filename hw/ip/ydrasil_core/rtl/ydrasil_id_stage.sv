@@ -32,6 +32,11 @@ module ydrasil_id_stage #(
 
     output wire [`OPERATOR_TYPE_WIDTH-1:0] operator_type_o, // 操作类型信号
 
+    output wire                            id_ex_rs2_rd_forward_o, // 前递控制信号
+    output wire                            id_ex_rs1_rd_forward_o, // 前递控制信号
+    output wire                            id_mem_rs2_rd_forward_o, // 前递控制信号
+    // output wire                            id_mem_rs1_rd_forward_o, // 前递控制信号
+
     // Generic writeback information
     output wire                            id_alu_rf_wen_rd_o,
     output wire [4:0]                      id_rf_waddr_rd_o
@@ -39,6 +44,18 @@ module ydrasil_id_stage #(
 
 );
 
+    wire id_ex_rs2_rd_forward;//前递
+    wire id_ex_rs1_rd_forward;//前递
+    wire id_mem_rs2_rd_forward;//前递
+    wire id_mem_rs1_rd_forward;//前递
+
+    reg id_ex_rs2_rd_forward_ff;//前递
+    reg id_ex_rs1_rd_forward_ff;//前递
+    reg id_mem_rs2_rd_forward_ff;//前递
+    reg id_mem_rs1_rd_forward_ff;//前递
+
+    wire rs2_rd_hazard;
+    wire rs1_rd_hazard;
 
     wire [4:0]                           rf_raddr_rs1;
     wire [4:0]                           rf_raddr_rs2;
@@ -107,6 +124,13 @@ module ydrasil_id_stage #(
     assign bt_a_operand = bt_a_rs_sel ? rf_rdata_rs1_i : if_id_pc_i;
     assign bt_b_operand = imm_i;
 
+    assign rs2_rd_hazard = (rf_raddr_rs2 != 0) && (rf_raddr_rs2 == rf_waddr_rd_ff) && rf_wen_rd_ff;
+    assign rs1_rd_hazard = (rf_raddr_rs1 != 0) && (rf_raddr_rs1 == rf_waddr_rd_ff) && rf_wen_rd_ff;
+
+    assign id_ex_rs2_rd_forward = rs2_rd_hazard && operand_b_rs_sel;
+    assign id_ex_rs1_rd_forward = rs1_rd_hazard && (~operand_a_pc_sel);
+    assign id_mem_rs2_rd_forward = rs2_rd_hazard ;
+    // assign id_mem_rs1_rd_forward = rs1_rd_hazard ;
 
     always_ff @(posedge clk_i or negedge rst_n_i) begin
         if (!rst_n_i) begin
@@ -120,6 +144,10 @@ module ydrasil_id_stage #(
             id_lsu_rs2_data_ff  <= '0;
             bt_a_operand_ff     <= '0;
             bt_b_operand_ff     <= '0;
+            id_ex_rs2_rd_forward_ff <= 1'b0;
+            id_ex_rs1_rd_forward_ff <= 1'b0;
+            id_mem_rs2_rd_forward_ff <= 1'b0;
+            id_mem_rs1_rd_forward_ff <= 1'b0;
         end
         else if (flush_id_i) begin
             operand_a_ff        <= '0;
@@ -132,6 +160,10 @@ module ydrasil_id_stage #(
             id_lsu_rs2_data_ff  <= '0;
             bt_a_operand_ff     <= '0;
             bt_b_operand_ff     <= '0;
+            id_ex_rs2_rd_forward_ff <= 1'b0;
+            id_ex_rs1_rd_forward_ff <= 1'b0;
+            id_mem_rs2_rd_forward_ff <= 1'b0;
+            id_mem_rs1_rd_forward_ff <= 1'b0;
         end
         else if (!stall_id_i) begin
             operand_a_ff        <= operand_a;
@@ -144,6 +176,10 @@ module ydrasil_id_stage #(
             id_lsu_rs2_data_ff  <= rf_rdata_rs2_i; // 直接传递寄存器数据，供LSU使用
             bt_a_operand_ff     <= bt_a_operand;
             bt_b_operand_ff     <= bt_b_operand;
+            id_ex_rs2_rd_forward_ff <= id_ex_rs2_rd_forward;
+            id_ex_rs1_rd_forward_ff <= id_ex_rs1_rd_forward;
+            id_mem_rs2_rd_forward_ff <= id_mem_rs2_rd_forward;
+            id_mem_rs1_rd_forward_ff <= id_mem_rs1_rd_forward;
         end
     end
 
@@ -157,6 +193,10 @@ module ydrasil_id_stage #(
     assign id_lsu_rs2_data_o    = id_lsu_rs2_data_ff; // 直接传递寄存器数据，供LSU使用
     assign bt_a_operand_o       = bt_a_operand_ff;
     assign bt_b_operand_o       = bt_b_operand_ff;
+    assign id_ex_rs2_rd_forward_o = id_ex_rs2_rd_forward_ff;
+    assign id_ex_rs1_rd_forward_o = id_ex_rs1_rd_forward_ff;
+    assign id_mem_rs2_rd_forward_o = id_mem_rs2_rd_forward_ff;
+    assign id_mem_rs1_rd_forward_o = id_mem_rs1_rd_forward_ff;
 
 
 

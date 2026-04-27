@@ -17,11 +17,14 @@ module ydrasil_ex_block #(
 	input  wire [`OPERATOR_TYPE_WIDTH-1:0] operator_type_i,
     input  wire [ 4:0]                     id_rf_waddr_rd_i,
     input  wire                            id_alu_rf_wen_rd_i,
+	input  wire                            id_ex_rs2_rd_forward_i,
+	input  wire                            id_ex_rs1_rd_forward_i,
 
 	output wire                            ex_branch_jump_o,      // to CTRL
 	output wire [DATA_WIDTH-1:0]           ex_branch_target_o, // to CTRL
     output wire [`BUS_ADDR_WIDTH-1:0]      ex_lsu_mem_addr_o,      // to EX 
 
+	output wire [DATA_WIDTH-1:0]           ex_alu_result_o,        // to EX
 
     output wire [`REGS_DATA_WIDTH-1:0]     alu_result_o,
     output wire                            alu_rf_wen_rd_o,
@@ -37,14 +40,20 @@ module ydrasil_ex_block #(
 	reg [`REGS_DATA_WIDTH-1:0]     alu_result_ff;
 	reg                            alu_rf_wen_rd_ff;
 	reg [`REGS_ADDR_WIDTH-1:0]     alu_rf_waddr_rd_ff;
-	
+
 	wire ex_branch_jump;
+
+	wire [31:0] operand_a;
+	wire [31:0] operand_b;
 
     assign bt_alu_result = bt_a_operand_i + bt_b_operand_i;
 	assign ex_lsu_mem_addr_o = alu_result;
     assign ex_branch_target_o = bt_alu_result;
 
 	// 内部例化 ALU，EX 直接透传控制和操作数
+
+	assign operand_a = id_ex_rs1_rd_forward_i ? alu_result_ff : operand_a_i;
+	assign operand_b = id_ex_rs2_rd_forward_i ? alu_result_ff : operand_b_i;
 
 
 	assign ex_branch_jump_o = ex_branch_jump;
@@ -54,8 +63,8 @@ module ydrasil_ex_block #(
 	) u_ydrasil_alu (
 		// .rst_n            (rst_n_i),
 		// .req_alu_i        (ex_valid_i),
-		.operand_a_i      (operand_a_i),
-		.operand_b_i      (operand_b_i),
+		.operand_a_i      (operand_a),
+		.operand_b_i      (operand_b),
 		.operator_i       (operator_i),
 		.operator_type_i  (operator_type_i),
 		.id_rf_waddr_rd_i (id_rf_waddr_rd_i),
