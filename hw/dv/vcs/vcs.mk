@@ -60,9 +60,9 @@ SIM_OPTS := -lca
 
 VERDIFLAGS := -dbdir $(OBJ_DIR_SIM)/simv.daidir/
 
-all: sim wave
+all: comp sim wave
 
-sim:
+comp:
 	@mkdir -p $(OBJ_DIR) $(LOG_DIR) $(WAVE_DIR) $(OBJ_DIR_SIM) 
 
 ifeq ($(USE_BENDER),1)
@@ -83,6 +83,7 @@ endif
 	    -top $(TOP) \
 	    -l $(LOG_DIR)/$(TOP).vcs_compile_$(TIME_TAG).log 2>$(LOG_DIR)/$(TOP).vcs_compile.err_$(TIME_TAG).log
 
+sim:
 	@echo "[VCS RUN]"
 	@cd $(OBJ_DIR_SIM) && $(SIMV) $(SIM_OPTS) +fsdb \
 	    -l $(LOG_DIR)/$(TOP).vcs_sim_$(TIME_TAG).log 2>$(LOG_DIR)/$(TOP).vcs_sim.err_$(TIME_TAG).log

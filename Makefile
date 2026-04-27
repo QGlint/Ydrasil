@@ -18,8 +18,11 @@ export PROJECT_ROOT BUILD_DIR WAVE_DIR LOG_DIR SIM_TOOL IP VERILATOR_MOD UVM USE
 
 .PHONY: all sim clean wave resim sim_jyd_fpga resim_jyd_fpga
 
-all: sim wave
+all:  comp sim wave
 
+comp:
+	@mkdir -p $(BUILD_DIR) $(WAVE_DIR) $(LOG_DIR)
+	@$(MAKE) -C hw/dv -f Makefile comp
 
 sim:
 	@mkdir -p $(BUILD_DIR) $(WAVE_DIR) $(LOG_DIR)

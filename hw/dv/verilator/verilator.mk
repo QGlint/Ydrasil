@@ -38,14 +38,13 @@ VERILATOR_FLAGS += --build -o $(abspath $(BIN))
 
 VERILATOR_FLAGS += -Wno-fatal -Wno-TIMESCALEMOD 
 
-VERILATOR_FLAGS += \
- -Wno-INITIALDLY \
- -Wno-WIDTHTRUNC \
- -Wno-WIDTHCONCAT \
- -Wno-WIDTHEXPAND \
- -Wno-UNOPTFLAT \
- -Wno-PINMISSING \
- -Wno-UNSIGNED 
+VERILATOR_FLAGS +=  -Wno-INITIALDLY 
+VERILATOR_FLAGS += -Wno-WIDTHTRUNC 
+# VERILATOR_FLAGS += -Wno-WIDTHCONCAT 
+VERILATOR_FLAGS += -Wno-WIDTHEXPAND 
+VERILATOR_FLAGS += -Wno-UNOPTFLAT 
+# VERILATOR_FLAGS += -Wno-PINMISSING 
+VERILATOR_FLAGS += -Wno-UNSIGNED 
 
 # VERILATOR_FLAGS += -CFLAGS -DVL_DEBUG
 
@@ -75,7 +74,7 @@ endif
 ##################################
 
 
-sim:
+comp:
 	@mkdir -p $(OBJ_DIR) $(LOG_DIR) $(WAVE_DIR) $(OBJ_DIR_SIM) 
 
 ifeq ($(USE_BENDER),1)
@@ -96,9 +95,12 @@ endif
 	    $(SIM_CSRCS)\
 	    >$(LOG_DIR)/$(TOP).ver.comp_$(TIME_TAG).log 2>$(LOG_DIR)/$(TOP).ver.comp.err_$(TIME_TAG).log
 
+sim:
 	@echo "[VERILATOR RUN]"
 	cd $(OBJ_DIR_SIM) && $(BIN) +trace \
 	    >$(LOG_DIR)/$(TOP).ver.sim_$(TIME_TAG).log 2>$(LOG_DIR)/$(TOP).ver.sim.err_$(TIME_TAG).log
+	
+ifeq ($(VERILATOR_TRACE),1)
 	@echo "[MOVE WAVE]"
 	@if ls $(OBJ_DIR_SIM)/*.vcd 1>/dev/null 2>&1; then \
 	    mv $(OBJ_DIR_SIM)/*.vcd \
@@ -109,7 +111,8 @@ endif
 	    mv $(OBJ_DIR_SIM)/*.fst \
 	       $(WAVE_DIR)/$(TOP)_$(TIME_TAG).fst ; \
 	fi
-	
+endif
+
 	@echo "[CLEAN EMPTY LOG]"
 	@find $(LOG_DIR) -type f -size 0 -delete
 	@find $(LOG_DIR) -type f -size 0 -print -delete
@@ -120,4 +123,6 @@ resim:
 	$(MAKE) sim
 
 wave:
+ifeq ($(VERILATOR_TRACE),1)
 	gtkwave $$(ls -t $(WAVE_DIR)/$(TOP)_*.vcd | head -n 1) &
+endif

@@ -12,7 +12,7 @@ module ydrasil_load_store_unit (
     input wire [1:0]                       operator_lsu_type_i,
     input wire [`REGS_DATA_WIDTH-1:0]      id_lsu_rs2_data_i, // 存储操作的源寄存器数据
     input wire [`REGS_ADDR_WIDTH-1:0]      ex_lsu_rd_data_i, // 存储操作的源寄存器数据
-    input wire                             id_mem_rs2_rd_forward_i,
+    input wire                             id_lsu_rs2_rd_forward_i,
     
     // 内存接口
     input wire [`BUS_DATA_WIDTH-1:0]       lsu_mem_rdata_i,
@@ -21,6 +21,12 @@ module ydrasil_load_store_unit (
     output wire                            lsu_mem_wen_o,
     output wire                            lsu_mem_req_o,
     output wire [                3:0]      lsu_mem_wmask_o,  // 字节写入掩码，4位分别对应4个字节
+
+	output wire                           	lsu_ctrl_stall_o,       // LSU 可能会因为等待内存响应而请求stall
+    output wire                           	lsu_ctrl_stall_wb_o,    // LSU 可能会因为异常等原因
+    output wire [`REGS_ADDR_WIDTH-1:0]    	lsu_ctrl_waddr_rd_o,
+    output wire [`REGS_ADDR_WIDTH-1:0]    	lsu_ctrl_waddr_rd_wb_o,
+
 
     // 寄存器写回接口
     output wire [`REGS_DATA_WIDTH-1:0]     lsu_wb_result_o,
@@ -46,7 +52,7 @@ module ydrasil_load_store_unit (
     reg        is_load_ff;
     reg [1:0]  mem_addr_index_ff;
 
-    assign lsu_rs2_data = id_mem_rs2_rd_forward_i ? ex_lsu_rd_data_i : id_lsu_rs2_data_i; // 前递后的源寄存器数据
+    assign lsu_rs2_data = id_lsu_rs2_rd_forward_i ? ex_lsu_rd_data_i : id_lsu_rs2_data_i; // 前递后的源寄存器数据
 
     assign is_load   = operator_lsu_type_i [`OPERATOR_TYPE_LOAD - `OPERATOR_TYPE_LSU_BASE] ;
     assign is_store  = operator_lsu_type_i [`OPERATOR_TYPE_STORE - `OPERATOR_TYPE_LSU_BASE] ;
@@ -71,6 +77,11 @@ module ydrasil_load_store_unit (
     //         id_lsu_rs2_data_i_ff <= lsu_rs2_data;
     //     end
     // end
+
+    assign lsu_ctrl_stall_o = is_load; 
+    assign lsu_ctrl_stall_wb_o = is_load_ff; // 假设与lsu_ctrl_stall_o相同
+    assign lsu_ctrl_waddr_rd_o = id_rd_waddr_i;
+    assign lsu_ctrl_waddr_rd_wb_o = rd_addr_ff;
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin

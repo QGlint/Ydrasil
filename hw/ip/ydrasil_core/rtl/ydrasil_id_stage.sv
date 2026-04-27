@@ -35,7 +35,11 @@ module ydrasil_id_stage #(
     output wire                            id_ex_rs2_rd_forward_o, // 前递控制信号
     output wire                            id_ex_rs1_rd_forward_o, // 前递控制信号
     output wire                            id_lsu_rs2_rd_forward_o, // 前递控制信号
-    // output wire                            id_mem_rs1_rd_forward_o, // 前递控制信号
+    // output wire                            id_lsu_rs1_rd_forward_o, // 前递控制信号
+    output wire [`REGS_ADDR_WIDTH-1:0]     id_ctrl_rs1_addr_o,
+    output wire [`REGS_ADDR_WIDTH-1:0]     id_ctrl_rs2_addr_o,
+
+
 
     // Generic writeback information
     output wire                            id_alu_rf_wen_rd_o,
@@ -198,6 +202,7 @@ module ydrasil_id_stage #(
     assign id_lsu_rs2_rd_forward_o = id_lsu_rs2_rd_forward_ff;
     // assign id_lsu_rs1_rd_forward_o = id_lsu_rs1_rd_forward_ff;
 
-
+    assign id_ctrl_rs1_addr_o = rf_raddr_rs1;
+    assign id_ctrl_rs2_addr_o = rf_raddr_rs2;
 
 endmodule

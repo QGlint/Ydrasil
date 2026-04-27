@@ -8,7 +8,7 @@ VFLAGS += $(addprefix -I,$(INC_DIRS))
 VFLAGS += -Wall
 VFLAGS += -D IVERILOG_VCD
 
-sim:
+comp:
 	@mkdir -p $(OBJ_DIR) $(OBJ_DIR_SIM) $(LOG_DIR) $(WAVE_DIR)
 
 ifeq ($(USE_BENDER),1)
@@ -28,7 +28,7 @@ endif
 	    $(if $(filter 1,$(USE_BENDER)),-f $(FLIST_FILE),$(RTL_SRCS)) $(if $(and $(filter 1,$(USE_BENDER)),$(filter 1,$(BENDER_INCLUDE_TB))),,$(TB_SRCS)) \
 	    -o $(OBJ_DIR_SIM)/simv \
 	    > $(LOG_DIR)/$(TOP).iv.comp_$(TIME_TAG).log 2> $(LOG_DIR)/$(TOP).iv.comp.err_$(TIME_TAG).log
-	
+sim:	
 	@echo "[RUN SIMULATION]"
 	cd $(OBJ_DIR_SIM) && vvp simv \
 	    > $(LOG_DIR)/$(TOP).iv.sim_$(TIME_TAG).log 2> $(LOG_DIR)/$(TOP).iv.sim.err_$(TIME_TAG).log

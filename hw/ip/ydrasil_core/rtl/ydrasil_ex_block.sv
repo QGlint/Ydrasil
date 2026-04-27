@@ -55,7 +55,7 @@ module ydrasil_ex_block #(
 	assign operand_a = id_ex_rs1_rd_forward_i ? alu_result_ff : operand_a_i;
 	assign operand_b = id_ex_rs2_rd_forward_i ? alu_result_ff : operand_b_i;
 
-	assign ex_alu_result_o = alu_result_ff;
+	assign ex_lsu_result_o = alu_result_ff;
 
 	assign ex_branch_jump_o = ex_branch_jump;
 

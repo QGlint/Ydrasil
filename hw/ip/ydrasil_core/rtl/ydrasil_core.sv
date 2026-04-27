@@ -87,6 +87,15 @@ module ydrasil_core #(
     wire                        dram_sel; 
     wire [`BUS_DATA_WIDTH-1:0]  lsu_mem_rdata_m; // 从DRAM读取的数据
 
+    //LSU -> CTRL
+    wire                            lsu_ctrl_stall;   
+    wire                           	lsu_ctrl_stall_wb;
+    wire [`REGS_ADDR_WIDTH-1:0]    	lsu_ctrl_waddr_rd;
+    wire [`REGS_ADDR_WIDTH-1:0]    	lsu_ctrl_waddr_rd_wb;
+
+    //LSU -> ID
+    wire [`REGS_ADDR_WIDTH-1:0]    id_ctrl_rs1_addr;
+    wire [`REGS_ADDR_WIDTH-1:0]    id_ctrl_rs2_addr;
 
     assign dram_sel = (lsu_mem_addr >= DRAM_ADDR_START) && (lsu_mem_addr <= DRAM_ADDR_END);
 
@@ -115,6 +124,10 @@ module ydrasil_core #(
 		.lsu_mem_wen_o     (lsu_mem_we),
 		.lsu_mem_req_o     (lsu_mem_req),
 		.lsu_mem_wmask_o   (lsu_mem_wmask),
+		.lsu_ctrl_stall_o       (lsu_ctrl_stall),
+		.lsu_ctrl_stall_wb_o    (lsu_ctrl_stall_wb),
+		.lsu_ctrl_waddr_rd_o    (lsu_ctrl_waddr_rd),
+		.lsu_ctrl_waddr_rd_wb_o (lsu_ctrl_waddr_rd_wb),
 		.lsu_wb_result_o   (lsu_wb_result),
 		.lsu_rf_rd_wen_o   (lsu_rf_wen_rd),
 		.lsu_rf_rd_waddr_o (lsu_rf_waddr_rd)
@@ -155,6 +168,8 @@ module ydrasil_core #(
 		.id_ex_rs2_rd_forward_o (id_ex_rs2_rd_forward),
 		.id_ex_rs1_rd_forward_o (id_ex_rs1_rd_forward),
 		.id_lsu_rs2_rd_forward_o (id_lsu_rs2_rd_forward),
+		.id_ctrl_rs1_addr_o (id_ctrl_rs1_addr),
+		.id_ctrl_rs2_addr_o (id_ctrl_rs2_addr),
 		.id_alu_rf_wen_rd_o (id_alu_rf_wen_rd),
 		.id_rf_waddr_rd_o   (id_rf_waddr_rd)
 	);
@@ -227,6 +242,12 @@ module ydrasil_core #(
 		.rst_n             (rst_n_i),
 		.ex_branch_jump_i  (ex_branch_jump),
 		.ex_branch_target_i(ex_branch_target),
+		.lsu_ctrl_stall_i       (lsu_ctrl_stall),
+		.lsu_ctrl_stall_wb_i    (lsu_ctrl_stall_wb),
+		.lsu_ctrl_waddr_rd_i    (lsu_ctrl_waddr_rd),
+		.lsu_ctrl_waddr_rd_wb_i (lsu_ctrl_waddr_rd_wb),
+		.id_ctrl_rs1_addr_i     (id_ctrl_rs1_addr),
+		.id_ctrl_rs2_addr_i     (id_ctrl_rs2_addr),
 		.stall_if_o        (stall_if),
 		.stall_id_o        (stall_id),
 		.flush_if_o        (flush_if),

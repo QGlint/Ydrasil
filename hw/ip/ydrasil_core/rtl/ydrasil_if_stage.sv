@@ -67,7 +67,7 @@ module ydrasil_if_stage #(
 			if_id_pc_ff    <= `RESET_INS;
 			if_id_instr_ff <= `RV32I_INS_NOP;
 		end 
-		else begin
+		else if(!stall_if_i) begin
 			if_id_pc_ff    <= pc_ff;
 			if_id_instr_ff <= if_id_instr;
 		end
