@@ -93,23 +93,23 @@ endif
 	    $(if $(filter 1,$(USE_BENDER)),,$(RTL_SRCS)) \
 	    $(if $(and $(filter 1,$(USE_BENDER)),$(filter 1,$(BENDER_INCLUDE_TB))),,$(TB_SRCS)) \
 	    $(SIM_CSRCS)\
-	    >$(LOG_DIR)/$(TOP).ver.comp_$(TIME_TAG).log 2>$(LOG_DIR)/$(TOP).ver.comp.err_$(TIME_TAG).log
+	    >$(LOG_DIR)/$(TOP).ver.comp.log 2>$(LOG_DIR)/$(TOP).ver.comp.err.log
 
 sim:
 	@echo "[VERILATOR RUN]"
 	cd $(OBJ_DIR_SIM) && $(BIN) +trace \
-	    >$(LOG_DIR)/$(TOP).ver.sim_$(TIME_TAG).log 2>$(LOG_DIR)/$(TOP).ver.sim.err_$(TIME_TAG).log
+	    >$(LOG_DIR)/$(TOP).ver.sim_$(TIME_TAG).log 2>$(LOG_DIR)/$(TOP).ver.sim.err.log
 	
 ifeq ($(VERILATOR_TRACE),1)
 	@echo "[MOVE WAVE]"
 	@if ls $(OBJ_DIR_SIM)/*.vcd 1>/dev/null 2>&1; then \
-	    mv $(OBJ_DIR_SIM)/*.vcd \
-	       $(WAVE_DIR)/$(TOP)_$(TIME_TAG).vcd ; \
+	    mv -f $(OBJ_DIR_SIM)/*.vcd \
+	       $(WAVE_DIR)/$(TOP).vcd ; \
 	fi
 
 	@if ls $(OBJ_DIR_SIM)/*.fst 1>/dev/null 2>&1; then \
-	    mv $(OBJ_DIR_SIM)/*.fst \
-	       $(WAVE_DIR)/$(TOP)_$(TIME_TAG).fst ; \
+	    mv -f $(OBJ_DIR_SIM)/*.fst \
+	       $(WAVE_DIR)/$(TOP).fst ; \
 	fi
 endif
 
@@ -124,5 +124,5 @@ resim:
 
 wave:
 ifeq ($(VERILATOR_TRACE),1)
-	gtkwave $$(ls -t $(WAVE_DIR)/$(TOP)_*.vcd | head -n 1) &
+	gtkwave $$(ls -t $(WAVE_DIR)/$(TOP).vcd | head -n 1) &
 endif

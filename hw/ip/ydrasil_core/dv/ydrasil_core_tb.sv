@@ -1,7 +1,7 @@
 `timescale 1ns/1ns
 parameter CNT_s = 40;
 parameter CNT_us = 50;
-parameter time_end = CNT_us; // 40s
+parameter time_end = 50*CNT_us; // 40s
 
 module ydrasil_core_tb;
 

@@ -19,6 +19,11 @@ module ydrasil_ins_decoder #(
 	output wire       operand_a_pc_sel_o, // 选择ALU操作数A的来源：0表示来自寄存器，1表示来自PC（用于AUIPC指令）
 	output wire       bt_a_rs_sel_o, // 选择分支目标地址计算的操作数A的来源：0表示来自寄存器，1表示来自PC（用于JALR指令）
 
+	output wire [`BUS_ADDR_WIDTH-1:0] 	csr_reg_raddr_o,  // 读CSR寄存器地址
+    output wire                        	csr_ex_we_o,        // 写CSR寄存器标志
+    output wire [`BUS_ADDR_WIDTH-1:0] 	csr_ex_waddr_o,      // 写CSR寄存器地址
+	output 	wire [`op_CSR_INFO_WIDTH-1:0] csr_op_info,
+
 	output wire [`OPERATOR_WIDTH-1:0] operator_o,
 	output wire [`OP_LSU_INFO_WIDTH-1:0] operator_lsu_o,
 	output wire [`OPERATOR_TYPE_WIDTH-1:0] operator_type_o
@@ -28,6 +33,7 @@ module ydrasil_ins_decoder #(
 	wire [`OP_ALU_INFO_WIDTH-1:0] alu_op_info;
 	wire [`OP_BJP_INFO_WIDTH-1:0] bjp_op_info;
 	wire [`OP_LSU_INFO_WIDTH-1:0] lsu_op_info;
+	wire [`op_CSR_INFO_WIDTH-1:0] csr_op_info;
 
 	wire [6:0] opcode 		;
 	wire [4:0]	rf_waddr_rd ;
@@ -60,13 +66,14 @@ module ydrasil_ins_decoder #(
 	wire [31:0] imm_u 		;
 	wire [31:0] imm_j 		;
 	wire [31:0] imm_shamt 	;
-
+    wire [31:0] imm_csr;
 	assign imm_i 		= {{20{instr_i[31]}}, instr_i[31:20]};
 	assign imm_s 		= {{20{instr_i[31]}}, instr_i[31:25], instr_i[11:7]};
 	assign imm_b 		= {{19{instr_i[31]}}, instr_i[31], instr_i[7], instr_i[30:25], instr_i[11:8], 1'b0};
 	assign imm_u 		= {instr_i[31:12], 12'b0};
 	assign imm_j 		= {{11{instr_i[31]}}, instr_i[31], instr_i[19:12], instr_i[20], instr_i[30:21], 1'b0};
 	assign imm_shamt 	= {27'h0, instr_i[24:20]}; // 用于I类型中的移位指令，表示移位量
+	assign imm_csr 		= {27'h0, instr_i[19:15]};
 
 	wire is_op_imm   ;
 	wire is_op_r_m   ;
@@ -77,6 +84,7 @@ module ydrasil_ins_decoder #(
 	wire is_jalr     ;
 	wire is_lui      ;
 	wire is_auipc    ;
+	wire is_csr	  ;
 
 	assign is_op_imm   = (opcode == `RV32I_INS_TYPE_I);
 	assign is_op_r_m   = (opcode == `RV32I_INS_TYPE_R_M);
@@ -87,6 +95,7 @@ module ydrasil_ins_decoder #(
 	assign is_jalr     = (opcode == `RV32I_INS_JALR) & funct3_is_000;
 	assign is_lui      = (opcode == `RV32I_INS_LUI);
 	assign is_auipc    = (opcode == `RV32I_INS_AUIPC);
+	assign is_csr      = (opcode == `RV32I_INS_CSR);
 
 	wire is_beq      ;
 	wire is_bne      ;
@@ -180,6 +189,22 @@ module ydrasil_ins_decoder #(
 	assign is_ecall  = (instr_i == `RV32I_INS_ECALL);
 	assign is_ebreak = (instr_i == `RV32I_INS_EBREAK);
 
+	wire is_csrrw ;
+    wire is_csrrs ;
+    wire is_csrrc ;
+    wire is_csrrwi;
+    wire is_csrrsi;
+    wire is_csrrci;
+
+
+	assign is_csrrw =  is_csr 	& (funct3 == `RV32I_INS_CSRRW);
+	assign is_csrrs =  is_csr 	& (funct3 == `RV32I_INS_CSRRS);
+	assign is_csrrc =  is_csr 	& (funct3 == `RV32I_INS_CSRRC);
+	assign is_csrrwi = is_csr  	& (funct3 == `RV32I_INS_CSRRWI);
+	assign is_csrrsi = is_csr  	& (funct3 == `RV32I_INS_CSRRSI);
+	assign is_csrrci = is_csr  	& (funct3 == `RV32I_INS_CSRRCI);
+
+
 	assign alu_op_info[`OP_ALU_ADD]   = is_addi | is_add | is_auipc | is_lui;
 	assign alu_op_info[`OP_ALU_SUB]   = is_sub;
 	assign alu_op_info[`OP_ALU_SLL]   = is_slli | is_sll;
@@ -229,6 +254,20 @@ module ydrasil_ins_decoder #(
 	assign operator_type_o [`OPERATOR_TYPE_LOAD] = is_load;
 	assign operator_type_o [`OPERATOR_TYPE_STORE] = is_store;
 	
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 	// wire [`OPERATOR_WIDTH-1:0] alu_op_info_mark = ({`OPERATOR_WIDTH{is_alu_use }}& {{{`OPERATOR_WIDTH-`OP_ALU_INFO_WIDTH}{1'b0}},alu_op_info});
 	// wire [`OPERATOR_WIDTH-1:0] bjp_op_info_mark = ({`OPERATOR_WIDTH{is_bjp_use }}& {{{`OPERATOR_WIDTH-`OP_BJP_INFO_WIDTH}{1'b0}},bjp_op_info});
 	// assign lsu_op_info_mark =  operator_type_o [OPERATOR_TYPE_LOAD] ? {{`OPERATOR_WIDTH-`OP_LSU_INFO_WIDTH{1'b0}},lsu_op_info} : '0;
@@ -238,6 +277,7 @@ module ydrasil_ins_decoder #(
 	wire [31:0] imm_u_mask 		;
 	wire [31:0] imm_j_mask 		;
 	wire [31:0] imm_shamt_mask ;
+	wire [31:0] imm_csr_mask	;
 
 	assign imm_i_mask 	= ((is_op_r_m & ! is_shift) | is_jalr | is_load) ? imm_i : '0;
 	assign imm_s_mask 	= is_store ? imm_s : '0;
@@ -245,6 +285,7 @@ module ydrasil_ins_decoder #(
 	assign imm_u_mask 	= (is_lui | is_auipc) ? imm_u : '0;
 	assign imm_j_mask 	= is_jal ? imm_j : '0;
 	assign imm_shamt_mask = is_shift ? imm_shamt : '0;
+	assign imm_csr_mask = is_csr ? imm_csr : '0;
 
 	assign imm_i_o = imm_i_mask | imm_s_mask | imm_b_mask | imm_u_mask | imm_j_mask | imm_shamt_mask;
 
