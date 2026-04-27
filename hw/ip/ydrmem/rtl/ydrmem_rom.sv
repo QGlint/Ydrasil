@@ -49,7 +49,8 @@ module ydrmem_rom #(
         end
     end
 
-    logic [ADDR_WIDTH-1:0] word_addr = addr_i[ADDR_WIDTH-1:0];
+    wire [ADDR_WIDTH-1:0] word_addr ;
+    assign word_addr = addr_i;
 
     assign data_o = mem_r[word_addr];
 

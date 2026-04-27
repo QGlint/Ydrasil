@@ -57,8 +57,8 @@ module ydrmem_ram #(
         end
     end
 
-    wire [ADDR_WIDT-1:0] word_addr;
-    assign word_addr = addr_i[ADDR_WIDTH-1:0];
+    wire [ADDR_WIDTH-1:0] word_addr;
+    assign word_addr = addr_i;
 
     // 写入逻辑
     always @(posedge clk) begin

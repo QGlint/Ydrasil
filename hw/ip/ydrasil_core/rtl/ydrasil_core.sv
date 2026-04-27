@@ -181,7 +181,7 @@ module ydrasil_core #(
 		.lsu_mem_we_i  (lsu_mem_we),
 		.lsu_mem_req_i (lsu_mem_req),
 		.lsu_mem_wmask_i(lsu_mem_wmask),
-        .dram_sel_i     (dram_sel),
+        .dram_sel_i     (dram_sel)
 		// .hold_flag_o   (hold_flag)
 	);
 

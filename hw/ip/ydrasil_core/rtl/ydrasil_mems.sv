@@ -17,7 +17,7 @@ module ydrasil_mems (
     input  wire                       lsu_mem_req_i, 
     input  wire [                3:0] lsu_mem_wmask_i, 
 
-    input  wire                         dram_sel_i,       // 来自EXU的DRAM访问选择信号
+    input  wire                         dram_sel_i       // 来自EXU的DRAM访问选择信号
     // 暂停信号
     // output wire hold_flag_o  // 暂停流水线信号
 );

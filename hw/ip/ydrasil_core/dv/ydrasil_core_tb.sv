@@ -38,7 +38,7 @@ module ydrasil_core_tb;
 	assign rst = ~rst_n;
 
 	initial begin
-		repeat (2000000000) @(posedge clk);
+		repeat (2000000) @(posedge clk);
 		$display("[TB] timeout reached, finish simulation");
 		$finish;
 	end
