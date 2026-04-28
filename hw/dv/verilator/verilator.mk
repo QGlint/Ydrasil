@@ -8,7 +8,7 @@ VERILATOR_TRACE ?= 1
 
 BIN := $(OBJ_DIR)/$(TOP)
 OBJ_DIR_SIM := $(OBJ_DIR)/verilator
-
+LOG_OUTPUT ?= 1 
 ifeq ($(VERILATOR_MOD),cc)
 SIM_C_DIR := $(PROJECT_ROOT)/hw/dv/verilator
 SIM_CSRCS := $(SIM_C_DIR)/sim.cpp
@@ -97,9 +97,14 @@ endif
 
 sim:
 	@echo "[VERILATOR RUN]"
+ifeq ($(LOG_OUTPUT),1) 
 	cd $(OBJ_DIR_SIM) && $(BIN) +trace \
-	    >$(LOG_DIR)/$(TOP).ver.sim.log 2>$(LOG_DIR)/$(TOP).ver.sim.err.log
-	
+		>$(LOG_DIR)/$(TOP).ver.sim.log 2>$(LOG_DIR)/$(TOP).ver.sim.err.log
+else
+	cd $(OBJ_DIR_SIM) && $(BIN) +trace
+endif
+
+
 ifeq ($(VERILATOR_TRACE),1)
 	@echo "[MOVE WAVE]"
 	@if ls $(OBJ_DIR_SIM)/*.vcd 1>/dev/null 2>&1; then \

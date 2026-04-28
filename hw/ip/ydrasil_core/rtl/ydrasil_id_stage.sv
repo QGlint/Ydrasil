@@ -116,7 +116,7 @@ module ydrasil_id_stage #(
 
     wire [`OP_SYS_INFO_WIDTH-1:0]  sys_op_info;
     reg [`OP_SYS_INFO_WIDTH-1:0]   sys_op_info_ff;
-
+    wire                            operand_b_jump_sel;
 
 
     ydrasil_ins_decoder #(
@@ -134,6 +134,7 @@ module ydrasil_id_stage #(
         .operand_a_pc_sel_o (operand_a_pc_sel),
         .operand_a_imm_sel_o(operand_a_imm_sel),
         .bt_a_rs_sel_o      (bt_a_rs_sel),
+        .operand_b_jump_sel_o(operand_b_jump_sel),
         .csr_reg_raddr_o    (csr_reg_raddr),
         // .csr_ex_we_o        (csr_ex_we),
         .csr_ex_waddr_o     (csr_ex_waddr),
@@ -144,13 +145,18 @@ module ydrasil_id_stage #(
         .operator_type_o    (operator_type)
     );
 
+
+
+
+
     assign rf_addr_rs1_o = rf_raddr_rs1;
     assign rf_addr_rs2_o = rf_raddr_rs2;
 
     // Keep ALU source selection consistent with decoder control outputs.
     assign operand_a     =  operand_a_pc_sel ? if_id_pc_i :
                             operand_a_imm_sel ? imm_i: rf_rdata_rs1_i;
-    assign operand_b     = operand_b_rs_sel ? rf_rdata_rs2_i : DATA_WIDTH'(imm_i);
+    assign operand_b     = operand_b_jump_sel? 32'h4 :operand_b_rs_sel ? rf_rdata_rs2_i : DATA_WIDTH'(imm_i);
+
 
     assign bt_a_operand = bt_a_rs_sel ? rf_rdata_rs1_i : if_id_pc_i;
     assign bt_b_operand = imm_i;
@@ -159,7 +165,7 @@ module ydrasil_id_stage #(
     assign rs1_rd_hazard = (rf_raddr_rs1 != 0) && (rf_raddr_rs1 == rf_waddr_rd_ff) && rf_wen_rd_ff;
 
     assign id_ex_rs2_rd_forward = rs2_rd_hazard && operand_b_rs_sel;
-    assign id_ex_rs1_rd_forward = rs1_rd_hazard && (~operand_a_pc_sel);
+    assign id_ex_rs1_rd_forward = rs1_rd_hazard && (~(operand_a_pc_sel&& operand_a_imm_sel)) | bt_a_rs_sel;
     assign id_lsu_rs2_rd_forward = rs2_rd_hazard ;
     // assign id_lsu_rs1_rd_forward = rs1_rd_hazard ;
 

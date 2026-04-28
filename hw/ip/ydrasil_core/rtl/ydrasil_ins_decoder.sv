@@ -19,6 +19,8 @@ module ydrasil_ins_decoder #(
 	output wire       operand_a_pc_sel_o, // 选择ALU操作数A的来源：0表示来自寄存器，1表示来自PC（用于AUIPC指令）
 	output wire       bt_a_rs_sel_o, // 选择分支目标地址计算的操作数A的来源：0表示来自寄存器，1表示来自PC（用于JALR指令）
 	output wire       operand_a_imm_sel_o, // 选择ALU操作数A的立即数来源：0表示不使用，1表示使用
+	output wire 	  operand_b_jump_sel_o, 
+
 
 	output wire [`CSR_ADDR_WIDTH-1:0] 	 csr_reg_raddr_o,  // 读CSR寄存器地址
     // output wire                        	 csr_ex_we_o,        // 写CSR寄存器标志
@@ -303,13 +305,14 @@ module ydrasil_ins_decoder #(
 	assign operand_a_imm_sel = is_csrrwi | is_csrrsi | is_csrrci;
 
 	assign operand_b_rs_sel_o = is_branch | is_store |is_op_r_m;
-	assign operand_a_pc_sel_o = is_auipc  ;
+	assign operand_a_pc_sel_o = is_auipc  |is_jal |is_jalr;
 	assign bt_a_rs_sel_o = is_jalr;
 
 	assign operand_b_rs_sel_o = operand_b_rs_sel;
 	assign operand_a_pc_sel_o = operand_a_pc_sel;
 	assign operand_a_imm_sel_o = operand_a_imm_sel;
 	assign bt_a_rs_sel_o = bt_a_rs_sel;
+	assign operand_b_jump_sel_o = is_jal | is_jalr;
 
 	assign rf_waddr_rd_o = rf_waddr_rd;
 	assign rf_raddr_rs1_o = rf_raddr_rs1;

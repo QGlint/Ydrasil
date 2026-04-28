@@ -15,8 +15,8 @@ BENDER ?= bender
 # ITCM_MEM ?= $(PROJECT_ROOT)/hw/dv/test_data/mem_generated/rv32ui-p-add.mem
 # # DTCM_MEM ?= $(PROJECT_ROOT)/hw/dv/test_data/mem/dram0.mem
 
-ITCM_MEM ?= $(PROJECT_ROOT)/hw/dv/test_data/mem_generated/rv32ui-p-add.mem
-DTCM_MEM ?= $(PROJECT_ROOT)/hw/dv/test_data/mem_generated/rv32ui-p-add.mem
+ITCM_MEM ?= $(PROJECT_ROOT)/hw/dv/test_data/mem_generated/rv32ui-p-auipc.mem
+# DTCM_MEM ?= $(PROJECT_ROOT)/hw/dv/test_data/mem_generated/rv32ui-p-add.mem
 
 # --- 自动化测试相关定义 ---
 # 测试数据所在的真实路径
@@ -43,7 +43,7 @@ sim:
 	@$(MAKE) -C hw/dv -f Makefile sim
 
 # --- 核心自动化测试逻辑 ---
-test_all: comp
+test_all: 
 	@echo "==========================================================="
 	@echo "   开始全量指令集回归测试 (Total: $(words $(UI_TEST_CASES)) cases)"
 	@echo "==========================================================="
@@ -51,12 +51,12 @@ test_all: comp
 	@rm -f $(RESULT_DIR)/summary.log
 	@for tst in $(UI_TEST_CASES); do \
 		echo -n "Running [$$tst] ... "; \
-		$(MAKE) sim \
+		$(MAKE) LOG_OUTPUT=0 comp sim \
 			ITCM_MEM=$(TEST_SRC_DIR)/$$tst.mem \
 			DTCM_MEM=$(TEST_SRC_DIR)/$$tst.mem \
 			> $(RESULT_DIR)/$$tst.log 2>&1; \
 		\
-		if grep -q "RISCV-TEST-RESULT: PASS" $(RESULT_DIR)/$$tst.log; then \
+		if grep -q "TEST_PASS" $(RESULT_DIR)/$$tst.log; then \
 			echo -e "\033[32m[ PASSED ]\033[0m"; \
 			echo "$$tst: PASS" >> $(RESULT_DIR)/summary.log; \
 		else \

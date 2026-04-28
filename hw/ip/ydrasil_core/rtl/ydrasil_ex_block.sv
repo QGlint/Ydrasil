@@ -57,6 +57,12 @@ module ydrasil_ex_block #(
 	wire [31:0] operand_a;
 	wire [31:0] operand_b;
 
+	wire [31:0] bt_a_operand;
+	wire [31:0] bt_b_operand;
+
+	assign bt_a_operand = id_ex_rs1_rd_forward_i ? alu_result_ff :bt_a_operand_i;
+	assign bt_b_operand = bt_b_operand_i;
+
     assign bt_alu_result = bt_a_operand_i + bt_b_operand_i;
 	assign ex_lsu_mem_addr_o = alu_result;
     assign ex_branch_target_o = interrupt_i ? clint_ex_int_addr_i:bt_alu_result;
