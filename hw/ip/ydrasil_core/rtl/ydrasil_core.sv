@@ -117,8 +117,8 @@ module ydrasil_core #(
 	wire [`REGS_DATA_WIDTH-1:0]      csr_clint_mepc;
 	wire [`REGS_DATA_WIDTH-1:0]      csr_clint_mstatus;
 	wire                             global_int_en;
-	wire                             clint_ex_int_addr;
-	wire [`INST_ADDR_WIDTH-1:0]      interrupt;
+	wire                             interrupt;
+	wire [`INST_ADDR_WIDTH-1:0]      clint_ex_int_addr;
 	wire                             clint_stall;
 
     wire [`BUS_ADDR_WIDTH-1:0] id_instr_addr;
