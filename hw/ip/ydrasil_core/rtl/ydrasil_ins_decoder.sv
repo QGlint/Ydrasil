@@ -214,7 +214,7 @@ module ydrasil_ins_decoder #(
 	assign is_csrrci = is_csr  	& (funct3 == `RV32I_INS_CSRRCI);
 
 
-	assign alu_op_info[`OP_ALU_ADD]   = is_addi | is_add | is_auipc | is_lui;
+	assign alu_op_info[`OP_ALU_ADD]   = is_addi | is_add ;
 	assign alu_op_info[`OP_ALU_SUB]   = is_sub;
 	assign alu_op_info[`OP_ALU_SLL]   = is_slli | is_sll;
 	assign alu_op_info[`OP_ALU_SLT]   = is_slti | is_slt;
@@ -281,7 +281,7 @@ module ydrasil_ins_decoder #(
 	wire [31:0] imm_shamt_mask ;
 	wire [31:0] imm_csr_mask	;
 
-	assign imm_i_mask 	= ((is_op_r_m & ! is_shift) | is_jalr | is_load) ? imm_i : '0;
+	assign imm_i_mask 	= ((is_op_imm & ! is_shift) | is_jalr | is_load) ? imm_i : '0;
 	assign imm_s_mask 	= is_store ? imm_s : '0;
 	assign imm_b_mask 	= is_branch ? imm_b : '0;
 	assign imm_u_mask 	= (is_lui | is_auipc) ? imm_u : '0;

@@ -7,6 +7,7 @@ module ydrasil_if_stage #(
 
 	// 流水线控制信号
 	input  wire        stall_if_i,
+	input  wire        stall_pc_i,
 	input  wire        flush_if_i,
 
 	// 后级跳转
@@ -30,6 +31,7 @@ module ydrasil_if_stage #(
 	wire [31:0] pc_n;
 	wire [31:0] pc_plus4;
 	wire [31:0] if_id_instr;
+	wire [31:0] pc_now;
 	reg [31:0] pc_ff;
 	reg [31:0] if_id_pc_ff;
 	reg [31:0] if_id_instr_ff;
@@ -38,12 +40,12 @@ module ydrasil_if_stage #(
 	// 默认顺序取指地址：PC + 4
 	assign pc_plus4   = pc_ff + 32'd4;
 	// 若发生重定向则跳转到目标 PC，否则顺序执行
-	assign pc_n       = branch_jump_i ? branch_target_i : pc_plus4;
+	assign pc_n       = branch_jump_i ? branch_target_i : stall_pc_i ? pc_ff : pc_plus4;
 
 	assign if_mem_addr_o = pc_ff;
 
 	assign if_id_pc_o    = if_id_pc_ff;
-
+	assign pc_now = flush_if_i ? `RESET_INS : pc_ff;
 	assign if_id_instr_o = if_id_instr_ff;
 	assign if_id_instr = flush_if_i ? `RV32I_INS_NOP : if_mem_rdata_i;
 
@@ -53,7 +55,7 @@ module ydrasil_if_stage #(
 	always_ff @(posedge clk_i or negedge rst_n_i) begin
 		if (!rst_n_i) begin
 			pc_ff <= `RESET_INS;
-		end else if (!stall_if_i) begin
+		end else begin
 			pc_ff <= pc_n;
 		end
 	end
@@ -68,7 +70,7 @@ module ydrasil_if_stage #(
 			if_id_instr_ff <= `RV32I_INS_NOP;
 		end 
 		else if(!stall_if_i) begin
-			if_id_pc_ff    <= pc_ff;
+			if_id_pc_ff    <= pc_now;
 			if_id_instr_ff <= if_id_instr;
 		end
 	end

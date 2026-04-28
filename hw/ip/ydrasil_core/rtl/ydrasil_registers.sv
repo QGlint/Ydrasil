@@ -34,7 +34,7 @@ module ydrasil_registers (
     genvar i;
     generate
         for (i = 1; i < `REGS_NUM; i = i + 1) begin : gen_regs_we
-            assign registers_wen[i] = (rf_wen_rd_i ) && (rf_waddr_rd_i == i) && (!rst_n);
+            assign registers_wen[i] = (rf_wen_rd_i ) && (rf_waddr_rd_i == i) && (rst_n);
         end
     endgenerate
 
@@ -54,8 +54,12 @@ module ydrasil_registers (
     endgenerate
 
 
-    assign rf_rdata_rs1_o = registers[rf_raddr_rs1_i];
+    assign rf_rdata_rs1_o = (rf_raddr_rs1_i == '0) ? '0 :
+                      ((rf_raddr_rs1_i == rf_waddr_rd_i) && (rf_wen_rd_i)) ? rf_wdata_rd_i :
+                       registers[rf_raddr_rs1_i];
 
-    assign rf_rdata_rs2_o = registers[rf_raddr_rs2_i];
+    assign rf_rdata_rs2_o = (rf_raddr_rs2_i == '0) ? '0 :
+                      ((rf_raddr_rs2_i == rf_waddr_rd_i) && (rf_wen_rd_i)) ? rf_wdata_rd_i :
+                       registers[rf_raddr_rs2_i];
 
 endmodule
