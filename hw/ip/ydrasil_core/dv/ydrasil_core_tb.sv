@@ -1,6 +1,7 @@
 `timescale 1ns/1ns
 `include "define_mem_reg.svh"
-parameter CNT_s = 40;
+parameter CNT_s = 1000*1000*50;
+parameter CNS_ms = 1000*50;
 parameter CNT_us = 50;
 parameter time_end = 50*CNT_us; // 40s
 

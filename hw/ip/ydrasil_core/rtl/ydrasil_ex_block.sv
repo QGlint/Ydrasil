@@ -66,9 +66,9 @@ module ydrasil_ex_block #(
 	assign operand_a = id_ex_rs1_rd_forward_i ? alu_result_ff : operand_a_i;
 	assign operand_b = id_ex_rs2_rd_forward_i ? alu_result_ff : operand_b_i;
 
-	assign ex_lsu_result_o = alu_result_ff | interrupt_i;
+	assign ex_lsu_result_o = alu_result_ff ;
 
-	assign ex_branch_jump_o = ex_branch_jump;
+	assign ex_branch_jump_o = ex_branch_jump | interrupt_i;
 
 	ydrasil_alu #(
 		.DATAWIDTH(DATA_WIDTH)
@@ -89,23 +89,7 @@ module ydrasil_ex_block #(
 
 	wire [31:0] alu_csr_result;
 	wire csr_wen;
-	always @(posedge clk_i or negedge rst_n_i) begin
-		if(!rst_n_i) begin
-			alu_result_ff <= '0;
-			alu_rf_wen_rd_ff <= 1'b0;
-			alu_rf_waddr_rd_ff <= '0;
-		end 
-		else if(flush_ex_i) begin
-			alu_result_ff <= '0;
-			alu_rf_wen_rd_ff <= 1'b0;
-			alu_rf_waddr_rd_ff <= '0;
-		end
-		else begin
-			alu_result_ff <= alu_csr_result;
-			alu_rf_wen_rd_ff <= alu_rf_wen_rd | csr_wen;
-			alu_rf_waddr_rd_ff <= alu_rf_waddr_rd;
-		end
-	end
+
 
 	assign alu_result_o = alu_result_ff;
 	assign alu_rf_wen_rd_o = alu_rf_wen_rd_ff;
@@ -122,17 +106,52 @@ module ydrasil_ex_block #(
 		wire [31:0]csr_reg_wdata ;
 		wire [31:0]csr_wdata ;
 
+	reg [`REGS_DATA_WIDTH-1:0] ex_csr_wdata_o_ff;
+	reg 						ex_csr_wen_o_ff;
+	reg [`CSR_ADDR_WIDTH-1:0] ex_csr_waddr_o_ff;
+
+
 	assign csr_reg_wdata = interrupt_i ? '0: csr_ex_rdata_i;
 	assign csr_wdata = interrupt_i ? '0:
-							({`REGS_DATA_WIDTH{csr_csrrw}} & operand_a_i) |
-                          	({`REGS_DATA_WIDTH{csr_csrrs}} & (operand_a_i | csr_ex_rdata_i)) |
-                          	({`REGS_DATA_WIDTH{csr_csrrc}} & (csr_ex_rdata_i & (~operand_a_i)));
+							({`REGS_DATA_WIDTH{csr_csrrw}} & operand_a) |
+                          	({`REGS_DATA_WIDTH{csr_csrrs}} & (operand_a | csr_ex_rdata_i)) |
+                          	({`REGS_DATA_WIDTH{csr_csrrc}} & (csr_ex_rdata_i & (~operand_a)));
 	assign csr_wen = op_csr;
-	assign ex_csr_wdata_o = csr_wdata;
-	assign ex_csr_wen_o = csr_wen;
-	assign ex_csr_waddr_o = id_ex_csr_waddr_i;
+	
+	always_ff @(posedge clk_i or negedge rst_n_i) begin
+		if(!rst_n_i) begin
+			alu_result_ff <= '0;
+			alu_rf_wen_rd_ff <= 1'b0;
+			alu_rf_waddr_rd_ff <= '0;
+			ex_csr_wdata_o_ff <= '0;
+			ex_csr_wen_o_ff <= 1'b0;
+			ex_csr_waddr_o_ff <= '0;
+		end 
+		else if(flush_ex_i) begin
+			alu_result_ff <= '0;
+			alu_rf_wen_rd_ff <= 1'b0;
+			alu_rf_waddr_rd_ff <= '0;
+			ex_csr_wdata_o_ff <= '0;
+			ex_csr_wen_o_ff <= 1'b0;
+			ex_csr_waddr_o_ff <= '0;
+		end
+		else begin
+			alu_result_ff <= alu_csr_result;
+			alu_rf_wen_rd_ff <= alu_rf_wen_rd | csr_wen;
+			alu_rf_waddr_rd_ff <= alu_rf_waddr_rd;
+			ex_csr_wdata_o_ff <= csr_wdata;
+			ex_csr_wen_o_ff <= csr_wen;
+			ex_csr_waddr_o_ff <= id_ex_csr_waddr_i;
+		end
+	end
+	
+	assign ex_csr_wdata_o = ex_csr_wdata_o_ff;
+	assign ex_csr_wen_o = ex_csr_wen_o_ff;
+	assign ex_csr_waddr_o = ex_csr_waddr_o_ff;
 	assign alu_csr_result = ({32{csr_wen}} & csr_reg_wdata )|
 							({32{alu_rf_wen_rd} }& alu_result) ;
+
+
 
 
 endmodule

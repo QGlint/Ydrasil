@@ -63,8 +63,8 @@ module clint (
     output wire [`REGS_DATA_WIDTH-1:0] clint_csr_data_o,
 
     // to ex
-    output wire [`INST_ADDR_WIDTH-1:0] interrupt_o,   //ecall和ebreak的返回地址
-    output wire                        clint_ex_int_addr_o  //ecall和ebreak的中断信号
+    output wire [`INST_ADDR_WIDTH-1:0] clint_ex_int_addr_o,   //ecall和ebreak的返回地址
+    output wire                        interrupt_o  //ecall和ebreak的中断信号
 );
 
     wire    sys_op_ecall_i;
