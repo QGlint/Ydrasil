@@ -20,6 +20,14 @@ module ydrasil_ex_block #(
 	input  wire                            id_ex_rs2_rd_forward_i,
 	input  wire                            id_ex_rs1_rd_forward_i,
 
+	input  wire [`CSR_ADDR_WIDTH-1:0] 	   id_ex_csr_waddr_i,
+	input  wire [`OP_CSR_INFO_WIDTH-1:0]   id_op_csr_info_i,
+	input  wire [DATA_WIDTH-1:0]           csr_ex_rdata_i,
+
+	output wire 						   ex_csr_wen_o,
+	output wire [DATA_WIDTH-1:0]           ex_csr_wdata_o,
+	output wire [`CSR_ADDR_WIDTH-1:0] 	   ex_csr_waddr_o,
+
 	output wire                            ex_branch_jump_o,      // to CTRL
 	output wire [DATA_WIDTH-1:0]           ex_branch_target_o, // to CTRL
     output wire [`BUS_ADDR_WIDTH-1:0]      ex_lsu_mem_addr_o,      // to EX 
@@ -76,6 +84,8 @@ module ydrasil_ex_block #(
 		.alu_rf_waddr_rd_o (alu_rf_waddr_rd)
 	);
 
+	wire [31:0] alu_csr_result;
+	wire csr_wen;
 	always @(posedge clk_i or negedge rst_n_i) begin
 		if(!rst_n_i) begin
 			alu_result_ff <= '0;
@@ -88,8 +98,8 @@ module ydrasil_ex_block #(
 			alu_rf_waddr_rd_ff <= '0;
 		end
 		else begin
-			alu_result_ff <= alu_result;
-			alu_rf_wen_rd_ff <= alu_rf_wen_rd;
+			alu_result_ff <= alu_csr_result;
+			alu_rf_wen_rd_ff <= alu_rf_wen_rd | csr_wen;
 			alu_rf_waddr_rd_ff <= alu_rf_waddr_rd;
 		end
 	end
@@ -97,6 +107,28 @@ module ydrasil_ex_block #(
 	assign alu_result_o = alu_result_ff;
 	assign alu_rf_wen_rd_o = alu_rf_wen_rd_ff;
 	assign alu_rf_waddr_rd_o = alu_rf_waddr_rd_ff;
+
+	//csr
+
+		wire op_csr = operator_type_i[`OPERATOR_TYPE_CSR] ;
+
+		wire csr_csrrw = op_csr & id_op_csr_info_i[`OP_CSR_CSRRW];
+		wire csr_csrrs = op_csr & id_op_csr_info_i[`OP_CSR_CSRRS];
+		wire csr_csrrc = op_csr & id_op_csr_info_i[`OP_CSR_CSRRC];
+
+		wire [31:0]csr_reg_wdata ;
+		wire [31:0]csr_wdata ;
+
+	assign csr_reg_wdata = csr_ex_rdata_i;
+	assign csr_wdata = 	({`REGS_DATA_WIDTH{csr_csrrw}} & operand_a_i) |
+                          	({`REGS_DATA_WIDTH{csr_csrrs}} & (operand_a_i | csr_ex_rdata_i)) |
+                          	({`REGS_DATA_WIDTH{csr_csrrc}} & (csr_ex_rdata_i & (~operand_a_i)));
+	assign csr_wen = op_csr;
+	assign ex_csr_wdata_o = csr_wdata;
+	assign ex_csr_wen_o = csr_wen;
+	assign ex_csr_waddr_o = id_ex_csr_waddr_i;
+	assign alu_csr_result = ({32{csr_wen}} & csr_reg_wdata )|
+							({32{alu_rf_wen_rd} }& alu_result) ;
 
 
 endmodule

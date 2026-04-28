@@ -20,6 +20,8 @@ sources:
       - rtl/ydrasil_mems.sv
       - rtl/ydrasil_wb_stage.sv
       - rtl/ydrasil_registers.sv
+      - rtl/ydrasil_registers_csr.sv
+      - rtl/ydrasil_clint.sv
       - rtl/ydrasil_ctrl.sv
       - rtl/ydrasil_core.sv
 

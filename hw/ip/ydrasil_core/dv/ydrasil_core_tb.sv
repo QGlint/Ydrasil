@@ -140,6 +140,7 @@ module ydrasil_core_tb;
     logic [31:0] cnt_ms;
     logic start;
 
+
     always_ff @(posedge clk) begin
         if (rst) begin
             start <= 0;
@@ -172,7 +173,7 @@ module ydrasil_core_tb;
         end
     end
 
-    assign perip_rdata = cnt_ms;
+    assign cnt_rdata = cnt_ms;
 
 
 
