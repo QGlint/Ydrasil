@@ -52,4 +52,12 @@
 `define OP_LSU_SW           7
 
 
+`define op_CSR_BUS_WIDTH    4  
+`define op_CSR_CSRRW        0
+`define op_CSR_CSRRS        1
+`define op_CSR_CSRRC        2
+`define op_CSR_RS1IMM       3
+`define op_CSR_CSRADDR_WIDTH      12
+
+
 // `endif

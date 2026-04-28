@@ -13,7 +13,7 @@
 
 // 内存初始化控制
 `ifndef INIT_ITCM
-`define INIT_ITCM 0       // 控制ITCM是否初始化，1表示初始化，0表示不初始化
+`define INIT_ITCM 1       // 控制ITCM是否初始化，1表示初始化，0表示不初始化
 `endif
 `ifndef ITCM_INIT_FILE
 `define ITCM_INIT_FILE "hw/dv/test_data/mem_generated/rv32ui-p-add.mem"  // ITCM初始化文件路径
