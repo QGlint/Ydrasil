@@ -1,9 +1,16 @@
 `timescale 1ns/1ns
+`include "define_mem_reg.svh"
 parameter CNT_s = 40;
 parameter CNT_us = 50;
 parameter time_end = 50*CNT_us; // 40s
 
 module ydrasil_core_tb;
+
+    // ToHost程序地址,用于监控测试是否结束
+    `define PC_WRITE_TOHOST 32'h00000040
+
+    // ITCM 访问路径
+    `define ITCM u_dut.u_ydrasil_mems.u_itcm
 
 	logic        clk;
 	logic        rst_n;
@@ -14,7 +21,33 @@ module ydrasil_core_tb;
 	logic [31:0] perip_wdata;
 	logic [31:0] perip_rdata;
 
-	assign perip_rdata = 32'h0000_0000;
+    // 通用寄存器访问 - 仅用于错误信息显示
+    wire [31:0] x3 = u_dut.u_ydrasil_registers.registers[3];
+    // PC 监控
+    wire [31:0] pc = u_dut.u_ydrasil_if_stage.if_id_pc_o;
+
+    integer           r;
+    reg     [8*300:1] testcase;
+
+    // 计算ITCM的深度和字节大小
+    localparam ITCM_DEPTH = (1 << (`ITCM_ADDR_WIDTH));  // ITCM中的字数
+    localparam ITCM_BYTE_SIZE = ITCM_DEPTH * 4;  // 总字节数
+
+    // 创建与ITCM容量相同的临时字节数组
+    reg [7:0] prog_mem[0:ITCM_BYTE_SIZE-1];
+    integer i;
+
+    // 添加PC监控变量
+    reg [31:0] pc_write_to_host_cnt;
+    reg [31:0] pc_write_to_host_cycle;
+    reg [31:0] cycle_count;
+    reg pc_write_to_host_flag;
+    reg [31:0] last_pc;
+
+    // 添加指令计数和IPC计算相关变量
+    reg [31:0] instruction_count;
+    wire valid_instruction = (pc != last_pc);
+    real ipc;
 
 	ydrasil_core u_dut (
 		.clk_i      (clk),
@@ -45,6 +78,62 @@ module ydrasil_core_tb;
 		$display("[TB] timeout reached, finish simulation");
 		$finish;
 	end
+
+    // 周期计数器 - 保持同步实现
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            cycle_count       <= 32'b0;
+            last_pc           <= 32'b0;
+            instruction_count <= 32'b0;
+        end else begin
+            cycle_count <= cycle_count + 1'b1;
+            last_pc     <= pc;
+            if (valid_instruction) begin
+                instruction_count <= instruction_count + 1'b1;
+            end
+        end
+    end
+
+    // PC监控逻辑
+    always @(pc) begin
+        if (pc == `PC_WRITE_TOHOST && pc != last_pc) begin
+            pc_write_to_host_cnt = pc_write_to_host_cnt + 1'b1;
+            if (pc_write_to_host_flag == 1'b0) begin
+                pc_write_to_host_cycle = cycle_count;
+                pc_write_to_host_flag  = 1'b1;
+            end
+        end
+    end
+
+    // 添加异步复位逻辑
+    always @(negedge rst_n) begin
+        if (!rst_n) begin
+            pc_write_to_host_cnt   = 32'b0;
+            pc_write_to_host_flag  = 1'b0;
+            pc_write_to_host_cycle = 32'b0;
+        end
+    end
+
+    // 测试用例解析与ITCM加载
+    initial begin
+        if ($value$plusargs("itcm_init=%s", testcase)) begin
+            display_testcase_name();
+            $display("");
+
+            $readmemh({testcase, ".verilog"}, prog_mem);
+            for (i = 0; i < ITCM_DEPTH; i = i + 1) begin
+                `ITCM.mem_r[i] = {prog_mem[i*4+3], prog_mem[i*4+2], prog_mem[i*4+1], prog_mem[i*4+0]};
+            end
+            $display("Successfully loaded instructions to ITCM");
+            $display("ITCM 0x00: %h", `ITCM.mem_r[0]);
+            $display("ITCM 0x01: %h", `ITCM.mem_r[1]);
+            $display("ITCM 0x02: %h", `ITCM.mem_r[2]);
+            $display("ITCM 0x03: %h", `ITCM.mem_r[3]);
+            $display("ITCM 0x04: %h", `ITCM.mem_r[4]);
+        end else begin
+            $display("No itcm_init defined, use default ITCM init.");
+        end
+    end
 
 	initial begin
 		$monitor("[TB] time=%0t, rst_n=%b, LED=0x%08h, seg_wdata=0x%08h",
@@ -173,6 +262,76 @@ module ydrasil_core_tb;
     end
 
     assign cnt_rdata = cnt_ms;
+
+    // 对pc_write_to_host_cnt的变化进行监控
+    always @(pc_write_to_host_cnt) begin
+        if (pc_write_to_host_cnt == 32'd8) begin
+            ipc = (instruction_count > 0 && cycle_count > 0) ? (instruction_count * 1.0) / cycle_count : 0.0;
+
+            $display("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
+            $display("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
+            $display("~~~~~~~~~~~~~ Test Result Summary ~~~~~~~~~~~~~~~~~~~~~~");
+            $display("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
+            $display("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
+            $write("~TESTCASE: ");
+            display_testcase_name();
+            $display("~");
+            $display("~~~~~~~~~~~~~~Total cycle_count value: %d ~~~~~~~~~~~~~", cycle_count);
+            $display("~~~~~The test ending reached at cycle: %d ~~~~~~~~~~~~~", pc_write_to_host_cycle);
+            $display("~~~~~~~~~~Total instructions executed: %d ~~~~~~~~~~~~~", instruction_count);
+            $display("~~~~~~~~~~~~~~~~~~ IPC value: %.4f ~~~~~~~~~~~~~~~~~~", ipc);
+            $display("~~~~~~~~~~~~~~~The final x3 Reg value: %d ~~~~~~~~~~~~~", x3);
+            $display("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
+
+            if (x3 == 1) begin
+                $display("~~~~~~~~~~~~~~~~~~~ TEST_PASS ~~~~~~~~~~~~~~~~~~~");
+                $display("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
+                $display("~~~~~~~~~ #####     ##     ####    #### ~~~~~~~~~");
+                $display("~~~~~~~~~ #    #   #  #   #       #     ~~~~~~~~~");
+                $display("~~~~~~~~~ #    #  #    #   ####    #### ~~~~~~~~~");
+                $display("~~~~~~~~~ #####   ######       #       #~~~~~~~~~");
+                $display("~~~~~~~~~ #       #    #  #    #  #    #~~~~~~~~~");
+                $display("~~~~~~~~~ #       #    #   ####    #### ~~~~~~~~~");
+                $display("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
+            end else begin
+                $display("~~~~~~~~~~~~~~~~~~~ TEST_FAIL ~~~~~~~~~~~~~~~~~~~~");
+                $display("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
+                $display("~~~~~~~~~~######    ##       #    #     ~~~~~~~~~~");
+                $display("~~~~~~~~~~#        #  #      #    #     ~~~~~~~~~~");
+                $display("~~~~~~~~~~#####   #    #     #    #     ~~~~~~~~~~");
+                $display("~~~~~~~~~~#       ######     #    #     ~~~~~~~~~~");
+                $display("~~~~~~~~~~#       #    #     #    #     ~~~~~~~~~~");
+                $display("~~~~~~~~~~#       #    #     #    ######~~~~~~~~~~");
+                $display("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
+                $display("fail testnum = %2d", x3);
+                for (r = 0; r < 32; r = r + 1) $display("x%2d = 0x%x", r, u_dut.u_ydrasil_registers.registers[r]);
+            end
+            $display("PERF_METRIC: CYCLES=%-d INSTS=%-d IPC=%.4f", cycle_count, instruction_count, ipc);
+            $finish;
+        end
+    end
+
+    // 添加一个任务来显示处理过的testcase名称
+    task automatic display_testcase_name;
+        integer i;
+        reg [7:0] ch;
+        reg printing;
+
+        printing = 0;
+        for (i = 300; i >= 1; i = i - 1) begin
+            ch = testcase[i*8-:8];
+            if (!printing && ch != " " && ch != 8'h00 && ch != 8'h20) begin
+                printing = 1;
+            end
+            if (printing && (ch == 8'h00 || ch == 8'h0A)) begin
+                printing = 0;
+                break;
+            end
+            if (printing && ch >= 8'h20) begin
+                $write("%c", ch);
+            end
+        end
+    endtask
 
 
 
