@@ -29,6 +29,7 @@ module ydrasil_core #(
 	// CTRL signals
 	wire                        stall_if;
 	wire                        stall_id;
+    wire                       stall_pc;
 	wire                        flush_if;
 	wire                        flush_id;
 	wire                        flush_ex;
@@ -116,8 +117,8 @@ module ydrasil_core #(
 	wire [`REGS_DATA_WIDTH-1:0]      csr_clint_mepc;
 	wire [`REGS_DATA_WIDTH-1:0]      csr_clint_mstatus;
 	wire                             global_int_en;
-	wire                             clint_int_assert;
-	wire [`INST_ADDR_WIDTH-1:0]      clint_int_addr;
+	wire                             clint_ex_int_addr;
+	wire [`INST_ADDR_WIDTH-1:0]      interrupt;
 	wire                             clint_stall;
 
     wire [`BUS_ADDR_WIDTH-1:0] id_instr_addr;
@@ -165,6 +166,7 @@ module ydrasil_core #(
 		.clk_i           (clk_i),
 		.rst_n_i         (rst_n_i),
 		.stall_if_i      (stall_if),
+        .stall_pc_i      (stall_pc),
 		.flush_if_i      (flush_if),
 		.branch_jump_i   (branch_jump),
 		.branch_target_i (branch_target),
@@ -217,6 +219,8 @@ module ydrasil_core #(
 		.operand_b_i        (operand_b),
 		.operator_i         (operator),
 		.operator_type_i    (operator_type),
+        .interrupt_i          (interrupt), 
+        .clint_ex_int_addr_i    (clint_ex_int_addr),
 		.id_rf_waddr_rd_i   (id_rf_waddr_rd),
 		.id_alu_rf_wen_rd_i (id_alu_rf_wen_rd),
         .id_ex_rs2_rd_forward_i (id_ex_rs2_rd_forward),
@@ -290,6 +294,7 @@ module ydrasil_core #(
         .clint_stall_i        (clint_stall),
 		.stall_if_o        (stall_if),
 		.stall_id_o        (stall_id),
+        .stall_pc_o        (stall_pc),
 		.flush_if_o        (flush_if),
 		.flush_id_o        (flush_id),
 		.flush_ex_o        (flush_ex),
@@ -334,8 +339,8 @@ module ydrasil_core #(
 		.clint_csr_waddr_o (clint_csr_waddr),
 		.clint_csr_raddr_o (clint_csr_raddr),
 		.clint_csr_data_o  (clint_csr_wdata),
-		.int_addr_o        (clint_int_addr),
-		.int_assert_o      (clint_int_assert)
+		.interrupt_o        (interrupt),
+		.clint_ex_int_addr_o      (clint_ex_int_addr)
 	);
 
 

@@ -13,6 +13,7 @@ module ydrasil_alu#(
     
     input wire [ 4:0]                      id_rf_waddr_rd_i,
     input wire                             id_alu_rf_wen_rd_i,
+    input wire                             interrupt_i,
     // 中断信号
     // input wire                             int_assert_i,
 
@@ -64,6 +65,9 @@ module ydrasil_alu#(
     wire        op_bge  ;
     wire        op_bltu ;
     wire        op_bgeu ;
+    wire        op_branch;
+
+    assign op_branch = op_beq | op_bne | op_blt | op_bge | op_bltu | op_bgeu;
 
     assign op_jump = operator_i [`OP_BJP_JUMP] &  operator_type_i[`OPERATOR_TYPE_BJP];
     assign op_beq  = operator_i [`OP_BJP_BEQ] &  operator_type_i[`OPERATOR_TYPE_BJP];
@@ -83,7 +87,7 @@ module ydrasil_alu#(
     wire        op_compare      ;
 
     assign op_shift     = op_sll | op_srl | op_sra; // 移位操作
-    assign op_compare   = op_slt | op_sltu; // 比较操作
+    assign op_compare   = op_slt | op_sltu| op_branch; // 比较操作
 
     //////////////////////////////////////////////////////////////
     // 1. 实现移位器 - 统一实现左移，右移通过输入翻转实现
@@ -199,6 +203,7 @@ module ydrasil_alu#(
 
     wire [31:0] alu_res ;
     assign alu_res = 
+        ({32{interrupt_i}} & 32'h0) |
         ({32{op_add | op_auipc | op_jump | op_lsu}} & adder_res[31:0]) |
         ({32{op_sub}} & adder_res[31:0]) |
         ({32{op_xor}} & xor_res) |
@@ -214,7 +219,7 @@ module ydrasil_alu#(
 
     // 所有算术逻辑操作都需要写回寄存器
     wire alu_rf_wen_rd ;
-    assign alu_rf_wen_rd =(id_alu_rf_wen_rd_i);
+    assign alu_rf_wen_rd =interrupt_i ? 1'b0: id_alu_rf_wen_rd_i;
 
     assign alu_rf_wen_rd_o = alu_rf_wen_rd;
 

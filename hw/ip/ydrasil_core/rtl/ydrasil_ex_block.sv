@@ -19,6 +19,9 @@ module ydrasil_ex_block #(
     input  wire                            id_alu_rf_wen_rd_i,
 	input  wire                            id_ex_rs2_rd_forward_i,
 	input  wire                            id_ex_rs1_rd_forward_i,
+	input  wire 							interrupt_i,
+	input wire  [`INST_ADDR_WIDTH-1:0]      clint_ex_int_addr_i,
+
 
 	input  wire [`CSR_ADDR_WIDTH-1:0] 	   id_ex_csr_waddr_i,
 	input  wire [`OP_CSR_INFO_WIDTH-1:0]   id_op_csr_info_i,
@@ -56,14 +59,14 @@ module ydrasil_ex_block #(
 
     assign bt_alu_result = bt_a_operand_i + bt_b_operand_i;
 	assign ex_lsu_mem_addr_o = alu_result;
-    assign ex_branch_target_o = bt_alu_result;
+    assign ex_branch_target_o = interrupt_i ? clint_ex_int_addr_i:bt_alu_result;
 
 	// 内部例化 ALU，EX 直接透传控制和操作数
 
 	assign operand_a = id_ex_rs1_rd_forward_i ? alu_result_ff : operand_a_i;
 	assign operand_b = id_ex_rs2_rd_forward_i ? alu_result_ff : operand_b_i;
 
-	assign ex_lsu_result_o = alu_result_ff;
+	assign ex_lsu_result_o = alu_result_ff | interrupt_i;
 
 	assign ex_branch_jump_o = ex_branch_jump;
 
@@ -119,8 +122,9 @@ module ydrasil_ex_block #(
 		wire [31:0]csr_reg_wdata ;
 		wire [31:0]csr_wdata ;
 
-	assign csr_reg_wdata = csr_ex_rdata_i;
-	assign csr_wdata = 	({`REGS_DATA_WIDTH{csr_csrrw}} & operand_a_i) |
+	assign csr_reg_wdata = interrupt_i ? '0: csr_ex_rdata_i;
+	assign csr_wdata = interrupt_i ? '0:
+							({`REGS_DATA_WIDTH{csr_csrrw}} & operand_a_i) |
                           	({`REGS_DATA_WIDTH{csr_csrrs}} & (operand_a_i | csr_ex_rdata_i)) |
                           	({`REGS_DATA_WIDTH{csr_csrrc}} & (csr_ex_rdata_i & (~operand_a_i)));
 	assign csr_wen = op_csr;
