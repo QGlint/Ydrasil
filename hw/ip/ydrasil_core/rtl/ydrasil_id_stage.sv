@@ -37,6 +37,9 @@ module ydrasil_id_stage #(
     output wire                            id_ex_bt_rs1_rd_forward_o, // 前递控制信号
     output wire                            id_lsu_rs2_rd_forward_o, // 前递控制信号
     // output wire                            id_lsu_rs1_rd_forward_o, // 前递控制信号
+    output wire [`OPSEL_INFO_WIDTH-1:0]                      sel_rs_o,
+    output wire [`REGS_ADDR_WIDTH-1:0]     id_ex_rs1_raddr_o,
+    output wire [`REGS_ADDR_WIDTH-1:0]     id_ex_rs2_raddr_o,
     output wire [`REGS_ADDR_WIDTH-1:0]     id_ctrl_rs1_addr_o,
     output wire [`REGS_ADDR_WIDTH-1:0]     id_ctrl_rs2_addr_o,
 
@@ -64,6 +67,9 @@ module ydrasil_id_stage #(
     reg id_lsu_rs2_rd_forward_ff;//前递
     reg id_ex_bt_rs1_rd_forward_ff;//前递
     // reg id_mem_rs1_rd_forward_ff;//前递
+    reg [`REGS_ADDR_WIDTH-1:0]     rf_raddr_rs1_ff;
+    reg [`REGS_ADDR_WIDTH-1:0]     rf_raddr_rs2_ff;
+
 
     wire rs2_rd_hazard;
     wire rs1_rd_hazard;
@@ -149,7 +155,13 @@ module ydrasil_id_stage #(
     );
 
 
+    wire [`OPSEL_INFO_WIDTH-1:0] sel_rs;
+    reg [`OPSEL_INFO_WIDTH-1:0] sel_rs_ff;
+    assign sel_rs_o = sel_rs_ff;
 
+    assign sel_rs[`ASELRS] = ~(operand_a_pc_sel| operand_a_imm_sel);
+    assign sel_rs[`BSELRS] = operand_b_rs_sel;
+    assign sel_rs[`BTASELRS] = bt_a_rs_sel;
 
 
     assign rf_addr_rs1_o = rf_raddr_rs1;
@@ -195,6 +207,9 @@ module ydrasil_id_stage #(
             csr_op_info_ff <= '0;
             sys_op_info_ff <= '0;
             id_instr_addr_ff <= '0;
+            sel_rs_ff <= '0;
+            rf_raddr_rs1_ff <= '0;
+            rf_raddr_rs2_ff <= '0;
         end
         else if (flush_id_i) begin
             operand_a_ff        <= '0;
@@ -218,6 +233,9 @@ module ydrasil_id_stage #(
             csr_op_info_ff <= '0;
             sys_op_info_ff <= '0;
             id_instr_addr_ff <= '0;
+            sel_rs_ff <= '0;
+            rf_raddr_rs1_ff <= '0;
+            rf_raddr_rs2_ff <= '0;
         end
         else if (!stall_id_i) begin
             operand_a_ff        <= operand_a;
@@ -240,6 +258,9 @@ module ydrasil_id_stage #(
             csr_op_info_ff <= csr_op_info;
             sys_op_info_ff <= sys_op_info;
             id_instr_addr_ff <= if_id_pc_i;
+            sel_rs_ff <= sel_rs;
+            rf_raddr_rs1_ff <= rf_raddr_rs1;
+            rf_raddr_rs2_ff <= rf_raddr_rs2;
         end
     end
 
@@ -264,8 +285,9 @@ module ydrasil_id_stage #(
     assign  id_op_csr_info_o = csr_op_info_ff;
     assign  id_op_sys_info_o = sys_op_info_ff;
     assign id_instr_addr_o = id_instr_addr_ff;
-
-
+    assign sel_rs_o = sel_rs_ff;
+    assign id_ex_rs1_raddr_o = rf_raddr_rs1_ff;
+    assign id_ex_rs2_raddr_o = rf_raddr_rs2_ff;
 
     assign id_ctrl_rs1_addr_o = rf_raddr_rs1;
     assign id_ctrl_rs2_addr_o = rf_raddr_rs2;

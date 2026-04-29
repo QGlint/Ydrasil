@@ -85,6 +85,12 @@ module ydrasil_core #(
 	wire [`REGS_DATA_WIDTH-1:0] rf_wdata_rd;
 	wire                        rf_wen_rd;
 	wire [`REGS_ADDR_WIDTH-1:0] rf_waddr_rd;
+	wire [`OPSEL_INFO_WIDTH-1:0]		sel_rs;
+	wire [`REGS_ADDR_WIDTH-1:0]      id_ex_rs2_raddr;
+	wire [`REGS_ADDR_WIDTH-1:0]      id_ex_rs1_raddr;
+	wire [`REGS_DATA_WIDTH-1:0]     wb_ex_pending_wdata_rd_ff;
+	wire [`REGS_ADDR_WIDTH-1:0]		wb_ex_pending_waddr_rd_ff;
+	wire                       		wb_ex_pending_ff;
 
     wire [`BUS_DATA_WIDTH-1:0]  lsu_mem_rdata_m; // 从DRAM读取的数据
 
@@ -208,6 +214,9 @@ module ydrasil_core #(
 		.bt_a_operand_o     (bt_a_operand),
 		.bt_b_operand_o     (bt_b_operand),
 		.operator_lsu_o     (operator_lsu),
+		.sel_rs_o            (sel_rs),
+		.id_ex_rs2_raddr_o (id_ex_rs2_raddr),
+		.id_ex_rs1_raddr_o (id_ex_rs1_raddr),
 		.id_lsu_rs2_data_o  (id_lsu_rs2_data),
 		.operator_type_o    (operator_type),
 		.id_ex_rs2_rd_forward_o (id_ex_rs2_rd_forward),
@@ -248,6 +257,12 @@ module ydrasil_core #(
         .ex_csr_wen_o(ex_csr_wen),
         .ex_csr_wdata_o(ex_csr_wdata),
         .ex_csr_waddr_o(ex_csr_waddr),
+		.sel_rs_i(sel_rs),
+		.wb_ex_pending_wdata_rd_ff_i(wb_ex_pending_wdata_rd_ff),
+		.wb_ex_pending_waddr_rd_ff_i(wb_ex_pending_waddr_rd_ff),
+		.wb_ex_pending_ff_i(wb_ex_pending_ff),
+		.id_ex_rs2_raddr_i(id_ex_rs2_raddr),
+		.id_ex_rs1_raddr_i(id_ex_rs1_raddr),
 		.ex_branch_jump_o   (ex_branch_jump),
 		.ex_branch_target_o (ex_branch_target),
 		.ex_lsu_mem_addr_o  (ex_lsu_mem_addr),
@@ -281,6 +296,9 @@ module ydrasil_core #(
 		.lsu_wb_result_i  (lsu_wb_result),
 		.lsu_rf_wen_rd_i  (lsu_rf_wen_rd),
 		.lsu_rf_waddr_rd_i(lsu_rf_waddr_rd),
+		.wb_ex_pending_wdata_rd_ff_o(wb_ex_pending_wdata_rd_ff),
+		.wb_ex_pending_waddr_rd_ff_o(wb_ex_pending_waddr_rd_ff),
+		.wb_ex_pending_ff_o(wb_ex_pending_ff),
 		.rf_wdata_rd_o    (rf_wdata_rd),
 		.rf_wen_rd_o      (rf_wen_rd),
 		.rf_waddr_rd_o    (rf_waddr_rd)

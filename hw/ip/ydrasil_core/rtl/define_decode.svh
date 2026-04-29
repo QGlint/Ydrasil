@@ -66,4 +66,10 @@
 `define OP_SYS_EBREAK        1
 `define OP_SYS_MRET          2
 
+`define OPSEL_INFO_WIDTH 3
+`define ASELRS 0
+`define BSELRS 1
+`define BTASELRS 2
+
+
 // `endif

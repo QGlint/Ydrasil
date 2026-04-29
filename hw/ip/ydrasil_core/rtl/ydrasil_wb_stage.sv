@@ -15,6 +15,10 @@ module ydrasil_wb_stage (
     input wire                         lsu_rf_wen_rd_i,
     input wire [`REGS_ADDR_WIDTH-1:0]  lsu_rf_waddr_rd_i,
 
+    output [`REGS_DATA_WIDTH-1:0]    wb_ex_pending_wdata_rd_ff_o,
+    output [`REGS_ADDR_WIDTH-1:0]    wb_ex_pending_waddr_rd_ff_o,
+    output                           wb_ex_pending_ff_o,  
+
     // 寄存器写回接口
     output wire [`REGS_DATA_WIDTH-1:0] rf_wdata_rd_o,
     output wire                        rf_wen_rd_o,
@@ -26,6 +30,10 @@ module ydrasil_wb_stage (
     reg [`REGS_DATA_WIDTH-1:0]    alu_wdata_rd_ff;
     reg [`REGS_ADDR_WIDTH-1:0]    alu_rf_waddr_rd_ff;
     reg                           alu_pending_ff;  
+
+    assign wb_ex_pending_wdata_rd_ff_o = alu_wdata_rd_ff;
+    assign wb_ex_pending_waddr_rd_ff_o = alu_rf_waddr_rd_ff;
+    assign wb_ex_pending_ff_o = alu_pending_ff;
 
     wire sel_lsu       ;
     wire sel_alu_i     ;

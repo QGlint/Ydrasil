@@ -10,26 +10,26 @@ VERILATOR_MOD ?= cc
 UVM ?= 0
 USE_BENDER ?= 1
 BENDER ?= bender
-
+VERILATOR_TRACE ?= 1
 # --- 内存路径配置 (指向你新生成的 split 目录) ---
 ITCM_TEST_BASE := $(PROJECT_ROOT)/hw/dv/test_data/split/itcm
 DTCM_TEST_BASE := $(PROJECT_ROOT)/hw/dv/test_data/split/dtcm
 
 # 默认单次仿真的内存文件 (以 add 为例)
-ITCM_TEST_MEM ?= $(ITCM_TEST_BASE)/rv32ui-p-sw.mem
-DTCM_TEST_MEM ?= $(DTCM_TEST_BASE)/rv32ui-p-sw.mem
+# ITCM_MEM ?= $(ITCM_TEST_BASE)/rv32ui-p-sh.mem
+# DTCM_MEM ?= $(DTCM_TEST_BASE)/rv32ui-p-sh.mem
 
 ITCM_BASE := $(PROJECT_ROOT)/hw/dv/test_data/mem/itcm
 DTCM_BASE := $(PROJECT_ROOT)/hw/dv/test_data/mem/dtcm
-ITCM_MEM ?= $(ITCM_BASE)/irom.mem
-DTCM_MEM ?= $(DTCM_BASE)/dram.mem
+ITCM_MEM ?= $(ITCM_BASE)/irom0.mem
+DTCM_MEM ?= $(DTCM_BASE)/dram0.mem
 
 # --- 自动化测试相关定义 ---
 # 搜寻 ITCM 目录下所有的 .mem 文件来确定测试用例列表
 UI_TEST_CASES := $(notdir $(patsubst %.mem,%,$(wildcard $(ITCM_TEST_BASE)/rv32ui-p-*.mem)))
 RESULT_DIR := $(LOG_DIR)/test_results
 
-export PROJECT_ROOT BUILD_DIR WAVE_DIR LOG_DIR SIM_TOOL IP VERILATOR_MOD UVM USE_BENDER BENDER ITCM_TEST_MEM DTCM_TEST_MEM ITCM_MEM DTCM_MEM Compile_optimization
+export PROJECT_ROOT BUILD_DIR WAVE_DIR LOG_DIR SIM_TOOL IP VERILATOR_MOD UVM USE_BENDER BENDER ITCM_TEST_MEM DTCM_TEST_MEM ITCM_MEM DTCM_MEM Compile_optimization VERILATOR_TRACE
 
 .PHONY: all comp sim clean wave resim test_all
 
@@ -56,7 +56,7 @@ test_all:
 	@rm -f $(RESULT_DIR)/summary.log
 	@for tst in $(UI_TEST_CASES); do \
 		echo -n "Running [$$tst] ... "; \
-		$(MAKE) LOG_OUTPUT=0 Compile_optimization = 0 comp sim \
+		$(MAKE) LOG_OUTPUT=0 Compile_optimization=0 comp sim \
 			ITCM_MEM=$(ITCM_TEST_BASE)/$$tst.mem \
 			DTCM_MEM=$(DTCM_TEST_BASE)/$$tst.mem \
 			> $(RESULT_DIR)/$$tst.log 2>&1; \
