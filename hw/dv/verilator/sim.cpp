@@ -1,7 +1,8 @@
 #include <verilated.h>
 #include <cstdlib>
 #include <cstdio>
-
+#include <cstring>
+#include <iostream>
 #ifndef TB_NAME
 #error "Please define TB_NAME (e.g. -D TB_NAME=gearbox_68_to_80_tb)"
 #endif
@@ -40,16 +41,47 @@ vluint64_t tick = 0;
 int main(int argc, char **argv) {
 
     Verilated::commandArgs(argc, argv);
-    Verilated::traceEverOn(true);
+
 
     TB_CLASS_NAME *tb = new TB_CLASS_NAME;
+    // check if trace is enabled
+    int trace_en = 0;
+    for (int i = 0; i < argc; i++)
+    {
+        if (strcmp(argv[i], "+trace") == 0)
+            trace_en = 1;
+        if (strcmp(argv[i], "--trace") == 0)
+            trace_en = 1;
+        if (strcmp(argv[i], "+notrace") == 0)
+            trace_en = 0;
+    }
 
-    tb->trace(tfp, 99);
-#if CONFIG_FST_WAVE_TRACE
-    tfp->open("tb_top.fst");
-#else
-    tfp->open("tb_top.vcd");
+#ifdef VERILATOR_CC
+    if (!trace_en) {
+        trace_en = 1;
+    }
 #endif
+
+    if (trace_en)
+    {
+        std::cout << "Trace is enabled.\n";
+    }
+    else
+    {
+        std::cout << "Trace is disabled.\n";
+    }
+
+    if (trace_en)
+    {
+        
+        Verilated::traceEverOn(true);
+        tb->trace(tfp, 99);
+#if CONFIG_FST_WAVE_TRACE
+        tfp->open("tb_top.fst");
+#else
+        tfp->open("tb_top.vcd");
+#endif
+    }
 
 #ifdef VERILATOR_CC
     // ---------------- Reset phase ----------------
@@ -57,20 +89,35 @@ int main(int argc, char **argv) {
     tb->rst_n = 0;
 
     for (int i = 0; i < 20; i++) {
+        tb->clk = !tb->clk;  
         tb->eval();
-        tfp->dump(tick++);
+        if (trace_en) {
+            tfp->dump(tick++);
+        }
+        // Verilated::timeInc(1);
         tb->eval();
-        tfp->dump(tick++);
+        if (trace_en) {
+            tfp->dump(tick++);
+        }
+        // Verilated::timeInc(1);
     }
 
     tb->rst_n = 1;
 
     // ---------------- Main simulation ----------------
-    while (!Verilated::gotFinish() && !tb->tb_done && Verilated::time() < max_cycles) {
+    while (!Verilated::gotFinish() ) {
         tb->clk = !tb->clk;   
         tb->eval();
-        tfp->dump(tick++);
-        tfp->dump(tick++);
+        if(trace_en) {
+            tfp->dump(tick++);
+        }
+        Verilated::timeInc(1);
+        tb->eval();
+        if(trace_en) {
+            tfp->dump(tick++);
+        }
+        Verilated::timeInc(1);
+
     }
 #else
     // ---------------- 纯sv仿真 ----------------
@@ -88,8 +135,12 @@ int main(int argc, char **argv) {
 
 #endif
     // ---------------- Finish ----------------
-    tfp->close();
-    delete tb;
+
+    if (trace_en) {
+        std::cout << "Simulation finished at time " << Verilated::time() << " ticks.\n";
+        tfp->close();
+    }
     delete tfp;
+    delete tb;
     return 0;
 }

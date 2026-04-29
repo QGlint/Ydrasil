@@ -15,8 +15,8 @@ module ydrasil_core #(
 );
 
 
-    localparam DRAM_ADDR_START = 32'h0000_0000;
-    localparam DRAM_ADDR_END   = 32'h0003_FFFF;
+    localparam DRAM_ADDR_START = 32'h8010_0000;
+    localparam DRAM_ADDR_END   = 32'h8013_FFFF;
 
 	// IF <-> MEMS
 	wire [`INST_ADDR_WIDTH-1:0] if_mem_addr;

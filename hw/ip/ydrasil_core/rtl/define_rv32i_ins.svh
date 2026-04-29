@@ -76,7 +76,7 @@
 `define RV32I_INS_MRET 32'h30200073
 `define RV32I_INS_DRET 32'h7b200073
 
-`define RESET_INS 32'h0000_0000
+`define RESET_INS 32'h8000_0000
 
 
 // CSR inst
@@ -88,15 +88,7 @@
 `define RV32I_INS_CSRRSI 3'b110
 `define RV32I_INS_CSRRCI 3'b111
 
-// CSR reg addr
-`define CSR_CYCLE 12'hc00
-`define CSR_CYCLEH 12'hc80
-`define CSR_MTVEC 12'h305
-`define CSR_MCAUSE 12'h342
-`define CSR_MEPC 12'h341
-`define CSR_MIE 12'h304
-`define CSR_MSTATUS 12'h300
-`define CSR_MSCRATCH 12'h340
+
 
 
 

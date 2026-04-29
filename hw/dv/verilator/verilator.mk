@@ -1,6 +1,6 @@
 VERILATOR ?= verilator
 VERILATOR_TRACE ?= 1
-
+Compile_optimization ?= 1
 
 ##################################
 # Paths
@@ -27,7 +27,7 @@ VERILATOR_FLAGS += --binary --timing --exe
 VERILATOR_FLAGS += -DVERILATOR_SV
 endif
 
-VERILATOR_FLAGS += -O3
+
 
 VERILATOR_FLAGS += -MAKEFLAGS "-j$(shell nproc)"
 
@@ -47,9 +47,11 @@ VERILATOR_FLAGS += -Wno-fatal -Wno-TIMESCALEMOD
 # VERILATOR_FLAGS += -Wno-UNSIGNED 
 
 # VERILATOR_FLAGS += -CFLAGS -DVL_DEBUG
-
+ifeq ($(Compile_optimization),1)
+VERILATOR_FLAGS += -O3
 VERILATOR_FLAGS += --no-assert
 VERILATOR_FLAGS += -CFLAGS "-O3 -march=native -DNDEBUG"
+endif
 
 ifeq ($(VERILATOR_TRACE),1)
 # VERILATOR_FLAGS += --trace --trace-depth 2
@@ -66,6 +68,11 @@ ifeq ($(USE_BENDER),1)
 VERILATOR_FLAGS += -f $(FLIST_FILE)
 endif
 
+ifeq ($(VERILATOR_TRACE),1)
+SIM_CMDS := $(BIN) +trace
+else
+SIM_CMDS := $(BIN)
+endif
 
 
 
@@ -98,10 +105,10 @@ endif
 sim:
 	@echo "[VERILATOR RUN]"
 ifeq ($(LOG_OUTPUT),1) 
-	cd $(OBJ_DIR_SIM) && $(BIN) +trace \
+	cd $(OBJ_DIR_SIM) && $(SIM_CMDS) \
 		>$(LOG_DIR)/$(TOP).ver.sim.log 2>$(LOG_DIR)/$(TOP).ver.sim.err.log
 else
-	cd $(OBJ_DIR_SIM) && $(BIN) +trace
+	cd $(OBJ_DIR_SIM) && $(SIM_CMDS)
 endif
 
 

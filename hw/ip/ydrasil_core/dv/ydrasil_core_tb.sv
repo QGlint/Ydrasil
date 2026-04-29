@@ -1,20 +1,27 @@
 `timescale 1ns/1ns
 `include "define_mem_reg.svh"
 parameter CNT_s = 1000*1000*50;
-parameter CNS_ms = 1000*50;
+parameter CNT_ms = 1000*50;
 parameter CNT_us = 50;
-parameter time_end = 50*CNT_us; // 40s
+parameter time_end = 5000 * CNT_us; // 40s
 
-module ydrasil_core_tb;
+module ydrasil_core_tb(
+`ifdef VERILATOR_CC
+    input clk,
+    input rst_n
+`endif
+
+);
 
     // ToHost程序地址,用于监控测试是否结束
-    `define PC_WRITE_TOHOST 32'h00000040
+    `define PC_WRITE_TOHOST 32'h80000040
 
     // ITCM 访问路径
     `define ITCM u_dut.u_ydrasil_mems.u_itcm
-
+`ifndef VERILATOR_CC
 	logic        clk;
 	logic        rst_n;
+`endif
 
 	logic [31:0] perip_addr;
 	logic        perip_wen;
@@ -59,7 +66,7 @@ module ydrasil_core_tb;
 		.perip_wdata(perip_wdata),
 		.perip_rdata(perip_rdata)
 	);
-
+`ifndef VERILATOR_CC
 	initial begin
 		clk = 1'b0;
 		forever #10 clk = ~clk;
@@ -70,6 +77,7 @@ module ydrasil_core_tb;
 		repeat (10) @(posedge clk);
 		rst_n = 1'b1;
 	end
+`endif
 
 	wire rst;
 	assign rst = ~rst_n;
