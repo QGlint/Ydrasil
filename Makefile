@@ -1,29 +1,27 @@
 PROJECT_ROOT := $(abspath $(CURDIR))
 
-BUILD_DIR := $(PROJECT_ROOT)/build
+BUILD_DIR := $(BUILD_DIR)/build
 WAVE_DIR  := $(BUILD_DIR)/wave
 LOG_DIR   := $(BUILD_DIR)/log
 
 SIM_TOOL ?= verilator
-IP  ?= ydrasil_core
+IP   ?= ydrasil_core
 VERILATOR_MOD ?= sv
 UVM ?= 0
 USE_BENDER ?= 1
 BENDER ?= bender
 
-# 默认内存路径
-# ITCM_MEM ?= $(PROJECT_ROOT)/hw/dv/test_data/mem_generated/rv32ui-p-add.mem
-# # DTCM_MEM ?= $(PROJECT_ROOT)/hw/dv/test_data/mem/dram0.mem
+# --- 内存路径配置 (指向你新生成的 split 目录) ---
+ITCM_BASE := $(PROJECT_ROOT)/hw/dv/test_data/split/itcm
+DTCM_BASE := $(PROJECT_ROOT)/hw/dv/test_data/split/dtcm
 
-ITCM_MEM ?= $(PROJECT_ROOT)/hw/dv/test_data/mem_generated/rv32ui-p-sw.mem
-DTCM_MEM ?= $(PROJECT_ROOT)/hw/dv/test_data/mem_generated/rv32ui-p-sw.mem
+# 默认单次仿真的内存文件 (以 add 为例)
+ITCM_MEM ?= $(ITCM_BASE)/rv32ui-p-add.mem
+DTCM_MEM ?= $(DTCM_BASE)/rv32ui-p-add.mem
 
 # --- 自动化测试相关定义 ---
-# 测试数据所在的真实路径
-TEST_SRC_DIR := $(PROJECT_ROOT)/hw/dv/test_data/mem_generated
-# 搜寻所有 rv32ui-p 开头的 .mem 文件，并提取其基本名称
-UI_TEST_CASES := $(notdir $(patsubst %.mem,%,$(wildcard $(TEST_SRC_DIR)/rv32ui-p-*.mem)))
-# 测试结果存放路径
+# 搜寻 ITCM 目录下所有的 .mem 文件来确定测试用例列表
+UI_TEST_CASES := $(notdir $(patsubst %.mem,%,$(wildcard $(ITCM_BASE)/rv32ui-p-*.mem)))
 RESULT_DIR := $(LOG_DIR)/test_results
 
 export PROJECT_ROOT BUILD_DIR WAVE_DIR LOG_DIR SIM_TOOL IP VERILATOR_MOD UVM USE_BENDER BENDER ITCM_MEM DTCM_MEM
@@ -42,18 +40,20 @@ sim:
 	@mkdir -p $(BUILD_DIR) $(WAVE_DIR) $(LOG_DIR)
 	@$(MAKE) -C hw/dv -f Makefile sim
 
-# --- 核心自动化测试逻辑 ---
+# --- 核心自动化测试逻辑 (支持 ITCM/DTCM 分离加载) ---
 test_all: 
 	@echo "==========================================================="
 	@echo "   开始全量指令集回归测试 (Total: $(words $(UI_TEST_CASES)) cases)"
+	@echo "   ITCM 路径: $(ITCM_BASE)"
+	@echo "   DTCM 路径: $(DTCM_BASE)"
 	@echo "==========================================================="
 	@mkdir -p $(RESULT_DIR)
 	@rm -f $(RESULT_DIR)/summary.log
 	@for tst in $(UI_TEST_CASES); do \
 		echo -n "Running [$$tst] ... "; \
 		$(MAKE) LOG_OUTPUT=0 comp sim \
-			ITCM_MEM=$(TEST_SRC_DIR)/$$tst.mem \
-			DTCM_MEM=$(TEST_SRC_DIR)/$$tst.mem \
+			ITCM_MEM=$(ITCM_BASE)/$$tst.mem \
+			DTCM_MEM=$(DTCM_BASE)/$$tst.mem \
 			> $(RESULT_DIR)/$$tst.log 2>&1; \
 		\
 		if grep -q "TEST_PASS" $(RESULT_DIR)/$$tst.log; then \
