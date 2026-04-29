@@ -258,7 +258,7 @@ module ydrasil_ins_decoder #(
 	wire rf_ren_rs1 =	(~is_lui) 	& (~is_auipc) 	& (~is_jal) &  
        					(~is_ecall) & (~is_ebreak) 	& (~is_fence) & 
        					(~is_nop) 	& (~is_fence_i);// U类型指令不需要rs1
-	wire rf_ren_rs2 = is_op_r_m | is_branch | is_store; // R类型和分支指令需要rs2
+	wire rf_ren_rs2 = is_op_r_m | is_branch ; // R类型和分支指令需要rs2
 
 	wire rf_wen_rd = is_lui | is_auipc | is_jal | is_jalr | is_op_imm | is_op_r_m ; // 需要写回寄存器的指令类型 
 
@@ -304,7 +304,7 @@ module ydrasil_ins_decoder #(
 
 	assign operand_a_imm_sel = is_csrrwi | is_csrrsi | is_csrrci;
 
-	assign operand_b_rs_sel_o = is_branch | is_store |is_op_r_m;
+	assign operand_b_rs_sel_o = is_branch |is_op_r_m;
 	assign operand_a_pc_sel_o = is_auipc  |is_jal |is_jalr;
 	assign bt_a_rs_sel_o = is_jalr;
 

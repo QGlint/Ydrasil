@@ -15,8 +15,8 @@ BENDER ?= bender
 # ITCM_MEM ?= $(PROJECT_ROOT)/hw/dv/test_data/mem_generated/rv32ui-p-add.mem
 # # DTCM_MEM ?= $(PROJECT_ROOT)/hw/dv/test_data/mem/dram0.mem
 
-ITCM_MEM ?= $(PROJECT_ROOT)/hw/dv/test_data/mem_generated/rv32ui-p-auipc.mem
-# DTCM_MEM ?= $(PROJECT_ROOT)/hw/dv/test_data/mem_generated/rv32ui-p-add.mem
+ITCM_MEM ?= $(PROJECT_ROOT)/hw/dv/test_data/mem_generated/rv32ui-p-sw.mem
+DTCM_MEM ?= $(PROJECT_ROOT)/hw/dv/test_data/mem_generated/rv32ui-p-sw.mem
 
 # --- 自动化测试相关定义 ---
 # 测试数据所在的真实路径
