@@ -21,15 +21,15 @@ DTCM_TEST_MEM ?= $(DTCM_TEST_BASE)/rv32ui-p-sw.mem
 
 ITCM_BASE := $(PROJECT_ROOT)/hw/dv/test_data/mem/itcm
 DTCM_BASE := $(PROJECT_ROOT)/hw/dv/test_data/mem/dtcm
-ITCM_MEM ?= $(ITCM_BASE)/irom1.mem
-DTCM_MEM ?= $(DTCM_BASE)/dram1.mem
+ITCM_MEM ?= $(ITCM_BASE)/irom.mem
+DTCM_MEM ?= $(DTCM_BASE)/dram.mem
 
 # --- 自动化测试相关定义 ---
 # 搜寻 ITCM 目录下所有的 .mem 文件来确定测试用例列表
 UI_TEST_CASES := $(notdir $(patsubst %.mem,%,$(wildcard $(ITCM_TEST_BASE)/rv32ui-p-*.mem)))
 RESULT_DIR := $(LOG_DIR)/test_results
 
-export PROJECT_ROOT BUILD_DIR WAVE_DIR LOG_DIR SIM_TOOL IP VERILATOR_MOD UVM USE_BENDER BENDER ITCM_TEST_MEM DTCM_TEST_MEM ITCM_MEM DTCM_MEM
+export PROJECT_ROOT BUILD_DIR WAVE_DIR LOG_DIR SIM_TOOL IP VERILATOR_MOD UVM USE_BENDER BENDER ITCM_TEST_MEM DTCM_TEST_MEM ITCM_MEM DTCM_MEM Compile_optimization
 
 .PHONY: all comp sim clean wave resim test_all
 

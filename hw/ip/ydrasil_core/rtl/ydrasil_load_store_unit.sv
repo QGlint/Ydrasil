@@ -42,10 +42,7 @@ module ydrasil_load_store_unit (
     wire is_store  ;
     wire  [`REGS_DATA_WIDTH-1:0] lsu_rs2_data ;
 
-    // reg id_rd_waddr_i_ff;
-    // reg [`OP_LSU_INFO_WIDTH-1:0] operator_lsu_i_ff;
-    // reg [1:0] operator_lsu_type_i_ff;
-    // reg [`REGS_DATA_WIDTH-1:0] id_lsu_rs2_data_i_ff;
+
     
     reg [`OP_LOAD_INFO_WIDTH-1:0]  operator_load_ff;
     reg [4:0]  rd_addr_ff;
@@ -63,25 +60,34 @@ module ydrasil_load_store_unit (
     assign mem_rs2_data    = lsu_rs2_data; // 存储操作的源寄存器数据
 
 
-    // always_ff @(posedge clk or negedge rst_n) begin
-    //     if (!rst_n) begin
-    //         id_rd_waddr_i_ff      <= 0;
-    //         operator_lsu_i_ff    <= 0;
-    //         operator_lsu_type_i_ff <= 0;
-    //         id_lsu_rs2_data_i_ff <= 0;
-    //     end
-    //     else begin
-    //         id_rd_waddr_i_ff      <= id_rd_waddr_i;
-    //         operator_lsu_i_ff    <= operator_lsu_i;
-    //         operator_lsu_type_i_ff <= operator_lsu_type_i;
-    //         id_lsu_rs2_data_i_ff <= lsu_rs2_data;
-    //     end
-    // end
+    wire[`REGS_DATA_WIDTH-1:0] lsu_wb_result;
+    wire                         lsu_rf_rd_wen;
+    wire[`REGS_ADDR_WIDTH-1:0] lsu_rf_rd_waddr;
+    reg [`REGS_DATA_WIDTH-1:0]  lsu_wb_result_ff;
+    reg                         lsu_rf_rd_wen_ff;
+    reg [`REGS_ADDR_WIDTH-1:0]  lsu_rf_rd_waddr_ff;
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            lsu_wb_result_ff <= 0;
+            lsu_rf_rd_wen_ff <= 0;
+            lsu_rf_rd_waddr_ff <= 0;
+        end
+        else begin
+            lsu_wb_result_ff <= lsu_wb_result; // 直接使用组合逻辑输出的结果
+            lsu_rf_rd_wen_ff <= lsu_rf_rd_wen; // 直接使用组合逻辑输出的结果
+            lsu_rf_rd_waddr_ff <= lsu_rf_rd_waddr; // 直接使用组合逻辑输出的结果
+        end
+    end
 
     assign lsu_ctrl_stall_o = is_load; 
     assign lsu_ctrl_stall_wb_o = is_load_ff; // 假设与lsu_ctrl_stall_o相同
     assign lsu_ctrl_waddr_rd_o = id_rd_waddr_i;
     assign lsu_ctrl_waddr_rd_wb_o = rd_addr_ff;
+
+    assign lsu_wb_result_o = lsu_wb_result_ff;
+    assign lsu_rf_rd_wen_o = lsu_rf_rd_wen_ff;
+    assign lsu_rf_rd_waddr_o = lsu_rf_rd_waddr_ff;
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -128,8 +134,8 @@ module ydrasil_load_store_unit (
     assign lsu_mem_wen_o       = is_store ;
 
     // 并行选择逻辑生成寄存器写回控制 - 使用打一拍后的信号
-    assign lsu_rf_rd_wen_o      = is_load_ff;
-    assign lsu_rf_rd_waddr_o    = is_load_ff? rd_addr_ff : '0;
+    assign lsu_rf_rd_wen      = is_load_ff;
+    assign lsu_rf_rd_waddr    = is_load_ff? rd_addr_ff : '0;
 
     // 字节加载数据 - 使用并行选择逻辑
     wire [31:0] lb_data, lh_data, lw_data, lbu_data, lhu_data;
@@ -175,7 +181,7 @@ module ydrasil_load_store_unit (
     assign lw_data = lsu_mem_rdata_i;
 
     // 并行选择最终的寄存器写回数据 - 使用打一拍后的信号
-    assign lsu_wb_result_o =    ({32{is_lb}} & lb_data) |
+    assign lsu_wb_result =    ({32{is_lb}} & lb_data) |
                                 ({32{is_lbu}} & lbu_data) |
                                 ({32{is_lh}} & lh_data) |
                                 ({32{is_lhu}} & lhu_data) |

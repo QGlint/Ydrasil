@@ -149,6 +149,12 @@ module ydrasil_core_tb(
 			$time, rst_n, LED, seg_wdata);
 	end
 
+	initial begin
+		if(pc == 32'h800001b4) begin
+			$display("PC = 0x800001b4,time = %0t", $time);
+		end
+	end
+
 
 	localparam SW0_ADDR  = 32'h8020_0000;  // sw[31:0]
     localparam SW1_ADDR  = 32'h8020_0004;  // sw[63:32]
@@ -241,7 +247,7 @@ module ydrasil_core_tb(
     always_ff @(posedge clk) begin
         if (rst) begin
             start <= 0;
-        end else if (cnt_wen & cnt_rdata == 32'h8000_0000) begin
+        end else if (cnt_wen & perip_wdata == 32'h8000_0000) begin
             start <= 1;
         end else if (cnt_wen & perip_wdata == 32'hFFFF_FFFF) begin
             start <= 0;

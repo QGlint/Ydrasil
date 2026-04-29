@@ -304,9 +304,9 @@ module ydrasil_ins_decoder #(
 
 	assign operand_a_imm_sel = is_csrrwi | is_csrrsi | is_csrrci;
 
-	assign operand_b_rs_sel_o = is_branch |is_op_r_m;
-	assign operand_a_pc_sel_o = is_auipc  |is_jal |is_jalr;
-	assign bt_a_rs_sel_o = is_jalr;
+	assign operand_b_rs_sel = is_branch |is_op_r_m;
+	assign operand_a_pc_sel = is_auipc  |is_jal |is_jalr;
+	assign bt_a_rs_sel = is_jalr;
 
 	assign operand_b_rs_sel_o = operand_b_rs_sel;
 	assign operand_a_pc_sel_o = operand_a_pc_sel;
