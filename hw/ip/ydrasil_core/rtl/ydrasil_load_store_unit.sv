@@ -11,7 +11,7 @@ module ydrasil_load_store_unit (
     input wire [`OP_LSU_INFO_WIDTH-1:0]    operator_lsu_i,
     input wire [1:0]                       operator_lsu_type_i,
     input wire [`REGS_DATA_WIDTH-1:0]      id_lsu_rs2_data_i, // 存储操作的源寄存器数据
-    input wire [`REGS_ADDR_WIDTH-1:0]      ex_lsu_rd_data_i, // 存储操作的源寄存器数据
+    input wire [`REGS_DATA_WIDTH-1:0]      ex_lsu_rd_data_i, // 存储操作的源寄存器数据
     input wire                             id_lsu_rs2_rd_forward_i,
     
     // 内存接口

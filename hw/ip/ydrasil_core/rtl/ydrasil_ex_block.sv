@@ -19,6 +19,7 @@ module ydrasil_ex_block #(
     input  wire                            id_alu_rf_wen_rd_i,
 	input  wire                            id_ex_rs2_rd_forward_i,
 	input  wire                            id_ex_rs1_rd_forward_i,
+	input  wire 						  id_ex_bt_rs1_rd_forward_i,
 	input  wire 							interrupt_i,
 	input wire  [`INST_ADDR_WIDTH-1:0]      clint_ex_int_addr_i,
 
@@ -60,10 +61,10 @@ module ydrasil_ex_block #(
 	wire [31:0] bt_a_operand;
 	wire [31:0] bt_b_operand;
 
-	assign bt_a_operand = id_ex_rs1_rd_forward_i ? alu_result_ff :bt_a_operand_i;
+	assign bt_a_operand = id_ex_bt_rs1_rd_forward_i ? alu_result_ff :bt_a_operand_i;
 	assign bt_b_operand = bt_b_operand_i;
 
-    assign bt_alu_result = bt_a_operand_i + bt_b_operand_i;
+    assign bt_alu_result = bt_a_operand + bt_b_operand;
 	assign ex_lsu_mem_addr_o = alu_result;
     assign ex_branch_target_o = interrupt_i ? clint_ex_int_addr_i:bt_alu_result;
 
@@ -85,6 +86,7 @@ module ydrasil_ex_block #(
 		.operand_b_i      (operand_b),
 		.operator_i       (operator_i),
 		.operator_type_i  (operator_type_i),
+		.interrupt_i	   (interrupt_i),
 		.id_rf_waddr_rd_i (id_rf_waddr_rd_i),
 		.id_alu_rf_wen_rd_i   (id_alu_rf_wen_rd_i),
 		.comp_result_o    (ex_branch_jump),

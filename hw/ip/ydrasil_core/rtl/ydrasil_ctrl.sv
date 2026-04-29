@@ -36,7 +36,7 @@ module ydrasil_ctrl (
     wire lsu_stall_rs_rd_wb;
 
     wire lsu_stall ;
-    assign lsu_stall = lsu_ctrl_stall_i | lsu_ctrl_stall_wb_i;
+    assign lsu_stall = lsu_stall_rs_rd | lsu_stall_rs_rd_wb;
 
     assign branch_target_o = ex_branch_target_i;
     assign branch_jump_o = ex_branch_jump_i;

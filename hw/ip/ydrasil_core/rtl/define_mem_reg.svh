@@ -19,7 +19,7 @@
 `define ITCM_INIT_FILE "hw/dv/test_data/mem_generated/rv32ui-p-add.mem"  // ITCM初始化文件路径
 `endif
 `ifndef INIT_DTCM
-`define INIT_DTCM 0
+`define INIT_DTCM 1
 `endif
 `ifndef DTCM_INIT_FILE
 `define DTCM_INIT_FILE "hw/dv/test_data/mem/dram_test.mem"

@@ -139,7 +139,7 @@ module clint (
     // 下一个保存的指令地址instr_addr值的并行选择逻辑
     assign next_instr_addr = 
         ({`INST_ADDR_WIDTH{!rst_n}} & '0) |
-        ({`INST_ADDR_WIDTH{csr_state == S_CSR_IDLE && int_state == S_INT_SYNC_ASSERT && ex_branch_jump_i}} & (ex_branch_target_i - 4'h4)) |
+        ({`INST_ADDR_WIDTH{csr_state == S_CSR_IDLE && int_state == S_INT_SYNC_ASSERT && ex_branch_jump_i}} & (ex_branch_target_i - 32'h4)) |
         ({`INST_ADDR_WIDTH{csr_state == S_CSR_IDLE && int_state == S_INT_SYNC_ASSERT && ex_branch_jump_i}} & instr_addr_i) |
         ({`INST_ADDR_WIDTH{!(!rst_n || (csr_state == S_CSR_IDLE && int_state == S_INT_SYNC_ASSERT))}} & instr_addr);
 

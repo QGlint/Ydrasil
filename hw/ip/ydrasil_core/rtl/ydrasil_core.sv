@@ -9,14 +9,14 @@ module ydrasil_core #(
     
     ,output wire [31:0]  perip_addr,
     output wire         perip_wen,
-	output wire [ 1:0]  perip_mask,
+	output wire [ 3:0]  perip_mask,
     output wire [31:0]  perip_wdata,
     input  wire [31:0]  perip_rdata
 );
 
 
-    localparam DRAM_ADDR_START = 32'h8010_0000;
-    localparam DRAM_ADDR_END   = 32'h8013_FFFF;
+    localparam DRAM_ADDR_START = 32'h0000_0000;
+    localparam DRAM_ADDR_END   = 32'h0003_FFFF;
 
 	// IF <-> MEMS
 	wire [`INST_ADDR_WIDTH-1:0] if_mem_addr;
@@ -52,6 +52,7 @@ module ydrasil_core #(
     wire                           id_lsu_rs2_rd_forward;
     wire id_ex_rs2_rd_forward;
     wire id_ex_rs1_rd_forward;
+    wire id_ex_bt_rs1_rd_forward;
 	wire [31:0]                    id_lsu_rs2_data;
 	wire [`OPERATOR_TYPE_WIDTH-1:0] operator_type;
 	wire                           id_alu_rf_wen_rd;
@@ -85,7 +86,6 @@ module ydrasil_core #(
 	wire                        rf_wen_rd;
 	wire [`REGS_ADDR_WIDTH-1:0] rf_waddr_rd;
 
-    wire                        dram_sel; 
     wire [`BUS_DATA_WIDTH-1:0]  lsu_mem_rdata_m; // 从DRAM读取的数据
 
     //LSU -> CTRL
@@ -109,8 +109,8 @@ module ydrasil_core #(
 
 	// CSR <-> CLINT wires
 	wire                             clint_csr_we;
-	wire [`BUS_ADDR_WIDTH-1:0]       clint_csr_waddr;
-	wire [`BUS_ADDR_WIDTH-1:0]       clint_csr_raddr;
+	wire [`CSR_ADDR_WIDTH-1:0]       clint_csr_waddr;
+	wire [`CSR_ADDR_WIDTH-1:0]       clint_csr_raddr;
 	wire [`REGS_DATA_WIDTH-1:0]      clint_csr_wdata;
 	wire [`REGS_DATA_WIDTH-1:0]      csr_clint_data;
 	wire [`REGS_DATA_WIDTH-1:0]      csr_clint_mtvec;
@@ -125,8 +125,23 @@ module ydrasil_core #(
 
     wire [`OP_SYS_INFO_WIDTH-1:0] id_op_sys_info;
 
+    reg dram_addr_sel_ff; 
+    reg lsu_mem_read_ff;
+    wire dram_sel;  
+    wire dram_addr_sel;
+    assign dram_addr_sel = (lsu_mem_addr >= DRAM_ADDR_START) && (lsu_mem_addr <= DRAM_ADDR_END);
 
-    assign dram_sel = (lsu_mem_addr >= DRAM_ADDR_START) && (lsu_mem_addr <= DRAM_ADDR_END);
+    assign dram_sel =( lsu_mem_we& lsu_mem_we) | (dram_addr_sel_ff & lsu_mem_read_ff); // 写操作直接使用当前地址判断，读操作使用上一个周期的地址判断
+
+    always_ff @(posedge clk_i or negedge rst_n_i) begin
+        if (!rst_n_i) begin
+            dram_addr_sel_ff <= 1'b0;
+            lsu_mem_read_ff <= 1'b0;
+        end else begin
+            dram_addr_sel_ff <= dram_addr_sel;
+            lsu_mem_read_ff <= (lsu_mem_req && !lsu_mem_we); // 只有在发出读请求时才认为是读操作
+        end
+    end
 
 	assign operator_lsu_type[0] = operator_type[`OPERATOR_TYPE_LOAD];
 	assign operator_lsu_type[1] = operator_type[`OPERATOR_TYPE_STORE];
@@ -198,6 +213,7 @@ module ydrasil_core #(
 		.id_ex_rs2_rd_forward_o (id_ex_rs2_rd_forward),
 		.id_ex_rs1_rd_forward_o (id_ex_rs1_rd_forward),
 		.id_lsu_rs2_rd_forward_o (id_lsu_rs2_rd_forward),
+        .id_ex_bt_rs1_rd_forward_o (id_ex_bt_rs1_rd_forward),
 		.id_ctrl_rs1_addr_o (id_ctrl_rs1_addr),
 		.id_ctrl_rs2_addr_o (id_ctrl_rs2_addr),
 		.id_csr_raddr_o     (id_csr_raddr),
@@ -225,6 +241,7 @@ module ydrasil_core #(
 		.id_alu_rf_wen_rd_i (id_alu_rf_wen_rd),
         .id_ex_rs2_rd_forward_i (id_ex_rs2_rd_forward),
         .id_ex_rs1_rd_forward_i (id_ex_rs1_rd_forward),
+        .id_ex_bt_rs1_rd_forward_i (id_ex_bt_rs1_rd_forward),
 		.id_ex_csr_waddr_i  (id_ex_csr_waddr) ,
         .id_op_csr_info_i(id_op_csr_info) ,
         .csr_ex_rdata_i(csr_ex_rdata) ,
