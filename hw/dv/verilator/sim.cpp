@@ -9,13 +9,14 @@
 
 // ---------------- Wave select ----------------
 #define CONFIG_FST_WAVE_TRACE 0
-
+#ifdef VERILATOR_TRACE
 #if CONFIG_FST_WAVE_TRACE
 #include <verilated_fst_c.h>
 VerilatedFstC *tfp = new VerilatedFstC;
 #else
 #include <verilated_vcd_c.h>
 VerilatedVcdC *tfp = new VerilatedVcdC;
+#endif
 #endif
 
 // ---------------- Macro utils ----------------
@@ -31,7 +32,7 @@ VerilatedVcdC *tfp = new VerilatedVcdC;
 #include TB_HEADER_FILE
 
 // ---------------- Time ----------------
-vluint64_t max_cycles = 10000000;
+// vluint64_t max_cycles = 10000000;
 
 #ifdef VERILATOR_CC
 vluint64_t tick = 0;
@@ -52,15 +53,7 @@ int main(int argc, char **argv) {
             trace_en = 1;
         if (strcmp(argv[i], "--trace") == 0)
             trace_en = 1;
-        if (strcmp(argv[i], "+notrace") == 0)
-            trace_en = 0;
     }
-
-#ifdef VERILATOR_CC
-    if (!trace_en) {
-        trace_en = 1;
-    }
-#endif
 
     if (trace_en)
     {
@@ -71,9 +64,7 @@ int main(int argc, char **argv) {
         std::cout << "Trace is disabled.\n";
     }
 
-    if (trace_en)
-    {
-        
+#ifdef VERILATOR_TRACE
         Verilated::traceEverOn(true);
         tb->trace(tfp, 99);
 #if CONFIG_FST_WAVE_TRACE
@@ -81,9 +72,8 @@ int main(int argc, char **argv) {
 #else
         tfp->open("tb_top.vcd");
 #endif
-    }
+#endif
 
-#ifdef VERILATOR_CC
     // ---------------- Reset phase ----------------
     tb->clk   = 0;
     tb->rst_n = 0;
@@ -91,15 +81,19 @@ int main(int argc, char **argv) {
     for (int i = 0; i < 20; i++) {
         tb->clk = !tb->clk;  
         tb->eval();
-        if (trace_en) {
-            tfp->dump(tick++);
-        }
-        // Verilated::timeInc(1);
+
+#ifdef VERILATOR_TRACE
+            tfp->dump(tick);
+#endif
+    tick++;        
+    Verilated::timeInc(1);
         tb->eval();
-        if (trace_en) {
-            tfp->dump(tick++);
-        }
-        // Verilated::timeInc(1);
+
+#ifdef VERILATOR_TRACE
+            tfp->dump(tick);
+#endif
+    tick++;        
+    Verilated::timeInc(1);
     }
 
     tb->rst_n = 1;
@@ -108,39 +102,28 @@ int main(int argc, char **argv) {
     while (!Verilated::gotFinish() ) {
         tb->clk = !tb->clk;   
         tb->eval();
-        if(trace_en) {
-            tfp->dump(tick++);
-        }
-        Verilated::timeInc(1);
-        tb->eval();
-        if(trace_en) {
-            tfp->dump(tick++);
-        }
-        Verilated::timeInc(1);
-
-    }
-#else
-    // ---------------- 纯sv仿真 ----------------
-    while (!Verilated::gotFinish() && Verilated::time() < max_cycles) {
-        // 1. 评估一次电路
-        tb->eval();
-        // 2. 记录当前时间点波形
-        tfp->dump(Verilated::time());
-        // 3. 时间推进 1 tick
-        Verilated::timeInc(1);
-    }
-    if (Verilated::time() >= max_cycles) {
-        VL_PRINTF("Timeout: simulation stopped\n");
-    }
-
+#ifdef VERILATOR_TRACE
+            tfp->dump(tick);
 #endif
+        Verilated::timeInc(1);
+        tb->eval();
+        tick++; 
+#ifdef VERILATOR_TRACE
+            tfp->dump(tick);
+#endif
+        tick++;
+        Verilated::timeInc(1);
+
+    }
+
     // ---------------- Finish ----------------
 
-    if (trace_en) {
-        std::cout << "Simulation finished at time " << Verilated::time() << " ticks.\n";
+
+    std::cout << "Simulation finished at time " << Verilated::time() << " ticks.\n";
+    #ifdef VERILATOR_TRACE
         tfp->close();
-    }
     delete tfp;
+    #endif
     delete tb;
     return 0;
 }

@@ -20,21 +20,21 @@
 //////////////////////////////////////////////////////////////////////////////////
 
 module perip_bridge(
-    input  logic         clk				,
-    input  logic         cnt_clk			,
-    input  logic         rst                ,
+    input  wire         clk				,
+    input  wire         cnt_clk			,
+    input  wire         rst                ,
 
-    input  logic [31:0]  perip_addr			,
-    input  logic [31:0]  perip_wdata		,
-    input  logic         perip_wen			,
-	input  logic [1:0]	 perip_mask			,
-    output logic [31:0]  perip_rdata		,
+    input  wire [31:0]  perip_addr			,
+    input  wire [31:0]  perip_wdata		,
+    input  wire         perip_wen			,
+	input  wire [1:0]	 perip_mask			,
+    output wire [31:0]  perip_rdata		,
 
-    input  logic [63:0]  virtual_sw_input	,
-    input  logic [7:0]   virtual_key_input	,	
+    input  wire [63:0]  virtual_sw_input	,
+    input  wire [7:0]   virtual_key_input	,	
 
-	output logic [39:0]  virtual_seg_output	,
-    output logic [31:0]  virtual_led_output
+	output wire [39:0]  virtual_seg_output	,
+    output wire [31:0]  virtual_led_output
 );
     // localparam DRAM_ADDR_START = 32'h8010_0000;
     // localparam DRAM_ADDR_END   = 32'h8013_FFFF;
@@ -45,9 +45,15 @@ module perip_bridge(
     localparam LED_ADDR  = 32'h8020_0040;  // led[31:0]
     localparam CNT_ADDR  = 32'h8020_0050;  // counter
 
-    logic [31:0] LED;
-    logic [31:0] seg_wdata, cnt_rdata, mmio_rdata, dram_rdata;
-    logic [39:0] seg_output;
+    reg [31:0] LED;
+    reg [31:0] seg_wdata;
+    reg [31:0] mmio_rdata;
+    wire [31:0] cnt_rdata;
+    // wire [31:0] dram_rdata;
+    wire [39:0] seg_output;
+
+    reg [31:0] perip_rdata_ff;
+    wire [31:0] perip_rdata_comb;
 
     // we don't care perip_mask in LED, SEG, SW & KEY, only care in DRAM
     // write process
@@ -112,13 +118,21 @@ module perip_bridge(
         .perip_rdata		(cnt_rdata)
     );
 
-    assign perip_rdata = {32{perip_addr == SW0_ADDR}} & mmio_rdata |
+    assign perip_rdata_comb = {32{perip_addr == SW0_ADDR}} & mmio_rdata |
                         {32{perip_addr == SW1_ADDR}} & mmio_rdata |
                         {32{perip_addr == KEY_ADDR}} & mmio_rdata |
                         {32{perip_addr == SEG_ADDR}} & mmio_rdata |
                         // {32{perip_addr >= DRAM_ADDR_START && perip_addr < DRAM_ADDR_END}} & dram_rdata |
                         {32{perip_addr == CNT_ADDR}} & cnt_rdata;
-    
+    always_ff @(posedge clk or posedge rst) begin
+        if(rst) begin
+            perip_rdata_ff <= 32'h0;
+        end else begin
+            perip_rdata_ff <= perip_rdata_comb;
+        end
+    end
+    assign perip_rdata = perip_rdata_ff;
+
     assign virtual_led_output = LED;
     assign virtual_seg_output = seg_output;
 

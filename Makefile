@@ -21,8 +21,8 @@ DTCM_TEST_BASE := $(PROJECT_ROOT)/hw/dv/test_data/split/dtcm
 
 ITCM_BASE := $(PROJECT_ROOT)/hw/dv/test_data/mem/itcm
 DTCM_BASE := $(PROJECT_ROOT)/hw/dv/test_data/mem/dtcm
-ITCM_MEM ?= $(ITCM_BASE)/irom0.mem
-DTCM_MEM ?= $(DTCM_BASE)/dram0.mem
+ITCM_MEM ?= $(ITCM_BASE)/irom2.mem
+DTCM_MEM ?= $(DTCM_BASE)/dram2.mem
 
 # --- 自动化测试相关定义 ---
 # 搜寻 ITCM 目录下所有的 .mem 文件来确定测试用例列表

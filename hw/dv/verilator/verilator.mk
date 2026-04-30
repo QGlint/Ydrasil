@@ -1,6 +1,7 @@
 VERILATOR ?= verilator
 VERILATOR_TRACE ?= 1
 Compile_optimization ?= 1
+mutil_run ?= 1
 
 ##################################
 # Paths
@@ -27,7 +28,9 @@ VERILATOR_FLAGS += --binary --timing --exe
 VERILATOR_FLAGS += -DVERILATOR_SV
 endif
 
-
+ifeq ($(mutil_run),1)
+VERILATOR_FLAGS += --threads 16
+endif
 
 VERILATOR_FLAGS += -MAKEFLAGS "-j$(shell nproc)"
 
@@ -69,6 +72,7 @@ VERILATOR_FLAGS += -f $(FLIST_FILE)
 endif
 
 ifeq ($(VERILATOR_TRACE),1)
+VERILATOR_FLAGS += -CFLAGS "-DVERILATOR_TRACE"
 SIM_CMDS := $(BIN) +trace
 else
 SIM_CMDS := $(BIN)

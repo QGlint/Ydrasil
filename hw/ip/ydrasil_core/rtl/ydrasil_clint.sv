@@ -25,7 +25,7 @@
 `include "define_mem_reg.svh"
 `include "define_decode.svh"
 // core local interruptor module
-module clint (
+module ydrasil_clint (
 
     input wire clk,
     input wire rst_n,

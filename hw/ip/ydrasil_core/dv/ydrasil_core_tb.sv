@@ -1,9 +1,9 @@
 `timescale 1ns/1ns
 `include "define_mem_reg.svh"
-parameter CNT_s = 1000*1000*50;
-parameter CNT_ms = 1000*50;
-parameter CNT_us = 50;
-parameter time_end = 5000 * CNT_us; // 40s
+parameter longint CNT_s  = 1000 * 1000 * 50;
+parameter longint CNT_ms = 1000 * 50;
+parameter longint CNT_us = 50;
+parameter longint time_end = 60 * CNT_s; // 40s
 
 module ydrasil_core_tb(
 `ifdef VERILATOR_CC
@@ -83,9 +83,10 @@ module ydrasil_core_tb(
 	assign rst = ~rst_n;
 
 	initial begin
-		repeat (time_end) @(posedge clk);
-		$display("[TB] timeout reached, finish simulation");
-		$finish;
+		if($time >= time_end) begin
+            $display("[TB] timeout reached, finish simulation");
+            $finish;
+        end
 	end
 
     // 周期计数器 - 保持同步实现
@@ -167,6 +168,11 @@ module ydrasil_core_tb(
     logic [31:0] seg_wdata, cnt_rdata, mmio_rdata, dram_rdata;
     logic [39:0] seg_output;
 
+    initial begin
+        if(LED > 0)
+           $finish; 
+    end
+
     // we don't care perip_mask in LED, SEG, SW & KEY, only care in DRAM
     // write process
     always_ff @(posedge clk) begin
@@ -228,7 +234,13 @@ module ydrasil_core_tb(
 	wire cnt_wen ;
 	assign cnt_wen = perip_wen & (perip_addr == CNT_ADDR);
 
-    assign perip_rdata = {32{perip_addr == SW0_ADDR}} & mmio_rdata |
+    reg [31:0] mmio_rdata_reg;
+    reg [31:0] back_rdata;
+    always_ff @(posedge clk) begin
+        mmio_rdata_reg <= back_rdata;
+    end
+    assign perip_rdata = mmio_rdata_reg;
+    assign back_rdata = {32{perip_addr == SW0_ADDR}} & mmio_rdata |
                         {32{perip_addr == SW1_ADDR}} & mmio_rdata |
                         {32{perip_addr == KEY_ADDR}} & mmio_rdata |
                         {32{perip_addr == SEG_ADDR}} & mmio_rdata |

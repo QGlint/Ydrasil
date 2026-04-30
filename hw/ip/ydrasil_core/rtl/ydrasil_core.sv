@@ -356,7 +356,7 @@ module ydrasil_core #(
 		.csr_ex_data_o     (csr_ex_rdata)
 	);
 
-	clint u_clint (
+	ydrasil_clint u_clint (
 		.clk               (clk_i),
 		.rst_n             (rst_n_i),
 		.instr_addr_i       (id_instr_addr),
