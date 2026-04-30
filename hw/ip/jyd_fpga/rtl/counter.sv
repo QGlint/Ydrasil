@@ -22,6 +22,7 @@
 
 module counter(
     input  logic         clk,
+    input  wire          perip_clk,
     input  logic         rst,
 
     input  logic [31:0]  perip_wdata,
@@ -33,7 +34,7 @@ module counter(
     logic [31:0] cnt_ms;
     logic start;
 
-    always_ff @(posedge clk) begin
+    always_ff @(posedge perip_clk) begin
         if (rst) begin
             start <= 0;
         end else if (cnt_wen & perip_wdata == 32'h8000_0000) begin

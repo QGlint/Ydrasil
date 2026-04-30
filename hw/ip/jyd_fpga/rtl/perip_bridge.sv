@@ -112,6 +112,7 @@ module perip_bridge(
     // counter rw
     counter counter_inst (
         .clk				(cnt_clk),
+        .perip_clk            (clk),
         .rst                (rst),
         .perip_wdata		(perip_wdata),
         .cnt_wen 			(perip_wen & (perip_addr == CNT_ADDR)),
