@@ -16,13 +16,13 @@ ITCM_TEST_BASE := $(PROJECT_ROOT)/hw/dv/test_data/split/itcm
 DTCM_TEST_BASE := $(PROJECT_ROOT)/hw/dv/test_data/split/dtcm
 
 # 默认单次仿真的内存文件 (以 add 为例)
-# ITCM_MEM ?= $(ITCM_TEST_BASE)/rv32ui-p-sh.mem
-# DTCM_MEM ?= $(DTCM_TEST_BASE)/rv32ui-p-sh.mem
+ITCM_MEM ?= $(ITCM_TEST_BASE)/rv32ui-p-fence_i.mem
+DTCM_MEM ?= $(DTCM_TEST_BASE)/rv32ui-p-fence_i.mem
 
 ITCM_BASE := $(PROJECT_ROOT)/hw/dv/test_data/mem/itcm
 DTCM_BASE := $(PROJECT_ROOT)/hw/dv/test_data/mem/dtcm
-ITCM_MEM ?= $(ITCM_BASE)/irom2.mem
-DTCM_MEM ?= $(DTCM_BASE)/dram2.mem
+# ITCM_MEM ?= $(ITCM_BASE)/irom2.mem
+# DTCM_MEM ?= $(DTCM_BASE)/dram2.mem
 
 # --- 自动化测试相关定义 ---
 # 搜寻 ITCM 目录下所有的 .mem 文件来确定测试用例列表
@@ -55,17 +55,20 @@ test_all:
 	@mkdir -p $(RESULT_DIR)
 	@rm -f $(RESULT_DIR)/summary.log
 	@for tst in $(UI_TEST_CASES); do \
-		echo -n "Running [$$tst] ... "; \
+		echo -n "Running [$$tst]  "; \
 		$(MAKE) LOG_OUTPUT=0 Compile_optimization=0 comp sim \
 			ITCM_MEM=$(ITCM_TEST_BASE)/$$tst.mem \
 			DTCM_MEM=$(DTCM_TEST_BASE)/$$tst.mem \
 			> $(RESULT_DIR)/$$tst.log 2>&1; \
 		\
+		cycles=$$(grep -o "CYCLES=[0-9]*" $(RESULT_DIR)/$$tst.log | cut -d= -f2);\
+		insts=$$(grep -o "INSTS=[0-9]*" $(RESULT_DIR)/$$tst.log | cut -d= -f2); \
+		ipc=$$(grep -o "IPC=[0-9.]*" $(RESULT_DIR)/$$tst.log | cut -d= -f2); \
 		if grep -q "TEST_PASS" $(RESULT_DIR)/$$tst.log; then \
-			echo -e "\033[32m[ PASSED ]\033[0m"; \
+			echo -e "\033[34m [Cycles: $$cycles | Insts: $$insts | IPC: $$ipc]\033[0m \033[32m[ PASSED ]\033[0m"; \
 			echo "$$tst: PASS" >> $(RESULT_DIR)/summary.log; \
 		else \
-			echo -e "\033[31m[ FAILED ]\033[0m"; \
+			echo -e "\033[34m [Cycles: $$cycles | Insts: $$insts | IPC: $$ipc]\033[0m \033[31m[ FAILED ]\033[0m"; \
 			echo "$$tst: FAIL (Check $(RESULT_DIR)/$$tst.log)" >> $(RESULT_DIR)/summary.log; \
 		fi \
 	done

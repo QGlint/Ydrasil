@@ -99,7 +99,7 @@ int main(int argc, char **argv) {
     tb->rst_n = 1;
 
     // ---------------- Main simulation ----------------
-    while (!Verilated::gotFinish() ) {
+    while ((!Verilated::gotFinish() )&&(tick <=10000)) {
         tb->clk = !tb->clk;   
         tb->eval();
 #ifdef VERILATOR_TRACE

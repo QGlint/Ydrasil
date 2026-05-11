@@ -1,7 +1,7 @@
 VERILATOR ?= verilator
 VERILATOR_TRACE ?= 1
-Compile_optimization ?= 1
-mutil_run ?= 1
+# Compile_optimization ?= 1
+# mutil_run ?= 1
 
 ##################################
 # Paths

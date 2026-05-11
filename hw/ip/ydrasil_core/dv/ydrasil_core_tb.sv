@@ -3,7 +3,7 @@
 parameter longint CNT_s  = 1000 * 1000 * 50;
 parameter longint CNT_ms = 1000 * 50;
 parameter longint CNT_us = 50;
-parameter longint time_end = 60 * CNT_s; // 40s
+parameter longint time_end = 60 * CNT_us; // 40s
 
 module ydrasil_core_tb(
 `ifdef VERILATOR_CC
@@ -32,7 +32,9 @@ module ydrasil_core_tb(
     // 通用寄存器访问 - 仅用于错误信息显示
     wire [31:0] x3 = u_dut.u_ydrasil_registers.registers[3];
     // PC 监控
-    wire [31:0] pc = u_dut.u_ydrasil_if_stage.if_id_pc_o;
+    wire [31:0] pc = u_dut.u_ydrasil_if_stage.pc_ff;
+    // wire [31:0] csr_instret = u_dut.u_ydrasil_csr.minstret[31:0];
+    wire [31:0] csr_cyclel = u_dut.u_ydrasil_registers_csr.cycle[31:0]; 
 
     integer           r;
     reg     [8*300:1] testcase;
@@ -48,12 +50,12 @@ module ydrasil_core_tb(
     // 添加PC监控变量
     reg [31:0] pc_write_to_host_cnt;
     reg [31:0] pc_write_to_host_cycle;
-    reg [31:0] cycle_count;
+    wire  [31:0] cycle_count = csr_cyclel;
     reg pc_write_to_host_flag;
     reg [31:0] last_pc;
 
     // 添加指令计数和IPC计算相关变量
-    reg [31:0] instruction_count;
+    reg [31:0] instruction_count ;//= csr_instret; // 直接使用CSR中的instret寄存器
     wire valid_instruction = (pc != last_pc);
     real ipc;
 
@@ -92,14 +94,12 @@ module ydrasil_core_tb(
     // 周期计数器 - 保持同步实现
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            cycle_count       <= 32'b0;
-            last_pc           <= 32'b0;
             instruction_count <= 32'b0;
+            last_pc           <= 32'b0;
         end else begin
-            cycle_count <= cycle_count + 1'b1;
             last_pc     <= pc;
             if (valid_instruction) begin
-                instruction_count <= instruction_count + 1'b1;
+                instruction_count <= instruction_count + 1;
             end
         end
     end
