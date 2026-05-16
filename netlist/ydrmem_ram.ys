@@ -1,3 +1,0 @@
-read_verilog -sv -formal -overwrite {workspace}/hw/ip/ydrmem/rtl/ydrmem_ram.sv
-design -reset-vlog; proc;
-write_json {workspace}/netlist/ydrmem_ram.json
