@@ -4,25 +4,9 @@ BUILD_DIR := $(PROJECT_ROOT)/build
 WAVE_DIR  := $(BUILD_DIR)/wave
 LOG_DIR   := $(BUILD_DIR)/log
 
-SIM_TOOL ?= verilator
-IP   ?= ydrasil_core
-VERILATOR_MOD ?= cc
-UVM ?= 0
-USE_BENDER ?= 1
-BENDER ?= bender
-VERILATOR_TRACE ?= 1
-# --- 内存路径配置 (指向你新生成的 split 目录) ---
-ITCM_TEST_BASE := $(PROJECT_ROOT)/hw/dv/test_data/split/itcm
-DTCM_TEST_BASE := $(PROJECT_ROOT)/hw/dv/test_data/split/dtcm
+TOOLS := verilator gtkwave spike riscv64-elf-gcc riscv64-elf-binutils riscv64-elf-gdb riscv64-elf-newlib qemu-system-riscv
 
-# 默认单次仿真的内存文件 (以 add 为例)
-ITCM_MEM ?= $(ITCM_TEST_BASE)/rv32ui-p-fence_i.mem
-DTCM_MEM ?= $(DTCM_TEST_BASE)/rv32ui-p-fence_i.mem
-
-ITCM_BASE := $(PROJECT_ROOT)/hw/dv/test_data/mem/itcm
-DTCM_BASE := $(PROJECT_ROOT)/hw/dv/test_data/mem/dtcm
-# ITCM_MEM ?= $(ITCM_BASE)/irom2.mem
-# DTCM_MEM ?= $(DTCM_BASE)/dram2.mem
+include config.mk
 
 # --- 自动化测试相关定义 ---
 # 搜寻 ITCM 目录下所有的 .mem 文件来确定测试用例列表
@@ -88,3 +72,38 @@ clean:
 
 tran_coe:
 	bash hw/dv/test_data/coe_to_mem.sh
+
+PKG_MANAGER := $(shell \
+	if command -v pacman >/dev/null 2>&1; then \
+		echo "sudo pacman -S --needed"; \
+	elif command -v apt-get >/dev/null 2>&1; then \
+		echo "sudo apt-get install -y"; \
+	elif command -v dnf >/dev/null 2>&1; then \
+		echo "sudo dnf install -y"; \
+	elif command -v yum >/dev/null 2>&1; then \
+		echo "sudo yum install -y"; \
+	elif command -v brew >/dev/null 2>&1; then \
+		echo "brew install"; \
+	else \
+		echo "unknown"; \
+	fi)
+
+# 检查依赖并自动安装
+check-deps:
+	@missing=""; \
+	for tool in $(TOOLS); do \
+		if ! command -v $$tool >/dev/null 2>&1; then \
+			echo "$$tool not found."; \
+			missing="$$missing $$tool"; \
+		fi; \
+	done; \
+	if [ -n "$$missing" ]; then \
+		echo "Missing tools:$$missing"; \
+		if [ "$(PKG_MANAGER)" = "unknown" ]; then \
+			echo "Error: No known package manager found. Please install $(TOOLS) manually."; \
+			exit 1; \
+		fi; \
+		echo "Installing missing packages using:$(PKG_MANAGER) $$missing"; \
+		$(PKG_MANAGER) $$missing; \
+	fi
+
