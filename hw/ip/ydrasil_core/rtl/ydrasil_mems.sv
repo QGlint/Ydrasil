@@ -43,65 +43,23 @@ module ydrasil_mems (
     assign dtcm_wen     = lsu_mem_we_i; // DTCM写使能
     assign dtcm_wmask   = lsu_mem_wmask_i; // DTCM写
 
-`ifdef SYNTHESIS
-    IROM u_itcm (
-    .a(itcm_addr),      // input wire [11 : 0] a
-    .spo(itcm_rdata)  // output wire [31 : 0] spo
+    itcm u_itcm (
+        .clk(clk),
+        .itcm_en(rst_n), // ITCM在复位后始终使能
+        .itcm_addr(itcm_addr),
+        .itcm_data_o(itcm_rdata)
     );
 
-    blk_mem_gen_0 u_dtcm (
-    .clka(clk),    // input wire clka
-    .ena(dtcm_en),      // input wire ena
-    .wea(dtcm_wmask),      // input wire [3 : 0] wea
-    .addra(dtcm_addr),  // input wire [15 : 0] addra
-    .dina(dtcm_wdata),    // input wire [31 : 0] dina
-    .douta(dtcm_rdata)  // output wire [31 : 0] douta
+    dtcm u_dtcm (
+        .clk(clk),
+        .dtcm_en(dtcm_en),
+        .dtcm_wen(dtcm_wen),
+        .dtcm_mask(dtcm_wmask),
+        .dtcm_addr(dtcm_addr),
+        .dtcm_data_i(dtcm_wdata),
+        .dtcm_data_o(dtcm_rdata)
     );
 
-`elsif __XILINX_SIMULATOR__
 
-    IROM u_itcm (
-    .a(itcm_addr),      // input wire [11 : 0] a
-    .spo(itcm_rdata)  // output wire [31 : 0] spo
-    );
-
-    blk_mem_gen_0 u_dtcm (
-    .clka(clk),    // input wire clka
-    .ena(dtcm_en),      // input wire ena
-    .wea(dtcm_wmask),      // input wire [3 : 0] wea
-    .addra(dtcm_addr),  // input wire [15 : 0] addra
-    .dina(dtcm_wdata),    // input wire [31 : 0] dina
-    .douta(dtcm_rdata)  // output wire [31 : 0] douta
-    );
-    
-`else
-    // ITCM模块例化 - 使用参数化和宏定义控制初始化
-    ydrmem_rom #(
-        .ADDR_WIDTH(`ITCM_ADDR_WIDTH),
-        .DATA_WIDTH(`BUS_DATA_WIDTH),
-        .INIT_MEM  (`INIT_ITCM),        // 使用宏定义控制是否初始化
-        .INIT_FILE (`ITCM_INIT_FILE)    // 使用宏定义指定初始化文件
-    ) u_itcm (
-        .addr_i   (itcm_addr),
-        .data_o   (itcm_rdata)
-    );
-
-    // DTCM模块例化 - 使用参数化，默认不初始化
-    ydrmem_ram #(
-        .ADDR_WIDTH(`DTCM_ADDR_WIDTH),
-        .DATA_WIDTH(`BUS_DATA_WIDTH),
-        .INIT_MEM  (`INIT_DTCM),        // 使用宏定义控制是否初始化
-        .INIT_FILE (`DTCM_INIT_FILE)    // 使用宏定义指定初始化文件
-    ) u_dtcm (
-        .clk      (clk),
-        .rst_n    (rst_n),
-        .we_i     (dtcm_wen),
-        .we_mask_i(dtcm_wmask),
-        .addr_i   (dtcm_addr),
-        .data_i   (dtcm_wdata),
-        .data_o   (dtcm_rdata)
-    );
-
-`endif
 
 endmodule

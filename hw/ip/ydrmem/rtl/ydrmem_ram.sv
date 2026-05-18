@@ -5,8 +5,7 @@ module ydrmem_ram #(
     parameter DATA_WIDTH = 32  // 数据宽度参数
 ) (
     input wire clk,
-    input wire rst_n,
-
+    input wire                  en_i,      // 使能信号
     input wire                  we_i,       // write enable
     input wire [           3:0] we_mask_i,  // 字节写入掩码 (byte write enable)
     input wire [ADDR_WIDTH-1:0] addr_i,     // addr
@@ -40,10 +39,10 @@ module ydrmem_ram #(
 
     // 同步读取逻辑
     always @(posedge clk) begin
-        if (!rst_n) begin
-            data_o <= {DATA_WIDTH{1'b0}};
-        end else begin
+        if (en_i) begin
             data_o <= mem_r[word_addr];
+        end else begin
+            data_o <= 0; // 不使能时输出0，或者保持之前的值
         end
     end
 
