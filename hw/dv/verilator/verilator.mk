@@ -1,28 +1,36 @@
 VERILATOR ?= verilator
 VERILATOR_TRACE ?= 1
-# Compile_optimization ?= 1
-# mutil_run ?= 1
-
+VERILATOR_MOD ?= cc
+VERILATOR_IGNORE_ALL ?= 0
+Compile_optimization ?= 0
+mutil_run ?= 0
+LOG_OUTPUT ?= 1 
 ##################################
 # Paths
 ##################################
 
 BIN := $(OBJ_DIR)/$(TOP)
 OBJ_DIR_SIM := $(OBJ_DIR)/verilator
-LOG_OUTPUT ?= 1 
+
+
 ifeq ($(VERILATOR_MOD),cc)
 SIM_C_DIR := $(PROJECT_ROOT)/hw/dv/verilator
 SIM_CSRCS := $(SIM_C_DIR)/sim.cpp
 endif
+
+SIM_CMDS := $(BIN)
+SIM_FLAGS := 
+VERILATOR_FLAGS :=
+
 ##################################
 # Base Flags
 ##################################
 
-VERILATOR_FLAGS :=
+
 ifeq ($(VERILATOR_MOD) ,cc)
-VERILATOR_FLAGS += -cc --exe --timing
+VERILATOR_FLAGS += -cc --exe
 VERILATOR_FLAGS += -DVERILATOR_CC
-VERILATOR_FLAGS += -CFLAGS "-DVERILATOR_CC"
+# VERILATOR_FLAGS += -CFLAGS "-DVERILATOR_CC"
 else
 VERILATOR_FLAGS += --binary --timing --exe
 VERILATOR_FLAGS += -DVERILATOR_SV
@@ -39,17 +47,26 @@ VERILATOR_FLAGS += --Mdir $(OBJ_DIR_SIM)
 VERILATOR_FLAGS += -x-assign fast
 VERILATOR_FLAGS += --build -o $(abspath $(BIN))
 
+VERILATOR_FLAGS += -j  $(shell nproc)
+VERILATOR_FLAGS += --top-module $(TOP)
+
+VERILATOR_FLAGS += $(addprefix -I,$(INC_DIRS))
+VERILATOR_FLAGS += $(addprefix -D,$(DEFINES))
+VERILATOR_FLAGS += -CFLAGS "-DTB_NAME=$(TOP)"
+
+
 VERILATOR_FLAGS += -Wno-fatal -Wno-TIMESCALEMOD 
 
-# VERILATOR_FLAGS +=  -Wno-INITIALDLY 
-# VERILATOR_FLAGS += -Wno-WIDTHTRUNC 
-# VERILATOR_FLAGS += -Wno-WIDTHCONCAT 
-# VERILATOR_FLAGS += -Wno-WIDTHEXPAND 
-# VERILATOR_FLAGS += -Wno-UNOPTFLAT 
-# VERILATOR_FLAGS += -Wno-PINMISSING 
-# VERILATOR_FLAGS += -Wno-UNSIGNED 
+ifeq ($(VERILATOR_IGNORE_ALL),1)
+VERILATOR_FLAGS +=  -Wno-INITIALDLY 
+VERILATOR_FLAGS += -Wno-WIDTHTRUNC 
+VERILATOR_FLAGS += -Wno-WIDTHCONCAT 
+VERILATOR_FLAGS += -Wno-WIDTHEXPAND 
+VERILATOR_FLAGS += -Wno-UNOPTFLAT 
+VERILATOR_FLAGS += -Wno-PINMISSING 
+VERILATOR_FLAGS += -Wno-UNSIGNED
+endif
 
-# VERILATOR_FLAGS += -CFLAGS -DVL_DEBUG
 ifeq ($(Compile_optimization),1)
 VERILATOR_FLAGS += -O3
 VERILATOR_FLAGS += --no-assert
@@ -59,26 +76,13 @@ endif
 ifeq ($(VERILATOR_TRACE),1)
 # VERILATOR_FLAGS += --trace --trace-depth 2
 VERILATOR_FLAGS +=--trace  --trace-structs --trace-params --trace-max-array 1024
+VERILATOR_FLAGS += -CFLAGS "-DVERILATOR_TRACE"
+SIM_FLAGS += +trace
 endif
-VERILATOR_FLAGS += -j  $(shell nproc)
-VERILATOR_FLAGS += --top-module $(TOP)
-
-VERILATOR_FLAGS += $(addprefix -I,$(INC_DIRS))
-VERILATOR_FLAGS += $(addprefix -D,$(DEFINES))
-VERILATOR_FLAGS += -CFLAGS "-DTB_NAME=$(TOP)"
 
 ifeq ($(USE_BENDER),1)
 VERILATOR_FLAGS += -f $(FLIST_FILE)
 endif
-
-ifeq ($(VERILATOR_TRACE),1)
-VERILATOR_FLAGS += -CFLAGS "-DVERILATOR_TRACE"
-SIM_CMDS := $(BIN) +trace
-else
-SIM_CMDS := $(BIN)
-endif
-
-
 
 ##################################
 # Target
@@ -106,13 +110,17 @@ endif
 	    $(SIM_CSRCS)\
 	    >$(LOG_DIR)/$(TOP).ver.comp.log 2>$(LOG_DIR)/$(TOP).ver.comp.err.log
 
+	@echo "[CLEAN EMPTY LOG]"
+	@find $(LOG_DIR) -type f -size 0 -delete
+	@find $(LOG_DIR) -type f -size 0 -print -delete
+
 sim:
 	@echo "[VERILATOR RUN]"
 ifeq ($(LOG_OUTPUT),1) 
-	cd $(OBJ_DIR_SIM) && $(SIM_CMDS) \
+	cd $(OBJ_DIR_SIM) && $(SIM_CMDS) $(SIM_FLAGS) \
 		>$(LOG_DIR)/$(TOP).ver.sim.log 2>$(LOG_DIR)/$(TOP).ver.sim.err.log
 else
-	cd $(OBJ_DIR_SIM) && $(SIM_CMDS)
+	cd $(OBJ_DIR_SIM) && $(SIM_CMDS) $(SIM_FLAGS) 
 endif
 
 
@@ -133,10 +141,10 @@ endif
 	@find $(LOG_DIR) -type f -size 0 -delete
 	@find $(LOG_DIR) -type f -size 0 -print -delete
 
-resim:
+recomp:
 	@echo "[CLEAN OBJ_DIR_SIM]"
 	@rm -rf $(OBJ_DIR_SIM)/*;  
-	$(MAKE) sim
+	$(MAKE) comp
 
 wave:
 ifeq ($(VERILATOR_TRACE),1)

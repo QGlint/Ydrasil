@@ -31,8 +31,8 @@ endif
 # Paths
 ##################################
 
-OBJ_DIR := $(BUILD_DIR)/$(TOP)
-TB_SRCS := $(wildcard $(IP_DIR)/dv/*.sv)
+OBJ_DIR ?= $(BUILD_DIR)/$(TOP)
+TB_SRCS ?= $(wildcard $(IP_DIR)/dv/*.sv)
 INC_DIRS += $(PROJECT_ROOT)/hw/include
 INC_DIRS += $(IP_DIR)/rtl
 INC_DIRS += $(IP_DIR)/include
@@ -56,12 +56,10 @@ endif
 # Defines
 ##################################
 
-DEFINES := RANDOM_SEED=$(RANDOM_SEED)
-DEFINES += INIT_ITCM=1
-DEFINES += INIT_DTCM=1
-DEFINES += ITCM_INIT_FILE=\"$(abspath $(ITCM_MEM))\"
-DEFINES += DTCM_INIT_FILE=\"$(abspath $(DTCM_MEM))\"
+ITCM_INIT_FILE ?= 
+DTCM_INIT_FILE ?=
 
+DEFINES := RANDOM_SEED=$(RANDOM_SEED)
 
 ##################################
 # Timestamp

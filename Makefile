@@ -4,15 +4,14 @@ BUILD_DIR := $(PROJECT_ROOT)/build
 WAVE_DIR  := $(BUILD_DIR)/wave
 LOG_DIR   := $(BUILD_DIR)/log
 
-TOOLS := verilator gtkwave spike riscv64-elf-gcc riscv64-elf-binutils riscv64-elf-gdb riscv64-elf-newlib qemu-system-riscv
-
+TOOLS := verilator gtkwave spike riscv64-elf-gcc riscv64-elf-newlib riscv64-elf-gdb  qemu-system-riscv
 
 # --- 自动化测试相关定义 ---
 # 搜寻 ITCM 目录下所有的 .mem 文件来确定测试用例列表
 UI_TEST_CASES := $(notdir $(patsubst %.mem,%,$(wildcard $(ITCM_TEST_BASE)/rv32ui-p-*.mem)))
 RESULT_DIR := $(LOG_DIR)/test_results
 
-export PROJECT_ROOT BUILD_DIR WAVE_DIR LOG_DIR SIM_TOOL IP VERILATOR_MOD UVM USE_BENDER BENDER ITCM_TEST_MEM DTCM_TEST_MEM ITCM_MEM DTCM_MEM Compile_optimization VERILATOR_TRACE
+export PROJECT_ROOT BUILD_DIR WAVE_DIR LOG_DIR SIM_TOOL IP VERILATOR_MOD UVM USE_BENDER BENDER 
 
 .PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean
 
@@ -72,26 +71,10 @@ clean:
 tran_coe:
 	bash hw/dv/test_data/coe_to_mem.sh
 
-PKG_MANAGER := $(shell \
-	if command -v pacman >/dev/null 2>&1; then \
-		echo "sudo pacman -S --needed"; \
-	elif command -v apt-get >/dev/null 2>&1; then \
-		echo "sudo apt-get install -y"; \
-	elif command -v dnf >/dev/null 2>&1; then \
-		echo "sudo dnf install -y"; \
-	elif command -v yum >/dev/null 2>&1; then \
-		echo "sudo yum install -y"; \
-	elif command -v brew >/dev/null 2>&1; then \
-		echo "brew install"; \
-	else \
-		echo "unknown"; \
-	fi)
-
-# 检查依赖并自动安装
 check-deps:
 	@missing=""; \
 	for tool in $(TOOLS); do \
-		if ! command -v $$tool >/dev/null 2>&1; then \
+		if ! pacman -Qs -q $$tool >/dev/null 2>&1; then \
 			echo "$$tool not found."; \
 			missing="$$missing $$tool"; \
 		fi; \
@@ -106,21 +89,4 @@ check-deps:
 		$(PKG_MANAGER) $$missing; \
 	fi
 
-
-rv_test_comp_genmem: $(RVTESTS_TARGETS)
-
-rv_test_comp_genmem_rebuild:
-	@$(MAKE) rv_test_comp_genmem REBUILD=1
-
-rv_comp_%:
-	@name=$*; \
-	group=$${name%%_*}; \
-	base=$${name#*_}; \
-	type=$$group; \
-	echo ">>> Building $$group/$$base"; \
-	$(MAKE) -C sw rv_comp_genmem \
-		NAME=$$name \
-		SRC=$(RVTESTSISA_DIR)/$$group/$$base.S \
-		OUT_DIR=$(PROJECT_ROOT)/build/riscv_tests/$$type \
-		COMP_MODE=rvtest \
-		INCLUDES="$(RVTESTS_INCLUDES)"
+include verif/tests/tests.mk

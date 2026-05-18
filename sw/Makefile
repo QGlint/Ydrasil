@@ -39,6 +39,7 @@ OBJCOPY := $(RISCV_PREFIX)-objcopy
 OBJDUMP := $(RISCV_PREFIX)-objdump
 
 RV_CFLAGS ?= -march=$(ARCH) -mabi=$(ABI) -nostdlib -nostartfiles -static -mcmodel=medany
+LDFLAGS ?=
 
 # ====== derived ======
 SRC ?= 
@@ -67,7 +68,7 @@ rv_comp_genmem:
 
 rv_elf:
 	@mkdir -p $(ELF_DIR) 
-	$(CC) $(RV_CFLAGS) $(INCLUDES) -T $(LDSCRIPT) $(SRC) -o $(ELF)
+	$(CC) $(RV_CFLAGS) $(INCLUDES) -T $(LDSCRIPT) $(SRC) $(LDFLAGS) -o $(ELF)
 
 rv_dump: rv_elf
 	@mkdir -p $(DUMP_DIR)

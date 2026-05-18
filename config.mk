@@ -20,6 +20,23 @@ DTCM_BASE := $(PROJECT_ROOT)/hw/dv/test_data/mem/dtcm
 # ITCM_MEM ?= $(ITCM_BASE)/irom2.mem
 # DTCM_MEM ?= $(DTCM_BASE)/dram2.mem
 
+
+PKG_MANAGER := $(shell \
+	if command -v pacman >/dev/null 2>&1; then \
+		echo "sudo pacman -S --needed"; \
+	elif command -v apt-get >/dev/null 2>&1; then \
+		echo "sudo apt-get install -y"; \
+	elif command -v dnf >/dev/null 2>&1; then \
+		echo "sudo dnf install -y"; \
+	elif command -v yum >/dev/null 2>&1; then \
+		echo "sudo yum install -y"; \
+	elif command -v brew >/dev/null 2>&1; then \
+		echo "brew install"; \
+	else \
+		echo "unknown"; \
+	fi)
+
+
 #------------------------------------------
 # toolchain
 #------------------------------------------
@@ -42,13 +59,3 @@ RISCV_CFLAGS := \
 
 RVTESTS_TYPE := rv32ui rv32um
 
-RVTESTS_DIR := $(PROJECT_ROOT)/verif/tests/riscv-tests
-RVTESTSISA_DIR := $(RVTESTS_DIR)/isa
-
-RVTESTS_ALL := $(foreach t,$(RVTESTS_TYPE), \
-               $(addprefix $(t)/,$(basename $(notdir $(wildcard $(RVTESTSISA_DIR)/$(t)/*.S)))) )
-
-# 为每个测试生成唯一目标名（替换 / 为 _）
-RVTESTS_TARGETS := $(addprefix rv_comp_,$(subst /,_,$(RVTESTS_ALL)))
-
-RVTESTS_INCLUDES := -I$(RVTESTS_DIR)/env/p -I$(RVTESTS_DIR)/isa/macros/scalar
