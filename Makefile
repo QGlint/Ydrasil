@@ -1,4 +1,4 @@
-PROJECT_ROOT := $(abspath $(CURDIR))
+include config.mk
 
 BUILD_DIR := $(PROJECT_ROOT)/build
 WAVE_DIR  := $(BUILD_DIR)/wave
@@ -6,7 +6,6 @@ LOG_DIR   := $(BUILD_DIR)/log
 
 TOOLS := verilator gtkwave spike riscv64-elf-gcc riscv64-elf-binutils riscv64-elf-gdb riscv64-elf-newlib qemu-system-riscv
 
-include config.mk
 
 # --- 自动化测试相关定义 ---
 # 搜寻 ITCM 目录下所有的 .mem 文件来确定测试用例列表
@@ -15,7 +14,7 @@ RESULT_DIR := $(LOG_DIR)/test_results
 
 export PROJECT_ROOT BUILD_DIR WAVE_DIR LOG_DIR SIM_TOOL IP VERILATOR_MOD UVM USE_BENDER BENDER ITCM_TEST_MEM DTCM_TEST_MEM ITCM_MEM DTCM_MEM Compile_optimization VERILATOR_TRACE
 
-.PHONY: all comp sim clean wave resim test_all
+.PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean
 
 all: comp sim
 
@@ -107,3 +106,21 @@ check-deps:
 		$(PKG_MANAGER) $$missing; \
 	fi
 
+
+rv_test_comp_genmem: $(RVTESTS_TARGETS)
+
+rv_test_comp_genmem_rebuild:
+	@$(MAKE) rv_test_comp_genmem REBUILD=1
+
+rv_comp_%:
+	@name=$*; \
+	group=$${name%%_*}; \
+	base=$${name#*_}; \
+	type=$$group; \
+	echo ">>> Building $$group/$$base"; \
+	$(MAKE) -C sw rv_comp_genmem \
+		NAME=$$name \
+		SRC=$(RVTESTSISA_DIR)/$$group/$$base.S \
+		OUT_DIR=$(PROJECT_ROOT)/build/riscv_tests/$$type \
+		COMP_MODE=rvtest \
+		INCLUDES="$(RVTESTS_INCLUDES)"
