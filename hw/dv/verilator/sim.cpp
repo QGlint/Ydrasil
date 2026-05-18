@@ -34,9 +34,10 @@ VerilatedVcdC *tfp = new VerilatedVcdC;
 // ---------------- Time ----------------
 // vluint64_t max_cycles = 10000000;
 
-#ifdef VERILATOR_CC
-vluint64_t tick = 0;
-#endif
+// #define DOUBLE_TICK
+
+vluint64_t MAX_TIME = 10000; // 默认
+
 
 // ------------------------------------------------
 int main(int argc, char **argv) {
@@ -53,6 +54,8 @@ int main(int argc, char **argv) {
             trace_en = 1;
         if (strcmp(argv[i], "--trace") == 0)
             trace_en = 1;
+        if (sscanf(argv[i], "+cpp_timeout=%llu", &MAX_TIME) == 1)
+            printf("C++ timeout set to %llu\n", MAX_TIME);
     }
 
     if (trace_en)
@@ -75,7 +78,7 @@ int main(int argc, char **argv) {
 #endif
 
     // ---------------- Reset phase ----------------
-    tb->clk   = 0;
+    tb->clk   = 1;
     tb->rst_n = 0;
 
     for (int i = 0; i < 20; i++) {
@@ -83,37 +86,38 @@ int main(int argc, char **argv) {
         tb->eval();
 
 #ifdef VERILATOR_TRACE
-            tfp->dump(tick);
-#endif
-    tick++;        
-    Verilated::timeInc(1);
-        tb->eval();
+        tfp->dump(Verilated::time());
+#endif     
+        Verilated::timeInc(1);
+
+#ifdef DOUBLE_TICK
 
 #ifdef VERILATOR_TRACE
-            tfp->dump(tick);
+            tfp->dump(Verilated::time());
 #endif
-    tick++;        
-    Verilated::timeInc(1);
+        Verilated::timeInc(1);
+#endif
     }
 
     tb->rst_n = 1;
 
     // ---------------- Main simulation ----------------
-    while ((!Verilated::gotFinish() )&&(tick <=10000)) {
+    while ((!Verilated::gotFinish() )&&(Verilated::time() <= MAX_TIME)) {
         tb->clk = !tb->clk;   
         tb->eval();
 #ifdef VERILATOR_TRACE
-            tfp->dump(tick);
+            tfp->dump(Verilated::time());
 #endif
-        Verilated::timeInc(1);
-        tb->eval();
-        tick++; 
-#ifdef VERILATOR_TRACE
-            tfp->dump(tick);
-#endif
-        tick++;
         Verilated::timeInc(1);
 
+#ifdef DOUBLE_TICK
+        tb->eval();
+
+#ifdef VERILATOR_TRACE
+            tfp->dump(Verilated::time());
+#endif
+        Verilated::timeInc(1);
+#endif
     }
 
     // ---------------- Finish ----------------

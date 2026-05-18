@@ -4,8 +4,8 @@
 module ydrasil_ex_block #(
 	parameter int DATA_WIDTH = 32
 )(
-	input  wire                            clk_i,
-    input  wire                            rst_n_i,
+	input  wire                            clk,
+    input  wire                            rst_n,
 	input  wire                            flush_ex_i,
 
     input  wire [DATA_WIDTH-1:0]           bt_a_operand_i,
@@ -101,7 +101,7 @@ module ydrasil_ex_block #(
 	ydrasil_alu #(
 		.DATAWIDTH(DATA_WIDTH)
 	) u_ydrasil_alu (
-		// .rst_n            (rst_n_i),
+		// .rst_n            (rst_n),
 		// .req_alu_i        (ex_valid_i),
 		.operand_a_i      (operand_a),
 		.operand_b_i      (operand_b),
@@ -147,8 +147,8 @@ module ydrasil_ex_block #(
                           	({`REGS_DATA_WIDTH{csr_csrrc}} & (csr_ex_rdata_i & (~operand_a)));
 	assign csr_wen = op_csr;
 	
-	always_ff @(posedge clk_i or negedge rst_n_i) begin
-		if(!rst_n_i) begin
+	always_ff @(posedge clk or negedge rst_n) begin
+		if(!rst_n) begin
 			alu_result_ff <= '0;
 			alu_rf_wen_rd_ff <= 1'b0;
 			alu_rf_waddr_rd_ff <= '0;

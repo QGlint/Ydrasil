@@ -60,7 +60,7 @@ rv_comp_%:
 	$(MAKE) -C sw rv_comp_genmem \
 		NAME=$$name \
 		SRC=$(RVTESTSISA_DIR)/$$group/$$base.S \
-		OUT_DIR=$(PROJECT_ROOT)/build/riscv_tests/$$type \
+		OUT_DIR=$(RVTESTS_OUT_ROOT)/$$type \
 		COMP_MODE=rvtest \
 		INCLUDES="$(RVTESTS_INCLUDES)"
 
@@ -70,7 +70,7 @@ rv_bench_%:
 	$(MAKE) -C sw rv_comp_genmem \
 		NAME=$$name \
 		SRC="$(wildcard $(RVBENCH_DIR)/$$name/*.c) $(wildcard $(RVBENCH_DIR)/$$name/*.S) $(wildcard $(RVBENCH_COMMON)/*.c) $(wildcard $(RVBENCH_COMMON)/*.S)" \
-		OUT_DIR=$(PROJECT_ROOT)/build/riscv_test/benchmark \
+		OUT_DIR=$(RVTESTS_OUT_ROOT)/benchmark \
 		COMP_MODE=bench \
 		INCLUDES="$(RVBENCH_INCLUDES)" \
 		LDSCRIPT=$(RVBENCH_LDSCRIPT) \

@@ -7,7 +7,7 @@ dependencies: {}
 sources:
   - target: any(verilator, iverilog, vcs)
     files:
-      - rtl/IROM.sv
-      - rtl/DRAM.sv
+      - rtl/itcm.sv
+      - rtl/dtcm.sv
       - rtl/ydrmem_ram.sv
       - rtl/ydrmem_rom.sv

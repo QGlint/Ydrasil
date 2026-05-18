@@ -56,8 +56,15 @@ endif
 # Defines
 ##################################
 
-ITCM_INIT_FILE ?= 
-DTCM_INIT_FILE ?=
+ITCM_FILE ?= 
+DTCM_FILE ?=
+
+ifneq ($(ITCM_FILE),)
+SIM_DEFINES += +itcmfile=$(ITCM_FILE)
+endif
+ifneq ($(DTCM_FILE),)
+SIM_DEFINES += +dtcmfile=$(DTCM_FILE)
+endif
 
 DEFINES := RANDOM_SEED=$(RANDOM_SEED)
 

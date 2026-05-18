@@ -27,6 +27,12 @@ sim:
 	@mkdir -p $(BUILD_DIR) $(WAVE_DIR) $(LOG_DIR)
 	@$(MAKE) -C hw/dv -f Makefile sim
 
+test_once:
+	@$(MAKE) -C hw/dv comp sim \
+		ITCM_FILE=$(RVTESTS_OUT_ROOT)/rv32ui/mem/rv32ui_sh.itcm \
+		DTCM_FILE=$(RVTESTS_OUT_ROOT)/rv32ui/mem/rv32ui_sh.dtcm
+
+
 # --- 核心自动化测试逻辑 (支持 ITCM/DTCM 分离加载) ---
 test_all: 
 	@echo "==========================================================="

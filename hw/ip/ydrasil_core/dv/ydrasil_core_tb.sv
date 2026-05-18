@@ -1,9 +1,7 @@
 `timescale 1ns/1ns
 `include "define_mem_reg.svh"
-parameter longint CNT_s  = 1000 * 1000 * 50;
-parameter longint CNT_ms = 1000 * 50;
-parameter longint CNT_us = 50;
-parameter longint time_end = 60 * CNT_us; // 40s
+
+parameter longint time_end = 100000; 
 
 module ydrasil_core_tb(
 `ifdef VERILATOR_CC
@@ -12,14 +10,40 @@ module ydrasil_core_tb(
 `endif
 
 );
+string itcmfile;
+string dtcmfile;
+// ToHost程序地址,用于监控测试是否结束
+`define PC_WRITE_TOHOST 32'h80000040
+// ITCM 访问路径
+`define ITCM u_dut.u_ydrasil_mems.u_itcm.u_irom
+`define DTCM u_dut.u_ydrasil_mems.u_dtcm.u_dram
+
+longint time_out;
+longint sv_timeout;
+initial begin
+    if ($value$plusargs("itcmfile=%s", itcmfile)) begin
+      $display("Loading memory from %s", itcmfile);
+      $readmemh(itcmfile, `ITCM.mem_r);
+    end else begin
+      $display("No itcmfile provided");
+    end
+
+    if ($value$plusargs("dtcmfile=%s", dtcmfile)) begin
+      $display("Loading memory from %s", dtcmfile);
+      $readmemh(dtcmfile, `DTCM.mem_r);
+    end else begin
+      $display("No dtcmfile provided");
+    end
+
+    if ($value$plusargs("sv_timeout=%d", time_out))begin
+        sv_timeout = time_out;
+    end else begin
+        sv_timeout = time_end;
+    end
+end
 
 
 
-    // ToHost程序地址,用于监控测试是否结束
-    `define PC_WRITE_TOHOST 32'h80000040
-
-    // ITCM 访问路径
-    `define ITCM u_dut.u_ydrasil_mems.u_itcm
 `ifndef VERILATOR_CC
 	logic        clk;
 	logic        rst_n;
@@ -62,8 +86,8 @@ module ydrasil_core_tb(
     real ipc;
 
 	ydrasil_core u_dut (
-		.clk_i      (clk),
-		.rst_n_i    (rst_n),
+		.clk      (clk),
+		.rst_n    (rst_n),
 		.perip_addr (perip_addr),
 		.perip_wen  (perip_wen),
 		.perip_mask (perip_mask),
@@ -86,11 +110,13 @@ module ydrasil_core_tb(
 	wire rst;
 	assign rst = ~rst_n;
 
-	initial begin
-		if($time >= time_end) begin
+	always_ff @(posedge clk) begin
+		if($time >= sv_timeout) begin
             $display("[TB] timeout reached, finish simulation");
             $finish;
         end
+        if(LED > 0)
+            $finish; 
 	end
 
     // 周期计数器 - 保持同步实现
@@ -169,11 +195,6 @@ module ydrasil_core_tb(
     logic [31:0] LED;
     logic [31:0] seg_wdata, cnt_rdata, mmio_rdata, dram_rdata;
     logic [39:0] seg_output;
-
-    initial begin
-        if(LED > 0)
-           $finish; 
-    end
 
     // we don't care perip_mask in LED, SEG, SW & KEY, only care in DRAM
     // write process

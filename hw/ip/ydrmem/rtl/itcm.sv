@@ -3,8 +3,8 @@
 module itcm(
     input wire                  clk,
     input wire                  itcm_en,
-    input wire [`ITCM_ADDR_WIDTH:0]           itcm_addr,
-    output wire [`INST_DATA_WIDTH:0]          itcm_data_o
+    input wire [`ITCM_ADDR_WIDTH-1:0]           itcm_addr,
+    output wire [`INST_DATA_WIDTH-1:0]          itcm_data_o
 );
 
     ydrmem_ram #(
@@ -12,7 +12,7 @@ module itcm(
         .DATA_WIDTH(`INST_DATA_WIDTH)
     ) u_irom (
         .clk(clk),
-        .rst_n(itcm_en),
+        .en_i(itcm_en),
         .we_i(1'b0),
         .we_mask_i(4'b0),
         .addr_i(itcm_addr),

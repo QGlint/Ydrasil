@@ -1,9 +1,10 @@
+`include "define_mem_reg.svh"
 
 module itcm(
     input wire                  clk,
     input wire                  itcm_en,
-    input wire [15:0]           itcm_addr,
-    output wire [31:0]          itcm_data_o
+    input wire [`ITCM_ADDR_WIDTH-1:0]           itcm_addr,
+    output wire [`INST_DATA_WIDTH-1:0]          itcm_data_o
 );
 
 

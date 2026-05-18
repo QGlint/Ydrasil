@@ -5,17 +5,17 @@ module dtcm(
     input wire                  dtcm_en,
     input wire                  dtcm_wen,
     input wire [3:0]            dtcm_mask,
-    input wire [`DTCM_ADDR_WIDTH:0]           dtcm_addr,
-    input wire [`BUS_DATA_WIDTH:0]           dtcm_data_i,
-    output wire [`BUS_DATA_WIDTH:0]          dtcm_data_o
+    input wire [`DTCM_ADDR_WIDTH-1:0]           dtcm_addr,
+    input wire [`BUS_DATA_WIDTH-1:0]           dtcm_data_i,
+    output wire [`BUS_DATA_WIDTH-1:0]          dtcm_data_o
 );
 
     ydrmem_ram #(
         .ADDR_WIDTH(`DTCM_ADDR_WIDTH),
         .DATA_WIDTH(`BUS_DATA_WIDTH)
-    ) u_ram (
+    ) u_dram (
         .clk(clk),
-        .rst_n(dtcm_en),
+        .en_i(dtcm_en),
         .we_i(dtcm_wen),
         .we_mask_i(dtcm_mask),
         .addr_i(dtcm_addr),

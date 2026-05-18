@@ -50,8 +50,8 @@ module student_top#(
     // assign inst_addr = pc[13:2];
 
     ydrasil_core Core_cpu (
-        .clk_i              (w_cpu_clk),
-        .rst_n_i            (~w_clk_rst),
+        .clk              (w_cpu_clk),
+        .rst_n            (~w_clk_rst),
 
         // // Interface to IROM
         // .irom_addr          (pc),             

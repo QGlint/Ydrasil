@@ -3,8 +3,8 @@
 module ydrasil_id_stage #(
     parameter int DATA_WIDTH = 32
 )(
-    input  wire                            clk_i,
-    input  wire                            rst_n_i,
+    input  wire                            clk,
+    input  wire                            rst_n,
     input  wire                            stall_id_i,
     input  wire                            flush_id_i,
 
@@ -185,8 +185,8 @@ module ydrasil_id_stage #(
     assign id_lsu_rs2_rd_forward = rs2_rd_hazard ;
     // assign id_lsu_rs1_rd_forward = rs1_rd_hazard ;
 
-    always_ff @(posedge clk_i or negedge rst_n_i) begin
-        if (!rst_n_i) begin
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
             operand_a_ff        <= '0;
             operand_b_ff        <= '0;
             operator_ff         <= '0;

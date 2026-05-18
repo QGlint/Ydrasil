@@ -3,8 +3,8 @@
 
 module ydrasil_core #(
 )(
-	input  wire clk_i,
-	input  wire rst_n_i
+	input  wire clk,
+	input  wire rst_n
     
     
     ,output wire [31:0]  perip_addr,
@@ -139,8 +139,8 @@ module ydrasil_core #(
 
     assign dram_sel =( lsu_mem_we& lsu_mem_we) | (dram_addr_sel_ff & lsu_mem_read_ff); // 写操作直接使用当前地址判断，读操作使用上一个周期的地址判断
 
-    always_ff @(posedge clk_i or negedge rst_n_i) begin
-        if (!rst_n_i) begin
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
             dram_addr_sel_ff <= 1'b0;
             lsu_mem_read_ff <= 1'b0;
         end else begin
@@ -159,8 +159,8 @@ module ydrasil_core #(
 	assign lsu_mem_rdata = dram_sel ? lsu_mem_rdata_m : perip_rdata ; 
 
 	ydrasil_load_store_unit u_ydrasil_load_store_unit (
-		.clk               (clk_i),
-		.rst_n             (rst_n_i),
+		.clk               (clk),
+		.rst_n             (rst_n),
 		.ex_lsu_mem_addr_i (ex_lsu_mem_addr),
 		.id_rd_waddr_i      (id_rf_waddr_rd),
 		.operator_lsu_i    (operator_lsu),
@@ -184,8 +184,8 @@ module ydrasil_core #(
 	);
 
 	ydrasil_if_stage u_ydrasil_if_stage (
-		.clk_i           (clk_i),
-		.rst_n_i         (rst_n_i),
+		.clk           (clk),
+		.rst_n         (rst_n),
 		.stall_if_i      (stall_if),
         .stall_pc_i      (stall_pc),
 		.flush_if_i      (flush_if),
@@ -198,8 +198,8 @@ module ydrasil_core #(
 	);
 
 	ydrasil_id_stage u_ydrasil_id_stage (
-		.clk_i              (clk_i),
-		.rst_n_i            (rst_n_i),
+		.clk              (clk),
+		.rst_n            (rst_n),
 		.stall_id_i         (stall_id),
 		.flush_id_i         (flush_id),
 		.if_id_pc_i         (if_id_pc),
@@ -235,8 +235,8 @@ module ydrasil_core #(
 	);
 
 	ydrasil_ex_block u_ydrasil_ex_block (
-		.clk_i              (clk_i),
-		.rst_n_i            (rst_n_i),
+		.clk              (clk),
+		.rst_n            (rst_n),
 		.flush_ex_i         (flush_ex),
 		.bt_a_operand_i     (bt_a_operand),
 		.bt_b_operand_i     (bt_b_operand),
@@ -273,8 +273,8 @@ module ydrasil_core #(
 	);
 
 	ydrasil_mems u_ydrasil_mems (
-		.clk           (clk_i),
-		.rst_n         (rst_n_i),
+		.clk           (clk),
+		.rst_n         (rst_n),
 		.if_mem_addr_i (if_mem_addr),
 		.if_mem_rdata_o(if_mem_rdata),
 		.lsu_mem_addr_i(lsu_mem_addr),
@@ -288,8 +288,8 @@ module ydrasil_core #(
 	);
 
 	ydrasil_wb_stage u_ydrasil_wb_stage (
-		.clk              (clk_i),
-		.rst_n            (rst_n_i),
+		.clk              (clk),
+		.rst_n            (rst_n),
 		.alu_wdata_rd_i   (alu_result),
 		.alu_rf_wen_rd_i  (alu_rf_wen_rd),
 		.alu_rf_waddr_rd_i(alu_rf_waddr_rd),
@@ -305,8 +305,8 @@ module ydrasil_core #(
 	);
 
 	ydrasil_registers u_ydrasil_registers (
-		.clk          (clk_i),
-		.rst_n        (rst_n_i),
+		.clk          (clk),
+		.rst_n        (rst_n),
 		.rf_wen_rd_i  (rf_wen_rd),
 		.rf_waddr_rd_i(rf_waddr_rd),
 		.rf_wdata_rd_i(rf_wdata_rd),
@@ -317,7 +317,7 @@ module ydrasil_core #(
 	);
 
 	ydrasil_ctrl u_ctrl (
-		.rst_n             (rst_n_i),
+		.rst_n             (rst_n),
 		.ex_branch_jump_i  (ex_branch_jump),
 		.ex_branch_target_i(ex_branch_target),
 		.lsu_ctrl_stall_i       (lsu_ctrl_stall),
@@ -338,8 +338,8 @@ module ydrasil_core #(
 	);
 
 	ydrasil_registers_csr u_ydrasil_registers_csr (
-		.clk               (clk_i),
-		.rst_n             (rst_n_i),
+		.clk               (clk),
+		.rst_n             (rst_n),
 		.ex_csr_wen_i      (ex_csr_wen),
 		.id_csr_raddr_i    (id_csr_raddr),
 		.ex_csr_waddr_i    (ex_csr_waddr),
@@ -357,8 +357,8 @@ module ydrasil_core #(
 	);
 
 	ydrasil_clint u_clint (
-		.clk               (clk_i),
-		.rst_n             (rst_n_i),
+		.clk               (clk),
+		.rst_n             (rst_n),
 		.instr_addr_i       (id_instr_addr),
 		.ex_branch_jump_i       (ex_branch_jump),
 		.ex_branch_target_i       (ex_branch_target),

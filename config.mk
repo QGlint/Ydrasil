@@ -59,3 +59,5 @@ RISCV_CFLAGS := \
 
 RVTESTS_TYPE := rv32ui rv32um
 
+RVTESTS_OUT_ROOT := $(PROJECT_ROOT)/build/riscv_tests
+
