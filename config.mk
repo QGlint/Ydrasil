@@ -1,4 +1,8 @@
 PROJECT_ROOT := $(abspath $(CURDIR))
+BUILD_DIR := $(PROJECT_ROOT)/build
+WAVE_DIR  := $(BUILD_DIR)/wave
+LOG_DIR   := $(BUILD_DIR)/log
+
 
 SIM_TOOL ?= verilator
 IP   ?= ydrasil_core
@@ -7,18 +11,8 @@ UVM ?= 0
 USE_BENDER ?= 1
 BENDER ?= bender
 VERILATOR_TRACE ?= 1
-# --- 内存路径配置 (指向你新生成的 split 目录) ---
-ITCM_TEST_BASE := $(PROJECT_ROOT)/hw/dv/test_data/split/itcm
-DTCM_TEST_BASE := $(PROJECT_ROOT)/hw/dv/test_data/split/dtcm
 
-# 默认单次仿真的内存文件 (以 add 为例)
-ITCM_MEM ?= $(ITCM_TEST_BASE)/rv32ui-p-fence_i.mem
-DTCM_MEM ?= $(DTCM_TEST_BASE)/rv32ui-p-fence_i.mem
 
-ITCM_BASE := $(PROJECT_ROOT)/hw/dv/test_data/mem/itcm
-DTCM_BASE := $(PROJECT_ROOT)/hw/dv/test_data/mem/dtcm
-# ITCM_MEM ?= $(ITCM_BASE)/irom2.mem
-# DTCM_MEM ?= $(DTCM_BASE)/dram2.mem
 
 
 PKG_MANAGER := $(shell \
@@ -59,5 +53,12 @@ RISCV_CFLAGS := \
 
 RVTESTS_TYPE := rv32ui rv32um
 
-RVTESTS_OUT_ROOT := $(PROJECT_ROOT)/build/riscv_tests
+RVTESTS_OUT_ROOT := $(BUILD_DIR)/riscv_tests
 
+RVTESTS_RESULT_DIR := $(BUILD_DIR)/rvtest_results
+
+
+.SECONDEXPANSION:
+
+RVTESTS_SIM_TARGETS = $(foreach typ,$(RVTESTS_TYPE),$(addprefix rv_sim_$(typ)_, $(basename $(notdir $(wildcard $(RVTESTS_OUT_ROOT)/$(typ)/mem/*.itcm)))))
+RVTESTS_SUMMARY_TARGETS = $(addprefix rv_summary_,$(RVTESTS_TYPE))

@@ -34,9 +34,9 @@ module ydrasil_if_stage #(
 	wire [31:0] pc_now;
 	reg [31:0] pc_ff;
 	reg [31:0] if_id_pc_ff;
-	// reg [31:0] if_id_instr_ff;
+	reg [31:0] if_id_instr_ff;
 	reg flush_if_ff;
-
+	reg stall_if_ff;
 
 	// 默认顺序取指地址：PC + 4
 	assign pc_plus4   = pc_ff + 32'd4;
@@ -46,9 +46,11 @@ module ydrasil_if_stage #(
 	assign if_mem_addr_o = pc_ff;
 
 	assign if_id_pc_o    = if_id_pc_ff;
-	assign pc_now = flush_if_i ? `RESET_INS : pc_ff;
+	assign pc_now =  pc_ff;
 	assign if_id_instr_o = if_id_instr;
-	assign if_id_instr = flush_if_ff ? `RV32I_INS_NOP : if_mem_rdata_i;
+	assign if_id_instr = 
+		stall_if_ff? if_id_instr_ff :
+		flush_if_ff ? `RV32I_INS_NOP : if_mem_rdata_i;
 
 
 
@@ -69,12 +71,16 @@ module ydrasil_if_stage #(
 		if (!rst_n) begin
 			if_id_pc_ff    <= `RESET_INS;
 			flush_if_ff     <= 1'b0;
-			// if_id_instr_ff <= `RV32I_INS_NOP;
+			if_id_instr_ff <= `RV32I_INS_NOP;
+			stall_if_ff    <= 1'b0;
 		end 
-		else if(!stall_if_i) begin
+		else begin
+			if(!stall_if_i) begin
 			if_id_pc_ff    <= pc_now;
 			flush_if_ff     <= flush_if_i;
-			// if_id_instr_ff <= if_id_instr;
+			end
+			if_id_instr_ff <= if_id_instr;
+			stall_if_ff    <= stall_if_i;
 		end
 	end
 

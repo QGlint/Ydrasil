@@ -77,11 +77,11 @@ rv_dump: rv_elf
 rv_mem: rv_elf
 	@mkdir -p $(MEM_DIR) $(BIN_DIR)
 	# ITCM: text/rodata/tohost
-	$(OBJCOPY) -O binary \
+	$(OBJCOPY) -O binary --gap-fill=0x00\
 		$(addprefix --only-section=,$(IROM_SECTIONS)) \
 		$(ELF) $(ITCM_BIN)
 	# DTCM: data/bss
-	$(OBJCOPY) -O binary \
+	$(OBJCOPY) -O binary --gap-fill=0x00\
 	  $(addprefix --only-section=,$(DRAM_SECTIONS)) \
 		$(DRAM_SECTFLAGS) \
 	  $(ELF) $(DTCM_BIN) || true
