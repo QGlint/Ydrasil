@@ -12,7 +12,14 @@ USE_BENDER ?= 1
 BENDER ?= bender
 VERILATOR_TRACE ?= 1
 
+SPIKE ?= ./tools/spike/bin/spike
+SPIKE_ELF ?= $(RVTESTS_OUT_ROOT)/rv32ui/elf/rv32ui_lh.elf
+SPIKE_LOG ?= $(BUILD_DIR)/sim/spike/rv32ui_lh
+SPIKE_MAXSTEPS ?= 1000000
 
+ifneq ($(steps),)
+  spike_stepout = --steps=$(steps)
+endif
 
 
 PKG_MANAGER := $(shell \
@@ -42,6 +49,7 @@ OBJDUMP := $(RISCV_PREFIX)-objdump
 
 ARCH := rv32im_zicsr
 ABI  := ilp32
+PRIV := m
 
 RISCV_CFLAGS := \
     -march=$(ARCH) \
@@ -57,8 +65,16 @@ RVTESTS_OUT_ROOT := $(BUILD_DIR)/riscv_tests
 
 RVTESTS_RESULT_DIR := $(BUILD_DIR)/rvtest_results
 
+SPIKE_FLAGS := \
+	--isa=$(ARCH) \
+	--log-commits \
+	--steps=$(SPIKE_MAXSTEPS) \
+	--priv=$(PRIV) \
+	-l 
+
 
 .SECONDEXPANSION:
 
 RVTESTS_SIM_TARGETS = $(foreach typ,$(RVTESTS_TYPE),$(addprefix rv_sim_$(typ)_, $(basename $(notdir $(wildcard $(RVTESTS_OUT_ROOT)/$(typ)/mem/*.itcm)))))
 RVTESTS_SUMMARY_TARGETS = $(addprefix rv_summary_,$(RVTESTS_TYPE))
+RVTESTS_REPORT_TARGETS = $(addprefix rv_report_,$(RVTESTS_TYPE))
