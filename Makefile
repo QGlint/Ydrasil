@@ -7,7 +7,7 @@ RESULT_DIR := $(LOG_DIR)/test_results
 
 export PROJECT_ROOT BUILD_DIR WAVE_DIR LOG_DIR SIM_TOOL IP VERILATOR_MOD UVM USE_BENDER BENDER 
 
-.PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean
+.PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests init
 
 .SECONDEXPANSION:
 
@@ -16,6 +16,12 @@ export PROJECT_ROOT BUILD_DIR WAVE_DIR LOG_DIR SIM_TOOL IP VERILATOR_MOD UVM USE
 all: comp_and_sim_cpu
 
 full : comp_and_sim_cpu wave
+
+run_all_tests: init check_deps rv_test_comp_genmem test_all
+
+
+run_all_tests:
+	git submodule update --init --recursive
 
 comp:
 	@mkdir -p $(BUILD_DIR) $(WAVE_DIR) $(LOG_DIR)
