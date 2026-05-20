@@ -22,6 +22,21 @@ ifneq ($(steps),)
 endif
 
 
+PKG_EXISTS := $(shell \
+	if command -v pacman >/dev/null 2>&1; then \
+		echo "pacman -Qs -q"; \
+	elif command -v apt-get >/dev/null 2>&1; then \
+		echo "dpkg -l"; \
+	elif command -v dnf >/dev/null 2>&1; then \
+		echo "dnf list installed"; \
+	elif command -v yum >/dev/null 2>&1; then \
+		echo "yum list installed"; \
+	elif command -v brew >/dev/null 2>&1; then \
+		echo "brew list"; \
+	else \
+		echo "unknown"; \
+	fi)
+
 PKG_MANAGER := $(shell \
 	if command -v pacman >/dev/null 2>&1; then \
 		echo "sudo pacman -S --needed"; \

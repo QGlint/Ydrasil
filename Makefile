@@ -71,7 +71,7 @@ tran_coe:
 check-deps:
 	@missing=""; \
 	for tool in $(TOOLS); do \
-		if ! pacman -Qs -q $$tool >/dev/null 2>&1; then \
+		if ! $(PKG_EXISTS) $$tool >/dev/null 2>&1; then \
 			echo "$$tool not found."; \
 			missing="$$missing $$tool"; \
 		fi; \
