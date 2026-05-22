@@ -14,7 +14,7 @@ module ydrmem_rom #(
     localparam DEPTH = (1 << (ADDR_WIDTH));
 
     // 使用计算出的深度定义存储器
-    (* ram_style = "block" *) reg [DATA_WIDTH-1:0] mem_r[0:DEPTH-1];
+    reg [DATA_WIDTH-1:0] mem_r[0:DEPTH-1];
 
 
     wire [ADDR_WIDTH-1:0] word_addr ;
