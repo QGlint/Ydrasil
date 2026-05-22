@@ -11,6 +11,9 @@ UVM ?= 0
 USE_BENDER ?= 1
 BENDER ?= bender
 VERILATOR_TRACE ?= 1
+PYTHON ?= python3
+TRACE_TO_CSV ?= $(PROJECT_ROOT)/verif/sim/riscv_trace_csv.py
+
 
 SPIKE ?= ./tools/spike/bin/spike
 SPIKE_ELF ?= $(RVTESTS_OUT_ROOT)/rv32ui/elf/rv32ui_lh.elf
@@ -20,6 +23,8 @@ SPIKE_MAXSTEPS ?= 1000000
 ifneq ($(steps),)
   spike_stepout = --steps=$(steps)
 endif
+
+
 
 
 PKG_EXISTS := $(shell \

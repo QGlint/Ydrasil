@@ -68,7 +68,7 @@ clean:
 tran_coe:
 	bash hw/dv/test_data/coe_to_mem.sh
 
-check-deps:
+check_deps:
 	@missing=""; \
 	for tool in $(TOOLS); do \
 		if ! $(PKG_EXISTS) $$tool >/dev/null 2>&1; then \
@@ -91,3 +91,6 @@ include verif/tests/tests.mk
 spike:
 	$(SPIKE) $(SPIKE_FLAGS) $(spike_stepout) $(spike_extension) $(SPIKE_ELF) \
 	> $(SPIKE_LOG).log 2>&1
+
+spike_wave_to_csv:
+	$(PYTHON) $(TRACE_TO_CSV) --log $(SPIKE_LOG).log --csv $(SPIKE_LOG).csv --source spike

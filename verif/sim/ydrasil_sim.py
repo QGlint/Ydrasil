@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import shlex
 import subprocess
 import sys
@@ -110,9 +111,12 @@ def _read_lines(path: str) -> Iterable[str]:
 
 
 def _compare_logs(args: argparse.Namespace) -> int:
+	if not _convert_logs_to_csv(args):
+		return 2
+
 	mismatches = 0
 	for idx, (hw_line, spike_line) in enumerate(
-		zip(_read_lines(args.hw_log), _read_lines(args.spike_log)), start=1
+		zip(_read_lines(args.hw_csv), _read_lines(args.spike_csv)), start=1
 	):
 		hw_norm = _normalize_line(hw_line, args.strip_prefix, args.drop_ansi)
 		spike_norm = _normalize_line(spike_line, args.strip_prefix, args.drop_ansi)
@@ -124,6 +128,48 @@ def _compare_logs(args: argparse.Namespace) -> int:
 			if args.max_mismatches and mismatches >= args.max_mismatches:
 				return 1
 	return 0 if mismatches == 0 else 1
+
+
+def _default_trace_tool() -> str:
+	return os.path.join(os.path.dirname(__file__), "riscv_trace_csv.py")
+
+
+def _default_csv_path(log_path: str, suffix: str) -> str:
+	base, _ = os.path.splitext(log_path)
+	return base + "_" + suffix + ".csv"
+
+
+def _run_convert(trace_tool: str, log_path: str, csv_path: str, source: str, full_trace: bool) -> bool:
+	cmd = [
+		sys.executable,
+		trace_tool,
+		"--log",
+		log_path,
+		"--csv",
+		csv_path,
+		"--source",
+		source,
+	]
+	if full_trace:
+		cmd.append("--full_trace")
+
+	proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+	if proc.returncode != 0:
+		print(proc.stdout)
+		return False
+	return True
+
+
+def _convert_logs_to_csv(args: argparse.Namespace) -> bool:
+	trace_tool = args.trace_tool or _default_trace_tool()
+	args.hw_csv = args.hw_csv or _default_csv_path(args.hw_log, "hw")
+	args.spike_csv = args.spike_csv or _default_csv_path(args.spike_log, "spike")
+
+	if not _run_convert(trace_tool, args.hw_log, args.hw_csv, args.hw_source, args.full_trace):
+		return False
+	if not _run_convert(trace_tool, args.spike_log, args.spike_csv, args.spike_source, args.full_trace):
+		return False
+	return True
 
 
 def parse_args() -> argparse.Namespace:
@@ -138,12 +184,33 @@ def parse_args() -> argparse.Namespace:
 	parser.add_argument("--spike-cmd", type=str, default="", help="Spike command")
 	parser.add_argument("--hw-log", type=str, default="", help="HW log file")
 	parser.add_argument("--spike-log", type=str, default="", help="Spike log file")
+	parser.add_argument("--hw-csv", type=str, default="", help="HW trace CSV output")
+	parser.add_argument("--spike-csv", type=str, default="", help="Spike trace CSV output")
+	parser.add_argument(
+		"--hw-source",
+		choices=["spike", "verilator"],
+		default="verilator",
+		help="HW log format",
+	)
+	parser.add_argument(
+		"--spike-source",
+		choices=["spike", "verilator"],
+		default="spike",
+		help="Spike log format",
+	)
+	parser.add_argument(
+		"--trace-tool",
+		default="",
+		help="Path to riscv_trace_csv.py",
+	)
 	parser.add_argument("--merge-stderr", action="store_true", help="Merge stderr into stdout")
 	parser.add_argument("--ignore-empty", action="store_true", help="Ignore empty line pairs")
 	parser.add_argument("--strip-prefix", type=str, default="", help="Strip fixed prefix")
 	parser.add_argument("--drop-ansi", action="store_true", help="Remove ANSI escape codes")
 	parser.add_argument("--delay-ms", type=int, default=0, help="Delay between line reads")
 	parser.add_argument("--max-mismatches", type=int, default=1, help="Stop after N mismatches")
+	parser.add_argument("--full-trace", dest="full_trace", action="store_true", help="Use full trace parsing")
+	parser.set_defaults(full_trace=False)
 	return parser.parse_args()
 
 
