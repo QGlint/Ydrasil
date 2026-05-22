@@ -1,9 +1,9 @@
 `timescale 1ns/1ns
-`include "define_mem_reg.svh"
 
 parameter longint time_end = 100000; 
 
-module ydrasil_core_tb(
+module ydrasil_core_tb
+(
 `ifdef VERILATOR_CC
     input clk,
     input rst_n
@@ -66,7 +66,7 @@ end
     reg     [8*300:1] testcase;
 
     // 计算ITCM的深度和字节大小
-    localparam ITCM_DEPTH = (1 << (`ITCM_ADDR_WIDTH));  // ITCM中的字数
+    localparam ITCM_DEPTH = (1 << (ydrasil_pkg::ITCM_ADDR_WIDTH));  // ITCM中的字数
     localparam ITCM_BYTE_SIZE = ITCM_DEPTH * 4;  // 总字节数
 
     // 创建与ITCM容量相同的临时字节数组

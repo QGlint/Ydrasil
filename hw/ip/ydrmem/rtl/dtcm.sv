@@ -1,18 +1,19 @@
-`include "define_mem_reg.svh"
 
-module dtcm(
+module dtcm
+import ydrasil_pkg::*;
+(
     input wire                  clk,
     input wire                  dtcm_en,
     input wire                  dtcm_wen,
     input wire [3:0]            dtcm_mask,
-    input wire [`DTCM_ADDR_WIDTH-1:0]           dtcm_addr,
-    input wire [`BUS_DATA_WIDTH-1:0]           dtcm_data_i,
-    output wire [`BUS_DATA_WIDTH-1:0]          dtcm_data_o
+    input wire [ydrasil_pkg::DTCM_ADDR_WIDTH-1:0]           dtcm_addr,
+    input wire [ydrasil_pkg::BUS_DATA_WIDTH-1:0]           dtcm_data_i,
+    output wire [ydrasil_pkg::BUS_DATA_WIDTH-1:0]          dtcm_data_o
 );
 
     ydrmem_ram #(
-        .ADDR_WIDTH(`DTCM_ADDR_WIDTH),
-        .DATA_WIDTH(`BUS_DATA_WIDTH)
+        .ADDR_WIDTH(ydrasil_pkg::DTCM_ADDR_WIDTH),
+        .DATA_WIDTH(ydrasil_pkg::BUS_DATA_WIDTH)
     ) u_dram (
         .clk(clk),
         .en_i(dtcm_en),

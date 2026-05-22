@@ -1,6 +1,7 @@
-`include "define_decode.svh"
-`include "define_mem_reg.svh"
-module ydrasil_id_stage #(
+
+module ydrasil_id_stage
+import ydrasil_pkg::*;
+ #(
     parameter int DATA_WIDTH = 32
 )(
     input  wire                            clk,
@@ -22,31 +23,31 @@ module ydrasil_id_stage #(
     // output wire                            alu_valid_o,
     output wire [DATA_WIDTH-1:0]           operand_a_o,
     output wire [DATA_WIDTH-1:0]           operand_b_o,
-    output wire [`OPERATOR_WIDTH-1:0]      operator_o, // 统一的ALU操作信息信号
+    output wire [ydrasil_pkg::OPERATOR_WIDTH-1:0]      operator_o, // 统一的ALU操作信息信号
 
     output wire [DATA_WIDTH-1:0]           bt_a_operand_o,
     output wire [DATA_WIDTH-1:0]           bt_b_operand_o,
 
-    output wire [`OP_LSU_INFO_WIDTH-1:0]   operator_lsu_o,
+    output wire [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0]   operator_lsu_o,
     output wire [DATA_WIDTH-1:0]           id_lsu_rs2_data_o, // 操作类型信号
 
-    output wire [`OPERATOR_TYPE_WIDTH-1:0] operator_type_o, // 操作类型信号
+    output wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] operator_type_o, // 操作类型信号
 
     output wire                            id_ex_rs2_rd_forward_o, // 前递控制信号
     output wire                            id_ex_rs1_rd_forward_o, // 前递控制信号
     output wire                            id_ex_bt_rs1_rd_forward_o, // 前递控制信号
     output wire                            id_lsu_rs2_rd_forward_o, // 前递控制信号
     // output wire                            id_lsu_rs1_rd_forward_o, // 前递控制信号
-    output wire [`OPSEL_INFO_WIDTH-1:0]                      sel_rs_o,
-    output wire [`REGS_ADDR_WIDTH-1:0]     id_ex_rs1_raddr_o,
-    output wire [`REGS_ADDR_WIDTH-1:0]     id_ex_rs2_raddr_o,
-    output wire [`REGS_ADDR_WIDTH-1:0]     id_ctrl_rs1_addr_o,
-    output wire [`REGS_ADDR_WIDTH-1:0]     id_ctrl_rs2_addr_o,
+    output wire [ydrasil_pkg::OPSEL_INFO_WIDTH-1:0]                      sel_rs_o,
+    output wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     id_ex_rs1_raddr_o,
+    output wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     id_ex_rs2_raddr_o,
+    output wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     id_ctrl_rs1_addr_o,
+    output wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     id_ctrl_rs2_addr_o,
 
-	output wire [`CSR_ADDR_WIDTH-1:0] 	    id_csr_raddr_o,  
-    output wire [`CSR_ADDR_WIDTH-1:0] 	    id_ex_csr_waddr_o,  
-	output wire [`OP_CSR_INFO_WIDTH-1:0]    id_op_csr_info_o,
-	output wire [`OP_SYS_INFO_WIDTH-1:0]    id_op_sys_info_o,
+    output wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0] 	    id_csr_raddr_o,  
+    output wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0] 	    id_ex_csr_waddr_o,  
+    output wire [ydrasil_pkg::OP_CSR_INFO_WIDTH-1:0]    id_op_csr_info_o,
+    output wire [ydrasil_pkg::OP_SYS_INFO_WIDTH-1:0]    id_op_sys_info_o,
 
     output wire [DATA_WIDTH-1:0]           id_instr_addr_o, // 当前指令地址，供CLINT使用
     // Generic writeback information
@@ -67,8 +68,8 @@ module ydrasil_id_stage #(
     reg id_lsu_rs2_rd_forward_ff;//前递
     reg id_ex_bt_rs1_rd_forward_ff;//前递
     // reg id_mem_rs1_rd_forward_ff;//前递
-    reg [`REGS_ADDR_WIDTH-1:0]     rf_raddr_rs1_ff;
-    reg [`REGS_ADDR_WIDTH-1:0]     rf_raddr_rs2_ff;
+    reg [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     rf_raddr_rs1_ff;
+    reg [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     rf_raddr_rs2_ff;
 
 
     wire rs2_rd_hazard;
@@ -93,38 +94,38 @@ module ydrasil_id_stage #(
 
     reg [DATA_WIDTH-1:0]                id_lsu_rs2_data_ff;
 
-    wire [`OPERATOR_TYPE_WIDTH-1:0]      operator_type;
-    reg [`OPERATOR_TYPE_WIDTH-1:0]       operator_type_ff;
+    wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0]      operator_type;
+    reg [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0]       operator_type_ff;
 
     wire [DATA_WIDTH-1:0]                operand_a;
     wire [DATA_WIDTH-1:0]                operand_b;
-    wire [`OPERATOR_WIDTH-1:0]           operator;
+    wire [ydrasil_pkg::OPERATOR_WIDTH-1:0]           operator;
 
 
     reg [DATA_WIDTH-1:0]                operand_a_ff;
     reg [DATA_WIDTH-1:0]                operand_b_ff;
-    reg [`OPERATOR_WIDTH-1:0]           operator_ff;
+    reg [ydrasil_pkg::OPERATOR_WIDTH-1:0]           operator_ff;
 
-    wire [`OP_LSU_INFO_WIDTH-1:0]        operator_lsu;
-    reg [`OP_LSU_INFO_WIDTH-1:0]         operator_lsu_ff;
+    wire [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0]        operator_lsu;
+    reg [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0]         operator_lsu_ff;
 
     wire [DATA_WIDTH-1:0]                bt_a_operand;
     wire [DATA_WIDTH-1:0]                bt_b_operand;
     reg [DATA_WIDTH-1:0]                 bt_a_operand_ff;
     reg [DATA_WIDTH-1:0]                 bt_b_operand_ff;
     reg [DATA_WIDTH-1:0]                 id_instr_addr_ff;
-	wire [`CSR_ADDR_WIDTH-1:0] 	 csr_reg_raddr;
+    wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0] 	 csr_reg_raddr;
    
-    wire [`CSR_ADDR_WIDTH-1:0] 	  csr_ex_waddr;
-	wire [`OP_CSR_INFO_WIDTH-1:0]  csr_op_info;
+    wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0] 	  csr_ex_waddr;
+	wire [ydrasil_pkg::OP_CSR_INFO_WIDTH-1:0]  csr_op_info;
 
-	reg [`CSR_ADDR_WIDTH-1:0] 	 csr_reg_raddr_ff;
+    reg [ydrasil_pkg::CSR_ADDR_WIDTH-1:0] 	 csr_reg_raddr_ff;
 
-    reg [`CSR_ADDR_WIDTH-1:0] 	  csr_ex_waddr_ff; 
-	reg [`OP_CSR_INFO_WIDTH-1:0]  csr_op_info_ff;
+    reg [ydrasil_pkg::CSR_ADDR_WIDTH-1:0] 	  csr_ex_waddr_ff; 
+	reg [ydrasil_pkg::OP_CSR_INFO_WIDTH-1:0]  csr_op_info_ff;
 
-    wire [`OP_SYS_INFO_WIDTH-1:0]  sys_op_info;
-    reg [`OP_SYS_INFO_WIDTH-1:0]   sys_op_info_ff;
+    wire [ydrasil_pkg::OP_SYS_INFO_WIDTH-1:0]  sys_op_info;
+    reg [ydrasil_pkg::OP_SYS_INFO_WIDTH-1:0]   sys_op_info_ff;
     wire                            operand_b_jump_sel;
 
 
@@ -155,13 +156,13 @@ module ydrasil_id_stage #(
     );
 
 
-    wire [`OPSEL_INFO_WIDTH-1:0] sel_rs;
-    reg [`OPSEL_INFO_WIDTH-1:0] sel_rs_ff;
+    wire [ydrasil_pkg::OPSEL_INFO_WIDTH-1:0] sel_rs;
+    reg [ydrasil_pkg::OPSEL_INFO_WIDTH-1:0] sel_rs_ff;
     assign sel_rs_o = sel_rs_ff;
 
-    assign sel_rs[`ASELRS] = ~(operand_a_pc_sel| operand_a_imm_sel);
-    assign sel_rs[`BSELRS] = operand_b_rs_sel;
-    assign sel_rs[`BTASELRS] = bt_a_rs_sel;
+    assign sel_rs[ydrasil_pkg::ASELRS] = ~(operand_a_pc_sel| operand_a_imm_sel);
+    assign sel_rs[ydrasil_pkg::BSELRS] = operand_b_rs_sel;
+    assign sel_rs[ydrasil_pkg::BTASELRS] = bt_a_rs_sel;
 
 
     assign rf_addr_rs1_o = rf_raddr_rs1;

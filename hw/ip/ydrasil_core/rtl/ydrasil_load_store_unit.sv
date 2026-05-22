@@ -1,37 +1,37 @@
-`include "define_decode.svh"
-`include "define_mem_reg.svh"
 
 // 地址生成单元 - 处理内存访问和相关寄存器操作
-module ydrasil_load_store_unit (
+module ydrasil_load_store_unit 
+import ydrasil_pkg::*;
+(
     input wire clk,  // 时钟输入
     input wire rst_n,
 
-    input wire [`BUS_ADDR_WIDTH-1:0]       ex_lsu_mem_addr_i,
+    input wire [ydrasil_pkg::BUS_ADDR_WIDTH-1:0]       ex_lsu_mem_addr_i,
     input wire [ 4:0]                      id_rd_waddr_i,
-    input wire [`OP_LSU_INFO_WIDTH-1:0]    operator_lsu_i,
+    input wire [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0]    operator_lsu_i,
     input wire [1:0]                       operator_lsu_type_i,
-    input wire [`REGS_DATA_WIDTH-1:0]      id_lsu_rs2_data_i, // 存储操作的源寄存器数据
-    input wire [`REGS_DATA_WIDTH-1:0]      ex_lsu_rd_data_i, // 存储操作的源寄存器数据
+    input wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]      id_lsu_rs2_data_i, // 存储操作的源寄存器数据
+    input wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]      ex_lsu_rd_data_i, // 存储操作的源寄存器数据
     input wire                             id_lsu_rs2_rd_forward_i,
     
     // 内存接口
-    input wire [`BUS_DATA_WIDTH-1:0]       lsu_mem_rdata_i,
-    output wire [`BUS_DATA_WIDTH-1:0]      lsu_mem_wdata_o,
-    output wire [`BUS_ADDR_WIDTH-1:0]      lsu_mem_addr_o,
+    input wire [ydrasil_pkg::BUS_DATA_WIDTH-1:0]       lsu_mem_rdata_i,
+    output wire [ydrasil_pkg::BUS_DATA_WIDTH-1:0]      lsu_mem_wdata_o,
+    output wire [ydrasil_pkg::BUS_ADDR_WIDTH-1:0]      lsu_mem_addr_o,
     output wire                            lsu_mem_wen_o,
     output wire                            lsu_mem_req_o,
     output wire [                3:0]      lsu_mem_wmask_o,  // 字节写入掩码，4位分别对应4个字节
 
 	output wire                           	lsu_ctrl_stall_o,       // LSU 可能会因为等待内存响应而请求stall
     output wire                           	lsu_ctrl_stall_wb_o,    // LSU 可能会因为异常等原因
-    output wire [`REGS_ADDR_WIDTH-1:0]    	lsu_ctrl_waddr_rd_o,
-    output wire [`REGS_ADDR_WIDTH-1:0]    	lsu_ctrl_waddr_rd_wb_o,
+    output wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    	lsu_ctrl_waddr_rd_o,
+    output wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    	lsu_ctrl_waddr_rd_wb_o,
 
 
     // 寄存器写回接口
-    output wire [`REGS_DATA_WIDTH-1:0]     lsu_wb_result_o,
+    output wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]     lsu_wb_result_o,
     output wire                            lsu_rf_rd_wen_o,
-    output wire [`REGS_ADDR_WIDTH-1:0]     lsu_rf_rd_waddr_o
+    output wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     lsu_rf_rd_waddr_o
 );
     // 内部信号定义
     wire [ 1:0] mem_addr_index;
@@ -40,19 +40,19 @@ module ydrasil_load_store_unit (
 
     wire is_load   ;
     wire is_store  ;
-    wire  [`REGS_DATA_WIDTH-1:0] lsu_rs2_data ;
+    wire  [ydrasil_pkg::REGS_DATA_WIDTH-1:0] lsu_rs2_data ;
 
 
     
-    reg [`OP_LOAD_INFO_WIDTH-1:0]  operator_load_ff;
+    reg [ydrasil_pkg::OP_LOAD_INFO_WIDTH-1:0]  operator_load_ff;
     reg [4:0]  rd_addr_ff;
     reg        is_load_ff;
     reg [1:0]  mem_addr_index_ff;
 
     assign lsu_rs2_data = id_lsu_rs2_rd_forward_i ? ex_lsu_rd_data_i : id_lsu_rs2_data_i; // 前递后的源寄存器数据
 
-    assign is_load   = operator_lsu_type_i [`OPERATOR_TYPE_LOAD - `OPERATOR_TYPE_LSU_BASE] ;
-    assign is_store  = operator_lsu_type_i [`OPERATOR_TYPE_STORE - `OPERATOR_TYPE_LSU_BASE] ;
+    assign is_load   = operator_lsu_type_i[ydrasil_pkg::OPERATOR_TYPE_LOAD - ydrasil_pkg::OPERATOR_TYPE_LSU_BASE];
+    assign is_store  = operator_lsu_type_i[ydrasil_pkg::OPERATOR_TYPE_STORE - ydrasil_pkg::OPERATOR_TYPE_LSU_BASE];
 
     
     assign mem_addr_index = mem_addr[1:0];
@@ -60,12 +60,12 @@ module ydrasil_load_store_unit (
     assign mem_rs2_data    = lsu_rs2_data; // 存储操作的源寄存器数据
 
 
-    wire[`REGS_DATA_WIDTH-1:0] lsu_wb_result;
+    wire[ydrasil_pkg::REGS_DATA_WIDTH-1:0] lsu_wb_result;
     wire                         lsu_rf_rd_wen;
-    wire[`REGS_ADDR_WIDTH-1:0] lsu_rf_rd_waddr;
-    reg [`REGS_DATA_WIDTH-1:0]  lsu_wb_result_ff;
+    wire[ydrasil_pkg::REGS_ADDR_WIDTH-1:0] lsu_rf_rd_waddr;
+    reg [ydrasil_pkg::REGS_DATA_WIDTH-1:0]  lsu_wb_result_ff;
     reg                         lsu_rf_rd_wen_ff;
-    reg [`REGS_ADDR_WIDTH-1:0]  lsu_rf_rd_waddr_ff;
+    reg [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]  lsu_rf_rd_waddr_ff;
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -97,7 +97,7 @@ module ydrasil_load_store_unit (
             mem_addr_index_ff       <= 0;
         end
         else begin
-            operator_load_ff        <= operator_lsu_i[`OP_LOAD_INFO_WIDTH-1:0];
+            operator_load_ff        <= operator_lsu_i[ydrasil_pkg::OP_LOAD_INFO_WIDTH-1:0];
             rd_addr_ff              <= id_rd_waddr_i;
             is_load_ff              <= is_load;
             mem_addr_index_ff       <= mem_addr_index;
@@ -110,19 +110,19 @@ module ydrasil_load_store_unit (
     wire is_lbu    ;
     wire is_lhu    ;
 
-    assign is_lb  = operator_load_ff[`OP_LSU_LB];
-    assign is_lh  = operator_load_ff[`OP_LSU_LH];
-    assign is_lw  = operator_load_ff[`OP_LSU_LW];
-    assign is_lbu = operator_load_ff[`OP_LSU_LBU];
-    assign is_lhu = operator_load_ff[`OP_LSU_LHU];
+    assign is_lb  = operator_load_ff[ydrasil_pkg::OP_LSU_LB];
+    assign is_lh  = operator_load_ff[ydrasil_pkg::OP_LSU_LH];
+    assign is_lw  = operator_load_ff[ydrasil_pkg::OP_LSU_LW];
+    assign is_lbu = operator_load_ff[ydrasil_pkg::OP_LSU_LBU];
+    assign is_lhu = operator_load_ff[ydrasil_pkg::OP_LSU_LHU];
 
     wire is_sb     ;
     wire is_sh     ;
     wire is_sw     ;
 
-    assign is_sb = operator_lsu_i[`OP_LSU_SB];
-    assign is_sh = operator_lsu_i[`OP_LSU_SH];
-    assign is_sw = operator_lsu_i[`OP_LSU_SW];
+    assign is_sb = operator_lsu_i[ydrasil_pkg::OP_LSU_SB];
+    assign is_sh = operator_lsu_i[ydrasil_pkg::OP_LSU_SH];
+    assign is_sw = operator_lsu_i[ydrasil_pkg::OP_LSU_SW];
     // 使用并行选择逻辑生成内存请求信号
     assign lsu_mem_req_o      = is_load | is_store;
 

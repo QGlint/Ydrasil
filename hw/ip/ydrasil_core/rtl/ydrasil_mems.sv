@@ -1,18 +1,18 @@
-`include "define_mem_reg.svh"
-
 // 内存管理模块，包含ITCM和DTCM
-module ydrasil_mems (
+module ydrasil_mems 
+import ydrasil_pkg::*;
+(
     input wire clk,
     input wire rst_n,
 
     // PC访问接口
-    input  wire [`INST_ADDR_WIDTH-1:0] if_mem_addr_i,   // PC地址
-    output wire [`INST_DATA_WIDTH-1:0] if_mem_rdata_o, // 指令输出
+    input  wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] if_mem_addr_i,   // PC地址
+    output wire [ydrasil_pkg::INST_DATA_WIDTH-1:0] if_mem_rdata_o, // 指令输出
 
     // EX访问接口
-    input  wire [`BUS_ADDR_WIDTH-1:0] lsu_mem_addr_i,  
-    input  wire [`BUS_DATA_WIDTH-1:0] lsu_mem_data_i,  
-    output wire [`BUS_DATA_WIDTH-1:0] lsu_mem_data_o,  
+    input  wire [ydrasil_pkg::BUS_ADDR_WIDTH-1:0] lsu_mem_addr_i,  
+    input  wire [ydrasil_pkg::BUS_DATA_WIDTH-1:0] lsu_mem_data_i,  
+    output wire [ydrasil_pkg::BUS_DATA_WIDTH-1:0] lsu_mem_data_o,  
     input  wire                       lsu_mem_we_i,    
     input  wire                       lsu_mem_req_i, 
     input  wire [                3:0] lsu_mem_wmask_i, 

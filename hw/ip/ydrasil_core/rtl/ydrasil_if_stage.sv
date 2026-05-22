@@ -1,6 +1,8 @@
-`include "define_rv32i_ins.svh"
 
-module ydrasil_if_stage #(
+
+module ydrasil_if_stage 
+import ydrasil_pkg::*;
+#(
 )(
 	input  wire        clk,
 	input  wire        rst_n,
@@ -50,14 +52,14 @@ module ydrasil_if_stage #(
 	assign if_id_instr_o = if_id_instr;
 	assign if_id_instr = 
 		stall_if_ff? if_id_instr_ff :
-		flush_if_ff ? `RV32I_INS_NOP : if_mem_rdata_i;
+		flush_if_ff ? ydrasil_pkg::RV32I_INS_NOP : if_mem_rdata_i;
 
 
 
 	// IF 级 PC 寄存器：复位置初值，非停顿时更新
 	always_ff @(posedge clk or negedge rst_n) begin
 		if (!rst_n) begin
-			pc_ff <= `RESET_INS;
+			pc_ff <= ydrasil_pkg::RESET_INS;
 		end else begin
 			pc_ff <= pc_n;
 		end
@@ -69,9 +71,9 @@ module ydrasil_if_stage #(
 	// IF/ID 流水寄存器：支持复位、冲刷和停顿
 	always_ff @(posedge clk or negedge rst_n) begin
 		if (!rst_n) begin
-			if_id_pc_ff    <= `RESET_INS;
+			if_id_pc_ff    <= ydrasil_pkg::RESET_INS;
 			flush_if_ff     <= 1'b0;
-			if_id_instr_ff <= `RV32I_INS_NOP;
+			if_id_instr_ff <= ydrasil_pkg::RV32I_INS_NOP;
 			stall_if_ff    <= 1'b0;
 		end 
 		else begin

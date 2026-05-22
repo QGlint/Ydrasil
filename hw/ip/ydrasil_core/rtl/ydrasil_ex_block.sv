@@ -1,7 +1,8 @@
-`include "define_decode.svh"
-`include "define_mem_reg.svh"
 
-module ydrasil_ex_block #(
+
+module ydrasil_ex_block 
+import ydrasil_pkg::*;
+#(
 	parameter int DATA_WIDTH = 32
 )(
 	input  wire                            clk,
@@ -13,50 +14,50 @@ module ydrasil_ex_block #(
 	
     input  wire [DATA_WIDTH-1:0]           operand_a_i,
 	input  wire [DATA_WIDTH-1:0]           operand_b_i,
-	input  wire [`OPERATOR_WIDTH-1:0]      operator_i,
-	input  wire [`OPERATOR_TYPE_WIDTH-1:0] operator_type_i,
+	input  wire [ydrasil_pkg::OPERATOR_WIDTH-1:0]      operator_i,
+	input  wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] operator_type_i,
     input  wire [ 4:0]                     id_rf_waddr_rd_i,
     input  wire                            id_alu_rf_wen_rd_i,
 	input  wire                            id_ex_rs2_rd_forward_i,
 	input  wire                            id_ex_rs1_rd_forward_i,
 	input  wire 						  id_ex_bt_rs1_rd_forward_i,
 	input  wire 							interrupt_i,
-	input wire  [`INST_ADDR_WIDTH-1:0]      clint_ex_int_addr_i,
-	input wire [`REGS_ADDR_WIDTH-1:0]      id_ex_rs2_raddr_i,
-	input wire [`REGS_ADDR_WIDTH-1:0]      id_ex_rs1_raddr_i,
-	input wire [`REGS_DATA_WIDTH-1:0]     	wb_ex_pending_wdata_rd_ff_i,
- 	input wire [`REGS_ADDR_WIDTH-1:0]		wb_ex_pending_waddr_rd_ff_i,
+	input wire  [ydrasil_pkg::INST_ADDR_WIDTH-1:0]      clint_ex_int_addr_i,
+	input wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]      id_ex_rs2_raddr_i,
+	input wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]      id_ex_rs1_raddr_i,
+	input wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]     	wb_ex_pending_wdata_rd_ff_i,
+ 	input wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]		wb_ex_pending_waddr_rd_ff_i,
  	input wire                       		wb_ex_pending_ff_i,
-	input wire [`OPSEL_INFO_WIDTH-1:0]		sel_rs_i,
+	input wire [ydrasil_pkg::OPSEL_INFO_WIDTH-1:0]		sel_rs_i,
 
-	input  wire [`CSR_ADDR_WIDTH-1:0] 	   id_ex_csr_waddr_i,
-	input  wire [`OP_CSR_INFO_WIDTH-1:0]   id_op_csr_info_i,
+	input  wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0] 	   id_ex_csr_waddr_i,
+	input  wire [ydrasil_pkg::OP_CSR_INFO_WIDTH-1:0]   id_op_csr_info_i,
 	input  wire [DATA_WIDTH-1:0]           csr_ex_rdata_i,
 
 	output wire 						   ex_csr_wen_o,
 	output wire [DATA_WIDTH-1:0]           ex_csr_wdata_o,
-	output wire [`CSR_ADDR_WIDTH-1:0] 	   ex_csr_waddr_o,
+	output wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0] 	   ex_csr_waddr_o,
 	
 	output wire                            ex_branch_jump_o,      // to CTRL
 	output wire [DATA_WIDTH-1:0]           ex_branch_target_o, // to CTRL
-    output wire [`BUS_ADDR_WIDTH-1:0]      ex_lsu_mem_addr_o,      // to EX 
+	output wire [ydrasil_pkg::BUS_ADDR_WIDTH-1:0]      ex_lsu_mem_addr_o,      // to EX 
 
 	output wire [DATA_WIDTH-1:0]           ex_lsu_result_o,        // to EX
 
-    output wire [`REGS_DATA_WIDTH-1:0]     alu_result_o,
+	output wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]     alu_result_o,
     output wire                            alu_rf_wen_rd_o,
-    output wire [`REGS_ADDR_WIDTH-1:0]     alu_rf_waddr_rd_o
+	output wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     alu_rf_waddr_rd_o
 );
 
 	// 分支目标地址：EX 内部单独加法器计算 PC + imm_b
 	wire [31:0] bt_alu_result;
-	wire [`REGS_DATA_WIDTH-1:0]     alu_result;
+	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]     alu_result;
 	wire                            alu_rf_wen_rd;
-	wire [`REGS_ADDR_WIDTH-1:0]     alu_rf_waddr_rd;
+	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     alu_rf_waddr_rd;
 
-	reg [`REGS_DATA_WIDTH-1:0]     alu_result_ff;
+	reg [ydrasil_pkg::REGS_DATA_WIDTH-1:0]     alu_result_ff;
 	reg                            alu_rf_wen_rd_ff;
-	reg [`REGS_ADDR_WIDTH-1:0]     alu_rf_waddr_rd_ff;
+	reg [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     alu_rf_waddr_rd_ff;
 
 	wire ex_branch_jump;
 
@@ -70,9 +71,9 @@ module ydrasil_ex_block #(
 	wire bt_a_sel_rs1;
 	wire op_b_sel_rs2;
 
-	assign op_a_sel_rs1 = sel_rs_i[`ASELRS];
-	assign bt_a_sel_rs1 = sel_rs_i[`BTASELRS];
-	assign op_b_sel_rs2 = sel_rs_i[`BSELRS];
+	assign op_a_sel_rs1 = sel_rs_i[ydrasil_pkg::ASELRS];
+	assign bt_a_sel_rs1 = sel_rs_i[ydrasil_pkg::BTASELRS];
+	assign op_b_sel_rs2 = sel_rs_i[ydrasil_pkg::BSELRS];
 
 	wire wb_ex_bt_rs1_rd_forward;
 	wire wb_ex_rs1_rd_forward;
@@ -126,25 +127,25 @@ module ydrasil_ex_block #(
 
 	//csr
 
-		wire op_csr = operator_type_i[`OPERATOR_TYPE_CSR] ;
+		wire op_csr = operator_type_i[ydrasil_pkg::OPERATOR_TYPE_CSR] ;
 
-		wire csr_csrrw = op_csr & id_op_csr_info_i[`OP_CSR_CSRRW];
-		wire csr_csrrs = op_csr & id_op_csr_info_i[`OP_CSR_CSRRS];
-		wire csr_csrrc = op_csr & id_op_csr_info_i[`OP_CSR_CSRRC];
+		wire csr_csrrw = op_csr & id_op_csr_info_i[ydrasil_pkg::OP_CSR_CSRRW];
+		wire csr_csrrs = op_csr & id_op_csr_info_i[ydrasil_pkg::OP_CSR_CSRRS];
+		wire csr_csrrc = op_csr & id_op_csr_info_i[ydrasil_pkg::OP_CSR_CSRRC];
 
 		wire [31:0]csr_reg_wdata ;
 		wire [31:0]csr_wdata ;
 
-	reg [`REGS_DATA_WIDTH-1:0] ex_csr_wdata_o_ff;
+	reg [ydrasil_pkg::REGS_DATA_WIDTH-1:0] ex_csr_wdata_o_ff;
 	reg 						ex_csr_wen_o_ff;
-	reg [`CSR_ADDR_WIDTH-1:0] ex_csr_waddr_o_ff;
+	reg [ydrasil_pkg::CSR_ADDR_WIDTH-1:0] ex_csr_waddr_o_ff;
 
 
 	assign csr_reg_wdata = interrupt_i ? '0: csr_ex_rdata_i;
 	assign csr_wdata = interrupt_i ? '0:
-							({`REGS_DATA_WIDTH{csr_csrrw}} & operand_a) |
-                          	({`REGS_DATA_WIDTH{csr_csrrs}} & (operand_a | csr_ex_rdata_i)) |
-                          	({`REGS_DATA_WIDTH{csr_csrrc}} & (csr_ex_rdata_i & (~operand_a)));
+						({ydrasil_pkg::REGS_DATA_WIDTH{csr_csrrw}} & operand_a) |
+                          	({ydrasil_pkg::REGS_DATA_WIDTH{csr_csrrs}} & (operand_a | csr_ex_rdata_i)) |
+                          	({ydrasil_pkg::REGS_DATA_WIDTH{csr_csrrc}} & (csr_ex_rdata_i & (~operand_a)));
 	assign csr_wen = op_csr;
 	
 	always_ff @(posedge clk or negedge rst_n) begin

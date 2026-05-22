@@ -1,19 +1,21 @@
-`include "define_mem_reg.svh"
-module ydrasil_ctrl (
+
+module ydrasil_ctrl 
+import ydrasil_pkg::*;
+(
 
     input wire rst_n,
 
     // from ex
     input wire                          ex_branch_jump_i,
-    input wire [`INST_ADDR_WIDTH-1:0]   ex_branch_target_i,
+    input wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0]   ex_branch_target_i,
     
     input wire                           lsu_ctrl_stall_i, // LSU 可能会因为等待内存响应而请求stall
     input wire                           lsu_ctrl_stall_wb_i, // LSU 可能会因为异常等原因
-    input wire [`REGS_ADDR_WIDTH-1:0]    lsu_ctrl_waddr_rd_i,
-    input wire [`REGS_ADDR_WIDTH-1:0]    lsu_ctrl_waddr_rd_wb_i,
+    input wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    lsu_ctrl_waddr_rd_i,
+    input wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    lsu_ctrl_waddr_rd_wb_i,
 
-    input wire [`REGS_ADDR_WIDTH-1:0]    id_ctrl_rs1_addr_i,
-    input wire [`REGS_ADDR_WIDTH-1:0]    id_ctrl_rs2_addr_i,
+    input wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    id_ctrl_rs1_addr_i,
+    input wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    id_ctrl_rs2_addr_i,
 
     input wire                          clint_stall_i,
 
@@ -28,7 +30,7 @@ module ydrasil_ctrl (
     // output wire                         flush_mems_o, --- IGNORE ---
     //跳转
     output wire                         branch_jump_o,
-    output wire [`INST_ADDR_WIDTH-1:0]  branch_target_o
+    output wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0]  branch_target_o
 
 );
 

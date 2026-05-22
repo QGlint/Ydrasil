@@ -1,6 +1,6 @@
-`include "define_decode.svh"
-`include "define_mem_reg.svh"
-module ydrasil_alu#(
+module ydrasil_alu
+import ydrasil_pkg::*;
+#(
     parameter   DATAWIDTH = 32   
 )(
     // input wire rst_n,
@@ -8,8 +8,8 @@ module ydrasil_alu#(
     // input wire                             req_alu_i,
     input wire [DATAWIDTH-1:0]             operand_a_i,
     input wire [DATAWIDTH-1:0]             operand_b_i,
-    input wire [`OPERATOR_WIDTH-1:0]       operator_i,  // 统一的ALU操作信息信号
-    input wire [`OPERATOR_TYPE_WIDTH-1:0]  operator_type_i, // 操作类型信号
+    input wire [ydrasil_pkg::OPERATOR_WIDTH-1:0]       operator_i,  // 统一的ALU操作信息信号
+    input wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0]  operator_type_i, // 操作类型信号
     
     input wire [ 4:0]                      id_rf_waddr_rd_i,
     input wire                             id_alu_rf_wen_rd_i,
@@ -20,16 +20,16 @@ module ydrasil_alu#(
     //比较输出
     output wire                            comp_result_o,
     // 结果输出
-    output wire [`REGS_DATA_WIDTH-1:0]     alu_result_o,
+    output wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]     alu_result_o,
     output wire                            alu_rf_wen_rd_o,
-    output wire [`REGS_ADDR_WIDTH-1:0]     alu_rf_waddr_rd_o
+    output wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     alu_rf_waddr_rd_o
 );
 
     // ALU操作数选择 - 统一的运算器输入
     wire [31:0] mux_op1 = operand_a_i;
     wire [31:0] mux_op2 = operand_b_i;
 
-    wire        req_alu = operator_type_i[`OPERATOR_TYPE_ALU];
+    wire        req_alu = operator_type_i[ydrasil_pkg::OPERATOR_TYPE_ALU];
 
     // ALU运算类型选择(包括R与I类型)
     wire        op_add   ;
@@ -45,18 +45,18 @@ module ydrasil_alu#(
     wire        op_lui   ;
     wire        op_auipc ;
 
-    assign op_add   = operator_i [`OP_ALU_ADD] &  operator_type_i[`OPERATOR_TYPE_ALU];
-    assign op_sub   = operator_i [`OP_ALU_SUB] &  operator_type_i[`OPERATOR_TYPE_ALU];
-    assign op_sll   = operator_i [`OP_ALU_SLL] &  operator_type_i[`OPERATOR_TYPE_ALU];
-    assign op_slt   = operator_i [`OP_ALU_SLT] &  operator_type_i[`OPERATOR_TYPE_ALU];
-    assign op_sltu  = operator_i [`OP_ALU_SLTU] &  operator_type_i[`OPERATOR_TYPE_ALU];
-    assign op_xor   = operator_i [`OP_ALU_XOR] &  operator_type_i[`OPERATOR_TYPE_ALU];
-    assign op_srl   = operator_i [`OP_ALU_SRL] &  operator_type_i[`OPERATOR_TYPE_ALU];
-    assign op_sra   = operator_i [`OP_ALU_SRA] &  operator_type_i[`OPERATOR_TYPE_ALU];
-    assign op_or    = operator_i [`OP_ALU_OR] &  operator_type_i[`OPERATOR_TYPE_ALU];
-    assign op_and   = operator_i [`OP_ALU_AND] &  operator_type_i[`OPERATOR_TYPE_ALU];
-    assign op_lui   = operator_i [`OP_ALU_LUI] &  operator_type_i[`OPERATOR_TYPE_ALU];
-    assign op_auipc = operator_i [`OP_ALU_AUIPC] &  operator_type_i[`OPERATOR_TYPE_ALU];
+    assign op_add   = operator_i[ydrasil_pkg::OP_ALU_ADD] &  operator_type_i[ydrasil_pkg::OPERATOR_TYPE_ALU];
+    assign op_sub   = operator_i[ydrasil_pkg::OP_ALU_SUB] &  operator_type_i[ydrasil_pkg::OPERATOR_TYPE_ALU];
+    assign op_sll   = operator_i[ydrasil_pkg::OP_ALU_SLL] &  operator_type_i[ydrasil_pkg::OPERATOR_TYPE_ALU];
+    assign op_slt   = operator_i[ydrasil_pkg::OP_ALU_SLT] &  operator_type_i[ydrasil_pkg::OPERATOR_TYPE_ALU];
+    assign op_sltu  = operator_i[ydrasil_pkg::OP_ALU_SLTU] &  operator_type_i[ydrasil_pkg::OPERATOR_TYPE_ALU];
+    assign op_xor   = operator_i[ydrasil_pkg::OP_ALU_XOR] &  operator_type_i[ydrasil_pkg::OPERATOR_TYPE_ALU];
+    assign op_srl   = operator_i[ydrasil_pkg::OP_ALU_SRL] &  operator_type_i[ydrasil_pkg::OPERATOR_TYPE_ALU];
+    assign op_sra   = operator_i[ydrasil_pkg::OP_ALU_SRA] &  operator_type_i[ydrasil_pkg::OPERATOR_TYPE_ALU];
+    assign op_or    = operator_i[ydrasil_pkg::OP_ALU_OR] &  operator_type_i[ydrasil_pkg::OPERATOR_TYPE_ALU];
+    assign op_and   = operator_i[ydrasil_pkg::OP_ALU_AND] &  operator_type_i[ydrasil_pkg::OPERATOR_TYPE_ALU];
+    assign op_lui   = operator_i[ydrasil_pkg::OP_ALU_LUI] &  operator_type_i[ydrasil_pkg::OPERATOR_TYPE_ALU];
+    assign op_auipc = operator_i[ydrasil_pkg::OP_ALU_AUIPC] &  operator_type_i[ydrasil_pkg::OPERATOR_TYPE_ALU];
 
     wire        op_jump ;
     wire        op_beq  ;
@@ -69,17 +69,17 @@ module ydrasil_alu#(
 
     assign op_branch = op_beq | op_bne | op_blt | op_bge | op_bltu | op_bgeu;
 
-    assign op_jump = operator_i [`OP_BJP_JUMP] &  operator_type_i[`OPERATOR_TYPE_BJP];
-    assign op_beq  = operator_i [`OP_BJP_BEQ] &  operator_type_i[`OPERATOR_TYPE_BJP];
-    assign op_bne  = operator_i [`OP_BJP_BNE] &  operator_type_i[`OPERATOR_TYPE_BJP];
-    assign op_blt  = operator_i [`OP_BJP_BLT] &  operator_type_i[`OPERATOR_TYPE_BJP];
-    assign op_bge  = operator_i [`OP_BJP_BGE] &  operator_type_i[`OPERATOR_TYPE_BJP];
-    assign op_bltu = operator_i [`OP_BJP_BLTU] &  operator_type_i[`OPERATOR_TYPE_BJP];
-    assign op_bgeu = operator_i [`OP_BJP_BGEU] &  operator_type_i[`OPERATOR_TYPE_BJP]   ;
+    assign op_jump = operator_i[ydrasil_pkg::OP_BJP_JUMP] &  operator_type_i[ydrasil_pkg::OPERATOR_TYPE_BJP];
+    assign op_beq  = operator_i[ydrasil_pkg::OP_BJP_BEQ] &  operator_type_i[ydrasil_pkg::OPERATOR_TYPE_BJP];
+    assign op_bne  = operator_i[ydrasil_pkg::OP_BJP_BNE] &  operator_type_i[ydrasil_pkg::OPERATOR_TYPE_BJP];
+    assign op_blt  = operator_i[ydrasil_pkg::OP_BJP_BLT] &  operator_type_i[ydrasil_pkg::OPERATOR_TYPE_BJP];
+    assign op_bge  = operator_i[ydrasil_pkg::OP_BJP_BGE] &  operator_type_i[ydrasil_pkg::OPERATOR_TYPE_BJP];
+    assign op_bltu = operator_i[ydrasil_pkg::OP_BJP_BLTU] &  operator_type_i[ydrasil_pkg::OPERATOR_TYPE_BJP];
+    assign op_bgeu = operator_i[ydrasil_pkg::OP_BJP_BGEU] &  operator_type_i[ydrasil_pkg::OPERATOR_TYPE_BJP];
 
     wire        op_lsu   ;
     
-    assign op_lsu = operator_type_i[`OPERATOR_TYPE_LOAD] | operator_type_i[`OPERATOR_TYPE_STORE];
+    assign op_lsu = operator_type_i[ydrasil_pkg::OPERATOR_TYPE_LOAD] | operator_type_i[ydrasil_pkg::OPERATOR_TYPE_STORE];
 
     // 指令分类信号 - 便于复用运算器
 

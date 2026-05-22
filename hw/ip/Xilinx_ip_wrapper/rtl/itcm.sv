@@ -1,10 +1,11 @@
-`include "define_mem_reg.svh"
 
-module itcm(
+module itcm
+import ydrasil_pkg::*;
+(
     input wire                  clk,
     input wire                  itcm_en,
-    input wire [`ITCM_ADDR_WIDTH-1:0]           itcm_addr,
-    output wire [`INST_DATA_WIDTH-1:0]          itcm_data_o
+    input wire [ydrasil_pkg::ITCM_ADDR_WIDTH-1:0]           itcm_addr,
+    output wire [ydrasil_pkg::INST_DATA_WIDTH-1:0]          itcm_data_o
 );
 
 

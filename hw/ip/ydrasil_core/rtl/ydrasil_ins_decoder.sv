@@ -1,7 +1,7 @@
-`include "define_decode.svh"
-`include "define_rv32i_ins.svh"
-`include "define_mem_reg.svh"
-module ydrasil_ins_decoder #(
+
+module ydrasil_ins_decoder 
+import ydrasil_pkg::*;
+#(
 	parameter int DATA_WIDTH = 32
 )(
 	input  wire [DATA_WIDTH-1:0] instr_i,
@@ -22,24 +22,24 @@ module ydrasil_ins_decoder #(
 	output wire 	  operand_b_jump_sel_o, 
 
 
-	output wire [`CSR_ADDR_WIDTH-1:0] 	 csr_reg_raddr_o,  // 读CSR寄存器地址
+	output wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0] 	 csr_reg_raddr_o,  // 读CSR寄存器地址
     // output wire                        	 csr_ex_we_o,        // 写CSR寄存器标志
-    output wire [`CSR_ADDR_WIDTH-1:0] 	 csr_ex_waddr_o,      // 写CSR寄存器地址
-	output wire [`OP_CSR_INFO_WIDTH-1:0] csr_op_info_o,
-	output wire [`OP_SYS_INFO_WIDTH-1:0] sys_op_info_o,
+	output wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0] 	 csr_ex_waddr_o,      // 写CSR寄存器地址
+	output wire [ydrasil_pkg::OP_CSR_INFO_WIDTH-1:0] csr_op_info_o,
+	output wire [ydrasil_pkg::OP_SYS_INFO_WIDTH-1:0] sys_op_info_o,
 
 
-	output wire [`OPERATOR_WIDTH-1:0] operator_o,
-	output wire [`OP_LSU_INFO_WIDTH-1:0] operator_lsu_o,
-	output wire [`OPERATOR_TYPE_WIDTH-1:0] operator_type_o
+	output wire [ydrasil_pkg::OPERATOR_WIDTH-1:0] operator_o,
+	output wire [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0] operator_lsu_o,
+	output wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] operator_type_o
 );
 
 
-	wire [`OP_ALU_INFO_WIDTH-1:0] alu_op_info;
-	wire [`OP_BJP_INFO_WIDTH-1:0] bjp_op_info;
-	wire [`OP_LSU_INFO_WIDTH-1:0] lsu_op_info;
-	wire [`OP_CSR_INFO_WIDTH-1:0] csr_op_info;
-	wire [`OP_SYS_INFO_WIDTH-1:0] sys_op_info;
+	wire [ydrasil_pkg::OP_ALU_INFO_WIDTH-1:0] alu_op_info;
+	wire [ydrasil_pkg::OP_BJP_INFO_WIDTH-1:0] bjp_op_info;
+	wire [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0] lsu_op_info;
+	wire [ydrasil_pkg::OP_CSR_INFO_WIDTH-1:0] csr_op_info;
+	wire [ydrasil_pkg::OP_SYS_INFO_WIDTH-1:0] sys_op_info;
 
 	wire [6:0] opcode 		;
 	wire [4:0]	rf_waddr_rd ;
@@ -93,16 +93,16 @@ module ydrasil_ins_decoder #(
 	wire is_csr	  ;
 	wire is_sys		;
 
-	assign is_op_imm   = (opcode == `RV32I_INS_TYPE_I);
-	assign is_op_r_m   = (opcode == `RV32I_INS_TYPE_R_M);
-	assign is_load     = (opcode == `RV32I_INS_TYPE_L);
-	assign is_store    = (opcode == `RV32I_INS_TYPE_S);
-	assign is_branch   = (opcode == `RV32I_INS_TYPE_B);
-	assign is_jal      = (opcode == `RV32I_INS_JAL);
-	assign is_jalr     = (opcode == `RV32I_INS_JALR) & funct3_is_000;
-	assign is_lui      = (opcode == `RV32I_INS_LUI);
-	assign is_auipc    = (opcode == `RV32I_INS_AUIPC);
-	assign is_csr      = (opcode == `RV32I_INS_CSR);
+	assign is_op_imm   = (opcode == ydrasil_pkg::RV32I_INS_TYPE_I);
+	assign is_op_r_m   = (opcode == ydrasil_pkg::RV32I_INS_TYPE_R_M);
+	assign is_load     = (opcode == ydrasil_pkg::RV32I_INS_TYPE_L);
+	assign is_store    = (opcode == ydrasil_pkg::RV32I_INS_TYPE_S);
+	assign is_branch   = (opcode == ydrasil_pkg::RV32I_INS_TYPE_B);
+	assign is_jal      = (opcode == ydrasil_pkg::RV32I_INS_JAL);
+	assign is_jalr     = (opcode == ydrasil_pkg::RV32I_INS_JALR) & funct3_is_000;
+	assign is_lui      = (opcode == ydrasil_pkg::RV32I_INS_LUI);
+	assign is_auipc    = (opcode == ydrasil_pkg::RV32I_INS_AUIPC);
+	assign is_csr      = (opcode == ydrasil_pkg::RV32I_INS_CSR);
 
 	wire is_beq      ;
 	wire is_bne      ;
@@ -111,12 +111,12 @@ module ydrasil_ins_decoder #(
 	wire is_bltu     ;
 	wire is_bgeu     ;
 
-	assign is_beq      = is_branch & (funct3 == `RV32I_INS_BEQ);
-	assign is_bne      = is_branch & (funct3 == `RV32I_INS_BNE);
-	assign is_blt      = is_branch & (funct3 == `RV32I_INS_BLT);
-	assign is_bge      = is_branch & (funct3 == `RV32I_INS_BGE);
-	assign is_bltu     = is_branch & (funct3 == `RV32I_INS_BLTU);
-	assign is_bgeu     = is_branch & (funct3 == `RV32I_INS_BGEU);
+	assign is_beq      = is_branch & (funct3 == ydrasil_pkg::RV32I_INS_BEQ);
+	assign is_bne      = is_branch & (funct3 == ydrasil_pkg::RV32I_INS_BNE);
+	assign is_blt      = is_branch & (funct3 == ydrasil_pkg::RV32I_INS_BLT);
+	assign is_bge      = is_branch & (funct3 == ydrasil_pkg::RV32I_INS_BGE);
+	assign is_bltu     = is_branch & (funct3 == ydrasil_pkg::RV32I_INS_BLTU);
+	assign is_bgeu     = is_branch & (funct3 == ydrasil_pkg::RV32I_INS_BGEU);
 
 	wire is_lb     ;
 	wire is_lh     ;
@@ -124,19 +124,19 @@ module ydrasil_ins_decoder #(
 	wire is_lbu    ;
 	wire is_lhu    ;
 
-	assign is_lb     = is_load & (funct3 == `RV32I_INS_LB);
-	assign is_lh     = is_load & (funct3 == `RV32I_INS_LH);
-	assign is_lw     = is_load & (funct3 == `RV32I_INS_LW);
-	assign is_lbu    = is_load & (funct3 == `RV32I_INS_LBU);
-	assign is_lhu    = is_load & (funct3 == `RV32I_INS_LHU);
+	assign is_lb     = is_load & (funct3 == ydrasil_pkg::RV32I_INS_LB);
+	assign is_lh     = is_load & (funct3 == ydrasil_pkg::RV32I_INS_LH);
+	assign is_lw     = is_load & (funct3 == ydrasil_pkg::RV32I_INS_LW);
+	assign is_lbu    = is_load & (funct3 == ydrasil_pkg::RV32I_INS_LBU);
+	assign is_lhu    = is_load & (funct3 == ydrasil_pkg::RV32I_INS_LHU);
 
 	wire is_sb     ;
 	wire is_sh     ;
 	wire is_sw     ;
 
-	assign is_sb     = is_store & (funct3 == `RV32I_INS_SB);
-	assign is_sh     = is_store & (funct3 == `RV32I_INS_SH);
-	assign is_sw     = is_store & (funct3 == `RV32I_INS_SW);
+	assign is_sb     = is_store & (funct3 == ydrasil_pkg::RV32I_INS_SB);
+	assign is_sh     = is_store & (funct3 == ydrasil_pkg::RV32I_INS_SH);
+	assign is_sw     = is_store & (funct3 == ydrasil_pkg::RV32I_INS_SW);
 
 	wire is_addi  ;
 	wire is_slti  ;
@@ -148,15 +148,15 @@ module ydrasil_ins_decoder #(
 	wire is_srli  ;
 	wire is_srai  ;
 
-	assign is_addi  = is_op_imm & (funct3 == `RV32I_INS_ADDI);
-	assign is_slti  = is_op_imm & (funct3 == `RV32I_INS_SLTI);
-	assign is_sltiu = is_op_imm & (funct3 == `RV32I_INS_SLTIU);
-	assign is_xori  = is_op_imm & (funct3 == `RV32I_INS_XORI);
-	assign is_ori   = is_op_imm & (funct3 == `RV32I_INS_ORI);
-	assign is_andi  = is_op_imm & (funct3 == `RV32I_INS_ANDI);
-	assign is_slli  = is_op_imm & (funct3 == `RV32I_INS_SLLI) 	& funct7_is_0000000;
-	assign is_srli  = is_op_imm & (funct3 == `RV32I_INS_SRI) 	& funct7_is_0000000;
-	assign is_srai  = is_op_imm & (funct3 == `RV32I_INS_SRI) 	& funct7_is_0100000;
+	assign is_addi  = is_op_imm & (funct3 == ydrasil_pkg::RV32I_INS_ADDI);
+	assign is_slti  = is_op_imm & (funct3 == ydrasil_pkg::RV32I_INS_SLTI);
+	assign is_sltiu = is_op_imm & (funct3 == ydrasil_pkg::RV32I_INS_SLTIU);
+	assign is_xori  = is_op_imm & (funct3 == ydrasil_pkg::RV32I_INS_XORI);
+	assign is_ori   = is_op_imm & (funct3 == ydrasil_pkg::RV32I_INS_ORI);
+	assign is_andi  = is_op_imm & (funct3 == ydrasil_pkg::RV32I_INS_ANDI);
+	assign is_slli  = is_op_imm & (funct3 == ydrasil_pkg::RV32I_INS_SLLI) 	& funct7_is_0000000;
+	assign is_srli  = is_op_imm & (funct3 == ydrasil_pkg::RV32I_INS_SRI) 	& funct7_is_0000000;
+	assign is_srai  = is_op_imm & (funct3 == ydrasil_pkg::RV32I_INS_SRI) 	& funct7_is_0100000;
 
 	wire is_shift ;
 
@@ -172,31 +172,31 @@ module ydrasil_ins_decoder #(
 	wire is_and   ;
 
 	assign is_shift = is_slli | is_srli | is_srai;
-	assign is_add   = is_op_r_m & (funct3 == `RV32I_INS_ADD_SUB) 	& funct7_is_0000000;
-	assign is_sub   = is_op_r_m & (funct3 == `RV32I_INS_ADD_SUB) 	& funct7_is_0100000;
-	assign is_sll   = is_op_r_m & (funct3 == `RV32I_INS_SLL) 		& funct7_is_0000000;
-	assign is_slt   = is_op_r_m & (funct3 == `RV32I_INS_SLT) 		& funct7_is_0000000;
-	assign is_sltu  = is_op_r_m & (funct3 == `RV32I_INS_SLTU) 		& funct7_is_0000000;
-	assign is_xor   = is_op_r_m & (funct3 == `RV32I_INS_XOR) 		& funct7_is_0000000;
-	assign is_srl   = is_op_r_m & (funct3 == `RV32I_INS_SR) 			& funct7_is_0000000;
-	assign is_sra   = is_op_r_m & (funct3 == `RV32I_INS_SR) 			& funct7_is_0100000;
-	assign is_or    = is_op_r_m & (funct3 == `RV32I_INS_OR) 			& funct7_is_0000000;
-	assign is_and   = is_op_r_m & (funct3 == `RV32I_INS_AND) 		& funct7_is_0000000;
+	assign is_add   = is_op_r_m & (funct3 == ydrasil_pkg::RV32I_INS_ADD_SUB) 	& funct7_is_0000000;
+	assign is_sub   = is_op_r_m & (funct3 == ydrasil_pkg::RV32I_INS_ADD_SUB) 	& funct7_is_0100000;
+	assign is_sll   = is_op_r_m & (funct3 == ydrasil_pkg::RV32I_INS_SLL) 		& funct7_is_0000000;
+	assign is_slt   = is_op_r_m & (funct3 == ydrasil_pkg::RV32I_INS_SLT) 		& funct7_is_0000000;
+	assign is_sltu  = is_op_r_m & (funct3 == ydrasil_pkg::RV32I_INS_SLTU) 		& funct7_is_0000000;
+	assign is_xor   = is_op_r_m & (funct3 == ydrasil_pkg::RV32I_INS_XOR) 		& funct7_is_0000000;
+	assign is_srl   = is_op_r_m & (funct3 == ydrasil_pkg::RV32I_INS_SR) 			& funct7_is_0000000;
+	assign is_sra   = is_op_r_m & (funct3 == ydrasil_pkg::RV32I_INS_SR) 			& funct7_is_0100000;
+	assign is_or    = is_op_r_m & (funct3 == ydrasil_pkg::RV32I_INS_OR) 			& funct7_is_0000000;
+	assign is_and   = is_op_r_m & (funct3 == ydrasil_pkg::RV32I_INS_AND) 		& funct7_is_0000000;
 
 	wire is_fence  ;
 	wire is_fence_i;
-	assign is_fence  = (opcode == `RV32I_INS_FENCE) & funct3_is_000;
-	assign is_fence_i = (opcode == `RV32I_INS_FENCE) & funct3_is_001;
+	assign is_fence  = (opcode == ydrasil_pkg::RV32I_INS_FENCE) & funct3_is_000;
+	assign is_fence_i = (opcode == ydrasil_pkg::RV32I_INS_FENCE) & funct3_is_001;
 
 	wire is_nop    ;
 	wire is_ecall  ;
 	wire is_ebreak ;
 	wire is_mret    ;
 
-	assign is_nop    = (instr_i == `RV32I_INS_NOP);
-	assign is_ecall  = (instr_i == `RV32I_INS_ECALL);
-	assign is_ebreak = (instr_i == `RV32I_INS_EBREAK);
-	assign is_mret    = (instr_i == `RV32I_INS_MRET);
+	assign is_nop    = (instr_i == ydrasil_pkg::RV32I_INS_NOP);
+	assign is_ecall  = (instr_i == ydrasil_pkg::RV32I_INS_ECALL);
+	assign is_ebreak = (instr_i == ydrasil_pkg::RV32I_INS_EBREAK);
+	assign is_mret    = (instr_i == ydrasil_pkg::RV32I_INS_MRET);
 
 	assign is_sys = is_ecall | is_ebreak | is_mret;
 
@@ -208,51 +208,51 @@ module ydrasil_ins_decoder #(
     wire is_csrrci;
 
 
-	assign is_csrrw =  is_csr 	& (funct3 == `RV32I_INS_CSRRW);
-	assign is_csrrs =  is_csr 	& (funct3 == `RV32I_INS_CSRRS);
-	assign is_csrrc =  is_csr 	& (funct3 == `RV32I_INS_CSRRC);
-	assign is_csrrwi = is_csr  	& (funct3 == `RV32I_INS_CSRRWI);
-	assign is_csrrsi = is_csr  	& (funct3 == `RV32I_INS_CSRRSI);
-	assign is_csrrci = is_csr  	& (funct3 == `RV32I_INS_CSRRCI);
+	assign is_csrrw =  is_csr 	& (funct3 == ydrasil_pkg::RV32I_INS_CSRRW);
+	assign is_csrrs =  is_csr 	& (funct3 == ydrasil_pkg::RV32I_INS_CSRRS);
+	assign is_csrrc =  is_csr 	& (funct3 == ydrasil_pkg::RV32I_INS_CSRRC);
+	assign is_csrrwi = is_csr  	& (funct3 == ydrasil_pkg::RV32I_INS_CSRRWI);
+	assign is_csrrsi = is_csr  	& (funct3 == ydrasil_pkg::RV32I_INS_CSRRSI);
+	assign is_csrrci = is_csr  	& (funct3 == ydrasil_pkg::RV32I_INS_CSRRCI);
 
 
-	assign alu_op_info[`OP_ALU_ADD]   = is_addi | is_add ;
-	assign alu_op_info[`OP_ALU_SUB]   = is_sub;
-	assign alu_op_info[`OP_ALU_SLL]   = is_slli | is_sll;
-	assign alu_op_info[`OP_ALU_SLT]   = is_slti | is_slt;
-	assign alu_op_info[`OP_ALU_SLTU]  = is_sltiu | is_sltu;
-	assign alu_op_info[`OP_ALU_XOR]   = is_xori | is_xor;
-	assign alu_op_info[`OP_ALU_SRL]   = is_srli | is_srl;
-	assign alu_op_info[`OP_ALU_SRA]   = is_srai | is_sra;
-	assign alu_op_info[`OP_ALU_OR]    = is_ori | is_or;
-	assign alu_op_info[`OP_ALU_AND]   = is_andi | is_and;
-	assign alu_op_info[`OP_ALU_LUI]   = is_lui;
-	assign alu_op_info[`OP_ALU_AUIPC] = is_auipc;
+	assign alu_op_info[ydrasil_pkg::OP_ALU_ADD]   = is_addi | is_add ;
+	assign alu_op_info[ydrasil_pkg::OP_ALU_SUB]   = is_sub;
+	assign alu_op_info[ydrasil_pkg::OP_ALU_SLL]   = is_slli | is_sll;
+	assign alu_op_info[ydrasil_pkg::OP_ALU_SLT]   = is_slti | is_slt;
+	assign alu_op_info[ydrasil_pkg::OP_ALU_SLTU]  = is_sltiu | is_sltu;
+	assign alu_op_info[ydrasil_pkg::OP_ALU_XOR]   = is_xori | is_xor;
+	assign alu_op_info[ydrasil_pkg::OP_ALU_SRL]   = is_srli | is_srl;
+	assign alu_op_info[ydrasil_pkg::OP_ALU_SRA]   = is_srai | is_sra;
+	assign alu_op_info[ydrasil_pkg::OP_ALU_OR]    = is_ori | is_or;
+	assign alu_op_info[ydrasil_pkg::OP_ALU_AND]   = is_andi | is_and;
+	assign alu_op_info[ydrasil_pkg::OP_ALU_LUI]   = is_lui;
+	assign alu_op_info[ydrasil_pkg::OP_ALU_AUIPC] = is_auipc;
 
-	assign bjp_op_info[`OP_BJP_JUMP] = is_jal | is_jalr;
-	assign bjp_op_info[`OP_BJP_BEQ]  = is_beq;
-	assign bjp_op_info[`OP_BJP_BNE]  = is_bne;
-	assign bjp_op_info[`OP_BJP_BLT]  = is_blt;
-	assign bjp_op_info[`OP_BJP_BGE]  = is_bge;
-	assign bjp_op_info[`OP_BJP_BLTU] = is_bltu;
-	assign bjp_op_info[`OP_BJP_BGEU] = is_bgeu;
+	assign bjp_op_info[ydrasil_pkg::OP_BJP_JUMP] = is_jal | is_jalr;
+	assign bjp_op_info[ydrasil_pkg::OP_BJP_BEQ]  = is_beq;
+	assign bjp_op_info[ydrasil_pkg::OP_BJP_BNE]  = is_bne;
+	assign bjp_op_info[ydrasil_pkg::OP_BJP_BLT]  = is_blt;
+	assign bjp_op_info[ydrasil_pkg::OP_BJP_BGE]  = is_bge;
+	assign bjp_op_info[ydrasil_pkg::OP_BJP_BLTU] = is_bltu;
+	assign bjp_op_info[ydrasil_pkg::OP_BJP_BGEU] = is_bgeu;
 
-	assign lsu_op_info[`OP_LSU_LB]  = is_lb;
-	assign lsu_op_info[`OP_LSU_LH]  = is_lh;
-	assign lsu_op_info[`OP_LSU_LW]  = is_lw;
-	assign lsu_op_info[`OP_LSU_LBU] = is_lbu;
-	assign lsu_op_info[`OP_LSU_LHU] = is_lhu;
-	assign lsu_op_info[`OP_LSU_SB]  = is_sb;
-	assign lsu_op_info[`OP_LSU_SH]  = is_sh;
-	assign lsu_op_info[`OP_LSU_SW]  = is_sw;
+	assign lsu_op_info[ydrasil_pkg::OP_LSU_LB]  = is_lb;
+	assign lsu_op_info[ydrasil_pkg::OP_LSU_LH]  = is_lh;
+	assign lsu_op_info[ydrasil_pkg::OP_LSU_LW]  = is_lw;
+	assign lsu_op_info[ydrasil_pkg::OP_LSU_LBU] = is_lbu;
+	assign lsu_op_info[ydrasil_pkg::OP_LSU_LHU] = is_lhu;
+	assign lsu_op_info[ydrasil_pkg::OP_LSU_SB]  = is_sb;
+	assign lsu_op_info[ydrasil_pkg::OP_LSU_SH]  = is_sh;
+	assign lsu_op_info[ydrasil_pkg::OP_LSU_SW]  = is_sw;
 
-	assign csr_op_info[`OP_CSR_CSRRW]  = is_csrrw | is_csrrwi;
-	assign csr_op_info[`OP_CSR_CSRRS]  = is_csrrs | is_csrrsi;
-	assign csr_op_info[`OP_CSR_CSRRC]  = is_csrrc | is_csrrci;
+	assign csr_op_info[ydrasil_pkg::OP_CSR_CSRRW]  = is_csrrw | is_csrrwi;
+	assign csr_op_info[ydrasil_pkg::OP_CSR_CSRRS]  = is_csrrs | is_csrrsi;
+	assign csr_op_info[ydrasil_pkg::OP_CSR_CSRRC]  = is_csrrc | is_csrrci;
 
-	assign sys_op_info[`OP_SYS_ECALL]  = is_ecall;
-	assign sys_op_info[`OP_SYS_EBREAK] = is_ebreak;
-	assign sys_op_info[`OP_SYS_MRET]   = is_mret;
+	assign sys_op_info[ydrasil_pkg::OP_SYS_ECALL]  = is_ecall;
+	assign sys_op_info[ydrasil_pkg::OP_SYS_EBREAK] = is_ebreak;
+	assign sys_op_info[ydrasil_pkg::OP_SYS_MRET]   = is_mret;
 
 
 	wire rf_ren_rs1 =	(~is_lui) 	& (~is_auipc) 	& (~is_jal) &  
@@ -266,12 +266,12 @@ module ydrasil_ins_decoder #(
 	wire is_bjp_use = is_branch | is_jal | is_jalr;
 
 
-	assign operator_type_o [`OPERATOR_TYPE_ALU] = is_alu_use;
-	assign operator_type_o [`OPERATOR_TYPE_BJP] = is_bjp_use;
-	assign operator_type_o [`OPERATOR_TYPE_LOAD] = is_load;
-	assign operator_type_o [`OPERATOR_TYPE_STORE] = is_store;
-	assign operator_type_o [`OPERATOR_TYPE_CSR] = is_csr;
-	assign operator_type_o [`OPERATOR_TYPE_SYS] = is_sys;
+	assign operator_type_o [ydrasil_pkg::OPERATOR_TYPE_ALU] = is_alu_use;
+	assign operator_type_o [ydrasil_pkg::OPERATOR_TYPE_BJP] = is_bjp_use;
+	assign operator_type_o [ydrasil_pkg::OPERATOR_TYPE_LOAD] = is_load;
+	assign operator_type_o [ydrasil_pkg::OPERATOR_TYPE_STORE] = is_store;
+	assign operator_type_o [ydrasil_pkg::OPERATOR_TYPE_CSR] = is_csr;
+	assign operator_type_o [ydrasil_pkg::OPERATOR_TYPE_SYS] = is_sys;
 	// wire [`OPERATOR_WIDTH-1:0] alu_op_info_mark = ({`OPERATOR_WIDTH{is_alu_use }}& {{{`OPERATOR_WIDTH-`OP_ALU_INFO_WIDTH}{1'b0}},alu_op_info});
 	// wire [`OPERATOR_WIDTH-1:0] bjp_op_info_mark = ({`OPERATOR_WIDTH{is_bjp_use }}& {{{`OPERATOR_WIDTH-`OP_BJP_INFO_WIDTH}{1'b0}},bjp_op_info});
 	// assign lsu_op_info_mark =  operator_type_o [OPERATOR_TYPE_LOAD] ? {{`OPERATOR_WIDTH-`OP_LSU_INFO_WIDTH{1'b0}},lsu_op_info} : '0;
@@ -293,8 +293,8 @@ module ydrasil_ins_decoder #(
 
 	assign imm_i_o = imm_i_mask | imm_s_mask | imm_b_mask | imm_u_mask | imm_j_mask | imm_shamt_mask | imm_csr_mask;
 
-	assign operator_o = ({`OPERATOR_WIDTH{is_alu_use }}& {{0{1'b0}},alu_op_info})|
-						({`OPERATOR_WIDTH{is_bjp_use }}& {{5{1'b0}},bjp_op_info});
+	assign operator_o = ({ydrasil_pkg::OPERATOR_WIDTH{is_alu_use }}& {{0{1'b0}},alu_op_info})|
+						({ydrasil_pkg::OPERATOR_WIDTH{is_bjp_use }}& {{5{1'b0}},bjp_op_info});
 	assign operator_lsu_o = lsu_op_info;
 
 	wire operand_b_rs_sel 	;

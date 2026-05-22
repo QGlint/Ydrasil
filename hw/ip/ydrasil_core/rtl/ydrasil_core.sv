@@ -1,7 +1,8 @@
-`include "define_decode.svh"
-`include "define_mem_reg.svh"
 
-module ydrasil_core #(
+
+module ydrasil_core
+import ydrasil_pkg::*;
+ #(
 )(
 	input  wire clk,
 	input  wire rst_n
@@ -19,8 +20,8 @@ module ydrasil_core #(
     localparam DRAM_ADDR_END   = 32'h8013_FFFF;
 
 	// IF <-> MEMS
-	wire [`INST_ADDR_WIDTH-1:0] if_mem_addr;
-	wire [`INST_DATA_WIDTH-1:0] if_mem_rdata;
+	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] if_mem_addr;
+	wire [ydrasil_pkg::INST_DATA_WIDTH-1:0] if_mem_rdata;
 
 	// IF/ID pipeline
 	wire [31:0] if_id_pc;
@@ -34,102 +35,102 @@ module ydrasil_core #(
 	wire                        flush_id;
 	wire                        flush_ex;
 	wire                        branch_jump;
-	wire [`INST_ADDR_WIDTH-1:0] branch_target;
+	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] branch_target;
 
 	// ID <-> RF
-	wire [`REGS_ADDR_WIDTH-1:0] rf_raddr_rs1;
-	wire [`REGS_ADDR_WIDTH-1:0] rf_raddr_rs2;
-	wire [`REGS_DATA_WIDTH-1:0] rf_rdata_rs1;
-	wire [`REGS_DATA_WIDTH-1:0] rf_rdata_rs2;
+	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] rf_raddr_rs1;
+	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] rf_raddr_rs2;
+	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] rf_rdata_rs1;
+	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] rf_rdata_rs2;
 
 	// ID -> EX
 	wire [31:0]                    operand_a;
 	wire [31:0]                    operand_b;
-	wire [`OPERATOR_WIDTH-1:0]     operator;
+	wire [ydrasil_pkg::OPERATOR_WIDTH-1:0]     operator;
 	wire [31:0]                    bt_a_operand;
 	wire [31:0]                    bt_b_operand;
-	wire [`OP_LSU_INFO_WIDTH-1:0]  operator_lsu;
+	wire [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0]  operator_lsu;
     wire                           id_lsu_rs2_rd_forward;
     wire id_ex_rs2_rd_forward;
     wire id_ex_rs1_rd_forward;
     wire id_ex_bt_rs1_rd_forward;
 	wire [31:0]                    id_lsu_rs2_data;
-	wire [`OPERATOR_TYPE_WIDTH-1:0] operator_type;
+	wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] operator_type;
 	wire                           id_alu_rf_wen_rd;
-	wire [`REGS_ADDR_WIDTH-1:0]    id_rf_waddr_rd;
+	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    id_rf_waddr_rd;
 
 	// EX outputs
 	wire                        ex_branch_jump;
-	wire [`INST_ADDR_WIDTH-1:0] ex_branch_target;
-	wire [`BUS_ADDR_WIDTH-1:0]  ex_lsu_mem_addr;
+	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] ex_branch_target;
+	wire [ydrasil_pkg::BUS_ADDR_WIDTH-1:0]  ex_lsu_mem_addr;
     wire [31:0]                 ex_lsu_result;
-	wire [`REGS_DATA_WIDTH-1:0] alu_result;
+	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] alu_result;
 	wire                        alu_rf_wen_rd;
-	wire [`REGS_ADDR_WIDTH-1:0] alu_rf_waddr_rd;
+	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] alu_rf_waddr_rd;
 
 	// LSU request path
 	wire [1:0]                  operator_lsu_type;
-	wire [`BUS_DATA_WIDTH-1:0]  lsu_mem_wdata;
-	wire [`BUS_ADDR_WIDTH-1:0]  lsu_mem_addr;
+	wire [ydrasil_pkg::BUS_DATA_WIDTH-1:0]  lsu_mem_wdata;
+	wire [ydrasil_pkg::BUS_ADDR_WIDTH-1:0]  lsu_mem_addr;
 	wire                        lsu_mem_we;
 	wire                        lsu_mem_req;
 	wire [3:0]                  lsu_mem_wmask;
-	wire [`BUS_DATA_WIDTH-1:0]  lsu_mem_rdata;
+	wire [ydrasil_pkg::BUS_DATA_WIDTH-1:0]  lsu_mem_rdata;
 	wire                        hold_flag;
 
-	wire [`REGS_DATA_WIDTH-1:0] lsu_wb_result;
+	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] lsu_wb_result;
 	wire                        lsu_rf_wen_rd;
-	wire [`REGS_ADDR_WIDTH-1:0] lsu_rf_waddr_rd;
+	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] lsu_rf_waddr_rd;
 
 	// WB -> RF
-	wire [`REGS_DATA_WIDTH-1:0] rf_wdata_rd;
+	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] rf_wdata_rd;
 	wire                        rf_wen_rd;
-	wire [`REGS_ADDR_WIDTH-1:0] rf_waddr_rd;
-	wire [`OPSEL_INFO_WIDTH-1:0]		sel_rs;
-	wire [`REGS_ADDR_WIDTH-1:0]      id_ex_rs2_raddr;
-	wire [`REGS_ADDR_WIDTH-1:0]      id_ex_rs1_raddr;
-	wire [`REGS_DATA_WIDTH-1:0]     wb_ex_pending_wdata_rd_ff;
-	wire [`REGS_ADDR_WIDTH-1:0]		wb_ex_pending_waddr_rd_ff;
+	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] rf_waddr_rd;
+	wire [ydrasil_pkg::OPSEL_INFO_WIDTH-1:0]		sel_rs;
+	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]      id_ex_rs2_raddr;
+	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]      id_ex_rs1_raddr;
+	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]     wb_ex_pending_wdata_rd_ff;
+	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]		wb_ex_pending_waddr_rd_ff;
 	wire                       		wb_ex_pending_ff;
 
-    wire [`BUS_DATA_WIDTH-1:0]  lsu_mem_rdata_m; // 从DRAM读取的数据
+	wire [ydrasil_pkg::BUS_DATA_WIDTH-1:0]  lsu_mem_rdata_m; // 从DRAM读取的数据
 
     //LSU -> CTRL
     wire                            lsu_ctrl_stall;   
     wire                           	lsu_ctrl_stall_wb;
-    wire [`REGS_ADDR_WIDTH-1:0]    	lsu_ctrl_waddr_rd;
-    wire [`REGS_ADDR_WIDTH-1:0]    	lsu_ctrl_waddr_rd_wb;
+	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    	lsu_ctrl_waddr_rd;
+	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    	lsu_ctrl_waddr_rd_wb;
 
     //LSU -> ID
-    wire [`REGS_ADDR_WIDTH-1:0]    id_ctrl_rs1_addr;
-    wire [`REGS_ADDR_WIDTH-1:0]    id_ctrl_rs2_addr;
+	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    id_ctrl_rs1_addr;
+	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    id_ctrl_rs2_addr;
 
-    wire [`CSR_ADDR_WIDTH-1:0]       id_csr_raddr;
-    wire [`CSR_ADDR_WIDTH-1:0]       id_ex_csr_waddr;
-    wire [`OP_CSR_INFO_WIDTH-1:0]    id_op_csr_info;
+	wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0]       id_csr_raddr;
+	wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0]       id_ex_csr_waddr;
+	wire [ydrasil_pkg::OP_CSR_INFO_WIDTH-1:0]    id_op_csr_info;
 
-	wire [`REGS_DATA_WIDTH-1:0]      csr_ex_rdata;
+	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]      csr_ex_rdata;
 	wire 					    ex_csr_wen;
-	wire [`REGS_DATA_WIDTH-1:0]      ex_csr_wdata;
-	wire [`CSR_ADDR_WIDTH-1:0]       ex_csr_waddr;
+	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]      ex_csr_wdata;
+	wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0]       ex_csr_waddr;
 
 	// CSR <-> CLINT wires
 	wire                             clint_csr_we;
-	wire [`CSR_ADDR_WIDTH-1:0]       clint_csr_waddr;
-	wire [`CSR_ADDR_WIDTH-1:0]       clint_csr_raddr;
-	wire [`REGS_DATA_WIDTH-1:0]      clint_csr_wdata;
-	wire [`REGS_DATA_WIDTH-1:0]      csr_clint_data;
-	wire [`REGS_DATA_WIDTH-1:0]      csr_clint_mtvec;
-	wire [`REGS_DATA_WIDTH-1:0]      csr_clint_mepc;
-	wire [`REGS_DATA_WIDTH-1:0]      csr_clint_mstatus;
+	wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0]       clint_csr_waddr;
+	wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0]       clint_csr_raddr;
+	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]      clint_csr_wdata;
+	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]      csr_clint_data;
+	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]      csr_clint_mtvec;
+	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]      csr_clint_mepc;
+	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]      csr_clint_mstatus;
 	wire                             global_int_en;
 	wire                             interrupt;
-	wire [`INST_ADDR_WIDTH-1:0]      clint_ex_int_addr;
+	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0]      clint_ex_int_addr;
 	wire                             clint_stall;
 
-    wire [`BUS_ADDR_WIDTH-1:0] id_instr_addr;
+	wire [ydrasil_pkg::BUS_ADDR_WIDTH-1:0] id_instr_addr;
 
-    wire [`OP_SYS_INFO_WIDTH-1:0] id_op_sys_info;
+	wire [ydrasil_pkg::OP_SYS_INFO_WIDTH-1:0] id_op_sys_info;
 
     reg dram_addr_sel_ff; 
     reg lsu_mem_read_ff;
@@ -149,8 +150,8 @@ module ydrasil_core #(
         end
     end
 
-	assign operator_lsu_type[0] = operator_type[`OPERATOR_TYPE_LOAD];
-	assign operator_lsu_type[1] = operator_type[`OPERATOR_TYPE_STORE];
+	assign operator_lsu_type[0] = operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD];
+	assign operator_lsu_type[1] = operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE];
 
 	assign perip_addr = lsu_mem_addr;
 	assign perip_wen = lsu_mem_req && lsu_mem_we;
@@ -363,7 +364,7 @@ module ydrasil_core #(
 		.ex_branch_jump_i       (ex_branch_jump),
 		.ex_branch_target_i       (ex_branch_target),
         .sys_op_info_i      (id_op_sys_info),
-        .sys_op_i           (operator_type[`OPERATOR_TYPE_SYS]), // 只要有任意
+        .sys_op_i           (operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS]), // 只要有任意
 		.csr_clint_data_i  (csr_clint_data),
 		.csr_clint_mtvec   (csr_clint_mtvec),
 		.csr_clint_mepc    (csr_clint_mepc),
