@@ -15,6 +15,7 @@ USE_BENDER ?= 1
 BENDER ?= bender
 BENDER_INCLUDE_TB ?= 1
 BENDER_TB_TARGET ?= ip_tb
+MUL_IMPL ?= 4cycle
 
 BENDER_TARGET_ARGS := -t $(SIM_TOOL)
 ifeq ($(BENDER_INCLUDE_TB),1)
@@ -67,6 +68,14 @@ SIM_DEFINES += +dtcmfile=$(DTCM_FILE)
 endif
 
 DEFINES := RANDOM_SEED=$(RANDOM_SEED)
+
+ifeq ($(MUL_IMPL),4cycle)
+DEFINES += YDRASIL_MUL_IMPL_4CYCLE
+else ifeq ($(MUL_IMPL),radix8)
+DEFINES += YDRASIL_MUL_IMPL_RADIX8
+else
+$(error Unsupported MUL_IMPL '$(MUL_IMPL)'. Use MUL_IMPL=4cycle or MUL_IMPL=radix8)
+endif
 
 ##################################
 # Timestamp

@@ -35,11 +35,25 @@ package ydrasil_pkg;
 
 	localparam int MUL_MODE_RADIX8 = 0;
 	localparam int MUL_MODE_4CYCLE = 1;
+`ifdef YDRASIL_MUL_IMPL_RADIX8
+	localparam int MUL_MODE = MUL_MODE_RADIX8;
+`elsif YDRASIL_MUL_IMPL_4CYCLE
 	localparam int MUL_MODE = MUL_MODE_4CYCLE;
+`else
+	localparam int MUL_MODE = MUL_MODE_4CYCLE;
+`endif
 
 	localparam int DIV_MODE_NEW = 0;
 	localparam int DIV_MODE_LEGACY = 1;
 	localparam int DIV_MODE = DIV_MODE_NEW;
+
+	localparam int LSU_MODE_NEW = 0;
+	localparam int LSU_MODE_LEGACY = 1;
+	localparam int LSU_MODE = LSU_MODE_NEW;
+
+	localparam int MEMS_MODE_NEW = 0;
+	localparam int MEMS_MODE_LEGACY = 1;
+	localparam int MEMS_MODE = MEMS_MODE_NEW;
 
 	// Bus and instruction widths
 	localparam int BUS_DATA_WIDTH = 32;
