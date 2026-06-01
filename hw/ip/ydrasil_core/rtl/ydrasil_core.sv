@@ -67,6 +67,7 @@ import ydrasil_pkg::*;
 	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] alu_result;
 	wire                        alu_rf_wen_rd;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] alu_rf_waddr_rd;
+	wire                        ex_mul_stall;
 
 	// LSU request path
 	wire [1:0]                  operator_lsu_type;
@@ -270,7 +271,8 @@ import ydrasil_pkg::*;
         .ex_lsu_result_o     (ex_lsu_result),
 		.alu_result_o       (alu_result),
 		.alu_rf_wen_rd_o    (alu_rf_wen_rd),
-		.alu_rf_waddr_rd_o  (alu_rf_waddr_rd)
+		.alu_rf_waddr_rd_o  (alu_rf_waddr_rd),
+		.ex_mul_stall_o     (ex_mul_stall)
 	);
 
 	ydrasil_mems u_ydrasil_mems (
@@ -328,6 +330,7 @@ import ydrasil_pkg::*;
 		.id_ctrl_rs1_addr_i     (id_ctrl_rs1_addr),
 		.id_ctrl_rs2_addr_i     (id_ctrl_rs2_addr),
         .clint_stall_i        (clint_stall),
+		.ex_mul_stall_i     (ex_mul_stall),
 		.stall_if_o        (stall_if),
 		.stall_id_o        (stall_id),
         .stall_pc_o        (stall_pc),

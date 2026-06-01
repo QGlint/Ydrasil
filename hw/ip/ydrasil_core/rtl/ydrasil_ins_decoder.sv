@@ -40,6 +40,7 @@ import ydrasil_pkg::*;
 	wire [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0] lsu_op_info;
 	wire [ydrasil_pkg::OP_CSR_INFO_WIDTH-1:0] csr_op_info;
 	wire [ydrasil_pkg::OP_SYS_INFO_WIDTH-1:0] sys_op_info;
+	wire [ydrasil_pkg::OP_MUL_INFO_WIDTH-1:0] mul_op_info;
 
 	wire [6:0] opcode 		;
 	wire [4:0]	rf_waddr_rd ;
@@ -58,11 +59,13 @@ import ydrasil_pkg::*;
 
     wire funct7_is_0000000 ;
 	wire funct7_is_0100000 ;
+	wire funct7_is_0000001 ;
     wire funct3_is_000 	;
 	wire funct3_is_001 	;
 
 	assign funct7_is_0000000 = (funct7 == 7'b0000000);
 	assign funct7_is_0100000 = (funct7 == 7'b0100000);
+	assign funct7_is_0000001 = (funct7 == 7'b0000001);
 	assign funct3_is_000 	= (funct3 == 3'b000);
 	assign funct3_is_001 	= (funct3 == 3'b001);
 
@@ -170,6 +173,10 @@ import ydrasil_pkg::*;
 	wire is_sra   ;
 	wire is_or    ;
 	wire is_and   ;
+	wire is_mul   ;
+	wire is_mulh  ;
+	wire is_mulhsu;
+	wire is_mulhu ;
 
 	assign is_shift = is_slli | is_srli | is_srai;
 	assign is_add   = is_op_r_m & (funct3 == ydrasil_pkg::RV32I_INS_ADD_SUB) 	& funct7_is_0000000;
@@ -182,6 +189,14 @@ import ydrasil_pkg::*;
 	assign is_sra   = is_op_r_m & (funct3 == ydrasil_pkg::RV32I_INS_SR) 			& funct7_is_0100000;
 	assign is_or    = is_op_r_m & (funct3 == ydrasil_pkg::RV32I_INS_OR) 			& funct7_is_0000000;
 	assign is_and   = is_op_r_m & (funct3 == ydrasil_pkg::RV32I_INS_AND) 		& funct7_is_0000000;
+	assign is_mul   = is_op_r_m & (funct3 == ydrasil_pkg::RV32I_INS_MUL) 		& funct7_is_0000001;
+	assign is_mulh  = is_op_r_m & (funct3 == ydrasil_pkg::RV32I_INS_MULH) 		& funct7_is_0000001;
+	assign is_mulhsu= is_op_r_m & (funct3 == ydrasil_pkg::RV32I_INS_MULHSU) 	& funct7_is_0000001;
+	assign is_mulhu = is_op_r_m & (funct3 == ydrasil_pkg::RV32I_INS_MULHU) 		& funct7_is_0000001;
+
+	wire is_r_alu_use = is_add | is_sub | is_sll | is_slt | is_sltu |
+	                    is_xor | is_srl | is_sra | is_or | is_and;
+	wire is_mul_use = is_mul | is_mulh | is_mulhsu | is_mulhu;
 
 	wire is_fence  ;
 	wire is_fence_i;
@@ -254,15 +269,24 @@ import ydrasil_pkg::*;
 	assign sys_op_info[ydrasil_pkg::OP_SYS_EBREAK] = is_ebreak;
 	assign sys_op_info[ydrasil_pkg::OP_SYS_MRET]   = is_mret;
 
+	assign mul_op_info[ydrasil_pkg::OP_MUL_MUL]    = is_mul;
+	assign mul_op_info[ydrasil_pkg::OP_MUL_MULH]   = is_mulh;
+	assign mul_op_info[ydrasil_pkg::OP_MUL_MULHSU] = is_mulhsu;
+	assign mul_op_info[ydrasil_pkg::OP_MUL_MULHU]  = is_mulhu;
+	assign mul_op_info[ydrasil_pkg::OP_MUL_DIV]    = 1'b0;
+	assign mul_op_info[ydrasil_pkg::OP_MUL_DIVU]   = 1'b0;
+	assign mul_op_info[ydrasil_pkg::OP_MUL_REM]    = 1'b0;
+	assign mul_op_info[ydrasil_pkg::OP_MUL_REMU]   = 1'b0;
+
 
 	wire rf_ren_rs1 =	(~is_lui) 	& (~is_auipc) 	& (~is_jal) &  
        					(~is_ecall) & (~is_ebreak) 	& (~is_fence) & 
        					(~is_nop) 	& (~is_fence_i);// U类型指令不需要rs1
-	wire rf_ren_rs2 = is_op_r_m | is_branch ; // R类型和分支指令需要rs2
+	wire rf_ren_rs2 = is_r_alu_use | is_mul_use | is_branch ; // R类型和分支指令需要rs2
 
-	wire rf_wen_rd = is_lui | is_auipc | is_jal | is_jalr | is_op_imm | is_op_r_m ; // 需要写回寄存器的指令类型 
+	wire rf_wen_rd = is_lui | is_auipc | is_jal | is_jalr | is_op_imm | is_r_alu_use | is_mul_use ; // 需要写回寄存器的指令类型
 
-	wire is_alu_use = is_op_imm | is_op_r_m | is_lui | is_auipc;
+	wire is_alu_use = is_op_imm | is_r_alu_use | is_lui | is_auipc;
 	wire is_bjp_use = is_branch | is_jal | is_jalr;
 
 
@@ -272,6 +296,7 @@ import ydrasil_pkg::*;
 	assign operator_type_o [ydrasil_pkg::OPERATOR_TYPE_STORE] = is_store;
 	assign operator_type_o [ydrasil_pkg::OPERATOR_TYPE_CSR] = is_csr;
 	assign operator_type_o [ydrasil_pkg::OPERATOR_TYPE_SYS] = is_sys;
+	assign operator_type_o [ydrasil_pkg::OPERATOR_TYPE_MUL] = is_mul_use;
 	// wire [`OPERATOR_WIDTH-1:0] alu_op_info_mark = ({`OPERATOR_WIDTH{is_alu_use }}& {{{`OPERATOR_WIDTH-`OP_ALU_INFO_WIDTH}{1'b0}},alu_op_info});
 	// wire [`OPERATOR_WIDTH-1:0] bjp_op_info_mark = ({`OPERATOR_WIDTH{is_bjp_use }}& {{{`OPERATOR_WIDTH-`OP_BJP_INFO_WIDTH}{1'b0}},bjp_op_info});
 	// assign lsu_op_info_mark =  operator_type_o [OPERATOR_TYPE_LOAD] ? {{`OPERATOR_WIDTH-`OP_LSU_INFO_WIDTH{1'b0}},lsu_op_info} : '0;
@@ -293,8 +318,9 @@ import ydrasil_pkg::*;
 
 	assign imm_i_o = imm_i_mask | imm_s_mask | imm_b_mask | imm_u_mask | imm_j_mask | imm_shamt_mask | imm_csr_mask;
 
-	assign operator_o = ({ydrasil_pkg::OPERATOR_WIDTH{is_alu_use }}& {{0{1'b0}},alu_op_info})|
-						({ydrasil_pkg::OPERATOR_WIDTH{is_bjp_use }}& {{5{1'b0}},bjp_op_info});
+	assign operator_o = ({ydrasil_pkg::OPERATOR_WIDTH{is_alu_use }}& {{(ydrasil_pkg::OPERATOR_WIDTH-ydrasil_pkg::OP_ALU_INFO_WIDTH){1'b0}},alu_op_info})|
+						({ydrasil_pkg::OPERATOR_WIDTH{is_bjp_use }}& {{(ydrasil_pkg::OPERATOR_WIDTH-ydrasil_pkg::OP_BJP_INFO_WIDTH){1'b0}},bjp_op_info}) |
+						({ydrasil_pkg::OPERATOR_WIDTH{is_mul_use }}& {{(ydrasil_pkg::OPERATOR_WIDTH-ydrasil_pkg::OP_MUL_INFO_WIDTH){1'b0}},mul_op_info});
 	assign operator_lsu_o = lsu_op_info;
 
 	wire operand_b_rs_sel 	;
@@ -304,7 +330,7 @@ import ydrasil_pkg::*;
 
 	assign operand_a_imm_sel = is_csrrwi | is_csrrsi | is_csrrci;
 
-	assign operand_b_rs_sel = is_branch |is_op_r_m;
+	assign operand_b_rs_sel = is_branch | is_r_alu_use | is_mul_use;
 	assign operand_a_pc_sel = is_auipc  |is_jal |is_jalr;
 	assign bt_a_rs_sel = is_jalr;
 

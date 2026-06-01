@@ -18,6 +18,7 @@ import ydrasil_pkg::*;
     input wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    id_ctrl_rs2_addr_i,
 
     input wire                          clint_stall_i,
+    input wire                          ex_mul_stall_i,
 
     output wire                         stall_if_o,
     output wire                         stall_id_o,
@@ -51,9 +52,9 @@ import ydrasil_pkg::*;
     assign lsu_stall_rs_rd_wb = ((id_ctrl_rs1_addr_i == lsu_ctrl_waddr_rd_wb_i) || (id_ctrl_rs2_addr_i == lsu_ctrl_waddr_rd_wb_i)) && lsu_ctrl_stall_wb_i;
 
     // assign stall_ex_o = clint_stall_i;
-    assign stall_id_o = 1'b0; 
-    assign stall_if_o = lsu_stall | clint_stall_i;
-    assign stall_pc_o = lsu_stall | clint_stall_i;
+    assign stall_id_o = ex_mul_stall_i;
+    assign stall_if_o = lsu_stall | clint_stall_i | ex_mul_stall_i;
+    assign stall_pc_o = lsu_stall | clint_stall_i | ex_mul_stall_i;
 
 
 endmodule

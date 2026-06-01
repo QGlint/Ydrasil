@@ -33,6 +33,10 @@ package ydrasil_pkg;
 	localparam string DTCM_INIT_FILE = "hw/dv/test_data/mem/dram_test.mem";
 `endif
 
+	localparam int MUL_MODE_RADIX8 = 0;
+	localparam int MUL_MODE_4CYCLE = 1;
+	localparam int MUL_MODE = MUL_MODE_4CYCLE;
+
 	localparam DIV_MODE =0;
 
 	// Bus and instruction widths
@@ -132,13 +136,14 @@ package ydrasil_pkg;
 	localparam logic [2:0] RV32I_INS_CSRRCI   = 3'b111;
 
 	// Decode constants
-	localparam int OPERATOR_TYPE_WIDTH = 6;
+	localparam int OPERATOR_TYPE_WIDTH = 7;
 	localparam int OPERATOR_TYPE_ALU   = 0;
 	localparam int OPERATOR_TYPE_BJP   = 1;
 	localparam int OPERATOR_TYPE_LOAD  = 2;
 	localparam int OPERATOR_TYPE_STORE = 3;
 	localparam int OPERATOR_TYPE_CSR   = 4;
 	localparam int OPERATOR_TYPE_SYS   = 5;
+	localparam int OPERATOR_TYPE_MUL   = 6;
 	localparam int OPERATOR_TYPE_LSU_BASE = 2;
 
 	localparam int OPERATOR_WIDTH = 12;
@@ -187,6 +192,16 @@ package ydrasil_pkg;
 	localparam int OP_SYS_EBREAK = 1;
 	localparam int OP_SYS_MRET   = 2;
 
+	localparam int OP_MUL_INFO_WIDTH = 8;
+	localparam int OP_MUL_MUL    = 0;
+	localparam int OP_MUL_MULH   = 1;
+	localparam int OP_MUL_MULHSU = 2;
+	localparam int OP_MUL_MULHU  = 3;
+	localparam int OP_MUL_DIV    = 4;
+	localparam int OP_MUL_DIVU   = 5;
+	localparam int OP_MUL_REM    = 6;
+	localparam int OP_MUL_REMU   = 7;
+
 	localparam int OPSEL_INFO_WIDTH = 3;
 	localparam int ASELRS   = 0;
 	localparam int BSELRS   = 1;
@@ -199,5 +214,3 @@ package ydrasil_pkg;
 
 
 endpackage
-
-
