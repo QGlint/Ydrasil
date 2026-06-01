@@ -177,6 +177,10 @@ import ydrasil_pkg::*;
 	wire is_mulh  ;
 	wire is_mulhsu;
 	wire is_mulhu ;
+	wire is_div   ;
+	wire is_divu  ;
+	wire is_rem   ;
+	wire is_remu  ;
 
 	assign is_shift = is_slli | is_srli | is_srai;
 	assign is_add   = is_op_r_m & (funct3 == ydrasil_pkg::RV32I_INS_ADD_SUB) 	& funct7_is_0000000;
@@ -193,10 +197,15 @@ import ydrasil_pkg::*;
 	assign is_mulh  = is_op_r_m & (funct3 == ydrasil_pkg::RV32I_INS_MULH) 		& funct7_is_0000001;
 	assign is_mulhsu= is_op_r_m & (funct3 == ydrasil_pkg::RV32I_INS_MULHSU) 	& funct7_is_0000001;
 	assign is_mulhu = is_op_r_m & (funct3 == ydrasil_pkg::RV32I_INS_MULHU) 		& funct7_is_0000001;
+	assign is_div   = is_op_r_m & (funct3 == ydrasil_pkg::RV32I_INS_DIV) 		& funct7_is_0000001;
+	assign is_divu  = is_op_r_m & (funct3 == ydrasil_pkg::RV32I_INS_DIVU) 		& funct7_is_0000001;
+	assign is_rem   = is_op_r_m & (funct3 == ydrasil_pkg::RV32I_INS_REM) 		& funct7_is_0000001;
+	assign is_remu  = is_op_r_m & (funct3 == ydrasil_pkg::RV32I_INS_REMU) 		& funct7_is_0000001;
 
 	wire is_r_alu_use = is_add | is_sub | is_sll | is_slt | is_sltu |
 	                    is_xor | is_srl | is_sra | is_or | is_and;
-	wire is_mul_use = is_mul | is_mulh | is_mulhsu | is_mulhu;
+	wire is_mul_use = is_mul | is_mulh | is_mulhsu | is_mulhu |
+	                  is_div | is_divu | is_rem | is_remu;
 
 	wire is_fence  ;
 	wire is_fence_i;
@@ -273,10 +282,10 @@ import ydrasil_pkg::*;
 	assign mul_op_info[ydrasil_pkg::OP_MUL_MULH]   = is_mulh;
 	assign mul_op_info[ydrasil_pkg::OP_MUL_MULHSU] = is_mulhsu;
 	assign mul_op_info[ydrasil_pkg::OP_MUL_MULHU]  = is_mulhu;
-	assign mul_op_info[ydrasil_pkg::OP_MUL_DIV]    = 1'b0;
-	assign mul_op_info[ydrasil_pkg::OP_MUL_DIVU]   = 1'b0;
-	assign mul_op_info[ydrasil_pkg::OP_MUL_REM]    = 1'b0;
-	assign mul_op_info[ydrasil_pkg::OP_MUL_REMU]   = 1'b0;
+	assign mul_op_info[ydrasil_pkg::OP_MUL_DIV]    = is_div;
+	assign mul_op_info[ydrasil_pkg::OP_MUL_DIVU]   = is_divu;
+	assign mul_op_info[ydrasil_pkg::OP_MUL_REM]    = is_rem;
+	assign mul_op_info[ydrasil_pkg::OP_MUL_REMU]   = is_remu;
 
 
 	wire rf_ren_rs1 =	(~is_lui) 	& (~is_auipc) 	& (~is_jal) &  

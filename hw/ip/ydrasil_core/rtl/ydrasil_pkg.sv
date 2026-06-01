@@ -37,7 +37,9 @@ package ydrasil_pkg;
 	localparam int MUL_MODE_4CYCLE = 1;
 	localparam int MUL_MODE = MUL_MODE_4CYCLE;
 
-	localparam DIV_MODE =0;
+	localparam int DIV_MODE_NEW = 0;
+	localparam int DIV_MODE_LEGACY = 1;
+	localparam int DIV_MODE = DIV_MODE_NEW;
 
 	// Bus and instruction widths
 	localparam int BUS_DATA_WIDTH = 32;
