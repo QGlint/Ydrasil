@@ -16,6 +16,9 @@ BENDER ?= bender
 BENDER_INCLUDE_TB ?= 1
 BENDER_TB_TARGET ?= ip_tb
 MUL_IMPL ?= 4cycle
+DIV_IMPL ?= new
+LSU_IMPL ?= new
+MEMS_IMPL ?= new
 
 BENDER_TARGET_ARGS := -t $(SIM_TOOL)
 ifeq ($(BENDER_INCLUDE_TB),1)
@@ -75,6 +78,30 @@ else ifeq ($(MUL_IMPL),radix8)
 DEFINES += YDRASIL_MUL_IMPL_RADIX8
 else
 $(error Unsupported MUL_IMPL '$(MUL_IMPL)'. Use MUL_IMPL=4cycle or MUL_IMPL=radix8)
+endif
+
+ifeq ($(DIV_IMPL),new)
+DEFINES += YDRASIL_DIV_IMPL_NEW
+else ifeq ($(DIV_IMPL),legacy)
+DEFINES += YDRASIL_DIV_IMPL_LEGACY
+else
+$(error Unsupported DIV_IMPL '$(DIV_IMPL)'. Use DIV_IMPL=new or DIV_IMPL=legacy)
+endif
+
+ifeq ($(LSU_IMPL),new)
+DEFINES += YDRASIL_LSU_IMPL_NEW
+else ifeq ($(LSU_IMPL),legacy)
+DEFINES += YDRASIL_LSU_IMPL_LEGACY
+else
+$(error Unsupported LSU_IMPL '$(LSU_IMPL)'. Use LSU_IMPL=new or LSU_IMPL=legacy)
+endif
+
+ifeq ($(MEMS_IMPL),new)
+DEFINES += YDRASIL_MEMS_IMPL_NEW
+else ifeq ($(MEMS_IMPL),legacy)
+DEFINES += YDRASIL_MEMS_IMPL_LEGACY
+else
+$(error Unsupported MEMS_IMPL '$(MEMS_IMPL)'. Use MEMS_IMPL=new or MEMS_IMPL=legacy)
 endif
 
 ##################################

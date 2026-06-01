@@ -45,15 +45,33 @@ package ydrasil_pkg;
 
 	localparam int DIV_MODE_NEW = 0;
 	localparam int DIV_MODE_LEGACY = 1;
+`ifdef YDRASIL_DIV_IMPL_LEGACY
+	localparam int DIV_MODE = DIV_MODE_LEGACY;
+`elsif YDRASIL_DIV_IMPL_NEW
 	localparam int DIV_MODE = DIV_MODE_NEW;
+`else
+	localparam int DIV_MODE = DIV_MODE_NEW;
+`endif
 
 	localparam int LSU_MODE_NEW = 0;
 	localparam int LSU_MODE_LEGACY = 1;
+`ifdef YDRASIL_LSU_IMPL_LEGACY
+	localparam int LSU_MODE = LSU_MODE_LEGACY;
+`elsif YDRASIL_LSU_IMPL_NEW
 	localparam int LSU_MODE = LSU_MODE_NEW;
+`else
+	localparam int LSU_MODE = LSU_MODE_NEW;
+`endif
 
 	localparam int MEMS_MODE_NEW = 0;
 	localparam int MEMS_MODE_LEGACY = 1;
+`ifdef YDRASIL_MEMS_IMPL_LEGACY
+	localparam int MEMS_MODE = MEMS_MODE_LEGACY;
+`elsif YDRASIL_MEMS_IMPL_NEW
 	localparam int MEMS_MODE = MEMS_MODE_NEW;
+`else
+	localparam int MEMS_MODE = MEMS_MODE_NEW;
+`endif
 
 	// Bus and instruction widths
 	localparam int BUS_DATA_WIDTH = 32;

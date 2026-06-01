@@ -98,7 +98,8 @@ import ydrasil_pkg::*;
 
     //LSU -> CTRL
     wire                            lsu_ctrl_stall;   
-    wire                           	lsu_ctrl_stall_wb;
+	    wire                           	lsu_ctrl_stall_wb;
+	wire                            lsu_ctrl_busy;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    	lsu_ctrl_waddr_rd;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    	lsu_ctrl_waddr_rd_wb;
 
@@ -178,6 +179,7 @@ import ydrasil_pkg::*;
 		.lsu_mem_wmask_o   (lsu_mem_wmask),
 		.lsu_ctrl_stall_o       (lsu_ctrl_stall),
 		.lsu_ctrl_stall_wb_o    (lsu_ctrl_stall_wb),
+		.lsu_ctrl_busy_o        (lsu_ctrl_busy),
 		.lsu_ctrl_waddr_rd_o    (lsu_ctrl_waddr_rd),
 		.lsu_ctrl_waddr_rd_wb_o (lsu_ctrl_waddr_rd_wb),
 		.lsu_wb_result_o   (lsu_wb_result),
@@ -325,6 +327,7 @@ import ydrasil_pkg::*;
 		.ex_branch_target_i(ex_branch_target),
 		.lsu_ctrl_stall_i       (lsu_ctrl_stall),
 		.lsu_ctrl_stall_wb_i    (lsu_ctrl_stall_wb),
+		.lsu_ctrl_busy_i        (lsu_ctrl_busy),
 		.lsu_ctrl_waddr_rd_i    (lsu_ctrl_waddr_rd),
 		.lsu_ctrl_waddr_rd_wb_i (lsu_ctrl_waddr_rd_wb),
 		.id_ctrl_rs1_addr_i     (id_ctrl_rs1_addr),

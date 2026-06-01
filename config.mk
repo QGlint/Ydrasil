@@ -12,6 +12,9 @@ USE_BENDER ?= 1
 BENDER ?= bender
 VERILATOR_TRACE ?= 1
 MUL_IMPL ?= 4cycle
+DIV_IMPL ?= new
+LSU_IMPL ?= new
+MEMS_IMPL ?= new
 PYTHON ?= python3
 TRACE_TO_CSV ?= $(PROJECT_ROOT)/verif/sim/riscv_trace_csv.py
 

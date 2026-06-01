@@ -87,7 +87,7 @@ rv_sim_%:
 	mem_dir=$(RVTESTS_OUT_ROOT)/$$typ/mem; \
 	result_dir=$(RVTESTS_RESULT_DIR)/$$typ; \
 	mkdir -p $$result_dir; \
-	$(MAKE) LOG_OUTPUT=0 Compile_optimization=0 sim \
+	$(MAKE) VERILATOR_TRACE=0 LOG_OUTPUT=0 Compile_optimization=0 sim \
 		ITCM_FILE=$$mem_dir/$$base.itcm \
 		DTCM_FILE=$$mem_dir/$$base.dtcm \
 		> $$result_dir/$$base.log 2>&1; \
