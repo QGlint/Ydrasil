@@ -41,6 +41,7 @@ import ydrasil_pkg::*;
 	wire [ydrasil_pkg::OP_CSR_INFO_WIDTH-1:0] csr_op_info;
 	wire [ydrasil_pkg::OP_SYS_INFO_WIDTH-1:0] sys_op_info;
 	wire [ydrasil_pkg::OP_MUL_INFO_WIDTH-1:0] mul_op_info;
+	wire [ydrasil_pkg::OP_B_INFO_WIDTH-1:0] bitmanip_op_info;
 
 	wire [6:0] opcode 		;
 	wire [4:0]	rf_waddr_rd ;
@@ -57,17 +58,49 @@ import ydrasil_pkg::*;
 	assign funct7 		= instr_i[31:25];
 
 
-    wire funct7_is_0000000 ;
+	wire funct7_is_0000000 ;
 	wire funct7_is_0100000 ;
 	wire funct7_is_0000001 ;
+	wire funct7_is_0000100 ;
+	wire funct7_is_0000101 ;
+	wire funct7_is_0010000 ;
+	wire funct7_is_0010100 ;
+	wire funct7_is_0100100 ;
+	wire funct7_is_0110000 ;
+	wire funct7_is_0110100 ;
     wire funct3_is_000 	;
 	wire funct3_is_001 	;
+	wire funct3_is_101 	;
 
 	assign funct7_is_0000000 = (funct7 == 7'b0000000);
 	assign funct7_is_0100000 = (funct7 == 7'b0100000);
 	assign funct7_is_0000001 = (funct7 == 7'b0000001);
+	assign funct7_is_0000100 = (funct7 == 7'b0000100);
+	assign funct7_is_0000101 = (funct7 == 7'b0000101);
+	assign funct7_is_0010000 = (funct7 == 7'b0010000);
+	assign funct7_is_0010100 = (funct7 == 7'b0010100);
+	assign funct7_is_0100100 = (funct7 == 7'b0100100);
+	assign funct7_is_0110000 = (funct7 == 7'b0110000);
+	assign funct7_is_0110100 = (funct7 == 7'b0110100);
 	assign funct3_is_000 	= (funct3 == 3'b000);
 	assign funct3_is_001 	= (funct3 == 3'b001);
+	assign funct3_is_101 	= (funct3 == 3'b101);
+
+	wire rs2_is_00000;
+	wire rs2_is_00001;
+	wire rs2_is_00010;
+	wire rs2_is_00100;
+	wire rs2_is_00101;
+	wire rs2_is_00111;
+	wire rs2_is_11000;
+
+	assign rs2_is_00000 = (rf_raddr_rs2 == 5'b00000);
+	assign rs2_is_00001 = (rf_raddr_rs2 == 5'b00001);
+	assign rs2_is_00010 = (rf_raddr_rs2 == 5'b00010);
+	assign rs2_is_00100 = (rf_raddr_rs2 == 5'b00100);
+	assign rs2_is_00101 = (rf_raddr_rs2 == 5'b00101);
+	assign rs2_is_00111 = (rf_raddr_rs2 == 5'b00111);
+	assign rs2_is_11000 = (rf_raddr_rs2 == 5'b11000);
 
 	wire [31:0] imm_i 		;
 	wire [31:0] imm_s 		;
@@ -181,6 +214,38 @@ import ydrasil_pkg::*;
 	wire is_divu  ;
 	wire is_rem   ;
 	wire is_remu  ;
+	wire is_sh1add;
+	wire is_sh2add;
+	wire is_sh3add;
+	wire is_andn;
+	wire is_clz;
+	wire is_cpop;
+	wire is_ctz;
+	wire is_max;
+	wire is_maxu;
+	wire is_min;
+	wire is_minu;
+	wire is_orc_b;
+	wire is_orn;
+	wire is_rev8;
+	wire is_rol;
+	wire is_ror;
+	wire is_rori;
+	wire is_sext_b;
+	wire is_sext_h;
+	wire is_xnor;
+	wire is_zext_h;
+	wire is_clmul;
+	wire is_clmulh;
+	wire is_clmulr;
+	wire is_bclr;
+	wire is_bclri;
+	wire is_bext;
+	wire is_bexti;
+	wire is_binv;
+	wire is_binvi;
+	wire is_bset;
+	wire is_bseti;
 
 	assign is_shift = is_slli | is_srli | is_srai;
 	assign is_add   = is_op_r_m & (funct3 == ydrasil_pkg::RV32I_INS_ADD_SUB) 	& funct7_is_0000000;
@@ -201,11 +266,52 @@ import ydrasil_pkg::*;
 	assign is_divu  = is_op_r_m & (funct3 == ydrasil_pkg::RV32I_INS_DIVU) 		& funct7_is_0000001;
 	assign is_rem   = is_op_r_m & (funct3 == ydrasil_pkg::RV32I_INS_REM) 		& funct7_is_0000001;
 	assign is_remu  = is_op_r_m & (funct3 == ydrasil_pkg::RV32I_INS_REMU) 		& funct7_is_0000001;
+	assign is_sh1add = is_op_r_m & (funct3 == 3'b010) & funct7_is_0010000;
+	assign is_sh2add = is_op_r_m & (funct3 == 3'b100) & funct7_is_0010000;
+	assign is_sh3add = is_op_r_m & (funct3 == 3'b110) & funct7_is_0010000;
+	assign is_andn   = is_op_r_m & (funct3 == 3'b111) & funct7_is_0100000;
+	assign is_clz    = is_op_imm & funct3_is_001 & funct7_is_0110000 & rs2_is_00000;
+	assign is_cpop   = is_op_imm & funct3_is_001 & funct7_is_0110000 & rs2_is_00010;
+	assign is_ctz    = is_op_imm & funct3_is_001 & funct7_is_0110000 & rs2_is_00001;
+	assign is_max    = is_op_r_m & (funct3 == 3'b110) & funct7_is_0000101;
+	assign is_maxu   = is_op_r_m & (funct3 == 3'b111) & funct7_is_0000101;
+	assign is_min    = is_op_r_m & (funct3 == 3'b100) & funct7_is_0000101;
+	assign is_minu   = is_op_r_m & (funct3 == 3'b101) & funct7_is_0000101;
+	assign is_orc_b  = is_op_imm & funct3_is_101 & funct7_is_0010100 & rs2_is_00111;
+	assign is_orn    = is_op_r_m & (funct3 == 3'b110) & funct7_is_0100000;
+	assign is_rev8   = is_op_imm & funct3_is_101 & funct7_is_0110100 & rs2_is_11000;
+	assign is_rol    = is_op_r_m & funct3_is_001 & funct7_is_0110000;
+	assign is_ror    = is_op_r_m & funct3_is_101 & funct7_is_0110000;
+	assign is_rori   = is_op_imm & funct3_is_101 & funct7_is_0110000;
+	assign is_sext_b = is_op_imm & funct3_is_001 & funct7_is_0110000 & rs2_is_00100;
+	assign is_sext_h = is_op_imm & funct3_is_001 & funct7_is_0110000 & rs2_is_00101;
+	assign is_xnor   = is_op_r_m & (funct3 == 3'b100) & funct7_is_0100000;
+	assign is_zext_h = is_op_r_m & (funct3 == 3'b100) & funct7_is_0000100 & rs2_is_00000;
+	assign is_clmul  = is_op_r_m & funct3_is_001 & funct7_is_0000101;
+	assign is_clmulh = is_op_r_m & (funct3 == 3'b011) & funct7_is_0000101;
+	assign is_clmulr = is_op_r_m & (funct3 == 3'b010) & funct7_is_0000101;
+	assign is_bclr   = is_op_r_m & funct3_is_001 & funct7_is_0100100;
+	assign is_bclri  = is_op_imm & funct3_is_001 & funct7_is_0100100;
+	assign is_bext   = is_op_r_m & funct3_is_101 & funct7_is_0100100;
+	assign is_bexti  = is_op_imm & funct3_is_101 & funct7_is_0100100;
+	assign is_binv   = is_op_r_m & funct3_is_001 & funct7_is_0110100;
+	assign is_binvi  = is_op_imm & funct3_is_001 & funct7_is_0110100;
+	assign is_bset   = is_op_r_m & funct3_is_001 & funct7_is_0010100;
+	assign is_bseti  = is_op_imm & funct3_is_001 & funct7_is_0010100;
 
 	wire is_r_alu_use = is_add | is_sub | is_sll | is_slt | is_sltu |
 	                    is_xor | is_srl | is_sra | is_or | is_and;
 	wire is_mul_use = is_mul | is_mulh | is_mulhsu | is_mulhu |
 	                  is_div | is_divu | is_rem | is_remu;
+	wire is_bitmanip_rs2_use = is_sh1add | is_sh2add | is_sh3add |
+	                           is_andn | is_max | is_maxu | is_min | is_minu |
+	                           is_orn | is_rol | is_ror | is_xnor | is_clmul |
+	                           is_clmulh | is_clmulr | is_bclr | is_bext |
+	                           is_binv | is_bset;
+	wire is_bitmanip_use = is_bitmanip_rs2_use | is_clz | is_cpop | is_ctz |
+	                       is_orc_b | is_rev8 | is_rori | is_sext_b |
+	                       is_sext_h | is_zext_h | is_bclri | is_bexti |
+	                       is_binvi | is_bseti;
 
 	wire is_fence  ;
 	wire is_fence_i;
@@ -286,14 +392,46 @@ import ydrasil_pkg::*;
 	assign mul_op_info[ydrasil_pkg::OP_MUL_DIVU]   = is_divu;
 	assign mul_op_info[ydrasil_pkg::OP_MUL_REM]    = is_rem;
 	assign mul_op_info[ydrasil_pkg::OP_MUL_REMU]   = is_remu;
+	assign bitmanip_op_info[ydrasil_pkg::OP_B_SH1ADD] = is_sh1add;
+	assign bitmanip_op_info[ydrasil_pkg::OP_B_SH2ADD] = is_sh2add;
+	assign bitmanip_op_info[ydrasil_pkg::OP_B_SH3ADD] = is_sh3add;
+	assign bitmanip_op_info[ydrasil_pkg::OP_B_ANDN]   = is_andn;
+	assign bitmanip_op_info[ydrasil_pkg::OP_B_CLZ]    = is_clz;
+	assign bitmanip_op_info[ydrasil_pkg::OP_B_CPOP]   = is_cpop;
+	assign bitmanip_op_info[ydrasil_pkg::OP_B_CTZ]    = is_ctz;
+	assign bitmanip_op_info[ydrasil_pkg::OP_B_MAX]    = is_max;
+	assign bitmanip_op_info[ydrasil_pkg::OP_B_MAXU]   = is_maxu;
+	assign bitmanip_op_info[ydrasil_pkg::OP_B_MIN]    = is_min;
+	assign bitmanip_op_info[ydrasil_pkg::OP_B_MINU]   = is_minu;
+	assign bitmanip_op_info[ydrasil_pkg::OP_B_ORC_B]  = is_orc_b;
+	assign bitmanip_op_info[ydrasil_pkg::OP_B_ORN]    = is_orn;
+	assign bitmanip_op_info[ydrasil_pkg::OP_B_REV8]   = is_rev8;
+	assign bitmanip_op_info[ydrasil_pkg::OP_B_ROL]    = is_rol;
+	assign bitmanip_op_info[ydrasil_pkg::OP_B_ROR]    = is_ror;
+	assign bitmanip_op_info[ydrasil_pkg::OP_B_RORI]   = is_rori;
+	assign bitmanip_op_info[ydrasil_pkg::OP_B_SEXT_B] = is_sext_b;
+	assign bitmanip_op_info[ydrasil_pkg::OP_B_SEXT_H] = is_sext_h;
+	assign bitmanip_op_info[ydrasil_pkg::OP_B_XNOR]   = is_xnor;
+	assign bitmanip_op_info[ydrasil_pkg::OP_B_ZEXT_H] = is_zext_h;
+	assign bitmanip_op_info[ydrasil_pkg::OP_B_CLMUL]  = is_clmul;
+	assign bitmanip_op_info[ydrasil_pkg::OP_B_CLMULH] = is_clmulh;
+	assign bitmanip_op_info[ydrasil_pkg::OP_B_CLMULR] = is_clmulr;
+	assign bitmanip_op_info[ydrasil_pkg::OP_B_BCLR]   = is_bclr;
+	assign bitmanip_op_info[ydrasil_pkg::OP_B_BCLRI]  = is_bclri;
+	assign bitmanip_op_info[ydrasil_pkg::OP_B_BEXT]   = is_bext;
+	assign bitmanip_op_info[ydrasil_pkg::OP_B_BEXTI]  = is_bexti;
+	assign bitmanip_op_info[ydrasil_pkg::OP_B_BINV]   = is_binv;
+	assign bitmanip_op_info[ydrasil_pkg::OP_B_BINVI]  = is_binvi;
+	assign bitmanip_op_info[ydrasil_pkg::OP_B_BSET]   = is_bset;
+	assign bitmanip_op_info[ydrasil_pkg::OP_B_BSETI]  = is_bseti;
 
 
 	wire rf_ren_rs1 =	(~is_lui) 	& (~is_auipc) 	& (~is_jal) &  
        					(~is_ecall) & (~is_ebreak) 	& (~is_fence) & 
        					(~is_nop) 	& (~is_fence_i);// U类型指令不需要rs1
-	wire rf_ren_rs2 = is_r_alu_use | is_mul_use | is_branch ; // R类型和分支指令需要rs2
+	wire rf_ren_rs2 = is_r_alu_use | is_mul_use | is_branch | is_bitmanip_rs2_use; // R类型和分支指令需要rs2
 
-	wire rf_wen_rd = is_lui | is_auipc | is_jal | is_jalr | is_op_imm | is_r_alu_use | is_mul_use ; // 需要写回寄存器的指令类型
+	wire rf_wen_rd = is_lui | is_auipc | is_jal | is_jalr | is_op_imm | is_r_alu_use | is_mul_use | is_bitmanip_use ; // 需要写回寄存器的指令类型
 
 	wire is_alu_use = is_op_imm | is_r_alu_use | is_lui | is_auipc;
 	wire is_bjp_use = is_branch | is_jal | is_jalr;
@@ -306,6 +444,7 @@ import ydrasil_pkg::*;
 	assign operator_type_o [ydrasil_pkg::OPERATOR_TYPE_CSR] = is_csr;
 	assign operator_type_o [ydrasil_pkg::OPERATOR_TYPE_SYS] = is_sys;
 	assign operator_type_o [ydrasil_pkg::OPERATOR_TYPE_MUL] = is_mul_use;
+	assign operator_type_o [ydrasil_pkg::OPERATOR_TYPE_BITMANIP] = is_bitmanip_use;
 	// wire [`OPERATOR_WIDTH-1:0] alu_op_info_mark = ({`OPERATOR_WIDTH{is_alu_use }}& {{{`OPERATOR_WIDTH-`OP_ALU_INFO_WIDTH}{1'b0}},alu_op_info});
 	// wire [`OPERATOR_WIDTH-1:0] bjp_op_info_mark = ({`OPERATOR_WIDTH{is_bjp_use }}& {{{`OPERATOR_WIDTH-`OP_BJP_INFO_WIDTH}{1'b0}},bjp_op_info});
 	// assign lsu_op_info_mark =  operator_type_o [OPERATOR_TYPE_LOAD] ? {{`OPERATOR_WIDTH-`OP_LSU_INFO_WIDTH{1'b0}},lsu_op_info} : '0;
@@ -329,7 +468,8 @@ import ydrasil_pkg::*;
 
 	assign operator_o = ({ydrasil_pkg::OPERATOR_WIDTH{is_alu_use }}& {{(ydrasil_pkg::OPERATOR_WIDTH-ydrasil_pkg::OP_ALU_INFO_WIDTH){1'b0}},alu_op_info})|
 						({ydrasil_pkg::OPERATOR_WIDTH{is_bjp_use }}& {{(ydrasil_pkg::OPERATOR_WIDTH-ydrasil_pkg::OP_BJP_INFO_WIDTH){1'b0}},bjp_op_info}) |
-						({ydrasil_pkg::OPERATOR_WIDTH{is_mul_use }}& {{(ydrasil_pkg::OPERATOR_WIDTH-ydrasil_pkg::OP_MUL_INFO_WIDTH){1'b0}},mul_op_info});
+						({ydrasil_pkg::OPERATOR_WIDTH{is_mul_use }}& {{(ydrasil_pkg::OPERATOR_WIDTH-ydrasil_pkg::OP_MUL_INFO_WIDTH){1'b0}},mul_op_info}) |
+						({ydrasil_pkg::OPERATOR_WIDTH{is_bitmanip_use }}& bitmanip_op_info);
 	assign operator_lsu_o = lsu_op_info;
 
 	wire operand_b_rs_sel 	;
@@ -339,7 +479,7 @@ import ydrasil_pkg::*;
 
 	assign operand_a_imm_sel = is_csrrwi | is_csrrsi | is_csrrci;
 
-	assign operand_b_rs_sel = is_branch | is_r_alu_use | is_mul_use;
+	assign operand_b_rs_sel = is_branch | is_r_alu_use | is_mul_use | is_bitmanip_rs2_use;
 	assign operand_a_pc_sel = is_auipc  |is_jal |is_jalr;
 	assign bt_a_rs_sel = is_jalr;
 

@@ -56,6 +56,7 @@ import ydrasil_pkg::*;
 	wire                            alu_rf_wen_rd;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     alu_rf_waddr_rd;
 	wire                            op_m_unit;
+	wire                            op_bitmanip;
 	wire                            op_mul;
 	wire                            mul_start;
 	wire                            mul_busy;
@@ -70,6 +71,8 @@ import ydrasil_pkg::*;
 	wire                            m_done;
 	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]     m_wb_result;
 	wire                            m_rf_wen_rd;
+	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]     bitmanip_result;
+	wire                            bitmanip_rf_wen_rd;
 	wire                            normal_alu_rf_wen_rd;
 	wire                            ex_rf_wen_rd;
 
@@ -117,6 +120,7 @@ import ydrasil_pkg::*;
 
 	assign ex_branch_jump_o = ex_branch_jump | interrupt_i;
 	assign op_m_unit = operator_type_i[ydrasil_pkg::OPERATOR_TYPE_MUL];
+	assign op_bitmanip = operator_type_i[ydrasil_pkg::OPERATOR_TYPE_BITMANIP];
 	assign op_mul = op_m_unit &
 					(operator_i[ydrasil_pkg::OP_MUL_MUL] | operator_i[ydrasil_pkg::OP_MUL_MULH] |
 					 operator_i[ydrasil_pkg::OP_MUL_MULHSU] | operator_i[ydrasil_pkg::OP_MUL_MULHU]);
@@ -130,7 +134,8 @@ import ydrasil_pkg::*;
 	assign mul_wb_result = operator_i[ydrasil_pkg::OP_MUL_MUL] ? mul_result[31:0] : mul_result[63:32];
 	assign m_wb_result = op_div ? div_result : mul_wb_result;
 	assign m_rf_wen_rd = m_done & id_alu_rf_wen_rd_i & !interrupt_i;
-	assign normal_alu_rf_wen_rd = alu_rf_wen_rd & !op_m_unit;
+	assign bitmanip_rf_wen_rd = op_bitmanip & id_alu_rf_wen_rd_i & !interrupt_i;
+	assign normal_alu_rf_wen_rd = alu_rf_wen_rd & !op_m_unit & !op_bitmanip;
 
 	ydrasil_alu #(
 		.DATAWIDTH(DATA_WIDTH)
@@ -176,6 +181,14 @@ import ydrasil_pkg::*;
 		.result_o        (mul_result)
 	);
 
+	ydrasil_bitmanip u_ydrasil_bitmanip (
+		.operand_a_i     (operand_a),
+		.operand_b_i     (operand_b),
+		.operator_i      (operator_i),
+		.operator_type_i (operator_type_i),
+		.result_o        (bitmanip_result)
+	);
+
 	wire [31:0] alu_csr_result;
 	wire csr_wen;
 
@@ -206,7 +219,7 @@ import ydrasil_pkg::*;
                           	({ydrasil_pkg::REGS_DATA_WIDTH{csr_csrrs}} & (operand_a | csr_ex_rdata_i)) |
                           	({ydrasil_pkg::REGS_DATA_WIDTH{csr_csrrc}} & (csr_ex_rdata_i & (~operand_a)));
 	assign csr_wen = op_csr;
-	assign ex_rf_wen_rd = m_rf_wen_rd | normal_alu_rf_wen_rd | csr_wen;
+	assign ex_rf_wen_rd = m_rf_wen_rd | bitmanip_rf_wen_rd | normal_alu_rf_wen_rd | csr_wen;
 	
 	always_ff @(posedge clk or negedge rst_n) begin
 		if(!rst_n) begin
@@ -239,6 +252,7 @@ import ydrasil_pkg::*;
 	assign ex_csr_wen_o = ex_csr_wen_o_ff;
 	assign ex_csr_waddr_o = ex_csr_waddr_o_ff;
 	assign alu_csr_result = ({32{m_rf_wen_rd}} & m_wb_result) |
+							({32{bitmanip_rf_wen_rd}} & bitmanip_result) |
 							({32{csr_wen}} & csr_reg_wdata )|
 							({32{normal_alu_rf_wen_rd} }& alu_result) ;
 

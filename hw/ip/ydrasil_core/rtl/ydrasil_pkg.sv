@@ -170,7 +170,7 @@ package ydrasil_pkg;
 	localparam logic [2:0] RV32I_INS_CSRRCI   = 3'b111;
 
 	// Decode constants
-	localparam int OPERATOR_TYPE_WIDTH = 7;
+	localparam int OPERATOR_TYPE_WIDTH = 8;
 	localparam int OPERATOR_TYPE_ALU   = 0;
 	localparam int OPERATOR_TYPE_BJP   = 1;
 	localparam int OPERATOR_TYPE_LOAD  = 2;
@@ -178,9 +178,10 @@ package ydrasil_pkg;
 	localparam int OPERATOR_TYPE_CSR   = 4;
 	localparam int OPERATOR_TYPE_SYS   = 5;
 	localparam int OPERATOR_TYPE_MUL   = 6;
+	localparam int OPERATOR_TYPE_BITMANIP = 7;
 	localparam int OPERATOR_TYPE_LSU_BASE = 2;
 
-	localparam int OPERATOR_WIDTH = 12;
+	localparam int OPERATOR_WIDTH = 32;
 
 	localparam int OP_ALU_INFO_WIDTH = 12;
 	localparam int OP_ALU_LUI   = 0;
@@ -235,6 +236,40 @@ package ydrasil_pkg;
 	localparam int OP_MUL_DIVU   = 5;
 	localparam int OP_MUL_REM    = 6;
 	localparam int OP_MUL_REMU   = 7;
+
+	localparam int OP_B_INFO_WIDTH = 32;
+	localparam int OP_B_SH1ADD = 0;
+	localparam int OP_B_SH2ADD = 1;
+	localparam int OP_B_SH3ADD = 2;
+	localparam int OP_B_ANDN   = 3;
+	localparam int OP_B_CLZ    = 4;
+	localparam int OP_B_CPOP   = 5;
+	localparam int OP_B_CTZ    = 6;
+	localparam int OP_B_MAX    = 7;
+	localparam int OP_B_MAXU   = 8;
+	localparam int OP_B_MIN    = 9;
+	localparam int OP_B_MINU   = 10;
+	localparam int OP_B_ORC_B  = 11;
+	localparam int OP_B_ORN    = 12;
+	localparam int OP_B_REV8   = 13;
+	localparam int OP_B_ROL    = 14;
+	localparam int OP_B_ROR    = 15;
+	localparam int OP_B_RORI   = 16;
+	localparam int OP_B_SEXT_B = 17;
+	localparam int OP_B_SEXT_H = 18;
+	localparam int OP_B_XNOR   = 19;
+	localparam int OP_B_ZEXT_H = 20;
+	localparam int OP_B_CLMUL  = 21;
+	localparam int OP_B_CLMULH = 22;
+	localparam int OP_B_CLMULR = 23;
+	localparam int OP_B_BCLR   = 24;
+	localparam int OP_B_BCLRI  = 25;
+	localparam int OP_B_BEXT   = 26;
+	localparam int OP_B_BEXTI  = 27;
+	localparam int OP_B_BINV   = 28;
+	localparam int OP_B_BINVI  = 29;
+	localparam int OP_B_BSET   = 30;
+	localparam int OP_B_BSETI  = 31;
 
 	localparam int OPSEL_INFO_WIDTH = 3;
 	localparam int ASELRS   = 0;

@@ -58,6 +58,8 @@ rv_comp_%:
 	type=$$group; \
 	echo ">>> Building $$group/$$base"; \
 	$(MAKE) -C sw rv_comp_genmem \
+		ARCH=$(ARCH) \
+		ABI=$(ABI) \
 		NAME=$$name \
 		SRC=$(RVTESTSISA_DIR)/$$group/$$base.S \
 		OUT_DIR=$(RVTESTS_OUT_ROOT)/$$type \
@@ -68,6 +70,8 @@ rv_bench_%:
 	@name=$*; \
 	echo ">>> Building benchmark $$name"; \
 	$(MAKE) -C sw rv_comp_genmem \
+		ARCH=$(ARCH) \
+		ABI=$(ABI) \
 		NAME=$$name \
 		SRC="$(wildcard $(RVBENCH_DIR)/$$name/*.c) $(wildcard $(RVBENCH_DIR)/$$name/*.S) $(wildcard $(RVBENCH_COMMON)/*.c) $(wildcard $(RVBENCH_COMMON)/*.S)" \
 		OUT_DIR=$(RVTESTS_OUT_ROOT)/benchmark \

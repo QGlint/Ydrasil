@@ -76,7 +76,7 @@ CC      := $(RISCV_PREFIX)-gcc
 OBJCOPY := $(RISCV_PREFIX)-objcopy
 OBJDUMP := $(RISCV_PREFIX)-objdump
 
-ARCH := rv32im_zicsr
+ARCH := rv32im_zicsr_zifencei_zba_zbb_zbc_zbs
 ABI  := ilp32
 PRIV := m
 
@@ -88,7 +88,7 @@ RISCV_CFLAGS := \
     -static \
     -mcmodel=medany
 
-RVTESTS_TYPE := rv32ui rv32um
+RVTESTS_TYPE := rv32ui rv32um rv32uzba rv32uzbb rv32uzbc rv32uzbs
 
 RVTESTS_OUT_ROOT := $(BUILD_DIR)/riscv_tests
 
