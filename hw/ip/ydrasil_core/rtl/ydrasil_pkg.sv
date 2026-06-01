@@ -33,6 +33,8 @@ package ydrasil_pkg;
 	localparam string DTCM_INIT_FILE = "hw/dv/test_data/mem/dram_test.mem";
 `endif
 
+	localparam DIV_MODE =0;
+
 	// Bus and instruction widths
 	localparam int BUS_DATA_WIDTH = 32;
 	localparam int BUS_ADDR_WIDTH = 32;

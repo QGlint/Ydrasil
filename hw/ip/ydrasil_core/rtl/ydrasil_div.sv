@@ -1,8 +1,9 @@
 
 module ydrasil_div
-import ydrasil_pkg::REGS_DATA_WIDTH;
+import ydrasil_pkg::*;
  #(
-localparam int DATA_WIDTH = ydrasil_pkg::REGS_DATA_WIDTH
+localparam int DATA_WIDTH = ydrasil_pkg::REGS_DATA_WIDTH,
+localparam MODE = ydrasil_pkg::DIV_MODE
 )
 (
    input wire                  clk,
@@ -15,6 +16,12 @@ localparam int DATA_WIDTH = ydrasil_pkg::REGS_DATA_WIDTH
    output wire [DATA_WIDTH-1:0]   remainder_o,
    output wire                  div_ready_o
 );
+
+   if(!MODE) begin 
+
+   
+   end
+   else begin 
 
     localparam int N_STATE = 4;
 
@@ -117,6 +124,8 @@ localparam int DATA_WIDTH = ydrasil_pkg::REGS_DATA_WIDTH
             default: state <= STATE_IDLE;
          endcase
       end
+   end
+
    end
 
 endmodule
