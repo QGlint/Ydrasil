@@ -7,7 +7,7 @@ RESULT_DIR := $(LOG_DIR)/test_results
 
 export PROJECT_ROOT BUILD_DIR WAVE_DIR LOG_DIR SIM_TOOL IP VERILATOR_MOD UVM USE_BENDER BENDER 
 
-.PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests init get_spike download_and_extract_spike check_deps spike spike_wave_to_csv 
+.PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests init get_spike download_and_extract_spike check_deps spike spike_wave_to_csv  rv_test_comp_genmem
 
 .SECONDEXPANSION:
 
@@ -17,10 +17,10 @@ all: comp_and_sim_cpu
 
 full : comp_and_sim_cpu wave
 
-run_all_tests: init check_deps rv_test_comp_genmem test_all
+run_all_tests: init check_deps test_all
 
 
-run_all_tests:
+init:
 	git submodule update --init --recursive
 
 comp:
@@ -53,7 +53,7 @@ test_all:
 	@echo "   测试结束！"
 	@echo "==========================================================="
 
-
+include verif/tests/tests.mk
 
 recomp:
 	@mkdir -p $(BUILD_DIR) $(WAVE_DIR) $(LOG_DIR)
@@ -86,11 +86,12 @@ check_deps:
 		$(PKG_MANAGER) $$missing; \
 	fi
 
-include verif/tests/tests.mk
+
 
 spike: get_spike
-	$(SPIKE) $(SPIKE_FLAGS) $(spike_stepout) $(spike_extension) $(SPIKE_ELF) \
-	> $(SPIKE_LOG).log 2>&1
+	@mkdir -p  $(SPIKE_OUT_DIR)
+	@$(SPIKE) $(SPIKE_FLAGS) $(spike_stepout) $(spike_extension) $(SPIKE_ELF) \
+	> $(SPIKE_OUT_DIR)/$(SPIKE_LOG).log 2>&1
 
 spike_wave_to_csv:
 	$(PYTHON) $(TRACE_TO_CSV) --log $(SPIKE_LOG).log --csv $(SPIKE_LOG).csv --source spike

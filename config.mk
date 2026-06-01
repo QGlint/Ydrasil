@@ -21,7 +21,8 @@ CURL ?=  curl
 
 SPIKE ?= ./tools/spike/bin/spike
 SPIKE_ELF ?= $(RVTESTS_OUT_ROOT)/rv32ui/elf/rv32ui_lh.elf
-SPIKE_LOG ?= $(BUILD_DIR)/sim/spike/rv32ui_lh
+SPIKE_OUT_DIR ?= $(BUILD_DIR)/sim/spike/
+SPIKE_LOG ?= rv32ui_lh
 SPIKE_MAXSTEPS ?= 1000000
 
 ifneq ($(steps),)
