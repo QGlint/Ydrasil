@@ -88,7 +88,7 @@ check_deps:
 
 include verif/tests/tests.mk
 
-spike:
+spike: get_spike
 	$(SPIKE) $(SPIKE_FLAGS) $(spike_stepout) $(spike_extension) $(SPIKE_ELF) \
 	> $(SPIKE_LOG).log 2>&1
 

@@ -189,6 +189,13 @@ package ydrasil_pkg;
 	localparam int ASELRS   = 0;
 	localparam int BSELRS   = 1;
 	localparam int BTASELRS = 2;
+
+	function automatic integer unsigned idx_width (input integer unsigned num_idx);
+        return (num_idx > 32'd1) ? unsigned'($clog2(num_idx)) : 32'd1;
+    endfunction
+
+
+
 endpackage
 
 
