@@ -1,13 +1,13 @@
 include config.mk
 
-TOOLS := verilator gtkwave spike riscv64-elf-gcc riscv64-elf-newlib riscv64-elf-gdb  qemu-system-riscv
+TOOLS ?= verilator gtkwave spike riscv64-elf-gcc riscv64-elf-newlib riscv64-elf-gdb  qemu-system-riscv
 
 # --- 自动化测试相关定义 ---
 RESULT_DIR := $(LOG_DIR)/test_results
 
 export PROJECT_ROOT BUILD_DIR WAVE_DIR LOG_DIR SIM_TOOL IP VERILATOR_MOD UVM USE_BENDER BENDER 
 
-.PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests init
+.PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests init get_spike download_and_extract_spike check_deps spike spike_wave_to_csv 
 
 .SECONDEXPANSION:
 
@@ -94,3 +94,17 @@ spike:
 
 spike_wave_to_csv:
 	$(PYTHON) $(TRACE_TO_CSV) --log $(SPIKE_LOG).log --csv $(SPIKE_LOG).csv --source spike
+
+get_spike:
+	@if tools/spike/bin/spike -v>/dev/null 2>&1; then \
+		echo "Spike is already installed."; \
+	else \
+		$(MAKE) download_and_extract_spike; \
+	fi
+
+download_and_extract_spike:
+	$(MAKE) TOOLS="$(CURL) tar" check_deps
+	@echo "Downloading Spike from: $(SPIKE_TAR_URL)"
+	@mkdir -p tools/spike
+	$(CURL) -L $(SPIKE_TAR_URL) -o tools/spike.tar.xz 
+	@tar -xJf tools/spike.tar.xz  -C tools/spike --strip-components=1

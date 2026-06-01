@@ -14,6 +14,10 @@ VERILATOR_TRACE ?= 1
 PYTHON ?= python3
 TRACE_TO_CSV ?= $(PROJECT_ROOT)/verif/sim/riscv_trace_csv.py
 
+SPIKE_TAR_URL ?= https://bitbucket.org/qglint/tool_tar/downloads/spike-1.1.1-log.tar.xz
+
+CURL ?=  curl 
+
 
 SPIKE ?= ./tools/spike/bin/spike
 SPIKE_ELF ?= $(RVTESTS_OUT_ROOT)/rv32ui/elf/rv32ui_lh.elf

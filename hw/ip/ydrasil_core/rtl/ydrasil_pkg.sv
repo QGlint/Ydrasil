@@ -1,5 +1,3 @@
-`ifndef ydrasil_pkg_SVH
-`define ydrasil_pkg_SVH
 
 package ydrasil_pkg;
 	// Memory and address configuration
@@ -193,4 +191,4 @@ package ydrasil_pkg;
 	localparam int BTASELRS = 2;
 endpackage
 
-`endif
+
