@@ -1,7 +1,7 @@
 module ydrasil_lzc
 import ydrasil_pkg::*;
 #(
-  parameter int unsigned WIDTH = 2,
+  parameter int unsigned WIDTH = 32,
   parameter bit          MODE  = 1'b0,// Mode selection: 0 -> trailing zero, 1 -> leading zero
   parameter int unsigned CNT_WIDTH = ydrasil_pkg::idx_width(WIDTH)
 ) (
@@ -41,67 +41,39 @@ import ydrasil_pkg::*;
       assign lzc_index[j] = (NumLevels)'(unsigned'(j));
     end
 
-    // for (genvar level = 0; unsigned'(level) < NumLevels; level++) begin : g_levels
-    //   if (unsigned'(level) == NumLevels - 1) begin : g_last_level
-    //     for (genvar k = 0; k < 2 ** level; k++) begin : g_level
-    //       // if two successive indices are still in the vector...
-    //       if (unsigned'(k) * 2 < WIDTH - 1) begin : g_reduce
-    //         assign sel_nodes[2 ** level - 1 + k] = in_to_process[k * 2] | in_to_process[k * 2 + 1];
-    //         assign index_nodes[2 ** level - 1 + k] = (in_to_process[k * 2] == 1'b1)
-    //           ? lzc_index[k * 2] :
-    //             lzc_index[k * 2 + 1];
-    //       end
-    //       // if only the first index is still in the vector...
-    //       if (unsigned'(k) * 2 == WIDTH - 1) begin : g_base
-    //         assign sel_nodes[2 ** level - 1 + k] = in_to_process[k * 2];
-    //         assign index_nodes[2 ** level - 1 + k] = lzc_index[k * 2];
-    //       end
-    //       // if index is out of range
-    //       if (unsigned'(k) * 2 > WIDTH - 1) begin : g_out_of_range
-    //         assign sel_nodes[2 ** level - 1 + k] = 1'b0;
-    //         assign index_nodes[2 ** level - 1 + k] = '0;
-    //       end
-    //     end
-    //   end else begin : g_not_last_level
-    //     for (genvar l = 0; l < 2 ** level; l++) begin : g_level
-    //       assign sel_nodes[2 ** level - 1 + l] =
-    //           sel_nodes[2 ** (level + 1) - 1 + l * 2] | sel_nodes[2 ** (level + 1) - 1 + l * 2 + 1];
-    //       assign index_nodes[2 ** level - 1 + l] = (sel_nodes[2 ** (level + 1) - 1 + l * 2] == 1'b1)
-    //         ? index_nodes[2 ** (level + 1) - 1 + l * 2] :
-    //           index_nodes[2 ** (level + 1) - 1 + l * 2 + 1];
-    //     end
-    //   end
-    // end
+        // 3. 树形归约计算每层
 
-    // 2. 第一层：每个叶节点对应输入位
-    genvar i;
-    generate
-        for (i=0; i<WIDTH; i=i+1) begin : gen_leaf
-            assign sel_nodes[i + 2**NumLevels - 1] = in_to_process[i];
-            assign index_nodes[i + 2**NumLevels - 1] = i[CNT_WIDTH-1:0];
-        end
-        // 超出宽度的节点置 0
-        for (i=WIDTH; i<2**NumLevels; i=i+1) begin : gen_pad
-            assign sel_nodes[i + 2**NumLevels - 1] = 1'b0;
-            assign index_nodes[i + 2**NumLevels - 1] = '0;
-        end
-    endgenerate
-
-    // 3. 树形归约计算每层
-    generate
-        for (genvar level = NumLevels-1; level>=0; level=level-1) begin : gen_levels
-            for (genvar k = 0; k < 2**level; k=k+1) begin : gen_nodes
-                assign sel_nodes[2**level - 1 + k] =
-                    sel_nodes[2**(level+1) - 1 + k*2] |
-                    sel_nodes[2**(level+1) - 1 + k*2 + 1];
-
-                assign index_nodes[2**level - 1 + k] =
-                    sel_nodes[2**(level+1) - 1 + k*2] ?
-                    index_nodes[2**(level+1) - 1 + k*2] :
-                    index_nodes[2**(level+1) - 1 + k*2 + 1];
+    for (genvar tree_level = 0; unsigned'(tree_level) < NumLevels; tree_level++) begin : g_tree_levels
+        if(unsigned'(tree_level) == NumLevels - 1) begin : g_last_tree_level
+          for (genvar k = 0; k < 2 ** tree_level; k++) begin : g_tree_nodes
+            // if two successive indices are still in the vector...
+            if (unsigned'(k) * 2 < WIDTH - 1) begin : g_reduce
+              assign sel_nodes[2 ** tree_level - 1 + k] = in_to_process[k * 2] | in_to_process[k * 2 + 1];
+              assign index_nodes[2 ** tree_level - 1 + k] = (in_to_process[k * 2] == 1'b1)
+                ? lzc_index[k * 2] :
+                  lzc_index[k * 2 + 1];
+            end
+            // if only the first index is still in the vector...
+            if (unsigned'(k) * 2 == WIDTH - 1) begin : g_base
+              assign sel_nodes[2 ** tree_level - 1 + k] = in_to_process[k * 2];
+              assign index_nodes[2 ** tree_level - 1 + k] = lzc_index[k * 2];
+            end
+            // if index is out of range
+            if (unsigned'(k) * 2 > WIDTH - 1) begin : g_out_of_range
+              assign sel_nodes[2 ** tree_level - 1 + k] = 1'b0;
+              assign index_nodes[2 ** tree_level - 1 + k] = '0;
+            end
+          end
+        end else begin : g_other_tree_level
+            for (genvar l = 0; l < 2 ** tree_level; l++) begin : g_level
+                assign sel_nodes[2 ** tree_level - 1 + l] =
+                    sel_nodes[2 ** (tree_level + 1) - 1 + l * 2] | sel_nodes[2 ** (tree_level + 1) - 1 + l * 2 + 1];
+                assign index_nodes[2 ** tree_level - 1 + l] = (sel_nodes[2 ** (tree_level + 1) - 1 + l * 2] == 1'b1)
+                ? index_nodes[2 ** (tree_level + 1) - 1 + l * 2] :
+                    index_nodes[2 ** (tree_level + 1) - 1 + l * 2 + 1];
             end
         end
-    endgenerate
+    end
 
 
 
