@@ -141,6 +141,86 @@ def non_restoring_division(
 	}
 
 
+def srt_radix4_division(
+	dividend: int,
+	divisor: int,
+	width: int | None = None,
+	signed_mode: bool = False,
+):
+	if divisor == 0:
+		raise ValueError("divisor cannot be zero")
+	if not signed_mode and (dividend < 0 or divisor < 0):
+		raise ValueError("unsigned mode does not allow negative values")
+
+	abs_dividend = abs(dividend)
+	abs_divisor = abs(divisor)
+
+	if width is None:
+		base_width = max(_bit_width(abs_dividend), _bit_width(abs_divisor))
+		if signed_mode:
+			base_width += 1
+		n = base_width
+	else:
+		n = width
+
+	if n <= 0:
+		raise ValueError("bit width must be positive")
+
+	# Radix-4 digit recurrence (non-redundant) for stable results.
+	# Convert dividend to base-4 digits from MSB.
+	tmp = abs_dividend
+	if tmp == 0:
+		digits = [0]
+	else:
+		digits = []
+		while tmp > 0:
+			digits.append(tmp & 0x3)
+			tmp >>= 2
+		digits.reverse()
+
+	steps = []
+	q = 0
+	rem = 0
+	for i, digit in enumerate(digits, start=1):
+		rem = (rem << 2) + digit
+		q_digit = rem // abs_divisor
+		if q_digit > 3:
+			q_digit = 3
+		rem = rem - q_digit * abs_divisor
+		q = (q << 2) + q_digit
+
+		steps.append(
+			{
+				"step": i,
+				"p": rem,
+				"d": abs_divisor,
+				"q_digit": int(q_digit),
+				"q": q,
+				"in_digit": digit,
+			}
+		)
+
+	quot = q
+
+	if signed_mode:
+		if (dividend < 0) ^ (divisor < 0):
+			quot = -quot
+		if dividend < 0:
+			rem = -rem
+
+	return {
+		"width": n,
+		"quotient": quot,
+		"remainder": rem,
+		"steps": steps,
+		"digit_count": len(steps),
+		"signed": signed_mode,
+		"scaled_divisor": abs_divisor,
+		"scaled_dividend": abs_dividend,
+		"scale_shift": 0,
+	}
+
+
 class DivisionGui:
 	def __init__(self, root: tk.Tk) -> None:
 		self.root = root
@@ -194,6 +274,9 @@ class DivisionGui:
 		self.summary = ttk.Label(main, text="", font=("TkDefaultFont", 10, "bold"))
 		self.summary.grid(row=1, column=0, sticky="w", pady=(10, 6))
 
+		self.srt_summary = ttk.Label(main, text="")
+		self.srt_summary.grid(row=2, column=0, sticky="w", pady=(0, 6))
+
 		self.help_text = ttk.Label(
 			main,
 			text=(
@@ -201,7 +284,7 @@ class DivisionGui:
 				"Final quotient is Q. Negative A appears as leading 1s (two's complement)."
 			),
 		)
-		self.help_text.grid(row=2, column=0, sticky="w", pady=(0, 6))
+		self.help_text.grid(row=3, column=0, sticky="w", pady=(0, 6))
 
 		self.table = ttk.Treeview(
 			main,
@@ -209,8 +292,8 @@ class DivisionGui:
 			show="headings",
 			height=12,
 		)
-		self.table.grid(row=3, column=0, sticky="nsew")
-		main.rowconfigure(3, weight=1)
+		self.table.grid(row=4, column=0, sticky="nsew")
+		main.rowconfigure(4, weight=1)
 
 		self.table.heading("step", text="Step")
 		self.table.heading("a", text="A (bin)")
@@ -226,7 +309,28 @@ class DivisionGui:
 		self.table.column("adec", width=80, anchor="center")
 		self.table.column("mdec", width=80, anchor="center")
 
-		ttk.Label(main, textvariable=self.status_var).grid(row=4, column=0, sticky="w", pady=(8, 0))
+		self.srt_table = ttk.Treeview(
+			main,
+			columns=("step", "p", "d", "qd", "pdec"),
+			show="headings",
+			height=8,
+		)
+		self.srt_table.grid(row=5, column=0, sticky="nsew", pady=(6, 0))
+		main.rowconfigure(5, weight=1)
+
+		self.srt_table.heading("step", text="SRT Step")
+		self.srt_table.heading("p", text="P (bin)")
+		self.srt_table.heading("d", text="D (bin)")
+		self.srt_table.heading("qd", text="q_digit")
+		self.srt_table.heading("pdec", text="P (dec)")
+
+		self.srt_table.column("step", width=70, anchor="center")
+		self.srt_table.column("p", width=180, anchor="center")
+		self.srt_table.column("d", width=180, anchor="center")
+		self.srt_table.column("qd", width=70, anchor="center")
+		self.srt_table.column("pdec", width=90, anchor="center")
+
+		ttk.Label(main, textvariable=self.status_var).grid(row=6, column=0, sticky="w", pady=(8, 0))
 
 	def run(self) -> None:
 		self._clear_table()
@@ -241,9 +345,11 @@ class DivisionGui:
 				raise ValueError("bit width must be positive")
 
 			result = non_restoring_division(dividend, divisor, width, signed_mode=signed_mode)
+			srt_result = srt_radix4_division(dividend, divisor, width, signed_mode=signed_mode)
 		except ValueError as exc:
 			self.status_var.set(f"Error: {exc}")
 			self.summary.config(text="")
+			self.srt_summary.config(text="")
 			return
 
 		n = result["width"]
@@ -269,6 +375,19 @@ class DivisionGui:
 			)
 		)
 
+		srt_q = srt_result["quotient"]
+		srt_r = srt_result["remainder"]
+		srt_cycles = srt_result["digit_count"]
+		srt_r_bin = _format_bin(srt_r, n + 1)
+		srt_q_bin = _format_bin(srt_q, n)
+		self.srt_summary.config(
+			text=(
+				f"SRT radix-4: Cycles = {srt_cycles}, "
+				f"Quotient = {srt_q} (bin { srt_q_bin }), "
+				f"Remainder = {srt_r} (bin { srt_r_bin })"
+			)
+		)
+
 		for step in result["steps"]:
 			a_val = step["a"]
 			m_val = step.get("m", abs(divisor))
@@ -285,11 +404,28 @@ class DivisionGui:
 				),
 			)
 
+		for step in srt_result["steps"]:
+			p_val = step["p"]
+			d_val = step["d"]
+			self.srt_table.insert(
+				"",
+				"end",
+				values=(
+					step["step"],
+					_format_bin(p_val, n + 2),
+					_format_bin(d_val, n + 2),
+					step["q_digit"],
+					p_val,
+				),
+			)
+
 		self.status_var.set("Done")
 
 	def _clear_table(self) -> None:
 		for row in self.table.get_children():
 			self.table.delete(row)
+		for row in self.srt_table.get_children():
+			self.srt_table.delete(row)
 
 
 def main() -> None:
