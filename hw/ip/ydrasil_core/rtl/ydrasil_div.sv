@@ -77,10 +77,26 @@ localparam MODE = ydrasil_pkg::DIV_MODE
    assign remainder_next = ;
    assign dividend_reg_next = div_shifter_next[DATA_WIDTH-1:0];
 
-   always_comb begin
-      
-   end
 
+
+   
+   ydrasil_lzc #(
+      .WIDTH     	(DATA_WIDTH),
+      .MODE      	(1   )
+   )u_ydrasil_a(
+      .lzc_in_i    	(lzc_a_i     ),
+      .lzc_cnt_o   	(lzc_a_result_o    ),
+      .lzc_empty_o 	(lzc_a_empty_o  )
+   );
+   
+   ydrasil_lzc #(
+      .WIDTH     	(DATA_WIDTH),
+      .MODE      	(1   )
+   )u_ydrasil_b(
+      .lzc_in_i    	(lzc_b_i     ),
+      .lzc_cnt_o   	(lzc_b_result_o    ),
+      .lzc_empty_o 	(lzc_b_empty_o  )
+   );
 
 
    always_ff @(posedge clk or negedge rst_n) begin

@@ -1,6 +1,7 @@
-`include "config.svh"
 
-module dtcm(
+module dtcm
+import ydrasil_pkg::*;
+(
     input wire                  clk,
     input wire                  dtcm_en,
     input wire                  dtcm_wen,

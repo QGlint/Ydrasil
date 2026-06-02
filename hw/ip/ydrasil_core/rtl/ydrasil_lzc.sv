@@ -25,7 +25,7 @@ import ydrasil_pkg::*;
 
     logic [WIDTH-1:0] in_to_process;
 
-    if (MODE) begin : g_input_reverse
+    if (!MODE) begin : g_input_reverse
       for (genvar i = 0; unsigned'(i) < WIDTH; i++) begin : g_each_input_reverse
         assign in_to_process[i] = lzc_in_i[WIDTH-1-i];
       end
