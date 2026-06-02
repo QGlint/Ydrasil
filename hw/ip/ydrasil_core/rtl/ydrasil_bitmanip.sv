@@ -59,6 +59,25 @@ import ydrasil_pkg::*;
         end
     endfunction
 
+    function automatic [7:0] brev8_byte(input [7:0] value);
+        integer idx;
+        begin
+            for (idx = 0; idx < 8; idx = idx + 1) begin
+                brev8_byte[idx] = value[7 - idx];
+            end
+        end
+    endfunction
+
+    function automatic [REGS_DATA_WIDTH-1:0] brev8_32(input [REGS_DATA_WIDTH-1:0] value);
+        integer idx;
+        begin
+            brev8_32 = '0;
+            for (idx = 0; idx < REGS_DATA_WIDTH / 8; idx = idx + 1) begin
+                brev8_32[idx * 8 +: 8] = brev8_byte(value[idx * 8 +: 8]);
+            end
+        end
+    endfunction
+
     function automatic [REGS_DATA_WIDTH-1:0] rol32(
         input [REGS_DATA_WIDTH-1:0] value,
         input [4:0] amount
@@ -102,6 +121,62 @@ import ydrasil_pkg::*;
         end
     endfunction
 
+    function automatic [REGS_DATA_WIDTH-1:0] zip32(input [REGS_DATA_WIDTH-1:0] value);
+        integer idx;
+        begin
+            zip32 = '0;
+            for (idx = 0; idx < 16; idx = idx + 1) begin
+                zip32[2 * idx]     = value[idx];
+                zip32[2 * idx + 1] = value[16 + idx];
+            end
+        end
+    endfunction
+
+    function automatic [REGS_DATA_WIDTH-1:0] unzip32(input [REGS_DATA_WIDTH-1:0] value);
+        integer idx;
+        begin
+            unzip32 = '0;
+            for (idx = 0; idx < 16; idx = idx + 1) begin
+                unzip32[idx]      = value[2 * idx];
+                unzip32[16 + idx] = value[2 * idx + 1];
+            end
+        end
+    endfunction
+
+    function automatic [REGS_DATA_WIDTH-1:0] xperm4_32(
+        input [REGS_DATA_WIDTH-1:0] lhs,
+        input [REGS_DATA_WIDTH-1:0] rhs
+    );
+        integer idx;
+        reg [3:0] sel;
+        begin
+            xperm4_32 = '0;
+            for (idx = 0; idx < REGS_DATA_WIDTH / 4; idx = idx + 1) begin
+                sel = rhs[idx * 4 +: 4];
+                if (sel < 4'd8) begin
+                    xperm4_32[idx * 4 +: 4] = lhs[sel * 4 +: 4];
+                end
+            end
+        end
+    endfunction
+
+    function automatic [REGS_DATA_WIDTH-1:0] xperm8_32(
+        input [REGS_DATA_WIDTH-1:0] lhs,
+        input [REGS_DATA_WIDTH-1:0] rhs
+    );
+        integer idx;
+        reg [7:0] sel;
+        begin
+            xperm8_32 = '0;
+            for (idx = 0; idx < REGS_DATA_WIDTH / 8; idx = idx + 1) begin
+                sel = rhs[idx * 8 +: 8];
+                if (sel < 8'd4) begin
+                    xperm8_32[idx * 8 +: 8] = lhs[sel * 8 +: 8];
+                end
+            end
+        end
+    endfunction
+
     wire [DOUBLE_REGS_WIDTH-1:0] clmul_full = clmul_full32(operand_a_i, operand_b_i);
     wire [REGS_DATA_WIDTH-1:0] bit_index_mask = {{(REGS_DATA_WIDTH-1){1'b0}}, 1'b1} << shamt;
 
@@ -142,6 +217,13 @@ import ydrasil_pkg::*;
                 operator_i[OP_B_BINVI]:  result_o = operand_a_i ^ bit_index_mask;
                 operator_i[OP_B_BSET]:   result_o = operand_a_i | bit_index_mask;
                 operator_i[OP_B_BSETI]:  result_o = operand_a_i | bit_index_mask;
+                operator_i[OP_B_BREV8]:  result_o = brev8_32(operand_a_i);
+                operator_i[OP_B_PACK]:   result_o = {operand_b_i[15:0], operand_a_i[15:0]};
+                operator_i[OP_B_PACKH]:  result_o = {16'b0, operand_b_i[7:0], operand_a_i[7:0]};
+                operator_i[OP_B_ZIP]:    result_o = zip32(operand_a_i);
+                operator_i[OP_B_UNZIP]:  result_o = unzip32(operand_a_i);
+                operator_i[OP_B_XPERM4]: result_o = xperm4_32(operand_a_i, operand_b_i);
+                operator_i[OP_B_XPERM8]: result_o = xperm8_32(operand_a_i, operand_b_i);
                 default:                 result_o = '0;
             endcase
         end

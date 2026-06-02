@@ -92,6 +92,7 @@ import ydrasil_pkg::*;
 	wire rs2_is_00100;
 	wire rs2_is_00101;
 	wire rs2_is_00111;
+	wire rs2_is_01111;
 	wire rs2_is_11000;
 
 	assign rs2_is_00000 = (rf_raddr_rs2 == 5'b00000);
@@ -100,6 +101,7 @@ import ydrasil_pkg::*;
 	assign rs2_is_00100 = (rf_raddr_rs2 == 5'b00100);
 	assign rs2_is_00101 = (rf_raddr_rs2 == 5'b00101);
 	assign rs2_is_00111 = (rf_raddr_rs2 == 5'b00111);
+	assign rs2_is_01111 = (rf_raddr_rs2 == 5'b01111);
 	assign rs2_is_11000 = (rf_raddr_rs2 == 5'b11000);
 
 	wire [31:0] imm_i 		;
@@ -246,6 +248,13 @@ import ydrasil_pkg::*;
 	wire is_binvi;
 	wire is_bset;
 	wire is_bseti;
+	wire is_brev8;
+	wire is_pack;
+	wire is_packh;
+	wire is_zip;
+	wire is_unzip;
+	wire is_xperm4;
+	wire is_xperm8;
 
 	assign is_shift = is_slli | is_srli | is_srai;
 	assign is_add   = is_op_r_m & (funct3 == ydrasil_pkg::RV32I_INS_ADD_SUB) 	& funct7_is_0000000;
@@ -298,6 +307,13 @@ import ydrasil_pkg::*;
 	assign is_binvi  = is_op_imm & funct3_is_001 & funct7_is_0110100;
 	assign is_bset   = is_op_r_m & funct3_is_001 & funct7_is_0010100;
 	assign is_bseti  = is_op_imm & funct3_is_001 & funct7_is_0010100;
+	assign is_brev8  = is_op_imm & funct3_is_101 & funct7_is_0110100 & rs2_is_00111;
+	assign is_pack   = is_op_r_m & (funct3 == 3'b100) & funct7_is_0000100 & !rs2_is_00000;
+	assign is_packh  = is_op_r_m & (funct3 == 3'b111) & funct7_is_0000100;
+	assign is_zip    = is_op_imm & funct3_is_001 & funct7_is_0000100 & rs2_is_01111;
+	assign is_unzip  = is_op_imm & funct3_is_101 & funct7_is_0000100 & rs2_is_01111;
+	assign is_xperm4 = is_op_r_m & (funct3 == 3'b010) & funct7_is_0010100;
+	assign is_xperm8 = is_op_r_m & (funct3 == 3'b100) & funct7_is_0010100;
 
 	wire is_r_alu_use = is_add | is_sub | is_sll | is_slt | is_sltu |
 	                    is_xor | is_srl | is_sra | is_or | is_and;
@@ -307,11 +323,13 @@ import ydrasil_pkg::*;
 	                           is_andn | is_max | is_maxu | is_min | is_minu |
 	                           is_orn | is_rol | is_ror | is_xnor | is_clmul |
 	                           is_clmulh | is_clmulr | is_bclr | is_bext |
-	                           is_binv | is_bset;
+	                           is_binv | is_bset | is_pack | is_packh |
+	                           is_xperm4 | is_xperm8;
 	wire is_bitmanip_use = is_bitmanip_rs2_use | is_clz | is_cpop | is_ctz |
 	                       is_orc_b | is_rev8 | is_rori | is_sext_b |
 	                       is_sext_h | is_zext_h | is_bclri | is_bexti |
-	                       is_binvi | is_bseti;
+	                       is_binvi | is_bseti | is_brev8 | is_zip |
+	                       is_unzip;
 
 	wire is_fence  ;
 	wire is_fence_i;
@@ -424,6 +442,14 @@ import ydrasil_pkg::*;
 	assign bitmanip_op_info[ydrasil_pkg::OP_B_BINVI]  = is_binvi;
 	assign bitmanip_op_info[ydrasil_pkg::OP_B_BSET]   = is_bset;
 	assign bitmanip_op_info[ydrasil_pkg::OP_B_BSETI]  = is_bseti;
+	assign bitmanip_op_info[ydrasil_pkg::OP_B_BREV8]  = is_brev8;
+	assign bitmanip_op_info[ydrasil_pkg::OP_B_PACK]   = is_pack;
+	assign bitmanip_op_info[ydrasil_pkg::OP_B_PACKH]  = is_packh;
+	assign bitmanip_op_info[ydrasil_pkg::OP_B_ZIP]    = is_zip;
+	assign bitmanip_op_info[ydrasil_pkg::OP_B_UNZIP]  = is_unzip;
+	assign bitmanip_op_info[ydrasil_pkg::OP_B_XPERM4] = is_xperm4;
+	assign bitmanip_op_info[ydrasil_pkg::OP_B_XPERM8] = is_xperm8;
+	assign bitmanip_op_info[ydrasil_pkg::OP_B_RSVD]   = 1'b0;
 
 
 	wire rf_ren_rs1 =	(~is_lui) 	& (~is_auipc) 	& (~is_jal) &  

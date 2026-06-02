@@ -181,7 +181,7 @@ package ydrasil_pkg;
 	localparam int OPERATOR_TYPE_BITMANIP = 7;
 	localparam int OPERATOR_TYPE_LSU_BASE = 2;
 
-	localparam int OPERATOR_WIDTH = 32;
+	localparam int OPERATOR_WIDTH = 40;
 
 	localparam int OP_ALU_INFO_WIDTH = 12;
 	localparam int OP_ALU_LUI   = 0;
@@ -237,7 +237,7 @@ package ydrasil_pkg;
 	localparam int OP_MUL_REM    = 6;
 	localparam int OP_MUL_REMU   = 7;
 
-	localparam int OP_B_INFO_WIDTH = 32;
+	localparam int OP_B_INFO_WIDTH = 40;
 	localparam int OP_B_SH1ADD = 0;
 	localparam int OP_B_SH2ADD = 1;
 	localparam int OP_B_SH3ADD = 2;
@@ -270,6 +270,14 @@ package ydrasil_pkg;
 	localparam int OP_B_BINVI  = 29;
 	localparam int OP_B_BSET   = 30;
 	localparam int OP_B_BSETI  = 31;
+	localparam int OP_B_BREV8  = 32;
+	localparam int OP_B_PACK   = 33;
+	localparam int OP_B_PACKH  = 34;
+	localparam int OP_B_ZIP    = 35;
+	localparam int OP_B_UNZIP  = 36;
+	localparam int OP_B_XPERM4 = 37;
+	localparam int OP_B_XPERM8 = 38;
+	localparam int OP_B_RSVD   = 39;
 
 	localparam int OPSEL_INFO_WIDTH = 3;
 	localparam int ASELRS   = 0;
