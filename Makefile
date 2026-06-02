@@ -46,6 +46,7 @@ test_all:
 	@echo "==========================================================="
 	@$(MAKE) -j rv_test_comp_genmem
 	@$(MAKE) comp
+	@rm -rf $(RVTESTS_RESULT_DIR)
 	@$(MAKE) -j rv_test_sim_all
 	@$(MAKE) rv_test_report_all
 	@$(MAKE) rv_test_summary_all
