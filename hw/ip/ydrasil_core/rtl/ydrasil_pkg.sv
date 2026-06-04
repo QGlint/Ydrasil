@@ -33,16 +33,6 @@ package ydrasil_pkg;
 	localparam string DTCM_INIT_FILE = "hw/dv/test_data/mem/dram_test.mem";
 `endif
 
-	localparam int MUL_MODE_RADIX8 = 0;
-	localparam int MUL_MODE_4CYCLE = 1;
-`ifdef YDRASIL_MUL_IMPL_RADIX8
-	localparam int MUL_MODE = MUL_MODE_RADIX8;
-`elsif YDRASIL_MUL_IMPL_4CYCLE
-	localparam int MUL_MODE = MUL_MODE_4CYCLE;
-`else
-	localparam int MUL_MODE = MUL_MODE_4CYCLE;
-`endif
-
 	localparam int DIV_MODE_NEW = 0;
 	localparam int DIV_MODE_LEGACY = 1;
 `ifdef YDRASIL_DIV_IMPL_LEGACY

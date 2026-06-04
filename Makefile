@@ -5,7 +5,7 @@ TOOLS ?= verilator gtkwave spike riscv64-elf-gcc riscv64-elf-newlib riscv64-elf-
 # --- 自动化测试相关定义 ---
 RESULT_DIR := $(LOG_DIR)/test_results
 
-export PROJECT_ROOT BUILD_DIR WAVE_DIR LOG_DIR SIM_TOOL IP VERILATOR_MOD UVM USE_BENDER BENDER MUL_IMPL DIV_IMPL LSU_IMPL MEMS_IMPL ARCH ABI
+export PROJECT_ROOT BUILD_DIR WAVE_DIR LOG_DIR SIM_TOOL IP VERILATOR_MOD UVM USE_BENDER BENDER DIV_IMPL LSU_IMPL MEMS_IMPL ARCH ABI
 
 .PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests init get_spike download_and_extract_spike check_deps spike spike_wave_to_csv  rv_test_comp_genmem
 

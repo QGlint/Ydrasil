@@ -20,6 +20,8 @@ import ydrasil_pkg::*;
 
     input wire                          clint_stall_i,
     input wire                          ex_mul_stall_i,
+    input wire                          mul_scoreboard_stall_i,
+    input wire                          wb_backpressure_i,
 
     output wire                         stall_if_o,
     output wire                         stall_id_o,
@@ -40,12 +42,15 @@ import ydrasil_pkg::*;
     wire lsu_stall_rs_rd_wb;
 
     wire lsu_stall ;
+    wire decode_bubble_stall;
     assign lsu_stall = lsu_ctrl_busy_i | lsu_stall_rs_rd | lsu_stall_rs_rd_wb;
+    assign decode_bubble_stall =
+        lsu_stall | clint_stall_i | mul_scoreboard_stall_i | wb_backpressure_i;
 
     assign branch_target_o = ex_branch_target_i;
     assign branch_jump_o = ex_branch_jump_i;
 
-    assign flush_id_o = branch_jump_o | lsu_stall | clint_stall_i;
+    assign flush_id_o = branch_jump_o | (decode_bubble_stall & !ex_mul_stall_i);
     assign flush_if_o = branch_jump_o ;
     assign flush_ex_o = 1'b0; 
     // assign flush_mems_o = 1'b0;
@@ -54,8 +59,8 @@ import ydrasil_pkg::*;
 
     // assign stall_ex_o = clint_stall_i;
     assign stall_id_o = ex_mul_stall_i;
-    assign stall_if_o = lsu_stall | clint_stall_i | ex_mul_stall_i;
-    assign stall_pc_o = lsu_stall | clint_stall_i | ex_mul_stall_i;
+    assign stall_if_o = decode_bubble_stall | ex_mul_stall_i;
+    assign stall_pc_o = decode_bubble_stall | ex_mul_stall_i;
 
 
 endmodule

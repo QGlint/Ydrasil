@@ -11,7 +11,6 @@ UVM ?= 0
 USE_BENDER ?= 1
 BENDER ?= bender
 VERILATOR_TRACE ?= 1
-MUL_IMPL ?= 4cycle
 DIV_IMPL ?= new
 LSU_IMPL ?= new
 MEMS_IMPL ?= new

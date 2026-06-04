@@ -46,6 +46,10 @@ import ydrasil_pkg::*;
     output wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     id_ex_rs2_raddr_o,
     output wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     id_ctrl_rs1_addr_o,
     output wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     id_ctrl_rs2_addr_o,
+    output wire                            id_ctrl_rs1_ren_o,
+    output wire                            id_ctrl_rs2_ren_o,
+    output wire                            id_ctrl_rd_wen_o,
+    output wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     id_ctrl_rd_addr_o,
 
     output wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0] 	    id_csr_raddr_o,  
     output wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0] 	    id_ex_csr_waddr_o,  
@@ -318,5 +322,9 @@ import ydrasil_pkg::*;
 
     assign id_ctrl_rs1_addr_o = rf_raddr_rs1;
     assign id_ctrl_rs2_addr_o = rf_raddr_rs2;
+    assign id_ctrl_rs1_ren_o = rf_ren_rs1;
+    assign id_ctrl_rs2_ren_o = rf_ren_rs2;
+    assign id_ctrl_rd_wen_o = rf_wen_rd & (rf_waddr_rd != '0);
+    assign id_ctrl_rd_addr_o = rf_waddr_rd;
 
 endmodule
