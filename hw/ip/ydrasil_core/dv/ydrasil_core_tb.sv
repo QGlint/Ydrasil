@@ -84,6 +84,16 @@ end
     reg [31:0] instruction_count ;//= csr_instret; // 直接使用CSR中的instret寄存器
     wire valid_instruction = (pc != last_pc);
     real ipc;
+    real bp_accuracy;
+
+    wire bp_branch_valid = u_dut.ex_bp_train_valid;
+    wire bp_pred_hit = u_dut.id_ex_pred_hit;
+    wire bp_pred_taken = u_dut.id_ex_pred_taken;
+    wire bp_mispredict = u_dut.ex_branch_mispredict;
+    reg [31:0] bp_branch_count;
+    reg [31:0] bp_hit_count;
+    reg [31:0] bp_taken_count;
+    reg [31:0] bp_mispredict_count;
 
 	ydrasil_core u_dut (
 		.clk      (clk),
@@ -124,10 +134,20 @@ end
         if (!rst_n) begin
             instruction_count <= 32'b0;
             last_pc           <= 32'b0;
+            bp_branch_count <= 32'b0;
+            bp_hit_count <= 32'b0;
+            bp_taken_count <= 32'b0;
+            bp_mispredict_count <= 32'b0;
         end else begin
             last_pc     <= pc;
             if (valid_instruction) begin
                 instruction_count <= instruction_count + 1;
+            end
+            if (bp_branch_valid) begin
+                bp_branch_count <= bp_branch_count + 1;
+                bp_hit_count <= bp_hit_count + (bp_pred_hit ? 32'd1 : 32'd0);
+                bp_taken_count <= bp_taken_count + (bp_pred_taken ? 32'd1 : 32'd0);
+                bp_mispredict_count <= bp_mispredict_count + (bp_mispredict ? 32'd1 : 32'd0);
             end
         end
     end
@@ -317,6 +337,8 @@ end
     always @(pc_write_to_host_cnt) begin
         if (pc_write_to_host_cnt == 32'd8) begin
             ipc = (instruction_count > 0 && cycle_count > 0) ? (instruction_count * 1.0) / cycle_count : 0.0;
+            bp_accuracy = (bp_branch_count > 0) ?
+                ((bp_branch_count - bp_mispredict_count) * 100.0) / bp_branch_count : 0.0;
 
             $display("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
             $display("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
@@ -330,6 +352,8 @@ end
             $display("~~~~~The test ending reached at cycle: %d ~~~~~~~~~~~~~", pc_write_to_host_cycle);
             $display("~~~~~~~~~~Total instructions executed: %d ~~~~~~~~~~~~~", instruction_count);
             $display("~~~~~~~~~~~~~~~~~~ IPC value: %.4f ~~~~~~~~~~~~~~~~~~", ipc);
+            $display("~~~~ Branch predictor: branches=%0d hits=%0d predicted_taken=%0d mispredicts=%0d accuracy=%.2f%% ~~~~",
+                bp_branch_count, bp_hit_count, bp_taken_count, bp_mispredict_count, bp_accuracy);
             $display("~~~~~~~~~~~~~~~The final x3 Reg value: %d ~~~~~~~~~~~~~", x3);
             $display("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
 
@@ -357,6 +381,8 @@ end
                 for (r = 0; r < 32; r = r + 1) $display("x%2d = 0x%x", r, u_dut.u_ydrasil_registers.registers[r]);
             end
             $display("PERF_METRIC: CYCLES=%-d INSTS=%-d IPC=%.4f", cycle_count, instruction_count, ipc);
+            $display("BP_METRIC: BRANCHES=%-d HITS=%-d PRED_TAKEN=%-d MISPRED=%-d ACC=%.2f",
+                bp_branch_count, bp_hit_count, bp_taken_count, bp_mispredict_count, bp_accuracy);
             $finish;
         end
     end

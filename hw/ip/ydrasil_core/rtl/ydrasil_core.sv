@@ -2,8 +2,9 @@
 
 module ydrasil_core
 import ydrasil_pkg::*;
- #(
-)(
+	 #(
+		parameter int BP_ENTRIES = 256
+	)(
 	input  wire clk,
 	input  wire rst_n
     
@@ -26,6 +27,9 @@ import ydrasil_pkg::*;
 	// IF/ID pipeline
 	wire [31:0] if_id_pc;
 	wire [31:0] if_id_instr;
+	wire        if_id_pred_hit;
+	wire        if_id_pred_taken;
+	wire [31:0] if_id_pred_target;
 
 	// CTRL signals
 	wire                        stall_if;
@@ -68,6 +72,22 @@ import ydrasil_pkg::*;
 	wire                        alu_rf_wen_rd;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] alu_rf_waddr_rd;
 	wire                        ex_mul_stall;
+	wire                        ex_pc_redirect;
+	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] ex_pc_redirect_target;
+	wire                        ex_bp_train_valid;
+	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] ex_bp_train_pc;
+	wire                        ex_bp_train_taken;
+	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] ex_bp_train_target;
+	wire                        ex_branch_mispredict;
+
+	// Branch predictor
+	wire                        bp_predict_hit;
+	wire                        bp_predict_taken;
+	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] bp_predict_target;
+	wire                        id_fence_i;
+	wire                        id_ex_pred_hit;
+	wire                        id_ex_pred_taken;
+	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] id_ex_pred_target;
 
 	// LSU request path
 	wire [1:0]                  operator_lsu_type;
@@ -187,28 +207,54 @@ import ydrasil_pkg::*;
 		.lsu_rf_rd_waddr_o (lsu_rf_waddr_rd)
 	);
 
-	ydrasil_if_stage u_ydrasil_if_stage (
-		.clk           (clk),
-		.rst_n         (rst_n),
-		.stall_if_i      (stall_if),
-        .stall_pc_i      (stall_pc),
-		.flush_if_i      (flush_if),
-		.branch_jump_i   (branch_jump),
-		.branch_target_i (branch_target),
-		.if_mem_addr_o   (if_mem_addr),
-		.if_mem_rdata_i  (if_mem_rdata),
-		.if_id_pc_o      (if_id_pc),
-		.if_id_instr_o   (if_id_instr)
-	);
+		ydrasil_branch_predictor #(
+			.BP_ENTRIES(BP_ENTRIES)
+		) u_ydrasil_branch_predictor (
+			.clk              (clk),
+			.rst_n            (rst_n),
+			.predict_pc_i     (if_mem_addr),
+			.predict_hit_o    (bp_predict_hit),
+			.predict_taken_o  (bp_predict_taken),
+			.predict_target_o (bp_predict_target),
+			.train_valid_i    (ex_bp_train_valid),
+			.train_pc_i       (ex_bp_train_pc),
+			.train_taken_i    (ex_bp_train_taken),
+			.train_target_i   (ex_bp_train_target),
+			.invalidate_i     (id_fence_i)
+		);
+
+		ydrasil_if_stage u_ydrasil_if_stage (
+			.clk           (clk),
+			.rst_n         (rst_n),
+			.stall_if_i      (stall_if),
+	        .stall_pc_i      (stall_pc),
+			.flush_if_i      (flush_if),
+			.branch_jump_i   (branch_jump),
+			.branch_target_i (branch_target),
+			.bp_predict_hit_i(bp_predict_hit),
+			.bp_predict_taken_i(bp_predict_taken),
+			.bp_predict_target_i(bp_predict_target),
+			.bp_invalidate_i(id_fence_i),
+			.if_mem_addr_o   (if_mem_addr),
+			.if_mem_rdata_i  (if_mem_rdata),
+			.if_id_pc_o      (if_id_pc),
+			.if_id_pred_hit_o(if_id_pred_hit),
+			.if_id_pred_taken_o(if_id_pred_taken),
+			.if_id_pred_target_o(if_id_pred_target),
+			.if_id_instr_o   (if_id_instr)
+		);
 
 	ydrasil_id_stage u_ydrasil_id_stage (
 		.clk              (clk),
 		.rst_n            (rst_n),
 		.stall_id_i         (stall_id),
-		.flush_id_i         (flush_id),
-		.if_id_pc_i         (if_id_pc),
-		.if_id_instr_i      (if_id_instr),
-		.rf_addr_rs1_o      (rf_raddr_rs1),
+			.flush_id_i         (flush_id),
+			.if_id_pc_i         (if_id_pc),
+			.if_id_instr_i      (if_id_instr),
+			.if_id_pred_hit_i   (if_id_pred_hit),
+			.if_id_pred_taken_i (if_id_pred_taken),
+			.if_id_pred_target_i(if_id_pred_target),
+			.rf_addr_rs1_o      (rf_raddr_rs1),
 		.rf_addr_rs2_o      (rf_raddr_rs2),
 		.rf_rdata_rs1_i     (rf_rdata_rs1),
 		.rf_rdata_rs2_i     (rf_rdata_rs2),
@@ -232,10 +278,14 @@ import ydrasil_pkg::*;
 		.id_csr_raddr_o     (id_csr_raddr),
 		.id_ex_csr_waddr_o  (id_ex_csr_waddr),
 		.id_op_csr_info_o   (id_op_csr_info),
-        .id_op_sys_info_o   (id_op_sys_info),
-        .id_instr_addr_o     (id_instr_addr),
-		.id_alu_rf_wen_rd_o (id_alu_rf_wen_rd),
-		.id_rf_waddr_rd_o   (id_rf_waddr_rd)
+	        .id_op_sys_info_o   (id_op_sys_info),
+	        .id_instr_addr_o     (id_instr_addr),
+			.id_fence_i_o       (id_fence_i),
+			.id_ex_pred_hit_o   (id_ex_pred_hit),
+			.id_ex_pred_taken_o (id_ex_pred_taken),
+			.id_ex_pred_target_o(id_ex_pred_target),
+			.id_alu_rf_wen_rd_o (id_alu_rf_wen_rd),
+			.id_rf_waddr_rd_o   (id_rf_waddr_rd)
 	);
 
 	ydrasil_ex_block u_ydrasil_ex_block (
@@ -245,10 +295,13 @@ import ydrasil_pkg::*;
 		.bt_a_operand_i     (bt_a_operand),
 		.bt_b_operand_i     (bt_b_operand),
 		.operand_a_i        (operand_a),
-		.operand_b_i        (operand_b),
-		.operator_i         (operator),
-		.operator_type_i    (operator_type),
-        .interrupt_i          (interrupt), 
+			.operand_b_i        (operand_b),
+			.operator_i         (operator),
+			.operator_type_i    (operator_type),
+			.id_ex_pred_hit_i   (id_ex_pred_hit),
+			.id_ex_pred_taken_i (id_ex_pred_taken),
+			.id_ex_pred_target_i(id_ex_pred_target),
+        .interrupt_i          (interrupt),
         .clint_ex_int_addr_i    (clint_ex_int_addr),
 		.id_rf_waddr_rd_i   (id_rf_waddr_rd),
 		.id_alu_rf_wen_rd_i (id_alu_rf_wen_rd),
@@ -266,10 +319,17 @@ import ydrasil_pkg::*;
 		.wb_ex_pending_waddr_rd_ff_i(wb_ex_pending_waddr_rd_ff),
 		.wb_ex_pending_ff_i(wb_ex_pending_ff),
 		.id_ex_rs2_raddr_i(id_ex_rs2_raddr),
-		.id_ex_rs1_raddr_i(id_ex_rs1_raddr),
-		.ex_branch_jump_o   (ex_branch_jump),
-		.ex_branch_target_o (ex_branch_target),
-		.ex_lsu_mem_addr_o  (ex_lsu_mem_addr),
+			.id_ex_rs1_raddr_i(id_ex_rs1_raddr),
+			.ex_branch_jump_o   (ex_branch_jump),
+			.ex_branch_target_o (ex_branch_target),
+			.ex_pc_redirect_o   (ex_pc_redirect),
+			.ex_pc_redirect_target_o(ex_pc_redirect_target),
+			.ex_bp_train_valid_o(ex_bp_train_valid),
+			.ex_bp_train_pc_o   (ex_bp_train_pc),
+			.ex_bp_train_taken_o(ex_bp_train_taken),
+			.ex_bp_train_target_o(ex_bp_train_target),
+			.ex_branch_mispredict_o(ex_branch_mispredict),
+			.ex_lsu_mem_addr_o  (ex_lsu_mem_addr),
         .ex_lsu_result_o     (ex_lsu_result),
 		.alu_result_o       (alu_result),
 		.alu_rf_wen_rd_o    (alu_rf_wen_rd),
@@ -321,10 +381,10 @@ import ydrasil_pkg::*;
 		.rf_rdata_rs2_o(rf_rdata_rs2)
 	);
 
-	ydrasil_ctrl u_ctrl (
-		.rst_n             (rst_n),
-		.ex_branch_jump_i  (ex_branch_jump),
-		.ex_branch_target_i(ex_branch_target),
+		ydrasil_ctrl u_ctrl (
+			.rst_n             (rst_n),
+			.ex_branch_jump_i  (ex_pc_redirect),
+			.ex_branch_target_i(ex_pc_redirect_target),
 		.lsu_ctrl_stall_i       (lsu_ctrl_stall),
 		.lsu_ctrl_stall_wb_i    (lsu_ctrl_stall_wb),
 		.lsu_ctrl_busy_i        (lsu_ctrl_busy),

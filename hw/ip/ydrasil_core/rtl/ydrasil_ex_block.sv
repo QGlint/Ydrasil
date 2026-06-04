@@ -13,10 +13,13 @@ import ydrasil_pkg::*;
     input  wire [DATA_WIDTH-1:0]           bt_b_operand_i,
 	
     input  wire [DATA_WIDTH-1:0]           operand_a_i,
-	input  wire [DATA_WIDTH-1:0]           operand_b_i,
-	input  wire [ydrasil_pkg::OPERATOR_WIDTH-1:0]      operator_i,
-	input  wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] operator_type_i,
-    input  wire [ 4:0]                     id_rf_waddr_rd_i,
+		input  wire [DATA_WIDTH-1:0]           operand_b_i,
+		input  wire [ydrasil_pkg::OPERATOR_WIDTH-1:0]      operator_i,
+		input  wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] operator_type_i,
+		input  wire                            id_ex_pred_hit_i,
+		input  wire                            id_ex_pred_taken_i,
+		input  wire [DATA_WIDTH-1:0]           id_ex_pred_target_i,
+	    input  wire [ 4:0]                     id_rf_waddr_rd_i,
     input  wire                            id_alu_rf_wen_rd_i,
 	input  wire                            id_ex_rs2_rd_forward_i,
 	input  wire                            id_ex_rs1_rd_forward_i,
@@ -38,9 +41,16 @@ import ydrasil_pkg::*;
 	output wire [DATA_WIDTH-1:0]           ex_csr_wdata_o,
 	output wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0] 	   ex_csr_waddr_o,
 	
-	output wire                            ex_branch_jump_o,      // to CTRL
-	output wire [DATA_WIDTH-1:0]           ex_branch_target_o, // to CTRL
-	output wire [ydrasil_pkg::BUS_ADDR_WIDTH-1:0]      ex_lsu_mem_addr_o,      // to EX 
+		output wire                            ex_branch_jump_o,      // to CTRL
+		output wire [DATA_WIDTH-1:0]           ex_branch_target_o, // to CTRL
+		output wire                            ex_pc_redirect_o,
+		output wire [DATA_WIDTH-1:0]           ex_pc_redirect_target_o,
+		output wire                            ex_bp_train_valid_o,
+		output wire [DATA_WIDTH-1:0]           ex_bp_train_pc_o,
+		output wire                            ex_bp_train_taken_o,
+		output wire [DATA_WIDTH-1:0]           ex_bp_train_target_o,
+		output wire                            ex_branch_mispredict_o,
+		output wire [ydrasil_pkg::BUS_ADDR_WIDTH-1:0]      ex_lsu_mem_addr_o,      // to EX
 
 	output wire [DATA_WIDTH-1:0]           ex_lsu_result_o,        // to EX
 
@@ -75,6 +85,15 @@ import ydrasil_pkg::*;
 	wire                            bitmanip_rf_wen_rd;
 	wire                            normal_alu_rf_wen_rd;
 	wire                            ex_rf_wen_rd;
+	wire                            ex_is_branch;
+	wire                            ex_is_jump;
+	wire                            ex_branch_taken;
+	wire                            ex_pred_taken;
+	wire [DATA_WIDTH-1:0]           ex_branch_pc;
+	wire [DATA_WIDTH-1:0]           ex_branch_next_pc;
+	wire [DATA_WIDTH-1:0]           ex_branch_actual_next_pc;
+	wire [DATA_WIDTH-1:0]           ex_branch_pred_next_pc;
+	wire                            ex_branch_mispredict;
 
 	reg [ydrasil_pkg::REGS_DATA_WIDTH-1:0]     alu_result_ff;
 	reg                            alu_rf_wen_rd_ff;
@@ -110,6 +129,8 @@ import ydrasil_pkg::*;
     assign bt_alu_result = bt_a_operand + bt_b_operand;
 	assign ex_lsu_mem_addr_o = alu_result;
     assign ex_branch_target_o = interrupt_i ? clint_ex_int_addr_i:bt_alu_result;
+	assign ex_branch_pc = bt_a_operand;
+	assign ex_branch_next_pc = ex_branch_pc + 32'd4;
 
 	// 内部例化 ALU，EX 直接透传控制和操作数
 
@@ -119,6 +140,31 @@ import ydrasil_pkg::*;
 	assign ex_lsu_result_o = alu_result_ff ;
 
 	assign ex_branch_jump_o = ex_branch_jump | interrupt_i;
+	assign ex_is_jump = operator_type_i[ydrasil_pkg::OPERATOR_TYPE_BJP] &
+	                    operator_i[ydrasil_pkg::OP_BJP_JUMP];
+	assign ex_is_branch = operator_type_i[ydrasil_pkg::OPERATOR_TYPE_BJP] &
+	                      (operator_i[ydrasil_pkg::OP_BJP_BEQ] |
+	                       operator_i[ydrasil_pkg::OP_BJP_BNE] |
+	                       operator_i[ydrasil_pkg::OP_BJP_BLT] |
+	                       operator_i[ydrasil_pkg::OP_BJP_BGE] |
+	                       operator_i[ydrasil_pkg::OP_BJP_BLTU] |
+	                       operator_i[ydrasil_pkg::OP_BJP_BGEU]);
+	assign ex_branch_taken = ex_is_branch & ex_branch_jump & !interrupt_i;
+	assign ex_pred_taken = id_ex_pred_hit_i & id_ex_pred_taken_i;
+	assign ex_branch_actual_next_pc = ex_branch_taken ? bt_alu_result : ex_branch_next_pc;
+	assign ex_branch_pred_next_pc = ex_pred_taken ? id_ex_pred_target_i : ex_branch_next_pc;
+	assign ex_branch_mispredict = ex_is_branch & !interrupt_i &
+	                              (ex_branch_actual_next_pc != ex_branch_pred_next_pc);
+	assign ex_branch_mispredict_o = ex_branch_mispredict;
+	assign ex_pc_redirect_o = interrupt_i | (ex_is_jump & ex_branch_jump & !interrupt_i) |
+	                          ex_branch_mispredict;
+	assign ex_pc_redirect_target_o = interrupt_i ? clint_ex_int_addr_i :
+	                                 (ex_is_jump & ex_branch_jump) ? bt_alu_result :
+	                                 ex_branch_actual_next_pc;
+	assign ex_bp_train_valid_o = ex_is_branch & !interrupt_i;
+	assign ex_bp_train_pc_o = ex_branch_pc;
+	assign ex_bp_train_taken_o = ex_branch_taken;
+	assign ex_bp_train_target_o = bt_alu_result;
 	assign op_m_unit = operator_type_i[ydrasil_pkg::OPERATOR_TYPE_MUL];
 	assign op_bitmanip = operator_type_i[ydrasil_pkg::OPERATOR_TYPE_BITMANIP];
 	assign op_mul = op_m_unit &

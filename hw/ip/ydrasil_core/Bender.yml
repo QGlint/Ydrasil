@@ -12,6 +12,7 @@ sources:
       - rtl
     files:
       - rtl/ydrasil_pkg.sv
+      - rtl/ydrasil_branch_predictor.sv
       - rtl/ydrasil_alu.sv
       - rtl/ydrasil_if_stage.sv
       - rtl/ydrasil_id_stage.sv
@@ -33,3 +34,4 @@ sources:
   - target: ip_tb
     files:
       - dv/ydrasil_core_tb.sv
+      - dv/ydrasil_branch_predictor_tb.sv

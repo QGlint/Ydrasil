@@ -12,6 +12,9 @@ import ydrasil_pkg::*;
     // IF/ID input  
     input  wire [DATA_WIDTH-1:0]           if_id_pc_i,
     input  wire [DATA_WIDTH-1:0]           if_id_instr_i,
+    input  wire                            if_id_pred_hit_i,
+    input  wire                            if_id_pred_taken_i,
+    input  wire [DATA_WIDTH-1:0]           if_id_pred_target_i,
 
     // Register file read ports 
     output wire [4:0]                      rf_addr_rs1_o,
@@ -50,6 +53,10 @@ import ydrasil_pkg::*;
     output wire [ydrasil_pkg::OP_SYS_INFO_WIDTH-1:0]    id_op_sys_info_o,
 
     output wire [DATA_WIDTH-1:0]           id_instr_addr_o, // 当前指令地址，供CLINT使用
+    output wire                            id_fence_i_o,
+    output wire                            id_ex_pred_hit_o,
+    output wire                            id_ex_pred_taken_o,
+    output wire [DATA_WIDTH-1:0]           id_ex_pred_target_o,
     // Generic writeback information
     output wire                            id_alu_rf_wen_rd_o,
     output wire [4:0]                      id_rf_waddr_rd_o
@@ -114,6 +121,9 @@ import ydrasil_pkg::*;
     reg [DATA_WIDTH-1:0]                 bt_a_operand_ff;
     reg [DATA_WIDTH-1:0]                 bt_b_operand_ff;
     reg [DATA_WIDTH-1:0]                 id_instr_addr_ff;
+    reg                                  id_ex_pred_hit_ff;
+    reg                                  id_ex_pred_taken_ff;
+    reg [DATA_WIDTH-1:0]                 id_ex_pred_target_ff;
     wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0] 	 csr_reg_raddr;
    
     wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0] 	  csr_ex_waddr;
@@ -127,6 +137,7 @@ import ydrasil_pkg::*;
     wire [ydrasil_pkg::OP_SYS_INFO_WIDTH-1:0]  sys_op_info;
     reg [ydrasil_pkg::OP_SYS_INFO_WIDTH-1:0]   sys_op_info_ff;
     wire                            operand_b_jump_sel;
+    wire                            id_fence_i;
 
 
     ydrasil_ins_decoder #(
@@ -176,6 +187,8 @@ import ydrasil_pkg::*;
 
     assign bt_a_operand = bt_a_rs_sel ? rf_rdata_rs1_i : if_id_pc_i;
     assign bt_b_operand = imm_i;
+    assign id_fence_i = (if_id_instr_i[6:0] == ydrasil_pkg::RV32I_INS_FENCE) &&
+                        (if_id_instr_i[14:12] == 3'b001);
 
     assign rs2_rd_hazard = (rf_raddr_rs2 != 0) && (rf_raddr_rs2 == rf_waddr_rd_ff) && rf_wen_rd_ff;
     assign rs1_rd_hazard = (rf_raddr_rs1 != 0) && (rf_raddr_rs1 == rf_waddr_rd_ff) && rf_wen_rd_ff;
@@ -208,6 +221,9 @@ import ydrasil_pkg::*;
             csr_op_info_ff <= '0;
             sys_op_info_ff <= '0;
             id_instr_addr_ff <= '0;
+            id_ex_pred_hit_ff <= 1'b0;
+            id_ex_pred_taken_ff <= 1'b0;
+            id_ex_pred_target_ff <= '0;
             sel_rs_ff <= '0;
             rf_raddr_rs1_ff <= '0;
             rf_raddr_rs2_ff <= '0;
@@ -234,6 +250,9 @@ import ydrasil_pkg::*;
             csr_op_info_ff <= '0;
             sys_op_info_ff <= '0;
             id_instr_addr_ff <= '0;
+            id_ex_pred_hit_ff <= 1'b0;
+            id_ex_pred_taken_ff <= 1'b0;
+            id_ex_pred_target_ff <= '0;
             sel_rs_ff <= '0;
             rf_raddr_rs1_ff <= '0;
             rf_raddr_rs2_ff <= '0;
@@ -259,6 +278,9 @@ import ydrasil_pkg::*;
             csr_op_info_ff <= csr_op_info;
             sys_op_info_ff <= sys_op_info;
             id_instr_addr_ff <= if_id_pc_i;
+            id_ex_pred_hit_ff <= if_id_pred_hit_i;
+            id_ex_pred_taken_ff <= if_id_pred_taken_i;
+            id_ex_pred_target_ff <= if_id_pred_target_i;
             sel_rs_ff <= sel_rs;
             rf_raddr_rs1_ff <= rf_raddr_rs1;
             rf_raddr_rs2_ff <= rf_raddr_rs2;
@@ -286,6 +308,10 @@ import ydrasil_pkg::*;
     assign  id_op_csr_info_o = csr_op_info_ff;
     assign  id_op_sys_info_o = sys_op_info_ff;
     assign id_instr_addr_o = id_instr_addr_ff;
+    assign id_fence_i_o = id_fence_i & !flush_id_i & !stall_id_i;
+    assign id_ex_pred_hit_o = id_ex_pred_hit_ff;
+    assign id_ex_pred_taken_o = id_ex_pred_taken_ff;
+    assign id_ex_pred_target_o = id_ex_pred_target_ff;
     assign sel_rs_o = sel_rs_ff;
     assign id_ex_rs1_raddr_o = rf_raddr_rs1_ff;
     assign id_ex_rs2_raddr_o = rf_raddr_rs2_ff;
