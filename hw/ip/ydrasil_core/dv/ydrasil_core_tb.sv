@@ -59,8 +59,8 @@ end
     wire [31:0] x3 = u_dut.u_ydrasil_registers.registers[3];
     // PC 监控
     wire [31:0] pc = u_dut.u_ydrasil_if_stage.pc_ff;
-    // wire [31:0] csr_instret = u_dut.u_ydrasil_csr.minstret[31:0];
-    wire [31:0] csr_cyclel = u_dut.u_ydrasil_registers_csr.cycle[31:0]; 
+    wire [31:0] csr_instret = u_dut.u_ydrasil_registers_csr.instret[31:0];
+    wire [31:0] csr_cyclel = u_dut.u_ydrasil_registers_csr.cycle[31:0];
 
     integer           r;
     reg     [8*300:1] testcase;
@@ -81,8 +81,7 @@ end
     reg [31:0] last_pc;
 
     // 添加指令计数和IPC计算相关变量
-    reg [31:0] instruction_count ;//= csr_instret; // 直接使用CSR中的instret寄存器
-    wire valid_instruction = (pc != last_pc);
+    wire [31:0] instruction_count = csr_instret; // Use CSR instret as the retired instruction count.
     real ipc;
     real bp_accuracy;
 
@@ -132,7 +131,6 @@ end
     // 周期计数器 - 保持同步实现
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            instruction_count <= 32'b0;
             last_pc           <= 32'b0;
             bp_branch_count <= 32'b0;
             bp_hit_count <= 32'b0;
@@ -140,9 +138,6 @@ end
             bp_mispredict_count <= 32'b0;
         end else begin
             last_pc     <= pc;
-            if (valid_instruction) begin
-                instruction_count <= instruction_count + 1;
-            end
             if (bp_branch_valid) begin
                 bp_branch_count <= bp_branch_count + 1;
                 bp_hit_count <= bp_hit_count + (bp_pred_hit ? 32'd1 : 32'd0);

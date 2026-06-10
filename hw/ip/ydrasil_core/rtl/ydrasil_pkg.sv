@@ -50,7 +50,7 @@ package ydrasil_pkg;
 `elsif YDRASIL_LSU_IMPL_NEW
 	localparam int LSU_MODE = LSU_MODE_NEW;
 `else
-	localparam int LSU_MODE = LSU_MODE_NEW;
+	localparam int LSU_MODE = LSU_MODE_LEGACY;
 `endif
 
 	localparam int MEMS_MODE_NEW = 0;
@@ -77,14 +77,33 @@ package ydrasil_pkg;
 	localparam int CSR_ADDR_WIDTH = 12;
 
 	// CSR addresses
-	localparam logic [11:0] CSR_CYCLE    = 12'hc00;
-	localparam logic [11:0] CSR_CYCLEH   = 12'hc80;
-	localparam logic [11:0] CSR_MTVEC    = 12'h305;
-	localparam logic [11:0] CSR_MCAUSE   = 12'h342;
-	localparam logic [11:0] CSR_MEPC     = 12'h341;
-	localparam logic [11:0] CSR_MIE      = 12'h304;
-	localparam logic [11:0] CSR_MSTATUS  = 12'h300;
-	localparam logic [11:0] CSR_MSCRATCH = 12'h340;
+	localparam logic [11:0] CSR_CYCLE         = 12'hc00;
+	localparam logic [11:0] CSR_TIME          = 12'hc01;
+	localparam logic [11:0] CSR_INSTRET       = 12'hc02;
+	localparam logic [11:0] CSR_CYCLEH        = 12'hc80;
+	localparam logic [11:0] CSR_TIMEH         = 12'hc81;
+	localparam logic [11:0] CSR_INSTRETH      = 12'hc82;
+	localparam logic [11:0] CSR_MCYCLE        = 12'hb00;
+	localparam logic [11:0] CSR_MINSTRET      = 12'hb02;
+	localparam logic [11:0] CSR_MCYCLEH       = 12'hb80;
+	localparam logic [11:0] CSR_MINSTRETH     = 12'hb82;
+	localparam logic [11:0] CSR_MSTATUS       = 12'h300;
+	localparam logic [11:0] CSR_MISA          = 12'h301;
+	localparam logic [11:0] CSR_MEDELEG       = 12'h302;
+	localparam logic [11:0] CSR_MIDELEG       = 12'h303;
+	localparam logic [11:0] CSR_MIE           = 12'h304;
+	localparam logic [11:0] CSR_MTVEC         = 12'h305;
+	localparam logic [11:0] CSR_MCOUNTEREN    = 12'h306;
+	localparam logic [11:0] CSR_MCOUNTINHIBIT = 12'h320;
+	localparam logic [11:0] CSR_MSCRATCH      = 12'h340;
+	localparam logic [11:0] CSR_MEPC          = 12'h341;
+	localparam logic [11:0] CSR_MCAUSE        = 12'h342;
+	localparam logic [11:0] CSR_MTVAL         = 12'h343;
+	localparam logic [11:0] CSR_MIP           = 12'h344;
+	localparam logic [11:0] CSR_MVENDORID     = 12'hf11;
+	localparam logic [11:0] CSR_MARCHID       = 12'hf12;
+	localparam logic [11:0] CSR_MIMPID        = 12'hf13;
+	localparam logic [11:0] CSR_MHARTID       = 12'hf14;
 
 	// RV32I instruction encodings
 	localparam logic [6:0] RV32I_INS_TYPE_I   = 7'b0010011;

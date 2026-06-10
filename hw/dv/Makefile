@@ -16,7 +16,7 @@ BENDER ?= bender
 BENDER_INCLUDE_TB ?= 1
 BENDER_TB_TARGET ?= ip_tb
 DIV_IMPL ?= new
-LSU_IMPL ?= new
+LSU_IMPL ?= legacy
 MEMS_IMPL ?= new
 
 BENDER_TARGET_ARGS := -t $(SIM_TOOL)

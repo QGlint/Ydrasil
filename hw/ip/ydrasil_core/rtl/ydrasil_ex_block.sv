@@ -15,6 +15,7 @@ import ydrasil_pkg::*;
     input  wire [DATA_WIDTH-1:0]           operand_b_i,
     input  wire [OPERATOR_WIDTH-1:0]       operator_i,
     input  wire [OPERATOR_TYPE_WIDTH-1:0]  operator_type_i,
+    input  wire                            id_ex_valid_i,
     input  wire                            id_ex_pred_hit_i,
     input  wire                            id_ex_pred_taken_i,
     input  wire [DATA_WIDTH-1:0]           id_ex_pred_target_i,
@@ -62,7 +63,9 @@ import ydrasil_pkg::*;
     output wire [REGS_DATA_WIDTH-1:0]      mul_wdata_rd_o,
     output wire                            mul_rf_wen_rd_o,
     output wire [REGS_ADDR_WIDTH-1:0]      mul_rf_waddr_rd_o,
+    output wire                            mul_result_valid_o,
 
+    output wire                            ex_instret_inc_o,
     output wire                            ex_mul_stall_o
 );
 
@@ -73,6 +76,7 @@ import ydrasil_pkg::*;
 
     wire op_m_unit;
     wire op_bitmanip;
+    wire op_load;
     wire op_mul;
     wire op_div;
 
@@ -84,6 +88,7 @@ import ydrasil_pkg::*;
     wire mul_issue_ready;
     wire mul_issue_valid;
     wire mul_issue_wen;
+    wire mul_result_valid;
 
     wire [REGS_DATA_WIDTH-1:0] bitmanip_result;
     wire                       bitmanip_rf_wen_rd;
@@ -153,9 +158,9 @@ import ydrasil_pkg::*;
     assign ex_branch_next_pc = ex_branch_pc + 32'd4;
 
     assign ex_branch_jump_o = ex_branch_jump | interrupt_i;
-    assign ex_is_jump = operator_type_i[OPERATOR_TYPE_BJP] & operator_i[OP_BJP_JUMP];
+    assign ex_is_jump = id_ex_valid_i & operator_type_i[OPERATOR_TYPE_BJP] & operator_i[OP_BJP_JUMP];
     assign ex_is_branch =
-        operator_type_i[OPERATOR_TYPE_BJP] &
+        id_ex_valid_i & operator_type_i[OPERATOR_TYPE_BJP] &
         (operator_i[OP_BJP_BEQ]  |
          operator_i[OP_BJP_BNE]  |
          operator_i[OP_BJP_BLT]  |
@@ -183,6 +188,7 @@ import ydrasil_pkg::*;
 
     assign op_m_unit = operator_type_i[OPERATOR_TYPE_MUL];
     assign op_bitmanip = operator_type_i[OPERATOR_TYPE_BITMANIP];
+    assign op_load = operator_type_i[OPERATOR_TYPE_LOAD];
     assign op_mul =
         op_m_unit &
         (operator_i[OP_MUL_MUL]    |
@@ -196,18 +202,22 @@ import ydrasil_pkg::*;
          operator_i[OP_MUL_REM]  |
          operator_i[OP_MUL_REMU]);
 
-    assign mul_issue_valid = op_mul & mul_issue_ready & !interrupt_i & !flush_ex_i;
+    assign mul_issue_valid = id_ex_valid_i & op_mul & mul_issue_ready & !interrupt_i & !flush_ex_i;
     assign mul_issue_wen = id_alu_rf_wen_rd_i & (id_rf_waddr_rd_i != '0);
     assign mul_issue_o = mul_issue_valid & mul_issue_wen;
     assign mul_issue_waddr_o = id_rf_waddr_rd_i;
 
-    assign div_start = op_div & !div_busy & !div_done & !interrupt_i;
-    assign div_rf_wen_rd = op_div & div_done & id_alu_rf_wen_rd_i & !interrupt_i;
+    assign div_start = id_ex_valid_i & op_div & !div_busy & !div_done & !interrupt_i & !flush_ex_i;
+    assign div_rf_wen_rd = id_ex_valid_i & op_div & div_done & id_alu_rf_wen_rd_i & !interrupt_i;
     assign ex_mul_stall_o = op_div & !div_done;
 
-    assign bitmanip_rf_wen_rd = op_bitmanip & id_alu_rf_wen_rd_i & !interrupt_i;
+    assign bitmanip_rf_wen_rd = id_ex_valid_i & op_bitmanip & id_alu_rf_wen_rd_i & !interrupt_i;
     assign normal_alu_rf_wen_rd = alu_rf_wen_rd & !op_m_unit & !op_bitmanip;
     assign ex_rf_wen_rd = div_rf_wen_rd | bitmanip_rf_wen_rd | normal_alu_rf_wen_rd | csr_wen;
+    assign mul_result_valid_o = mul_result_valid;
+    assign ex_instret_inc_o =
+        (id_ex_valid_i & !interrupt_i & !flush_ex_i & !op_load & !op_mul & !op_div) |
+        (id_ex_valid_i & !interrupt_i & !flush_ex_i & op_div & div_done);
 
     ydrasil_alu #(
         .DATAWIDTH(DATA_WIDTH)
@@ -249,7 +259,7 @@ import ydrasil_pkg::*;
         .operator_i      (operator_i),
         .issue_wen_i     (mul_issue_wen),
         .issue_waddr_i   (id_rf_waddr_rd_i),
-        .result_valid_o  (),
+        .result_valid_o  (mul_result_valid),
         .result_wen_o    (mul_rf_wen_rd_o),
         .result_waddr_o  (mul_rf_waddr_rd_o),
         .result_wdata_o  (mul_wdata_rd_o)
@@ -265,7 +275,7 @@ import ydrasil_pkg::*;
 
     wire [31:0] alu_csr_result;
     wire csr_wen;
-    wire op_csr = operator_type_i[OPERATOR_TYPE_CSR];
+    wire op_csr = id_ex_valid_i & operator_type_i[OPERATOR_TYPE_CSR] & !interrupt_i & !flush_ex_i;
     wire csr_csrrw = op_csr & id_op_csr_info_i[OP_CSR_CSRRW];
     wire csr_csrrs = op_csr & id_op_csr_info_i[OP_CSR_CSRRS];
     wire csr_csrrc = op_csr & id_op_csr_info_i[OP_CSR_CSRRC];

@@ -31,6 +31,7 @@ import ydrasil_pkg::*;
 		output wire        if_id_pred_hit_o,
 		output wire        if_id_pred_taken_o,
 		output wire [31:0] if_id_pred_target_o,
+		output wire        if_id_valid_o,
 
 		output wire [31:0] if_id_instr_o
 
@@ -49,6 +50,7 @@ import ydrasil_pkg::*;
 	reg        if_id_pred_hit_ff;
 	reg        if_id_pred_taken_ff;
 	reg [31:0] if_id_pred_target_ff;
+	reg        if_id_valid_ff;
 	reg flush_if_ff;
 	reg stall_if_ff;
 
@@ -66,6 +68,7 @@ import ydrasil_pkg::*;
 	assign if_id_pred_hit_o = if_id_pred_hit_ff;
 	assign if_id_pred_taken_o = if_id_pred_taken_ff;
 	assign if_id_pred_target_o = if_id_pred_target_ff;
+	assign if_id_valid_o = if_id_valid_ff;
 	assign pc_now =  pc_ff;
 	assign if_id_instr_o = if_id_instr;
 	assign if_id_instr = 
@@ -93,6 +96,7 @@ import ydrasil_pkg::*;
 			if_id_pred_hit_ff <= 1'b0;
 			if_id_pred_taken_ff <= 1'b0;
 			if_id_pred_target_ff <= '0;
+			if_id_valid_ff <= 1'b0;
 			flush_if_ff     <= 1'b0;
 			if_id_instr_ff <= ydrasil_pkg::RV32I_INS_NOP;
 			stall_if_ff    <= 1'b0;
@@ -103,12 +107,14 @@ import ydrasil_pkg::*;
 				if_id_pred_hit_ff <= 1'b0;
 				if_id_pred_taken_ff <= 1'b0;
 				if_id_pred_target_ff <= '0;
+				if_id_valid_ff <= 1'b0;
 				flush_if_ff     <= 1'b1;
 			end else if(!stall_if_i) begin
 				if_id_pc_ff    <= pc_now;
 				if_id_pred_hit_ff <= bp_predict_hit_i & !bp_invalidate_i;
 				if_id_pred_taken_ff <= bp_predict_taken_i & !bp_invalidate_i;
 				if_id_pred_target_ff <= bp_predict_target_i;
+				if_id_valid_ff <= 1'b1;
 				flush_if_ff     <= 1'b0;
 			end
 			if_id_instr_ff <= if_id_instr;

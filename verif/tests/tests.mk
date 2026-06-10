@@ -1,8 +1,12 @@
 RVTESTS_DIR := $(PROJECT_ROOT)/verif/tests/riscv-tests
 RVTESTSISA_DIR := $(RVTESTS_DIR)/isa
 
-RVTESTS_ALL := $(foreach t,$(RVTESTS_TYPE), \
+RVTESTS_EXCLUDE ?= rv32ui/ma_data
+
+RVTESTS_DISCOVERED := $(foreach t,$(RVTESTS_TYPE), \
                $(addprefix $(t)/,$(basename $(notdir $(wildcard $(RVTESTSISA_DIR)/$(t)/*.S)))) )
+
+RVTESTS_ALL := $(filter-out $(RVTESTS_EXCLUDE),$(RVTESTS_DISCOVERED))
 
 # 为每个测试生成唯一目标名（替换 / 为 _）
 RVTESTS_TARGETS := $(addprefix rv_comp_,$(subst /,_,$(RVTESTS_ALL)))

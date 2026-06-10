@@ -15,6 +15,7 @@ import ydrasil_pkg::*;
     input  wire                            if_id_pred_hit_i,
     input  wire                            if_id_pred_taken_i,
     input  wire [DATA_WIDTH-1:0]           if_id_pred_target_i,
+    input  wire                            if_id_valid_i,
 
     // Register file read ports 
     output wire [4:0]                      rf_addr_rs1_o,
@@ -61,6 +62,7 @@ import ydrasil_pkg::*;
     output wire                            id_ex_pred_hit_o,
     output wire                            id_ex_pred_taken_o,
     output wire [DATA_WIDTH-1:0]           id_ex_pred_target_o,
+    output wire                            id_ex_valid_o,
     // Generic writeback information
     output wire                            id_alu_rf_wen_rd_o,
     output wire [4:0]                      id_rf_waddr_rd_o
@@ -128,6 +130,7 @@ import ydrasil_pkg::*;
     reg                                  id_ex_pred_hit_ff;
     reg                                  id_ex_pred_taken_ff;
     reg [DATA_WIDTH-1:0]                 id_ex_pred_target_ff;
+    reg                                  id_ex_valid_ff;
     wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0] 	 csr_reg_raddr;
    
     wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0] 	  csr_ex_waddr;
@@ -228,6 +231,7 @@ import ydrasil_pkg::*;
             id_ex_pred_hit_ff <= 1'b0;
             id_ex_pred_taken_ff <= 1'b0;
             id_ex_pred_target_ff <= '0;
+            id_ex_valid_ff <= 1'b0;
             sel_rs_ff <= '0;
             rf_raddr_rs1_ff <= '0;
             rf_raddr_rs2_ff <= '0;
@@ -257,6 +261,7 @@ import ydrasil_pkg::*;
             id_ex_pred_hit_ff <= 1'b0;
             id_ex_pred_taken_ff <= 1'b0;
             id_ex_pred_target_ff <= '0;
+            id_ex_valid_ff <= 1'b0;
             sel_rs_ff <= '0;
             rf_raddr_rs1_ff <= '0;
             rf_raddr_rs2_ff <= '0;
@@ -285,6 +290,7 @@ import ydrasil_pkg::*;
             id_ex_pred_hit_ff <= if_id_pred_hit_i;
             id_ex_pred_taken_ff <= if_id_pred_taken_i;
             id_ex_pred_target_ff <= if_id_pred_target_i;
+            id_ex_valid_ff <= if_id_valid_i;
             sel_rs_ff <= sel_rs;
             rf_raddr_rs1_ff <= rf_raddr_rs1;
             rf_raddr_rs2_ff <= rf_raddr_rs2;
@@ -316,6 +322,7 @@ import ydrasil_pkg::*;
     assign id_ex_pred_hit_o = id_ex_pred_hit_ff;
     assign id_ex_pred_taken_o = id_ex_pred_taken_ff;
     assign id_ex_pred_target_o = id_ex_pred_target_ff;
+    assign id_ex_valid_o = id_ex_valid_ff;
     assign sel_rs_o = sel_rs_ff;
     assign id_ex_rs1_raddr_o = rf_raddr_rs1_ff;
     assign id_ex_rs2_raddr_o = rf_raddr_rs2_ff;

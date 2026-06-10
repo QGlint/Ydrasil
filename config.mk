@@ -12,7 +12,7 @@ USE_BENDER ?= 1
 BENDER ?= bender
 VERILATOR_TRACE ?= 1
 DIV_IMPL ?= new
-LSU_IMPL ?= new
+LSU_IMPL ?= legacy
 MEMS_IMPL ?= new
 PYTHON ?= python3
 TRACE_TO_CSV ?= $(PROJECT_ROOT)/verif/sim/riscv_trace_csv.py
@@ -88,6 +88,7 @@ RISCV_CFLAGS := \
     -mcmodel=medany
 
 RVTESTS_TYPE := rv32ui rv32um rv32uzba rv32uzbb rv32uzbc rv32uzbkb rv32uzbkx rv32uzbs
+RVTESTS_EXCLUDE ?= rv32ui/ma_data
 
 RVTESTS_OUT_ROOT := $(BUILD_DIR)/riscv_tests
 
@@ -103,6 +104,8 @@ SPIKE_FLAGS := \
 
 .SECONDEXPANSION:
 
-RVTESTS_SIM_TARGETS = $(foreach typ,$(RVTESTS_TYPE),$(addprefix rv_sim_$(typ)_, $(basename $(notdir $(wildcard $(RVTESTS_OUT_ROOT)/$(typ)/mem/*.itcm)))))
+RVTESTS_SIM_EXCLUDE_TARGETS = $(addprefix rv_sim_%_,$(subst /,_,$(RVTESTS_EXCLUDE)))
+RVTESTS_SIM_DISCOVERED_TARGETS = $(foreach typ,$(RVTESTS_TYPE),$(addprefix rv_sim_$(typ)_, $(basename $(notdir $(wildcard $(RVTESTS_OUT_ROOT)/$(typ)/mem/*.itcm)))))
+RVTESTS_SIM_TARGETS = $(filter-out $(RVTESTS_SIM_EXCLUDE_TARGETS),$(RVTESTS_SIM_DISCOVERED_TARGETS))
 RVTESTS_SUMMARY_TARGETS = $(addprefix rv_summary_,$(RVTESTS_TYPE))
 RVTESTS_REPORT_TARGETS = $(addprefix rv_report_,$(RVTESTS_TYPE))

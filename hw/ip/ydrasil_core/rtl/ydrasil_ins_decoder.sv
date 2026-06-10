@@ -362,6 +362,7 @@ import ydrasil_pkg::*;
 	assign is_csrrwi = is_csr  	& (funct3 == ydrasil_pkg::RV32I_INS_CSRRWI);
 	assign is_csrrsi = is_csr  	& (funct3 == ydrasil_pkg::RV32I_INS_CSRRSI);
 	assign is_csrrci = is_csr  	& (funct3 == ydrasil_pkg::RV32I_INS_CSRRCI);
+	wire csr_imm = is_csrrwi | is_csrrsi | is_csrrci;
 
 
 	assign alu_op_info[ydrasil_pkg::OP_ALU_ADD]   = is_addi | is_add ;
@@ -452,12 +453,12 @@ import ydrasil_pkg::*;
 	assign bitmanip_op_info[ydrasil_pkg::OP_B_RSVD]   = 1'b0;
 
 
-	wire rf_ren_rs1 =	(~is_lui) 	& (~is_auipc) 	& (~is_jal) &  
-       					(~is_ecall) & (~is_ebreak) 	& (~is_fence) & 
-       					(~is_nop) 	& (~is_fence_i);// U类型指令不需要rs1
+	wire rf_ren_rs1 =	(~is_lui) 	& (~is_auipc) 	& (~is_jal) &
+						(~is_ecall) & (~is_ebreak) & (~is_fence) &
+						(~is_nop) 	& (~is_fence_i) & (~csr_imm);// U类型指令不需要rs1
 	wire rf_ren_rs2 = is_r_alu_use | is_mul_use | is_branch | is_bitmanip_rs2_use; // R类型和分支指令需要rs2
 
-	wire rf_wen_rd = is_lui | is_auipc | is_jal | is_jalr | is_op_imm | is_r_alu_use | is_mul_use | is_bitmanip_use ; // 需要写回寄存器的指令类型
+	wire rf_wen_rd = is_lui | is_auipc | is_jal | is_jalr | is_op_imm | is_r_alu_use | is_mul_use | is_bitmanip_use | is_csr ; // 需要写回寄存器的指令类型
 
 	wire is_alu_use = is_op_imm | is_r_alu_use | is_lui | is_auipc;
 	wire is_bjp_use = is_branch | is_jal | is_jalr;
@@ -503,7 +504,7 @@ import ydrasil_pkg::*;
 	wire operand_a_imm_sel	;
 	wire bt_a_rs_sel 		;
 
-	assign operand_a_imm_sel = is_csrrwi | is_csrrsi | is_csrrci;
+	assign operand_a_imm_sel = csr_imm;
 
 	assign operand_b_rs_sel = is_branch | is_r_alu_use | is_mul_use | is_bitmanip_rs2_use;
 	assign operand_a_pc_sel = is_auipc  |is_jal |is_jalr;
