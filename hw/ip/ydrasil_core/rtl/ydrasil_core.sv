@@ -129,11 +129,7 @@ import ydrasil_pkg::*;
 	wire [ydrasil_pkg::BUS_DATA_WIDTH-1:0]  lsu_mem_rdata_m; // 从DRAM读取的数据
 
     //LSU -> CTRL
-    wire                            lsu_ctrl_stall;   
-	    wire                           	lsu_ctrl_stall_wb;
 	wire                            lsu_ctrl_busy;
-	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    	lsu_ctrl_waddr_rd;
-	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    	lsu_ctrl_waddr_rd_wb;
 
     //LSU -> ID
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    id_ctrl_rs1_addr;
@@ -142,8 +138,10 @@ import ydrasil_pkg::*;
 	wire                            id_ctrl_rs2_ren;
 	wire                            id_ctrl_rd_wen;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    id_ctrl_rd_addr;
-	wire                            mul_scoreboard_stall;
-	reg [ydrasil_pkg::REGS_NUM-1:0] mul_pending_q;
+	wire                            id_ctrl_lsu_req;
+	wire                            scoreboard_stall;
+	wire                            lsu_struct_stall;
+	reg [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_q;
 
 	wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0]       id_csr_raddr;
 	wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0]       id_ex_csr_waddr;
@@ -191,26 +189,32 @@ import ydrasil_pkg::*;
         end
     end
 
-	wire [ydrasil_pkg::REGS_NUM-1:0] mul_pending_clear_mask =
-		(wb_mul_complete && (wb_mul_complete_waddr != '0)) ?
-		(ydrasil_pkg::REGS_NUM'(1) << wb_mul_complete_waddr) : '0;
-	wire [ydrasil_pkg::REGS_NUM-1:0] mul_pending_issue_mask =
-		ex_mul_issue ? (ydrasil_pkg::REGS_NUM'(1) << ex_mul_issue_waddr) : '0;
-	wire [ydrasil_pkg::REGS_NUM-1:0] mul_pending_for_hazard =
-		(mul_pending_q & ~mul_pending_clear_mask) | mul_pending_issue_mask;
+	wire load_issue = id_ex_valid & operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD] &
+		(id_rf_waddr_rd != '0) & !interrupt;
+	wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_clear_mask =
+		((wb_mul_complete && (wb_mul_complete_waddr != '0)) ?
+			(ydrasil_pkg::REGS_NUM'(1) << wb_mul_complete_waddr) : '0) |
+		((lsu_rf_wen_rd && (lsu_rf_waddr_rd != '0)) ?
+			(ydrasil_pkg::REGS_NUM'(1) << lsu_rf_waddr_rd) : '0);
+	wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_issue_mask =
+		(ex_mul_issue ? (ydrasil_pkg::REGS_NUM'(1) << ex_mul_issue_waddr) : '0) |
+		(load_issue ? (ydrasil_pkg::REGS_NUM'(1) << id_rf_waddr_rd) : '0);
+	wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_for_hazard =
+		(gpr_pending_q & ~gpr_pending_clear_mask) | gpr_pending_issue_mask;
 
-	assign mul_scoreboard_stall =
-		(id_ctrl_rs1_ren && mul_pending_for_hazard[id_ctrl_rs1_addr]) |
-		(id_ctrl_rs2_ren && mul_pending_for_hazard[id_ctrl_rs2_addr]) |
-		(id_ctrl_rd_wen  && mul_pending_for_hazard[id_ctrl_rd_addr]);
+	assign scoreboard_stall =
+		(id_ctrl_rs1_ren && gpr_pending_for_hazard[id_ctrl_rs1_addr]) |
+		(id_ctrl_rs2_ren && gpr_pending_for_hazard[id_ctrl_rs2_addr]) |
+		(id_ctrl_rd_wen  && gpr_pending_for_hazard[id_ctrl_rd_addr]);
+	assign lsu_struct_stall = id_ctrl_lsu_req & lsu_ctrl_busy;
 
 	always_ff @(posedge clk or negedge rst_n) begin
 		if (!rst_n) begin
-			mul_pending_q <= '0;
+			gpr_pending_q <= '0;
 		end else if (flush_ex | interrupt) begin
-			mul_pending_q <= '0;
+			gpr_pending_q <= '0;
 		end else begin
-			mul_pending_q <= mul_pending_for_hazard;
+			gpr_pending_q <= gpr_pending_for_hazard;
 		end
 	end
 
@@ -240,11 +244,7 @@ import ydrasil_pkg::*;
 		.lsu_mem_wen_o     (lsu_mem_we),
 		.lsu_mem_req_o     (lsu_mem_req),
 		.lsu_mem_wmask_o   (lsu_mem_wmask),
-		.lsu_ctrl_stall_o       (lsu_ctrl_stall),
-		.lsu_ctrl_stall_wb_o    (lsu_ctrl_stall_wb),
 		.lsu_ctrl_busy_o        (lsu_ctrl_busy),
-		.lsu_ctrl_waddr_rd_o    (lsu_ctrl_waddr_rd),
-		.lsu_ctrl_waddr_rd_wb_o (lsu_ctrl_waddr_rd_wb),
 		.lsu_wb_result_o   (lsu_wb_result),
 		.lsu_rf_rd_wen_o   (lsu_rf_wen_rd),
 		.lsu_rf_rd_waddr_o (lsu_rf_waddr_rd)
@@ -324,6 +324,7 @@ import ydrasil_pkg::*;
 		.id_ctrl_rs2_ren_o  (id_ctrl_rs2_ren),
 		.id_ctrl_rd_wen_o   (id_ctrl_rd_wen),
 		.id_ctrl_rd_addr_o  (id_ctrl_rd_addr),
+		.id_ctrl_lsu_req_o  (id_ctrl_lsu_req),
 		.id_csr_raddr_o     (id_csr_raddr),
 		.id_ex_csr_waddr_o  (id_ex_csr_waddr),
 		.id_op_csr_info_o   (id_op_csr_info),
@@ -449,17 +450,11 @@ import ydrasil_pkg::*;
 			.rst_n             (rst_n),
 			.ex_branch_jump_i  (ex_pc_redirect),
 			.ex_branch_target_i(ex_pc_redirect_target),
-		.lsu_ctrl_stall_i       (lsu_ctrl_stall),
-		.lsu_ctrl_stall_wb_i    (lsu_ctrl_stall_wb),
-		.lsu_ctrl_busy_i        (lsu_ctrl_busy),
-		.lsu_ctrl_waddr_rd_i    (lsu_ctrl_waddr_rd),
-		.lsu_ctrl_waddr_rd_wb_i (lsu_ctrl_waddr_rd_wb),
-		.id_ctrl_rs1_addr_i     (id_ctrl_rs1_addr),
-		.id_ctrl_rs2_addr_i     (id_ctrl_rs2_addr),
-        .clint_stall_i        (clint_stall),
-		.ex_mul_stall_i     (ex_mul_stall),
-		.mul_scoreboard_stall_i(mul_scoreboard_stall),
-		.wb_backpressure_i  (wb_backpressure),
+			.scoreboard_stall_i (scoreboard_stall),
+			.lsu_struct_stall_i (lsu_struct_stall),
+	        .clint_stall_i        (clint_stall),
+			.ex_mul_stall_i     (ex_mul_stall),
+			.wb_backpressure_i  (wb_backpressure),
 		.stall_if_o        (stall_if),
 		.stall_id_o        (stall_id),
         .stall_pc_o        (stall_pc),

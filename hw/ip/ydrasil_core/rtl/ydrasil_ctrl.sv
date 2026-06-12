@@ -9,18 +9,10 @@ import ydrasil_pkg::*;
     input wire                          ex_branch_jump_i,
     input wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0]   ex_branch_target_i,
     
-    input wire                           lsu_ctrl_stall_i, // LSU 可能会因为等待内存响应而请求stall
-    input wire                           lsu_ctrl_stall_wb_i, // LSU 可能会因为异常等原因
-    input wire                           lsu_ctrl_busy_i,
-    input wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    lsu_ctrl_waddr_rd_i,
-    input wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    lsu_ctrl_waddr_rd_wb_i,
-
-    input wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    id_ctrl_rs1_addr_i,
-    input wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    id_ctrl_rs2_addr_i,
-
+    input wire                          scoreboard_stall_i,
+    input wire                          lsu_struct_stall_i,
     input wire                          clint_stall_i,
     input wire                          ex_mul_stall_i,
-    input wire                          mul_scoreboard_stall_i,
     input wire                          wb_backpressure_i,
 
     output wire                         stall_if_o,
@@ -38,14 +30,9 @@ import ydrasil_pkg::*;
 
 );
 
-    wire lsu_stall_rs_rd;
-    wire lsu_stall_rs_rd_wb;
-
-    wire lsu_stall ;
     wire decode_bubble_stall;
-    assign lsu_stall = lsu_ctrl_busy_i | lsu_stall_rs_rd | lsu_stall_rs_rd_wb;
     assign decode_bubble_stall =
-        lsu_stall | clint_stall_i | mul_scoreboard_stall_i | wb_backpressure_i;
+        scoreboard_stall_i | lsu_struct_stall_i | clint_stall_i | wb_backpressure_i;
 
     assign branch_target_o = ex_branch_target_i;
     assign branch_jump_o = ex_branch_jump_i;
@@ -54,9 +41,6 @@ import ydrasil_pkg::*;
     assign flush_if_o = branch_jump_o ;
     assign flush_ex_o = 1'b0; 
     // assign flush_mems_o = 1'b0;
-    assign lsu_stall_rs_rd = ((id_ctrl_rs1_addr_i == lsu_ctrl_waddr_rd_i) || (id_ctrl_rs2_addr_i == lsu_ctrl_waddr_rd_i)) && lsu_ctrl_stall_i;
-    assign lsu_stall_rs_rd_wb = ((id_ctrl_rs1_addr_i == lsu_ctrl_waddr_rd_wb_i) || (id_ctrl_rs2_addr_i == lsu_ctrl_waddr_rd_wb_i)) && lsu_ctrl_stall_wb_i;
-
     // assign stall_ex_o = clint_stall_i;
     assign stall_id_o = ex_mul_stall_i;
     assign stall_if_o = decode_bubble_stall | ex_mul_stall_i;

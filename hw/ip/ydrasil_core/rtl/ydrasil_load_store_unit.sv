@@ -22,11 +22,7 @@ import ydrasil_pkg::*;
     output wire                            lsu_mem_req_o,
     output wire [                3:0]      lsu_mem_wmask_o,  // 字节写入掩码，4位分别对应4个字节
 
-	output wire                           	lsu_ctrl_stall_o,       // LSU 可能会因为等待内存响应而请求stall
-    output wire                           	lsu_ctrl_stall_wb_o,    // LSU 可能会因为异常等原因
     output wire                            lsu_ctrl_busy_o,
-    output wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    	lsu_ctrl_waddr_rd_o,
-    output wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    	lsu_ctrl_waddr_rd_wb_o,
 
 
     // 寄存器写回接口
@@ -192,10 +188,6 @@ import ydrasil_pkg::*;
             store_data_for_word(active_store_data, active_store_index, active_store_op, second_store_req) : 32'b0;
 
         assign lsu_ctrl_busy_o = (state_q != S_IDLE) | request_valid | result_valid_q;
-        assign lsu_ctrl_stall_o = lsu_ctrl_busy_o;
-        assign lsu_ctrl_stall_wb_o = result_valid_q;
-        assign lsu_ctrl_waddr_rd_o = (state_q == S_IDLE) ? id_rd_waddr_i : rd_addr_q;
-        assign lsu_ctrl_waddr_rd_wb_o = rd_addr_q;
 
         assign lsu_wb_result_o = result_q;
         assign lsu_rf_rd_wen_o = result_valid_q;
@@ -311,11 +303,7 @@ import ydrasil_pkg::*;
         end
     end
 
-    assign lsu_ctrl_stall_o = is_load; 
-    assign lsu_ctrl_stall_wb_o = is_load_ff; // 假设与lsu_ctrl_stall_o相同
     assign lsu_ctrl_busy_o = 1'b0;
-    assign lsu_ctrl_waddr_rd_o = id_rd_waddr_i;
-    assign lsu_ctrl_waddr_rd_wb_o = rd_addr_ff;
 
     assign lsu_wb_result_o = lsu_wb_result_ff;
     assign lsu_rf_rd_wen_o = lsu_rf_rd_wen_ff;
