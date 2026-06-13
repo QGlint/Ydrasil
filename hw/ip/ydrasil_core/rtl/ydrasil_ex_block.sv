@@ -19,6 +19,7 @@ import ydrasil_pkg::*;
     input  wire                            id_ex_pred_hit_i,
     input  wire                            id_ex_pred_taken_i,
     input  wire [DATA_WIDTH-1:0]           id_ex_pred_target_i,
+    input  wire [1:0]                      id_ex_pred_counter_i,
     input  wire [REGS_ADDR_WIDTH-1:0]      id_rf_waddr_rd_i,
     input  wire                            id_alu_rf_wen_rd_i,
     input  wire                            id_ex_rs2_rd_forward_i,
@@ -49,6 +50,7 @@ import ydrasil_pkg::*;
     output wire [DATA_WIDTH-1:0]           ex_bp_train_pc_o,
     output wire                            ex_bp_train_taken_o,
     output wire [DATA_WIDTH-1:0]           ex_bp_train_target_o,
+    output wire [1:0]                      ex_bp_train_counter_o,
     output wire                            ex_branch_mispredict_o,
     output wire [BUS_ADDR_WIDTH-1:0]       ex_lsu_mem_addr_o,
 
@@ -185,6 +187,7 @@ import ydrasil_pkg::*;
     assign ex_bp_train_pc_o = ex_branch_pc;
     assign ex_bp_train_taken_o = ex_branch_taken;
     assign ex_bp_train_target_o = bt_alu_result;
+    assign ex_bp_train_counter_o = id_ex_pred_counter_i;
 
     assign op_m_unit = operator_type_i[OPERATOR_TYPE_MUL];
     assign op_bitmanip = operator_type_i[OPERATOR_TYPE_BITMANIP];

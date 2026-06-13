@@ -3,7 +3,9 @@
 module ydrasil_core
 import ydrasil_pkg::*;
 	 #(
-		parameter int BP_ENTRIES = 256
+		parameter int BP_ENTRIES  = 0,
+		parameter int BTB_ENTRIES = (BP_ENTRIES != 0) ? BP_ENTRIES : ydrasil_pkg::BP_BTB_ENTRIES,
+		parameter int BHT_ENTRIES = (BP_ENTRIES != 0) ? BP_ENTRIES : ydrasil_pkg::BP_BHT_ENTRIES
 	)(
 	input  wire clk,
 	input  wire rst_n
@@ -30,6 +32,7 @@ import ydrasil_pkg::*;
 	wire        if_id_pred_hit;
 	wire        if_id_pred_taken;
 	wire [31:0] if_id_pred_target;
+	wire [1:0]  if_id_pred_counter;
 	wire        if_id_valid;
 
 	// CTRL signals
@@ -86,16 +89,19 @@ import ydrasil_pkg::*;
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] ex_bp_train_pc;
 	wire                        ex_bp_train_taken;
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] ex_bp_train_target;
+	wire [1:0]                  ex_bp_train_counter;
 	wire                        ex_branch_mispredict;
 
 	// Branch predictor
 	wire                        bp_predict_hit;
 	wire                        bp_predict_taken;
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] bp_predict_target;
+	wire [1:0]                  bp_predict_counter;
 	wire                        id_fence_i;
 	wire                        id_ex_pred_hit;
 	wire                        id_ex_pred_taken;
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] id_ex_pred_target;
+	wire [1:0]                  id_ex_pred_counter;
 	wire                        id_ex_valid;
 
 	// LSU request path
@@ -251,7 +257,9 @@ import ydrasil_pkg::*;
 	);
 
 		ydrasil_branch_predictor #(
-			.BP_ENTRIES(BP_ENTRIES)
+			.BP_ENTRIES(BP_ENTRIES),
+			.BTB_ENTRIES(BTB_ENTRIES),
+			.BHT_ENTRIES(BHT_ENTRIES)
 		) u_ydrasil_branch_predictor (
 			.clk              (clk),
 			.rst_n            (rst_n),
@@ -259,10 +267,12 @@ import ydrasil_pkg::*;
 			.predict_hit_o    (bp_predict_hit),
 			.predict_taken_o  (bp_predict_taken),
 			.predict_target_o (bp_predict_target),
+			.predict_counter_o(bp_predict_counter),
 			.train_valid_i    (ex_bp_train_valid),
 			.train_pc_i       (ex_bp_train_pc),
 			.train_taken_i    (ex_bp_train_taken),
 			.train_target_i   (ex_bp_train_target),
+			.train_counter_i  (ex_bp_train_counter),
 			.invalidate_i     (id_fence_i)
 		);
 
@@ -277,6 +287,7 @@ import ydrasil_pkg::*;
 			.bp_predict_hit_i(bp_predict_hit),
 			.bp_predict_taken_i(bp_predict_taken),
 			.bp_predict_target_i(bp_predict_target),
+			.bp_predict_counter_i(bp_predict_counter),
 			.bp_invalidate_i(id_fence_i),
 			.if_mem_addr_o   (if_mem_addr),
 			.if_mem_rdata_i  (if_mem_rdata),
@@ -284,6 +295,7 @@ import ydrasil_pkg::*;
 			.if_id_pred_hit_o(if_id_pred_hit),
 			.if_id_pred_taken_o(if_id_pred_taken),
 			.if_id_pred_target_o(if_id_pred_target),
+			.if_id_pred_counter_o(if_id_pred_counter),
 			.if_id_valid_o   (if_id_valid),
 			.if_id_instr_o   (if_id_instr)
 		);
@@ -298,6 +310,7 @@ import ydrasil_pkg::*;
 		.if_id_pred_hit_i    (if_id_pred_hit),
 		.if_id_pred_taken_i  (if_id_pred_taken),
 		.if_id_pred_target_i (if_id_pred_target),
+		.if_id_pred_counter_i(if_id_pred_counter),
 		.if_id_valid_i       (if_id_valid),
 		.rf_addr_rs1_o       (rf_raddr_rs1),
 		.rf_addr_rs2_o      (rf_raddr_rs2),
@@ -334,6 +347,7 @@ import ydrasil_pkg::*;
 		.id_ex_pred_hit_o   (id_ex_pred_hit),
 		.id_ex_pred_taken_o (id_ex_pred_taken),
 		.id_ex_pred_target_o(id_ex_pred_target),
+		.id_ex_pred_counter_o(id_ex_pred_counter),
 		.id_ex_valid_o      (id_ex_valid),
 		.id_alu_rf_wen_rd_o (id_alu_rf_wen_rd),
 		.id_rf_waddr_rd_o   (id_rf_waddr_rd)
@@ -353,6 +367,7 @@ import ydrasil_pkg::*;
 		.id_ex_pred_hit_i   (id_ex_pred_hit),
 		.id_ex_pred_taken_i (id_ex_pred_taken),
 		.id_ex_pred_target_i(id_ex_pred_target),
+		.id_ex_pred_counter_i(id_ex_pred_counter),
 		.interrupt_i        (interrupt),
 		.clint_ex_int_addr_i(clint_ex_int_addr),
 		.id_rf_waddr_rd_i   (id_rf_waddr_rd),
@@ -380,6 +395,7 @@ import ydrasil_pkg::*;
 		.ex_bp_train_pc_o   (ex_bp_train_pc),
 		.ex_bp_train_taken_o(ex_bp_train_taken),
 		.ex_bp_train_target_o(ex_bp_train_target),
+		.ex_bp_train_counter_o(ex_bp_train_counter),
 		.ex_branch_mispredict_o(ex_branch_mispredict),
 		.ex_lsu_mem_addr_o  (ex_lsu_mem_addr),
 		.ex_lsu_result_o    (ex_lsu_result),

@@ -10,4 +10,5 @@ sources:
       - rtl/itcm.sv
       - rtl/dtcm.sv
       - rtl/ydrmem_ram.sv
+      - rtl/ydrmem_1r1w_ram.sv
       - rtl/ydrmem_rom.sv
