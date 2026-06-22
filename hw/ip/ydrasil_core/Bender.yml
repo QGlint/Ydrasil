@@ -18,6 +18,7 @@ sources:
       - rtl/ydrasil_id_stage.sv
       - rtl/ydrasil_ins_decoder.sv
       - rtl/ydrasil_mul.sv
+      - rtl/ydrasil_lzc.sv
       - rtl/ydrasil_div.sv
       - rtl/ydrasil_bitmanip.sv
       - rtl/ydrasil_ex_block.sv

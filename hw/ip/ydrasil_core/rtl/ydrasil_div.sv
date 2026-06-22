@@ -1,4 +1,3 @@
-
 module ydrasil_div
 import ydrasil_pkg::*;
 (
@@ -16,247 +15,233 @@ import ydrasil_pkg::*;
     output wire [REGS_DATA_WIDTH-1:0]      result_o
 );
 
-    if (DIV_MODE == DIV_MODE_NEW) begin : g_new
-        localparam [5:0] DIV_ITER_LAST = 6'd31;
+    generate
+        begin : g_lzc_div
+            localparam int unsigned LZC_CNT_WIDTH = ydrasil_pkg::idx_width(REGS_DATA_WIDTH);
 
-        reg                         busy_q;
-        reg                         done_q;
-        reg [5:0]                   iter_q;
-        reg [REGS_DATA_WIDTH-1:0]   dividend_q;
-        reg [REGS_DATA_WIDTH-1:0]   divisor_q;
-        reg [REGS_DATA_WIDTH-1:0]   quotient_q;
-        reg [REGS_DATA_WIDTH:0]     remainder_q;
-        reg                         quotient_neg_q;
-        reg                         remainder_neg_q;
-        reg                         rem_result_q;
-        reg [REGS_DATA_WIDTH-1:0]   result_q;
+            typedef enum logic [1:0] {
+                DIV_STATE_IDLE,
+                DIV_STATE_SHIFT,
+                DIV_STATE_ITER
+            } div_state_e;
 
-        wire op_div  = operator_i[OP_MUL_DIV];
-        wire op_rem  = operator_i[OP_MUL_REM];
-        wire op_remu = operator_i[OP_MUL_REMU];
+            div_state_e                    state_q;
+            logic                          busy_q;
+            logic                          done_q;
+            logic [LZC_CNT_WIDTH:0]        iter_q;
+            logic [REGS_DATA_WIDTH-1:0]    dividend_q;
+            logic [REGS_DATA_WIDTH-1:0]    divisor_q;
+            logic [REGS_DATA_WIDTH-1:0]    divisor_shift_q;
+            logic [REGS_DATA_WIDTH-1:0]    quotient_q;
+            logic signed [REGS_DATA_WIDTH:0] remainder_q;
+            logic                          quotient_neg_q;
+            logic                          remainder_neg_q;
+            logic                          rem_result_q;
+            logic [LZC_CNT_WIDTH-1:0]      dividend_lzc_q;
+            logic [LZC_CNT_WIDTH-1:0]      divisor_lzc_q;
+            logic                          dividend_empty_q;
+            logic [REGS_DATA_WIDTH-1:0]    result_q;
 
-        wire signed_op = op_div | op_rem;
-        wire rem_op    = op_rem | op_remu;
+            logic [LZC_CNT_WIDTH-1:0]      dividend_lzc;
+            logic [LZC_CNT_WIDTH-1:0]      divisor_lzc;
+            logic                          dividend_empty;
+            logic                          divisor_empty;
 
-        wire dividend_neg = signed_op & operand_a_i[REGS_DATA_WIDTH-1];
-        wire divisor_neg  = signed_op & operand_b_i[REGS_DATA_WIDTH-1];
+            wire op_div  = operator_i[OP_MUL_DIV];
+            wire op_rem  = operator_i[OP_MUL_REM];
+            wire op_remu = operator_i[OP_MUL_REMU];
 
-        wire [REGS_DATA_WIDTH-1:0] dividend_abs =
-            dividend_neg ? (~operand_a_i + REGS_DATA_WIDTH'(1)) : operand_a_i;
-        wire [REGS_DATA_WIDTH-1:0] divisor_abs =
-            divisor_neg ? (~operand_b_i + REGS_DATA_WIDTH'(1)) : operand_b_i;
+            wire signed_op = op_div | op_rem;
+            wire rem_op    = op_rem | op_remu;
 
-        wire divisor_is_zero = (operand_b_i == REGS_DATA_WIDTH'(0));
-        wire signed_overflow = signed_op &
-            (operand_a_i == {1'b1, {(REGS_DATA_WIDTH-1){1'b0}}}) &
-            (operand_b_i == {REGS_DATA_WIDTH{1'b1}});
+            wire dividend_neg = signed_op & operand_a_i[REGS_DATA_WIDTH-1];
+            wire divisor_neg  = signed_op & operand_b_i[REGS_DATA_WIDTH-1];
 
-        wire [REGS_DATA_WIDTH-1:0] divide_by_zero_result =
-            rem_op ? operand_a_i : {REGS_DATA_WIDTH{1'b1}};
-        wire [REGS_DATA_WIDTH-1:0] overflow_result =
-            rem_op ? REGS_DATA_WIDTH'(0) : {1'b1, {(REGS_DATA_WIDTH-1){1'b0}}};
+            wire [REGS_DATA_WIDTH-1:0] dividend_abs =
+                dividend_neg ? (~operand_a_i + REGS_DATA_WIDTH'(1)) : operand_a_i;
+            wire [REGS_DATA_WIDTH-1:0] divisor_abs =
+                divisor_neg ? (~operand_b_i + REGS_DATA_WIDTH'(1)) : operand_b_i;
 
-        wire [REGS_DATA_WIDTH:0] divisor_ext = {1'b0, divisor_q};
-        wire [REGS_DATA_WIDTH:0] remainder_shift =
-            {remainder_q[REGS_DATA_WIDTH-1:0], dividend_q[REGS_DATA_WIDTH-1]};
-        wire [REGS_DATA_WIDTH-1:0] dividend_shift =
-            {dividend_q[REGS_DATA_WIDTH-2:0], 1'b0};
-        wire subtract_en = (remainder_shift >= divisor_ext);
-        wire [REGS_DATA_WIDTH:0] remainder_next =
-            subtract_en ? (remainder_shift - divisor_ext) : remainder_shift;
-        wire [REGS_DATA_WIDTH-1:0] quotient_next =
-            {quotient_q[REGS_DATA_WIDTH-2:0], subtract_en};
+            wire divisor_is_zero = (operand_b_i == REGS_DATA_WIDTH'(0));
+            wire signed_overflow = signed_op &
+                (operand_a_i == {1'b1, {(REGS_DATA_WIDTH-1){1'b0}}}) &
+                (operand_b_i == {REGS_DATA_WIDTH{1'b1}});
 
-        wire [REGS_DATA_WIDTH-1:0] quotient_abs = quotient_next;
-        wire [REGS_DATA_WIDTH-1:0] remainder_abs = remainder_next[REGS_DATA_WIDTH-1:0];
-        wire [REGS_DATA_WIDTH-1:0] quotient_result =
-            quotient_neg_q ? (~quotient_abs + REGS_DATA_WIDTH'(1)) : quotient_abs;
-        wire [REGS_DATA_WIDTH-1:0] remainder_result =
-            remainder_neg_q ? (~remainder_abs + REGS_DATA_WIDTH'(1)) : remainder_abs;
-        wire [REGS_DATA_WIDTH-1:0] normal_result =
-            rem_result_q ? remainder_result : quotient_result;
+            wire [REGS_DATA_WIDTH-1:0] divide_by_zero_result =
+                rem_op ? operand_a_i : {REGS_DATA_WIDTH{1'b1}};
+            wire [REGS_DATA_WIDTH-1:0] overflow_result =
+                rem_op ? REGS_DATA_WIDTH'(0) : {1'b1, {(REGS_DATA_WIDTH-1){1'b0}}};
 
-        always_ff @(posedge clk or negedge rst_n) begin
-            if (!rst_n) begin
-                busy_q          <= 1'b0;
-                done_q          <= 1'b0;
-                iter_q          <= '0;
-                dividend_q      <= '0;
-                divisor_q       <= '0;
-                quotient_q      <= '0;
-                remainder_q     <= '0;
-                quotient_neg_q  <= 1'b0;
-                remainder_neg_q <= 1'b0;
-                rem_result_q    <= 1'b0;
-                result_q        <= '0;
-            end else if (flush_i) begin
-                busy_q          <= 1'b0;
-                done_q          <= 1'b0;
-                iter_q          <= '0;
-                dividend_q      <= '0;
-                divisor_q       <= '0;
-                quotient_q      <= '0;
-                remainder_q     <= '0;
-                quotient_neg_q  <= 1'b0;
-                remainder_neg_q <= 1'b0;
-                rem_result_q    <= 1'b0;
-                result_q        <= '0;
-            end else begin
-                done_q <= 1'b0;
+            wire dividend_smaller = dividend_lzc_q > divisor_lzc_q;
+            wire [LZC_CNT_WIDTH:0] divisor_lzc_ext = {1'b0, divisor_lzc_q};
+            wire [LZC_CNT_WIDTH:0] dividend_lzc_ext = {1'b0, dividend_lzc_q};
+            wire [LZC_CNT_WIDTH:0] align_shift = divisor_lzc_ext - dividend_lzc_ext;
+            wire [REGS_DATA_WIDTH-1:0] divisor_aligned =
+                divisor_q << align_shift[LZC_CNT_WIDTH-1:0];
 
-                if (start_i && !busy_q) begin
-                    if (divisor_is_zero) begin
-                        busy_q   <= 1'b0;
-                        done_q   <= 1'b1;
-                        result_q <= divide_by_zero_result;
-                    end else if (signed_overflow) begin
-                        busy_q   <= 1'b0;
-                        done_q   <= 1'b1;
-                        result_q <= overflow_result;
-                    end else begin
-                        busy_q          <= 1'b1;
-                        iter_q          <= '0;
-                        dividend_q      <= dividend_abs;
-                        divisor_q       <= divisor_abs;
-                        quotient_q      <= '0;
-                        remainder_q     <= '0;
-                        quotient_neg_q  <= dividend_neg ^ divisor_neg;
-                        remainder_neg_q <= dividend_neg;
-                        rem_result_q    <= rem_op;
-                    end
-                end else if (busy_q) begin
-                    dividend_q  <= dividend_shift;
-                    quotient_q  <= quotient_next;
-                    remainder_q <= remainder_next;
+            wire signed [REGS_DATA_WIDTH:0] divisor_shift_ext =
+                $signed({1'b0, divisor_shift_q});
+            wire signed [REGS_DATA_WIDTH:0] divisor_ext =
+                $signed({1'b0, divisor_q});
+            wire signed [REGS_DATA_WIDTH:0] remainder_calc =
+                remainder_q[REGS_DATA_WIDTH] ?
+                (remainder_q + divisor_shift_ext) :
+                (remainder_q - divisor_shift_ext);
+            wire remainder_calc_nonneg = ~remainder_calc[REGS_DATA_WIDTH];
+            wire [REGS_DATA_WIDTH-1:0] quotient_bit_mask =
+                REGS_DATA_WIDTH'(1) << iter_q[LZC_CNT_WIDTH-1:0];
+            wire [REGS_DATA_WIDTH-1:0] quotient_next =
+                quotient_q | (remainder_calc_nonneg ? quotient_bit_mask : '0);
+            wire signed [REGS_DATA_WIDTH:0] remainder_final =
+                remainder_calc[REGS_DATA_WIDTH] ? (remainder_calc + divisor_ext) : remainder_calc;
 
-                    if (iter_q == DIV_ITER_LAST) begin
-                        busy_q   <= 1'b0;
-                        done_q   <= 1'b1;
-                        result_q <= normal_result;
-                    end else begin
-                        iter_q <= iter_q + 6'd1;
-                    end
+            wire [REGS_DATA_WIDTH-1:0] quotient_result =
+                quotient_neg_q ? (~quotient_next + REGS_DATA_WIDTH'(1)) : quotient_next;
+            wire [REGS_DATA_WIDTH-1:0] remainder_result =
+                remainder_neg_q ?
+                (~remainder_final[REGS_DATA_WIDTH-1:0] + REGS_DATA_WIDTH'(1)) :
+                remainder_final[REGS_DATA_WIDTH-1:0];
+            wire [REGS_DATA_WIDTH-1:0] smaller_remainder_result =
+                remainder_neg_q ? (~dividend_q + REGS_DATA_WIDTH'(1)) : dividend_q;
+            wire [REGS_DATA_WIDTH-1:0] normal_result =
+                rem_result_q ? remainder_result : quotient_result;
+            wire [REGS_DATA_WIDTH-1:0] smaller_result =
+                rem_result_q ? smaller_remainder_result : '0;
+
+            ydrasil_lzc #(
+                .WIDTH     (REGS_DATA_WIDTH),
+                .MODE      (1'b0),
+                .CNT_WIDTH (LZC_CNT_WIDTH)
+            ) u_dividend_lzc (
+                .lzc_in_i    (dividend_abs),
+                .lzc_cnt_o   (dividend_lzc),
+                .lzc_empty_o (dividend_empty)
+            );
+
+            ydrasil_lzc #(
+                .WIDTH     (REGS_DATA_WIDTH),
+                .MODE      (1'b0),
+                .CNT_WIDTH (LZC_CNT_WIDTH)
+            ) u_divisor_lzc (
+                .lzc_in_i    (divisor_abs),
+                .lzc_cnt_o   (divisor_lzc),
+                .lzc_empty_o (divisor_empty)
+            );
+
+            always_ff @(posedge clk or negedge rst_n) begin
+                if (!rst_n) begin
+                    state_q          <= DIV_STATE_IDLE;
+                    busy_q           <= 1'b0;
+                    done_q           <= 1'b0;
+                    iter_q           <= '0;
+                    dividend_q       <= '0;
+                    divisor_q        <= '0;
+                    divisor_shift_q  <= '0;
+                    quotient_q       <= '0;
+                    remainder_q      <= '0;
+                    quotient_neg_q   <= 1'b0;
+                    remainder_neg_q  <= 1'b0;
+                    rem_result_q     <= 1'b0;
+                    dividend_lzc_q   <= '0;
+                    divisor_lzc_q    <= '0;
+                    dividend_empty_q <= 1'b0;
+                    result_q         <= '0;
+                end else if (flush_i) begin
+                    state_q          <= DIV_STATE_IDLE;
+                    busy_q           <= 1'b0;
+                    done_q           <= 1'b0;
+                    iter_q           <= '0;
+                    dividend_q       <= '0;
+                    divisor_q        <= '0;
+                    divisor_shift_q  <= '0;
+                    quotient_q       <= '0;
+                    remainder_q      <= '0;
+                    quotient_neg_q   <= 1'b0;
+                    remainder_neg_q  <= 1'b0;
+                    rem_result_q     <= 1'b0;
+                    dividend_lzc_q   <= '0;
+                    divisor_lzc_q    <= '0;
+                    dividend_empty_q <= 1'b0;
+                    result_q         <= '0;
+                end else begin
+                    done_q <= 1'b0;
+
+                    unique case (state_q)
+                        DIV_STATE_IDLE: begin
+                            if (start_i && !busy_q) begin
+                                if (divisor_is_zero) begin
+                                    busy_q   <= 1'b0;
+                                    done_q   <= 1'b1;
+                                    result_q <= divide_by_zero_result;
+                                end else if (signed_overflow) begin
+                                    busy_q   <= 1'b0;
+                                    done_q   <= 1'b1;
+                                    result_q <= overflow_result;
+                                end else begin
+                                    busy_q           <= 1'b1;
+                                    state_q          <= DIV_STATE_SHIFT;
+                                    dividend_q       <= dividend_abs;
+                                    divisor_q        <= divisor_abs;
+                                    quotient_q       <= '0;
+                                    remainder_q      <= '0;
+                                    divisor_shift_q  <= '0;
+                                    iter_q           <= '0;
+                                    quotient_neg_q   <= dividend_neg ^ divisor_neg;
+                                    remainder_neg_q  <= dividend_neg;
+                                    rem_result_q     <= rem_op;
+                                    dividend_lzc_q   <= dividend_lzc;
+                                    divisor_lzc_q    <= divisor_lzc;
+                                    dividend_empty_q <= dividend_empty;
+                                end
+                            end
+                        end
+
+                        DIV_STATE_SHIFT: begin
+                            if (dividend_empty_q || dividend_smaller) begin
+                                busy_q   <= 1'b0;
+                                done_q   <= 1'b1;
+                                state_q  <= DIV_STATE_IDLE;
+                                result_q <= smaller_result;
+                            end else begin
+                                state_q         <= DIV_STATE_ITER;
+                                iter_q          <= align_shift;
+                                divisor_shift_q <= divisor_aligned;
+                                quotient_q      <= '0;
+                                remainder_q     <= $signed({1'b0, dividend_q});
+                            end
+                        end
+
+                        DIV_STATE_ITER: begin
+                            remainder_q     <= remainder_calc;
+                            quotient_q      <= quotient_next;
+                            divisor_shift_q <= divisor_shift_q >> 1;
+
+                            if (iter_q == '0) begin
+                                busy_q   <= 1'b0;
+                                done_q   <= 1'b1;
+                                state_q  <= DIV_STATE_IDLE;
+                                iter_q   <= '0;
+                                result_q <= normal_result;
+                            end else begin
+                                iter_q <= iter_q - {{LZC_CNT_WIDTH{1'b0}}, 1'b1};
+                            end
+                        end
+
+                        default: begin
+                            state_q <= DIV_STATE_IDLE;
+                            busy_q  <= 1'b0;
+                            done_q  <= 1'b0;
+                        end
+                    endcase
                 end
             end
+
+            assign busy_o   = busy_q;
+            assign done_o   = done_q;
+            assign result_o = result_q;
+
+            wire unused_divisor_empty = divisor_empty;
         end
-
-        assign busy_o   = busy_q;
-        assign done_o   = done_q;
-        assign result_o = result_q;
-    end else begin : g_legacy
-        reg                         busy_q;
-        reg                         done_q;
-        reg [5:0]                   count_q;
-        reg [REGS_DATA_WIDTH-1:0]   dividend_q;
-        reg [REGS_DATA_WIDTH-1:0]   divisor_q;
-        reg [REGS_DATA_WIDTH-1:0]   quotient_q;
-        reg signed [REGS_DATA_WIDTH:0] remainder_q;
-        reg                         dividend_neg_q;
-        reg                         divisor_neg_q;
-        reg                         signed_op_q;
-        reg                         rem_op_q;
-        reg [REGS_DATA_WIDTH-1:0]   result_q;
-
-        wire op_div  = operator_i[OP_MUL_DIV];
-        wire op_rem  = operator_i[OP_MUL_REM];
-        wire op_remu = operator_i[OP_MUL_REMU];
-
-        wire signed_op = op_div | op_rem;
-        wire rem_op = op_rem | op_remu;
-        wire dividend_neg = signed_op & operand_a_i[REGS_DATA_WIDTH-1];
-        wire divisor_neg = signed_op & operand_b_i[REGS_DATA_WIDTH-1];
-        wire [REGS_DATA_WIDTH-1:0] dividend_abs =
-            dividend_neg ? (~operand_a_i + REGS_DATA_WIDTH'(1)) : operand_a_i;
-        wire [REGS_DATA_WIDTH-1:0] divisor_abs =
-            divisor_neg ? (~operand_b_i + REGS_DATA_WIDTH'(1)) : operand_b_i;
-
-        wire signed [REGS_DATA_WIDTH:0] remainder_shifted =
-            {remainder_q[REGS_DATA_WIDTH-1:0], dividend_q[REGS_DATA_WIDTH-1]};
-        wire signed [REGS_DATA_WIDTH:0] divisor_ext = {1'b0, divisor_q};
-        wire signed [REGS_DATA_WIDTH:0] remainder_calc = remainder_q[REGS_DATA_WIDTH] ?
-            (remainder_shifted + divisor_ext) :
-            (remainder_shifted - divisor_ext);
-        wire remainder_nonneg = ~remainder_calc[REGS_DATA_WIDTH];
-        wire signed [REGS_DATA_WIDTH:0] remainder_next = remainder_calc;
-        wire [REGS_DATA_WIDTH-1:0] quotient_next =
-            {quotient_q[REGS_DATA_WIDTH-2:0], remainder_nonneg};
-        wire signed [REGS_DATA_WIDTH:0] remainder_final =
-            remainder_calc[REGS_DATA_WIDTH] ? (remainder_calc + divisor_ext) : remainder_calc;
-        wire [REGS_DATA_WIDTH-1:0] quotient_result =
-            signed_op_q && (dividend_neg_q ^ divisor_neg_q) ?
-            (~quotient_next + REGS_DATA_WIDTH'(1)) : quotient_next;
-        wire [REGS_DATA_WIDTH-1:0] remainder_result =
-            signed_op_q && dividend_neg_q ?
-            (~remainder_final[REGS_DATA_WIDTH-1:0] + REGS_DATA_WIDTH'(1)) :
-            remainder_final[REGS_DATA_WIDTH-1:0];
-
-        always_ff @(posedge clk or negedge rst_n) begin
-            if (!rst_n) begin
-                busy_q         <= 1'b0;
-                done_q         <= 1'b0;
-                count_q        <= '0;
-                dividend_q     <= '0;
-                divisor_q      <= '0;
-                quotient_q     <= '0;
-                remainder_q    <= '0;
-                dividend_neg_q <= 1'b0;
-                divisor_neg_q  <= 1'b0;
-                signed_op_q    <= 1'b0;
-                rem_op_q       <= 1'b0;
-                result_q       <= '0;
-            end else if (flush_i) begin
-                busy_q         <= 1'b0;
-                done_q         <= 1'b0;
-                count_q        <= '0;
-                dividend_q     <= '0;
-                divisor_q      <= '0;
-                quotient_q     <= '0;
-                remainder_q    <= '0;
-                dividend_neg_q <= 1'b0;
-                divisor_neg_q  <= 1'b0;
-                signed_op_q    <= 1'b0;
-                rem_op_q       <= 1'b0;
-                result_q       <= '0;
-            end else begin
-                done_q <= 1'b0;
-
-                if (start_i && !busy_q) begin
-                    if (operand_b_i == REGS_DATA_WIDTH'(0)) begin
-                        busy_q   <= 1'b0;
-                        done_q   <= 1'b1;
-                        result_q <= rem_op ? operand_a_i : {REGS_DATA_WIDTH{1'b1}};
-                    end else begin
-                        busy_q         <= 1'b1;
-                        count_q        <= REGS_DATA_WIDTH;
-                        dividend_q     <= dividend_abs;
-                        divisor_q      <= divisor_abs;
-                        quotient_q     <= '0;
-                        remainder_q    <= '0;
-                        dividend_neg_q <= dividend_neg;
-                        divisor_neg_q  <= divisor_neg;
-                        signed_op_q    <= signed_op;
-                        rem_op_q       <= rem_op;
-                    end
-                end else if (busy_q) begin
-                    dividend_q  <= {dividend_q[REGS_DATA_WIDTH-2:0], 1'b0};
-                    remainder_q <= remainder_next;
-                    quotient_q  <= quotient_next;
-
-                    if (count_q == 6'd1) begin
-                        busy_q   <= 1'b0;
-                        done_q   <= 1'b1;
-                        count_q  <= '0;
-                        result_q <= rem_op_q ? remainder_result : quotient_result;
-                    end else begin
-                        count_q <= count_q - 6'd1;
-                    end
-                end
-            end
-        end
-
-        assign busy_o   = busy_q;
-        assign done_o   = done_q;
-        assign result_o = result_q;
-    end
+    endgenerate
 
 endmodule

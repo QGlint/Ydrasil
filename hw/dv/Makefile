@@ -15,7 +15,7 @@ USE_BENDER ?= 1
 BENDER ?= bender
 BENDER_INCLUDE_TB ?= 1
 BENDER_TB_TARGET ?= ip_tb
-DIV_IMPL ?= new
+DIV_IMPL ?= lzc
 LSU_IMPL ?= legacy
 MEMS_IMPL ?= new
 
@@ -71,12 +71,10 @@ endif
 
 DEFINES := RANDOM_SEED=$(RANDOM_SEED)
 
-ifeq ($(DIV_IMPL),new)
-DEFINES += YDRASIL_DIV_IMPL_NEW
-else ifeq ($(DIV_IMPL),legacy)
-DEFINES += YDRASIL_DIV_IMPL_LEGACY
+ifeq ($(DIV_IMPL),lzc)
+DEFINES += YDRASIL_DIV_IMPL_LZC
 else
-$(error Unsupported DIV_IMPL '$(DIV_IMPL)'. Use DIV_IMPL=new or DIV_IMPL=legacy)
+$(error Unsupported DIV_IMPL '$(DIV_IMPL)'. Use DIV_IMPL=lzc)
 endif
 
 ifeq ($(LSU_IMPL),new)
