@@ -1,6 +1,8 @@
 # rvtest_min.mk - minimal standalone builder for riscv-tests ISA
 
 # ====== user config ======
+PROJECT_ROOT ?= $(abspath ..)
+
 RISCV_PREFIX ?= riscv64-elf
 ARCH ?= rv32im_zicsr_zifencei
 ABI  ?= ilp32
@@ -34,9 +36,13 @@ ifeq ($(COMP_MODE), rvtest)
 endif
 
 # ====== tools ======
-CC      := $(RISCV_PREFIX)-gcc
-OBJCOPY := $(RISCV_PREFIX)-objcopy
-OBJDUMP := $(RISCV_PREFIX)-objdump
+ifeq ($(origin CC),default)
+CC := $(RISCV_PREFIX)-gcc
+else
+CC ?= $(RISCV_PREFIX)-gcc
+endif
+OBJCOPY ?= $(RISCV_PREFIX)-objcopy
+OBJDUMP ?= $(RISCV_PREFIX)-objdump
 
 RV_CFLAGS ?= -march=$(ARCH) -mabi=$(ABI) -nostdlib -nostartfiles -static -mcmodel=medany
 LDFLAGS ?=

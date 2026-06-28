@@ -1,11 +1,9 @@
 include config.mk
 
-TOOLS ?= verilator gtkwave spike riscv64-elf-gcc riscv64-elf-newlib riscv64-elf-gdb  qemu-system-riscv
-
 # --- 自动化测试相关定义 ---
 RESULT_DIR := $(LOG_DIR)/test_results
 
-export PROJECT_ROOT BUILD_DIR WAVE_DIR LOG_DIR SIM_TOOL IP VERILATOR_MOD UVM USE_BENDER BENDER DIV_IMPL LSU_IMPL MEMS_IMPL ARCH ABI
+export PROJECT_ROOT BUILD_DIR WAVE_DIR LOG_DIR SIM_TOOL IP VERILATOR_MOD UVM USE_BENDER BENDER DIV_IMPL LSU_IMPL MEMS_IMPL ARCH ABI RISCV_PREFIX CC OBJCOPY OBJDUMP GDB QEMU
 
 .PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests init get_spike download_and_extract_spike check_deps spike spike_wave_to_csv  rv_test_comp_genmem
 
@@ -83,6 +81,10 @@ check_deps:
 			echo "Error: No known package manager found. Please install $(TOOLS) manually."; \
 			exit 1; \
 		fi; \
+		if [ -n "$(PKG_UPDATE)" ] && [ "$(PKG_UPDATE)" != "true" ]; then \
+			echo "Updating package metadata using: $(PKG_UPDATE)"; \
+			$(PKG_UPDATE); \
+		fi; \
 		echo "Installing missing packages using:$(PKG_MANAGER) $$missing"; \
 		$(PKG_MANAGER) $$missing; \
 	fi
@@ -98,7 +100,7 @@ spike_wave_to_csv:
 	$(PYTHON) $(TRACE_TO_CSV) --log $(SPIKE_LOG).log --csv $(SPIKE_LOG).csv --source spike
 
 get_spike:
-	@if tools/spike/bin/spike -v>/dev/null 2>&1; then \
+	@if "$(SPIKE)" -v>/dev/null 2>&1; then \
 		echo "Spike is already installed."; \
 	else \
 		$(MAKE) download_and_extract_spike; \
@@ -107,6 +109,13 @@ get_spike:
 download_and_extract_spike:
 	$(MAKE) TOOLS="$(CURL) tar" check_deps
 	@echo "Downloading Spike from: $(SPIKE_TAR_URL)"
-	@mkdir -p tools/spike
-	$(CURL) -L $(SPIKE_TAR_URL) -o tools/spike.tar.xz 
-	@tar -xJf tools/spike.tar.xz  -C tools/spike --strip-components=1
+	@mkdir -p $(dir $(SPIKE_TAR_FILE))
+	$(CURL) -L $(SPIKE_TAR_URL) -o $(SPIKE_TAR_FILE)
+	@if [ "$(SPIKE_INSTALL_DIR)" = "/opt/spike" ]; then \
+		sudo mkdir -p "$(SPIKE_INSTALL_DIR)"; \
+		sudo tar -xJf "$(SPIKE_TAR_FILE)" -C "$(SPIKE_INSTALL_DIR)" --strip-components=1; \
+		sudo chmod -R a+rX "$(SPIKE_INSTALL_DIR)"; \
+	else \
+		mkdir -p "$(SPIKE_INSTALL_DIR)"; \
+		tar -xJf "$(SPIKE_TAR_FILE)" -C "$(SPIKE_INSTALL_DIR)" --strip-components=1; \
+	fi

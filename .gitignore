@@ -2,3 +2,4 @@ build/
 .venv/
 hw/ip/alioth/
 tools/
+spec/

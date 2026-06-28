@@ -5,9 +5,9 @@ module tpdram_wrapper #(
     parameter int ADDR_WIDTH_B = (DEPTH > 1) ? $clog2(DEPTH) : 1,
     parameter int READ_LATENCY_A = 1,
     parameter int READ_LATENCY_B = 1,
-    parameter string MEMORY_PRIMITIVE = "auto",
-    parameter string WRITE_MODE_A = "no_change",
-    parameter string WRITE_MODE_B = "no_change",
+    parameter MEMORY_PRIMITIVE = "auto",
+    parameter WRITE_MODE_A = "no_change",
+    parameter WRITE_MODE_B = "no_change",
     parameter int MEMORY_SIZE = DEPTH * DATA_WIDTH
 ) (
     input  wire                      clk,

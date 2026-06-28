@@ -3,7 +3,6 @@ BUILD_DIR := $(PROJECT_ROOT)/build
 WAVE_DIR  := $(BUILD_DIR)/wave
 LOG_DIR   := $(BUILD_DIR)/log
 
-
 SIM_TOOL ?= verilator
 IP   ?= ydrasil_core
 VERILATOR_MOD ?= cc
@@ -22,7 +21,14 @@ SPIKE_TAR_URL ?= https://bitbucket.org/qglint/tool_tar/downloads/spike-1.1.1-log
 CURL ?=  curl 
 
 
-SPIKE ?= ./tools/spike/bin/spike
+HOSTNAME := $(shell hostname)
+ifeq ($(HOSTNAME),servera437)
+SPIKE_INSTALL_DIR ?= /opt/spike
+else
+SPIKE_INSTALL_DIR ?= $(PROJECT_ROOT)/tools/spike
+endif
+SPIKE_TAR_FILE ?= $(BUILD_DIR)/downloads/spike.tar.xz
+SPIKE ?= $(SPIKE_INSTALL_DIR)/bin/spike
 SPIKE_ELF ?= $(RVTESTS_OUT_ROOT)/rv32ui/elf/rv32ui_lh.elf
 SPIKE_OUT_DIR ?= $(BUILD_DIR)/sim/spike/
 SPIKE_LOG ?= rv32ui_lh
@@ -33,8 +39,44 @@ ifneq ($(steps),)
 endif
 
 
+ifeq ($(origin PKG_KIND),undefined)
+PKG_KIND := $(shell \
+	if [ -r /etc/os-release ]; then \
+		. /etc/os-release; \
+		if [ "$$ID" = "arch" ]; then \
+			echo "arch"; exit 0; \
+		elif [ "$$ID" = "ubuntu" ]; then \
+			echo "ubuntu"; exit 0; \
+		elif printf '%s\n' "$$ID_LIKE" | grep -qw debian; then \
+			echo "ubuntu"; exit 0; \
+		fi; \
+	fi; \
+	if command -v pacman >/dev/null 2>&1; then \
+		echo "arch"; \
+	elif command -v apt-get >/dev/null 2>&1; then \
+		echo "ubuntu"; \
+	else \
+		echo "unknown"; \
+	fi)
+endif
 
-
+ifeq ($(PKG_KIND),arch)
+TOOLS ?= verilator gtkwave riscv64-elf-gcc riscv64-elf-newlib riscv64-elf-gdb qemu-system-riscv
+PKG_EXISTS ?= pacman -Qs -q
+PKG_MANAGER ?= sudo pacman -S --needed
+PKG_UPDATE ?= true
+RISCV_PREFIX ?= riscv64-elf
+GDB ?= $(RISCV_PREFIX)-gdb
+QEMU ?= qemu-system-riscv
+else ifeq ($(PKG_KIND),ubuntu)
+TOOLS ?= verilator gtkwave gcc-riscv64-unknown-elf binutils-riscv64-unknown-elf picolibc-riscv64-unknown-elf gdb-multiarch qemu-system-misc
+PKG_EXISTS ?= dpkg -l
+PKG_MANAGER ?= sudo apt-get install -y
+PKG_UPDATE ?= sudo apt-get update
+RISCV_PREFIX ?= riscv64-unknown-elf
+GDB ?= gdb-multiarch
+QEMU ?= qemu-system-riscv64
+else
 PKG_EXISTS := $(shell \
 	if command -v pacman >/dev/null 2>&1; then \
 		echo "pacman -Qs -q"; \
@@ -64,16 +106,24 @@ PKG_MANAGER := $(shell \
 	else \
 		echo "unknown"; \
 	fi)
+PKG_UPDATE ?= true
+RISCV_PREFIX ?= riscv64-elf
+GDB ?= $(RISCV_PREFIX)-gdb
+QEMU ?= qemu-system-riscv
+endif
 
 
 #------------------------------------------
 # toolchain
 #------------------------------------------
 
-RISCV_PREFIX := riscv64-elf
-CC      := $(RISCV_PREFIX)-gcc
-OBJCOPY := $(RISCV_PREFIX)-objcopy
-OBJDUMP := $(RISCV_PREFIX)-objdump
+ifeq ($(origin CC),default)
+CC := $(RISCV_PREFIX)-gcc
+else
+CC ?= $(RISCV_PREFIX)-gcc
+endif
+OBJCOPY ?= $(RISCV_PREFIX)-objcopy
+OBJDUMP ?= $(RISCV_PREFIX)-objdump
 
 ARCH := rv32im_zicsr_zifencei_zba_zbb_zbc_zbkb_zbkx_zbs
 ABI  := ilp32
