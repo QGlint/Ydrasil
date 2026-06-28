@@ -5,7 +5,21 @@ RESULT_DIR := $(LOG_DIR)/test_results
 
 export PROJECT_ROOT BUILD_DIR WAVE_DIR LOG_DIR SIM_TOOL IP VERILATOR_MOD UVM USE_BENDER BENDER DIV_IMPL LSU_IMPL MEMS_IMPL ARCH ABI RISCV_PREFIX CC OBJCOPY OBJDUMP GDB QEMU
 
-.PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests init get_spike download_and_extract_spike check_deps spike spike_wave_to_csv  rv_test_comp_genmem
+SYN_DIR ?= $(PROJECT_ROOT)/syn
+SYN_BUILD_DIR ?= $(BUILD_DIR)/syn
+SYN_VENV ?= $(SYN_BUILD_DIR)/.venv
+SYN_PYTHON ?= $(SYN_VENV)/bin/python
+SYN_XPR ?= $(PROJECT_ROOT)/FPGA/Ydrasil_FPGA.xpr
+SYN_SOURCES_TCL ?= $(SYN_BUILD_DIR)/vivado_sources.tcl
+SYN_REPORT_DIR ?= $(SYN_BUILD_DIR)/reports
+SYN_LOG_DIR ?= $(SYN_BUILD_DIR)/log
+SYN_JOBS ?= $(shell nproc)
+SYN_RUN_TO ?= route
+SYN_FORCE ?= 1
+SYN_SYNC_SOURCES ?= 1
+VIVADO ?= vivado
+
+.PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests init get_spike download_and_extract_spike check_deps spike spike_wave_to_csv  rv_test_comp_genmem syn syn-venv syn-prep syn-vivado syn-analyze syn-clean
 
 .SECONDEXPANSION:
 
@@ -16,6 +30,45 @@ all: comp_and_sim_cpu
 full : comp_and_sim_cpu wave
 
 run_all_tests: init check_deps test_all
+
+syn: syn-vivado
+	@$(MAKE) syn-analyze
+
+syn-venv: $(SYN_VENV)/.stamp
+
+$(SYN_VENV)/.stamp:
+	@mkdir -p $(SYN_BUILD_DIR)
+	$(PYTHON) -m venv $(SYN_VENV)
+	@touch $@
+
+syn-prep: syn-venv
+	@mkdir -p $(SYN_BUILD_DIR)
+	$(SYN_PYTHON) $(SYN_DIR)/prep_vivado_sources.py \
+		--repo-root $(PROJECT_ROOT) \
+		--bender $(BENDER) \
+		--bender-dir $(PROJECT_ROOT)/hw/ip/jyd_fpga \
+		--wrapper-dir $(PROJECT_ROOT)/hw/ip/Xilinx_ip_wrapper/rtl \
+		--out $(SYN_SOURCES_TCL)
+
+syn-vivado: syn-prep
+	@mkdir -p $(SYN_REPORT_DIR) $(SYN_LOG_DIR)
+	$(VIVADO) -mode batch -nojournal -log $(SYN_LOG_DIR)/vivado.log \
+		-source $(SYN_DIR)/run_vivado.tcl \
+		-tclargs \
+		-xpr $(SYN_XPR) \
+		-sources_tcl $(SYN_SOURCES_TCL) \
+		-report_dir $(SYN_REPORT_DIR) \
+		-checkpoint_dir $(SYN_BUILD_DIR)/checkpoints \
+		-jobs $(SYN_JOBS) \
+		-run_to $(SYN_RUN_TO) \
+		-sync_sources $(SYN_SYNC_SOURCES) \
+		-force $(SYN_FORCE)
+
+syn-analyze: syn-venv
+	$(SYN_PYTHON) $(SYN_DIR)/analyze_timing.py --report-dir $(SYN_REPORT_DIR)
+
+syn-clean:
+	rm -rf $(SYN_BUILD_DIR)
 
 
 init:
