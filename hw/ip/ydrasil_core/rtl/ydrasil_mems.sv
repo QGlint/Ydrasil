@@ -23,12 +23,12 @@ import ydrasil_pkg::*;
 );
 
 
-    wire [11:0] itcm_addr;
-    wire [31:0] itcm_rdata;
+    wire [ITCM_ADDR_WIDTH-1:0] itcm_addr;
+    wire [INST_DATA_WIDTH-1:0] itcm_rdata;
 
-    wire [15:0] dtcm_addr;
-    wire [31:0] dtcm_rdata;
-    wire [31:0] dtcm_wdata;
+    wire [DTCM_ADDR_WIDTH-1:0] dtcm_addr;
+    wire [BUS_DATA_WIDTH-1:0] dtcm_rdata;
+    wire [BUS_DATA_WIDTH-1:0] dtcm_wdata;
     wire        dtcm_wen;
     wire        dtcm_en;
     wire [3:0]  dtcm_wmask;
@@ -41,10 +41,10 @@ import ydrasil_pkg::*;
 
     assign if_dtcm_sel = (if_mem_addr_i >= DTCM_BASE_ADDR) &&
                          (if_mem_addr_i < (DTCM_BASE_ADDR + DTCM_BYTE_SIZE));
-    assign if_dtcm_addr = if_mem_addr_i[17:2];
-    assign lsu_dtcm_addr = lsu_mem_addr_i[17:2];
+    assign if_dtcm_addr = if_mem_addr_i[DTCM_ADDR_WIDTH+1:2];
+    assign lsu_dtcm_addr = lsu_mem_addr_i[DTCM_ADDR_WIDTH+1:2];
 
-    assign itcm_addr = if_mem_addr_i[13:2]; // 16KB ITCM，地址对齐到4字节
+    assign itcm_addr = if_mem_addr_i[ITCM_ADDR_WIDTH+1:2]; // 地址对齐到4字节
     assign dtcm_wdata = lsu_mem_data_i;
     assign dtcm_wmask = lsu_mem_wmask_i;
 
@@ -62,14 +62,20 @@ import ydrasil_pkg::*;
         assign dtcm_wen = lsu_mem_we_i;
     end
 
-    itcm u_itcm (
+    itcm #(
+        .ITCM_ADDR_WIDTH(ITCM_ADDR_WIDTH),
+        .INST_DATA_WIDTH(INST_DATA_WIDTH)
+    ) u_itcm (
         .clk(clk),
         .itcm_en(rst_n), // ITCM在复位后始终使能
         .itcm_addr(itcm_addr),
         .itcm_data_o(itcm_rdata)
     );
 
-    dtcm u_dtcm (
+    dtcm #(
+        .DTCM_ADDR_WIDTH(DTCM_ADDR_WIDTH),
+        .BUS_DATA_WIDTH(BUS_DATA_WIDTH)
+    ) u_dtcm (
         .clk(clk),
         .dtcm_en(dtcm_en),
         .dtcm_wen(dtcm_wen),

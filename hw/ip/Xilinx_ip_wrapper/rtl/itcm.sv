@@ -1,11 +1,12 @@
 
-module itcm
-import ydrasil_pkg::*;
-(
+module itcm #(
+    parameter int ITCM_ADDR_WIDTH  = 12,
+    parameter int INST_DATA_WIDTH  = 32
+) (
     input wire                  clk,
     input wire                  itcm_en,
-    input wire [ydrasil_pkg::ITCM_ADDR_WIDTH-1:0]           itcm_addr,
-    output wire [ydrasil_pkg::INST_DATA_WIDTH-1:0]          itcm_data_o
+    input wire [ITCM_ADDR_WIDTH-1:0]           itcm_addr,
+    output wire [INST_DATA_WIDTH-1:0]          itcm_data_o
 );
 
 

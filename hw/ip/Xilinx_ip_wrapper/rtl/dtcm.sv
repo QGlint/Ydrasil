@@ -1,14 +1,15 @@
 
-module dtcm
-import ydrasil_pkg::*;
-(
+module dtcm #(
+    parameter int DTCM_ADDR_WIDTH = 16,
+    parameter int BUS_DATA_WIDTH  = 32
+) (
     input wire                  clk,
     input wire                  dtcm_en,
     input wire                  dtcm_wen,
     input wire [3:0]            dtcm_mask,
-    input wire [ydrasil_pkg::DTCM_ADDR_WIDTH-1:0]           dtcm_addr,
-    input wire [ydrasil_pkg::BUS_DATA_WIDTH-1:0]           dtcm_data_i,
-    output wire [ydrasil_pkg::BUS_DATA_WIDTH-1:0]          dtcm_data_o
+    input wire [DTCM_ADDR_WIDTH-1:0]           dtcm_addr,
+    input wire [BUS_DATA_WIDTH-1:0]           dtcm_data_i,
+    output wire [BUS_DATA_WIDTH-1:0]          dtcm_data_o
 );
 
 DRAM u_dram (
