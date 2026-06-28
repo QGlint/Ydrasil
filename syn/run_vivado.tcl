@@ -6,7 +6,7 @@ proc usage {} {
     puts "  -sources_tcl <path>     generated source sync Tcl"
     puts "  -report_dir <path>      report output directory"
     puts "  -jobs <n>               Vivado launch job count"
-    puts "  -run_to <synth|route|bitstream|sync_only>"
+    puts "  -run_to <synth|route|bitstream|reports|sync_only>"
     puts "  -sync_sources <0|1>     remove old hw/ip sources and add generated list"
     puts "  -force <0|1>            reset runs before launching"
 }
@@ -55,6 +55,26 @@ proc remove_hw_ip_sources {} {
     }
 }
 
+proc remove_missing_sources {} {
+    foreach fs_name {sources_1 constrs_1 sim_1} {
+        set fs [get_filesets -quiet $fs_name]
+        if {[llength $fs] == 0} {
+            continue
+        }
+        set missing [list]
+        foreach f [get_files -of_objects $fs] {
+            set nf [file normalize $f]
+            if {![file exists $nf]} {
+                lappend missing $f
+            }
+        }
+        if {[llength $missing] > 0} {
+            puts "Removing [llength $missing] missing files from $fs_name"
+            remove_files -fileset $fs $missing
+        }
+    }
+}
+
 proc assert_run_ok {run_name} {
     set status [get_property STATUS [get_runs $run_name]]
     puts "$run_name status: $status"
@@ -73,6 +93,72 @@ proc report_if_possible {description command} {
     if {[catch {uplevel 1 $command} msg]} {
         puts "warning: failed to write $description: $msg"
     }
+}
+
+proc clocks_near_period {target_period tolerance} {
+    set result [list]
+    foreach clk [get_clocks -quiet *] {
+        set period [get_property PERIOD $clk]
+        if {$period eq ""} {
+            continue
+        }
+        if {[expr {abs(double($period) - double($target_period)) <= double($tolerance)}]} {
+            lappend result $clk
+        }
+    }
+    return $result
+}
+
+proc report_cpu150_timing {report_dir} {
+    set cpu_clocks [clocks_near_period 6.6667 0.0500]
+    set out [file join $report_dir cpu150_clocks.rpt]
+    set fp [open $out w]
+    puts $fp "150 MHz candidate clocks, selected by period ~= 6.6667 ns"
+    foreach clk $cpu_clocks {
+        puts $fp "[get_property NAME $clk] period=[get_property PERIOD $clk] waveform=[get_property WAVEFORM $clk]"
+    }
+    close $fp
+
+    if {[llength $cpu_clocks] == 0} {
+        puts "warning: no 150 MHz candidate clock found"
+        return
+    }
+
+    report_if_possible "150 MHz timing summary" \
+        "report_timing_summary -delay_type max -max_paths 100 -report_unconstrained -file [file join $report_dir cpu150_timing_summary.rpt]"
+    report_if_possible "150 MHz intra-clock timing paths" \
+        "report_timing -delay_type max -from $cpu_clocks -to $cpu_clocks -sort_by slack -max_paths 200 -nworst 20 -input_pins -file [file join $report_dir cpu150_timing_paths.rpt]"
+}
+
+proc open_impl_design {run_name checkpoint_dir} {
+    set opened 0
+    if {![catch {open_run $run_name -name $run_name} msg]} {
+        set opened 1
+    } else {
+        puts "warning: open_run $run_name failed: $msg"
+    }
+
+    if {$opened} {
+        return
+    }
+
+    set run_obj [get_runs $run_name]
+    set run_dir [get_property DIRECTORY $run_obj]
+    set top_name [get_property top [get_filesets sources_1]]
+    set candidates [list \
+        [file join $run_dir "${top_name}_routed.dcp"] \
+        [file join $run_dir "${top_name}.dcp"] \
+        [file join $checkpoint_dir "impl_1_route.dcp"]]
+
+    foreach dcp $candidates {
+        if {[file exists $dcp]} {
+            puts "Opening routed checkpoint: $dcp"
+            open_checkpoint $dcp
+            return
+        }
+    }
+
+    error "could not open $run_name and no routed checkpoint found in: $candidates"
 }
 
 if {[lsearch -exact $argv "-help"] >= 0 || [lsearch -exact $argv "--help"] >= 0} {
@@ -111,6 +197,8 @@ if {$max_threads != $jobs} {
 safe_param general.maxThreads $max_threads
 catch {set_property XPM_LIBRARIES {XPM_MEMORY} [current_project]}
 
+remove_missing_sources
+
 if {$sync_sources} {
     remove_hw_ip_sources
     puts "Sourcing generated sources: $sources_tcl"
@@ -126,6 +214,38 @@ if {$run_to eq "sync_only"} {
     exit 0
 }
 
+if {$run_to eq "reports"} {
+    open_impl_design impl_1 $checkpoint_dir
+    report_if_possible "post-route timing summary" \
+        "report_timing_summary -delay_type max -max_paths 100 -report_unconstrained -check_timing_verbose -file [file join $report_dir post_route_timing_summary.rpt]"
+    report_if_possible "post-route timing paths" \
+        "report_timing -delay_type max -sort_by group -max_paths 200 -nworst 10 -input_pins -file [file join $report_dir post_route_timing_paths.rpt]"
+    report_if_possible "post-route clocks" \
+        "report_clocks -file [file join $report_dir post_route_clocks.rpt]"
+    report_if_possible "post-route clock interaction" \
+        "report_clock_interaction -delay_type max -file [file join $report_dir post_route_clock_interaction.rpt]"
+    report_if_possible "post-route check timing" \
+        "check_timing -verbose -file [file join $report_dir post_route_check_timing.rpt]"
+    report_cpu150_timing $report_dir
+    report_if_possible "post-route utilization" \
+        "report_utilization -hierarchical -file [file join $report_dir post_route_utilization_hier.rpt]"
+    report_if_possible "route status" \
+        "report_route_status -file [file join $report_dir post_route_status.rpt]"
+    report_if_possible "post-route DRC" \
+        "report_drc -file [file join $report_dir post_route_drc.rpt]"
+    report_if_possible "post-route methodology" \
+        "report_methodology -file [file join $report_dir post_route_methodology.rpt]"
+    report_if_possible "post-route design analysis" \
+        "report_design_analysis -timing -logic_level_distribution -file [file join $report_dir post_route_design_analysis.rpt]"
+    report_if_possible "QoR suggestions" \
+        "report_qor_suggestions -file [file join $report_dir post_route_qor_suggestions.rpt]"
+    write_checkpoint -force [file join $checkpoint_dir impl_1_route.dcp]
+
+    puts "Reports written to $report_dir"
+    close_project
+    exit 0
+}
+
 if {[llength [get_ips -quiet]] > 0} {
     puts "Refreshing IP output products"
     report_ip_status -file [file join $report_dir "ip_status.rpt"]
@@ -134,6 +254,12 @@ if {[llength [get_ips -quiet]] > 0} {
 }
 
 if {$force_runs} {
+    foreach child_run [get_runs -quiet *synth*] {
+        if {[get_property NAME $child_run] ne "synth_1"} {
+            puts "Resetting [get_property NAME $child_run]"
+            reset_run $child_run
+        }
+    }
     puts "Resetting synth_1"
     reset_run synth_1
 }
@@ -173,11 +299,18 @@ if {$run_to eq "bitstream"} {
 wait_on_run impl_1
 assert_run_ok impl_1
 
-open_run impl_1 -name impl_1
+open_impl_design impl_1 $checkpoint_dir
 report_if_possible "post-route timing summary" \
     "report_timing_summary -delay_type max -max_paths 100 -report_unconstrained -check_timing_verbose -file [file join $report_dir post_route_timing_summary.rpt]"
 report_if_possible "post-route timing paths" \
     "report_timing -delay_type max -sort_by group -max_paths 200 -nworst 10 -input_pins -file [file join $report_dir post_route_timing_paths.rpt]"
+report_if_possible "post-route clocks" \
+    "report_clocks -file [file join $report_dir post_route_clocks.rpt]"
+report_if_possible "post-route clock interaction" \
+    "report_clock_interaction -delay_type max -file [file join $report_dir post_route_clock_interaction.rpt]"
+report_if_possible "post-route check timing" \
+    "check_timing -verbose -file [file join $report_dir post_route_check_timing.rpt]"
+report_cpu150_timing $report_dir
 report_if_possible "post-route utilization" \
     "report_utilization -hierarchical -file [file join $report_dir post_route_utilization_hier.rpt]"
 report_if_possible "route status" \

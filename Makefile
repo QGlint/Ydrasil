@@ -1,5 +1,7 @@
 include config.mk
 
+SHELL := /bin/bash
+
 # --- 自动化测试相关定义 ---
 RESULT_DIR := $(LOG_DIR)/test_results
 
@@ -18,6 +20,12 @@ SYN_RUN_TO ?= route
 SYN_FORCE ?= 1
 SYN_SYNC_SOURCES ?= 1
 VIVADO ?= vivado
+VIVADO_SETTINGS ?= /opt/Xilinx/Vitis/2024.2/settings64.sh
+VIVADO_LICENSE_FILE ?= $(firstword $(wildcard $(HOME)/opt/vivado_2037.lic $(HOME)/*.lic $(HOME)/.Xilinx/*.lic))
+
+ifneq ($(VIVADO_LICENSE_FILE),)
+export XILINXD_LICENSE_FILE := $(VIVADO_LICENSE_FILE)
+endif
 
 .PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests init get_spike download_and_extract_spike check_deps spike spike_wave_to_csv  rv_test_comp_genmem syn syn-venv syn-prep syn-vivado syn-analyze syn-clean
 
@@ -52,7 +60,7 @@ syn-prep: syn-venv
 
 syn-vivado: syn-prep
 	@mkdir -p $(SYN_REPORT_DIR) $(SYN_LOG_DIR)
-	$(VIVADO) -mode batch -nojournal -log $(SYN_LOG_DIR)/vivado.log \
+	. $(VIVADO_SETTINGS) && $(VIVADO) -mode batch -nojournal -log $(SYN_LOG_DIR)/vivado.log \
 		-source $(SYN_DIR)/run_vivado.tcl \
 		-tclargs \
 		-xpr $(SYN_XPR) \
@@ -66,6 +74,13 @@ syn-vivado: syn-prep
 
 syn-analyze: syn-venv
 	$(SYN_PYTHON) $(SYN_DIR)/analyze_timing.py --report-dir $(SYN_REPORT_DIR)
+	@if [ -f "$(SYN_REPORT_DIR)/cpu150_timing_paths.rpt" ]; then \
+		$(SYN_PYTHON) $(SYN_DIR)/analyze_timing.py \
+			--report-dir $(SYN_REPORT_DIR) \
+			--timing-report $(SYN_REPORT_DIR)/cpu150_timing_paths.rpt \
+			--csv $(SYN_REPORT_DIR)/cpu150_timing_groups.csv \
+			--md $(SYN_REPORT_DIR)/cpu150_timing_groups.md; \
+	fi
 
 syn-clean:
 	rm -rf $(SYN_BUILD_DIR)

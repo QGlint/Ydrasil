@@ -1,0 +1,100 @@
+# Ydrasil
+
+Ydrasil 是一个 RV32 处理器/FPGA 工程仓库，包含 RTL、FPGA Vivado 工程、仿真验证、RISC-V 测试生成、软件链接脚本，以及服务器上的 batch 综合布线和时序分析脚本。
+
+## 仓库构成
+
+| 路径 | 内容 |
+| --- | --- |
+| `hw/ip/ydrasil_core` | 处理器核心 RTL，包含取指、译码、执行、寄存器堆、CSR、分支预测、bitmanip 等模块。该目录使用 Bender 管理源码顺序。 |
+| `hw/ip/ydrmem` | 通用存储器封装 RTL。 |
+| `hw/ip/jyd_fpga` | FPGA 顶层相关 RTL 和 Bender 工程入口。 |
+| `hw/ip/Xilinx_ip_wrapper` | 面向 Vivado/IP 的 Xilinx wrapper RTL，例如 IROM、DTCM、PLL 相关封装。 |
+| `hw/dv` | RTL 仿真入口，按仿真器拆分为 Verilator、Icarus Verilog、VCS 配置。 |
+| `FPGA` | Vivado 工程 `Ydrasil_FPGA.xpr`、约束、COE、IP 输出和实现结果。 |
+| `syn` | Linux 服务器上的 Vivado batch 综合、布线、报告生成和 timing path 预处理脚本。 |
+| `sw` | 裸机/测试软件相关 linker script 和 include。 |
+| `verif` | RISC-V 测试、Spike/trace 辅助脚本、仿真结果处理脚本。 |
+| `doc` | 架构或 ISA 相关资料。 |
+| `build` | 构建输出目录，包括仿真产物、波形、RISC-V 测试输出、Vivado batch 报告。 |
+| `Makefile` | 仓库顶层常用任务入口。 |
+| `config.mk` | 工具链、仿真、RISC-V ISA、测试集合、Spike 路径等默认配置。 |
+
+## 文档入口
+
+| 主题 | 文档位置 |
+| --- | --- |
+| Vivado batch 综合、布线、150MHz 时序报告、timing path 合并分析 | [`syn/README.md`](syn/README.md) |
+| RISC-V 官方测试子模块说明 | [`verif/tests/riscv-tests/README.md`](verif/tests/riscv-tests/README.md) |
+| Spike/RISC-V ISA simulator 子模块说明 | [`verif/tools/riscv-isa-sim/README.md`](verif/tools/riscv-isa-sim/README.md) |
+| 顶层 make 目标和工程默认变量 | [`Makefile`](Makefile)、[`config.mk`](config.mk) |
+| FPGA 工程文件、约束、IP 输出 | `FPGA/` 目录，目前没有独立 README |
+| RTL 架构细节 | `hw/ip/ydrasil_core/rtl/` 目录，目前没有独立 README |
+| 仿真环境细节 | `hw/dv/` 和 `verif/` 目录，目前没有独立 README |
+
+## 常用命令
+
+初始化子模块：
+
+```sh
+make init
+```
+
+编译并运行默认 CPU 仿真：
+
+```sh
+make comp
+make sim
+```
+
+生成并运行 RISC-V 指令集回归：
+
+```sh
+make run_all_tests
+```
+
+无 GUI 跑 Vivado 综合、实现到 route，并生成时序分析：
+
+```sh
+make syn SYN_JOBS=40
+```
+
+只从已有 routed checkpoint 重新生成报告：
+
+```sh
+make syn-vivado SYN_RUN_TO=reports SYN_FORCE=0 SYN_SYNC_SOURCES=0 SYN_JOBS=40
+make syn-analyze
+```
+
+## Vivado 环境
+
+服务器上的 Vivado 入口应使用 batch 模式，不启动 GUI。顶层 Makefile 默认在 Vivado 目标中局部 source：
+
+```sh
+/opt/Xilinx/Vitis/2024.2/settings64.sh
+```
+
+如果环境不同，可以覆盖变量：
+
+```sh
+make syn VIVADO_SETTINGS=/path/to/settings64.sh VIVADO=/path/to/vivado
+```
+
+## 构建输出
+
+`build/` 和 Vivado run 目录是生成产物目录。常见输出包括：
+
+| 路径 | 内容 |
+| --- | --- |
+| `build/wave` | 仿真波形。 |
+| `build/log` | 仿真日志。 |
+| `build/riscv_tests` | RISC-V 测试编译输出。 |
+| `build/rvtest_results` | 回归测试结果。 |
+| `build/syn/reports` | Vivado batch 报告和 timing path 合并结果。 |
+| `build/syn/checkpoints` | batch flow 保存的 Vivado checkpoint。 |
+
+## 备注
+
+- Bender 管理的 RTL 顺序主要用于 `hw/ip/jyd_fpga` 及其依赖的 core/mem 源码。
+- FPGA 综合脚本会保留 `hw/ip/Xilinx_ip_wrapper/rtl` 中的 FPGA wrapper，并跳过与 wrapper 同名的通用 RTL，避免 Vivado 里出现重复模块定义。
+- `syn` 流程当前重点支持 200MHz 输入 PLL 派生出的 150MHz CPU clock 时序分析。

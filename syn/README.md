@@ -12,6 +12,15 @@ implementation through `route_design`, writes Vivado reports under
 `build/syn/reports`, and groups similar timing paths into `timing_groups.csv` and
 `timing_groups.md`.
 
+The route reports include general post-route timing plus 150 MHz CPU-clock
+focused reports:
+
+- `cpu150_clocks.rpt`
+- `cpu150_timing_summary.rpt`
+- `cpu150_timing_paths.rpt`
+- `post_route_clock_interaction.rpt`
+- `post_route_check_timing.rpt`
+
 Useful overrides:
 
 ```sh
