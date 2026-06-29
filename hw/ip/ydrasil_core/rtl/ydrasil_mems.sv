@@ -34,13 +34,24 @@ import ydrasil_pkg::*;
     wire [3:0]  dtcm_wmask;
 
     localparam [31:0] DTCM_BYTE_SIZE = (32'd1 << DTCM_ADDR_WIDTH) << 2;
+`ifdef TARGET_FPGA
+    localparam bit IF_DTCM_FETCH_ENABLE = 1'b0;
+`else
+`ifdef TARGET_SYNTHESIS
+    localparam bit IF_DTCM_FETCH_ENABLE = 1'b0;
+`else
+    localparam bit IF_DTCM_FETCH_ENABLE = 1'b1;
+`endif
+`endif
 
     wire if_dtcm_sel;
+    wire if_dtcm_access;
     wire [DTCM_ADDR_WIDTH-1:0] if_dtcm_addr;
     wire [DTCM_ADDR_WIDTH-1:0] lsu_dtcm_addr;
 
     assign if_dtcm_sel = (if_mem_addr_i >= DTCM_BASE_ADDR) &&
                          (if_mem_addr_i < (DTCM_BASE_ADDR + DTCM_BYTE_SIZE));
+    assign if_dtcm_access = IF_DTCM_FETCH_ENABLE & if_dtcm_sel;
     assign if_dtcm_addr = if_mem_addr_i[DTCM_ADDR_WIDTH+1:2];
     assign lsu_dtcm_addr = lsu_mem_addr_i[DTCM_ADDR_WIDTH+1:2];
 
@@ -50,9 +61,9 @@ import ydrasil_pkg::*;
 
     if (MEMS_MODE == MEMS_MODE_NEW) begin : g_new
         assign dtcm_addr = lsu_mem_req_i ? lsu_dtcm_addr : if_dtcm_addr;
-        assign if_mem_rdata_o = if_dtcm_sel ? dtcm_rdata : itcm_rdata;
+        assign if_mem_rdata_o = if_dtcm_access ? dtcm_rdata : itcm_rdata;
         assign lsu_mem_data_o = dtcm_rdata;
-        assign dtcm_en = lsu_mem_req_i | if_dtcm_sel;
+        assign dtcm_en = lsu_mem_req_i | if_dtcm_access;
         assign dtcm_wen = lsu_mem_req_i & lsu_mem_we_i;
     end else begin : g_legacy
         assign dtcm_addr = lsu_dtcm_addr;

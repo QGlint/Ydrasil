@@ -76,12 +76,17 @@ syn-vivado: syn-prep
 		-force $(SYN_FORCE)
 
 syn-analyze: syn-venv
-	$(SYN_PYTHON) $(SYN_DIR)/analyze_timing.py --report-dir $(SYN_REPORT_DIR)
+	$(SYN_PYTHON) $(SYN_DIR)/analyze_timing.py \
+		--report-dir $(SYN_REPORT_DIR) \
+		--violation-report $(SYN_REPORT_DIR)/post_route_timing_violations.rpt
 	@if [ -f "$(SYN_REPORT_DIR)/cpu150_timing_paths.rpt" ]; then \
 		$(SYN_PYTHON) $(SYN_DIR)/analyze_timing.py \
 			--report-dir $(SYN_REPORT_DIR) \
 			--timing-report $(SYN_REPORT_DIR)/cpu150_timing_paths.rpt \
+			--violation-report $(SYN_REPORT_DIR)/cpu150_timing_violations.rpt \
 			--csv $(SYN_REPORT_DIR)/cpu150_timing_groups.csv \
+			--paths-csv $(SYN_REPORT_DIR)/cpu150_timing_paths.csv \
+			--violations-csv $(SYN_REPORT_DIR)/cpu150_timing_violations.csv \
 			--md $(SYN_REPORT_DIR)/cpu150_timing_groups.md; \
 	fi
 

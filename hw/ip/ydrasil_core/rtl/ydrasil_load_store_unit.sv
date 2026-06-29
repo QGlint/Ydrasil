@@ -13,10 +13,6 @@ import ydrasil_pkg::*;
     input wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]      id_lsu_rs2_data_i, // 存储操作的源寄存器数据
     input wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]      id_lsu_rs2_raddr_i,
     input wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]      ex_lsu_rd_data_i, // 存储操作的源寄存器数据
-    input wire                             id_lsu_rs2_rd_forward_i,
-    input wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]      wb_ex_pending_wdata_rd_i,
-    input wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]      wb_ex_pending_waddr_rd_i,
-    input wire                             wb_ex_pending_i,
     
     // 内存接口
     input wire [ydrasil_pkg::BUS_DATA_WIDTH-1:0]       lsu_mem_rdata_i,
@@ -64,16 +60,7 @@ import ydrasil_pkg::*;
         wire request_crosses_word;
         wire latched_crosses_word;
 
-        wire wb_lsu_rs2_rd_forward;
-
-        assign wb_lsu_rs2_rd_forward =
-            wb_ex_pending_i &
-            (id_lsu_rs2_raddr_i == wb_ex_pending_waddr_rd_i) &
-            (id_lsu_rs2_raddr_i != '0);
-        assign lsu_rs2_data =
-            id_lsu_rs2_rd_forward_i ? ex_lsu_rd_data_i :
-            wb_lsu_rs2_rd_forward   ? wb_ex_pending_wdata_rd_i :
-                                       id_lsu_rs2_data_i;
+        assign lsu_rs2_data = id_lsu_rs2_data_i;
         assign is_load = operator_lsu_type_i[OPERATOR_TYPE_LOAD - OPERATOR_TYPE_LSU_BASE];
         assign is_store = operator_lsu_type_i[OPERATOR_TYPE_STORE - OPERATOR_TYPE_LSU_BASE];
         assign mem_addr = ex_lsu_mem_addr_i;
@@ -252,16 +239,7 @@ import ydrasil_pkg::*;
     reg        is_load_ff;
     reg [1:0]  mem_addr_index_ff;
 
-    wire wb_lsu_rs2_rd_forward;
-
-    assign wb_lsu_rs2_rd_forward =
-        wb_ex_pending_i &
-        (id_lsu_rs2_raddr_i == wb_ex_pending_waddr_rd_i) &
-        (id_lsu_rs2_raddr_i != '0);
-    assign lsu_rs2_data =
-        id_lsu_rs2_rd_forward_i ? ex_lsu_rd_data_i :
-        wb_lsu_rs2_rd_forward   ? wb_ex_pending_wdata_rd_i :
-                                   id_lsu_rs2_data_i; // 前递后的源寄存器数据
+    assign lsu_rs2_data = id_lsu_rs2_data_i;
 
     assign is_load   = operator_lsu_type_i[ydrasil_pkg::OPERATOR_TYPE_LOAD - ydrasil_pkg::OPERATOR_TYPE_LSU_BASE];
     assign is_store  = operator_lsu_type_i[ydrasil_pkg::OPERATOR_TYPE_STORE - ydrasil_pkg::OPERATOR_TYPE_LSU_BASE];

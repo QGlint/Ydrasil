@@ -38,14 +38,7 @@ import ydrasil_pkg::*;
 
     output wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] operator_type_o, // 操作类型信号
 
-    output wire                            id_ex_rs2_rd_forward_o, // 前递控制信号
-    output wire                            id_ex_rs1_rd_forward_o, // 前递控制信号
-    output wire                            id_ex_bt_rs1_rd_forward_o, // 前递控制信号
-    output wire                            id_lsu_rs2_rd_forward_o, // 前递控制信号
-    // output wire                            id_lsu_rs1_rd_forward_o, // 前递控制信号
-    output wire [ydrasil_pkg::OPSEL_INFO_WIDTH-1:0]                      sel_rs_o,
-    output wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     id_ex_rs1_raddr_o,
-    output wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     id_ex_rs2_raddr_o,
+    output wire                            id_ex_jalr_o,
     output wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     id_ctrl_rs1_addr_o,
     output wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     id_ctrl_rs2_addr_o,
     output wire                            id_ctrl_rs1_ren_o,
@@ -72,24 +65,6 @@ import ydrasil_pkg::*;
 
 
 );
-
-    wire id_ex_rs2_rd_forward;//前递
-    wire id_ex_rs1_rd_forward;//前递
-    wire id_lsu_rs2_rd_forward;//前递
-    wire id_ex_bt_rs1_rd_forward;//前递
-    // wire id_mem_rs1_rd_forward;//前递
-
-    reg id_ex_rs2_rd_forward_ff;//前递
-    reg id_ex_rs1_rd_forward_ff;//前递
-    reg id_lsu_rs2_rd_forward_ff;//前递
-    reg id_ex_bt_rs1_rd_forward_ff;//前递
-    // reg id_mem_rs1_rd_forward_ff;//前递
-    reg [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     rf_raddr_rs1_ff;
-    reg [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     rf_raddr_rs2_ff;
-
-
-    wire rs2_rd_hazard;
-    wire rs1_rd_hazard;
 
     wire [4:0]                           rf_raddr_rs1;
     wire [4:0]                           rf_raddr_rs2;
@@ -130,6 +105,7 @@ import ydrasil_pkg::*;
     reg [DATA_WIDTH-1:0]                 bt_a_operand_ff;
     reg [DATA_WIDTH-1:0]                 bt_b_operand_ff;
     reg [DATA_WIDTH-1:0]                 id_instr_addr_ff;
+    reg                                  id_ex_jalr_ff;
     reg                                  id_ex_pred_hit_ff;
     reg                                  id_ex_pred_taken_ff;
     reg [DATA_WIDTH-1:0]                 id_ex_pred_target_ff;
@@ -178,16 +154,6 @@ import ydrasil_pkg::*;
         .operator_type_o    (operator_type)
     );
 
-
-    wire [ydrasil_pkg::OPSEL_INFO_WIDTH-1:0] sel_rs;
-    reg [ydrasil_pkg::OPSEL_INFO_WIDTH-1:0] sel_rs_ff;
-    assign sel_rs_o = sel_rs_ff;
-
-    assign sel_rs[ydrasil_pkg::ASELRS] = ~(operand_a_pc_sel| operand_a_imm_sel);
-    assign sel_rs[ydrasil_pkg::BSELRS] = operand_b_rs_sel;
-    assign sel_rs[ydrasil_pkg::BTASELRS] = bt_a_rs_sel;
-
-
     assign rf_addr_rs1_o = rf_raddr_rs1;
     assign rf_addr_rs2_o = rf_raddr_rs2;
 
@@ -202,15 +168,6 @@ import ydrasil_pkg::*;
     assign id_fence_i = (if_id_instr_i[6:0] == ydrasil_pkg::RV32I_INS_FENCE) &&
                         (if_id_instr_i[14:12] == 3'b001);
 
-    assign rs2_rd_hazard = (rf_raddr_rs2 != 0) && (rf_raddr_rs2 == rf_waddr_rd_ff) && rf_wen_rd_ff;
-    assign rs1_rd_hazard = (rf_raddr_rs1 != 0) && (rf_raddr_rs1 == rf_waddr_rd_ff) && rf_wen_rd_ff;
-
-    assign id_ex_rs2_rd_forward = rs2_rd_hazard && operand_b_rs_sel;
-    assign id_ex_rs1_rd_forward = rs1_rd_hazard && (~(operand_a_pc_sel| operand_a_imm_sel)) ;
-    assign id_ex_bt_rs1_rd_forward = rs1_rd_hazard && bt_a_rs_sel;
-    assign id_lsu_rs2_rd_forward = rs2_rd_hazard ;
-    // assign id_lsu_rs1_rd_forward = rs1_rd_hazard ;
-
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             operand_a_ff        <= '0;
@@ -223,57 +180,37 @@ import ydrasil_pkg::*;
             id_lsu_rs2_data_ff  <= '0;
             bt_a_operand_ff     <= '0;
             bt_b_operand_ff     <= '0;
-            id_ex_rs2_rd_forward_ff <= 1'b0;
-            id_ex_rs1_rd_forward_ff <= 1'b0;
-            id_lsu_rs2_rd_forward_ff <= 1'b0;
-            id_ex_bt_rs1_rd_forward_ff <= 1'b0;
             csr_reg_raddr_ff <= '0;
             // csr_ex_we_ff <= 1'b0;
             csr_ex_waddr_ff <= '0;
             csr_op_info_ff <= '0;
             sys_op_info_ff <= '0;
             id_instr_addr_ff <= '0;
+            id_ex_jalr_ff <= 1'b0;
             id_ex_pred_hit_ff <= 1'b0;
             id_ex_pred_taken_ff <= 1'b0;
             id_ex_pred_target_ff <= '0;
             id_ex_pred_counter_ff <= 2'b01;
             id_ex_valid_ff <= 1'b0;
             id_fence_i_ff <= 1'b0;
-            sel_rs_ff <= '0;
-            rf_raddr_rs1_ff <= '0;
-            rf_raddr_rs2_ff <= '0;
         end
         else if (flush_id_i) begin
-            operand_a_ff        <= '0;
-            operand_b_ff        <= '0;
             operator_ff         <= '0;
             operator_type_ff    <= '0;
             rf_wen_rd_ff        <= '0;
             rf_waddr_rd_ff      <= '0;
             operator_lsu_ff     <= '0;
-            id_lsu_rs2_data_ff  <= '0;
-            bt_a_operand_ff     <= '0;
-            bt_b_operand_ff     <= '0;
-            id_ex_rs2_rd_forward_ff <= 1'b0;
-            id_ex_rs1_rd_forward_ff <= 1'b0;
-            id_lsu_rs2_rd_forward_ff <= 1'b0;
-            id_ex_bt_rs1_rd_forward_ff <= 1'b0;
-            // id_lsu_rs1_rd_forward_ff <= 1'b0;
             csr_reg_raddr_ff <= '0;
             // csr_ex_we_ff <= 1'b0;
             csr_ex_waddr_ff <= '0;
             csr_op_info_ff <= '0;
             sys_op_info_ff <= '0;
-            id_instr_addr_ff <= '0;
+            id_ex_jalr_ff <= 1'b0;
             id_ex_pred_hit_ff <= 1'b0;
             id_ex_pred_taken_ff <= 1'b0;
-            id_ex_pred_target_ff <= '0;
             id_ex_pred_counter_ff <= 2'b01;
             id_ex_valid_ff <= 1'b0;
             id_fence_i_ff <= 1'b0;
-            sel_rs_ff <= '0;
-            rf_raddr_rs1_ff <= '0;
-            rf_raddr_rs2_ff <= '0;
         end
         else if (!stall_id_i) begin
             operand_a_ff        <= operand_a;
@@ -286,25 +223,19 @@ import ydrasil_pkg::*;
             id_lsu_rs2_data_ff  <= rf_rdata_rs2_i; // 直接传递寄存器数据，供LSU使用
             bt_a_operand_ff     <= bt_a_operand;
             bt_b_operand_ff     <= bt_b_operand;
-            id_ex_rs2_rd_forward_ff <= id_ex_rs2_rd_forward;
-            id_ex_rs1_rd_forward_ff <= id_ex_rs1_rd_forward;
-            id_lsu_rs2_rd_forward_ff <= id_lsu_rs2_rd_forward;
-            id_ex_bt_rs1_rd_forward_ff <= id_ex_bt_rs1_rd_forward;
             csr_reg_raddr_ff <= csr_reg_raddr;
             // csr_ex_we_ff <= csr_ex_we;
             csr_ex_waddr_ff <= csr_ex_waddr;
             csr_op_info_ff <= csr_op_info;
             sys_op_info_ff <= sys_op_info;
             id_instr_addr_ff <= if_id_pc_i;
+            id_ex_jalr_ff <= bt_a_rs_sel;
             id_ex_pred_hit_ff <= if_id_pred_hit_i;
             id_ex_pred_taken_ff <= if_id_pred_taken_i;
             id_ex_pred_target_ff <= if_id_pred_target_i;
             id_ex_pred_counter_ff <= if_id_pred_counter_i;
             id_ex_valid_ff <= if_id_valid_i;
             id_fence_i_ff <= if_id_valid_i & id_fence_i;
-            sel_rs_ff <= sel_rs;
-            rf_raddr_rs1_ff <= rf_raddr_rs1;
-            rf_raddr_rs2_ff <= rf_raddr_rs2;
         end else begin
             id_fence_i_ff <= 1'b0;
         end
@@ -320,26 +251,19 @@ import ydrasil_pkg::*;
     assign id_lsu_rs2_data_o    = id_lsu_rs2_data_ff; // 直接传递寄存器数据，供LSU使用
     assign bt_a_operand_o       = bt_a_operand_ff;
     assign bt_b_operand_o       = bt_b_operand_ff;
-    assign id_ex_rs2_rd_forward_o = id_ex_rs2_rd_forward_ff;
-    assign id_ex_rs1_rd_forward_o = id_ex_rs1_rd_forward_ff;
-    assign id_lsu_rs2_rd_forward_o = id_lsu_rs2_rd_forward_ff;
-    assign id_ex_bt_rs1_rd_forward_o = id_ex_bt_rs1_rd_forward_ff;
-    // assign id_lsu_rs1_rd_forward_o = id_lsu_rs1_rd_forward_ff;
     assign  id_csr_raddr_o = csr_reg_raddr_ff;
     // assign  id_ex_csr_we_o = csr_ex_we_ff;
     assign  id_ex_csr_waddr_o = csr_ex_waddr_ff;
     assign  id_op_csr_info_o = csr_op_info_ff;
     assign  id_op_sys_info_o = sys_op_info_ff;
     assign id_instr_addr_o = id_instr_addr_ff;
+    assign id_ex_jalr_o = id_ex_jalr_ff;
     assign id_fence_i_o = id_fence_i_ff;
     assign id_ex_pred_hit_o = id_ex_pred_hit_ff;
     assign id_ex_pred_taken_o = id_ex_pred_taken_ff;
     assign id_ex_pred_target_o = id_ex_pred_target_ff;
     assign id_ex_pred_counter_o = id_ex_pred_counter_ff;
     assign id_ex_valid_o = id_ex_valid_ff;
-    assign sel_rs_o = sel_rs_ff;
-    assign id_ex_rs1_raddr_o = rf_raddr_rs1_ff;
-    assign id_ex_rs2_raddr_o = rf_raddr_rs2_ff;
 
     assign id_ctrl_rs1_addr_o = rf_raddr_rs1;
     assign id_ctrl_rs2_addr_o = rf_raddr_rs2;

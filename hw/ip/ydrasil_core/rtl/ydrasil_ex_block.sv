@@ -16,23 +16,15 @@ import ydrasil_pkg::*;
     input  wire [OPERATOR_WIDTH-1:0]       operator_i,
     input  wire [OPERATOR_TYPE_WIDTH-1:0]  operator_type_i,
     input  wire                            id_ex_valid_i,
+    input  wire                            id_ex_jalr_i,
     input  wire                            id_ex_pred_hit_i,
     input  wire                            id_ex_pred_taken_i,
     input  wire [DATA_WIDTH-1:0]           id_ex_pred_target_i,
     input  wire [1:0]                      id_ex_pred_counter_i,
     input  wire [REGS_ADDR_WIDTH-1:0]      id_rf_waddr_rd_i,
     input  wire                            id_alu_rf_wen_rd_i,
-    input  wire                            id_ex_rs2_rd_forward_i,
-    input  wire                            id_ex_rs1_rd_forward_i,
-    input  wire                            id_ex_bt_rs1_rd_forward_i,
     input  wire                            interrupt_i,
     input  wire [INST_ADDR_WIDTH-1:0]      clint_ex_int_addr_i,
-    input  wire [REGS_ADDR_WIDTH-1:0]      id_ex_rs2_raddr_i,
-    input  wire [REGS_ADDR_WIDTH-1:0]      id_ex_rs1_raddr_i,
-    input  wire [REGS_DATA_WIDTH-1:0]      wb_ex_pending_wdata_rd_ff_i,
-    input  wire [REGS_ADDR_WIDTH-1:0]      wb_ex_pending_waddr_rd_ff_i,
-    input  wire                            wb_ex_pending_ff_i,
-    input  wire [OPSEL_INFO_WIDTH-1:0]     sel_rs_i,
 
     input  wire [CSR_ADDR_WIDTH-1:0]       id_ex_csr_waddr_i,
     input  wire [OP_CSR_INFO_WIDTH-1:0]    id_op_csr_info_i,
@@ -119,44 +111,17 @@ import ydrasil_pkg::*;
     wire [31:0] bt_a_operand;
     wire [31:0] bt_b_operand;
 
-    wire op_a_sel_rs1 = sel_rs_i[ASELRS];
-    wire bt_a_sel_rs1 = sel_rs_i[BTASELRS];
-    wire op_b_sel_rs2 = sel_rs_i[BSELRS];
-
-    wire wb_ex_bt_rs1_rd_forward;
-    wire wb_ex_rs1_rd_forward;
-    wire wb_ex_rs2_rd_forward;
-
-    assign wb_ex_bt_rs1_rd_forward =
-        bt_a_sel_rs1 & wb_ex_pending_ff_i &
-        (id_ex_rs1_raddr_i == wb_ex_pending_waddr_rd_ff_i) & (id_ex_rs1_raddr_i != '0);
-    assign wb_ex_rs1_rd_forward =
-        op_a_sel_rs1 & wb_ex_pending_ff_i &
-        (id_ex_rs1_raddr_i == wb_ex_pending_waddr_rd_ff_i) & (id_ex_rs1_raddr_i != '0);
-    assign wb_ex_rs2_rd_forward =
-        op_b_sel_rs2 & wb_ex_pending_ff_i &
-        (id_ex_rs2_raddr_i == wb_ex_pending_waddr_rd_ff_i) & (id_ex_rs2_raddr_i != '0);
-
-    assign bt_a_operand =
-        id_ex_bt_rs1_rd_forward_i ? alu_result_ff :
-        wb_ex_bt_rs1_rd_forward   ? wb_ex_pending_wdata_rd_ff_i :
-                                    bt_a_operand_i;
+    assign bt_a_operand = bt_a_operand_i;
     assign bt_b_operand = bt_b_operand_i;
 
-    assign operand_a =
-        id_ex_rs1_rd_forward_i ? alu_result_ff :
-        wb_ex_rs1_rd_forward   ? wb_ex_pending_wdata_rd_ff_i :
-                                  operand_a_i;
-    assign operand_b =
-        id_ex_rs2_rd_forward_i ? alu_result_ff :
-        wb_ex_rs2_rd_forward   ? wb_ex_pending_wdata_rd_ff_i :
-                                  operand_b_i;
+    assign operand_a = operand_a_i;
+    assign operand_b = operand_b_i;
 
     assign bt_alu_result = bt_a_operand + bt_b_operand;
     assign ex_lsu_mem_addr_o = alu_result;
     assign ex_lsu_result_o = alu_result_ff;
 
-    assign ex_jump_target = bt_a_sel_rs1 ? {bt_alu_result[DATA_WIDTH-1:1], 1'b0} : bt_alu_result;
+    assign ex_jump_target = id_ex_jalr_i ? {bt_alu_result[DATA_WIDTH-1:1], 1'b0} : bt_alu_result;
     assign ex_branch_target_o = interrupt_i ? clint_ex_int_addr_i : ex_jump_target;
     assign ex_branch_pc = bt_a_operand;
     assign ex_branch_next_pc = ex_branch_pc + 32'd4;

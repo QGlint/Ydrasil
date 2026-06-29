@@ -18,10 +18,6 @@ import ydrasil_pkg::*;
     input  wire                         mul_rf_wen_rd_i,
     input  wire [REGS_ADDR_WIDTH-1:0]   mul_rf_waddr_rd_i,
 
-    output wire [REGS_DATA_WIDTH-1:0]   wb_ex_pending_wdata_rd_ff_o,
-    output wire [REGS_ADDR_WIDTH-1:0]   wb_ex_pending_waddr_rd_ff_o,
-    output wire                         wb_ex_pending_ff_o,
-
     output wire                         wb_mul_complete_o,
     output wire [REGS_ADDR_WIDTH-1:0]   wb_mul_complete_waddr_o,
     output wire                         wb_backpressure_o,
@@ -73,10 +69,6 @@ import ydrasil_pkg::*;
         mul_fifo_count_q +
         (mul_enqueue_accept ? MUL_FIFO_COUNT_WIDTH'(1) : '0) -
         (mul_dequeue ? MUL_FIFO_COUNT_WIDTH'(1) : '0);
-
-    assign wb_ex_pending_wdata_rd_ff_o = alu_pending_data_q;
-    assign wb_ex_pending_waddr_rd_ff_o = alu_pending_addr_q;
-    assign wb_ex_pending_ff_o = alu_pending_valid_q;
 
     assign wb_mul_complete_o = (sel_mul_fifo | sel_mul_current);
     assign wb_mul_complete_waddr_o = sel_mul_current ? mul_rf_waddr_rd_i : mul_fifo_head_addr;

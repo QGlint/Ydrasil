@@ -58,14 +58,11 @@ import ydrasil_pkg::*;
 	wire [31:0]                    bt_a_operand;
 	wire [31:0]                    bt_b_operand;
 	wire [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0]  operator_lsu;
-    wire                           id_lsu_rs2_rd_forward;
-    wire id_ex_rs2_rd_forward;
-    wire id_ex_rs1_rd_forward;
-    wire id_ex_bt_rs1_rd_forward;
 	wire [31:0]                    id_lsu_rs2_data;
 	wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] operator_type;
 	wire                           id_alu_rf_wen_rd;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    id_rf_waddr_rd;
+	wire                           id_ex_jalr;
 
 	// EX outputs
 	wire                        ex_branch_jump;
@@ -122,14 +119,6 @@ import ydrasil_pkg::*;
 	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] rf_wdata_rd;
 	wire                        rf_wen_rd;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] rf_waddr_rd;
-	wire [ydrasil_pkg::OPSEL_INFO_WIDTH-1:0]		sel_rs;
-	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]      id_ex_rs2_raddr;
-	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]      id_ex_rs1_raddr;
-	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]     wb_ex_pending_wdata_rd_ff;
-	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]		wb_ex_pending_waddr_rd_ff;
-	wire                       		wb_ex_pending_ff;
-	wire                        wb_mul_complete;
-	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] wb_mul_complete_waddr;
 	wire                        wb_backpressure;
 
 	wire [ydrasil_pkg::BUS_DATA_WIDTH-1:0]  lsu_mem_rdata_m; // 从DRAM读取的数据
@@ -148,6 +137,8 @@ import ydrasil_pkg::*;
 	wire                            scoreboard_stall;
 	wire                            lsu_struct_stall;
 	reg [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_q;
+	wire                            id_ex_rd_issue;
+	wire                            rf_wb_clear;
 
 	wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0]       id_csr_raddr;
 	wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0]       id_ex_csr_waddr;
@@ -195,16 +186,14 @@ import ydrasil_pkg::*;
         end
     end
 
-	wire load_issue = id_ex_valid & operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD] &
-		(id_rf_waddr_rd != '0) & !interrupt;
+	assign id_ex_rd_issue =
+		id_ex_valid & (id_rf_waddr_rd != '0) & !interrupt &
+		(id_alu_rf_wen_rd | operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD]);
+	assign rf_wb_clear = rf_wen_rd & (rf_waddr_rd != '0);
 	wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_clear_mask =
-		((wb_mul_complete && (wb_mul_complete_waddr != '0)) ?
-			(ydrasil_pkg::REGS_NUM'(1) << wb_mul_complete_waddr) : '0) |
-		((lsu_rf_wen_rd && (lsu_rf_waddr_rd != '0)) ?
-			(ydrasil_pkg::REGS_NUM'(1) << lsu_rf_waddr_rd) : '0);
+		rf_wb_clear ? (ydrasil_pkg::REGS_NUM'(1) << rf_waddr_rd) : '0;
 	wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_issue_mask =
-		(ex_mul_issue ? (ydrasil_pkg::REGS_NUM'(1) << ex_mul_issue_waddr) : '0) |
-		(load_issue ? (ydrasil_pkg::REGS_NUM'(1) << id_rf_waddr_rd) : '0);
+		id_ex_rd_issue ? (ydrasil_pkg::REGS_NUM'(1) << id_rf_waddr_rd) : '0;
 	wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_for_hazard =
 		(gpr_pending_q & ~gpr_pending_clear_mask) | gpr_pending_issue_mask;
 
@@ -243,11 +232,7 @@ import ydrasil_pkg::*;
 		.operator_lsu_type_i(operator_lsu_type),
         .ex_lsu_rd_data_i (ex_lsu_result),
 		.id_lsu_rs2_data_i (id_lsu_rs2_data),
-		.id_lsu_rs2_raddr_i(id_ex_rs2_raddr),
-        .id_lsu_rs2_rd_forward_i(id_lsu_rs2_rd_forward),
-		.wb_ex_pending_wdata_rd_i(wb_ex_pending_wdata_rd_ff),
-		.wb_ex_pending_waddr_rd_i(wb_ex_pending_waddr_rd_ff),
-		.wb_ex_pending_i  (wb_ex_pending_ff),
+		.id_lsu_rs2_raddr_i('0),
 		.lsu_mem_rdata_i   (lsu_mem_rdata),
 		.lsu_mem_wdata_o   (lsu_mem_wdata),
 		.lsu_mem_addr_o    (lsu_mem_addr),
@@ -326,15 +311,8 @@ import ydrasil_pkg::*;
 		.bt_a_operand_o     (bt_a_operand),
 		.bt_b_operand_o     (bt_b_operand),
 		.operator_lsu_o     (operator_lsu),
-		.sel_rs_o            (sel_rs),
-		.id_ex_rs2_raddr_o (id_ex_rs2_raddr),
-		.id_ex_rs1_raddr_o (id_ex_rs1_raddr),
 		.id_lsu_rs2_data_o  (id_lsu_rs2_data),
 		.operator_type_o    (operator_type),
-		.id_ex_rs2_rd_forward_o (id_ex_rs2_rd_forward),
-		.id_ex_rs1_rd_forward_o (id_ex_rs1_rd_forward),
-		.id_lsu_rs2_rd_forward_o (id_lsu_rs2_rd_forward),
-		.id_ex_bt_rs1_rd_forward_o (id_ex_bt_rs1_rd_forward),
 		.id_ctrl_rs1_addr_o (id_ctrl_rs1_addr),
 		.id_ctrl_rs2_addr_o (id_ctrl_rs2_addr),
 		.id_ctrl_rs1_ren_o  (id_ctrl_rs1_ren),
@@ -347,6 +325,7 @@ import ydrasil_pkg::*;
 		.id_op_csr_info_o   (id_op_csr_info),
 		.id_op_sys_info_o   (id_op_sys_info),
 		.id_instr_addr_o    (id_instr_addr),
+		.id_ex_jalr_o       (id_ex_jalr),
 		.id_fence_i_o       (id_fence_i),
 		.id_ex_pred_hit_o   (id_ex_pred_hit),
 		.id_ex_pred_taken_o (id_ex_pred_taken),
@@ -368,6 +347,7 @@ import ydrasil_pkg::*;
 		.operator_i         (operator),
 		.operator_type_i    (operator_type),
 		.id_ex_valid_i      (id_ex_valid),
+		.id_ex_jalr_i       (id_ex_jalr),
 		.id_ex_pred_hit_i   (id_ex_pred_hit),
 		.id_ex_pred_taken_i (id_ex_pred_taken),
 		.id_ex_pred_target_i(id_ex_pred_target),
@@ -376,21 +356,12 @@ import ydrasil_pkg::*;
 		.clint_ex_int_addr_i(clint_ex_int_addr),
 		.id_rf_waddr_rd_i   (id_rf_waddr_rd),
 		.id_alu_rf_wen_rd_i (id_alu_rf_wen_rd),
-		.id_ex_rs2_rd_forward_i    (id_ex_rs2_rd_forward),
-		.id_ex_rs1_rd_forward_i    (id_ex_rs1_rd_forward),
-		.id_ex_bt_rs1_rd_forward_i (id_ex_bt_rs1_rd_forward),
 		.id_ex_csr_waddr_i  (id_ex_csr_waddr) ,
 		.id_op_csr_info_i   (id_op_csr_info) ,
 		.csr_ex_rdata_i     (csr_ex_rdata) ,
 		.ex_csr_wen_o       (ex_csr_wen),
 		.ex_csr_wdata_o     (ex_csr_wdata),
 		.ex_csr_waddr_o     (ex_csr_waddr),
-		.sel_rs_i(sel_rs),
-		.wb_ex_pending_wdata_rd_ff_i(wb_ex_pending_wdata_rd_ff),
-		.wb_ex_pending_waddr_rd_ff_i(wb_ex_pending_waddr_rd_ff),
-		.wb_ex_pending_ff_i(wb_ex_pending_ff),
-		.id_ex_rs2_raddr_i(id_ex_rs2_raddr),
-		.id_ex_rs1_raddr_i(id_ex_rs1_raddr),
 		.ex_branch_jump_o   (ex_branch_jump),
 		.ex_branch_target_o (ex_branch_target),
 		.ex_pc_redirect_o   (ex_pc_redirect),
@@ -443,11 +414,8 @@ import ydrasil_pkg::*;
 		.mul_wdata_rd_i   (mul_wb_result),
 		.mul_rf_wen_rd_i  (mul_rf_wen_rd),
 		.mul_rf_waddr_rd_i(mul_rf_waddr_rd),
-		.wb_ex_pending_wdata_rd_ff_o(wb_ex_pending_wdata_rd_ff),
-		.wb_ex_pending_waddr_rd_ff_o(wb_ex_pending_waddr_rd_ff),
-		.wb_ex_pending_ff_o(wb_ex_pending_ff),
-		.wb_mul_complete_o(wb_mul_complete),
-		.wb_mul_complete_waddr_o(wb_mul_complete_waddr),
+		.wb_mul_complete_o(),
+		.wb_mul_complete_waddr_o(),
 		.wb_backpressure_o(wb_backpressure),
 		.rf_wdata_rd_o    (rf_wdata_rd),
 		.rf_wen_rd_o      (rf_wen_rd),
