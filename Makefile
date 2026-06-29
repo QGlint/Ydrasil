@@ -22,12 +22,13 @@ SYN_SYNC_SOURCES ?= 1
 VIVADO ?= vivado
 VIVADO_SETTINGS ?= /opt/Xilinx/Vitis/2024.2/settings64.sh
 VIVADO_LICENSE_FILE ?= $(firstword $(wildcard $(HOME)/opt/vivado_2037.lic $(HOME)/*.lic $(HOME)/.Xilinx/*.lic))
+BENDER_INSTALL_URL ?= https://github.com/pulp-platform/bender/releases/download/v0.32.0/bender-installer.sh
 
 ifneq ($(VIVADO_LICENSE_FILE),)
 export XILINXD_LICENSE_FILE := $(VIVADO_LICENSE_FILE)
 endif
 
-.PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests init get_spike download_and_extract_spike check_deps spike spike_wave_to_csv  rv_test_comp_genmem syn syn-venv syn-prep syn-vivado syn-analyze syn-clean
+.PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests init install-bender get_spike download_and_extract_spike check_deps spike spike_wave_to_csv  rv_test_comp_genmem syn syn-venv syn-prep syn-vivado syn-analyze syn-clean
 
 .SECONDEXPANSION:
 
@@ -86,8 +87,22 @@ syn-clean:
 	rm -rf $(SYN_BUILD_DIR)
 
 
-init:
+init: install-bender
 	git submodule update --init --recursive
+
+install-bender:
+	@if command -v $(BENDER) >/dev/null 2>&1; then \
+		echo "Bender is already installed: $$(command -v $(BENDER))"; \
+	else \
+		echo "Installing Bender from $(BENDER_INSTALL_URL)"; \
+		curl --proto '=https' --tlsv1.2 -LsSf "$(BENDER_INSTALL_URL)" | sh; \
+		if command -v $(BENDER) >/dev/null 2>&1; then \
+			echo "Bender installed: $$(command -v $(BENDER))"; \
+		else \
+			echo "Error: Bender installer finished but $(BENDER) was not found in PATH."; \
+			exit 1; \
+		fi; \
+	fi
 
 comp:
 	@mkdir -p $(BUILD_DIR) $(WAVE_DIR) $(LOG_DIR)
