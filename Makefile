@@ -28,7 +28,7 @@ ifneq ($(VIVADO_LICENSE_FILE),)
 export XILINXD_LICENSE_FILE := $(VIVADO_LICENSE_FILE)
 endif
 
-.PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests init install-bender get_spike download_and_extract_spike check_deps spike spike_wave_to_csv  rv_test_comp_genmem syn syn-venv syn-prep syn-vivado syn-analyze syn-clean
+.PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests init install-bender get_spike download_and_extract_spike check_deps spike spike_wave_to_csv  rv_test_comp_genmem coremark coremark_sim coremark_run syn syn-venv syn-prep syn-vivado syn-analyze syn-clean
 
 .SECONDEXPANSION:
 
@@ -116,6 +116,21 @@ comp_and_sim_cpu: comp
 	@$(MAKE) -C hw/dv sim \
 		ITCM_FILE=$(RVTESTS_OUT_ROOT)/rv32ui/mem/rv32ui_lh.itcm \
 		DTCM_FILE=$(RVTESTS_OUT_ROOT)/rv32ui/mem/rv32ui_lh.dtcm
+
+coremark:
+	@$(MAKE) -C sw coremark \
+		PROJECT_ROOT=$(PROJECT_ROOT) \
+		RISCV_PREFIX=$(RISCV_PREFIX) \
+		ARCH=rv32im_zicsr_zifencei \
+		ABI=$(ABI)
+
+coremark_sim: coremark comp
+	@$(MAKE) -C hw/dv sim \
+		ITCM_FILE=$(BUILD_DIR)/app/coremark/coremark.itcm \
+		DTCM_FILE=$(BUILD_DIR)/app/coremark/coremark.dtcm \
+		SIM_EXTRA_DEFINES="+cpp_timeout=10000000 +sv_timeout=10000000"
+
+coremark_run: coremark_sim
 
 
 # --- 核心自动化测试逻辑 (支持 ITCM/DTCM 分离加载) ---

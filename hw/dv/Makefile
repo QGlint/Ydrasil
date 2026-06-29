@@ -68,6 +68,7 @@ endif
 ifneq ($(DTCM_FILE),)
 SIM_DEFINES += +dtcmfile=$(DTCM_FILE)
 endif
+SIM_DEFINES += $(SIM_EXTRA_DEFINES)
 
 DEFINES := RANDOM_SEED=$(RANDOM_SEED)
 

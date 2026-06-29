@@ -1,0 +1,19 @@
+# RT-Thread building script for component
+
+from building import *
+import os
+
+cwd = GetCurrentDir()
+src = []
+
+# 递归查找所有.c和.S文件
+for root, dirs, files in os.walk(cwd):
+    for f in files:
+        if f.endswith('.c') or f.endswith('.S'):
+            src.append(os.path.relpath(os.path.join(root, f), cwd))
+
+CPPPATH = [cwd, os.path.join(cwd, 'include')]
+
+group = DefineGroup('Libraries', src, depend = [''], CPPPATH = CPPPATH)
+
+Return('group')

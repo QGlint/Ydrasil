@@ -43,9 +43,72 @@ CC ?= $(RISCV_PREFIX)-gcc
 endif
 OBJCOPY ?= $(RISCV_PREFIX)-objcopy
 OBJDUMP ?= $(RISCV_PREFIX)-objdump
+AR ?= $(RISCV_PREFIX)-ar
 
 RV_CFLAGS ?= -march=$(ARCH) -mabi=$(ABI) -nostdlib -nostartfiles -static -mcmodel=medany
 LDFLAGS ?=
+
+COREMARK_DIR := coremark
+COREMARK_PORT_DIR := simple
+COREMARK_OUT ?= $(PROJECT_ROOT)/build/app/coremark
+COREMARK_NAME := coremark
+COREMARK_ELF := $(COREMARK_OUT)/$(COREMARK_NAME).elf
+COREMARK_BIN := $(COREMARK_OUT)/$(COREMARK_NAME).bin
+COREMARK_DUMP := $(COREMARK_OUT)/$(COREMARK_NAME).dump
+COREMARK_ITCM := $(COREMARK_OUT)/$(COREMARK_NAME).itcm
+COREMARK_DTCM := $(COREMARK_OUT)/$(COREMARK_NAME).dtcm
+COREMARK_OBJDUMP := $(COREMARK_OUT)/$(COREMARK_NAME).objdump
+COREMARK_MAP := $(COREMARK_OUT)/$(COREMARK_NAME).map
+
+BSP_DIR := $(PROJECT_ROOT)/sw/bsp
+BSP_INCLUDES := -I$(BSP_DIR)/include
+BSP_ASM_SRCS := $(wildcard $(BSP_DIR)/*.S)
+BSP_C_SRCS := \
+	$(BSP_DIR)/lib/platform.c \
+	$(BSP_DIR)/lib/int_handler.c \
+	$(BSP_DIR)/lib/sim_ctrl.c \
+	$(BSP_DIR)/lib/syscalls.c \
+	$(BSP_DIR)/lib/xprintf.c
+COREMARK_C_SRCS := \
+	$(COREMARK_DIR)/core_list_join.c \
+	$(COREMARK_DIR)/core_main.c \
+	$(COREMARK_DIR)/core_matrix.c \
+	$(COREMARK_DIR)/core_state.c \
+	$(COREMARK_DIR)/core_util.c \
+	$(COREMARK_DIR)/$(COREMARK_PORT_DIR)/core_portme.c
+COREMARK_SRCS := $(BSP_ASM_SRCS) $(BSP_C_SRCS) $(COREMARK_C_SRCS)
+COREMARK_CFLAGS := \
+	-march=rv32im_zicsr_zifencei \
+	-mabi=$(ABI) \
+	-mcmodel=medany \
+	-O2 \
+	-g \
+	-ffunction-sections \
+	-fdata-sections \
+	-fno-builtin \
+	-fno-common \
+	-nostdlib \
+	-nostartfiles \
+	-static \
+	-DITERATIONS=1 \
+	-DYDRASIL_SIM_CTRL=1 \
+	-DXPRINTF_DISABLE_FLOAT=1 \
+	-DSDK_BANNER=0 \
+	-DPERFORMANCE_RUN=1 \
+	-DFLAGS_STR=\"rv32im_zicsr_zifencei-ilp32-O2\" \
+	-I$(COREMARK_DIR) \
+	-I$(COREMARK_DIR)/$(COREMARK_PORT_DIR) \
+	$(BSP_INCLUDES)
+COREMARK_LDFLAGS := \
+	-march=rv32im_zicsr_zifencei \
+	-mabi=$(ABI) \
+	-mcmodel=medany \
+	-nostartfiles \
+	-nostdlib \
+	-static \
+	-T $(BSP_DIR)/link.lds \
+	-Wl,-Map,$(COREMARK_MAP) \
+	-Wl,--gc-sections
 
 # ====== derived ======
 SRC ?= 
@@ -64,7 +127,7 @@ DTCM := $(OUT_DIR)/mem/$(NAME).dtcm
 ITCM_BIN  := $(OUT_DIR)/bin/$(NAME)_itcm.bin
 DTCM_BIN  := $(OUT_DIR)/bin/$(NAME)_dtcm.bin
 
-.PHONY: rv_all rv_elf rv_dump rv_mem
+.PHONY: rv_all rv_elf rv_dump rv_mem coremark coremark-clean
 rv_comp_genmem:
 	@if [ "$(REBUILD)" != "1" ] && [ -f "$(ELF)" ] && [ -f "$(DUMP)" ] && [ -f "$(ITCM)" ] && [ -f "$(DTCM)" ]; then \
 		echo "[skip] outputs exist for $(NAME) (set REBUILD=1 to force)"; \
@@ -97,3 +160,53 @@ rv_mem: rv_elf
 	else \
 	  printf "00000000\n" > $(DTCM); \
 	fi
+
+coremark: $(COREMARK_ELF) $(COREMARK_BIN) $(COREMARK_DUMP) $(COREMARK_ITCM) $(COREMARK_DTCM)
+	@echo "[coremark] ELF  $(COREMARK_ELF)"
+	@echo "[coremark] ITCM $(COREMARK_ITCM)"
+	@echo "[coremark] DTCM $(COREMARK_DTCM)"
+
+$(COREMARK_OUT):
+	@mkdir -p $@
+
+$(COREMARK_ELF): $(COREMARK_SRCS) $(BSP_DIR)/link.lds Makefile | $(COREMARK_OUT)
+	$(CC) $(COREMARK_CFLAGS) $(COREMARK_SRCS) $(COREMARK_LDFLAGS) -lgcc -o $@
+
+$(COREMARK_BIN): $(COREMARK_ELF)
+	$(OBJCOPY) -O binary $< $@
+
+$(COREMARK_DUMP): $(COREMARK_ELF)
+	$(OBJDUMP) -d $< > $@
+
+$(COREMARK_OBJDUMP): $(COREMARK_ELF)
+	$(OBJDUMP) -h -S $< > $@
+
+$(COREMARK_ITCM): $(COREMARK_ELF) | $(COREMARK_OUT)
+	$(OBJCOPY) -O binary --gap-fill=0x00 \
+		--only-section=.init \
+		--only-section=.text \
+		--only-section=.text.* \
+		--only-section=.preinit_array \
+		--only-section=.init_array \
+		--only-section=.fini_array \
+		--only-section=.ctors \
+		--only-section=.dtors \
+		$< $(COREMARK_OUT)/$(COREMARK_NAME)_itcm.bin
+	od -An -t x4 -w4 -v $(COREMARK_OUT)/$(COREMARK_NAME)_itcm.bin | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > $@
+
+$(COREMARK_DTCM): $(COREMARK_ELF) | $(COREMARK_OUT)
+	$(OBJCOPY) -O binary --gap-fill=0x00 \
+		--only-section=.data \
+		--only-section=.bss \
+		--only-section=.stack \
+		--set-section-flags .bss=alloc,load,contents \
+		--set-section-flags .stack=alloc,load,contents \
+		$< $(COREMARK_OUT)/$(COREMARK_NAME)_dtcm.bin || true
+	@if [ -s $(COREMARK_OUT)/$(COREMARK_NAME)_dtcm.bin ]; then \
+		od -An -t x4 -w4 -v $(COREMARK_OUT)/$(COREMARK_NAME)_dtcm.bin | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > $@; \
+	else \
+		printf "00000000\n" > $@; \
+	fi
+
+coremark-clean:
+	rm -rf $(COREMARK_OUT)

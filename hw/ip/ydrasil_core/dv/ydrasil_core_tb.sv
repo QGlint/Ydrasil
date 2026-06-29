@@ -124,7 +124,7 @@ end
             $display("[TB] timeout reached, finish simulation");
             $finish;
         end
-        if(LED > 0)
+        if(sim_done)
             $finish; 
 	end
 
@@ -203,24 +203,38 @@ end
 	localparam SW0_ADDR  = 32'h8020_0000;  // sw[31:0]
     localparam SW1_ADDR  = 32'h8020_0004;  // sw[63:32]
     localparam KEY_ADDR  = 32'h8020_0010;  // key[7:0]
-    localparam SEG_ADDR  = 32'h8020_0020;  // seg
-    localparam LED_ADDR  = 32'h8020_0040;  // led[31:0]
-    localparam CNT_ADDR  = 32'h8020_0050;  // counter
+	localparam SEG_ADDR  = 32'h8020_0020;  // seg
+	localparam LED_ADDR  = 32'h8020_0040;  // led[31:0]
+	localparam CNT_ADDR  = 32'h8020_0050;  // counter
+	localparam SIM_STDOUT_ADDR = 32'h8020_0060;
+	localparam SIM_DUMP_ADDR   = 32'h8020_0064;
 
-    logic [31:0] LED;
-    logic [31:0] seg_wdata, cnt_rdata, mmio_rdata, dram_rdata;
-    logic [39:0] seg_output;
+	logic [31:0] LED;
+	logic [31:0] seg_wdata, cnt_rdata, mmio_rdata, dram_rdata;
+	logic sim_done;
+	logic sim_dump_en;
+	logic [39:0] seg_output;
 
-    // we don't care perip_mask in LED, SEG, SW & KEY, only care in DRAM
-    // write process
-    always_ff @(posedge clk) begin
-        if (perip_wen) begin
-            case (perip_addr)
-                LED_ADDR:   LED <= perip_wdata;
-                SEG_ADDR:   seg_wdata <= perip_wdata;
-            endcase
-        end
-    end
+	// we don't care perip_mask in LED, SEG, SW & KEY, only care in DRAM
+	// write process
+	always_ff @(posedge clk) begin
+		if (rst) begin
+			LED <= 32'h0;
+			seg_wdata <= 32'h0;
+			sim_done <= 1'b0;
+			sim_dump_en <= 1'b0;
+		end else if (perip_wen) begin
+			case (perip_addr)
+				LED_ADDR: begin
+					LED <= perip_wdata;
+					sim_done <= (perip_wdata != 32'h0);
+				end
+				SEG_ADDR:   seg_wdata <= perip_wdata;
+				SIM_STDOUT_ADDR: $write("%c", perip_wdata[7:0]);
+				SIM_DUMP_ADDR: sim_dump_en <= perip_wdata[0];
+			endcase
+		end
+	end
 
 	wire [31:0] virtual_led_output;
 	wire [39:0] virtual_seg_output;

@@ -1,6 +1,8 @@
 RVTESTS_DIR := $(PROJECT_ROOT)/verif/tests/riscv-tests
 RVTESTSISA_DIR := $(RVTESTS_DIR)/isa
 
+TESTS += coremark
+
 RVTESTS_EXCLUDE ?= rv32ui/ma_data
 
 RVTESTS_DISCOVERED := $(foreach t,$(RVTESTS_TYPE), \
