@@ -37,12 +37,10 @@ module ydrmem_ram #(
         end
     end
 
-    // 同步读取逻辑
+    // 同步读取逻辑：匹配无额外输出寄存器的一拍 BRAM 行为。
     always @(posedge clk) begin
         if (en_i) begin
             data_o <= mem_r[word_addr];
-        end else begin
-            data_o <= 0; // 不使能时输出0，或者保持之前的值
         end
     end
 
