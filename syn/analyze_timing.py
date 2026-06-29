@@ -215,6 +215,7 @@ def split_paths(text: str) -> list[str]:
 
 def load_paths(path: Path) -> list[TimingPath]:
     if not path.is_file():
+        print(f"warning: timing report not found: {path}")
         return []
     text = path.read_text(encoding="utf-8", errors="ignore")
     return [item for item in (parse_path(block) for block in split_paths(text)) if item is not None]
@@ -321,6 +322,15 @@ def write_paths_csv(paths: list[TimingPath], out: Path) -> None:
             writer.writerow(path_row(path, idx))
 
 
+def dedupe_worst_paths(paths: list[TimingPath]) -> list[TimingPath]:
+    groups: dict[tuple[str, str, str, str], TimingPath] = {}
+    for path in paths:
+        key = group_key(path)
+        if key not in groups or path.slack < groups[key].slack:
+            groups[key] = path
+    return sorted(groups.values(), key=lambda item: item.slack)
+
+
 def write_path_table(f, paths: list[TimingPath]) -> None:
     f.write("| Rank | Slack ns | Status | Cause | Route % | Logic Levels | Source | Destination | Structure |\n")
     f.write("| ---: | ---: | --- | --- | ---: | ---: | --- | --- | --- |\n")
@@ -348,6 +358,7 @@ def write_markdown(
     paths: list[TimingPath],
     out: Path,
     max_groups: int,
+    raw_path_count: int,
 ) -> None:
     sorted_paths = sorted(paths, key=lambda item: item.slack)
     group_rows = rows[:max_groups]
@@ -360,8 +371,8 @@ def write_markdown(
             f.write("No setup timing violations were found in the parsed reports.\n")
             return
 
-        f.write(f"- Parsed paths: {len(paths)}\n")
-        f.write(f"- Violating paths: {len(paths)}\n")
+        f.write(f"- Raw violating paths: {raw_path_count}\n")
+        f.write(f"- Representative violating paths: {len(paths)}\n")
         f.write(f"- Worst slack: {min(path.slack for path in paths):.3f} ns\n\n")
 
         f.write("## Violating Similar Path Groups\n\n")
@@ -432,11 +443,13 @@ def main() -> int:
     if args.max_violating_paths > 0:
         paths = paths[: args.max_violating_paths]
     rows = write_csv(paths, csv_out)
-    write_paths_csv(paths, paths_csv_out)
-    write_paths_csv(paths, violations_csv_out)
-    write_markdown(rows, paths, md_out, args.max_groups)
+    representative_paths = dedupe_worst_paths(paths)
+    write_paths_csv(representative_paths, paths_csv_out)
+    write_paths_csv(representative_paths, violations_csv_out)
+    write_markdown(rows, representative_paths, md_out, args.max_groups, len(paths))
 
     print(f"parsed {len(paths)} violating timing paths")
+    print(f"deduped to {len(representative_paths)} representative paths")
     print(f"wrote {csv_out}")
     print(f"wrote {paths_csv_out}")
     print(f"wrote {violations_csv_out}")

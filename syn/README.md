@@ -6,25 +6,39 @@ Run from the repository root:
 make syn
 ```
 
-The Makefile uses `vivado -mode batch`, so no GUI is started. By default it creates
-`build/syn/.venv`, generates an ordered source Tcl from Bender, runs synthesis and
-implementation through `route_design`, writes Vivado reports under
-`build/syn/reports`, and groups similar timing paths into `timing_groups.csv` and
-`timing_groups.md`.
+The Makefile uses `vivado -mode batch`, so no GUI is started. By default it keeps
+the checked-in `FPGA/Ydrasil_FPGA.xpr` as the 150 MHz baseline, copies it to a
+frequency-specific staged project, generates an ordered source Tcl from Bender,
+and passes a synthesis define such as `SYN_PLL_FREQ_150` or `SYN_PLL_FREQ_200`.
+The define selects the RTL MMCM parameters in `ydrasil_clocking.sv`; the legacy
+`pll` clk_wiz IP is not used by the batch flow. Reports are written under
+`build/syn/pll150m/reports`, and similar timing paths are grouped into
+`timing_groups.csv` and `timing_groups.md`.
 
-The route reports include general post-route timing plus 150 MHz CPU-clock
-focused reports:
+The route reports include general post-route timing plus CPU-clock focused
+reports named by `SYN_PLL_FREQ_MHZ`:
 
 - `cpu150_clocks.rpt`
 - `cpu150_timing_summary.rpt`
 - `cpu150_timing_paths.rpt`
+- `synth_clocks.rpt`
 - `post_route_clock_interaction.rpt`
 - `post_route_check_timing.rpt`
+
+For 200 MHz:
+
+```sh
+make synf
+```
+
+The 200 MHz staged project, reports, checkpoints, copied bitstream, and manifest
+are kept under `build/syn/pll200m/`.
 
 Useful overrides:
 
 ```sh
 make syn SYN_JOBS=40
+make syn-vivado SYN_PLL_FREQ_MHZ=200 SYN_RUN_TO=synth
 make syn-vivado SYN_RUN_TO=synth
 make syn-vivado SYN_RUN_TO=bitstream
 make syn-analyze

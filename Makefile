@@ -11,10 +11,20 @@ SYN_DIR ?= $(PROJECT_ROOT)/syn
 SYN_BUILD_DIR ?= $(BUILD_DIR)/syn
 SYN_VENV ?= $(SYN_BUILD_DIR)/.venv
 SYN_PYTHON ?= $(SYN_VENV)/bin/python
-SYN_XPR ?= $(PROJECT_ROOT)/FPGA/Ydrasil_FPGA.xpr
-SYN_SOURCES_TCL ?= $(SYN_BUILD_DIR)/vivado_sources.tcl
-SYN_REPORT_DIR ?= $(SYN_BUILD_DIR)/reports
-SYN_LOG_DIR ?= $(SYN_BUILD_DIR)/log
+SYN_PLL_FREQ_MHZ ?= 150
+SYN_PLL_SUPPORTED_FREQS := 150 200
+SYN_PLL_FREQ_TAG = pll$(subst .,p,$(SYN_PLL_FREQ_MHZ))m
+SYN_PLL_DEFINE = SYN_PLL_FREQ_$(subst .,P,$(SYN_PLL_FREQ_MHZ))
+SYN_FREQ_BUILD_DIR ?= $(SYN_BUILD_DIR)/$(SYN_PLL_FREQ_TAG)
+SYN_STAGE_ROOT ?= $(SYN_FREQ_BUILD_DIR)/project
+SYN_ORIG_FPGA_DIR ?= $(PROJECT_ROOT)/FPGA
+SYN_STAGE_FPGA_DIR ?= $(SYN_STAGE_ROOT)/FPGA
+SYN_XPR ?= $(SYN_STAGE_FPGA_DIR)/Ydrasil_FPGA.xpr
+SYN_SOURCES_TCL ?= $(SYN_FREQ_BUILD_DIR)/vivado_sources.tcl
+SYN_REPORT_DIR ?= $(SYN_FREQ_BUILD_DIR)/reports
+SYN_LOG_DIR ?= $(SYN_FREQ_BUILD_DIR)/log
+SYN_ARTIFACT_DIR ?= $(SYN_FREQ_BUILD_DIR)/artifacts
+SYN_CHECKPOINT_DIR ?= $(SYN_FREQ_BUILD_DIR)/checkpoints
 SYN_JOBS ?= $(shell nproc)
 SYN_RUN_TO ?= route
 SYN_FORCE ?= 1
@@ -28,9 +38,13 @@ ifneq ($(VIVADO_LICENSE_FILE),)
 export XILINXD_LICENSE_FILE := $(VIVADO_LICENSE_FILE)
 endif
 
+ifeq ($(filter $(SYN_PLL_FREQ_MHZ),$(SYN_PLL_SUPPORTED_FREQS)),)
+$(error Unsupported SYN_PLL_FREQ_MHZ=$(SYN_PLL_FREQ_MHZ); supported values: $(SYN_PLL_SUPPORTED_FREQS))
+endif
+
 .PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests init install-bender get_spike download_and_extract_spike check_deps spike spike_wave_to_csv  rv_test_comp_genmem
 .PHONY: coremark coremark_sim coremark_run coremark-rebuild coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map
-.PHONY: syn syn-venv syn-prep syn-vivado syn-analyze syn-clean
+.PHONY: syn synf syn-venv syn-prep syn-stage-xpr syn-vivado syn-analyze syn-clean
 
 .SECONDEXPANSION:
 
@@ -45,6 +59,12 @@ run_all_tests: init check_deps test_all
 syn: syn-vivado
 	@$(MAKE) syn-analyze
 
+synf: SYN_PLL_FREQ_MHZ := 200
+synf: SYN_RUN_TO := bitstream
+synf: SYN_JOBS := 40
+synf: syn-vivado
+	@$(MAKE) syn-analyze SYN_PLL_FREQ_MHZ=$(SYN_PLL_FREQ_MHZ)
+
 syn-venv: $(SYN_VENV)/.stamp
 
 $(SYN_VENV)/.stamp:
@@ -53,41 +73,61 @@ $(SYN_VENV)/.stamp:
 	@touch $@
 
 syn-prep: syn-venv
-	@mkdir -p $(SYN_BUILD_DIR)
+	@mkdir -p $(SYN_FREQ_BUILD_DIR)
 	$(SYN_PYTHON) $(SYN_DIR)/prep_vivado_sources.py \
 		--repo-root $(PROJECT_ROOT) \
 		--bender $(BENDER) \
 		--bender-dir $(PROJECT_ROOT)/hw/ip/jyd_fpga \
 		--wrapper-dir $(PROJECT_ROOT)/hw/ip/Xilinx_ip_wrapper/rtl \
+		--define $(SYN_PLL_DEFINE) \
 		--out $(SYN_SOURCES_TCL)
 
-syn-vivado: syn-prep
-	@mkdir -p $(SYN_REPORT_DIR) $(SYN_LOG_DIR)
+syn-stage-xpr:
+	@mkdir -p $(SYN_STAGE_ROOT)
+	rm -rf \
+		$(SYN_STAGE_FPGA_DIR)/Ydrasil_FPGA.cache \
+		$(SYN_STAGE_FPGA_DIR)/Ydrasil_FPGA.gen \
+		$(SYN_STAGE_FPGA_DIR)/Ydrasil_FPGA.hw \
+		$(SYN_STAGE_FPGA_DIR)/Ydrasil_FPGA.ip_user_files \
+		$(SYN_STAGE_FPGA_DIR)/Ydrasil_FPGA.runs
+	rsync -a --delete \
+		--exclude 'Ydrasil_FPGA.cache' \
+		--exclude 'Ydrasil_FPGA.gen' \
+		--exclude 'Ydrasil_FPGA.hw' \
+		--exclude 'Ydrasil_FPGA.ip_user_files' \
+		--exclude 'Ydrasil_FPGA.runs' \
+		--exclude 'vivado*' \
+		$(SYN_ORIG_FPGA_DIR)/ $(SYN_STAGE_FPGA_DIR)/
+
+syn-vivado: syn-prep syn-stage-xpr
+	@mkdir -p $(SYN_REPORT_DIR) $(SYN_LOG_DIR) $(SYN_ARTIFACT_DIR)
 	. $(VIVADO_SETTINGS) && $(VIVADO) -mode batch -nojournal -log $(SYN_LOG_DIR)/vivado.log \
 		-source $(SYN_DIR)/run_vivado.tcl \
 		-tclargs \
 		-xpr $(SYN_XPR) \
 		-sources_tcl $(SYN_SOURCES_TCL) \
 		-report_dir $(SYN_REPORT_DIR) \
-		-checkpoint_dir $(SYN_BUILD_DIR)/checkpoints \
+		-checkpoint_dir $(SYN_CHECKPOINT_DIR) \
+		-artifact_dir $(SYN_ARTIFACT_DIR) \
 		-jobs $(SYN_JOBS) \
 		-run_to $(SYN_RUN_TO) \
 		-sync_sources $(SYN_SYNC_SOURCES) \
+		-pll_freq_mhz $(SYN_PLL_FREQ_MHZ) \
 		-force $(SYN_FORCE)
 
 syn-analyze: syn-venv
 	$(SYN_PYTHON) $(SYN_DIR)/analyze_timing.py \
 		--report-dir $(SYN_REPORT_DIR) \
 		--violation-report $(SYN_REPORT_DIR)/post_route_timing_violations.rpt
-	@if [ -f "$(SYN_REPORT_DIR)/cpu150_timing_paths.rpt" ]; then \
+	@if [ -f "$(SYN_REPORT_DIR)/cpu$(subst .,p,$(SYN_PLL_FREQ_MHZ))_timing_paths.rpt" ]; then \
 		$(SYN_PYTHON) $(SYN_DIR)/analyze_timing.py \
 			--report-dir $(SYN_REPORT_DIR) \
-			--timing-report $(SYN_REPORT_DIR)/cpu150_timing_paths.rpt \
-			--violation-report $(SYN_REPORT_DIR)/cpu150_timing_violations.rpt \
-			--csv $(SYN_REPORT_DIR)/cpu150_timing_groups.csv \
-			--paths-csv $(SYN_REPORT_DIR)/cpu150_timing_paths.csv \
-			--violations-csv $(SYN_REPORT_DIR)/cpu150_timing_violations.csv \
-			--md $(SYN_REPORT_DIR)/cpu150_timing_groups.md; \
+			--timing-report $(SYN_REPORT_DIR)/cpu$(subst .,p,$(SYN_PLL_FREQ_MHZ))_timing_paths.rpt \
+			--violation-report $(SYN_REPORT_DIR)/cpu$(subst .,p,$(SYN_PLL_FREQ_MHZ))_timing_violations.rpt \
+			--csv $(SYN_REPORT_DIR)/cpu$(subst .,p,$(SYN_PLL_FREQ_MHZ))_timing_groups.csv \
+			--paths-csv $(SYN_REPORT_DIR)/cpu$(subst .,p,$(SYN_PLL_FREQ_MHZ))_timing_paths.csv \
+			--violations-csv $(SYN_REPORT_DIR)/cpu$(subst .,p,$(SYN_PLL_FREQ_MHZ))_timing_violations.csv \
+			--md $(SYN_REPORT_DIR)/cpu$(subst .,p,$(SYN_PLL_FREQ_MHZ))_timing_groups.md; \
 	fi
 
 syn-clean:

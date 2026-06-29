@@ -9,7 +9,7 @@ Ydrasil 是一个 RV32 处理器/FPGA 工程仓库，包含 RTL、FPGA Vivado �
 | `hw/ip/ydrasil_core` | 处理器核心 RTL，包含取指、译码、执行、寄存器堆、CSR、分支预测、bitmanip 等模块。该目录使用 Bender 管理源码顺序。 |
 | `hw/ip/ydrmem` | 通用存储器封装 RTL。 |
 | `hw/ip/jyd_fpga` | FPGA 顶层相关 RTL 和 Bender 工程入口。 |
-| `hw/ip/Xilinx_ip_wrapper` | 面向 Vivado/IP 的 Xilinx wrapper RTL，例如 IROM、DTCM、PLL 相关封装。 |
+| `hw/ip/Xilinx_ip_wrapper` | 面向 Vivado/IP 的 Xilinx wrapper RTL，例如 IROM、DTCM 相关封装。 |
 | `hw/dv` | RTL 仿真入口，按仿真器拆分为 Verilator、Icarus Verilog、VCS 配置。 |
 | `FPGA` | Vivado 工程 `Ydrasil_FPGA.xpr`、约束、COE、IP 输出和实现结果。 |
 | `syn` | Linux 服务器上的 Vivado batch 综合、布线、报告生成和 timing path 预处理脚本。 |
@@ -59,6 +59,12 @@ make run_all_tests
 make syn SYN_JOBS=40
 ```
 
+使用 RTL MMCM 切换 CPU clock 到 200MHz，综合、实现并生成 bitstream：
+
+```sh
+make synf
+```
+
 只从已有 routed checkpoint 重新生成报告：
 
 ```sh
@@ -90,11 +96,12 @@ make syn VIVADO_SETTINGS=/path/to/settings64.sh VIVADO=/path/to/vivado
 | `build/log` | 仿真日志。 |
 | `build/riscv_tests` | RISC-V 测试编译输出。 |
 | `build/rvtest_results` | 回归测试结果。 |
-| `build/syn/reports` | Vivado batch 报告和 timing path 合并结果。 |
-| `build/syn/checkpoints` | batch flow 保存的 Vivado checkpoint。 |
+| `build/syn/pll150m/reports` | 默认 150MHz Vivado batch 报告和 timing path 合并结果。 |
+| `build/syn/pll150m/checkpoints` | 默认 150MHz batch flow 保存的 Vivado checkpoint。 |
+| `build/syn/pll200m/artifacts` | 200MHz bitstream、checkpoint 副本和 manifest，使用 `make synf` 生成。 |
 
 ## 备注
 
 - Bender 管理的 RTL 顺序主要用于 `hw/ip/jyd_fpga` 及其依赖的 core/mem 源码。
 - FPGA 综合脚本会保留 `hw/ip/Xilinx_ip_wrapper/rtl` 中的 FPGA wrapper，并跳过与 wrapper 同名的通用 RTL，避免 Vivado 里出现重复模块定义。
-- `syn` 流程当前重点支持 200MHz 输入 PLL 派生出的 150MHz CPU clock 时序分析。
+- `FPGA/Ydrasil_FPGA.xpr` 保持 150MHz 基线；`syn` 流程会按 `SYN_PLL_FREQ_MHZ` 复制 staged 工程到 `build/syn/pllXXXm/project`，通过 `SYN_PLL_FREQ_150`/`SYN_PLL_FREQ_200` 宏选择 `ydrasil_clocking.sv` 中的 MMCM 参数。

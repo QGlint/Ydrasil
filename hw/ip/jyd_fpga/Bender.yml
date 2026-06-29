@@ -15,6 +15,7 @@ sources:
       - rtl/perip_bridge.sv
       - rtl/twin_controller.sv
       - rtl/uart.sv
+      - rtl/ydrasil_clocking.sv
       - rtl/student_top.sv
       - rtl/jyd_fpga.sv
 

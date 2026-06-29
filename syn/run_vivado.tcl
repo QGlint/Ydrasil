@@ -9,6 +9,8 @@ proc usage {} {
     puts "  -run_to <synth|route|bitstream|reports|sync_only>"
     puts "  -sync_sources <0|1>     remove old hw/ip sources and add generated list"
     puts "  -force <0|1>            reset runs before launching"
+    puts "  -pll_freq_mhz <mhz>     RTL MMCM CPU clock frequency selected by synthesis define, default 150"
+    puts "  -artifact_dir <path>    copied bitstream/artifact output directory"
     puts "  -timing_summary_max_paths <n>  timing summary path limit, default 1000"
     puts "  -timing_path_max_paths <n>     violating report_timing path limit, default 500"
     puts "  -timing_nworst <n>             report_timing nworst per endpoint/group, default 100"
@@ -78,6 +80,14 @@ proc remove_missing_sources {} {
     }
 }
 
+proc remove_legacy_pll_ip {} {
+    set pll_files [get_files -quiet -all */pll.xci]
+    if {[llength $pll_files] > 0} {
+        puts "Removing legacy clk_wiz pll IP from staged project; RTL MMCM clocking is used instead"
+        remove_files $pll_files
+    }
+}
+
 proc assert_run_ok {run_name} {
     set status [get_property STATUS [get_runs $run_name]]
     puts "$run_name status: $status"
@@ -112,29 +122,143 @@ proc clocks_near_period {target_period tolerance} {
     return $result
 }
 
-proc report_cpu150_timing {report_dir} {
+proc cpu_clocks_near_period {target_period tolerance} {
+    set candidates [clocks_near_period $target_period $tolerance]
+    set cpu_clocks [list]
+    foreach clk $candidates {
+        set name [get_property NAME $clk]
+        if {[regexp -nocase {cpu|clk_out2} $name]} {
+            lappend cpu_clocks $clk
+        }
+    }
+    if {[llength $cpu_clocks] > 0} {
+        return $cpu_clocks
+    }
+    return $candidates
+}
+
+proc freq_file_tag {freq_mhz} {
+    set tag [string trim $freq_mhz]
+    if {![regexp {^[0-9]+([.][0-9]+)?$} $tag]} {
+        error "invalid frequency for report tag: $freq_mhz"
+    }
+    return [string map {. p} $tag]
+}
+
+proc report_cpu_freq_timing {report_dir freq_mhz} {
     global timing_summary_max_paths timing_path_max_paths timing_nworst
 
-    set cpu_clocks [clocks_near_period 6.6667 0.0500]
-    set out [file join $report_dir cpu150_clocks.rpt]
+    set target_period [expr {1000.0 / double($freq_mhz)}]
+    set tag [freq_file_tag $freq_mhz]
+    set cpu_clocks [cpu_clocks_near_period $target_period 0.0500]
+    set out [file join $report_dir "cpu${tag}_clocks.rpt"]
     set fp [open $out w]
-    puts $fp "150 MHz candidate clocks, selected by period ~= 6.6667 ns"
+    puts $fp "$freq_mhz MHz candidate clocks, selected by period ~= [format %.4f $target_period] ns"
     foreach clk $cpu_clocks {
         puts $fp "[get_property NAME $clk] period=[get_property PERIOD $clk] waveform=[get_property WAVEFORM $clk]"
     }
     close $fp
 
     if {[llength $cpu_clocks] == 0} {
-        puts "warning: no 150 MHz candidate clock found"
+        puts "warning: no $freq_mhz MHz candidate clock found"
         return
     }
 
-    report_if_possible "150 MHz timing summary" \
-        "report_timing_summary -delay_type max -max_paths $timing_summary_max_paths -report_unconstrained -file [file join $report_dir cpu150_timing_summary.rpt]"
-    report_if_possible "150 MHz violating timing paths" \
-        "report_timing -delay_type max -from $cpu_clocks -to $cpu_clocks -sort_by slack -slack_lesser_than 0.000 -max_paths $timing_path_max_paths -nworst $timing_nworst -input_pins -file [file join $report_dir cpu150_timing_violations.rpt]"
-    report_if_possible "150 MHz intra-clock timing paths" \
-        "report_timing -delay_type max -from $cpu_clocks -to $cpu_clocks -sort_by slack -slack_lesser_than 0.000 -max_paths $timing_path_max_paths -nworst $timing_nworst -input_pins -file [file join $report_dir cpu150_timing_paths.rpt]"
+    puts "Writing $freq_mhz MHz timing summary"
+    if {[catch {
+        report_timing_summary -delay_type max -max_paths $timing_summary_max_paths -report_unconstrained \
+            -file [file join $report_dir cpu${tag}_timing_summary.rpt]
+    } msg]} {
+        puts "warning: failed to write $freq_mhz MHz timing summary: $msg"
+    }
+    puts "Writing $freq_mhz MHz violating timing paths"
+    if {[catch {
+        report_timing -delay_type max -from $cpu_clocks -to $cpu_clocks -sort_by slack \
+            -slack_lesser_than 0.000 -max_paths $timing_path_max_paths -nworst $timing_nworst \
+            -input_pins -file [file join $report_dir cpu${tag}_timing_violations.rpt]
+    } msg]} {
+        puts "warning: failed to write $freq_mhz MHz violating timing paths: $msg"
+    }
+    puts "Writing $freq_mhz MHz intra-clock timing paths"
+    if {[catch {
+        report_timing -delay_type max -from $cpu_clocks -to $cpu_clocks -sort_by slack \
+            -slack_lesser_than 0.000 -max_paths $timing_path_max_paths -nworst $timing_nworst \
+            -input_pins -file [file join $report_dir cpu${tag}_timing_paths.rpt]
+    } msg]} {
+        puts "warning: failed to write $freq_mhz MHz intra-clock timing paths: $msg"
+    }
+}
+
+proc validate_clocking_frequency {freq_mhz} {
+    set freq_mhz [string trim $freq_mhz]
+    if {![regexp {^[0-9]+([.][0-9]+)?$} $freq_mhz] || double($freq_mhz) <= 0.0} {
+        error "invalid -pll_freq_mhz value: $freq_mhz"
+    }
+
+    set pll_ip [get_ips -quiet pll]
+    if {[llength $pll_ip] == 0} {
+        puts "Using RTL MMCM clocking configured by synthesis define for ${freq_mhz} MHz CPU clock"
+        return
+    }
+
+    puts "Leaving existing pll clk_wiz IP unchanged; RTL MMCM clocking is selected by synthesis defines"
+    report_property $pll_ip -file [file join $::report_dir pll_properties.rpt]
+}
+
+proc copy_existing_files {patterns dest_dir} {
+    set copied [list]
+    foreach pattern $patterns {
+        foreach src [glob -nocomplain $pattern] {
+            if {[file isfile $src]} {
+                set dst [file join $dest_dir [file tail $src]]
+                file copy -force $src $dst
+                lappend copied $dst
+            }
+        }
+    }
+    return $copied
+}
+
+proc archive_run_artifacts {run_name artifact_dir pll_freq_mhz run_to report_dir checkpoint_dir run_dir top_name} {
+    set artifact_dir [ensure_dir $artifact_dir]
+    if {$run_dir eq ""} {
+        set run_obj [get_runs -quiet $run_name]
+        if {[llength $run_obj] > 0} {
+            set run_dir [get_property DIRECTORY $run_obj]
+        }
+    }
+    if {$top_name eq ""} {
+        set top_name [get_property top [get_filesets sources_1]]
+    }
+    if {$run_dir eq "" || ![file exists $run_dir]} {
+        puts "warning: run directory for $run_name not found; only checkpoint_dir artifacts will be archived"
+    }
+
+    set patterns [list \
+        [file join $run_dir "${top_name}.bit"] \
+        [file join $run_dir "${top_name}*.bit"] \
+        [file join $run_dir "${top_name}*.ltx"] \
+        [file join $run_dir "${top_name}_routed.dcp"] \
+        [file join $checkpoint_dir "impl_1_route.dcp"] \
+        [file join $checkpoint_dir "synth_1.dcp"]]
+    set copied [copy_existing_files $patterns $artifact_dir]
+    if {$run_to eq "bitstream" && [llength [glob -nocomplain [file join $artifact_dir "*.bit"]]] == 0} {
+        error "bitstream run completed but no .bit file was copied from $run_dir to $artifact_dir"
+    }
+
+    set fp [open [file join $artifact_dir "manifest.txt"] w]
+    puts $fp "pll_freq_mhz=$pll_freq_mhz"
+    puts $fp "run_to=$run_to"
+    puts $fp "xpr=[current_project]"
+    puts $fp "run_dir=$run_dir"
+    puts $fp "report_dir=$report_dir"
+    puts $fp "checkpoint_dir=$checkpoint_dir"
+    puts $fp "copied_files:"
+    foreach f $copied {
+        puts $fp "  $f"
+    }
+    close $fp
+    puts "Artifacts written to $artifact_dir"
 }
 
 proc open_impl_design {run_name checkpoint_dir} {
@@ -180,10 +304,12 @@ set xpr [file normalize [arg_value "-xpr" [file join $repo_root "FPGA/Ydrasil_FP
 set sources_tcl [file normalize [arg_value "-sources_tcl" [file join $repo_root "build/syn/vivado_sources.tcl"]]]
 set report_dir [ensure_dir [arg_value "-report_dir" [file join $repo_root "build/syn/reports"]]]
 set checkpoint_dir [ensure_dir [arg_value "-checkpoint_dir" [file join $repo_root "build/syn/checkpoints"]]]
+set artifact_dir [ensure_dir [arg_value "-artifact_dir" [file join $repo_root "build/syn/artifacts"]]]
 set jobs [arg_value "-jobs" "16"]
 set run_to [arg_value "-run_to" "route"]
 set sync_sources [arg_value "-sync_sources" "1"]
 set force_runs [arg_value "-force" "1"]
+set pll_freq_mhz [arg_value "-pll_freq_mhz" "150"]
 set timing_summary_max_paths [arg_value "-timing_summary_max_paths" "1000"]
 set timing_path_max_paths [arg_value "-timing_path_max_paths" "500"]
 set timing_nworst [arg_value "-timing_nworst" "100"]
@@ -208,6 +334,7 @@ safe_param general.maxThreads $max_threads
 catch {set_property XPM_LIBRARIES {XPM_MEMORY} [current_project]}
 
 remove_missing_sources
+remove_legacy_pll_ip
 
 if {$sync_sources} {
     remove_hw_ip_sources
@@ -219,9 +346,18 @@ set_property top jyd_fpga [get_filesets sources_1]
 update_compile_order -fileset sources_1
 
 if {$run_to eq "sync_only"} {
+    validate_clocking_frequency $pll_freq_mhz
     puts "Source synchronization complete."
     close_project
     exit 0
+}
+
+if {[llength [get_ips -quiet]] > 0} {
+    puts "Refreshing IP output products"
+    report_ip_status -file [file join $report_dir "ip_status.rpt"]
+    catch {upgrade_ip [get_ips]}
+    validate_clocking_frequency $pll_freq_mhz
+    generate_target all [get_ips]
 }
 
 if {$run_to eq "reports"} {
@@ -238,7 +374,7 @@ if {$run_to eq "reports"} {
         "report_clock_interaction -delay_type max -file [file join $report_dir post_route_clock_interaction.rpt]"
     report_if_possible "post-route check timing" \
         "check_timing -verbose -file [file join $report_dir post_route_check_timing.rpt]"
-    report_cpu150_timing $report_dir
+    report_cpu_freq_timing $report_dir $pll_freq_mhz
     report_if_possible "post-route utilization" \
         "report_utilization -hierarchical -file [file join $report_dir post_route_utilization_hier.rpt]"
     report_if_possible "route status" \
@@ -256,13 +392,6 @@ if {$run_to eq "reports"} {
     puts "Reports written to $report_dir"
     close_project
     exit 0
-}
-
-if {[llength [get_ips -quiet]] > 0} {
-    puts "Refreshing IP output products"
-    report_ip_status -file [file join $report_dir "ip_status.rpt"]
-    catch {upgrade_ip [get_ips]}
-    generate_target all [get_ips]
 }
 
 if {$force_runs} {
@@ -285,6 +414,9 @@ report_if_possible "post-synthesis utilization" \
     "report_utilization -hierarchical -file [file join $report_dir synth_utilization_hier.rpt]"
 report_if_possible "post-synthesis timing summary" \
     "report_timing_summary -delay_type max -max_paths 50 -report_unconstrained -file [file join $report_dir synth_timing_summary.rpt]"
+report_if_possible "post-synthesis clocks" \
+    "report_clocks -file [file join $report_dir synth_clocks.rpt]"
+report_cpu_freq_timing $report_dir $pll_freq_mhz
 report_if_possible "post-synthesis methodology" \
     "report_methodology -file [file join $report_dir synth_methodology.rpt]"
 report_if_possible "post-synthesis DRC" \
@@ -302,7 +434,7 @@ if {$force_runs} {
 }
 
 if {$run_to eq "bitstream"} {
-    launch_runs impl_1 -jobs $jobs
+    launch_runs impl_1 -to_step write_bitstream -jobs $jobs
 } elseif {$run_to eq "route" || $run_to eq "impl"} {
     launch_runs impl_1 -to_step route_design -jobs $jobs
 } else {
@@ -310,6 +442,13 @@ if {$run_to eq "bitstream"} {
 }
 wait_on_run impl_1
 assert_run_ok impl_1
+
+set impl_run_dir ""
+set top_name [get_property top [get_filesets sources_1]]
+set impl_run_obj [get_runs -quiet impl_1]
+if {[llength $impl_run_obj] > 0} {
+    set impl_run_dir [get_property DIRECTORY $impl_run_obj]
+}
 
 open_impl_design impl_1 $checkpoint_dir
 report_if_possible "post-route timing summary" \
@@ -324,7 +463,7 @@ report_if_possible "post-route clock interaction" \
     "report_clock_interaction -delay_type max -file [file join $report_dir post_route_clock_interaction.rpt]"
 report_if_possible "post-route check timing" \
     "check_timing -verbose -file [file join $report_dir post_route_check_timing.rpt]"
-report_cpu150_timing $report_dir
+report_cpu_freq_timing $report_dir $pll_freq_mhz
 report_if_possible "post-route utilization" \
     "report_utilization -hierarchical -file [file join $report_dir post_route_utilization_hier.rpt]"
 report_if_possible "route status" \
@@ -338,6 +477,7 @@ report_if_possible "post-route design analysis" \
 report_if_possible "QoR suggestions" \
     "report_qor_suggestions -file [file join $report_dir post_route_qor_suggestions.rpt]"
 write_checkpoint -force [file join $checkpoint_dir impl_1_route.dcp]
+archive_run_artifacts impl_1 $artifact_dir $pll_freq_mhz $run_to $report_dir $checkpoint_dir $impl_run_dir $top_name
 
 puts "Reports written to $report_dir"
 close_project
