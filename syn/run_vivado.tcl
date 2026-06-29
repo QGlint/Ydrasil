@@ -10,7 +10,7 @@ proc usage {} {
     puts "  -sync_sources <0|1>     remove old hw/ip sources and add generated list"
     puts "  -force <0|1>            reset runs before launching"
     puts "  -timing_summary_max_paths <n>  timing summary path limit, default 1000"
-    puts "  -timing_path_max_paths <n>     report_timing path limit, default 5000"
+    puts "  -timing_path_max_paths <n>     violating report_timing path limit, default 500"
     puts "  -timing_nworst <n>             report_timing nworst per endpoint/group, default 100"
 }
 
@@ -134,7 +134,7 @@ proc report_cpu150_timing {report_dir} {
     report_if_possible "150 MHz violating timing paths" \
         "report_timing -delay_type max -from $cpu_clocks -to $cpu_clocks -sort_by slack -slack_lesser_than 0.000 -max_paths $timing_path_max_paths -nworst $timing_nworst -input_pins -file [file join $report_dir cpu150_timing_violations.rpt]"
     report_if_possible "150 MHz intra-clock timing paths" \
-        "report_timing -delay_type max -from $cpu_clocks -to $cpu_clocks -sort_by slack -max_paths $timing_path_max_paths -nworst $timing_nworst -input_pins -file [file join $report_dir cpu150_timing_paths.rpt]"
+        "report_timing -delay_type max -from $cpu_clocks -to $cpu_clocks -sort_by slack -slack_lesser_than 0.000 -max_paths $timing_path_max_paths -nworst $timing_nworst -input_pins -file [file join $report_dir cpu150_timing_paths.rpt]"
 }
 
 proc open_impl_design {run_name checkpoint_dir} {
@@ -185,7 +185,7 @@ set run_to [arg_value "-run_to" "route"]
 set sync_sources [arg_value "-sync_sources" "1"]
 set force_runs [arg_value "-force" "1"]
 set timing_summary_max_paths [arg_value "-timing_summary_max_paths" "1000"]
-set timing_path_max_paths [arg_value "-timing_path_max_paths" "5000"]
+set timing_path_max_paths [arg_value "-timing_path_max_paths" "500"]
 set timing_nworst [arg_value "-timing_nworst" "100"]
 
 if {![file exists $xpr]} {
@@ -231,7 +231,7 @@ if {$run_to eq "reports"} {
     report_if_possible "post-route violating timing paths" \
         "report_timing -delay_type max -sort_by slack -slack_lesser_than 0.000 -max_paths $timing_path_max_paths -nworst $timing_nworst -input_pins -file [file join $report_dir post_route_timing_violations.rpt]"
     report_if_possible "post-route timing paths" \
-        "report_timing -delay_type max -sort_by group -max_paths $timing_path_max_paths -nworst $timing_nworst -input_pins -file [file join $report_dir post_route_timing_paths.rpt]"
+        "report_timing -delay_type max -sort_by slack -slack_lesser_than 0.000 -max_paths $timing_path_max_paths -nworst $timing_nworst -input_pins -file [file join $report_dir post_route_timing_paths.rpt]"
     report_if_possible "post-route clocks" \
         "report_clocks -file [file join $report_dir post_route_clocks.rpt]"
     report_if_possible "post-route clock interaction" \
@@ -317,7 +317,7 @@ report_if_possible "post-route timing summary" \
 report_if_possible "post-route violating timing paths" \
     "report_timing -delay_type max -sort_by slack -slack_lesser_than 0.000 -max_paths $timing_path_max_paths -nworst $timing_nworst -input_pins -file [file join $report_dir post_route_timing_violations.rpt]"
 report_if_possible "post-route timing paths" \
-    "report_timing -delay_type max -sort_by group -max_paths $timing_path_max_paths -nworst $timing_nworst -input_pins -file [file join $report_dir post_route_timing_paths.rpt]"
+    "report_timing -delay_type max -sort_by slack -slack_lesser_than 0.000 -max_paths $timing_path_max_paths -nworst $timing_nworst -input_pins -file [file join $report_dir post_route_timing_paths.rpt]"
 report_if_possible "post-route clocks" \
     "report_clocks -file [file join $report_dir post_route_clocks.rpt]"
 report_if_possible "post-route clock interaction" \

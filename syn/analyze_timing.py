@@ -321,10 +321,6 @@ def write_paths_csv(paths: list[TimingPath], out: Path) -> None:
             writer.writerow(path_row(path, idx))
 
 
-def write_violation_csv(paths: list[TimingPath], out: Path) -> None:
-    write_paths_csv([path for path in paths if path.slack < 0], out)
-
-
 def write_path_table(f, paths: list[TimingPath]) -> None:
     f.write("| Rank | Slack ns | Status | Cause | Route % | Logic Levels | Source | Destination | Structure |\n")
     f.write("| ---: | ---: | --- | --- | ---: | ---: | --- | --- | --- |\n")
@@ -347,57 +343,28 @@ def write_path_table(f, paths: list[TimingPath]) -> None:
         )
 
 
-def dedupe_paths(paths: list[TimingPath]) -> list[TimingPath]:
-    seen: set[tuple[str, str, str, str]] = set()
-    result: list[TimingPath] = []
-    for path in paths:
-        key = group_key(path)
-        if key in seen:
-            continue
-        seen.add(key)
-        result.append(path)
-    return result
-
-
 def write_markdown(
     rows: list[dict[str, object]],
     paths: list[TimingPath],
     out: Path,
     max_groups: int,
-    max_nonviolating_paths: int,
 ) -> None:
     sorted_paths = sorted(paths, key=lambda item: item.slack)
-    violations = [path for path in sorted_paths if path.slack < 0]
-    violating_group_keys = {
-        group_key(path)
-        for path in violations
-    }
-    violating_rows = [
-        row for row in rows
-        if (
-            str(row["path_group"]),
-            str(row["start_pattern"]),
-            str(row["end_pattern"]),
-            str(row["structure_signature"]),
-        ) in violating_group_keys
-    ]
-    group_rows = violating_rows if violations else rows[:max_groups]
+    group_rows = rows[:max_groups]
 
     out.parent.mkdir(parents=True, exist_ok=True)
     with out.open("w", encoding="utf-8") as f:
-        f.write("# Vivado Timing Group Summary\n\n")
+        f.write("# Vivado Timing Violation Summary\n\n")
         if not paths:
-            f.write("No timing paths were parsed. Check post_route_timing_paths.rpt.\n")
+            f.write("- Violating paths: 0\n\n")
+            f.write("No setup timing violations were found in the parsed reports.\n")
             return
 
         f.write(f"- Parsed paths: {len(paths)}\n")
-        f.write(f"- Violating paths: {len(violations)}\n")
+        f.write(f"- Violating paths: {len(paths)}\n")
         f.write(f"- Worst slack: {min(path.slack for path in paths):.3f} ns\n\n")
 
-        if violations:
-            f.write("## Violating Similar Path Groups\n\n")
-        else:
-            f.write("## Worst Similar Path Groups\n\n")
+        f.write("## Violating Similar Path Groups\n\n")
         f.write("| Rank | Count | Worst Slack ns | Avg Slack ns | Cause | Route % | Logic Levels | Start Reg Group | End Reg Group | Structure |\n")
         f.write("| --- | ---: | ---: | ---: | --- | ---: | ---: | --- | --- | --- |\n")
         for idx, row in enumerate(group_rows, start=1):
@@ -419,18 +386,12 @@ def write_markdown(
                 )
             )
 
-        if violations:
-            f.write("\n## All Violating Paths\n\n")
-            write_path_table(f, violations)
-        elif max_nonviolating_paths > 0:
-            near_critical = dedupe_paths(sorted_paths)[:max_nonviolating_paths]
-            f.write(f"\n## Near-Critical Representative Paths (Top {len(near_critical)})\n\n")
-            write_path_table(f, near_critical)
+        f.write(f"\n## Worst Violating Paths (Top {len(sorted_paths)})\n\n")
+        write_path_table(f, sorted_paths)
 
         f.write("\n## Initial Diagnosis\n\n")
         cause_counts: dict[str, int] = {}
-        diagnosis_rows = violating_rows if violations else rows
-        for row in diagnosis_rows:
+        for row in rows:
             cause_counts[str(row["cause"])] = cause_counts.get(str(row["cause"]), 0) + int(row["count"])
         for cause, count in sorted(cause_counts.items(), key=lambda item: (-item[1], item[0])):
             if cause == "route-dominated":
@@ -454,7 +415,7 @@ def main() -> int:
     parser.add_argument("--paths-csv", type=Path, default=None)
     parser.add_argument("--violations-csv", type=Path, default=None)
     parser.add_argument("--max-groups", type=int, default=80)
-    parser.add_argument("--max-nonviolating-paths", type=int, default=80)
+    parser.add_argument("--max-violating-paths", type=int, default=500)
     args = parser.parse_args()
 
     report_dir = args.report_dir
@@ -465,29 +426,22 @@ def main() -> int:
     paths_csv_out = args.paths_csv or report_dir / "timing_paths.csv"
     violations_csv_out = args.violations_csv or report_dir / "timing_violations.csv"
 
-    paths = load_paths(timing_report)
     violation_paths = load_paths(violation_report) if violation_report is not None else []
-    if violation_paths:
-        seen = {
-            (path.source, path.destination, path.slack, path.structure_signature)
-            for path in paths
-        }
-        for path in violation_paths:
-            key = (path.source, path.destination, path.slack, path.structure_signature)
-            if key not in seen:
-                paths.append(path)
-                seen.add(key)
+    source_paths = violation_paths if violation_paths else load_paths(timing_report)
+    paths = sorted((path for path in source_paths if path.slack < 0), key=lambda item: item.slack)
+    if args.max_violating_paths > 0:
+        paths = paths[: args.max_violating_paths]
     rows = write_csv(paths, csv_out)
     write_paths_csv(paths, paths_csv_out)
-    write_violation_csv(violation_paths if violation_paths else paths, violations_csv_out)
-    write_markdown(rows, paths, md_out, args.max_groups, args.max_nonviolating_paths)
+    write_paths_csv(paths, violations_csv_out)
+    write_markdown(rows, paths, md_out, args.max_groups)
 
-    print(f"parsed {len(paths)} timing paths")
+    print(f"parsed {len(paths)} violating timing paths")
     print(f"wrote {csv_out}")
     print(f"wrote {paths_csv_out}")
     print(f"wrote {violations_csv_out}")
     print(f"wrote {md_out}")
-    return 0 if paths else 1
+    return 0
 
 
 if __name__ == "__main__":
