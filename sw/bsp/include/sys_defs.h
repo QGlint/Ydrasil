@@ -17,7 +17,7 @@ extern "C"
 #include "gcc_defs.h"
 
 #ifndef SYSTEM_CLOCK
-#define SYSTEM_CLOCK (242000000UL)
+#define SYSTEM_CLOCK (100000000UL)
 #endif
 
 #ifndef SYSTEM_CLOCK_MHZ

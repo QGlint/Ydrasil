@@ -11,8 +11,12 @@ import ydrasil_pkg::*;
     input wire [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0]    operator_lsu_i,
     input wire [1:0]                       operator_lsu_type_i,
     input wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]      id_lsu_rs2_data_i, // 存储操作的源寄存器数据
+    input wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]      id_lsu_rs2_raddr_i,
     input wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]      ex_lsu_rd_data_i, // 存储操作的源寄存器数据
     input wire                             id_lsu_rs2_rd_forward_i,
+    input wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]      wb_ex_pending_wdata_rd_i,
+    input wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]      wb_ex_pending_waddr_rd_i,
+    input wire                             wb_ex_pending_i,
     
     // 内存接口
     input wire [ydrasil_pkg::BUS_DATA_WIDTH-1:0]       lsu_mem_rdata_i,
@@ -55,119 +59,27 @@ import ydrasil_pkg::*;
         wire [BUS_ADDR_WIDTH-1:0] mem_addr;
         wire [REGS_DATA_WIDTH-1:0] mem_rs2_data;
         wire request_valid;
+        wire [2:0] request_access_size;
+        wire [2:0] latched_access_size;
+        wire request_crosses_word;
+        wire latched_crosses_word;
 
-        assign lsu_rs2_data = id_lsu_rs2_rd_forward_i ? ex_lsu_rd_data_i : id_lsu_rs2_data_i;
+        wire wb_lsu_rs2_rd_forward;
+
+        assign wb_lsu_rs2_rd_forward =
+            wb_ex_pending_i &
+            (id_lsu_rs2_raddr_i == wb_ex_pending_waddr_rd_i) &
+            (id_lsu_rs2_raddr_i != '0);
+        assign lsu_rs2_data =
+            id_lsu_rs2_rd_forward_i ? ex_lsu_rd_data_i :
+            wb_lsu_rs2_rd_forward   ? wb_ex_pending_wdata_rd_i :
+                                       id_lsu_rs2_data_i;
         assign is_load = operator_lsu_type_i[OPERATOR_TYPE_LOAD - OPERATOR_TYPE_LSU_BASE];
         assign is_store = operator_lsu_type_i[OPERATOR_TYPE_STORE - OPERATOR_TYPE_LSU_BASE];
         assign mem_addr = ex_lsu_mem_addr_i;
         assign mem_addr_index = mem_addr[1:0];
         assign mem_rs2_data = lsu_rs2_data;
         assign request_valid = is_load | is_store;
-
-        function automatic [2:0] access_size(input [OP_LSU_INFO_WIDTH-1:0] op);
-            begin
-                if (op[OP_LSU_LW] | op[OP_LSU_SW]) begin
-                    access_size = 3'd4;
-                end else if (op[OP_LSU_LH] | op[OP_LSU_LHU] | op[OP_LSU_SH]) begin
-                    access_size = 3'd2;
-                end else begin
-                    access_size = 3'd1;
-                end
-            end
-        endfunction
-
-        function automatic access_crosses_word(
-            input [1:0] addr_index,
-            input [OP_LSU_INFO_WIDTH-1:0] op
-        );
-            begin
-                access_crosses_word = ({1'b0, addr_index} + access_size(op)) > 3'd4;
-            end
-        endfunction
-
-        function automatic [31:0] format_load_data(
-            input [63:0] data,
-            input [1:0] addr_index,
-            input [OP_LSU_INFO_WIDTH-1:0] op
-        );
-            reg [63:0] shifted_data;
-            begin
-                shifted_data = data >> ({3'b000, addr_index} << 3);
-                if (op[OP_LSU_LB]) begin
-                    format_load_data = {{24{shifted_data[7]}}, shifted_data[7:0]};
-                end else if (op[OP_LSU_LBU]) begin
-                    format_load_data = {24'b0, shifted_data[7:0]};
-                end else if (op[OP_LSU_LH]) begin
-                    format_load_data = {{16{shifted_data[15]}}, shifted_data[15:0]};
-                end else if (op[OP_LSU_LHU]) begin
-                    format_load_data = {16'b0, shifted_data[15:0]};
-                end else begin
-                    format_load_data = shifted_data[31:0];
-                end
-            end
-        endfunction
-
-        function automatic [3:0] store_mask_for_word(
-            input [1:0] addr_index,
-            input [OP_LSU_INFO_WIDTH-1:0] op,
-            input high_word
-        );
-            integer lane;
-            integer src_byte;
-            integer start_lane;
-            integer bytes;
-            integer low_bytes;
-            integer high_bytes;
-            begin
-                bytes = access_size(op);
-                low_bytes = (bytes < (4 - addr_index)) ? bytes : (4 - addr_index);
-                high_bytes = bytes - low_bytes;
-                store_mask_for_word = 4'b0000;
-                for (lane = 0; lane < 4; lane = lane + 1) begin
-                    start_lane = high_word ? 0 : addr_index;
-                    src_byte = high_word ? (low_bytes + lane) : (lane - addr_index);
-                    if (high_word) begin
-                        if (lane < high_bytes) begin
-                            store_mask_for_word[lane] = 1'b1;
-                        end
-                    end else if ((lane >= start_lane) && (src_byte < low_bytes)) begin
-                        store_mask_for_word[lane] = 1'b1;
-                    end
-                end
-            end
-        endfunction
-
-        function automatic [31:0] store_data_for_word(
-            input [31:0] store_data,
-            input [1:0] addr_index,
-            input [OP_LSU_INFO_WIDTH-1:0] op,
-            input high_word
-        );
-            integer lane;
-            integer src_byte;
-            integer bytes;
-            integer low_bytes;
-            integer high_bytes;
-            begin
-                bytes = access_size(op);
-                low_bytes = (bytes < (4 - addr_index)) ? bytes : (4 - addr_index);
-                high_bytes = bytes - low_bytes;
-                store_data_for_word = 32'b0;
-                for (lane = 0; lane < 4; lane = lane + 1) begin
-                    if (high_word) begin
-                        src_byte = low_bytes + lane;
-                        if (lane < high_bytes) begin
-                            store_data_for_word[(lane * 8) +: 8] = store_data[(src_byte * 8) +: 8];
-                        end
-                    end else begin
-                        src_byte = lane - addr_index;
-                        if ((lane >= addr_index) && (src_byte < low_bytes)) begin
-                            store_data_for_word[(lane * 8) +: 8] = store_data[(src_byte * 8) +: 8];
-                        end
-                    end
-                end
-            end
-        endfunction
 
         wire first_access_req = (state_q == S_IDLE) & request_valid;
         wire second_load_req = (state_q == S_LOAD_FIRST) & load_cross_q;
@@ -178,14 +90,82 @@ import ydrasil_pkg::*;
             second_store_req ? operator_lsu_q : operator_lsu_i;
         wire [1:0] active_store_index = second_store_req ? addr_index_q : mem_addr_index;
         wire [31:0] active_store_data = second_store_req ? store_data_q : mem_rs2_data;
+        wire [2:0] active_store_size = second_store_req ? latched_access_size : request_access_size;
+        wire [2:0] active_store_low_room = 3'd4 - {1'b0, active_store_index};
+        wire [2:0] active_store_low_bytes =
+            (active_store_size < active_store_low_room) ? active_store_size : active_store_low_room;
+        wire [2:0] active_store_high_bytes = active_store_size - active_store_low_bytes;
+        wire [63:0] single_load_data = {32'b0, lsu_mem_rdata_i};
+        wire [63:0] cross_load_data = {lsu_mem_rdata_i, first_word_q};
+        wire [63:0] single_load_shifted = single_load_data >> ({3'b000, addr_index_q} << 3);
+        wire [63:0] cross_load_shifted = cross_load_data >> ({3'b000, addr_index_q} << 3);
+        reg [3:0] store_mask_word;
+        reg [31:0] store_data_word;
+        reg [31:0] single_load_result;
+        reg [31:0] cross_load_result;
+        integer store_lane;
+        integer store_src_byte;
+
+        assign request_access_size =
+            (operator_lsu_i[OP_LSU_LW] | operator_lsu_i[OP_LSU_SW]) ? 3'd4 :
+            (operator_lsu_i[OP_LSU_LH] | operator_lsu_i[OP_LSU_LHU] | operator_lsu_i[OP_LSU_SH]) ? 3'd2 :
+                                                                                                    3'd1;
+        assign latched_access_size =
+            (operator_lsu_q[OP_LSU_LW] | operator_lsu_q[OP_LSU_SW]) ? 3'd4 :
+            (operator_lsu_q[OP_LSU_LH] | operator_lsu_q[OP_LSU_LHU] | operator_lsu_q[OP_LSU_SH]) ? 3'd2 :
+                                                                                                    3'd1;
+        assign request_crosses_word =
+            ({1'b0, mem_addr_index} + request_access_size) > 3'd4;
+        assign latched_crosses_word =
+            ({1'b0, addr_index_q} + latched_access_size) > 3'd4;
+
+        always_comb begin
+            store_mask_word = 4'b0000;
+            store_data_word = 32'b0;
+            for (store_lane = 0; store_lane < 4; store_lane = store_lane + 1) begin
+                if (second_store_req) begin
+                    store_src_byte = active_store_low_bytes + store_lane;
+                    if ({1'b0, store_lane[1:0]} < active_store_high_bytes) begin
+                        store_mask_word[store_lane] = 1'b1;
+                        store_data_word[(store_lane * 8) +: 8] =
+                            active_store_data[(store_src_byte * 8) +: 8];
+                    end
+                end else begin
+                    store_src_byte = store_lane - active_store_index;
+                    if ((store_lane >= active_store_index) &&
+                        ({1'b0, store_src_byte[1:0]} < active_store_low_bytes)) begin
+                        store_mask_word[store_lane] = 1'b1;
+                        store_data_word[(store_lane * 8) +: 8] =
+                            active_store_data[(store_src_byte * 8) +: 8];
+                    end
+                end
+            end
+        end
+
+        always_comb begin
+            if (operator_lsu_q[OP_LSU_LB]) begin
+                single_load_result = {{24{single_load_shifted[7]}}, single_load_shifted[7:0]};
+                cross_load_result = {{24{cross_load_shifted[7]}}, cross_load_shifted[7:0]};
+            end else if (operator_lsu_q[OP_LSU_LBU]) begin
+                single_load_result = {24'b0, single_load_shifted[7:0]};
+                cross_load_result = {24'b0, cross_load_shifted[7:0]};
+            end else if (operator_lsu_q[OP_LSU_LH]) begin
+                single_load_result = {{16{single_load_shifted[15]}}, single_load_shifted[15:0]};
+                cross_load_result = {{16{cross_load_shifted[15]}}, cross_load_shifted[15:0]};
+            end else if (operator_lsu_q[OP_LSU_LHU]) begin
+                single_load_result = {16'b0, single_load_shifted[15:0]};
+                cross_load_result = {16'b0, cross_load_shifted[15:0]};
+            end else begin
+                single_load_result = single_load_shifted[31:0];
+                cross_load_result = cross_load_shifted[31:0];
+            end
+        end
 
         assign lsu_mem_req_o = first_access_req | second_access;
         assign lsu_mem_wen_o = ((state_q == S_IDLE) & is_store) | second_store_req;
         assign lsu_mem_addr_o = second_access ? latched_next_addr : mem_addr;
-        assign lsu_mem_wmask_o = lsu_mem_wen_o ?
-            store_mask_for_word(active_store_index, active_store_op, second_store_req) : 4'b0000;
-        assign lsu_mem_wdata_o = lsu_mem_wen_o ?
-            store_data_for_word(active_store_data, active_store_index, active_store_op, second_store_req) : 32'b0;
+        assign lsu_mem_wmask_o = lsu_mem_wen_o ? store_mask_word : 4'b0000;
+        assign lsu_mem_wdata_o = lsu_mem_wen_o ? store_data_word : 32'b0;
 
         assign lsu_ctrl_busy_o = (state_q != S_IDLE) | request_valid | result_valid_q;
 
@@ -217,12 +197,12 @@ import ydrasil_pkg::*;
                             operator_lsu_q <= operator_lsu_i;
                             rd_addr_q      <= id_rd_waddr_i;
                             addr_index_q   <= mem_addr_index;
-                            load_cross_q   <= access_crosses_word(mem_addr_index, operator_lsu_i) & is_load;
-                            store_cross_q  <= access_crosses_word(mem_addr_index, operator_lsu_i) & is_store;
+                            load_cross_q   <= request_crosses_word & is_load;
+                            store_cross_q  <= request_crosses_word & is_store;
 
                             if (is_load) begin
                                 state_q <= S_LOAD_FIRST;
-                            end else if (access_crosses_word(mem_addr_index, operator_lsu_i)) begin
+                            end else if (request_crosses_word) begin
                                 state_q <= S_STORE_SECOND;
                             end
                         end
@@ -233,14 +213,14 @@ import ydrasil_pkg::*;
                             first_word_q <= lsu_mem_rdata_i;
                             state_q      <= S_LOAD_SECOND;
                         end else begin
-                            result_q       <= format_load_data({32'b0, lsu_mem_rdata_i}, addr_index_q, operator_lsu_q);
+                            result_q       <= single_load_result;
                             result_valid_q <= 1'b1;
                             state_q        <= S_IDLE;
                         end
                     end
 
                     S_LOAD_SECOND: begin
-                        result_q       <= format_load_data({lsu_mem_rdata_i, first_word_q}, addr_index_q, operator_lsu_q);
+                        result_q       <= cross_load_result;
                         result_valid_q <= 1'b1;
                         state_q        <= S_IDLE;
                     end
@@ -272,7 +252,16 @@ import ydrasil_pkg::*;
     reg        is_load_ff;
     reg [1:0]  mem_addr_index_ff;
 
-    assign lsu_rs2_data = id_lsu_rs2_rd_forward_i ? ex_lsu_rd_data_i : id_lsu_rs2_data_i; // 前递后的源寄存器数据
+    wire wb_lsu_rs2_rd_forward;
+
+    assign wb_lsu_rs2_rd_forward =
+        wb_ex_pending_i &
+        (id_lsu_rs2_raddr_i == wb_ex_pending_waddr_rd_i) &
+        (id_lsu_rs2_raddr_i != '0);
+    assign lsu_rs2_data =
+        id_lsu_rs2_rd_forward_i ? ex_lsu_rd_data_i :
+        wb_lsu_rs2_rd_forward   ? wb_ex_pending_wdata_rd_i :
+                                   id_lsu_rs2_data_i; // 前递后的源寄存器数据
 
     assign is_load   = operator_lsu_type_i[ydrasil_pkg::OPERATOR_TYPE_LOAD - ydrasil_pkg::OPERATOR_TYPE_LSU_BASE];
     assign is_store  = operator_lsu_type_i[ydrasil_pkg::OPERATOR_TYPE_STORE - ydrasil_pkg::OPERATOR_TYPE_LSU_BASE];

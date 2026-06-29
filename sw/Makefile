@@ -57,6 +57,8 @@ COREMARK_BIN := $(COREMARK_OUT)/$(COREMARK_NAME).bin
 COREMARK_DUMP := $(COREMARK_OUT)/$(COREMARK_NAME).dump
 COREMARK_ITCM := $(COREMARK_OUT)/$(COREMARK_NAME).itcm
 COREMARK_DTCM := $(COREMARK_OUT)/$(COREMARK_NAME).dtcm
+COREMARK_ITCM_BIN := $(COREMARK_OUT)/$(COREMARK_NAME)_itcm.bin
+COREMARK_DTCM_BIN := $(COREMARK_OUT)/$(COREMARK_NAME)_dtcm.bin
 COREMARK_OBJDUMP := $(COREMARK_OUT)/$(COREMARK_NAME).objdump
 COREMARK_MAP := $(COREMARK_OUT)/$(COREMARK_NAME).map
 
@@ -92,7 +94,6 @@ COREMARK_CFLAGS := \
 	-static \
 	-DITERATIONS=1 \
 	-DYDRASIL_SIM_CTRL=1 \
-	-DXPRINTF_DISABLE_FLOAT=1 \
 	-DSDK_BANNER=0 \
 	-DPERFORMANCE_RUN=1 \
 	-DFLAGS_STR=\"rv32im_zicsr_zifencei-ilp32-O2\" \
@@ -127,7 +128,9 @@ DTCM := $(OUT_DIR)/mem/$(NAME).dtcm
 ITCM_BIN  := $(OUT_DIR)/bin/$(NAME)_itcm.bin
 DTCM_BIN  := $(OUT_DIR)/bin/$(NAME)_dtcm.bin
 
-.PHONY: rv_all rv_elf rv_dump rv_mem coremark coremark-clean
+.PHONY: rv_all rv_elf rv_dump rv_mem
+.PHONY: coremark coremark-rebuild coremark-clean coremark-clean-all
+.PHONY: coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map
 rv_comp_genmem:
 	@if [ "$(REBUILD)" != "1" ] && [ -f "$(ELF)" ] && [ -f "$(DUMP)" ] && [ -f "$(ITCM)" ] && [ -f "$(DTCM)" ]; then \
 		echo "[skip] outputs exist for $(NAME) (set REBUILD=1 to force)"; \
@@ -181,7 +184,7 @@ $(COREMARK_DUMP): $(COREMARK_ELF)
 $(COREMARK_OBJDUMP): $(COREMARK_ELF)
 	$(OBJDUMP) -h -S $< > $@
 
-$(COREMARK_ITCM): $(COREMARK_ELF) | $(COREMARK_OUT)
+$(COREMARK_ITCM): | $(COREMARK_ELF) $(COREMARK_OUT)
 	$(OBJCOPY) -O binary --gap-fill=0x00 \
 		--only-section=.init \
 		--only-section=.text \
@@ -191,22 +194,42 @@ $(COREMARK_ITCM): $(COREMARK_ELF) | $(COREMARK_OUT)
 		--only-section=.fini_array \
 		--only-section=.ctors \
 		--only-section=.dtors \
-		$< $(COREMARK_OUT)/$(COREMARK_NAME)_itcm.bin
-	od -An -t x4 -w4 -v $(COREMARK_OUT)/$(COREMARK_NAME)_itcm.bin | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > $@
+		$(COREMARK_ELF) $(COREMARK_ITCM_BIN)
+	od -An -t x4 -w4 -v $(COREMARK_ITCM_BIN) | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > $@
 
-$(COREMARK_DTCM): $(COREMARK_ELF) | $(COREMARK_OUT)
+$(COREMARK_DTCM): | $(COREMARK_ELF) $(COREMARK_OUT)
 	$(OBJCOPY) -O binary --gap-fill=0x00 \
 		--only-section=.data \
 		--only-section=.bss \
 		--only-section=.stack \
 		--set-section-flags .bss=alloc,load,contents \
 		--set-section-flags .stack=alloc,load,contents \
-		$< $(COREMARK_OUT)/$(COREMARK_NAME)_dtcm.bin || true
-	@if [ -s $(COREMARK_OUT)/$(COREMARK_NAME)_dtcm.bin ]; then \
-		od -An -t x4 -w4 -v $(COREMARK_OUT)/$(COREMARK_NAME)_dtcm.bin | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > $@; \
+		$(COREMARK_ELF) $(COREMARK_DTCM_BIN) || true
+	@if [ -s $(COREMARK_DTCM_BIN) ]; then \
+		od -An -t x4 -w4 -v $(COREMARK_DTCM_BIN) | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > $@; \
 	else \
 		printf "00000000\n" > $@; \
 	fi
 
+coremark-rebuild: coremark-clean-all coremark
+
 coremark-clean:
+	$(MAKE) coremark-clean-all
+
+coremark-clean-all:
 	rm -rf $(COREMARK_OUT)
+
+coremark-clean-elf:
+	rm -f $(COREMARK_ELF)
+
+coremark-clean-bin:
+	rm -f $(COREMARK_BIN)
+
+coremark-clean-dump:
+	rm -f $(COREMARK_DUMP) $(COREMARK_OBJDUMP)
+
+coremark-clean-mem:
+	rm -f $(COREMARK_ITCM) $(COREMARK_DTCM) $(COREMARK_ITCM_BIN) $(COREMARK_DTCM_BIN)
+
+coremark-clean-map:
+	rm -f $(COREMARK_MAP)

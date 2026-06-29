@@ -17,7 +17,8 @@ import ydrasil_pkg::*;
 
     generate
         begin : g_lzc_div
-            localparam int unsigned LZC_CNT_WIDTH = ydrasil_pkg::idx_width(REGS_DATA_WIDTH);
+            localparam int unsigned LZC_CNT_WIDTH =
+                (REGS_DATA_WIDTH > 1) ? $clog2(REGS_DATA_WIDTH) : 1;
 
             typedef enum logic [1:0] {
                 DIV_STATE_IDLE,

@@ -289,14 +289,4 @@ package ydrasil_pkg;
 	localparam int BP_BTB_ENTRIES = 256;
 	localparam int BP_BHT_ENTRIES = 256;
 
-	function automatic integer unsigned log_addr_width (input integer unsigned depth);
-        return (depth > 32'd1) ? unsigned'($clog2(depth)) : 32'd1;
-    endfunction
-
-	function automatic integer unsigned idx_width (input integer unsigned num_idx);
-        return log_addr_width(num_idx);
-    endfunction
-
-
-
 endpackage

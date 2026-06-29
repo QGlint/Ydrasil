@@ -106,6 +106,7 @@ import ydrasil_pkg::*;
     wire [DATA_WIDTH-1:0] ex_branch_next_pc;
     wire [DATA_WIDTH-1:0] ex_branch_actual_next_pc;
     wire [DATA_WIDTH-1:0] ex_branch_pred_next_pc;
+    wire [DATA_WIDTH-1:0] ex_jump_target;
     wire ex_branch_mispredict;
     wire ex_branch_jump;
 
@@ -155,7 +156,8 @@ import ydrasil_pkg::*;
     assign ex_lsu_mem_addr_o = alu_result;
     assign ex_lsu_result_o = alu_result_ff;
 
-    assign ex_branch_target_o = interrupt_i ? clint_ex_int_addr_i : bt_alu_result;
+    assign ex_jump_target = bt_a_sel_rs1 ? {bt_alu_result[DATA_WIDTH-1:1], 1'b0} : bt_alu_result;
+    assign ex_branch_target_o = interrupt_i ? clint_ex_int_addr_i : ex_jump_target;
     assign ex_branch_pc = bt_a_operand;
     assign ex_branch_next_pc = ex_branch_pc + 32'd4;
 
@@ -181,7 +183,7 @@ import ydrasil_pkg::*;
         interrupt_i | (ex_is_jump & ex_branch_jump & !interrupt_i) | ex_branch_mispredict;
     assign ex_pc_redirect_target_o =
         interrupt_i ? clint_ex_int_addr_i :
-        (ex_is_jump & ex_branch_jump) ? bt_alu_result :
+        (ex_is_jump & ex_branch_jump) ? ex_jump_target :
                                         ex_branch_actual_next_pc;
     assign ex_bp_train_valid_o = ex_is_branch & !interrupt_i;
     assign ex_bp_train_pc_o = ex_branch_pc;

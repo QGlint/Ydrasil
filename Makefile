@@ -28,7 +28,9 @@ ifneq ($(VIVADO_LICENSE_FILE),)
 export XILINXD_LICENSE_FILE := $(VIVADO_LICENSE_FILE)
 endif
 
-.PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests init install-bender get_spike download_and_extract_spike check_deps spike spike_wave_to_csv  rv_test_comp_genmem coremark coremark_sim coremark_run syn syn-venv syn-prep syn-vivado syn-analyze syn-clean
+.PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests init install-bender get_spike download_and_extract_spike check_deps spike spike_wave_to_csv  rv_test_comp_genmem
+.PHONY: coremark coremark_sim coremark_run coremark-rebuild coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map
+.PHONY: syn syn-venv syn-prep syn-vivado syn-analyze syn-clean
 
 .SECONDEXPANSION:
 
@@ -117,12 +119,17 @@ comp_and_sim_cpu: comp
 		ITCM_FILE=$(RVTESTS_OUT_ROOT)/rv32ui/mem/rv32ui_lh.itcm \
 		DTCM_FILE=$(RVTESTS_OUT_ROOT)/rv32ui/mem/rv32ui_lh.dtcm
 
-coremark:
-	@$(MAKE) -C sw coremark \
+COREMARK_SW_MAKE_ARGS = \
 		PROJECT_ROOT=$(PROJECT_ROOT) \
 		RISCV_PREFIX=$(RISCV_PREFIX) \
 		ARCH=rv32im_zicsr_zifencei \
 		ABI=$(ABI)
+
+coremark:
+	@$(MAKE) -C sw coremark $(COREMARK_SW_MAKE_ARGS)
+
+coremark-rebuild:
+	@$(MAKE) -C sw coremark-rebuild $(COREMARK_SW_MAKE_ARGS)
 
 coremark_sim: coremark comp
 	@$(MAKE) -C hw/dv sim \
@@ -131,6 +138,9 @@ coremark_sim: coremark comp
 		SIM_EXTRA_DEFINES="+cpp_timeout=10000000 +sv_timeout=10000000"
 
 coremark_run: coremark_sim
+
+coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map:
+	@$(MAKE) -C sw $@ $(COREMARK_SW_MAKE_ARGS)
 
 
 # --- 核心自动化测试逻辑 (支持 ITCM/DTCM 分离加载) ---

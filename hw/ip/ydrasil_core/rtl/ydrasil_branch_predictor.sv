@@ -23,10 +23,11 @@ import ydrasil_pkg::*;
     input  wire                            invalidate_i
 );
 
-    localparam int BTB_INDEX_WIDTH = ydrasil_pkg::log_addr_width(BTB_ENTRIES);
-    localparam int BHT_INDEX_WIDTH = ydrasil_pkg::log_addr_width(BHT_ENTRIES);
+    localparam int BTB_INDEX_WIDTH = (BTB_ENTRIES > 1) ? $clog2(BTB_ENTRIES) : 1;
+    localparam int BHT_INDEX_WIDTH = (BHT_ENTRIES > 1) ? $clog2(BHT_ENTRIES) : 1;
     localparam int BTB_TAG_WIDTH = ydrasil_pkg::INST_ADDR_WIDTH - BTB_INDEX_WIDTH - 2;
     localparam int BTB_DATA_WIDTH = BTB_TAG_WIDTH + ydrasil_pkg::INST_ADDR_WIDTH;
+    localparam int BP_EPOCH_WIDTH = 2;
 
     if ((BTB_ENTRIES < 2) || ((BTB_ENTRIES & (BTB_ENTRIES - 1)) != 0)) begin : g_bad_btb_entries
         initial begin
@@ -48,6 +49,9 @@ import ydrasil_pkg::*;
 
     logic btb_valid_q [0:BTB_ENTRIES-1];
     logic bht_valid_q [0:BHT_ENTRIES-1];
+    logic [BP_EPOCH_WIDTH-1:0] bp_epoch_q;
+    logic [BP_EPOCH_WIDTH-1:0] btb_epoch_q [0:BTB_ENTRIES-1];
+    logic [BP_EPOCH_WIDTH-1:0] bht_epoch_q [0:BHT_ENTRIES-1];
 
     wire [BTB_INDEX_WIDTH-1:0] predict_btb_index;
     wire [BHT_INDEX_WIDTH-1:0] predict_bht_index;
@@ -69,17 +73,8 @@ import ydrasil_pkg::*;
     wire [1:0] bht_counter;
     wire       train_fire;
     wire       btb_hit;
-
-    function automatic logic [1:0] next_counter(
-        input logic [1:0] counter_i,
-        input logic       taken_i
-    );
-        if (taken_i) begin
-            next_counter = (counter_i == 2'b11) ? counter_i : (counter_i + 2'b01);
-        end else begin
-            next_counter = (counter_i == 2'b00) ? counter_i : (counter_i - 2'b01);
-        end
-    endfunction
+    wire       predict_btb_entry_valid;
+    wire       predict_bht_entry_valid;
 
     assign predict_btb_index = predict_pc_i[BTB_INDEX_WIDTH+1:2];
     assign predict_bht_index = predict_pc_i[BHT_INDEX_WIDTH+1:2];
@@ -89,9 +84,17 @@ import ydrasil_pkg::*;
     assign train_btb_tag     = train_pc_i[ydrasil_pkg::INST_ADDR_WIDTH-1:BTB_INDEX_WIDTH+2];
 
     assign btb_wdata = {train_btb_tag, train_target_i};
-    assign bht_wdata = next_counter(train_counter_i, train_taken_i);
+    assign bht_wdata = train_taken_i ?
+        ((train_counter_i == 2'b11) ? train_counter_i : (train_counter_i + 2'b01)) :
+        ((train_counter_i == 2'b00) ? train_counter_i : (train_counter_i - 2'b01));
     assign {btb_rtag, btb_rtarget} = btb_rdata;
     assign train_fire = train_valid_i && !invalidate_i;
+    assign predict_btb_entry_valid =
+        btb_valid_q[predict_btb_index] &&
+        (btb_epoch_q[predict_btb_index] == bp_epoch_q);
+    assign predict_bht_entry_valid =
+        bht_valid_q[predict_bht_index] &&
+        (bht_epoch_q[predict_bht_index] == bp_epoch_q);
 
     ydrmem_1r1w_ram #(
         .DEPTH(BTB_ENTRIES),
@@ -128,30 +131,30 @@ import ydrasil_pkg::*;
             predict_btb_tag_q   <= '0;
             predict_btb_valid_q <= 1'b0;
             predict_bht_valid_q <= 1'b0;
+            bp_epoch_q          <= '0;
             for (i = 0; i < BTB_ENTRIES; i = i + 1) begin
                 btb_valid_q[i] <= 1'b0;
+                btb_epoch_q[i] <= '0;
             end
             for (j = 0; j < BHT_ENTRIES; j = j + 1) begin
                 bht_valid_q[j] <= 1'b0;
+                bht_epoch_q[j] <= '0;
             end
         end else if (invalidate_i) begin
             predict_btb_tag_q   <= '0;
             predict_btb_valid_q <= 1'b0;
             predict_bht_valid_q <= 1'b0;
-            for (i = 0; i < BTB_ENTRIES; i = i + 1) begin
-                btb_valid_q[i] <= 1'b0;
-            end
-            for (j = 0; j < BHT_ENTRIES; j = j + 1) begin
-                bht_valid_q[j] <= 1'b0;
-            end
+            bp_epoch_q          <= bp_epoch_q + {{(BP_EPOCH_WIDTH-1){1'b0}}, 1'b1};
         end else begin
             predict_btb_tag_q   <= predict_btb_tag;
-            predict_btb_valid_q <= btb_valid_q[predict_btb_index];
-            predict_bht_valid_q <= bht_valid_q[predict_bht_index];
+            predict_btb_valid_q <= predict_btb_entry_valid;
+            predict_bht_valid_q <= predict_bht_entry_valid;
 
             if (train_fire) begin
                 btb_valid_q[train_btb_index] <= 1'b1;
                 bht_valid_q[train_bht_index] <= 1'b1;
+                btb_epoch_q[train_btb_index] <= bp_epoch_q;
+                bht_epoch_q[train_bht_index] <= bp_epoch_q;
             end
         end
     end

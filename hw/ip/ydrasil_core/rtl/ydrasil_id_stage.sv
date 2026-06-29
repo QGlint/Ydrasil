@@ -135,6 +135,7 @@ import ydrasil_pkg::*;
     reg [DATA_WIDTH-1:0]                 id_ex_pred_target_ff;
     reg [1:0]                            id_ex_pred_counter_ff;
     reg                                  id_ex_valid_ff;
+    reg                                  id_fence_i_ff;
     wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0] 	 csr_reg_raddr;
    
     wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0] 	  csr_ex_waddr;
@@ -237,6 +238,7 @@ import ydrasil_pkg::*;
             id_ex_pred_target_ff <= '0;
             id_ex_pred_counter_ff <= 2'b01;
             id_ex_valid_ff <= 1'b0;
+            id_fence_i_ff <= 1'b0;
             sel_rs_ff <= '0;
             rf_raddr_rs1_ff <= '0;
             rf_raddr_rs2_ff <= '0;
@@ -268,6 +270,7 @@ import ydrasil_pkg::*;
             id_ex_pred_target_ff <= '0;
             id_ex_pred_counter_ff <= 2'b01;
             id_ex_valid_ff <= 1'b0;
+            id_fence_i_ff <= 1'b0;
             sel_rs_ff <= '0;
             rf_raddr_rs1_ff <= '0;
             rf_raddr_rs2_ff <= '0;
@@ -298,9 +301,12 @@ import ydrasil_pkg::*;
             id_ex_pred_target_ff <= if_id_pred_target_i;
             id_ex_pred_counter_ff <= if_id_pred_counter_i;
             id_ex_valid_ff <= if_id_valid_i;
+            id_fence_i_ff <= if_id_valid_i & id_fence_i;
             sel_rs_ff <= sel_rs;
             rf_raddr_rs1_ff <= rf_raddr_rs1;
             rf_raddr_rs2_ff <= rf_raddr_rs2;
+        end else begin
+            id_fence_i_ff <= 1'b0;
         end
     end
 
@@ -325,7 +331,7 @@ import ydrasil_pkg::*;
     assign  id_op_csr_info_o = csr_op_info_ff;
     assign  id_op_sys_info_o = sys_op_info_ff;
     assign id_instr_addr_o = id_instr_addr_ff;
-    assign id_fence_i_o = id_fence_i & !flush_id_i & !stall_id_i;
+    assign id_fence_i_o = id_fence_i_ff;
     assign id_ex_pred_hit_o = id_ex_pred_hit_ff;
     assign id_ex_pred_taken_o = id_ex_pred_taken_ff;
     assign id_ex_pred_target_o = id_ex_pred_target_ff;

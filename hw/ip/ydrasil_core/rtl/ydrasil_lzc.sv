@@ -3,7 +3,7 @@ import ydrasil_pkg::*;
 #(
   parameter int unsigned WIDTH = 32,
   parameter bit          MODE  = 1'b0,// Mode selection: 0 -> trailing zero, 1 -> leading zero
-  parameter int unsigned CNT_WIDTH = ydrasil_pkg::idx_width(WIDTH)
+  parameter int unsigned CNT_WIDTH = (WIDTH > 1) ? $clog2(WIDTH) : 1
 ) (
   input  logic [WIDTH-1:0]     lzc_in_i,
   output logic [CNT_WIDTH-1:0] lzc_cnt_o,

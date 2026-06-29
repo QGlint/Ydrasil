@@ -50,6 +50,147 @@ void xputs (					/* Put a string to the default device */
 		xputc(*str++);
 }
 
+#ifndef XPRINTF_DISABLE_FLOAT
+static unsigned int xfloat_next_digit(unsigned long long *frac, unsigned long long denom)
+{
+	unsigned int digit = 0;
+	unsigned int i;
+	unsigned long long acc = 0;
+
+	for (i = 0; i < 10; i++) {
+		acc += *frac;
+		if (acc >= denom) {
+			acc -= denom;
+			digit++;
+		}
+	}
+
+	*frac = acc;
+	return digit;
+}
+
+static void xput_float(double val, unsigned int width, unsigned int precision, unsigned int flags)
+{
+	char s[16];
+	char frac_s[10];
+	unsigned int i, digits, pad, neg;
+	unsigned long long mant;
+	unsigned long long intpart;
+	unsigned long long frac;
+	unsigned long long frac_mask;
+	unsigned int hi, lo;
+	unsigned int exp_bits;
+	unsigned int round_digit;
+	int exp2;
+
+	if (precision > 9) {
+		precision = 9;
+	}
+
+	union {
+		double d;
+		unsigned int w[2];
+	} cvt;
+
+	cvt.d = val;
+	hi = cvt.w[0];
+	lo = cvt.w[1];
+	neg = hi >> 31;
+	exp_bits = (hi >> 20) & 0x7ff;
+	mant = ((unsigned long long)(hi & 0xfffff) << 32) | lo;
+
+	if (neg) {
+		xputc('-');
+	}
+
+	if (exp_bits == 0x7ff) {
+		xputs(mant ? "nan" : "inf");
+		return;
+	}
+
+	if (exp_bits == 0 && mant == 0) {
+		intpart = 0;
+		for (i = 0; i < precision; i++) {
+			frac_s[i] = '0';
+		}
+		goto print_parts;
+	}
+
+	if (exp_bits == 0) {
+		exp2 = 1 - 1023 - 52;
+	} else {
+		mant |= (1ULL << 52);
+		exp2 = (int)exp_bits - 1023 - 52;
+	}
+
+	if (exp2 >= 0) {
+		intpart = mant << exp2;
+		for (i = 0; i < precision; i++) {
+			frac_s[i] = '0';
+		}
+	} else {
+		unsigned int rshift = (unsigned int)(-exp2);
+
+		if (rshift >= 63) {
+			intpart = 0;
+			frac = mant;
+			for (i = 0; i < precision; i++) {
+				frac_s[i] = '0';
+			}
+		} else {
+			intpart = mant >> rshift;
+			frac_mask = (1ULL << rshift) - 1ULL;
+			frac = mant & frac_mask;
+			frac_mask++;
+
+			for (i = 0; i < precision; i++) {
+				frac_s[i] = (char)('0' + xfloat_next_digit(&frac, frac_mask));
+			}
+
+			round_digit = xfloat_next_digit(&frac, frac_mask);
+			if (round_digit >= 5) {
+				for (i = precision; i > 0; i--) {
+					if (frac_s[i - 1] < '9') {
+						frac_s[i - 1]++;
+						break;
+					}
+					frac_s[i - 1] = '0';
+				}
+				if (i == 0) {
+					intpart++;
+				}
+			}
+		}
+	}
+
+print_parts:
+	i = 0;
+	do {
+		s[i++] = (char)('0' + (intpart % 10ULL));
+		intpart /= 10ULL;
+	} while (intpart && i < sizeof(s));
+
+	digits = i + 1 + precision;
+	pad = (width > digits) ? (width - digits) : 0;
+	while (!(flags & 2) && pad--) {
+		xputc((flags & 1) ? '0' : ' ');
+	}
+
+	do {
+		xputc(s[--i]);
+	} while (i);
+
+	xputc('.');
+	for (i = 0; i < precision; i++) {
+		xputc(frac_s[i]);
+	}
+
+	while ((flags & 2) && pad--) {
+		xputc(' ');
+	}
+}
+#endif
+
 
 /*----------------------------------------------*/
 /* Formatted string output                      */
@@ -86,6 +227,10 @@ void xvprintf (
 		}
 		f = 0;
 		c = *fmt++;					/* Get first char of the sequense */
+		if (c == '%') {
+			xputc('%');
+			continue;
+		}
 		if (c == '0') {				/* Flag: '0' padded */
 			f = 1; c = *fmt++;
 		} else {
@@ -95,6 +240,15 @@ void xvprintf (
 		}
 		for (w = 0; c >= '0' && c <= '9'; c = *fmt++)	/* Minimum width */
 			w = w * 10 + c - '0';
+		unsigned int precision = 6;
+		if (c == '.') {
+			c = *fmt++;
+			precision = 0;
+			while (c >= '0' && c <= '9') {
+				precision = precision * 10 + c - '0';
+				c = *fmt++;
+			}
+		}
 		if (c == 'l' || c == 'L') {	/* Prefix: Size is long int */
 			f |= 4; c = *fmt++;
 		}
@@ -103,44 +257,8 @@ void xvprintf (
 		if (d >= 'a') d -= 0x20;
 
 #ifndef XPRINTF_DISABLE_FLOAT
-		// 增加对%f浮点数的支持
 		if (d == 'F') {
-			double fv = va_arg(arp, double);
-			int prec = 6; // 默认小数点后6位
-			// 支持格式如%.3f
-			if (*(fmt-2) == '.') {
-				prec = 0;
-				const char* pprec = fmt-1;
-				while (*pprec >= '0' && *pprec <= '9') {
-					prec = prec * 10 + (*pprec - '0');
-					pprec++;
-				}
-			}
-			if (fv < 0) {
-				xputc('-');
-				fv = -fv;
-			}
-			long ipart = (long)fv;
-			double fpart = fv - ipart;
-			// 打印整数部分
-			i = 0;
-			v = ipart;
-			do {
-				d = (char)(v % 10); v /= 10;
-				s[i++] = d + '0';
-			} while (v && i < sizeof(s));
-			j = i;
-			while (j++ < w) xputc(' ');
-			do xputc(s[--i]); while(i);
-			// 打印小数点
-			xputc('.');
-			// 打印小数部分
-			for (i = 0; i < prec; i++) {
-				fpart *= 10;
-				int digit = (int)fpart;
-				xputc('0' + digit);
-				fpart -= digit;
-			}
+			xput_float(va_arg(arp, double), w, precision, f);
 			continue;
 		}
 #endif
