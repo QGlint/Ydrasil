@@ -27,7 +27,7 @@ module perip_bridge(
     input  wire [31:0]  perip_addr			,
     input  wire [31:0]  perip_wdata		,
     input  wire         perip_wen			,
-	input  wire [1:0]	 perip_mask			,
+	input  wire [3:0]	 perip_mask			,
     output wire [31:0]  perip_rdata		,
 
     input  wire [63:0]  virtual_sw_input	,
@@ -54,15 +54,30 @@ module perip_bridge(
 
     reg [31:0] perip_rdata_ff;
     wire [31:0] perip_rdata_comb;
+    reg         cnt_cmd_valid_q;
+    reg         cnt_cmd_start_q;
+    reg         cnt_cmd_stop_q;
 
     // we don't care perip_mask in LED, SEG, SW & KEY, only care in DRAM
     // write process
-    always_ff @(posedge clk) begin
-        if (perip_wen) begin
+    always_ff @(posedge clk or posedge rst) begin
+        if (rst) begin
+            LED <= 32'h0;
+            seg_wdata <= 32'h0;
+            cnt_cmd_valid_q <= 1'b0;
+            cnt_cmd_start_q <= 1'b0;
+            cnt_cmd_stop_q <= 1'b0;
+        end else begin
+            cnt_cmd_valid_q <= perip_wen & (perip_addr == CNT_ADDR);
+            cnt_cmd_start_q <= perip_wdata == 32'h8000_0000;
+            cnt_cmd_stop_q <= perip_wdata == 32'hFFFF_FFFF;
+
+            if (perip_wen) begin
             case (perip_addr)
                 LED_ADDR:   LED <= perip_wdata;
                 SEG_ADDR:   seg_wdata <= perip_wdata;
             endcase
+            end
         end
     end
 
@@ -114,8 +129,9 @@ module perip_bridge(
         .clk				(cnt_clk),
         .perip_clk            (clk),
         .rst                (rst),
-        .perip_wdata		(perip_wdata),
-        .cnt_wen 			(perip_wen & (perip_addr == CNT_ADDR)),
+        .perip_cmd_valid	(cnt_cmd_valid_q),
+        .perip_cmd_start	(cnt_cmd_start_q),
+        .perip_cmd_stop	(cnt_cmd_stop_q),
         .perip_rdata		(cnt_rdata)
     );
 

@@ -237,7 +237,7 @@ import ydrasil_pkg::*;
     wire dram_addr_sel;
     assign dram_addr_sel = (lsu_mem_addr >= DRAM_ADDR_START) && (lsu_mem_addr <= DRAM_ADDR_END);
 
-    assign dram_sel =( lsu_mem_we& lsu_mem_we) | (dram_addr_sel_ff & lsu_mem_read_ff); // 写操作直接使用当前地址判断，读操作使用上一个周期的地址判断
+    assign dram_sel = (lsu_mem_we & dram_addr_sel) | (dram_addr_sel_ff & lsu_mem_read_ff); // 写操作直接使用当前地址判断，读操作使用上一个周期的地址判断
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin

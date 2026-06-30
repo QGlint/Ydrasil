@@ -223,192 +223,258 @@ import ydrasil_pkg::*;
             end
         end
     end else begin : g_legacy
-    // 内部信号定义
-    wire [ 1:0] mem_addr_index;
-    wire [31:0] mem_addr        ;
-    wire [31:0] mem_rs2_data    ;
+    wire is_load;
+    wire is_store;
+    wire request_valid;
+    wire [1:0] mem_addr_index;
 
-    wire is_load   ;
-    wire is_store  ;
-    wire  [ydrasil_pkg::REGS_DATA_WIDTH-1:0] lsu_rs2_data ;
+    localparam [31:0] DTCM_BYTE_SIZE = (32'd1 << ydrasil_pkg::DTCM_ADDR_WIDTH) << 2;
+    localparam [31:0] DTCM_LIMIT_ADDR = ydrasil_pkg::DTCM_BASE_ADDR + DTCM_BYTE_SIZE;
 
+    wire request_is_dtcm;
+    wire dtcm_accept;
+    wire dtcm_load_req;
+    wire dtcm_store_req;
+    wire mmio_accept;
+    wire mmio_busy;
 
-    
-    reg [ydrasil_pkg::OP_LOAD_INFO_WIDTH-1:0]  operator_load_ff;
-    reg [4:0]  rd_addr_ff;
-    reg        is_load_ff;
-    reg [1:0]  mem_addr_index_ff;
+    reg        mmio_req_valid_q;
+    reg        mmio_wait_q;
+    reg        mmio_is_load_q;
+    reg        mmio_is_store_q;
+    reg [ydrasil_pkg::BUS_ADDR_WIDTH-1:0]      mmio_addr_q;
+    reg [ydrasil_pkg::BUS_DATA_WIDTH-1:0]      mmio_wdata_q;
+    reg [3:0]                                  mmio_wmask_q;
+    reg [1:0]                                  mmio_addr_index_q;
+    reg [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0]   mmio_operator_lsu_q;
+    reg [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     mmio_rd_addr_q;
+    reg        mmio_wb_valid_q;
+    reg [ydrasil_pkg::REGS_DATA_WIDTH-1:0]     mmio_wb_result_q;
+    reg [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     mmio_wb_rd_addr_q;
 
-    assign lsu_rs2_data = id_lsu_rs2_data_i;
+    reg        load_s1_valid_q;
+    reg [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     load_s1_rd_addr_q;
+    reg [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0]   load_s1_operator_lsu_q;
+    reg [1:0]                                  load_s1_addr_index_q;
 
-    assign is_load   = operator_lsu_type_i[ydrasil_pkg::OPERATOR_TYPE_LOAD - ydrasil_pkg::OPERATOR_TYPE_LSU_BASE];
-    assign is_store  = operator_lsu_type_i[ydrasil_pkg::OPERATOR_TYPE_STORE - ydrasil_pkg::OPERATOR_TYPE_LSU_BASE];
+    reg        load_s2_valid_q;
+    reg [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     load_s2_rd_addr_q;
+    reg [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0]   load_s2_operator_lsu_q;
+    reg [ydrasil_pkg::REGS_DATA_WIDTH-1:0]     load_s2_shifted_q;
 
-    
-    assign mem_addr_index = mem_addr[1:0];
-    assign mem_addr        = ex_lsu_mem_addr_i; // 内存访问的地址
-    assign mem_rs2_data    = lsu_rs2_data; // 存储操作的源寄存器数据
+    wire is_sb;
+    wire is_sh;
+    wire is_sw;
+    wire [3:0] sb_mask;
+    wire [3:0] sh_mask;
+    wire [3:0] sw_mask;
+    wire [31:0] sb_data;
+    wire [31:0] sh_data;
+    wire [31:0] sw_data;
+    wire [3:0] store_wmask;
+    wire [31:0] store_wdata;
+    reg [31:0] dtcm_load_result;
+    reg [31:0] mmio_load_result;
+    reg [31:0] load_shifted_data;
 
+    wire dtcm_wb_valid;
+    wire mmio_wb_out_valid;
+    wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] selected_wb_result;
+    wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] selected_wb_rd_addr;
 
-    wire[ydrasil_pkg::REGS_DATA_WIDTH-1:0] lsu_wb_result;
-    wire                         lsu_rf_rd_wen;
-    wire[ydrasil_pkg::REGS_ADDR_WIDTH-1:0] lsu_rf_rd_waddr;
-    reg [ydrasil_pkg::REGS_DATA_WIDTH-1:0]  lsu_wb_result_ff;
-    reg                         lsu_rf_rd_wen_ff;
-    reg [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]  lsu_rf_rd_waddr_ff;
-
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            lsu_wb_result_ff <= 0;
-            lsu_rf_rd_wen_ff <= 0;
-            lsu_rf_rd_waddr_ff <= 0;
-        end
-        else begin
-            lsu_wb_result_ff <= lsu_wb_result; // 直接使用组合逻辑输出的结果
-            lsu_rf_rd_wen_ff <= lsu_rf_rd_wen; // 直接使用组合逻辑输出的结果
-            lsu_rf_rd_waddr_ff <= lsu_rf_rd_waddr; // 直接使用组合逻辑输出的结果
-        end
-    end
-
-    assign lsu_ctrl_busy_o = 1'b0;
-
-    assign lsu_wb_result_o = lsu_wb_result_ff;
-    assign lsu_rf_rd_wen_o = lsu_rf_rd_wen_ff;
-    assign lsu_rf_rd_waddr_o = lsu_rf_rd_waddr_ff;
-
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            rd_addr_ff              <= 0;
-            operator_load_ff        <= 0;
-            is_load_ff              <= 0;
-            mem_addr_index_ff       <= 0;
-        end
-        else begin
-            operator_load_ff        <= operator_lsu_i[ydrasil_pkg::OP_LOAD_INFO_WIDTH-1:0];
-            rd_addr_ff              <= id_rd_waddr_i;
-            is_load_ff              <= is_load;
-            mem_addr_index_ff       <= mem_addr_index;
-        end
-    end
-
-    wire is_lb     ;
-    wire is_lh     ;
-    wire is_lw     ;
-    wire is_lbu    ;
-    wire is_lhu    ;
-
-    assign is_lb  = operator_load_ff[ydrasil_pkg::OP_LSU_LB];
-    assign is_lh  = operator_load_ff[ydrasil_pkg::OP_LSU_LH];
-    assign is_lw  = operator_load_ff[ydrasil_pkg::OP_LSU_LW];
-    assign is_lbu = operator_load_ff[ydrasil_pkg::OP_LSU_LBU];
-    assign is_lhu = operator_load_ff[ydrasil_pkg::OP_LSU_LHU];
-
-    wire is_sb     ;
-    wire is_sh     ;
-    wire is_sw     ;
+    assign is_load = operator_lsu_type_i[ydrasil_pkg::OPERATOR_TYPE_LOAD - ydrasil_pkg::OPERATOR_TYPE_LSU_BASE];
+    assign is_store = operator_lsu_type_i[ydrasil_pkg::OPERATOR_TYPE_STORE - ydrasil_pkg::OPERATOR_TYPE_LSU_BASE];
+    assign request_valid = is_load | is_store;
+    assign mem_addr_index = ex_lsu_mem_addr_i[1:0];
+    assign request_is_dtcm =
+        (ex_lsu_mem_addr_i >= ydrasil_pkg::DTCM_BASE_ADDR) &&
+        (ex_lsu_mem_addr_i < DTCM_LIMIT_ADDR);
+    assign mmio_busy = mmio_req_valid_q | mmio_wait_q | mmio_wb_valid_q;
+    assign dtcm_accept = request_valid & request_is_dtcm & !mmio_wb_valid_q;
+    assign dtcm_load_req = dtcm_accept & is_load;
+    assign dtcm_store_req = dtcm_accept & is_store;
+    assign mmio_accept = request_valid & !request_is_dtcm & !mmio_busy;
 
     assign is_sb = operator_lsu_i[ydrasil_pkg::OP_LSU_SB];
     assign is_sh = operator_lsu_i[ydrasil_pkg::OP_LSU_SH];
     assign is_sw = operator_lsu_i[ydrasil_pkg::OP_LSU_SW];
-    // 使用并行选择逻辑生成内存请求信号
-    assign lsu_mem_req_o      = is_load | is_store;
-
-    // 并行选择逻辑生成地址
-    assign lsu_mem_addr_o    = mem_addr;
-    // assign lsu_mem_waddr_o    = (valid_op & is_store_op) ? mem_addr ;
-
-    // 并行选择逻辑生成写使能信号
-    assign lsu_mem_wen_o       = is_store ;
-
-    // 并行选择逻辑生成寄存器写回控制 - 使用打一拍后的信号
-    assign lsu_rf_rd_wen      = is_load_ff;
-    assign lsu_rf_rd_waddr    = is_load_ff? rd_addr_ff : '0;
-
-    // 字节加载数据 - 使用并行选择逻辑
-    wire [31:0] lb_data, lh_data, lw_data, lbu_data, lhu_data;
-    wire [31:0] lb_byte0, lb_byte1, lb_byte2, lb_byte3;
-    wire [31:0] lbu_byte0, lbu_byte1, lbu_byte2, lbu_byte3;
-    wire [31:0] lh_low, lh_high, lhu_low, lhu_high;
-
-    // 有符号字节加载 - 并行准备所有可能的字节值
-    assign lb_byte0 = {{24{lsu_mem_rdata_i[7]}}, lsu_mem_rdata_i[7:0]};
-    assign lb_byte1 = {{24{lsu_mem_rdata_i[15]}}, lsu_mem_rdata_i[15:8]};
-    assign lb_byte2 = {{24{lsu_mem_rdata_i[23]}}, lsu_mem_rdata_i[23:16]};
-    assign lb_byte3 = {{24{lsu_mem_rdata_i[31]}}, lsu_mem_rdata_i[31:24]};
-
-    // 无符号字节加载 - 并行准备所有可能的字节值
-    assign lbu_byte0 = {24'h0, lsu_mem_rdata_i[7:0]};
-    assign lbu_byte1 = {24'h0, lsu_mem_rdata_i[15:8]};
-    assign lbu_byte2 = {24'h0, lsu_mem_rdata_i[23:16]};
-    assign lbu_byte3 = {24'h0, lsu_mem_rdata_i[31:24]};
-
-    // 有符号半字加载 - 并行准备所有可能的半字值
-    assign lh_low = {{16{lsu_mem_rdata_i[15]}}, lsu_mem_rdata_i[15:0]};
-    assign lh_high = {{16{lsu_mem_rdata_i[31]}}, lsu_mem_rdata_i[31:16]};
-
-    // 无符号半字加载 - 并行准备所有可能的半字值
-    assign lhu_low = {16'h0, lsu_mem_rdata_i[15:0]};
-    assign lhu_high = {16'h0, lsu_mem_rdata_i[31:16]};
-
-    // 使用并行选择逻辑选择正确的字节/半字/字 - 使用打一拍后的地址索引
-    assign lb_data = ({32{mem_addr_index_ff == 2'b00}} & lb_byte0) |
-                     ({32{mem_addr_index_ff == 2'b01}} & lb_byte1) |
-                     ({32{mem_addr_index_ff == 2'b10}} & lb_byte2) |
-                     ({32{mem_addr_index_ff == 2'b11}} & lb_byte3);
-
-    assign lbu_data = ({32{mem_addr_index_ff == 2'b00}} & lbu_byte0) |
-                      ({32{mem_addr_index_ff == 2'b01}} & lbu_byte1) |
-                      ({32{mem_addr_index_ff == 2'b10}} & lbu_byte2) |
-                      ({32{mem_addr_index_ff == 2'b11}} & lbu_byte3);
-
-    assign lh_data = ({32{mem_addr_index_ff[1] == 1'b0}} & lh_low) | ({32{mem_addr_index_ff[1] == 1'b1}} & lh_high);
-
-    assign lhu_data = ({32{mem_addr_index_ff[1] == 1'b0}} & lhu_low) | ({32{mem_addr_index_ff[1] == 1'b1}} & lhu_high);
-
-    assign lw_data = lsu_mem_rdata_i;
-
-    // 并行选择最终的寄存器写回数据 - 使用打一拍后的信号
-    assign lsu_wb_result =    ({32{is_lb}} & lb_data) |
-                                ({32{is_lbu}} & lbu_data) |
-                                ({32{is_lh}} & lh_data) |
-                                ({32{is_lhu}} & lhu_data) |
-                                ({32{is_lw}} & lw_data);
-
-    // 存储操作的掩码和数据 - 使用并行选择逻辑
-    // 字节存储掩码和数据
-    wire [ 3:0] sb_mask;
-    wire [31:0] sb_data;
 
     assign sb_mask = ({4{mem_addr_index == 2'b00}} & 4'b0001) |
                      ({4{mem_addr_index == 2'b01}} & 4'b0010) |
                      ({4{mem_addr_index == 2'b10}} & 4'b0100) |
                      ({4{mem_addr_index == 2'b11}} & 4'b1000);
+    assign sh_mask = mem_addr_index[1] ? 4'b1100 : 4'b0011;
+    assign sw_mask = 4'b1111;
 
-    assign sb_data = ({32{mem_addr_index == 2'b00}} & {24'b0, mem_rs2_data[7:0]}) |
-                     ({32{mem_addr_index == 2'b01}} & {16'b0, mem_rs2_data[7:0], 8'b0}) |
-                     ({32{mem_addr_index == 2'b10}} & {8'b0, mem_rs2_data[7:0], 16'b0}) |
-                     ({32{mem_addr_index == 2'b11}} & {mem_rs2_data[7:0], 24'b0});
+    assign sb_data = ({32{mem_addr_index == 2'b00}} & {24'b0, id_lsu_rs2_data_i[7:0]}) |
+                     ({32{mem_addr_index == 2'b01}} & {16'b0, id_lsu_rs2_data_i[7:0], 8'b0}) |
+                     ({32{mem_addr_index == 2'b10}} & {8'b0, id_lsu_rs2_data_i[7:0], 16'b0}) |
+                     ({32{mem_addr_index == 2'b11}} & {id_lsu_rs2_data_i[7:0], 24'b0});
+    assign sh_data = mem_addr_index[1] ? {id_lsu_rs2_data_i[15:0], 16'b0} :
+                                         {16'b0, id_lsu_rs2_data_i[15:0]};
+    assign sw_data = id_lsu_rs2_data_i;
 
-    // 半字存储掩码和数据
-    wire [ 3:0] sh_mask= ({4{mem_addr_index[1] == 1'b0}} & 4'b0011) | ({4{mem_addr_index[1] == 1'b1}} & 4'b1100);
-    wire [31:0] sh_data;
-
-    assign sh_data = ({32{mem_addr_index[1] == 1'b0}} & {16'b0, mem_rs2_data[15:0]}) |
-                     ({32{mem_addr_index[1] == 1'b1}} & {mem_rs2_data[15:0], 16'b0});
-
-    // 字存储掩码和数据
-    wire [ 3:0] sw_mask = 4'b1111;
-    wire [31:0] sw_data = mem_rs2_data;
-
-
-    // 并行选择最终的存储掩码和数据
-    assign lsu_mem_wmask_o = ({ 4{is_sb}} & sb_mask) |
-                         ({ 4{is_sh}} & sh_mask) |
-                         ({ 4{is_sw}} & sw_mask);
-
-    assign lsu_mem_wdata_o = ({32{is_sb}} & sb_data) |
+    assign store_wmask = ({4{is_sb}} & sb_mask) |
+                         ({4{is_sh}} & sh_mask) |
+                         ({4{is_sw}} & sw_mask);
+    assign store_wdata = ({32{is_sb}} & sb_data) |
                          ({32{is_sh}} & sh_data) |
                          ({32{is_sw}} & sw_data);
+
+    always_comb begin
+        unique case (load_s1_addr_index_q)
+            2'b00: load_shifted_data = lsu_mem_rdata_i;
+            2'b01: load_shifted_data = {8'b0, lsu_mem_rdata_i[31:8]};
+            2'b10: load_shifted_data = {16'b0, lsu_mem_rdata_i[31:16]};
+            default: load_shifted_data = {24'b0, lsu_mem_rdata_i[31:24]};
+        endcase
+    end
+
+    always_comb begin
+        dtcm_load_result = load_s2_shifted_q;
+        unique case (1'b1)
+            load_s2_operator_lsu_q[ydrasil_pkg::OP_LSU_LB]: begin
+                dtcm_load_result = {{24{load_s2_shifted_q[7]}}, load_s2_shifted_q[7:0]};
+            end
+            load_s2_operator_lsu_q[ydrasil_pkg::OP_LSU_LBU]: begin
+                dtcm_load_result = {24'b0, load_s2_shifted_q[7:0]};
+            end
+            load_s2_operator_lsu_q[ydrasil_pkg::OP_LSU_LH]: begin
+                dtcm_load_result = {{16{load_s2_shifted_q[15]}}, load_s2_shifted_q[15:0]};
+            end
+            load_s2_operator_lsu_q[ydrasil_pkg::OP_LSU_LHU]: begin
+                dtcm_load_result = {16'b0, load_s2_shifted_q[15:0]};
+            end
+            default: begin
+                dtcm_load_result = load_s2_shifted_q;
+            end
+        endcase
+    end
+
+    always_comb begin
+        mmio_load_result = lsu_mem_rdata_i;
+        unique case (1'b1)
+            mmio_operator_lsu_q[ydrasil_pkg::OP_LSU_LB]: begin
+                unique case (mmio_addr_index_q)
+                    2'b00: mmio_load_result = {{24{lsu_mem_rdata_i[7]}}, lsu_mem_rdata_i[7:0]};
+                    2'b01: mmio_load_result = {{24{lsu_mem_rdata_i[15]}}, lsu_mem_rdata_i[15:8]};
+                    2'b10: mmio_load_result = {{24{lsu_mem_rdata_i[23]}}, lsu_mem_rdata_i[23:16]};
+                    default: mmio_load_result = {{24{lsu_mem_rdata_i[31]}}, lsu_mem_rdata_i[31:24]};
+                endcase
+            end
+            mmio_operator_lsu_q[ydrasil_pkg::OP_LSU_LBU]: begin
+                unique case (mmio_addr_index_q)
+                    2'b00: mmio_load_result = {24'b0, lsu_mem_rdata_i[7:0]};
+                    2'b01: mmio_load_result = {24'b0, lsu_mem_rdata_i[15:8]};
+                    2'b10: mmio_load_result = {24'b0, lsu_mem_rdata_i[23:16]};
+                    default: mmio_load_result = {24'b0, lsu_mem_rdata_i[31:24]};
+                endcase
+            end
+            mmio_operator_lsu_q[ydrasil_pkg::OP_LSU_LH]: begin
+                mmio_load_result = mmio_addr_index_q[1] ?
+                    {{16{lsu_mem_rdata_i[31]}}, lsu_mem_rdata_i[31:16]} :
+                    {{16{lsu_mem_rdata_i[15]}}, lsu_mem_rdata_i[15:0]};
+            end
+            mmio_operator_lsu_q[ydrasil_pkg::OP_LSU_LHU]: begin
+                mmio_load_result = mmio_addr_index_q[1] ?
+                    {16'b0, lsu_mem_rdata_i[31:16]} :
+                    {16'b0, lsu_mem_rdata_i[15:0]};
+            end
+            default: begin
+                mmio_load_result = lsu_mem_rdata_i;
+            end
+        endcase
+    end
+
+    assign lsu_mem_req_o = dtcm_accept | mmio_req_valid_q;
+    assign lsu_mem_wen_o = dtcm_store_req | (mmio_req_valid_q & mmio_is_store_q);
+    assign lsu_mem_addr_o = mmio_req_valid_q ? mmio_addr_q : ex_lsu_mem_addr_i;
+    assign lsu_mem_wmask_o =
+        dtcm_store_req ? store_wmask :
+        ((mmio_req_valid_q & mmio_is_store_q) ? mmio_wmask_q : 4'b0000);
+    assign lsu_mem_wdata_o =
+        dtcm_store_req ? store_wdata :
+        ((mmio_req_valid_q & mmio_is_store_q) ? mmio_wdata_q : 32'b0);
+
+    assign dtcm_wb_valid = load_s2_valid_q;
+    assign mmio_wb_out_valid = mmio_wb_valid_q & !dtcm_wb_valid;
+    assign selected_wb_result = dtcm_wb_valid ? dtcm_load_result : mmio_wb_result_q;
+    assign selected_wb_rd_addr = dtcm_wb_valid ? load_s2_rd_addr_q : mmio_wb_rd_addr_q;
+
+    assign lsu_ctrl_busy_o = mmio_busy | mmio_accept;
+    assign lsu_wb_result_o = selected_wb_result;
+    assign lsu_rf_rd_wen_o = dtcm_wb_valid | mmio_wb_out_valid;
+    assign lsu_rf_rd_waddr_o = (dtcm_wb_valid | mmio_wb_out_valid) ? selected_wb_rd_addr : '0;
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            mmio_req_valid_q       <= 1'b0;
+            mmio_wait_q            <= 1'b0;
+            mmio_is_load_q         <= 1'b0;
+            mmio_is_store_q        <= 1'b0;
+            mmio_addr_q            <= '0;
+            mmio_wdata_q           <= '0;
+            mmio_wmask_q           <= '0;
+            mmio_addr_index_q      <= '0;
+            mmio_operator_lsu_q    <= '0;
+            mmio_rd_addr_q         <= '0;
+            mmio_wb_valid_q        <= 1'b0;
+            mmio_wb_result_q       <= '0;
+            mmio_wb_rd_addr_q      <= '0;
+            load_s1_valid_q        <= 1'b0;
+            load_s1_rd_addr_q      <= '0;
+            load_s1_operator_lsu_q <= '0;
+            load_s1_addr_index_q   <= '0;
+            load_s2_valid_q        <= 1'b0;
+            load_s2_rd_addr_q      <= '0;
+            load_s2_operator_lsu_q <= '0;
+            load_s2_shifted_q      <= '0;
+        end else begin
+            load_s1_valid_q <= dtcm_load_req;
+            if (dtcm_load_req) begin
+                load_s1_rd_addr_q      <= id_rd_waddr_i;
+                load_s1_operator_lsu_q <= operator_lsu_i;
+                load_s1_addr_index_q   <= mem_addr_index;
+            end
+
+            load_s2_valid_q <= load_s1_valid_q;
+            if (load_s1_valid_q) begin
+                load_s2_rd_addr_q      <= load_s1_rd_addr_q;
+                load_s2_operator_lsu_q <= load_s1_operator_lsu_q;
+                load_s2_shifted_q      <= load_shifted_data;
+            end
+
+            if (mmio_wb_valid_q && !load_s2_valid_q) begin
+                mmio_wb_valid_q <= 1'b0;
+            end
+
+            if (mmio_wait_q) begin
+                mmio_wait_q       <= 1'b0;
+                mmio_wb_valid_q   <= 1'b1;
+                mmio_wb_result_q  <= mmio_load_result;
+                mmio_wb_rd_addr_q <= mmio_rd_addr_q;
+            end
+
+            if (mmio_req_valid_q) begin
+                mmio_req_valid_q <= 1'b0;
+                if (mmio_is_load_q) begin
+                    mmio_wait_q <= 1'b1;
+                end
+            end
+
+            if (mmio_accept) begin
+                mmio_req_valid_q    <= 1'b1;
+                mmio_is_load_q      <= is_load;
+                mmio_is_store_q     <= is_store;
+                mmio_addr_q         <= ex_lsu_mem_addr_i;
+                mmio_wdata_q        <= store_wdata;
+                mmio_wmask_q        <= store_wmask;
+                mmio_addr_index_q   <= mem_addr_index;
+                mmio_operator_lsu_q <= operator_lsu_i;
+                mmio_rd_addr_q      <= id_rd_waddr_i;
+            end
+        end
+    end
 
     end
 

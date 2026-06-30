@@ -54,8 +54,8 @@ int main(int argc, char **argv) {
             trace_en = 1;
         if (strcmp(argv[i], "--trace") == 0)
             trace_en = 1;
-        if (sscanf(argv[i], "+cpp_timeout=%llu", &MAX_TIME) == 1)
-            printf("C++ timeout set to %llu\n", MAX_TIME);
+        if (sscanf(argv[i], "+cpp_timeout=%lu", &MAX_TIME) == 1)
+            printf("C++ timeout set to %lu\n", MAX_TIME);
     }
 
     if (trace_en)

@@ -44,7 +44,7 @@ module student_top#(
     // perip
     logic [31:0] perip_addr, perip_wdata, perip_rdata;
     logic perip_wen;
-    logic [1:0] perip_mask;
+    logic [3:0] perip_mask;
 
     // 16KB = 2^12 * 32bit
     // assign inst_addr = pc[13:2];

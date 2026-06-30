@@ -25,47 +25,84 @@ module counter(
     input  wire          perip_clk,
     input  logic         rst,
 
-    input  logic [31:0]  perip_wdata,
-    input  logic         cnt_wen,
+    input  logic         perip_cmd_valid,
+    input  logic         perip_cmd_start,
+    input  logic         perip_cmd_stop,
     output logic [31:0]  perip_rdata
 );
 
     logic [15:0] cnt_1ms;
     logic [31:0] cnt_ms;
-    logic start;
+    logic        run_perip;
+    (* ASYNC_REG = "TRUE" *) logic [1:0]  run_sync;
+    logic        start;
+    logic [31:0] cnt_ms_gray;
+    (* ASYNC_REG = "TRUE" *) logic [31:0] cnt_ms_gray_perip_meta;
+    (* ASYNC_REG = "TRUE" *) logic [31:0] cnt_ms_gray_perip_sync;
+    logic [31:0] cnt_ms_perip;
 
-    always_ff @(posedge perip_clk) begin
+    function automatic logic [31:0] gray_to_binary(input logic [31:0] gray_i);
+        integer bit_idx;
+        begin
+            gray_to_binary[31] = gray_i[31];
+            for (bit_idx = 30; bit_idx >= 0; bit_idx = bit_idx - 1) begin
+                gray_to_binary[bit_idx] = gray_to_binary[bit_idx + 1] ^ gray_i[bit_idx];
+            end
+        end
+    endfunction
+
+    assign cnt_ms_gray = cnt_ms ^ (cnt_ms >> 1);
+    assign cnt_ms_perip = gray_to_binary(cnt_ms_gray_perip_sync);
+
+    always_ff @(posedge perip_clk or posedge rst) begin
         if (rst) begin
-            start <= 0;
-        end else if (cnt_wen & perip_wdata == 32'h8000_0000) begin
-            start <= 1;
-        end else if (cnt_wen & perip_wdata == 32'hFFFF_FFFF) begin
-            start <= 0;
+            run_perip <= 1'b0;
+            cnt_ms_gray_perip_meta <= 32'h0;
+            cnt_ms_gray_perip_sync <= 32'h0;
+        end else begin
+            if (perip_cmd_valid && perip_cmd_start) begin
+                run_perip <= 1'b1;
+            end
+            if (perip_cmd_valid && perip_cmd_stop) begin
+                run_perip <= 1'b0;
+            end
+            cnt_ms_gray_perip_meta <= cnt_ms_gray;
+            cnt_ms_gray_perip_sync <= cnt_ms_gray_perip_meta;
         end
     end
 
-    always_ff @(posedge clk) begin
+    always_ff @(posedge clk or posedge rst) begin
         if (rst) begin
-            cnt_1ms <= 0;
+            run_sync <= 2'b00;
+            start <= 1'b0;
+        end else begin
+            run_sync <= {run_sync[0], run_perip};
+            start <= run_sync[1];
+        end
+    end
+
+    always_ff @(posedge clk or posedge rst) begin
+        if (rst) begin
+            cnt_1ms <= 16'h0;
         end else if (start) begin
             if (cnt_1ms == 49999) begin
-                cnt_1ms <= 0;
+                cnt_1ms <= 16'h0;
             end else begin
                 cnt_1ms <= cnt_1ms + 1;
             end
         end else begin
-            cnt_1ms <= 0;
+            cnt_1ms <= 16'h0;
         end
     end
 
-    always_ff @(posedge clk) begin
+    always_ff @(posedge clk or posedge rst) begin
         if (rst) begin
-            cnt_ms <= 0;
+            cnt_ms <= 32'h0;
         end else if (start && cnt_1ms == 49999) begin
             cnt_ms <= cnt_ms + 1;
         end
     end
 
-    assign perip_rdata = cnt_ms;
+    assign perip_rdata = cnt_ms_perip;
 
 endmodule
