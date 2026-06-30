@@ -101,6 +101,20 @@ import ydrasil_pkg::*;
     wire [DATA_WIDTH-1:0] ex_jump_target;
     wire ex_branch_mispredict;
     wire ex_branch_jump;
+    wire ex_pc_redirect;
+    wire [DATA_WIDTH-1:0] ex_pc_redirect_target;
+    wire ex_bp_train_valid;
+
+    reg                       ex2_branch_jump_q;
+    reg [DATA_WIDTH-1:0]      ex2_branch_target_q;
+    reg                       ex2_pc_redirect_q;
+    reg [DATA_WIDTH-1:0]      ex2_pc_redirect_target_q;
+    reg                       ex2_bp_train_valid_q;
+    reg [DATA_WIDTH-1:0]      ex2_bp_train_pc_q;
+    reg                       ex2_bp_train_taken_q;
+    reg [DATA_WIDTH-1:0]      ex2_bp_train_target_q;
+    reg [1:0]                 ex2_bp_train_counter_q;
+    reg                       ex2_branch_mispredict_q;
 
     reg [REGS_DATA_WIDTH-1:0] alu_result_ff;
     reg                       alu_rf_wen_rd_ff;
@@ -122,11 +136,9 @@ import ydrasil_pkg::*;
     assign ex_lsu_result_o = alu_result_ff;
 
     assign ex_jump_target = id_ex_jalr_i ? {bt_alu_result[DATA_WIDTH-1:1], 1'b0} : bt_alu_result;
-    assign ex_branch_target_o = interrupt_i ? clint_ex_int_addr_i : ex_jump_target;
     assign ex_branch_pc = bt_a_operand;
     assign ex_branch_next_pc = ex_branch_pc + 32'd4;
 
-    assign ex_branch_jump_o = ex_branch_jump | interrupt_i;
     assign ex_is_jump = id_ex_valid_i & operator_type_i[OPERATOR_TYPE_BJP] & operator_i[OP_BJP_JUMP];
     assign ex_is_branch =
         id_ex_valid_i & operator_type_i[OPERATOR_TYPE_BJP] &
@@ -143,18 +155,61 @@ import ydrasil_pkg::*;
     assign ex_branch_mispredict =
         ex_is_branch & !interrupt_i & (ex_branch_actual_next_pc != ex_branch_pred_next_pc);
 
-    assign ex_branch_mispredict_o = ex_branch_mispredict;
-    assign ex_pc_redirect_o =
+    assign ex_pc_redirect =
         interrupt_i | (ex_is_jump & ex_branch_jump & !interrupt_i) | ex_branch_mispredict;
-    assign ex_pc_redirect_target_o =
+    assign ex_pc_redirect_target =
         interrupt_i ? clint_ex_int_addr_i :
         (ex_is_jump & ex_branch_jump) ? ex_jump_target :
                                         ex_branch_actual_next_pc;
-    assign ex_bp_train_valid_o = ex_is_branch & !interrupt_i;
-    assign ex_bp_train_pc_o = ex_branch_pc;
-    assign ex_bp_train_taken_o = ex_branch_taken;
-    assign ex_bp_train_target_o = bt_alu_result;
-    assign ex_bp_train_counter_o = id_ex_pred_counter_i;
+    assign ex_bp_train_valid = ex_is_branch & !interrupt_i;
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            ex2_branch_jump_q <= 1'b0;
+            ex2_branch_target_q <= '0;
+            ex2_pc_redirect_q <= 1'b0;
+            ex2_pc_redirect_target_q <= '0;
+            ex2_bp_train_valid_q <= 1'b0;
+            ex2_bp_train_pc_q <= '0;
+            ex2_bp_train_taken_q <= 1'b0;
+            ex2_bp_train_target_q <= '0;
+            ex2_bp_train_counter_q <= 2'b01;
+            ex2_branch_mispredict_q <= 1'b0;
+        end else if (flush_ex_i) begin
+            ex2_branch_jump_q <= 1'b0;
+            ex2_branch_target_q <= '0;
+            ex2_pc_redirect_q <= 1'b0;
+            ex2_pc_redirect_target_q <= '0;
+            ex2_bp_train_valid_q <= 1'b0;
+            ex2_bp_train_pc_q <= '0;
+            ex2_bp_train_taken_q <= 1'b0;
+            ex2_bp_train_target_q <= '0;
+            ex2_bp_train_counter_q <= 2'b01;
+            ex2_branch_mispredict_q <= 1'b0;
+        end else begin
+            ex2_branch_jump_q <= ex_branch_jump | interrupt_i;
+            ex2_branch_target_q <= interrupt_i ? clint_ex_int_addr_i : ex_jump_target;
+            ex2_pc_redirect_q <= ex_pc_redirect;
+            ex2_pc_redirect_target_q <= ex_pc_redirect_target;
+            ex2_bp_train_valid_q <= ex_bp_train_valid;
+            ex2_bp_train_pc_q <= ex_branch_pc;
+            ex2_bp_train_taken_q <= ex_branch_taken;
+            ex2_bp_train_target_q <= bt_alu_result;
+            ex2_bp_train_counter_q <= id_ex_pred_counter_i;
+            ex2_branch_mispredict_q <= ex_branch_mispredict;
+        end
+    end
+
+    assign ex_branch_jump_o = ex2_branch_jump_q;
+    assign ex_branch_target_o = ex2_branch_target_q;
+    assign ex_branch_mispredict_o = ex2_branch_mispredict_q;
+    assign ex_pc_redirect_o = ex2_pc_redirect_q;
+    assign ex_pc_redirect_target_o = ex2_pc_redirect_target_q;
+    assign ex_bp_train_valid_o = ex2_bp_train_valid_q;
+    assign ex_bp_train_pc_o = ex2_bp_train_pc_q;
+    assign ex_bp_train_taken_o = ex2_bp_train_taken_q;
+    assign ex_bp_train_target_o = ex2_bp_train_target_q;
+    assign ex_bp_train_counter_o = ex2_bp_train_counter_q;
 
     assign op_m_unit = operator_type_i[OPERATOR_TYPE_MUL];
     assign op_bitmanip = operator_type_i[OPERATOR_TYPE_BITMANIP];
@@ -178,11 +233,11 @@ import ydrasil_pkg::*;
     assign mul_issue_waddr_o = id_rf_waddr_rd_i;
 
     assign div_start = id_ex_valid_i & op_div & !div_busy & !div_done & !interrupt_i & !flush_ex_i;
-    assign div_rf_wen_rd = id_ex_valid_i & op_div & div_done & id_alu_rf_wen_rd_i & !interrupt_i;
-    assign ex_mul_stall_o = op_div & !div_done;
+    assign div_rf_wen_rd = id_ex_valid_i & op_div & div_done & id_alu_rf_wen_rd_i & !interrupt_i & !flush_ex_i;
+    assign ex_mul_stall_o = id_ex_valid_i & op_div & !div_done & !flush_ex_i;
 
-    assign bitmanip_rf_wen_rd = id_ex_valid_i & op_bitmanip & id_alu_rf_wen_rd_i & !interrupt_i;
-    assign normal_alu_rf_wen_rd = alu_rf_wen_rd & !op_m_unit & !op_bitmanip;
+    assign bitmanip_rf_wen_rd = id_ex_valid_i & op_bitmanip & id_alu_rf_wen_rd_i & !interrupt_i & !flush_ex_i;
+    assign normal_alu_rf_wen_rd = id_ex_valid_i & alu_rf_wen_rd & !op_m_unit & !op_bitmanip & !flush_ex_i;
     assign ex_rf_wen_rd = div_rf_wen_rd | bitmanip_rf_wen_rd | normal_alu_rf_wen_rd | csr_wen;
     assign mul_result_valid_o = mul_result_valid;
     assign ex_instret_inc_o =
@@ -221,7 +276,7 @@ import ydrasil_pkg::*;
     ydrasil_mul u_ydrasil_mul (
         .clk             (clk),
         .rst_n           (rst_n),
-        .flush_i         (flush_ex_i | interrupt_i),
+        .flush_i         (interrupt_i),
         .issue_valid_i   (mul_issue_valid),
         .issue_ready_o   (mul_issue_ready),
         .operand_a_i     (operand_a),

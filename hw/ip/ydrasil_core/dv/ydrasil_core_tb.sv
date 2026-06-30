@@ -120,8 +120,44 @@ end
 	assign rst = ~rst_n;
 
 	always_ff @(posedge clk) begin
-		if($time >= sv_timeout) begin
+        if($time >= sv_timeout) begin
             $display("[TB] timeout reached, finish simulation");
+            $display("[TB] timeout pc=0x%08h cycle=%0d instret=%0d", pc, cycle_count, instruction_count);
+            $display("[TB] stall scoreboard=%0b lsu_struct=%0b clint=%0b wb=%0b stall_if=%0b stall_id=%0b bubble_id=%0b id_ex_valid=%0b",
+                     u_dut.scoreboard_stall,
+                     u_dut.lsu_struct_stall,
+                     u_dut.clint_stall,
+                     u_dut.wb_backpressure,
+                     u_dut.stall_if,
+                     u_dut.stall_id,
+                     u_dut.bubble_id,
+                     u_dut.id_ex_valid);
+            $display("[TB] id_ctrl rs1=%0d ren1=%0b pend1=%0b rs2=%0d ren2=%0b pend2=%0b rd=%0d wen=%0b pend_rd=%0b lsu_req=%0b lsu_busy=%0b",
+                     u_dut.id_ctrl_rs1_addr,
+                     u_dut.id_ctrl_rs1_ren,
+                     u_dut.gpr_pending_for_hazard[u_dut.id_ctrl_rs1_addr],
+                     u_dut.id_ctrl_rs2_addr,
+                     u_dut.id_ctrl_rs2_ren,
+                     u_dut.gpr_pending_for_hazard[u_dut.id_ctrl_rs2_addr],
+                     u_dut.id_ctrl_rd_addr,
+                     u_dut.id_ctrl_rd_wen,
+                     u_dut.gpr_pending_for_hazard[u_dut.id_ctrl_rd_addr],
+                     u_dut.id_ctrl_lsu_req,
+                     u_dut.lsu_ctrl_busy);
+            $display("[TB] pending=0x%08h clear=0x%08h issue=0x%08h ex_accept=%0b id_rd_issue=%0b rf_wen=%0b rf_waddr=%0d alu_wen=%0b alu_waddr=%0d lsu_wen=%0b lsu_waddr=%0d mul_wen=%0b mul_waddr=%0d",
+                     u_dut.gpr_pending_q,
+                     u_dut.gpr_pending_clear_mask,
+                     u_dut.gpr_pending_issue_mask,
+                     u_dut.ex_accept_valid,
+                     u_dut.id_ex_rd_issue,
+                     u_dut.rf_wen_rd,
+                     u_dut.rf_waddr_rd,
+                     u_dut.alu_rf_wen_rd,
+                     u_dut.alu_rf_waddr_rd,
+                     u_dut.lsu_rf_wen_rd,
+                     u_dut.lsu_rf_waddr_rd,
+                     u_dut.mul_rf_wen_rd,
+                     u_dut.mul_rf_waddr_rd);
             $finish;
         end
         if(sim_done)

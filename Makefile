@@ -15,6 +15,27 @@ SYN_PLL_FREQ_MHZ ?= 150
 SYN_PLL_SUPPORTED_FREQS := 150 200
 SYN_PLL_FREQ_TAG = pll$(subst .,p,$(SYN_PLL_FREQ_MHZ))m
 SYN_PLL_DEFINE = SYN_PLL_FREQ_$(subst .,P,$(SYN_PLL_FREQ_MHZ))
+SYN_RTL_DEFINES = $(SYN_PLL_DEFINE)
+ifeq ($(DIV_IMPL),lzc)
+SYN_RTL_DEFINES += YDRASIL_DIV_IMPL_LZC
+else
+$(error Unsupported DIV_IMPL '$(DIV_IMPL)'. Use DIV_IMPL=lzc)
+endif
+ifeq ($(LSU_IMPL),new)
+SYN_RTL_DEFINES += YDRASIL_LSU_IMPL_NEW
+else ifeq ($(LSU_IMPL),legacy)
+SYN_RTL_DEFINES += YDRASIL_LSU_IMPL_LEGACY
+else
+$(error Unsupported LSU_IMPL '$(LSU_IMPL)'. Use LSU_IMPL=new or LSU_IMPL=legacy)
+endif
+ifeq ($(MEMS_IMPL),new)
+SYN_RTL_DEFINES += YDRASIL_MEMS_IMPL_NEW
+else ifeq ($(MEMS_IMPL),legacy)
+SYN_RTL_DEFINES += YDRASIL_MEMS_IMPL_LEGACY
+else
+$(error Unsupported MEMS_IMPL '$(MEMS_IMPL)'. Use MEMS_IMPL=new or MEMS_IMPL=legacy)
+endif
+SYN_DEFINE_ARGS = $(foreach define,$(SYN_RTL_DEFINES),--define $(define))
 SYN_FREQ_BUILD_DIR ?= $(SYN_BUILD_DIR)/$(SYN_PLL_FREQ_TAG)
 SYN_STAGE_ROOT ?= $(SYN_FREQ_BUILD_DIR)/project
 SYN_ORIG_FPGA_DIR ?= $(PROJECT_ROOT)/FPGA
@@ -79,7 +100,7 @@ syn-prep: syn-venv
 		--bender $(BENDER) \
 		--bender-dir $(PROJECT_ROOT)/hw/ip/jyd_fpga \
 		--wrapper-dir $(PROJECT_ROOT)/hw/ip/Xilinx_ip_wrapper/rtl \
-		--define $(SYN_PLL_DEFINE) \
+		$(SYN_DEFINE_ARGS) \
 		--out $(SYN_SOURCES_TCL)
 
 syn-stage-xpr:

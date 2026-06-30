@@ -37,9 +37,9 @@ import ydrasil_pkg::*;
     assign branch_target_o = ex_branch_target_i;
     assign branch_jump_o = ex_branch_jump_i;
 
-    assign flush_id_o = branch_jump_o | (decode_bubble_stall & !ex_mul_stall_i);
+    assign flush_id_o = branch_jump_o;
     assign flush_if_o = branch_jump_o ;
-    assign flush_ex_o = 1'b0; 
+    assign flush_ex_o = branch_jump_o;
     // assign flush_mems_o = 1'b0;
     // assign stall_ex_o = clint_stall_i;
     assign stall_id_o = ex_mul_stall_i;
