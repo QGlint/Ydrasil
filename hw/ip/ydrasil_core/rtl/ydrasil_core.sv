@@ -18,10 +18,6 @@ import ydrasil_pkg::*;
     input  wire [31:0]  perip_rdata
 );
 
-
-    localparam DRAM_ADDR_START = 32'h8010_0000;
-    localparam DRAM_ADDR_END   = 32'h8013_FFFF;
-
 	// IF <-> MEMS
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] if_mem_addr;
 	wire [ydrasil_pkg::INST_DATA_WIDTH-1:0] if_mem_rdata;
@@ -104,13 +100,17 @@ import ydrasil_pkg::*;
 
 	// LSU request path
 	wire [1:0]                  operator_lsu_type;
-	wire [ydrasil_pkg::BUS_DATA_WIDTH-1:0]  lsu_mem_wdata;
-	wire [ydrasil_pkg::BUS_ADDR_WIDTH-1:0]  lsu_mem_addr;
-	wire                        lsu_mem_we;
-	wire                        lsu_mem_req;
-	wire [3:0]                  lsu_mem_wmask;
-	wire [ydrasil_pkg::BUS_DATA_WIDTH-1:0]  lsu_mem_rdata;
-	wire                        hold_flag;
+	wire [ydrasil_pkg::BUS_DATA_WIDTH-1:0]  dtcm_wdata;
+	wire [ydrasil_pkg::BUS_ADDR_WIDTH-1:0]  dtcm_addr;
+	wire                        dtcm_we;
+	wire                        dtcm_req;
+	wire [3:0]                  dtcm_wmask;
+	wire [ydrasil_pkg::BUS_DATA_WIDTH-1:0]  dtcm_rdata;
+	wire [ydrasil_pkg::BUS_DATA_WIDTH-1:0]  mmio_wdata;
+	wire [ydrasil_pkg::BUS_ADDR_WIDTH-1:0]  mmio_addr;
+	wire                        mmio_we;
+	wire                        mmio_req;
+	wire [3:0]                  mmio_wmask;
 
 	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] lsu_wb_result;
 	wire                        lsu_rf_wen_rd;
@@ -121,8 +121,6 @@ import ydrasil_pkg::*;
 	wire                        rf_wen_rd;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] rf_waddr_rd;
 	wire                        wb_backpressure;
-
-	wire [ydrasil_pkg::BUS_DATA_WIDTH-1:0]  lsu_mem_rdata_m; // 从DRAM读取的数据
 
     //LSU -> CTRL
 	wire                            lsu_ctrl_busy;
@@ -231,24 +229,6 @@ import ydrasil_pkg::*;
 	end
 `endif
 
-    reg dram_addr_sel_ff; 
-    reg lsu_mem_read_ff;
-    wire dram_sel;  
-    wire dram_addr_sel;
-    assign dram_addr_sel = (lsu_mem_addr >= DRAM_ADDR_START) && (lsu_mem_addr <= DRAM_ADDR_END);
-
-    assign dram_sel = (lsu_mem_we & dram_addr_sel) | (dram_addr_sel_ff & lsu_mem_read_ff); // 写操作直接使用当前地址判断，读操作使用上一个周期的地址判断
-
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            dram_addr_sel_ff <= 1'b0;
-            lsu_mem_read_ff <= 1'b0;
-        end else begin
-            dram_addr_sel_ff <= dram_addr_sel;
-            lsu_mem_read_ff <= (lsu_mem_req && !lsu_mem_we); // 只有在发出读请求时才认为是读操作
-        end
-    end
-
 	assign ex_accept_valid = id_ex_valid & !flush_ex;
 	assign id_ex_rd_issue =
 		ex_accept_valid & (id_rf_waddr_rd != '0) & !interrupt &
@@ -287,11 +267,10 @@ import ydrasil_pkg::*;
 	assign operator_lsu_type[0] = ex_accept_valid & operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD];
 	assign operator_lsu_type[1] = ex_accept_valid & operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE];
 
-	assign perip_addr = lsu_mem_addr;
-	assign perip_wen = lsu_mem_req && lsu_mem_we;
-	assign perip_mask = lsu_mem_wmask;
-	assign perip_wdata = lsu_mem_wdata;
-	assign lsu_mem_rdata = dram_sel ? lsu_mem_rdata_m : perip_rdata ; 
+	assign perip_addr = mmio_addr;
+	assign perip_wen = mmio_req && mmio_we;
+	assign perip_mask = mmio_wmask;
+	assign perip_wdata = mmio_wdata;
 	assign instret_inc = ex_instret_inc | lsu_rf_wen_rd | mul_result_valid;
 
 	ydrasil_load_store_unit u_ydrasil_load_store_unit (
@@ -304,12 +283,18 @@ import ydrasil_pkg::*;
         .ex_lsu_rd_data_i (ex_lsu_result),
 		.id_lsu_rs2_data_i (id_lsu_rs2_data),
 		.id_lsu_rs2_raddr_i('0),
-		.lsu_mem_rdata_i   (lsu_mem_rdata),
-		.lsu_mem_wdata_o   (lsu_mem_wdata),
-		.lsu_mem_addr_o    (lsu_mem_addr),
-		.lsu_mem_wen_o     (lsu_mem_we),
-		.lsu_mem_req_o     (lsu_mem_req),
-		.lsu_mem_wmask_o   (lsu_mem_wmask),
+		.dtcm_rdata_i      (dtcm_rdata),
+		.dtcm_wdata_o      (dtcm_wdata),
+		.dtcm_addr_o       (dtcm_addr),
+		.dtcm_wen_o        (dtcm_we),
+		.dtcm_req_o        (dtcm_req),
+		.dtcm_wmask_o      (dtcm_wmask),
+		.mmio_rdata_i      (perip_rdata),
+		.mmio_wdata_o      (mmio_wdata),
+		.mmio_addr_o       (mmio_addr),
+		.mmio_wen_o        (mmio_we),
+		.mmio_req_o        (mmio_req),
+		.mmio_wmask_o      (mmio_wmask),
 		.lsu_ctrl_busy_o        (lsu_ctrl_busy),
 		.lsu_wb_result_o   (lsu_wb_result),
 		.lsu_rf_rd_wen_o   (lsu_rf_wen_rd),
@@ -464,13 +449,13 @@ import ydrasil_pkg::*;
 		.rst_n         (rst_n),
 		.if_mem_addr_i (if_mem_addr),
 		.if_mem_rdata_o(if_mem_rdata),
-		.lsu_mem_addr_i(lsu_mem_addr),
-		.lsu_mem_data_i(lsu_mem_wdata),
-		.lsu_mem_data_o(lsu_mem_rdata_m),
-		.lsu_mem_we_i  (lsu_mem_we),
-		.lsu_mem_req_i (lsu_mem_req),
-		.lsu_mem_wmask_i(lsu_mem_wmask),
-        .dram_sel_i     (dram_sel)
+		.lsu_mem_addr_i(dtcm_addr),
+		.lsu_mem_data_i(dtcm_wdata),
+		.lsu_mem_data_o(dtcm_rdata),
+		.lsu_mem_we_i  (dtcm_we),
+		.lsu_mem_req_i (dtcm_req),
+		.lsu_mem_wmask_i(dtcm_wmask),
+        .dram_sel_i     (1'b1)
 		// .hold_flag_o   (hold_flag)
 	);
 

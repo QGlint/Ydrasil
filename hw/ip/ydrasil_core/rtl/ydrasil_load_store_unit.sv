@@ -14,13 +14,21 @@ import ydrasil_pkg::*;
     input wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]      id_lsu_rs2_raddr_i,
     input wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]      ex_lsu_rd_data_i, // 存储操作的源寄存器数据
     
-    // 内存接口
-    input wire [ydrasil_pkg::BUS_DATA_WIDTH-1:0]       lsu_mem_rdata_i,
-    output wire [ydrasil_pkg::BUS_DATA_WIDTH-1:0]      lsu_mem_wdata_o,
-    output wire [ydrasil_pkg::BUS_ADDR_WIDTH-1:0]      lsu_mem_addr_o,
-    output wire                            lsu_mem_wen_o,
-    output wire                            lsu_mem_req_o,
-    output wire [                3:0]      lsu_mem_wmask_o,  // 字节写入掩码，4位分别对应4个字节
+    // DTCM fast path
+    input wire [ydrasil_pkg::BUS_DATA_WIDTH-1:0]       dtcm_rdata_i,
+    output wire [ydrasil_pkg::BUS_DATA_WIDTH-1:0]      dtcm_wdata_o,
+    output wire [ydrasil_pkg::BUS_ADDR_WIDTH-1:0]      dtcm_addr_o,
+    output wire                            dtcm_wen_o,
+    output wire                            dtcm_req_o,
+    output wire [                3:0]      dtcm_wmask_o,
+
+    // MMIO slow path
+    input wire [ydrasil_pkg::BUS_DATA_WIDTH-1:0]       mmio_rdata_i,
+    output wire [ydrasil_pkg::BUS_DATA_WIDTH-1:0]      mmio_wdata_o,
+    output wire [ydrasil_pkg::BUS_ADDR_WIDTH-1:0]      mmio_addr_o,
+    output wire                            mmio_wen_o,
+    output wire                            mmio_req_o,
+    output wire [                3:0]      mmio_wmask_o,
 
     output wire                            lsu_ctrl_busy_o,
 
@@ -82,8 +90,8 @@ import ydrasil_pkg::*;
         wire [2:0] active_store_low_bytes =
             (active_store_size < active_store_low_room) ? active_store_size : active_store_low_room;
         wire [2:0] active_store_high_bytes = active_store_size - active_store_low_bytes;
-        wire [63:0] single_load_data = {32'b0, lsu_mem_rdata_i};
-        wire [63:0] cross_load_data = {lsu_mem_rdata_i, first_word_q};
+        wire [63:0] single_load_data = {32'b0, dtcm_rdata_i};
+        wire [63:0] cross_load_data = {dtcm_rdata_i, first_word_q};
         wire [63:0] single_load_shifted = single_load_data >> ({3'b000, addr_index_q} << 3);
         wire [63:0] cross_load_shifted = cross_load_data >> ({3'b000, addr_index_q} << 3);
         reg [3:0] store_mask_word;
@@ -148,11 +156,17 @@ import ydrasil_pkg::*;
             end
         end
 
-        assign lsu_mem_req_o = first_access_req | second_access;
-        assign lsu_mem_wen_o = ((state_q == S_IDLE) & is_store) | second_store_req;
-        assign lsu_mem_addr_o = second_access ? latched_next_addr : mem_addr;
-        assign lsu_mem_wmask_o = lsu_mem_wen_o ? store_mask_word : 4'b0000;
-        assign lsu_mem_wdata_o = lsu_mem_wen_o ? store_data_word : 32'b0;
+        assign dtcm_req_o = first_access_req | second_access;
+        assign dtcm_wen_o = ((state_q == S_IDLE) & is_store) | second_store_req;
+        assign dtcm_addr_o = second_access ? latched_next_addr : mem_addr;
+        assign dtcm_wmask_o = dtcm_wen_o ? store_mask_word : 4'b0000;
+        assign dtcm_wdata_o = dtcm_wen_o ? store_data_word : 32'b0;
+
+        assign mmio_req_o = 1'b0;
+        assign mmio_wen_o = 1'b0;
+        assign mmio_addr_o = '0;
+        assign mmio_wmask_o = 4'b0000;
+        assign mmio_wdata_o = '0;
 
         assign lsu_ctrl_busy_o = (state_q != S_IDLE) | request_valid | result_valid_q;
 
@@ -197,7 +211,7 @@ import ydrasil_pkg::*;
 
                     S_LOAD_FIRST: begin
                         if (load_cross_q) begin
-                            first_word_q <= lsu_mem_rdata_i;
+                            first_word_q <= dtcm_rdata_i;
                             state_q      <= S_LOAD_SECOND;
                         end else begin
                             result_q       <= single_load_result;
@@ -323,10 +337,10 @@ import ydrasil_pkg::*;
 
     always_comb begin
         unique case (load_s1_addr_index_q)
-            2'b00: load_shifted_data = lsu_mem_rdata_i;
-            2'b01: load_shifted_data = {8'b0, lsu_mem_rdata_i[31:8]};
-            2'b10: load_shifted_data = {16'b0, lsu_mem_rdata_i[31:16]};
-            default: load_shifted_data = {24'b0, lsu_mem_rdata_i[31:24]};
+            2'b00: load_shifted_data = dtcm_rdata_i;
+            2'b01: load_shifted_data = {8'b0, dtcm_rdata_i[31:8]};
+            2'b10: load_shifted_data = {16'b0, dtcm_rdata_i[31:16]};
+            default: load_shifted_data = {24'b0, dtcm_rdata_i[31:24]};
         endcase
     end
 
@@ -352,49 +366,51 @@ import ydrasil_pkg::*;
     end
 
     always_comb begin
-        mmio_load_result = lsu_mem_rdata_i;
+        mmio_load_result = mmio_rdata_i;
         unique case (1'b1)
             mmio_operator_lsu_q[ydrasil_pkg::OP_LSU_LB]: begin
                 unique case (mmio_addr_index_q)
-                    2'b00: mmio_load_result = {{24{lsu_mem_rdata_i[7]}}, lsu_mem_rdata_i[7:0]};
-                    2'b01: mmio_load_result = {{24{lsu_mem_rdata_i[15]}}, lsu_mem_rdata_i[15:8]};
-                    2'b10: mmio_load_result = {{24{lsu_mem_rdata_i[23]}}, lsu_mem_rdata_i[23:16]};
-                    default: mmio_load_result = {{24{lsu_mem_rdata_i[31]}}, lsu_mem_rdata_i[31:24]};
+                    2'b00: mmio_load_result = {{24{mmio_rdata_i[7]}}, mmio_rdata_i[7:0]};
+                    2'b01: mmio_load_result = {{24{mmio_rdata_i[15]}}, mmio_rdata_i[15:8]};
+                    2'b10: mmio_load_result = {{24{mmio_rdata_i[23]}}, mmio_rdata_i[23:16]};
+                    default: mmio_load_result = {{24{mmio_rdata_i[31]}}, mmio_rdata_i[31:24]};
                 endcase
             end
             mmio_operator_lsu_q[ydrasil_pkg::OP_LSU_LBU]: begin
                 unique case (mmio_addr_index_q)
-                    2'b00: mmio_load_result = {24'b0, lsu_mem_rdata_i[7:0]};
-                    2'b01: mmio_load_result = {24'b0, lsu_mem_rdata_i[15:8]};
-                    2'b10: mmio_load_result = {24'b0, lsu_mem_rdata_i[23:16]};
-                    default: mmio_load_result = {24'b0, lsu_mem_rdata_i[31:24]};
+                    2'b00: mmio_load_result = {24'b0, mmio_rdata_i[7:0]};
+                    2'b01: mmio_load_result = {24'b0, mmio_rdata_i[15:8]};
+                    2'b10: mmio_load_result = {24'b0, mmio_rdata_i[23:16]};
+                    default: mmio_load_result = {24'b0, mmio_rdata_i[31:24]};
                 endcase
             end
             mmio_operator_lsu_q[ydrasil_pkg::OP_LSU_LH]: begin
                 mmio_load_result = mmio_addr_index_q[1] ?
-                    {{16{lsu_mem_rdata_i[31]}}, lsu_mem_rdata_i[31:16]} :
-                    {{16{lsu_mem_rdata_i[15]}}, lsu_mem_rdata_i[15:0]};
+                    {{16{mmio_rdata_i[31]}}, mmio_rdata_i[31:16]} :
+                    {{16{mmio_rdata_i[15]}}, mmio_rdata_i[15:0]};
             end
             mmio_operator_lsu_q[ydrasil_pkg::OP_LSU_LHU]: begin
                 mmio_load_result = mmio_addr_index_q[1] ?
-                    {16'b0, lsu_mem_rdata_i[31:16]} :
-                    {16'b0, lsu_mem_rdata_i[15:0]};
+                    {16'b0, mmio_rdata_i[31:16]} :
+                    {16'b0, mmio_rdata_i[15:0]};
             end
             default: begin
-                mmio_load_result = lsu_mem_rdata_i;
+                mmio_load_result = mmio_rdata_i;
             end
         endcase
     end
 
-    assign lsu_mem_req_o = dtcm_accept | mmio_req_valid_q;
-    assign lsu_mem_wen_o = dtcm_store_req | (mmio_req_valid_q & mmio_is_store_q);
-    assign lsu_mem_addr_o = mmio_req_valid_q ? mmio_addr_q : ex_lsu_mem_addr_i;
-    assign lsu_mem_wmask_o =
-        dtcm_store_req ? store_wmask :
-        ((mmio_req_valid_q & mmio_is_store_q) ? mmio_wmask_q : 4'b0000);
-    assign lsu_mem_wdata_o =
-        dtcm_store_req ? store_wdata :
-        ((mmio_req_valid_q & mmio_is_store_q) ? mmio_wdata_q : 32'b0);
+    assign dtcm_req_o = dtcm_accept;
+    assign dtcm_wen_o = dtcm_store_req;
+    assign dtcm_addr_o = ex_lsu_mem_addr_i;
+    assign dtcm_wmask_o = dtcm_store_req ? store_wmask : 4'b0000;
+    assign dtcm_wdata_o = dtcm_store_req ? store_wdata : 32'b0;
+
+    assign mmio_req_o = mmio_req_valid_q;
+    assign mmio_wen_o = mmio_req_valid_q & mmio_is_store_q;
+    assign mmio_addr_o = mmio_addr_q;
+    assign mmio_wmask_o = (mmio_req_valid_q & mmio_is_store_q) ? mmio_wmask_q : 4'b0000;
+    assign mmio_wdata_o = (mmio_req_valid_q & mmio_is_store_q) ? mmio_wdata_q : 32'b0;
 
     assign dtcm_wb_valid = load_s2_valid_q;
     assign mmio_wb_out_valid = mmio_wb_valid_q & !dtcm_wb_valid;
