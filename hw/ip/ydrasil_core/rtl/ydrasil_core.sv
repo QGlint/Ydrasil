@@ -56,6 +56,10 @@ import ydrasil_pkg::*;
 	wire [31:0]                    bt_b_operand;
 	wire [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0]  operator_lsu;
 	wire [31:0]                    id_lsu_rs2_data;
+	wire [31:0]                    id_lsu_addr;
+	wire                           id_lsu_addr_is_dtcm;
+	wire [31:0]                    id_lsu_store_data;
+	wire [3:0]                     id_lsu_store_mask;
 	wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] operator_type;
 	wire                           id_alu_rf_wen_rd;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    id_rf_waddr_rd;
@@ -283,6 +287,10 @@ import ydrasil_pkg::*;
         .ex_lsu_rd_data_i (ex_lsu_result),
 		.id_lsu_rs2_data_i (id_lsu_rs2_data),
 		.id_lsu_rs2_raddr_i('0),
+		.id_lsu_addr_i     (id_lsu_addr),
+		.id_lsu_addr_is_dtcm_i(id_lsu_addr_is_dtcm),
+		.id_lsu_store_data_i(id_lsu_store_data),
+		.id_lsu_store_mask_i(id_lsu_store_mask),
 		.dtcm_rdata_i      (dtcm_rdata),
 		.dtcm_wdata_o      (dtcm_wdata),
 		.dtcm_addr_o       (dtcm_addr),
@@ -369,6 +377,10 @@ import ydrasil_pkg::*;
 		.bt_b_operand_o     (bt_b_operand),
 		.operator_lsu_o     (operator_lsu),
 		.id_lsu_rs2_data_o  (id_lsu_rs2_data),
+		.id_lsu_addr_o      (id_lsu_addr),
+		.id_lsu_addr_is_dtcm_o(id_lsu_addr_is_dtcm),
+		.id_lsu_store_data_o(id_lsu_store_data),
+		.id_lsu_store_mask_o(id_lsu_store_mask),
 		.operator_type_o    (operator_type),
 		.id_ctrl_rs1_addr_o (id_ctrl_rs1_addr),
 		.id_ctrl_rs2_addr_o (id_ctrl_rs2_addr),
