@@ -95,22 +95,37 @@ rv_sim_%:
 	typ=$${name%%_*}; \
 	base=$${name#*_}; \
 	mem_dir=$(RVTESTS_OUT_ROOT)/$$typ/mem; \
+	elf_dir=$(RVTESTS_OUT_ROOT)/$$typ/elf; \
 	result_dir=$(RVTESTS_RESULT_DIR)/$$typ; \
+	compare_dir=$(SIM_COMPARE_DIR)/$$typ/$$base; \
 	mkdir -p $$result_dir; \
-	$(MAKE) VERILATOR_TRACE=0 LOG_OUTPUT=0 Compile_optimization=0 sim \
-		ITCM_FILE=$$mem_dir/$$base.itcm \
-		DTCM_FILE=$$mem_dir/$$base.dtcm \
-		> $$result_dir/$$base.log 2>&1; \
-	cycles=$$(grep -o "CYCLES=[0-9]*" $$result_dir/$$base.log | cut -d= -f2); \
-	insts=$$(grep -o "INSTS=[0-9]*" $$result_dir/$$base.log | cut -d= -f2); \
-	ipc=$$(grep -o "IPC=[0-9.]*" $$result_dir/$$base.log | cut -d= -f2); \
-	if grep -q "TEST_PASS" $$result_dir/$$base.log; then \
-		echo "[$$typ/$$base] [Cycles: $$cycles | Insts: $$insts | IPC: $$ipc] [ PASSED ]" >> $$result_dir/$$base.log; \
-		echo "[$$typ/$$base] [Cycles: $$cycles | Insts: $$insts | IPC: $$ipc] [ PASSED ]" > $$result_dir/$$base.status; \
+	if $(MAKE) --no-print-directory sim_compare \
+		COMPARE_NAME=$$typ/$$base \
+		COMPARE_ELF=$$elf_dir/$$base.elf \
+		COMPARE_ITCM=$$mem_dir/$$base.itcm \
+		COMPARE_DTCM=$$mem_dir/$$base.dtcm \
+		COMPARE_OUT_DIR=$$compare_dir \
+		> $$result_dir/$$base.log 2>&1; then \
+		match_status=MATCH; \
 	else \
-		echo "[$$typ/$$base] [Cycles: $$cycles | Insts: $$insts | IPC: $$ipc] [ FAILED ]" >> $$result_dir/$$base.log; \
-		echo "[$$typ/$$base] [Cycles: $$cycles | Insts: $$insts | IPC: $$ipc] [ FAILED ]" > $$result_dir/$$base.status; \
-	fi
+		match_status=MISMATCH; \
+	fi; \
+	hw_log=$(HW_TRACE_OUT_DIR)/$$typ/$$base/hw.log; \
+	[ -f "$$hw_log" ] || hw_log=$$result_dir/$$base.log; \
+	cycles=$$(grep -o "CYCLES=[0-9]*" $$hw_log | cut -d= -f2); \
+	insts=$$(grep -o "INSTS=[0-9]*" $$hw_log | cut -d= -f2); \
+	ipc=$$(grep -o "IPC=[0-9.]*" $$hw_log | cut -d= -f2); \
+	if [ "$(SIM_COMPARE)" = "none" ]; then \
+		match_status=SKIP; \
+	fi; \
+	if grep -q "TEST_PASS" $$hw_log; then \
+		pass_status=PASS; \
+	else \
+		pass_status=FAIL; \
+	fi; \
+	status_line="[$$typ/$$base] [Cycles: $$cycles | Insts: $$insts | IPC: $$ipc] [$$match_status] [$$pass_status]"; \
+	echo "$$status_line" >> $$result_dir/$$base.log; \
+	echo "$$status_line" > $$result_dir/$$base.status
 
 rv_test_report_all: $(RVTESTS_REPORT_TARGETS)
 
@@ -120,14 +135,14 @@ rv_report_%:
 	echo "========== $$typ =========="; \
 	for f in $$(ls $$result_dir/*.status 2>/dev/null | sort); do \
 		line=$$(cat $$f); \
-		left=$$(echo "$$line" | sed 's/\(.*\)\(\[Cycles:.*\]\)\( \[ [A-Z]* \]\)/\1/'); \
-		mid=$$(echo "$$line" | sed 's/\(.*\)\(\[Cycles:.*\]\)\( \[ [A-Z]* \]\)/\2/'); \
-		tag=$$(echo "$$line" | sed 's/\(.*\)\(\[Cycles:.*\]\)\( \[ [A-Z]* \]\)/\3/'); \
-		if echo "$$tag" | grep -q "\[ PASSED \]"; then \
-			echo -e "$$left\033[34m$$mid\033[0m \033[32m$$tag\033[0m"; \
-		else \
-			echo -e "$$left\033[34m$$mid\033[0m \033[31m$$tag\033[0m"; \
-		fi; \
+		colored=$$(printf '%s\n' "$$line" | sed \
+			-e 's/\(\[Cycles:[^]]*\]\)/\\033[34m\1\\033[0m/' \
+			-e 's/\[MISMATCH\]/\\033[31m[MISMATCH]\\033[0m/g' \
+			-e 's/\[MATCH\]/\\033[32m[MATCH]\\033[0m/g' \
+			-e 's/\[SKIP\]/\\033[34m[SKIP]\\033[0m/g' \
+			-e 's/\[FAIL\]/\\033[31m[FAIL]\\033[0m/g' \
+			-e 's/\[PASS\]/\\033[32m[PASS]\\033[0m/g'); \
+		printf '%b\n' "$$colored"; \
 	done
 
 rv_test_summary_all: $(RVTESTS_SUMMARY_TARGETS)
@@ -140,7 +155,7 @@ rv_summary_%:
 	for log in $$result_dir/*.log; do \
 		[ -e "$$log" ] || continue; \
 		base=$$(basename $$log .log); \
-		if grep -q "TEST_PASS" $$log; then \
+		if grep -q "\[PASS\]" $$result_dir/$$base.status 2>/dev/null; then \
 			echo "$$base: PASS" >> $$summary_file; \
 		else \
 			echo "$$base: FAIL" >> $$summary_file; \

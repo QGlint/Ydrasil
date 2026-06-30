@@ -15,29 +15,9 @@ LSU_IMPL ?= legacy
 MEMS_IMPL ?= new
 PYTHON ?= python3
 TRACE_TO_CSV ?= $(PROJECT_ROOT)/verif/sim/riscv_trace_csv.py
-
-SPIKE_TAR_URL ?= https://bitbucket.org/qglint/tool_tar/downloads/spike-1.1.1-log.tar.xz
-
-CURL ?=  curl 
-
+TRACE_COMPARE ?= $(PROJECT_ROOT)/verif/sim/ydrasil_sim.py
 
 HOSTNAME := $(shell hostname)
-ifeq ($(HOSTNAME),servera437)
-SPIKE_INSTALL_DIR ?= /opt/spike
-else
-SPIKE_INSTALL_DIR ?= $(PROJECT_ROOT)/tools/spike
-endif
-SPIKE_TAR_FILE ?= $(BUILD_DIR)/downloads/spike.tar.xz
-SPIKE ?= $(SPIKE_INSTALL_DIR)/bin/spike
-SPIKE_ELF ?= $(RVTESTS_OUT_ROOT)/rv32ui/elf/rv32ui_lh.elf
-SPIKE_OUT_DIR ?= $(BUILD_DIR)/sim/spike/
-SPIKE_LOG ?= rv32ui_lh
-SPIKE_MAXSTEPS ?= 1000000
-
-ifneq ($(steps),)
-  spike_stepout = --steps=$(steps)
-endif
-
 
 ifeq ($(origin PKG_KIND),undefined)
 PKG_KIND := $(shell \
@@ -60,8 +40,76 @@ PKG_KIND := $(shell \
 	fi)
 endif
 
+SPIKE_TAR_URL ?= https://bitbucket.org/qglint/tool_tar/downloads/spike-1.1.1-log.tar.xz
+SPIKE_SRC_DIR ?= $(PROJECT_ROOT)/verif/tools/riscv-isa-sim
+SPIKE_SRC_BUILD_DIR ?= $(BUILD_DIR)/spike-src
+SPIKE_BUILD_JOBS ?= $(shell nproc)
+SPIKE_HOST_CC ?= gcc
+SPIKE_HOST_CXX ?= g++
+SPIKE_HOST_AR ?= ar
+SPIKE_HOST_RANLIB ?= ranlib
+
+CURL ?= curl
+SPIKE_SYSTEM_INSTALL_DIR ?= /opt/spike
+SPIKE_LOCAL_INSTALL_DIR ?= $(PROJECT_ROOT)/tools/spike
+SPIKE_PREBUILT_BOOST_REGEX ?= libboost_regex.so.1.91.0
+
+ifeq ($(PKG_KIND),ubuntu)
+ifeq ($(HOSTNAME),servera437)
+SPIKE_INSTALL_DIR ?= $(SPIKE_SYSTEM_INSTALL_DIR)
+SPIKE_DEPLOY_MODE ?= source-sudo
+else
+SPIKE_INSTALL_DIR ?= $(SPIKE_LOCAL_INSTALL_DIR)
+SPIKE_DEPLOY_MODE ?= source
+endif
+else
+SPIKE_INSTALL_DIR ?= $(SPIKE_LOCAL_INSTALL_DIR)
+SPIKE_DEPLOY_MODE ?= prebuilt
+endif
+
+SPIKE_SRC_INSTALL_DIR ?= $(SPIKE_INSTALL_DIR)
+SPIKE_INSTALL_SUDO ?= $(if $(filter source-sudo,$(SPIKE_DEPLOY_MODE)),sudo,)
+SPIKE_TAR_FILE ?= $(BUILD_DIR)/downloads/spike.tar.xz
+SPIKE ?= $(SPIKE_INSTALL_DIR)/bin/spike
+SPIKE_RUN_ENV ?= LD_LIBRARY_PATH=$(SPIKE_INSTALL_DIR)/lib:$(LD_LIBRARY_PATH)
+SPIKE_CHECK_ARGS ?= --help
+SPIKE_ELF ?= $(RVTESTS_OUT_ROOT)/rv32ui/elf/rv32ui_lh.elf
+SIM_OUT_DIR ?= $(BUILD_DIR)/sim
+SPIKE_OUT_DIR ?= $(SIM_OUT_DIR)/spike
+SPIKE_LOG ?= rv32ui_lh
+SPIKE_MAXSTEPS ?= 1000000
+SPIKE_LIMIT_ARG ?= --instructions=$(SPIKE_MAXSTEPS)
+SPIKE_TRACE_LOG ?= $(SPIKE_OUT_DIR)/$(SPIKE_LOG).log
+SPIKE_TRACE_CSV ?= $(SPIKE_OUT_DIR)/$(SPIKE_LOG).csv
+SPIKE_MEM_BASE ?= $(patsubst %/elf/,%/mem/,$(dir $(SPIKE_ELF)))$(basename $(notdir $(SPIKE_ELF)))
+HW_TRACE_OUT_DIR ?= $(SIM_OUT_DIR)/hw
+HW_TRACE_LOG ?= $(HW_TRACE_OUT_DIR)/$(SPIKE_LOG)/hw.log
+HW_TRACE_CSV ?= $(HW_TRACE_OUT_DIR)/$(SPIKE_LOG)/hw.csv
+TRACE_COMPARE_FIELDS ?= pc,binary,gpr
+SIM_COMPARE ?= csv
+SIM_COMPARE_MAX_MISMATCHES ?= 20
+SIM_COMPARE_TIMEOUT ?= 1000000
+SIM_COMPARE_DIR ?= $(SIM_OUT_DIR)/compare
+COMPARE_NAME ?= $(SPIKE_LOG)
+COMPARE_ELF ?= $(SPIKE_ELF)
+COMPARE_ITCM ?= $(SPIKE_MEM_BASE).itcm
+COMPARE_DTCM ?= $(SPIKE_MEM_BASE).dtcm
+COMPARE_OUT_DIR ?= $(SIM_COMPARE_DIR)/$(COMPARE_NAME)
+COMPARE_HW_OUT_DIR ?= $(HW_TRACE_OUT_DIR)/$(COMPARE_NAME)
+COMPARE_HW_LOG ?= $(COMPARE_HW_OUT_DIR)/hw.log
+COMPARE_SPIKE_LOG ?= $(SPIKE_OUT_DIR)/$(COMPARE_NAME).log
+COMPARE_HW_CSV ?= $(COMPARE_HW_OUT_DIR)/hw.csv
+COMPARE_SPIKE_CSV ?= $(SPIKE_OUT_DIR)/$(COMPARE_NAME).csv
+COMPARE_LOG ?= $(COMPARE_OUT_DIR)/compare.log
+COMPARE_SIM_EXTRA_DEFINES ?= +cpp_timeout=$(SIM_COMPARE_TIMEOUT) +sv_timeout=$(SIM_COMPARE_TIMEOUT)
+
+ifneq ($(steps),)
+  spike_stepout = --steps=$(steps)
+endif
+
 ifeq ($(PKG_KIND),arch)
 TOOLS ?= verilator gtkwave riscv64-elf-gcc riscv64-elf-newlib riscv64-elf-gdb qemu-system-riscv
+SPIKE_BUILD_TOOLS ?= autoconf automake gcc make dtc boost
 PKG_EXISTS ?= pacman -Qs -q
 PKG_MANAGER ?= sudo pacman -S --needed
 PKG_UPDATE ?= true
@@ -70,6 +118,7 @@ GDB ?= $(RISCV_PREFIX)-gdb
 QEMU ?= qemu-system-riscv
 else ifeq ($(PKG_KIND),ubuntu)
 TOOLS ?= verilator gtkwave gcc-riscv64-unknown-elf binutils-riscv64-unknown-elf picolibc-riscv64-unknown-elf gdb-multiarch qemu-system-misc
+SPIKE_BUILD_TOOLS ?= autoconf automake gcc g++ make device-tree-compiler libboost-dev libboost-regex-dev
 PKG_EXISTS ?= dpkg -l
 PKG_MANAGER ?= sudo apt-get install -y
 PKG_UPDATE ?= sudo apt-get update
@@ -110,6 +159,7 @@ PKG_UPDATE ?= true
 RISCV_PREFIX ?= riscv64-elf
 GDB ?= $(RISCV_PREFIX)-gdb
 QEMU ?= qemu-system-riscv
+SPIKE_BUILD_TOOLS ?= autoconf automake gcc g++ make device-tree-compiler boost
 endif
 
 
@@ -147,9 +197,9 @@ RVTESTS_RESULT_DIR := $(BUILD_DIR)/rvtest_results
 SPIKE_FLAGS := \
 	--isa=$(ARCH) \
 	--log-commits \
-	--steps=$(SPIKE_MAXSTEPS) \
+	$(SPIKE_LIMIT_ARG) \
 	--priv=$(PRIV) \
-	-l 
+	-l
 
 
 .SECONDEXPANSION:

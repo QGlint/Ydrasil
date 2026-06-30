@@ -170,6 +170,67 @@ import ydrasil_pkg::*;
 
 	wire [ydrasil_pkg::OP_SYS_INFO_WIDTH-1:0] id_op_sys_info;
 
+`ifndef SYNTHESIS
+	wire [ydrasil_pkg::INST_DATA_WIDTH-1:0] commit_alu_instr;
+	wire [ydrasil_pkg::INST_DATA_WIDTH-1:0] commit_lsu_instr;
+	wire [ydrasil_pkg::INST_DATA_WIDTH-1:0] commit_mul_instr;
+	reg commit_ex_valid_q;
+	reg [ydrasil_pkg::INST_ADDR_WIDTH-1:0] commit_ex_pc_q;
+	reg [ydrasil_pkg::INST_DATA_WIDTH-1:0] commit_ex_instr_q;
+	reg commit_lsu_issue_valid_q;
+	reg [ydrasil_pkg::INST_ADDR_WIDTH-1:0] commit_lsu_issue_pc_q;
+	reg [ydrasil_pkg::INST_DATA_WIDTH-1:0] commit_lsu_issue_instr_q;
+	reg commit_mul_issue_valid_q;
+	reg [ydrasil_pkg::INST_ADDR_WIDTH-1:0] commit_mul_issue_pc_q;
+	reg [ydrasil_pkg::INST_DATA_WIDTH-1:0] commit_mul_issue_instr_q;
+
+	function automatic [ydrasil_pkg::INST_DATA_WIDTH-1:0] commit_read_instr;
+		input [ydrasil_pkg::INST_ADDR_WIDTH-1:0] pc;
+		begin
+			if ((pc >= ydrasil_pkg::DTCM_BASE_ADDR) &&
+			    (pc < (ydrasil_pkg::DTCM_BASE_ADDR + ((32'd1 << ydrasil_pkg::DTCM_ADDR_WIDTH) << 2)))) begin
+				commit_read_instr =
+					u_ydrasil_mems.u_dtcm.u_dram.mem_r[
+						pc[ydrasil_pkg::DTCM_ADDR_WIDTH+1:2]
+					];
+			end else begin
+				commit_read_instr =
+					u_ydrasil_mems.u_itcm.u_irom.mem_r[
+						pc[ydrasil_pkg::ITCM_ADDR_WIDTH+1:2]
+					];
+			end
+		end
+	endfunction
+
+	assign commit_alu_instr = commit_read_instr(id_instr_addr);
+	assign commit_lsu_instr = commit_read_instr(id_instr_addr);
+	assign commit_mul_instr = commit_read_instr(id_instr_addr);
+
+	always_ff @(posedge clk or negedge rst_n) begin
+		if (!rst_n) begin
+			commit_ex_valid_q <= 1'b0;
+			commit_ex_pc_q <= '0;
+			commit_ex_instr_q <= '0;
+			commit_lsu_issue_valid_q <= 1'b0;
+			commit_lsu_issue_pc_q <= '0;
+			commit_lsu_issue_instr_q <= '0;
+			commit_mul_issue_valid_q <= 1'b0;
+			commit_mul_issue_pc_q <= '0;
+			commit_mul_issue_instr_q <= '0;
+		end else begin
+			commit_ex_valid_q <= id_ex_valid & !interrupt & !flush_ex;
+			commit_ex_pc_q <= id_instr_addr;
+			commit_ex_instr_q <= commit_alu_instr;
+			commit_lsu_issue_valid_q <= ex_accept_valid & operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD];
+			commit_lsu_issue_pc_q <= id_instr_addr;
+			commit_lsu_issue_instr_q <= commit_lsu_instr;
+			commit_mul_issue_valid_q <= ex_mul_issue;
+			commit_mul_issue_pc_q <= id_instr_addr;
+			commit_mul_issue_instr_q <= commit_mul_instr;
+		end
+	end
+`endif
+
     reg dram_addr_sel_ff; 
     reg lsu_mem_read_ff;
     wire dram_sel;  
@@ -505,6 +566,30 @@ import ydrasil_pkg::*;
 		.interrupt_o        (interrupt),
 		.clint_ex_int_addr_o      (clint_ex_int_addr)
 	);
+
+`ifndef SYNTHESIS
+	ydrasil_commit_trace u_ydrasil_commit_trace (
+		.clk              (clk),
+		.rst_n            (rst_n),
+		.alu_valid_i      (commit_ex_valid_q & alu_rf_wen_rd),
+		.alu_pc_i         (commit_ex_pc_q),
+		.alu_instr_i      (commit_ex_instr_q),
+		.alu_waddr_i      (alu_rf_waddr_rd),
+		.alu_wdata_i      (alu_result),
+		.lsu_issue_valid_i(commit_lsu_issue_valid_q),
+		.lsu_issue_pc_i   (commit_lsu_issue_pc_q),
+		.lsu_issue_instr_i(commit_lsu_issue_instr_q),
+		.lsu_valid_i      (lsu_rf_wen_rd),
+		.lsu_waddr_i      (lsu_rf_waddr_rd),
+		.lsu_wdata_i      (lsu_wb_result),
+		.mul_issue_valid_i(commit_mul_issue_valid_q),
+		.mul_issue_pc_i   (commit_mul_issue_pc_q),
+		.mul_issue_instr_i(commit_mul_issue_instr_q),
+		.mul_valid_i      (mul_rf_wen_rd),
+		.mul_waddr_i      (mul_rf_waddr_rd),
+		.mul_wdata_i      (mul_wb_result)
+	);
+`endif
 
 
 

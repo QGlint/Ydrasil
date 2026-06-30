@@ -101,7 +101,7 @@ SPIKE_COMMIT_RE = re.compile(
     r"(?P<reg>[xf]\s*\d+)\s+0x(?P<val>[a-f0-9]+)"
 )
 VERILATOR_INSTR_RE = re.compile(
-    r"core.*0x(?P<addr>[a-f0-9]+)\s+\(0x(?P<bin>[a-f0-9]+)\)\s+(?P<instr>.+)$"
+    r".*core\s+\d+:\s+0x(?P<addr>[a-f0-9]+)\s+\(0x(?P<bin>[a-f0-9]+)\)\s+(?P<instr>.+)$"
 )
 VERILATOR_COMMIT_RE = re.compile(
     r"(?P<pri>\d)\s+0x(?P<addr>[a-f0-9]+)\s+\(0x(?P<bin>[a-f0-9]+)\)\s+"
@@ -109,6 +109,8 @@ VERILATOR_COMMIT_RE = re.compile(
 )
 ADDR_RE = re.compile(r"(?P<rd>[a-z0-9]+?),(?P<imm>[\-0-9]+?)\((?P<rs1>[a-z0-9]+)\)")
 ILLEGAL_RE = re.compile(r"trap_illegal_instruction")
+SPIKE_BOOT_ADDR_LIMIT = 0x80000000
+YDRASIL_TEST_ADDR_LIMIT = 0x80000050
 
 
 def _normalize_disasm(disasm):
@@ -152,6 +154,30 @@ def _build_entry(match, full_trace):
     return entry
 
 
+def _is_spike_boot_entry(entry):
+    try:
+        return int(entry.pc, 16) < SPIKE_BOOT_ADDR_LIMIT
+    except ValueError:
+        return False
+
+
+def _is_ydrasil_trap_entry(entry):
+    try:
+        return int(entry.pc, 16) < YDRASIL_TEST_ADDR_LIMIT
+    except ValueError:
+        return False
+
+
+def _should_skip_entry(entry, source, full_trace):
+    if full_trace:
+        return False
+    if source == "spike" and _is_spike_boot_entry(entry):
+        return True
+    if source == "ydrasil" and _is_ydrasil_trap_entry(entry):
+        return True
+    return False
+
+
 def _iter_trace_entries(lines, source, full_trace):
     if source == "spike":
         instr_re = SPIKE_INSTR_RE
@@ -162,6 +188,15 @@ def _iter_trace_entries(lines, source, full_trace):
         in_debug = False
         start_debug_re = None
         stop_debug_re = None
+    elif source == "ydrasil":
+        instr_re = VERILATOR_INSTR_RE
+        commit_re = VERILATOR_COMMIT_RE
+        start_trampoline_re = None
+        end_trampoline_re = None
+        start_debug_re = None
+        stop_debug_re = None
+        in_trampoline = False
+        in_debug = False
     else:
         instr_re = VERILATOR_INSTR_RE
         commit_re = VERILATOR_COMMIT_RE
@@ -196,7 +231,8 @@ def _iter_trace_entries(lines, source, full_trace):
         match = instr_re.match(line)
         if match:
             if current is not None:
-                yield current, False
+                if not _should_skip_entry(current, source, full_trace):
+                    yield current, False
             current = _build_entry(match, full_trace)
             if current.instr_str == "ecall":
                 break
@@ -206,7 +242,8 @@ def _iter_trace_entries(lines, source, full_trace):
             continue
 
         if ILLEGAL_RE.search(line):
-            yield current, True
+            if not _should_skip_entry(current, source, full_trace):
+                yield current, True
             current = None
             continue
 
@@ -217,7 +254,8 @@ def _iter_trace_entries(lines, source, full_trace):
             current.mode = commit.group("pri")
 
     if current is not None:
-        yield current, False
+        if not _should_skip_entry(current, source, full_trace):
+            yield current, False
 
 
 def process_sim_log(log_path, csv_path, full_trace=False, source="spike"):
@@ -235,7 +273,7 @@ def process_sim_log(log_path, csv_path, full_trace=False, source="spike"):
                 if illegal and full_trace:
                     logging.debug("Illegal instruction: %s", entry.instr_str)
 
-                if not (full_trace or entry.gpr or entry.instr_str in ["wfi", "ecall"]):
+                if not (full_trace or entry.gpr or entry.instr_str in ["wfi"]):
                     continue
 
                 writer.write_trace_entry(entry)
@@ -253,7 +291,7 @@ def main():
     parser.add_argument(
         "--source",
         type=str,
-        choices=["spike", "verilator"],
+        choices=["spike", "verilator", "ydrasil"],
         default="spike",
         help="Log source format",
     )

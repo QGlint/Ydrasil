@@ -1,0 +1,136 @@
+`timescale 1ns/1ns
+
+module ydrasil_commit_trace
+import ydrasil_pkg::*;
+#(
+    parameter int FIFO_DEPTH = 256,
+    parameter int FIFO_PTR_WIDTH = 8
+) (
+    input  wire clk,
+    input  wire rst_n,
+
+    input  wire alu_valid_i,
+    input  wire [INST_ADDR_WIDTH-1:0] alu_pc_i,
+    input  wire [INST_DATA_WIDTH-1:0] alu_instr_i,
+    input  wire [REGS_ADDR_WIDTH-1:0] alu_waddr_i,
+    input  wire [REGS_DATA_WIDTH-1:0] alu_wdata_i,
+
+    input  wire lsu_issue_valid_i,
+    input  wire [INST_ADDR_WIDTH-1:0] lsu_issue_pc_i,
+    input  wire [INST_DATA_WIDTH-1:0] lsu_issue_instr_i,
+    input  wire lsu_valid_i,
+    input  wire [REGS_ADDR_WIDTH-1:0] lsu_waddr_i,
+    input  wire [REGS_DATA_WIDTH-1:0] lsu_wdata_i,
+
+    input  wire mul_issue_valid_i,
+    input  wire [INST_ADDR_WIDTH-1:0] mul_issue_pc_i,
+    input  wire [INST_DATA_WIDTH-1:0] mul_issue_instr_i,
+    input  wire mul_valid_i,
+    input  wire [REGS_ADDR_WIDTH-1:0] mul_waddr_i,
+    input  wire [REGS_DATA_WIDTH-1:0] mul_wdata_i
+);
+
+    localparam [1:0] COMMIT_ALU = 2'd0;
+    localparam [1:0] COMMIT_LSU = 2'd1;
+    localparam [1:0] COMMIT_MUL = 2'd2;
+
+    reg [1:0]                 commit_kind_q  [0:FIFO_DEPTH-1];
+    reg [INST_ADDR_WIDTH-1:0] commit_pc_q    [0:FIFO_DEPTH-1];
+    reg [INST_DATA_WIDTH-1:0] commit_instr_q [0:FIFO_DEPTH-1];
+    reg [REGS_ADDR_WIDTH-1:0] commit_waddr_q [0:FIFO_DEPTH-1];
+    reg [REGS_DATA_WIDTH-1:0] commit_wdata_q [0:FIFO_DEPTH-1];
+    reg                       commit_ready_q [0:FIFO_DEPTH-1];
+    reg [FIFO_PTR_WIDTH-1:0]  commit_rptr_q;
+    reg [FIFO_PTR_WIDTH-1:0]  commit_wptr_q;
+
+    reg [FIFO_PTR_WIDTH-1:0] lsu_commit_idx_q [0:FIFO_DEPTH-1];
+    reg [FIFO_PTR_WIDTH-1:0] lsu_rptr_q;
+    reg [FIFO_PTR_WIDTH-1:0] lsu_wptr_q;
+
+    reg [FIFO_PTR_WIDTH-1:0] mul_commit_idx_q [0:FIFO_DEPTH-1];
+    reg [FIFO_PTR_WIDTH-1:0] mul_rptr_q;
+    reg [FIFO_PTR_WIDTH-1:0] mul_wptr_q;
+
+    task automatic print_gpr_commit;
+        input [INST_ADDR_WIDTH-1:0] pc;
+        input [INST_DATA_WIDTH-1:0] instr;
+        input [REGS_ADDR_WIDTH-1:0] waddr;
+        input [REGS_DATA_WIDTH-1:0] wdata;
+        begin
+            if (waddr != '0) begin
+                $display("core   0: 0x%08h (0x%08h) unknown", pc, instr);
+                $display("3 0x%08h (0x%08h) x%0d 0x%08h", pc, instr, waddr, wdata);
+            end
+        end
+    endtask
+
+    always @(negedge clk or negedge rst_n) begin
+        integer i;
+        if (!rst_n) begin
+            commit_rptr_q = '0;
+            commit_wptr_q = '0;
+            lsu_rptr_q = '0;
+            lsu_wptr_q = '0;
+            mul_rptr_q = '0;
+            mul_wptr_q = '0;
+        end else begin
+            if (alu_valid_i) begin
+                commit_kind_q[commit_wptr_q] = COMMIT_ALU;
+                commit_pc_q[commit_wptr_q] = alu_pc_i;
+                commit_instr_q[commit_wptr_q] = alu_instr_i;
+                commit_waddr_q[commit_wptr_q] = alu_waddr_i;
+                commit_wdata_q[commit_wptr_q] = alu_wdata_i;
+                commit_ready_q[commit_wptr_q] = 1'b1;
+                commit_wptr_q = commit_wptr_q + FIFO_PTR_WIDTH'(1);
+            end
+
+            if (lsu_issue_valid_i) begin
+                commit_kind_q[commit_wptr_q] = COMMIT_LSU;
+                commit_pc_q[commit_wptr_q] = lsu_issue_pc_i;
+                commit_instr_q[commit_wptr_q] = lsu_issue_instr_i;
+                commit_waddr_q[commit_wptr_q] = '0;
+                commit_wdata_q[commit_wptr_q] = '0;
+                commit_ready_q[commit_wptr_q] = 1'b0;
+                lsu_commit_idx_q[lsu_wptr_q] = commit_wptr_q;
+                lsu_wptr_q = lsu_wptr_q + FIFO_PTR_WIDTH'(1);
+                commit_wptr_q = commit_wptr_q + FIFO_PTR_WIDTH'(1);
+            end
+
+            if (mul_issue_valid_i) begin
+                commit_kind_q[commit_wptr_q] = COMMIT_MUL;
+                commit_pc_q[commit_wptr_q] = mul_issue_pc_i;
+                commit_instr_q[commit_wptr_q] = mul_issue_instr_i;
+                commit_waddr_q[commit_wptr_q] = '0;
+                commit_wdata_q[commit_wptr_q] = '0;
+                commit_ready_q[commit_wptr_q] = 1'b0;
+                mul_commit_idx_q[mul_wptr_q] = commit_wptr_q;
+                mul_wptr_q = mul_wptr_q + FIFO_PTR_WIDTH'(1);
+                commit_wptr_q = commit_wptr_q + FIFO_PTR_WIDTH'(1);
+            end
+
+            if (mul_valid_i) begin
+                commit_waddr_q[mul_commit_idx_q[mul_rptr_q]] = mul_waddr_i;
+                commit_wdata_q[mul_commit_idx_q[mul_rptr_q]] = mul_wdata_i;
+                commit_ready_q[mul_commit_idx_q[mul_rptr_q]] = 1'b1;
+                mul_rptr_q = mul_rptr_q + FIFO_PTR_WIDTH'(1);
+            end
+
+            if (lsu_valid_i) begin
+                commit_waddr_q[lsu_commit_idx_q[lsu_rptr_q]] = lsu_waddr_i;
+                commit_wdata_q[lsu_commit_idx_q[lsu_rptr_q]] = lsu_wdata_i;
+                commit_ready_q[lsu_commit_idx_q[lsu_rptr_q]] = 1'b1;
+                lsu_rptr_q = lsu_rptr_q + FIFO_PTR_WIDTH'(1);
+            end
+
+            for (i = 0; i < FIFO_DEPTH; i = i + 1) begin
+                if ((commit_rptr_q != commit_wptr_q) && commit_ready_q[commit_rptr_q]) begin
+                    print_gpr_commit(commit_pc_q[commit_rptr_q], commit_instr_q[commit_rptr_q],
+                                     commit_waddr_q[commit_rptr_q], commit_wdata_q[commit_rptr_q]);
+                    commit_ready_q[commit_rptr_q] = 1'b0;
+                    commit_rptr_q = commit_rptr_q + FIFO_PTR_WIDTH'(1);
+                end
+            end
+        end
+    end
+
+endmodule
