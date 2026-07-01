@@ -55,12 +55,7 @@ import ydrasil_pkg::*;
     endgenerate
 
 
-    assign rf_rdata_rs1_o = (rf_raddr_rs1_i == '0) ? '0 :
-                      ((rf_raddr_rs1_i == rf_waddr_rd_i) && (rf_wen_rd_i)) ? rf_wdata_rd_i :
-                       registers[rf_raddr_rs1_i];
-
-    assign rf_rdata_rs2_o = (rf_raddr_rs2_i == '0) ? '0 :
-                      ((rf_raddr_rs2_i == rf_waddr_rd_i) && (rf_wen_rd_i)) ? rf_wdata_rd_i :
-                       registers[rf_raddr_rs2_i];
+    assign rf_rdata_rs1_o = (rf_raddr_rs1_i == '0) ? '0 : registers[rf_raddr_rs1_i];
+    assign rf_rdata_rs2_o = (rf_raddr_rs2_i == '0) ? '0 : registers[rf_raddr_rs2_i];
 
 endmodule

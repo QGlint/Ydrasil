@@ -73,6 +73,16 @@ import ydrasil_pkg::*;
             lsu_wptr_q = '0;
             mul_rptr_q = '0;
             mul_wptr_q = '0;
+            for (i = 0; i < FIFO_DEPTH; i = i + 1) begin
+                commit_kind_q[i] = '0;
+                commit_pc_q[i] = '0;
+                commit_instr_q[i] = '0;
+                commit_waddr_q[i] = '0;
+                commit_wdata_q[i] = '0;
+                commit_ready_q[i] = 1'b0;
+                lsu_commit_idx_q[i] = '0;
+                mul_commit_idx_q[i] = '0;
+            end
         end else begin
             if (alu_valid_i) begin
                 commit_kind_q[commit_wptr_q] = COMMIT_ALU;

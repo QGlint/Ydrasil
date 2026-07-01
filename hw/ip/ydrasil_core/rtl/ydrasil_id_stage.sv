@@ -24,6 +24,15 @@ import ydrasil_pkg::*;
     output wire [4:0]                      rf_addr_rs2_o,
     input  wire [DATA_WIDTH-1:0]           rf_rdata_rs1_i,
     input  wire [DATA_WIDTH-1:0]           rf_rdata_rs2_i,
+    input  wire                            wb_fwd_valid_i,
+    input  wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] wb_fwd_addr_i,
+    input  wire [DATA_WIDTH-1:0]           wb_fwd_data_i,
+    input  wire                            lsu_fwd_valid_i,
+    input  wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] lsu_fwd_addr_i,
+    input  wire [DATA_WIDTH-1:0]           lsu_fwd_data_i,
+    input  wire                            alu_fwd_valid_i,
+    input  wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] alu_fwd_addr_i,
+    input  wire [DATA_WIDTH-1:0]           alu_fwd_data_i,
 
     // Dispatch to EX   
     // output wire                            alu_valid_o,
@@ -199,13 +208,52 @@ import ydrasil_pkg::*;
     assign rf_addr_rs2_o = issue_rf_raddr_rs2_ff;
 
     // Keep ALU source selection consistent with decoder control outputs.
+    wire rs1_wb_fwd =
+        wb_fwd_valid_i &&
+        issue_rf_ren_rs1_ff &&
+        (issue_rf_raddr_rs1_ff != '0) &&
+        (issue_rf_raddr_rs1_ff == wb_fwd_addr_i);
+    wire rs2_wb_fwd =
+        wb_fwd_valid_i &&
+        (issue_rf_ren_rs2_ff | issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
+        (issue_rf_raddr_rs2_ff != '0) &&
+        (issue_rf_raddr_rs2_ff == wb_fwd_addr_i);
+    wire rs1_lsu_fwd =
+        lsu_fwd_valid_i &&
+        issue_rf_ren_rs1_ff &&
+        (issue_rf_raddr_rs1_ff != '0) &&
+        (issue_rf_raddr_rs1_ff == lsu_fwd_addr_i);
+    wire rs2_lsu_fwd =
+        lsu_fwd_valid_i &&
+        (issue_rf_ren_rs2_ff | issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
+        (issue_rf_raddr_rs2_ff != '0) &&
+        (issue_rf_raddr_rs2_ff == lsu_fwd_addr_i);
+    wire rs1_alu_fwd =
+        alu_fwd_valid_i &&
+        issue_rf_ren_rs1_ff &&
+        (issue_rf_raddr_rs1_ff != '0) &&
+        (issue_rf_raddr_rs1_ff == alu_fwd_addr_i);
+    wire rs2_alu_fwd =
+        alu_fwd_valid_i &&
+        (issue_rf_ren_rs2_ff | issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
+        (issue_rf_raddr_rs2_ff != '0) &&
+        (issue_rf_raddr_rs2_ff == alu_fwd_addr_i);
+    wire [DATA_WIDTH-1:0] issue_rs1_data =
+        rs1_lsu_fwd ? lsu_fwd_data_i :
+        rs1_alu_fwd ? alu_fwd_data_i :
+        rs1_wb_fwd  ? wb_fwd_data_i  : rf_rdata_rs1_i;
+    wire [DATA_WIDTH-1:0] issue_rs2_data =
+        rs2_lsu_fwd ? lsu_fwd_data_i :
+        rs2_alu_fwd ? alu_fwd_data_i :
+        rs2_wb_fwd  ? wb_fwd_data_i  : rf_rdata_rs2_i;
+
     assign operand_a     =  issue_operand_a_pc_sel_ff ? issue_pc_ff :
-                            issue_operand_a_imm_sel_ff ? issue_imm_ff : rf_rdata_rs1_i;
+                            issue_operand_a_imm_sel_ff ? issue_imm_ff : issue_rs1_data;
     assign operand_b     = issue_operand_b_jump_sel_ff ? 32'h4 :
-                            issue_operand_b_rs_sel_ff ? rf_rdata_rs2_i : issue_imm_ff;
+                            issue_operand_b_rs_sel_ff ? issue_rs2_data : issue_imm_ff;
 
 
-    assign bt_a_operand = issue_bt_a_rs_sel_ff ? rf_rdata_rs1_i : issue_pc_ff;
+    assign bt_a_operand = issue_bt_a_rs_sel_ff ? issue_rs1_data : issue_pc_ff;
     assign bt_b_operand = issue_imm_ff;
     assign id_fence_i = (if_id_instr_i[6:0] == ydrasil_pkg::RV32I_INS_FENCE) &&
                         (if_id_instr_i[14:12] == 3'b001);
@@ -229,17 +277,17 @@ import ydrasil_pkg::*;
         ({4{issue_lsu_is_sh}} & issue_lsu_sh_mask) |
         ({4{issue_lsu_is_sw}} & 4'b1111);
     wire [DATA_WIDTH-1:0] issue_lsu_sb_data =
-        ({DATA_WIDTH{issue_lsu_addr_index == 2'b00}} & {24'b0, rf_rdata_rs2_i[7:0]}) |
-        ({DATA_WIDTH{issue_lsu_addr_index == 2'b01}} & {16'b0, rf_rdata_rs2_i[7:0], 8'b0}) |
-        ({DATA_WIDTH{issue_lsu_addr_index == 2'b10}} & {8'b0, rf_rdata_rs2_i[7:0], 16'b0}) |
-        ({DATA_WIDTH{issue_lsu_addr_index == 2'b11}} & {rf_rdata_rs2_i[7:0], 24'b0});
+        ({DATA_WIDTH{issue_lsu_addr_index == 2'b00}} & {24'b0, issue_rs2_data[7:0]}) |
+        ({DATA_WIDTH{issue_lsu_addr_index == 2'b01}} & {16'b0, issue_rs2_data[7:0], 8'b0}) |
+        ({DATA_WIDTH{issue_lsu_addr_index == 2'b10}} & {8'b0, issue_rs2_data[7:0], 16'b0}) |
+        ({DATA_WIDTH{issue_lsu_addr_index == 2'b11}} & {issue_rs2_data[7:0], 24'b0});
     wire [DATA_WIDTH-1:0] issue_lsu_sh_data =
-        issue_lsu_addr_index[1] ? {rf_rdata_rs2_i[15:0], 16'b0} :
-                                  {16'b0, rf_rdata_rs2_i[15:0]};
+        issue_lsu_addr_index[1] ? {issue_rs2_data[15:0], 16'b0} :
+                                  {16'b0, issue_rs2_data[15:0]};
     wire [DATA_WIDTH-1:0] issue_lsu_store_data =
         ({DATA_WIDTH{issue_lsu_is_sb}} & issue_lsu_sb_data) |
         ({DATA_WIDTH{issue_lsu_is_sh}} & issue_lsu_sh_data) |
-        ({DATA_WIDTH{issue_lsu_is_sw}} & rf_rdata_rs2_i);
+        ({DATA_WIDTH{issue_lsu_is_sw}} & issue_rs2_data);
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -331,7 +379,7 @@ import ydrasil_pkg::*;
                 rf_wen_rd_ff        <= issue_rf_wen_rd_ff;
                 rf_waddr_rd_ff      <= issue_rf_waddr_rd_ff;
                 operator_lsu_ff     <= issue_operator_lsu_ff;
-                id_lsu_rs2_data_ff  <= rf_rdata_rs2_i; // 直接传递寄存器数据，供LSU使用
+                id_lsu_rs2_data_ff  <= issue_rs2_data; // 直接传递寄存器数据，供LSU使用
                 id_lsu_addr_ff      <= issue_lsu_addr;
                 id_lsu_addr_is_dtcm_ff <= issue_lsu_addr_is_dtcm;
                 id_lsu_store_data_ff <= issue_lsu_store_data;

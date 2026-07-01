@@ -197,6 +197,7 @@ COREMARK_SW_MAKE_ARGS = \
 		ARCH=rv32im_zicsr_zifencei \
 		ABI=$(ABI)
 COREMARK_RESULT_LOG ?= $(HW_TRACE_OUT_DIR)/coremark/hw.log
+COREMARK_SIM_COMPARE ?= none
 
 coremark:
 	@$(MAKE) -C sw coremark $(COREMARK_SW_MAKE_ARGS)
@@ -212,6 +213,7 @@ coremark_sim: coremark comp
 		COMPARE_ELF=$(BUILD_DIR)/app/coremark/coremark.elf \
 		COMPARE_ITCM=$(BUILD_DIR)/app/coremark/coremark.itcm \
 		COMPARE_DTCM=$(BUILD_DIR)/app/coremark/coremark.dtcm \
+		SIM_COMPARE=$(COREMARK_SIM_COMPARE) \
 		COMPARE_SIM_EXTRA_DEFINES="+cpp_timeout=10000000 +sv_timeout=10000000"; \
 	rc=$$?; \
 	$(MAKE) --no-print-directory coremark_result; \

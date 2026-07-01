@@ -166,14 +166,42 @@ def _normalize_gpr(text: str) -> str:
 	return ";".join(items)
 
 
+def _is_counter_csr_instr(binary: str) -> bool:
+	try:
+		instr = int(binary, 16)
+	except (TypeError, ValueError):
+		return False
+
+	if (instr & 0x7f) != 0x73:
+		return False
+
+	funct3 = (instr >> 12) & 0x7
+	if funct3 == 0:
+		return False
+
+	csr = (instr >> 20) & 0xfff
+	if csr in (0xc00, 0xc01, 0xc02, 0xc80, 0xc81, 0xc82, 0xb00, 0xb02, 0xb80, 0xb82):
+		return True
+	if 0xc03 <= csr <= 0xc1f:
+		return True
+	if 0xc83 <= csr <= 0xc9f:
+		return True
+	if 0xb03 <= csr <= 0xb1f:
+		return True
+	if 0xb83 <= csr <= 0xb9f:
+		return True
+	return False
+
+
 def _csv_key(row: dict[str, str], fields: list[str]) -> tuple[str, ...]:
 	values = []
+	is_counter_csr = _is_counter_csr_instr(row.get("binary", ""))
 	for field in fields:
 		value = row.get(field, "")
 		if field in ("pc", "binary"):
 			value = _normalize_hex(value)
 		elif field == "gpr":
-			value = _normalize_gpr(value)
+			value = "<counter-csr>" if is_counter_csr else _normalize_gpr(value)
 		else:
 			value = value.strip()
 		values.append(value)
