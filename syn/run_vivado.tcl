@@ -145,10 +145,49 @@ proc freq_file_tag {freq_mhz} {
     return [string map {. p} $tag]
 }
 
+proc cpu_clock_period_ns {freq_mhz} {
+    set freq_mhz [string trim $freq_mhz]
+    if {![regexp {^[0-9]+([.][0-9]+)?$} $freq_mhz] || double($freq_mhz) <= 0.0} {
+        error "invalid CPU frequency: $freq_mhz"
+    }
+    return [expr {1000.0 / double($freq_mhz)}]
+}
+
+proc patch_ip_ooc_clock_constraints {freq_mhz} {
+    set period [format %.3f [cpu_clock_period_ns $freq_mhz]]
+    set project_dir [get_property DIRECTORY [current_project]]
+    set gen_dir [file join $project_dir "[get_property NAME [current_project]].gen" "sources_1" "ip"]
+    set patched [list]
+
+    foreach xdc [glob -nocomplain -types f [file join $gen_dir "*" "*_ooc.xdc"]] {
+        set fp [open $xdc r]
+        set text [read $fp]
+        close $fp
+
+        set new_text [regsub -all -- {create_clock -name "TS_CLKA" -period [0-9.]+ \[ get_ports clka \]} \
+            $text "create_clock -name \"TS_CLKA\" -period $period \[ get_ports clka \]"]
+        if {$new_text ne $text} {
+            set fp [open $xdc w]
+            puts -nonewline $fp $new_text
+            close $fp
+            lappend patched $xdc
+        }
+    }
+
+    if {[llength $patched] > 0} {
+        puts "Patched IP OOC clka constraints to ${period} ns for ${freq_mhz} MHz CPU clock:"
+        foreach xdc $patched {
+            puts "  $xdc"
+        }
+    } else {
+        puts "warning: no IP OOC clka constraints were patched under $gen_dir"
+    }
+}
+
 proc report_cpu_freq_timing {report_dir freq_mhz} {
     global timing_summary_max_paths timing_path_max_paths timing_nworst
 
-    set target_period [expr {1000.0 / double($freq_mhz)}]
+    set target_period [cpu_clock_period_ns $freq_mhz]
     set tag [freq_file_tag $freq_mhz]
     set cpu_clocks [cpu_clocks_near_period $target_period 0.0500]
     set out [file join $report_dir "cpu${tag}_clocks.rpt"]
@@ -358,6 +397,7 @@ if {[llength [get_ips -quiet]] > 0} {
     catch {upgrade_ip [get_ips]}
     validate_clocking_frequency $pll_freq_mhz
     generate_target all [get_ips]
+    patch_ip_ooc_clock_constraints $pll_freq_mhz
 }
 
 if {$run_to eq "reports"} {
