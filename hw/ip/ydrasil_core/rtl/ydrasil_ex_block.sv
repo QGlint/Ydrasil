@@ -21,6 +21,7 @@ import ydrasil_pkg::*;
     input  wire                            id_ex_pred_taken_i,
     input  wire [DATA_WIDTH-1:0]           id_ex_pred_target_i,
     input  wire [1:0]                      id_ex_pred_counter_i,
+    input  wire [DATA_WIDTH-1:0]           id_ex_pred_bht_index_i,
     input  wire [REGS_ADDR_WIDTH-1:0]      id_rf_waddr_rd_i,
     input  wire                            id_alu_rf_wen_rd_i,
     input  wire                            interrupt_i,
@@ -43,6 +44,7 @@ import ydrasil_pkg::*;
     output wire                            ex_bp_train_taken_o,
     output wire [DATA_WIDTH-1:0]           ex_bp_train_target_o,
     output wire [1:0]                      ex_bp_train_counter_o,
+    output wire [DATA_WIDTH-1:0]           ex_bp_train_bht_index_o,
     output wire                            ex_branch_mispredict_o,
     output wire [BUS_ADDR_WIDTH-1:0]       ex_lsu_mem_addr_o,
 
@@ -84,6 +86,8 @@ import ydrasil_pkg::*;
     wire op_m_unit;
     wire op_bitmanip;
     wire op_load;
+    wire op_store;
+    wire op_bjp;
     wire op_mul;
     wire op_div;
 
@@ -127,6 +131,7 @@ import ydrasil_pkg::*;
     reg                       ex2_bp_train_taken_q;
     reg [DATA_WIDTH-1:0]      ex2_bp_train_target_q;
     reg [1:0]                 ex2_bp_train_counter_q;
+    reg [DATA_WIDTH-1:0]      ex2_bp_train_bht_index_q;
     reg                       ex2_branch_mispredict_q;
 `ifndef SYNTHESIS
     reg                       dbg_bp_resolve_valid_q;
@@ -158,7 +163,7 @@ import ydrasil_pkg::*;
     assign operand_b = operand_b_i;
 
     assign bt_alu_result = bt_a_operand + bt_b_operand;
-    assign ex_lsu_mem_addr_o = alu_result;
+    assign ex_lsu_mem_addr_o = fast_add_result;
     assign ex_lsu_result_o = alu_result_ff;
 
     assign ex_jump_target = id_ex_jalr_i ? {bt_alu_result[DATA_WIDTH-1:1], 1'b0} : bt_alu_result;
@@ -200,6 +205,7 @@ import ydrasil_pkg::*;
             ex2_bp_train_taken_q <= 1'b0;
             ex2_bp_train_target_q <= '0;
             ex2_bp_train_counter_q <= 2'b01;
+            ex2_bp_train_bht_index_q <= '0;
             ex2_branch_mispredict_q <= 1'b0;
 `ifndef SYNTHESIS
             dbg_bp_resolve_valid_q <= 1'b0;
@@ -224,6 +230,7 @@ import ydrasil_pkg::*;
             ex2_bp_train_taken_q <= 1'b0;
             ex2_bp_train_target_q <= '0;
             ex2_bp_train_counter_q <= 2'b01;
+            ex2_bp_train_bht_index_q <= '0;
             ex2_branch_mispredict_q <= 1'b0;
 `ifndef SYNTHESIS
             dbg_bp_resolve_valid_q <= 1'b0;
@@ -248,6 +255,7 @@ import ydrasil_pkg::*;
             ex2_bp_train_taken_q <= ex_branch_taken;
             ex2_bp_train_target_q <= bt_alu_result;
             ex2_bp_train_counter_q <= id_ex_pred_counter_i;
+            ex2_bp_train_bht_index_q <= id_ex_pred_bht_index_i;
             ex2_branch_mispredict_q <= ex_branch_mispredict;
 `ifndef SYNTHESIS
             dbg_bp_resolve_valid_q <= ex_bp_train_valid;
@@ -275,6 +283,7 @@ import ydrasil_pkg::*;
     assign ex_bp_train_taken_o = ex2_bp_train_taken_q;
     assign ex_bp_train_target_o = ex2_bp_train_target_q;
     assign ex_bp_train_counter_o = ex2_bp_train_counter_q;
+    assign ex_bp_train_bht_index_o = ex2_bp_train_bht_index_q;
 `ifndef SYNTHESIS
     assign dbg_bp_resolve_valid_o = dbg_bp_resolve_valid_q;
     assign dbg_bp_resolve_pc_o = dbg_bp_resolve_pc_q;
@@ -292,6 +301,8 @@ import ydrasil_pkg::*;
     assign op_m_unit = operator_type_i[OPERATOR_TYPE_MUL];
     assign op_bitmanip = operator_type_i[OPERATOR_TYPE_BITMANIP];
     assign op_load = operator_type_i[OPERATOR_TYPE_LOAD];
+    assign op_store = operator_type_i[OPERATOR_TYPE_STORE];
+    assign op_bjp = operator_type_i[OPERATOR_TYPE_BJP];
     assign op_mul =
         op_m_unit &
         (operator_i[OP_MUL_MUL]    |
@@ -321,6 +332,38 @@ import ydrasil_pkg::*;
     assign ex_instret_inc_o =
         (id_ex_valid_i & !interrupt_i & !flush_ex_i & !op_load & !op_mul & !op_div) |
         (id_ex_valid_i & !interrupt_i & !flush_ex_i & op_div & div_done);
+
+    wire fast_alu_op =
+        operator_type_i[OPERATOR_TYPE_ALU] & !op_m_unit & !op_bitmanip &
+        (operator_i[OP_ALU_ADD]  |
+         operator_i[OP_ALU_SUB]  |
+         operator_i[OP_ALU_SLT]  |
+         operator_i[OP_ALU_SLTU] |
+         operator_i[OP_ALU_XOR]  |
+         operator_i[OP_ALU_OR]   |
+         operator_i[OP_ALU_AND]  |
+         operator_i[OP_ALU_LUI]  |
+         operator_i[OP_ALU_AUIPC]);
+    wire fast_result_wen = id_ex_valid_i & !interrupt_i & !flush_ex_i & !op_bitmanip & !op_m_unit &
+        (fast_alu_op | op_load | op_store | op_bjp);
+    wire [31:0] fast_add_result = operand_a + operand_b;
+    wire [32:0] fast_sub_result_ext = {1'b0, operand_a} + {1'b0, ~operand_b} + 33'd1;
+    wire        fast_signs_differ = operand_a[31] ^ operand_b[31];
+    wire        fast_slt_signed = fast_signs_differ ? operand_a[31] : fast_sub_result_ext[31];
+    wire        fast_slt_unsigned = ~fast_sub_result_ext[32];
+    wire [31:0] fast_logic_result =
+        ({32{operator_i[OP_ALU_XOR]}} & (operand_a ^ operand_b)) |
+        ({32{operator_i[OP_ALU_OR]}}  & (operand_a | operand_b)) |
+        ({32{operator_i[OP_ALU_AND]}} & (operand_a & operand_b));
+    wire [31:0] fast_alu_result =
+        ({32{operator_i[OP_ALU_SUB]}}  & fast_sub_result_ext[31:0]) |
+        ({32{operator_i[OP_ALU_SLT]}}  & {31'b0, fast_slt_signed}) |
+        ({32{operator_i[OP_ALU_SLTU]}} & {31'b0, fast_slt_unsigned}) |
+        ({32{operator_i[OP_ALU_XOR] | operator_i[OP_ALU_OR] | operator_i[OP_ALU_AND]}} & fast_logic_result) |
+        ({32{operator_i[OP_ALU_LUI]}}  & operand_b) |
+        ({32{operator_i[OP_ALU_ADD] | operator_i[OP_ALU_AUIPC]}} & fast_add_result);
+    wire [31:0] fast_result =
+        fast_alu_op ? fast_alu_result : fast_add_result;
 
     ydrasil_alu #(
         .DATAWIDTH(DATA_WIDTH)
@@ -418,7 +461,8 @@ import ydrasil_pkg::*;
             ex_csr_wen_o_ff     <= 1'b0;
             ex_csr_waddr_o_ff   <= '0;
         end else begin
-            alu_result_ff      <= slow_result_wen ? slow_result : alu_result;
+            alu_result_ff      <= fast_result_wen ? fast_result :
+                                  slow_result_wen ? slow_result : alu_result;
             alu_rf_wen_rd_ff   <= ex_rf_wen_rd;
             alu_rf_waddr_rd_ff <= div_rf_wen_rd ? id_rf_waddr_rd_i : alu_rf_waddr_rd;
             ex_csr_wdata_o_ff  <= csr_wdata;

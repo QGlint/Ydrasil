@@ -21,6 +21,7 @@ import ydrasil_pkg::*;
 		input  wire        bp_predict_taken_i,
 		input  wire [31:0] bp_predict_target_i,
 		input  wire [1:0]  bp_predict_counter_i,
+		input  wire [31:0] bp_predict_bht_index_i,
 		input  wire        bp_invalidate_i,
 
 		// 指令存储器接口
@@ -33,6 +34,7 @@ import ydrasil_pkg::*;
 		output wire        if_id_pred_taken_o,
 		output wire [31:0] if_id_pred_target_o,
 		output wire [1:0]  if_id_pred_counter_o,
+		output wire [31:0] if_id_pred_bht_index_o,
 		output wire        if_id_valid_o,
 
 		output wire [31:0] if_id_instr_o
@@ -54,6 +56,7 @@ import ydrasil_pkg::*;
 	reg        pred_hold_taken_ff;
 	reg [31:0] pred_hold_target_ff;
 	reg [1:0]  pred_hold_counter_ff;
+	reg [31:0] pred_hold_bht_index_ff;
 	reg        if_id_valid_ff;
 	reg flush_if_ff;
 	reg stall_if_ff;
@@ -61,6 +64,7 @@ import ydrasil_pkg::*;
 	wire       if_id_pred_taken;
 	wire [31:0] if_id_pred_target;
 	wire [1:0]  if_id_pred_counter;
+	wire [31:0] if_id_pred_bht_index;
 	wire       bp_predict_redirect;
 
 	// 默认顺序取指地址：PC + 4
@@ -73,6 +77,8 @@ import ydrasil_pkg::*;
 	                           bp_predict_target_i;
 	assign if_id_pred_counter = pred_hold_valid_ff ? pred_hold_counter_ff :
 	                            bp_predict_counter_i;
+	assign if_id_pred_bht_index = pred_hold_valid_ff ? pred_hold_bht_index_ff :
+	                              bp_predict_bht_index_i;
 	assign bp_predict_redirect =
 		!branch_jump_i && !stall_if_i && !stall_pc_i && !bp_invalidate_i &&
 		if_id_valid_ff && if_id_pred_taken;
@@ -90,6 +96,7 @@ import ydrasil_pkg::*;
 	assign if_id_pred_target_o = if_id_pred_target;
 	assign if_id_pred_counter_o = (if_id_valid_ff && !bp_invalidate_i) ?
 	                              if_id_pred_counter : 2'b01;
+	assign if_id_pred_bht_index_o = if_id_pred_bht_index;
 	assign if_id_valid_o = if_id_valid_ff;
 	assign pc_now =  pc_ff;
 	assign if_id_instr_o = if_id_instr;
@@ -120,6 +127,7 @@ import ydrasil_pkg::*;
 			pred_hold_taken_ff <= 1'b0;
 			pred_hold_target_ff <= '0;
 			pred_hold_counter_ff <= 2'b01;
+			pred_hold_bht_index_ff <= '0;
 			if_id_valid_ff <= 1'b0;
 			flush_if_ff     <= 1'b0;
 			if_id_instr_ff <= ydrasil_pkg::RV32I_INS_NOP;
@@ -133,6 +141,7 @@ import ydrasil_pkg::*;
 				pred_hold_taken_ff <= 1'b0;
 				pred_hold_target_ff <= '0;
 				pred_hold_counter_ff <= 2'b01;
+				pred_hold_bht_index_ff <= '0;
 				if_id_valid_ff <= 1'b0;
 				flush_if_ff     <= 1'b1;
 			end else if (bp_predict_redirect) begin
@@ -142,6 +151,7 @@ import ydrasil_pkg::*;
 				pred_hold_taken_ff <= 1'b0;
 				pred_hold_target_ff <= '0;
 				pred_hold_counter_ff <= 2'b01;
+				pred_hold_bht_index_ff <= '0;
 				if_id_valid_ff <= 1'b0;
 				flush_if_ff     <= 1'b1;
 			end else if(stall_if_i) begin
@@ -150,6 +160,7 @@ import ydrasil_pkg::*;
 				pred_hold_taken_ff <= if_id_pred_taken;
 				pred_hold_target_ff <= if_id_pred_target;
 				pred_hold_counter_ff <= if_id_pred_counter;
+				pred_hold_bht_index_ff <= if_id_pred_bht_index;
 			end else if(!stall_if_i) begin
 				if_id_pc_ff    <= pc_now;
 				pred_hold_valid_ff <= 1'b0;
@@ -157,6 +168,7 @@ import ydrasil_pkg::*;
 				pred_hold_taken_ff <= 1'b0;
 				pred_hold_target_ff <= '0;
 				pred_hold_counter_ff <= 2'b01;
+				pred_hold_bht_index_ff <= '0;
 				if_id_valid_ff <= 1'b1;
 				flush_if_ff     <= 1'b0;
 			end

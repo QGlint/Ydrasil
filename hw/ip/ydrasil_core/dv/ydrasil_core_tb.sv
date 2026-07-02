@@ -147,6 +147,22 @@ end
     reg [31:0] stall_wb_backpressure_count;
     reg [31:0] stall_clint_count;
     reg [31:0] stall_mul_count;
+    reg [31:0] sb_rs1_pending_count;
+    reg [31:0] sb_rs2_pending_count;
+    reg [31:0] sb_rd_waw_count;
+    reg [31:0] sb_issue_rs1_hzd_count;
+    reg [31:0] sb_issue_rs2_hzd_count;
+    reg [31:0] sb_issue_rd_hzd_count;
+    reg [31:0] sb_load_use_count;
+    reg [31:0] sb_alu_use_count;
+    reg [31:0] sb_mul_div_use_count;
+    reg [31:0] sb_branch_src_wait_count;
+    reg [31:0] sb_store_addr_wait_count;
+    reg [31:0] sb_store_data_wait_count;
+    reg [31:0] fe_pred_taken_redirect_count;
+    reg [31:0] fe_correct_taken_redirect_count;
+    reg [31:0] fe_correct_taken_bubble_count;
+    reg [31:0] fe_wrong_dir_flush_count;
 
 	ydrasil_core u_dut (
 		.clk      (clk),
@@ -266,6 +282,22 @@ end
             stall_wb_backpressure_count <= 32'b0;
             stall_clint_count <= 32'b0;
             stall_mul_count <= 32'b0;
+            sb_rs1_pending_count <= 32'b0;
+            sb_rs2_pending_count <= 32'b0;
+            sb_rd_waw_count <= 32'b0;
+            sb_issue_rs1_hzd_count <= 32'b0;
+            sb_issue_rs2_hzd_count <= 32'b0;
+            sb_issue_rd_hzd_count <= 32'b0;
+            sb_load_use_count <= 32'b0;
+            sb_alu_use_count <= 32'b0;
+            sb_mul_div_use_count <= 32'b0;
+            sb_branch_src_wait_count <= 32'b0;
+            sb_store_addr_wait_count <= 32'b0;
+            sb_store_data_wait_count <= 32'b0;
+            fe_pred_taken_redirect_count <= 32'b0;
+            fe_correct_taken_redirect_count <= 32'b0;
+            fe_correct_taken_bubble_count <= 32'b0;
+            fe_wrong_dir_flush_count <= 32'b0;
         end else begin
             last_pc     <= pc;
             if (bp_branch_valid) begin
@@ -280,6 +312,9 @@ end
                 bp_btb_miss_taken_count <= bp_btb_miss_taken_count + (bp_btb_miss_taken ? 32'd1 : 32'd0);
                 bp_correct_taken_count <= bp_correct_taken_count + (bp_correct_taken ? 32'd1 : 32'd0);
                 bp_correct_not_taken_count <= bp_correct_not_taken_count + (bp_correct_not_taken ? 32'd1 : 32'd0);
+                fe_correct_taken_redirect_count <= fe_correct_taken_redirect_count + (bp_correct_taken ? 32'd1 : 32'd0);
+                fe_correct_taken_bubble_count <= fe_correct_taken_bubble_count + (bp_correct_taken ? 32'd1 : 32'd0);
+                fe_wrong_dir_flush_count <= fe_wrong_dir_flush_count + (bp_dir_mispredict ? 32'd1 : 32'd0);
 `ifndef SYNTHESIS
                 if (bp_trace_en) begin
                     $display("BP_TRACE: cycle=%0d pc=0x%08h pred_hit=%0b pred_taken=%0b actual_taken=%0b pred_target=0x%08h actual_target=0x%08h pred_next=0x%08h actual_next=0x%08h counter=%0d mispredict=%0b dir_mispredict=%0b target_mispredict=%0b",
@@ -320,6 +355,37 @@ end
                 (u_dut.clint_stall ? 32'd1 : 32'd0);
             stall_mul_count <= stall_mul_count +
                 (u_dut.ex_mul_stall ? 32'd1 : 32'd0);
+            sb_rs1_pending_count <= sb_rs1_pending_count +
+                (u_dut.rs1_pending_stall ? 32'd1 : 32'd0);
+            sb_rs2_pending_count <= sb_rs2_pending_count +
+                (u_dut.rs2_pending_stall ? 32'd1 : 32'd0);
+            sb_rd_waw_count <= sb_rd_waw_count +
+                (u_dut.rd_waw_stall ? 32'd1 : 32'd0);
+            sb_issue_rs1_hzd_count <= sb_issue_rs1_hzd_count +
+                (u_dut.rs1_issue_hzd ? 32'd1 : 32'd0);
+            sb_issue_rs2_hzd_count <= sb_issue_rs2_hzd_count +
+                (u_dut.rs2_issue_hzd ? 32'd1 : 32'd0);
+            sb_issue_rd_hzd_count <= sb_issue_rd_hzd_count +
+                (u_dut.rd_issue_hzd ? 32'd1 : 32'd0);
+            sb_load_use_count <= sb_load_use_count +
+                ((u_dut.issue_load_producer & u_dut.issue_src_hzd) ? 32'd1 : 32'd0);
+            sb_alu_use_count <= sb_alu_use_count +
+                ((u_dut.issue_alu_producer & u_dut.issue_src_hzd) ? 32'd1 : 32'd0);
+            sb_mul_div_use_count <= sb_mul_div_use_count +
+                ((u_dut.issue_mul_div_producer & u_dut.issue_src_hzd) ? 32'd1 : 32'd0);
+            sb_branch_src_wait_count <= sb_branch_src_wait_count +
+                ((u_dut.scoreboard_stall &&
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP]) ? 32'd1 : 32'd0);
+            sb_store_addr_wait_count <= sb_store_addr_wait_count +
+                ((u_dut.scoreboard_stall &&
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
+                  (u_dut.rs1_pending_stall | u_dut.rs1_issue_hzd)) ? 32'd1 : 32'd0);
+            sb_store_data_wait_count <= sb_store_data_wait_count +
+                ((u_dut.scoreboard_stall &&
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
+                  (u_dut.rs2_pending_stall | u_dut.rs2_issue_hzd)) ? 32'd1 : 32'd0);
+            fe_pred_taken_redirect_count <= fe_pred_taken_redirect_count +
+                (u_dut.u_ydrasil_if_stage.bp_predict_redirect ? 32'd1 : 32'd0);
         end
     end
 
@@ -595,6 +661,25 @@ end
                 stall_wb_backpressure_count,
                 stall_clint_count,
                 stall_mul_count);
+            $display("PERF_SCOREBOARD_DETAIL: RS1_PENDING=%-d RS2_PENDING=%-d RD_WAW=%-d ISSUE_RS1_HZD=%-d ISSUE_RS2_HZD=%-d ISSUE_RD_HZD=%-d LOAD_USE=%-d ALU_USE=%-d MUL_DIV_USE=%-d BRANCH_SRC_WAIT=%-d STORE_ADDR_WAIT=%-d STORE_DATA_WAIT=%-d",
+                sb_rs1_pending_count,
+                sb_rs2_pending_count,
+                sb_rd_waw_count,
+                sb_issue_rs1_hzd_count,
+                sb_issue_rs2_hzd_count,
+                sb_issue_rd_hzd_count,
+                sb_load_use_count,
+                sb_alu_use_count,
+                sb_mul_div_use_count,
+                sb_branch_src_wait_count,
+                sb_store_addr_wait_count,
+                sb_store_data_wait_count);
+            $display("PERF_FRONTEND: PRED_TAKEN_REDIRECT=%-d CORRECT_TAKEN_REDIRECT=%-d CORRECT_TAKEN_BUBBLE=%-d WRONG_DIR_FLUSH=%-d BTB_MISS_TAKEN=%-d",
+                fe_pred_taken_redirect_count,
+                fe_correct_taken_redirect_count,
+                fe_correct_taken_bubble_count,
+                fe_wrong_dir_flush_count,
+                bp_btb_miss_taken_count);
             $display("PERF_BRANCH: BRANCHES=%-d HITS=%-d PRED_TAKEN=%-d MISPRED=%-d ACC=%.2f",
                 bp_branch_count, bp_hit_count, bp_taken_count, bp_mispredict_count, perf_bp_accuracy);
             $display("PERF_BP_ACC: ACC=%.2f", perf_bp_accuracy);

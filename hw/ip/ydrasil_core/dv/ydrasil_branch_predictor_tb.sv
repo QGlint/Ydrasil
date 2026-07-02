@@ -36,6 +36,7 @@ module ydrasil_branch_predictor_tb
     logic        predict_taken;
     logic [31:0] predict_target;
     logic [1:0]  predict_counter;
+    logic [31:0] predict_bht_index;
 
     logic [31:0] predict_pc;
     logic        train_valid;
@@ -43,6 +44,7 @@ module ydrasil_branch_predictor_tb
     logic        train_taken;
     logic [31:0] train_target;
     logic [1:0]  train_counter;
+    logic [31:0] train_bht_index;
     logic        invalidate;
     int          step;
 
@@ -57,11 +59,13 @@ module ydrasil_branch_predictor_tb
         .predict_taken_o  (predict_taken),
         .predict_target_o (predict_target),
         .predict_counter_o(predict_counter),
+        .predict_bht_index_o(predict_bht_index),
         .train_valid_i    (train_valid),
         .train_pc_i       (train_pc),
         .train_taken_i    (train_taken),
         .train_target_i   (train_target),
         .train_counter_i  (train_counter),
+        .train_bht_index_i(train_bht_index),
         .invalidate_i     (invalidate)
     );
 
@@ -73,6 +77,7 @@ module ydrasil_branch_predictor_tb
             train_taken   <= 1'b0;
             train_target  <= '0;
             train_counter <= 2'b01;
+            train_bht_index <= '0;
             invalidate    <= 1'b0;
         end
     endtask
@@ -90,6 +95,7 @@ module ydrasil_branch_predictor_tb
             train_taken   <= taken;
             train_target  <= target;
             train_counter <= counter;
+            train_bht_index <= predict_bht_index;
             invalidate    <= 1'b0;
         end
     endtask
