@@ -11,6 +11,7 @@ import ydrasil_pkg::*;
     
     input wire                          scoreboard_stall_i,
     input wire                          lsu_struct_stall_i,
+    input wire                          id_frontend_stall_i,
     input wire                          clint_stall_i,
     input wire                          ex_mul_stall_i,
     input wire                          wb_backpressure_i,
@@ -32,7 +33,8 @@ import ydrasil_pkg::*;
 
     wire decode_bubble_stall;
     assign decode_bubble_stall =
-        scoreboard_stall_i | lsu_struct_stall_i | clint_stall_i | wb_backpressure_i;
+        scoreboard_stall_i | lsu_struct_stall_i | id_frontend_stall_i |
+        clint_stall_i | wb_backpressure_i;
 
     assign branch_target_o = ex_branch_target_i;
     assign branch_jump_o = ex_branch_jump_i;

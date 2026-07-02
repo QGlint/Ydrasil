@@ -13,6 +13,8 @@ import time
 from itertools import zip_longest
 from typing import Iterable, Optional
 
+from riscv_trace_csv import _iter_trace_entries
+
 
 def _open_log(path: Optional[str]):
 	if not path:
@@ -40,6 +42,41 @@ def _normalize_line(line: str, strip_prefix: Optional[str], drop_ansi: bool) -> 
 	return line.rstrip("\n")
 
 
+def _tee_lines(stream, log):
+	for line in stream:
+		if log:
+			log.write(line)
+		yield line
+
+
+def _drain_lines(stream, log):
+	if stream is None:
+		return
+	for line in stream:
+		if log:
+			log.write(line)
+
+
+def _entry_to_row(entry) -> dict[str, str]:
+	return {
+		"pc": entry.pc,
+		"binary": entry.binary,
+		"gpr": ";".join(entry.gpr),
+		"csr": ";".join(entry.csr),
+		"instr": entry.instr,
+		"instr_str": entry.instr_str,
+		"operand": entry.operand,
+		"mode": entry.mode,
+	}
+
+
+def _iter_realtime_entries(stream, log, source: str, full_trace: bool):
+	for entry, _illegal in _iter_trace_entries(_tee_lines(stream, log), source, full_trace):
+		if not (full_trace or entry.gpr or entry.instr_str in ["wfi"]):
+			continue
+		yield entry
+
+
 def _compare_realtime(args: argparse.Namespace) -> int:
 	hw_cmd = shlex.split(args.hw_cmd)
 	spike_cmd = shlex.split(args.spike_cmd)
@@ -64,36 +101,54 @@ def _compare_realtime(args: argparse.Namespace) -> int:
 		universal_newlines=True,
 	)
 
+	fields = [field.strip() for field in args.compare_csv_fields.split(",") if field.strip()]
+	hw_entries = _iter_realtime_entries(
+		hw_proc.stdout,
+		hw_log,
+		args.hw_source,
+		args.full_trace,
+	) if hw_proc.stdout else iter(())
+	spike_entries = _iter_realtime_entries(
+		spike_proc.stdout,
+		spike_log,
+		args.spike_source,
+		args.full_trace,
+	) if spike_proc.stdout else iter(())
+
 	mismatches = 0
 	try:
-		while True:
-			hw_line = hw_proc.stdout.readline() if hw_proc.stdout else ""
-			spike_line = spike_proc.stdout.readline() if spike_proc.stdout else ""
-
-			if hw_line == "" and spike_line == "":
-				break
-
-			if hw_log and hw_line:
-				hw_log.write(hw_line)
-			if spike_log and spike_line:
-				spike_log.write(spike_line)
-
-			if args.ignore_empty and not hw_line and not spike_line:
+		for idx, pair in enumerate(zip_longest(hw_entries, spike_entries), start=1):
+			hw_entry, spike_entry = pair
+			if spike_entry is None and hw_entry is not None:
 				continue
+			hw_row = _entry_to_row(hw_entry) if hw_entry is not None else None
+			spike_row = _entry_to_row(spike_entry) if spike_entry is not None else None
+			hw_key = _csv_key(hw_row, fields) if hw_row is not None else None
+			spike_key = _csv_key(spike_row, fields) if spike_row is not None else None
 
-			hw_norm = _normalize_line(hw_line, args.strip_prefix, args.drop_ansi)
-			spike_norm = _normalize_line(spike_line, args.strip_prefix, args.drop_ansi)
-
-			if hw_norm != spike_norm:
+			if hw_key != spike_key:
 				mismatches += 1
-				print("Mismatch")
-				print(f"HW:    {hw_norm}")
-				print(f"SPIKE: {spike_norm}")
+				print(f"Mismatch at trace row {idx}")
+				print(f"HW:    {_format_row(hw_row, fields)}")
+				print(f"SPIKE: {_format_row(spike_row, fields)}")
 				if args.max_mismatches and mismatches >= args.max_mismatches:
 					return 1
 
 			if args.delay_ms:
 				time.sleep(args.delay_ms / 1000.0)
+			if args.max_rows and idx >= args.max_rows:
+				print(f"MATCH: first {args.max_rows} realtime trace rows")
+				if spike_proc.poll() is None:
+					spike_proc.terminate()
+				_drain_lines(spike_proc.stdout, spike_log)
+				_drain_lines(hw_proc.stdout, hw_log)
+				hw_rc = hw_proc.wait()
+				if spike_proc.poll() is None:
+					spike_proc.wait()
+				if hw_rc != 0:
+					print(f"HW simulator exited with code {hw_rc}")
+					return hw_rc
+				return 0 if mismatches == 0 else 1
 	finally:
 		for proc in (hw_proc, spike_proc):
 			if proc.poll() is None:
@@ -241,10 +296,15 @@ def _compare_csv(args: argparse.Namespace) -> int:
 	fields = [field.strip() for field in args.compare_csv_fields.split(",") if field.strip()]
 	hw_rows = _read_csv_rows(args.hw_csv)
 	spike_rows = _read_csv_rows(args.spike_csv)
+	if args.max_rows:
+		hw_rows = hw_rows[:args.max_rows]
+		spike_rows = spike_rows[:args.max_rows]
 
 	mismatches = 0
 	for idx, pair in enumerate(zip_longest(hw_rows, spike_rows), start=1):
 		hw_row, spike_row = pair
+		if spike_row is None and hw_row is not None:
+			continue
 		if hw_row is None or spike_row is None:
 			mismatches += 1
 			print(f"Mismatch at trace row {idx}")
@@ -270,7 +330,10 @@ def _compare_csv(args: argparse.Namespace) -> int:
 
 	if mismatches == 0:
 		print("MATCH: YES")
-		print(f"CSV compare PASS: {len(hw_rows)} HW rows, {len(spike_rows)} Spike rows")
+		if args.max_rows:
+			print(f"CSV compare PASS: first {args.max_rows} rows")
+		else:
+			print(f"CSV compare PASS: {len(hw_rows)} HW rows, {len(spike_rows)} Spike rows")
 		return 0
 	print("MATCH: NO")
 	print(f"CSV compare FAIL: {mismatches} mismatch(es)")
@@ -356,6 +419,7 @@ def parse_args() -> argparse.Namespace:
 	parser.add_argument("--drop-ansi", action="store_true", help="Remove ANSI escape codes")
 	parser.add_argument("--delay-ms", type=int, default=0, help="Delay between line reads")
 	parser.add_argument("--max-mismatches", type=int, default=1, help="Stop after N mismatches")
+	parser.add_argument("--max-rows", type=int, default=0, help="Compare at most N trace rows; 0 compares all rows")
 	parser.add_argument("--context-lines", type=int, default=10, help="CSV rows before and after each mismatch")
 	parser.add_argument("--full-trace", dest="full_trace", action="store_true", help="Use full trace parsing")
 	parser.add_argument(

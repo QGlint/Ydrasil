@@ -53,6 +53,22 @@ make sim
 make run_all_tests
 ```
 
+编译并运行 CoreMark：
+
+```sh
+make coremark
+make coremark_sim
+```
+
+CoreMark 默认只跑 HW 仿真，结果摘要写入 `build/PPA/coremark_summary.log`，完整 HW 日志在 `build/sim/hw/coremark/hw.log`。如果需要和 Spike 比较，使用专门的 `COREMARK_SIM_COMPARE` 变量：
+
+```sh
+make coremark_sim COREMARK_SIM_COMPARE=csv SIM_COMPARE_MAX_MISMATCHES=1
+make coremark_sim COREMARK_SIM_COMPARE=realtime TRACE_COMPARE_FIELDS=pc,binary SIM_COMPARE_MAX_ROWS=240000 SIM_COMPARE_MAX_MISMATCHES=1
+```
+
+`csv` 模式会先生成完整 HW/Spike 日志再比较，适合保留上下文；`realtime` 模式会边跑边解析 commit trace，默认比较 `TRACE_COMPARE_FIELDS=pc,binary,gpr`，会自动跳过 make 输出、Spike warning 等非 trace 行，适合快速定位首个 mismatch。CoreMark 会读取 `mcycle` 并把计时值存入内存，和 Spike 的周期数不同，后续结果格式化阶段的控制流也可能不同；排查 benchmark 主体控制流时使用 `TRACE_COMPARE_FIELDS=pc,binary SIM_COMPARE_MAX_ROWS=<N>` 比较确定性前缀。CoreMark 仿真默认超时参数在顶层 `Makefile` 的 `coremark_sim` 目标中设置为 `+cpp_timeout=10000000 +sv_timeout=10000000`。
+
 无 GUI 跑 Vivado 综合、实现到 route，并生成时序分析：
 
 ```sh

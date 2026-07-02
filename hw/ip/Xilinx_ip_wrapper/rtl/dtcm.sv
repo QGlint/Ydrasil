@@ -15,7 +15,7 @@ module dtcm #(
 DRAM u_dram (
   .clka(clk),    // input wire clka
   .ena(dtcm_en),      // input wire ena
-  .wea(dtcm_mask),      // input wire [3 : 0] wea
+  .wea(dtcm_wen ? dtcm_mask : 4'b0000),      // input wire [3 : 0] wea
   .addra(dtcm_addr),  // input wire [15 : 0] addra
   .dina(dtcm_data_i),    // input wire [31 : 0] dina
   .douta(dtcm_data_o)  // output wire [31 : 0] douta

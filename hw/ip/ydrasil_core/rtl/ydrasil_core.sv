@@ -176,6 +176,7 @@ import ydrasil_pkg::*;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    id_ctrl_rd_addr;
 	wire                            id_ctrl_lsu_req;
 	wire                            scoreboard_stall;
+	wire                            id_frontend_stall;
 	wire                            lsu_struct_stall;
 	wire                            ex_accept_valid;
 	reg [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_q;
@@ -326,9 +327,9 @@ import ydrasil_pkg::*;
 		 (id_ctrl_rd_addr == lsu_rf_waddr_rd)) |
 		(alu_rf_wen_rd & id_ctrl_rd_wen & (id_ctrl_rd_addr != '0) &
 		 (id_ctrl_rd_addr == alu_rf_waddr_rd));
-	wire rs1_issue_hzd =
+	wire rs1_issue_raw_hzd =
 		id_ex_rd_issue & id_ctrl_rs1_ren & (id_ctrl_rs1_addr == id_rf_waddr_rd);
-	wire rs2_issue_hzd =
+	wire rs2_issue_raw_hzd =
 		id_ex_rd_issue & id_ctrl_rs2_ren & (id_ctrl_rs2_addr == id_rf_waddr_rd);
 	wire rd_issue_hzd =
 		id_ex_rd_issue & id_ctrl_rd_wen & (id_ctrl_rd_addr == id_rf_waddr_rd);
@@ -345,6 +346,10 @@ import ydrasil_pkg::*;
 		operator_type[ydrasil_pkg::OPERATOR_TYPE_ALU];
 	wire issue_mul_div_producer =
 		id_ex_rd_issue & operator_type[ydrasil_pkg::OPERATOR_TYPE_MUL];
+	wire rs1_issue_alu_ready_next = rs1_issue_raw_hzd & issue_alu_producer;
+	wire rs2_issue_alu_ready_next = rs2_issue_raw_hzd & issue_alu_producer;
+	wire rs1_issue_hzd = rs1_issue_raw_hzd & !issue_alu_producer;
+	wire rs2_issue_hzd = rs2_issue_raw_hzd & !issue_alu_producer;
 	wire issue_src_hzd = rs1_issue_hzd | rs2_issue_hzd;
 
 	assign scoreboard_stall =
@@ -418,7 +423,8 @@ import ydrasil_pkg::*;
 		ydrasil_branch_predictor #(
 			.BP_ENTRIES(BP_ENTRIES),
 			.BTB_ENTRIES(BTB_ENTRIES),
-			.BHT_ENTRIES(BHT_ENTRIES)
+			.BHT_ENTRIES(BHT_ENTRIES),
+			.USE_GSHARE(1'b0)
 		) u_ydrasil_branch_predictor (
 			.clk              (clk),
 			.rst_n            (rst_n),
@@ -490,6 +496,9 @@ import ydrasil_pkg::*;
 		.alu_fwd_valid_i    (alu_rf_wen_rd),
 		.alu_fwd_addr_i     (alu_rf_waddr_rd),
 		.alu_fwd_data_i     (alu_result),
+		.rs1_issue_alu_ready_next_i(rs1_issue_alu_ready_next),
+		.rs2_issue_alu_ready_next_i(rs2_issue_alu_ready_next),
+		.issue_frontend_stall_o(id_frontend_stall),
 		.operand_a_o        (operand_a),
 		.operand_b_o        (operand_b),
 		.operator_o         (operator),
@@ -645,6 +654,7 @@ import ydrasil_pkg::*;
 			.ex_branch_target_i(ex_pc_redirect_target),
 			.scoreboard_stall_i (scoreboard_stall),
 			.lsu_struct_stall_i (lsu_struct_stall),
+			.id_frontend_stall_i(id_frontend_stall),
 	        .clint_stall_i        (clint_stall),
 			.ex_mul_stall_i     (ex_mul_stall),
 			.wb_backpressure_i  (wb_backpressure),

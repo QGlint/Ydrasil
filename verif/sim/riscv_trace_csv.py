@@ -110,7 +110,6 @@ VERILATOR_COMMIT_RE = re.compile(
 ADDR_RE = re.compile(r"(?P<rd>[a-z0-9]+?),(?P<imm>[\-0-9]+?)\((?P<rs1>[a-z0-9]+)\)")
 ILLEGAL_RE = re.compile(r"trap_illegal_instruction")
 SPIKE_BOOT_ADDR_LIMIT = 0x80000000
-YDRASIL_TRAP_ADDR_LIMIT = 0x80000050
 
 
 def _normalize_disasm(disasm):
@@ -213,8 +212,6 @@ def _iter_trace_entries(lines, source, full_trace):
         in_debug = False
 
     current = None
-    ydrasil_seen_test_body = False
-
     for line in lines:
         if in_trampoline:
             if end_trampoline_re and end_trampoline_re.match(line):
@@ -240,17 +237,6 @@ def _iter_trace_entries(lines, source, full_trace):
                 if not _should_skip_entry(current, source, full_trace):
                     yield current, False
             current = _build_entry(match, full_trace)
-            pc = _entry_pc(current)
-            if (
-                source == "ydrasil"
-                and not full_trace
-                and pc is not None
-                and ydrasil_seen_test_body
-                and pc < YDRASIL_TRAP_ADDR_LIMIT
-            ):
-                break
-            if source == "ydrasil" and pc is not None and pc >= YDRASIL_TRAP_ADDR_LIMIT:
-                ydrasil_seen_test_body = True
             if current.instr_str == "ecall" or _is_ecall_entry(current):
                 break
             continue

@@ -336,12 +336,16 @@ else ifeq ($(SIM_COMPARE),realtime)
 	@$(MAKE) get_spike
 	@echo "[SIM] Realtime compare: $(COMPARE_NAME)"
 	$(PYTHON) $(TRACE_COMPARE) --mode realtime \
-		--hw-cmd "$(MAKE) -C hw/dv sim VERILATOR_TRACE=0 LOG_OUTPUT=0 ITCM_FILE=$(abspath $(COMPARE_ITCM)) DTCM_FILE=$(abspath $(COMPARE_DTCM)) SIM_EXTRA_DEFINES='$(COMPARE_SIM_EXTRA_DEFINES)'" \
+		--hw-cmd "$(MAKE) --no-print-directory -C hw/dv sim VERILATOR_TRACE=0 LOG_OUTPUT=0 ITCM_FILE=$(abspath $(COMPARE_ITCM)) DTCM_FILE=$(abspath $(COMPARE_DTCM)) SIM_EXTRA_DEFINES='$(COMPARE_SIM_EXTRA_DEFINES)'" \
 		--spike-cmd "env $(SPIKE_RUN_ENV) $(SPIKE) $(SPIKE_FLAGS) $(spike_stepout) $(spike_extension) $(abspath $(COMPARE_ELF))" \
 		--hw-log $(COMPARE_HW_LOG) \
 		--spike-log $(COMPARE_SPIKE_LOG) \
+		--hw-source ydrasil \
+		--spike-source spike \
 		--merge-stderr \
+		--compare-csv-fields $(TRACE_COMPARE_FIELDS) \
 		--max-mismatches $(SIM_COMPARE_MAX_MISMATCHES) \
+		--max-rows $(SIM_COMPARE_MAX_ROWS) \
 		> $(COMPARE_LOG) 2>&1
 	@cat $(COMPARE_LOG)
 else ifeq ($(SIM_COMPARE),csv)
@@ -366,6 +370,7 @@ else ifeq ($(SIM_COMPARE),csv)
 		--spike-csv $(COMPARE_SPIKE_CSV) \
 		--compare-csv-fields $(TRACE_COMPARE_FIELDS) \
 		--max-mismatches $(SIM_COMPARE_MAX_MISMATCHES) \
+		--max-rows $(SIM_COMPARE_MAX_ROWS) \
 		--context-lines 10 \
 		> $(COMPARE_LOG) 2>&1; \
 	rc=$$?; \
@@ -399,6 +404,7 @@ commit_compare: commit_spike_csv commit_hw_csv
 		--spike-csv $(SPIKE_TRACE_CSV) \
 		--compare-csv-fields $(TRACE_COMPARE_FIELDS) \
 		--max-mismatches $(SIM_COMPARE_MAX_MISMATCHES) \
+		--max-rows $(SIM_COMPARE_MAX_ROWS) \
 		--context-lines 10
 
 get_spike:
