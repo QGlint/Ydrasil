@@ -150,6 +150,19 @@ rv_report_%:
 		printf '%b\n' "$$colored"; \
 	done
 
+ppa_rvtest_report:
+	@mkdir -p "$(PPA_DIR)"; \
+	rm -f "$(PPA_RVTEST_LOG)"; \
+	for typ in $(RVTESTS_TYPE); do \
+		result_dir=$(RVTESTS_RESULT_DIR)/$$typ; \
+		[ -d "$$result_dir" ] || continue; \
+		echo "========== $$typ ==========" >> "$(PPA_RVTEST_LOG)"; \
+		for f in $$(ls $$result_dir/*.status 2>/dev/null | sort); do \
+			cat $$f >> "$(PPA_RVTEST_LOG)"; \
+		done; \
+	done; \
+	echo "[PPA] RV test report: $(PPA_RVTEST_LOG)"
+
 rv_test_summary_all: $(RVTESTS_SUMMARY_TARGETS)
 
 rv_summary_%:

@@ -3,3 +3,4 @@ build/
 hw/ip/alioth/
 tools/
 spec/
+spec
