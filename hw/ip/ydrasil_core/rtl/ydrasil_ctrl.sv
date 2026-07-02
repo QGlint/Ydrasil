@@ -46,7 +46,7 @@ import ydrasil_pkg::*;
     // assign stall_ex_o = clint_stall_i;
     assign stall_id_o = ex_mul_stall_i;
     assign stall_if_o = decode_bubble_stall | ex_mul_stall_i;
-    assign stall_pc_o = decode_bubble_stall | ex_mul_stall_i;
+    assign stall_pc_o = ex_mul_stall_i;
 
 
 endmodule

@@ -5,7 +5,8 @@ import ydrasil_pkg::*;
 	 #(
 		parameter int BP_ENTRIES  = 0,
 		parameter int BTB_ENTRIES = (BP_ENTRIES != 0) ? BP_ENTRIES : ydrasil_pkg::BP_BTB_ENTRIES,
-		parameter int BHT_ENTRIES = (BP_ENTRIES != 0) ? BP_ENTRIES : ydrasil_pkg::BP_BHT_ENTRIES
+		parameter int BHT_ENTRIES = (BP_ENTRIES != 0) ? BP_ENTRIES : ydrasil_pkg::BP_BHT_ENTRIES,
+		parameter bit USE_GSHARE  = 1'b0
 	)(
 	input  wire clk,
 	input  wire rst_n
@@ -424,7 +425,7 @@ import ydrasil_pkg::*;
 			.BP_ENTRIES(BP_ENTRIES),
 			.BTB_ENTRIES(BTB_ENTRIES),
 			.BHT_ENTRIES(BHT_ENTRIES),
-			.USE_GSHARE(1'b0)
+			.USE_GSHARE(USE_GSHARE)
 		) u_ydrasil_branch_predictor (
 			.clk              (clk),
 			.rst_n            (rst_n),
@@ -457,6 +458,10 @@ import ydrasil_pkg::*;
 			.bp_predict_counter_i(bp_predict_counter),
 			.bp_predict_bht_index_i(bp_predict_bht_index),
 			.bp_invalidate_i(id_fence_i),
+			.l0_train_valid_i(ex_bp_train_valid),
+			.l0_train_pc_i(ex_bp_train_pc),
+			.l0_train_taken_i(ex_bp_train_taken),
+			.l0_train_target_i(ex_bp_train_target),
 			.if_mem_addr_o   (if_mem_addr),
 			.if_mem_rdata_i  (if_mem_rdata),
 			.if_id_pc_o      (if_id_pc),

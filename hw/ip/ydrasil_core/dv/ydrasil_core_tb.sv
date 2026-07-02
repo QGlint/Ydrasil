@@ -674,12 +674,20 @@ end
                 sb_branch_src_wait_count,
                 sb_store_addr_wait_count,
                 sb_store_data_wait_count);
-            $display("PERF_FRONTEND: PRED_TAKEN_REDIRECT=%-d CORRECT_TAKEN_REDIRECT=%-d CORRECT_TAKEN_BUBBLE=%-d WRONG_DIR_FLUSH=%-d BTB_MISS_TAKEN=%-d",
+            $display("PERF_FRONTEND: PRED_TAKEN_REDIRECT=%-d CORRECT_TAKEN_REDIRECT=%-d CORRECT_TAKEN_BUBBLE=%-d WRONG_DIR_FLUSH=%-d BTB_MISS_TAKEN=%-d FETCH_Q_FULL=%-d FETCH_Q_EMPTY=%-d FETCH_Q_PUSH=%-d FETCH_Q_POP=%-d DECODE_BLOCKED_BY_UOPQ=%-d SYNC_BP_TAKEN_BUBBLE=%-d L0_HIT=%-d L0_TAKEN=%-d",
                 fe_pred_taken_redirect_count,
                 fe_correct_taken_redirect_count,
                 fe_correct_taken_bubble_count,
                 fe_wrong_dir_flush_count,
-                bp_btb_miss_taken_count);
+                bp_btb_miss_taken_count,
+                u_dut.u_ydrasil_if_stage.perf_fetch_q_full,
+                u_dut.u_ydrasil_if_stage.perf_fetch_q_empty,
+                u_dut.u_ydrasil_if_stage.perf_fetch_q_push,
+                u_dut.u_ydrasil_if_stage.perf_fetch_q_pop,
+                u_dut.u_ydrasil_if_stage.perf_decode_blocked_by_uopq,
+                u_dut.u_ydrasil_if_stage.perf_sync_bp_taken_bubble,
+                u_dut.u_ydrasil_if_stage.perf_l0_hit,
+                u_dut.u_ydrasil_if_stage.perf_l0_taken);
             $display("PERF_BRANCH: BRANCHES=%-d HITS=%-d PRED_TAKEN=%-d MISPRED=%-d ACC=%.2f",
                 bp_branch_count, bp_hit_count, bp_taken_count, bp_mispredict_count, perf_bp_accuracy);
             $display("PERF_BP_ACC: ACC=%.2f", perf_bp_accuracy);

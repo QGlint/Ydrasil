@@ -1,6 +1,4 @@
-
-
-module ydrasil_if_stage 
+module ydrasil_if_stage
 import ydrasil_pkg::*;
 #(
 )(
@@ -12,168 +10,303 @@ import ydrasil_pkg::*;
 	input  wire        stall_pc_i,
 	input  wire        flush_if_i,
 
-		// 后级跳转
-		input  wire        branch_jump_i,
-		input  wire [31:0] branch_target_i,
+	// 后级跳转
+	input  wire        branch_jump_i,
+	input  wire [31:0] branch_target_i,
 
-		// 分支预测
-		input  wire        bp_predict_hit_i,
-		input  wire        bp_predict_taken_i,
-		input  wire [31:0] bp_predict_target_i,
-		input  wire [1:0]  bp_predict_counter_i,
-		input  wire [31:0] bp_predict_bht_index_i,
-		input  wire        bp_invalidate_i,
+	// 分支预测
+	input  wire        bp_predict_hit_i,
+	input  wire        bp_predict_taken_i,
+	input  wire [31:0] bp_predict_target_i,
+	input  wire [1:0]  bp_predict_counter_i,
+	input  wire [31:0] bp_predict_bht_index_i,
+	input  wire        bp_invalidate_i,
+	input  wire        l0_train_valid_i,
+	input  wire [31:0] l0_train_pc_i,
+	input  wire        l0_train_taken_i,
+	input  wire [31:0] l0_train_target_i,
 
-		// 指令存储器接口
-		output wire [31:0] if_mem_addr_o,
-		input  wire [31:0] if_mem_rdata_i,
+	// 指令存储器接口
+	output wire [31:0] if_mem_addr_o,
+	input  wire [31:0] if_mem_rdata_i,
 
-		// IF/ID 流水寄存器输出
-		output wire [31:0] if_id_pc_o,
-		output wire        if_id_pred_hit_o,
-		output wire        if_id_pred_taken_o,
-		output wire [31:0] if_id_pred_target_o,
-		output wire [1:0]  if_id_pred_counter_o,
-		output wire [31:0] if_id_pred_bht_index_o,
-		output wire        if_id_valid_o,
+	// IF/ID 流水寄存器输出
+	output wire [31:0] if_id_pc_o,
+	output wire        if_id_pred_hit_o,
+	output wire        if_id_pred_taken_o,
+	output wire [31:0] if_id_pred_target_o,
+	output wire [1:0]  if_id_pred_counter_o,
+	output wire [31:0] if_id_pred_bht_index_o,
+	output wire        if_id_valid_o,
 
-		output wire [31:0] if_id_instr_o
+	output wire [31:0] if_id_instr_o
+);
 
-	);
+	localparam int FETCH_Q_DEPTH = 4;
+	localparam int FETCH_Q_COUNT_WIDTH = $clog2(FETCH_Q_DEPTH + 1);
+	localparam logic [FETCH_Q_COUNT_WIDTH:0] FETCH_Q_DEPTH_COUNT = FETCH_Q_DEPTH;
+	localparam int L0_ENTRIES = 8;
+	localparam int L0_INDEX_WIDTH = $clog2(L0_ENTRIES);
+	localparam int L0_TAG_WIDTH = 32 - L0_INDEX_WIDTH - 2;
 
-	// RV32I 标准 NOP 指令：addi x0, x0, 0
-	// 当前 PC、下一拍 PC、以及 PC+4
-
-	wire [31:0] pc_n;
-	wire [31:0] pc_plus4;
-	wire [31:0] if_id_instr;
-	wire [31:0] pc_now;
 	reg [31:0] pc_ff;
-	reg [31:0] if_id_pc_ff;
-	reg [31:0] if_id_instr_ff;
-	reg        pred_hold_valid_ff;
-	reg        pred_hold_hit_ff;
-	reg        pred_hold_taken_ff;
-	reg [31:0] pred_hold_target_ff;
-	reg [1:0]  pred_hold_counter_ff;
-	reg [31:0] pred_hold_bht_index_ff;
-	reg        if_id_valid_ff;
-	reg flush_if_ff;
-	reg stall_if_ff;
-	wire       if_id_pred_hit;
-	wire       if_id_pred_taken;
-	wire [31:0] if_id_pred_target;
-	wire [1:0]  if_id_pred_counter;
-	wire [31:0] if_id_pred_bht_index;
-	wire       bp_predict_redirect;
+	reg        mem_resp_valid_ff;
+	reg [31:0] mem_resp_pc_ff;
+	reg        mem_resp_l0_taken_ff;
+	reg [31:0] mem_resp_l0_target_ff;
 
-	// 默认顺序取指地址：PC + 4
-	assign pc_plus4   = pc_ff + 32'd4;
-	assign if_id_pred_hit = pred_hold_valid_ff ? pred_hold_hit_ff :
-	                        bp_predict_hit_i;
-	assign if_id_pred_taken = pred_hold_valid_ff ? pred_hold_taken_ff :
-	                          bp_predict_taken_i;
-	assign if_id_pred_target = pred_hold_valid_ff ? pred_hold_target_ff :
-	                           bp_predict_target_i;
-	assign if_id_pred_counter = pred_hold_valid_ff ? pred_hold_counter_ff :
-	                            bp_predict_counter_i;
-	assign if_id_pred_bht_index = pred_hold_valid_ff ? pred_hold_bht_index_ff :
-	                              bp_predict_bht_index_i;
+	reg        fetch_valid_ff [0:FETCH_Q_DEPTH-1];
+	reg [31:0] fetch_pc_ff [0:FETCH_Q_DEPTH-1];
+	reg [31:0] fetch_instr_ff [0:FETCH_Q_DEPTH-1];
+	reg        fetch_pred_l0_taken_ff [0:FETCH_Q_DEPTH-1];
+	reg        fetch_pred_hit_ff [0:FETCH_Q_DEPTH-1];
+	reg        fetch_pred_taken_ff [0:FETCH_Q_DEPTH-1];
+	reg [31:0] fetch_pred_target_ff [0:FETCH_Q_DEPTH-1];
+	reg [1:0]  fetch_pred_counter_ff [0:FETCH_Q_DEPTH-1];
+	reg [31:0] fetch_pred_bht_index_ff [0:FETCH_Q_DEPTH-1];
+	reg [FETCH_Q_COUNT_WIDTH-1:0] fetch_count_ff;
+
+	reg        l0_valid_ff [0:L0_ENTRIES-1];
+	reg [L0_TAG_WIDTH-1:0] l0_tag_ff [0:L0_ENTRIES-1];
+	reg [31:0] l0_target_ff [0:L0_ENTRIES-1];
+	reg [1:0]  l0_counter_ff [0:L0_ENTRIES-1];
+
+	reg [31:0] perf_fetch_q_full;
+	reg [31:0] perf_fetch_q_empty;
+	reg [31:0] perf_fetch_q_push;
+	reg [31:0] perf_fetch_q_pop;
+	reg [31:0] perf_decode_blocked_by_uopq;
+	reg [31:0] perf_sync_bp_taken_bubble;
+	reg [31:0] perf_l0_hit;
+	reg [31:0] perf_l0_taken;
+
+	wire [31:0] pc_plus4;
+	wire        fetch_q_valid;
+	wire        fetch_q_full;
+	wire        pop_fire;
+	wire        enqueue_fire;
+	wire        request_fire;
+	wire        bp_predict_redirect;
+	wire [FETCH_Q_COUNT_WIDTH:0] reserved_count;
+	wire        flush_queue;
+	wire [31:0] pc_n;
+	wire [L0_INDEX_WIDTH-1:0] l0_predict_index;
+	wire [L0_TAG_WIDTH-1:0]   l0_predict_tag;
+	wire                      l0_predict_hit;
+	wire                      l0_predict_taken;
+	wire [31:0]               l0_predict_target;
+	wire [L0_INDEX_WIDTH-1:0] l0_train_index;
+	wire [L0_TAG_WIDTH-1:0]   l0_train_tag;
+	wire                      l0_train_hit;
+	wire                      l0_train_fire;
+
+	assign pc_plus4 = pc_ff + 32'd4;
+	assign fetch_q_valid = fetch_count_ff != '0;
+	assign fetch_q_full = fetch_count_ff == FETCH_Q_DEPTH[FETCH_Q_COUNT_WIDTH-1:0];
+
+	assign if_id_valid_o = fetch_q_valid;
+	assign if_id_pc_o = fetch_q_valid ? fetch_pc_ff[0] : ydrasil_pkg::RESET_INS;
+	assign if_id_instr_o = fetch_q_valid ? fetch_instr_ff[0] : ydrasil_pkg::RV32I_INS_NOP;
+	assign if_id_pred_hit_o =
+		fetch_q_valid && !bp_invalidate_i && fetch_pred_hit_ff[0];
+	assign if_id_pred_taken_o =
+		fetch_q_valid && !bp_invalidate_i && fetch_pred_taken_ff[0];
+	assign if_id_pred_target_o = fetch_pred_target_ff[0];
+	assign if_id_pred_counter_o =
+		(fetch_q_valid && !bp_invalidate_i) ? fetch_pred_counter_ff[0] : 2'b01;
+	assign if_id_pred_bht_index_o = fetch_pred_bht_index_ff[0];
+
+	assign l0_predict_index = pc_ff[L0_INDEX_WIDTH+1:2];
+	assign l0_predict_tag = pc_ff[31:L0_INDEX_WIDTH+2];
+	assign l0_predict_hit =
+		l0_valid_ff[l0_predict_index] &&
+		(l0_tag_ff[l0_predict_index] == l0_predict_tag);
+	assign l0_predict_taken = l0_predict_hit && (l0_counter_ff[l0_predict_index] == 2'b11);
+	assign l0_predict_target = l0_target_ff[l0_predict_index];
+
+	assign l0_train_index = l0_train_pc_i[L0_INDEX_WIDTH+1:2];
+	assign l0_train_tag = l0_train_pc_i[31:L0_INDEX_WIDTH+2];
+	assign l0_train_hit =
+		l0_valid_ff[l0_train_index] &&
+		(l0_tag_ff[l0_train_index] == l0_train_tag);
+	assign l0_train_fire = l0_train_valid_i && !bp_invalidate_i;
+
 	assign bp_predict_redirect =
-		!branch_jump_i && !stall_if_i && !stall_pc_i && !bp_invalidate_i &&
-		if_id_valid_ff && if_id_pred_taken;
-	// 若发生重定向则跳转到目标 PC，否则顺序执行
-	assign pc_n       = branch_jump_i ? branch_target_i :
-						stall_pc_i ? pc_ff :
-						bp_invalidate_i ? pc_plus4 :
-						bp_predict_redirect ? if_id_pred_target : pc_plus4;
+		!branch_jump_i && !flush_if_i && !stall_if_i && !stall_pc_i &&
+		!bp_invalidate_i && if_id_valid_o && if_id_pred_taken_o &&
+		!fetch_pred_l0_taken_ff[0];
+
+	assign pop_fire = !flush_if_i && !bp_predict_redirect &&
+		!stall_if_i && fetch_q_valid;
+	assign enqueue_fire = !flush_if_i && !bp_predict_redirect &&
+		mem_resp_valid_ff;
+
+	assign reserved_count =
+		{1'b0, fetch_count_ff} +
+		{{FETCH_Q_COUNT_WIDTH{1'b0}}, mem_resp_valid_ff} -
+		{{FETCH_Q_COUNT_WIDTH{1'b0}}, pop_fire};
+	assign request_fire =
+		!branch_jump_i && !flush_if_i && !bp_predict_redirect &&
+		!stall_pc_i && !bp_invalidate_i &&
+		(reserved_count < FETCH_Q_DEPTH_COUNT);
+	assign flush_queue = flush_if_i | branch_jump_i | bp_predict_redirect;
+
+	assign pc_n =
+		branch_jump_i       ? branch_target_i :
+		bp_predict_redirect ? if_id_pred_target_o :
+		request_fire        ? (l0_predict_taken ? l0_predict_target : pc_plus4) :
+		                      pc_ff;
 
 	assign if_mem_addr_o = pc_ff;
 
-	assign if_id_pc_o    = if_id_pc_ff;
-	assign if_id_pred_hit_o = if_id_valid_ff && !bp_invalidate_i && if_id_pred_hit;
-	assign if_id_pred_taken_o = if_id_valid_ff && !bp_invalidate_i && if_id_pred_taken;
-	assign if_id_pred_target_o = if_id_pred_target;
-	assign if_id_pred_counter_o = (if_id_valid_ff && !bp_invalidate_i) ?
-	                              if_id_pred_counter : 2'b01;
-	assign if_id_pred_bht_index_o = if_id_pred_bht_index;
-	assign if_id_valid_o = if_id_valid_ff;
-	assign pc_now =  pc_ff;
-	assign if_id_instr_o = if_id_instr;
-	assign if_id_instr = 
-		stall_if_ff? if_id_instr_ff :
-		flush_if_ff ? ydrasil_pkg::RV32I_INS_NOP : if_mem_rdata_i;
-
-
-
-	// IF 级 PC 寄存器：复位置初值，非停顿时更新
+	integer i;
 	always_ff @(posedge clk or negedge rst_n) begin
 		if (!rst_n) begin
 			pc_ff <= ydrasil_pkg::RESET_INS;
+			mem_resp_valid_ff <= 1'b0;
+			mem_resp_pc_ff <= ydrasil_pkg::RESET_INS;
+			mem_resp_l0_taken_ff <= 1'b0;
+			mem_resp_l0_target_ff <= '0;
+			fetch_count_ff <= '0;
+			perf_fetch_q_full <= '0;
+			perf_fetch_q_empty <= '0;
+			perf_fetch_q_push <= '0;
+			perf_fetch_q_pop <= '0;
+			perf_decode_blocked_by_uopq <= '0;
+			perf_sync_bp_taken_bubble <= '0;
+			perf_l0_hit <= '0;
+			perf_l0_taken <= '0;
+			for (i = 0; i < FETCH_Q_DEPTH; i = i + 1) begin
+				fetch_valid_ff[i] <= 1'b0;
+				fetch_pc_ff[i] <= ydrasil_pkg::RESET_INS;
+				fetch_instr_ff[i] <= ydrasil_pkg::RV32I_INS_NOP;
+				fetch_pred_l0_taken_ff[i] <= 1'b0;
+				fetch_pred_hit_ff[i] <= 1'b0;
+				fetch_pred_taken_ff[i] <= 1'b0;
+				fetch_pred_target_ff[i] <= '0;
+				fetch_pred_counter_ff[i] <= 2'b01;
+				fetch_pred_bht_index_ff[i] <= '0;
+			end
+			for (i = 0; i < L0_ENTRIES; i = i + 1) begin
+				l0_valid_ff[i] <= 1'b0;
+				l0_tag_ff[i] <= '0;
+				l0_target_ff[i] <= '0;
+				l0_counter_ff[i] <= 2'b01;
+			end
 		end else begin
 			pc_ff <= pc_n;
-		end
-	end
 
-
-
-
-	// IF/ID 流水寄存器：支持复位、冲刷和停顿
-	always_ff @(posedge clk or negedge rst_n) begin
-		if (!rst_n) begin
-			if_id_pc_ff    <= ydrasil_pkg::RESET_INS;
-			pred_hold_valid_ff <= 1'b0;
-			pred_hold_hit_ff <= 1'b0;
-			pred_hold_taken_ff <= 1'b0;
-			pred_hold_target_ff <= '0;
-			pred_hold_counter_ff <= 2'b01;
-			pred_hold_bht_index_ff <= '0;
-			if_id_valid_ff <= 1'b0;
-			flush_if_ff     <= 1'b0;
-			if_id_instr_ff <= ydrasil_pkg::RV32I_INS_NOP;
-			stall_if_ff    <= 1'b0;
-		end 
-		else begin
-			if(flush_if_i) begin
-				if_id_pc_ff    <= pc_now;
-				pred_hold_valid_ff <= 1'b0;
-				pred_hold_hit_ff <= 1'b0;
-				pred_hold_taken_ff <= 1'b0;
-				pred_hold_target_ff <= '0;
-				pred_hold_counter_ff <= 2'b01;
-				pred_hold_bht_index_ff <= '0;
-				if_id_valid_ff <= 1'b0;
-				flush_if_ff     <= 1'b1;
-			end else if (bp_predict_redirect) begin
-				if_id_pc_ff    <= pc_now;
-				pred_hold_valid_ff <= 1'b0;
-				pred_hold_hit_ff <= 1'b0;
-				pred_hold_taken_ff <= 1'b0;
-				pred_hold_target_ff <= '0;
-				pred_hold_counter_ff <= 2'b01;
-				pred_hold_bht_index_ff <= '0;
-				if_id_valid_ff <= 1'b0;
-				flush_if_ff     <= 1'b1;
-			end else if(stall_if_i) begin
-				pred_hold_valid_ff <= if_id_valid_ff;
-				pred_hold_hit_ff <= if_id_pred_hit;
-				pred_hold_taken_ff <= if_id_pred_taken;
-				pred_hold_target_ff <= if_id_pred_target;
-				pred_hold_counter_ff <= if_id_pred_counter;
-				pred_hold_bht_index_ff <= if_id_pred_bht_index;
-			end else if(!stall_if_i) begin
-				if_id_pc_ff    <= pc_now;
-				pred_hold_valid_ff <= 1'b0;
-				pred_hold_hit_ff <= 1'b0;
-				pred_hold_taken_ff <= 1'b0;
-				pred_hold_target_ff <= '0;
-				pred_hold_counter_ff <= 2'b01;
-				pred_hold_bht_index_ff <= '0;
-				if_id_valid_ff <= 1'b1;
-				flush_if_ff     <= 1'b0;
+			if (flush_queue) begin
+				mem_resp_valid_ff <= 1'b0;
+				mem_resp_l0_taken_ff <= 1'b0;
+			end else begin
+				mem_resp_valid_ff <= request_fire;
+				if (request_fire) begin
+					mem_resp_pc_ff <= pc_ff;
+					mem_resp_l0_taken_ff <= l0_predict_taken;
+					mem_resp_l0_target_ff <= l0_predict_target;
+				end
 			end
-			if_id_instr_ff <= if_id_instr;
-			stall_if_ff    <= stall_if_i & !flush_if_i;
+
+			if (flush_queue) begin
+				fetch_count_ff <= '0;
+				for (i = 0; i < FETCH_Q_DEPTH; i = i + 1) begin
+					fetch_valid_ff[i] <= 1'b0;
+				end
+			end else if (pop_fire && enqueue_fire) begin
+				for (i = 0; i < FETCH_Q_DEPTH-1; i = i + 1) begin
+					if (i < fetch_count_ff - 1'b1) begin
+						fetch_valid_ff[i] <= fetch_valid_ff[i+1];
+						fetch_pc_ff[i] <= fetch_pc_ff[i+1];
+						fetch_instr_ff[i] <= fetch_instr_ff[i+1];
+						fetch_pred_l0_taken_ff[i] <= fetch_pred_l0_taken_ff[i+1];
+						fetch_pred_hit_ff[i] <= fetch_pred_hit_ff[i+1];
+						fetch_pred_taken_ff[i] <= fetch_pred_taken_ff[i+1];
+						fetch_pred_target_ff[i] <= fetch_pred_target_ff[i+1];
+						fetch_pred_counter_ff[i] <= fetch_pred_counter_ff[i+1];
+						fetch_pred_bht_index_ff[i] <= fetch_pred_bht_index_ff[i+1];
+					end
+				end
+				fetch_valid_ff[fetch_count_ff - 1'b1] <= 1'b1;
+				fetch_pc_ff[fetch_count_ff - 1'b1] <= mem_resp_pc_ff;
+				fetch_instr_ff[fetch_count_ff - 1'b1] <= if_mem_rdata_i;
+				fetch_pred_l0_taken_ff[fetch_count_ff - 1'b1] <= mem_resp_l0_taken_ff;
+				fetch_pred_hit_ff[fetch_count_ff - 1'b1] <= mem_resp_l0_taken_ff | bp_predict_hit_i;
+				fetch_pred_taken_ff[fetch_count_ff - 1'b1] <= mem_resp_l0_taken_ff | bp_predict_taken_i;
+				fetch_pred_target_ff[fetch_count_ff - 1'b1] <=
+					mem_resp_l0_taken_ff ? mem_resp_l0_target_ff : bp_predict_target_i;
+				fetch_pred_counter_ff[fetch_count_ff - 1'b1] <= bp_predict_counter_i;
+				fetch_pred_bht_index_ff[fetch_count_ff - 1'b1] <= bp_predict_bht_index_i;
+			end else if (pop_fire) begin
+				for (i = 0; i < FETCH_Q_DEPTH-1; i = i + 1) begin
+					if (i < fetch_count_ff - 1'b1) begin
+						fetch_valid_ff[i] <= fetch_valid_ff[i+1];
+						fetch_pc_ff[i] <= fetch_pc_ff[i+1];
+						fetch_instr_ff[i] <= fetch_instr_ff[i+1];
+						fetch_pred_l0_taken_ff[i] <= fetch_pred_l0_taken_ff[i+1];
+						fetch_pred_hit_ff[i] <= fetch_pred_hit_ff[i+1];
+						fetch_pred_taken_ff[i] <= fetch_pred_taken_ff[i+1];
+						fetch_pred_target_ff[i] <= fetch_pred_target_ff[i+1];
+						fetch_pred_counter_ff[i] <= fetch_pred_counter_ff[i+1];
+						fetch_pred_bht_index_ff[i] <= fetch_pred_bht_index_ff[i+1];
+					end
+				end
+				fetch_valid_ff[fetch_count_ff - 1'b1] <= 1'b0;
+				fetch_count_ff <= fetch_count_ff - 1'b1;
+			end else if (enqueue_fire && !fetch_q_full) begin
+				fetch_valid_ff[fetch_count_ff] <= 1'b1;
+				fetch_pc_ff[fetch_count_ff] <= mem_resp_pc_ff;
+				fetch_instr_ff[fetch_count_ff] <= if_mem_rdata_i;
+				fetch_pred_l0_taken_ff[fetch_count_ff] <= mem_resp_l0_taken_ff;
+				fetch_pred_hit_ff[fetch_count_ff] <= mem_resp_l0_taken_ff | bp_predict_hit_i;
+				fetch_pred_taken_ff[fetch_count_ff] <= mem_resp_l0_taken_ff | bp_predict_taken_i;
+				fetch_pred_target_ff[fetch_count_ff] <=
+					mem_resp_l0_taken_ff ? mem_resp_l0_target_ff : bp_predict_target_i;
+				fetch_pred_counter_ff[fetch_count_ff] <= bp_predict_counter_i;
+				fetch_pred_bht_index_ff[fetch_count_ff] <= bp_predict_bht_index_i;
+				fetch_count_ff <= fetch_count_ff + 1'b1;
+			end
+
+			if (bp_invalidate_i) begin
+				for (i = 0; i < L0_ENTRIES; i = i + 1) begin
+					l0_valid_ff[i] <= 1'b0;
+					l0_counter_ff[i] <= 2'b01;
+				end
+			end else if (l0_train_fire) begin
+				if (l0_train_taken_i) begin
+					l0_valid_ff[l0_train_index] <= 1'b1;
+					l0_tag_ff[l0_train_index] <= l0_train_tag;
+					l0_target_ff[l0_train_index] <= l0_train_target_i;
+					l0_counter_ff[l0_train_index] <=
+						l0_train_hit ?
+						((l0_counter_ff[l0_train_index] == 2'b11) ?
+						 l0_counter_ff[l0_train_index] :
+						 (l0_counter_ff[l0_train_index] + 2'b01)) :
+						2'b10;
+				end else if (l0_train_hit) begin
+					l0_counter_ff[l0_train_index] <=
+						(l0_counter_ff[l0_train_index] == 2'b00) ?
+						l0_counter_ff[l0_train_index] :
+						(l0_counter_ff[l0_train_index] - 2'b01);
+				end
+			end
+
+			perf_fetch_q_full <= perf_fetch_q_full +
+				(fetch_q_full ? 32'd1 : 32'd0);
+			perf_fetch_q_empty <= perf_fetch_q_empty +
+				((!stall_if_i && !fetch_q_valid) ? 32'd1 : 32'd0);
+			perf_fetch_q_push <= perf_fetch_q_push +
+				(enqueue_fire ? 32'd1 : 32'd0);
+			perf_fetch_q_pop <= perf_fetch_q_pop +
+				(pop_fire ? 32'd1 : 32'd0);
+			perf_decode_blocked_by_uopq <= perf_decode_blocked_by_uopq +
+				((stall_if_i && fetch_q_valid) ? 32'd1 : 32'd0);
+			perf_sync_bp_taken_bubble <= perf_sync_bp_taken_bubble +
+				(bp_predict_redirect ? 32'd1 : 32'd0);
+			perf_l0_hit <= perf_l0_hit +
+				((request_fire && l0_predict_hit) ? 32'd1 : 32'd0);
+			perf_l0_taken <= perf_l0_taken +
+				((request_fire && l0_predict_taken) ? 32'd1 : 32'd0);
 		end
 	end
 
