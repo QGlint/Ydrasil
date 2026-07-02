@@ -286,7 +286,7 @@ package ydrasil_pkg;
 	localparam int BSELRS   = 1;
 	localparam int BTASELRS = 2;
 
-	localparam int BP_BTB_ENTRIES = 256;
-	localparam int BP_BHT_ENTRIES = 256;
+	localparam int BP_BTB_ENTRIES = 512;
+	localparam int BP_BHT_ENTRIES = 512;
 
 endpackage

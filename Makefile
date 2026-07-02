@@ -227,15 +227,17 @@ coremark_result:
 		tmp=$$(mktemp); \
 		awk '{ \
 			line=$$0; \
-			if (match(line, /(core[[:space:]]+0:|3[[:space:]]+0x)/)) { \
+			if (line ~ /^(PERF_METRIC:|PERF_STALL:|PERF_BRANCH:|PERF_BP_ACC:|PERF_BP_DETAIL:)/) { \
+				print line; \
+			} else if (match(line, /(core[[:space:]]+0:|3[[:space:]]+0x)/)) { \
 				prefix=substr(line, 1, RSTART - 1); \
 				if (length(prefix) > 0) printf "%s", prefix; \
 			} else if (line == "") { \
 				printf "\n"; \
 			} \
 		} END { printf "\n"; }' "$(COREMARK_RESULT_LOG)" > $$tmp; \
-		if grep -Eq '^(CoreMark Size|Total ticks|Total time \(secs\)|Iterations/Sec|Iterations       |Compiler version|Compiler flags|Memory location|seedcrc|Correct operation validated|CoreMark 1\.0 :|Errors detected|ERROR!|COREMARK DONE|\[[0-9]+\]crc)' "$$tmp"; then \
-			grep -E '^(CoreMark Size|Total ticks|Total time \(secs\)|Iterations/Sec|Iterations       |Compiler version|Compiler flags|Memory location|seedcrc|Correct operation validated|CoreMark 1\.0 :|Errors detected|ERROR!|COREMARK DONE|\[[0-9]+\]crc)' "$$tmp"; \
+		if grep -Eq '^(CoreMark Size|Total ticks|Total time \(secs\)|Iterations/Sec|Iterations       |Compiler version|Compiler flags|Memory location|seedcrc|Correct operation validated|CoreMark 1\.0 :|Errors detected|ERROR!|COREMARK DONE|PERF_METRIC:|PERF_STALL:|PERF_BRANCH:|PERF_BP_ACC:|PERF_BP_DETAIL:|\[[0-9]+\]crc)' "$$tmp"; then \
+			grep -E '^(CoreMark Size|Total ticks|Total time \(secs\)|Iterations/Sec|Iterations       |Compiler version|Compiler flags|Memory location|seedcrc|Correct operation validated|CoreMark 1\.0 :|Errors detected|ERROR!|COREMARK DONE|PERF_METRIC:|PERF_STALL:|PERF_BRANCH:|PERF_BP_ACC:|PERF_BP_DETAIL:|\[[0-9]+\]crc)' "$$tmp"; \
 		else \
 			echo "[COREMARK] No CoreMark result lines found in $(COREMARK_RESULT_LOG)"; \
 		fi; \

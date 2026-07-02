@@ -16,6 +16,24 @@ import ydrasil_pkg::*;
 	output wire [ 3:0]  perip_mask,
     output wire [31:0]  perip_wdata,
     input  wire [31:0]  perip_rdata
+`ifndef SYNTHESIS
+    ,output wire [31:0] dbg_bp_predict_pc_o
+    ,output wire        dbg_bp_predict_hit_o
+    ,output wire        dbg_bp_predict_taken_o
+    ,output wire [31:0] dbg_bp_predict_target_o
+    ,output wire [1:0]  dbg_bp_predict_counter_o
+    ,output wire        dbg_bp_resolve_valid_o
+    ,output wire [31:0] dbg_bp_resolve_pc_o
+    ,output wire        dbg_bp_actual_taken_o
+    ,output wire [31:0] dbg_bp_actual_target_o
+    ,output wire [31:0] dbg_bp_actual_next_pc_o
+    ,output wire        dbg_bp_pred_hit_o
+    ,output wire        dbg_bp_pred_taken_o
+    ,output wire [31:0] dbg_bp_pred_target_o
+    ,output wire [1:0]  dbg_bp_pred_counter_o
+    ,output wire [31:0] dbg_bp_pred_next_pc_o
+    ,output wire        dbg_bp_mispredict_o
+`endif
 );
 
 	// IF <-> MEMS
@@ -89,6 +107,19 @@ import ydrasil_pkg::*;
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] ex_bp_train_target;
 	wire [1:0]                  ex_bp_train_counter;
 	wire                        ex_branch_mispredict;
+`ifndef SYNTHESIS
+	wire                        dbg_bp_resolve_valid;
+	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] dbg_bp_resolve_pc;
+	wire                        dbg_bp_actual_taken;
+	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] dbg_bp_actual_target;
+	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] dbg_bp_actual_next_pc;
+	wire                        dbg_bp_pred_hit;
+	wire                        dbg_bp_pred_taken;
+	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] dbg_bp_pred_target;
+	wire [1:0]                  dbg_bp_pred_counter;
+	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] dbg_bp_pred_next_pc;
+	wire                        dbg_bp_mispredict;
+`endif
 
 	// Branch predictor
 	wire                        bp_predict_hit;
@@ -239,6 +270,24 @@ import ydrasil_pkg::*;
 	assign id_ex_rd_issue =
 		ex_accept_valid & (id_rf_waddr_rd != '0) & !interrupt &
 		(id_alu_rf_wen_rd | operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD]);
+`ifndef SYNTHESIS
+	assign dbg_bp_predict_pc_o = if_mem_addr;
+	assign dbg_bp_predict_hit_o = bp_predict_hit;
+	assign dbg_bp_predict_taken_o = bp_predict_taken;
+	assign dbg_bp_predict_target_o = bp_predict_target;
+	assign dbg_bp_predict_counter_o = bp_predict_counter;
+	assign dbg_bp_resolve_valid_o = dbg_bp_resolve_valid;
+	assign dbg_bp_resolve_pc_o = dbg_bp_resolve_pc;
+	assign dbg_bp_actual_taken_o = dbg_bp_actual_taken;
+	assign dbg_bp_actual_target_o = dbg_bp_actual_target;
+	assign dbg_bp_actual_next_pc_o = dbg_bp_actual_next_pc;
+	assign dbg_bp_pred_hit_o = dbg_bp_pred_hit;
+	assign dbg_bp_pred_taken_o = dbg_bp_pred_taken;
+	assign dbg_bp_pred_target_o = dbg_bp_pred_target;
+	assign dbg_bp_pred_counter_o = dbg_bp_pred_counter;
+	assign dbg_bp_pred_next_pc_o = dbg_bp_pred_next_pc;
+	assign dbg_bp_mispredict_o = dbg_bp_mispredict;
+`endif
 	wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_clear_mask =
 		wb_hzd_valid_q ? (ydrasil_pkg::REGS_NUM'(1) << wb_hzd_addr_q) : '0;
 	wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_issue_mask =
@@ -502,6 +551,19 @@ import ydrasil_pkg::*;
 		.mul_result_valid_o (mul_result_valid),
 		.ex_instret_inc_o   (ex_instret_inc),
 		.ex_mul_stall_o     (ex_mul_stall)
+`ifndef SYNTHESIS
+		,.dbg_bp_resolve_valid_o(dbg_bp_resolve_valid)
+		,.dbg_bp_resolve_pc_o(dbg_bp_resolve_pc)
+		,.dbg_bp_actual_taken_o(dbg_bp_actual_taken)
+		,.dbg_bp_actual_target_o(dbg_bp_actual_target)
+		,.dbg_bp_actual_next_pc_o(dbg_bp_actual_next_pc)
+		,.dbg_bp_pred_hit_o(dbg_bp_pred_hit)
+		,.dbg_bp_pred_taken_o(dbg_bp_pred_taken)
+		,.dbg_bp_pred_target_o(dbg_bp_pred_target)
+		,.dbg_bp_pred_counter_o(dbg_bp_pred_counter)
+		,.dbg_bp_pred_next_pc_o(dbg_bp_pred_next_pc)
+		,.dbg_bp_mispredict_o(dbg_bp_mispredict)
+`endif
 	);
 
 	ydrasil_mems u_ydrasil_mems (

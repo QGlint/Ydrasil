@@ -85,14 +85,68 @@ end
     real ipc;
     real bp_accuracy;
 
-    wire bp_branch_valid = u_dut.ex_bp_train_valid;
-    wire bp_pred_hit = u_dut.id_ex_pred_hit;
-    wire bp_pred_taken = u_dut.id_ex_pred_taken;
-    wire bp_mispredict = u_dut.ex_branch_mispredict;
+`ifndef SYNTHESIS
+    wire [31:0] dbg_bp_predict_pc;
+    wire        dbg_bp_predict_hit;
+    wire        dbg_bp_predict_taken;
+    wire [31:0] dbg_bp_predict_target;
+    wire [1:0]  dbg_bp_predict_counter;
+    wire        dbg_bp_resolve_valid;
+    wire [31:0] dbg_bp_resolve_pc;
+    wire        dbg_bp_actual_taken;
+    wire [31:0] dbg_bp_actual_target;
+    wire [31:0] dbg_bp_actual_next_pc;
+    wire        dbg_bp_pred_hit;
+    wire        dbg_bp_pred_taken;
+    wire [31:0] dbg_bp_pred_target;
+    wire [1:0]  dbg_bp_pred_counter;
+    wire [31:0] dbg_bp_pred_next_pc;
+    wire        dbg_bp_mispredict;
+
+    wire bp_branch_valid = dbg_bp_resolve_valid;
+    wire bp_pred_hit = dbg_bp_pred_hit;
+    wire bp_pred_taken = dbg_bp_pred_hit & dbg_bp_pred_taken;
+    wire bp_actual_taken = dbg_bp_actual_taken;
+    wire bp_mispredict = dbg_bp_mispredict;
+    wire bp_dir_mispredict = bp_pred_taken ^ bp_actual_taken;
+    wire bp_target_mispredict =
+        bp_actual_taken & bp_pred_taken & (dbg_bp_pred_target != dbg_bp_actual_target);
+    wire bp_btb_miss_taken = bp_actual_taken & !dbg_bp_pred_hit;
+    wire bp_correct_taken =
+        bp_actual_taken & bp_pred_taken & (dbg_bp_pred_target == dbg_bp_actual_target);
+    wire bp_correct_not_taken = !bp_actual_taken & !bp_pred_taken;
+`else
+    wire bp_branch_valid = 1'b0;
+    wire bp_pred_hit = 1'b0;
+    wire bp_pred_taken = 1'b0;
+    wire bp_actual_taken = 1'b0;
+    wire bp_mispredict = 1'b0;
+    wire bp_dir_mispredict = 1'b0;
+    wire bp_target_mispredict = 1'b0;
+    wire bp_btb_miss_taken = 1'b0;
+    wire bp_correct_taken = 1'b0;
+    wire bp_correct_not_taken = 1'b0;
+`endif
+`ifndef SYNTHESIS
+    bit bp_trace_en;
+    bit bp_fetch_trace_en;
+`endif
     reg [31:0] bp_branch_count;
     reg [31:0] bp_hit_count;
     reg [31:0] bp_taken_count;
+    reg [31:0] bp_actual_taken_count;
+    reg [31:0] bp_actual_not_taken_count;
     reg [31:0] bp_mispredict_count;
+    reg [31:0] bp_dir_mispredict_count;
+    reg [31:0] bp_target_mispredict_count;
+    reg [31:0] bp_btb_miss_taken_count;
+    reg [31:0] bp_correct_taken_count;
+    reg [31:0] bp_correct_not_taken_count;
+    reg [31:0] stall_scoreboard_count;
+    reg [31:0] stall_lsu_struct_count;
+    reg [31:0] stall_wb_backpressure_count;
+    reg [31:0] stall_clint_count;
+    reg [31:0] stall_mul_count;
 
 	ydrasil_core u_dut (
 		.clk      (clk),
@@ -102,7 +156,33 @@ end
 		.perip_mask (perip_mask),
 		.perip_wdata(perip_wdata),
 		.perip_rdata(perip_rdata)
+`ifndef SYNTHESIS
+        ,.dbg_bp_predict_pc_o(dbg_bp_predict_pc)
+        ,.dbg_bp_predict_hit_o(dbg_bp_predict_hit)
+        ,.dbg_bp_predict_taken_o(dbg_bp_predict_taken)
+        ,.dbg_bp_predict_target_o(dbg_bp_predict_target)
+        ,.dbg_bp_predict_counter_o(dbg_bp_predict_counter)
+        ,.dbg_bp_resolve_valid_o(dbg_bp_resolve_valid)
+        ,.dbg_bp_resolve_pc_o(dbg_bp_resolve_pc)
+        ,.dbg_bp_actual_taken_o(dbg_bp_actual_taken)
+        ,.dbg_bp_actual_target_o(dbg_bp_actual_target)
+        ,.dbg_bp_actual_next_pc_o(dbg_bp_actual_next_pc)
+        ,.dbg_bp_pred_hit_o(dbg_bp_pred_hit)
+        ,.dbg_bp_pred_taken_o(dbg_bp_pred_taken)
+        ,.dbg_bp_pred_target_o(dbg_bp_pred_target)
+        ,.dbg_bp_pred_counter_o(dbg_bp_pred_counter)
+        ,.dbg_bp_pred_next_pc_o(dbg_bp_pred_next_pc)
+        ,.dbg_bp_mispredict_o(dbg_bp_mispredict)
+`endif
 	);
+
+`ifndef SYNTHESIS
+    initial begin
+        bp_trace_en = $test$plusargs("bp_trace");
+        bp_fetch_trace_en = $test$plusargs("bp_fetch_trace");
+    end
+`endif
+
 `ifndef VERILATOR_CC
 	initial begin
 		clk = 1'b0;
@@ -160,8 +240,10 @@ end
                      u_dut.mul_rf_waddr_rd);
             $finish;
         end
-        if(sim_done)
+        if(sim_done) begin
+            print_perf_metrics();
             $finish; 
+        end
 	end
 
     // 周期计数器 - 保持同步实现
@@ -171,15 +253,73 @@ end
             bp_branch_count <= 32'b0;
             bp_hit_count <= 32'b0;
             bp_taken_count <= 32'b0;
+            bp_actual_taken_count <= 32'b0;
+            bp_actual_not_taken_count <= 32'b0;
             bp_mispredict_count <= 32'b0;
+            bp_dir_mispredict_count <= 32'b0;
+            bp_target_mispredict_count <= 32'b0;
+            bp_btb_miss_taken_count <= 32'b0;
+            bp_correct_taken_count <= 32'b0;
+            bp_correct_not_taken_count <= 32'b0;
+            stall_scoreboard_count <= 32'b0;
+            stall_lsu_struct_count <= 32'b0;
+            stall_wb_backpressure_count <= 32'b0;
+            stall_clint_count <= 32'b0;
+            stall_mul_count <= 32'b0;
         end else begin
             last_pc     <= pc;
             if (bp_branch_valid) begin
                 bp_branch_count <= bp_branch_count + 1;
                 bp_hit_count <= bp_hit_count + (bp_pred_hit ? 32'd1 : 32'd0);
                 bp_taken_count <= bp_taken_count + (bp_pred_taken ? 32'd1 : 32'd0);
+                bp_actual_taken_count <= bp_actual_taken_count + (bp_actual_taken ? 32'd1 : 32'd0);
+                bp_actual_not_taken_count <= bp_actual_not_taken_count + (!bp_actual_taken ? 32'd1 : 32'd0);
                 bp_mispredict_count <= bp_mispredict_count + (bp_mispredict ? 32'd1 : 32'd0);
+                bp_dir_mispredict_count <= bp_dir_mispredict_count + (bp_dir_mispredict ? 32'd1 : 32'd0);
+                bp_target_mispredict_count <= bp_target_mispredict_count + (bp_target_mispredict ? 32'd1 : 32'd0);
+                bp_btb_miss_taken_count <= bp_btb_miss_taken_count + (bp_btb_miss_taken ? 32'd1 : 32'd0);
+                bp_correct_taken_count <= bp_correct_taken_count + (bp_correct_taken ? 32'd1 : 32'd0);
+                bp_correct_not_taken_count <= bp_correct_not_taken_count + (bp_correct_not_taken ? 32'd1 : 32'd0);
+`ifndef SYNTHESIS
+                if (bp_trace_en) begin
+                    $display("BP_TRACE: cycle=%0d pc=0x%08h pred_hit=%0b pred_taken=%0b actual_taken=%0b pred_target=0x%08h actual_target=0x%08h pred_next=0x%08h actual_next=0x%08h counter=%0d mispredict=%0b dir_mispredict=%0b target_mispredict=%0b",
+                        cycle_count,
+                        dbg_bp_resolve_pc,
+                        dbg_bp_pred_hit,
+                        bp_pred_taken,
+                        dbg_bp_actual_taken,
+                        dbg_bp_pred_target,
+                        dbg_bp_actual_target,
+                        dbg_bp_pred_next_pc,
+                        dbg_bp_actual_next_pc,
+                        dbg_bp_pred_counter,
+                        dbg_bp_mispredict,
+                        bp_dir_mispredict,
+                        bp_target_mispredict);
+                end
+`endif
             end
+`ifndef SYNTHESIS
+            if (bp_fetch_trace_en && dbg_bp_predict_hit) begin
+                $display("BP_FETCH_TRACE: cycle=%0d pc=0x%08h hit=%0b taken=%0b target=0x%08h counter=%0d",
+                    cycle_count,
+                    dbg_bp_predict_pc,
+                    dbg_bp_predict_hit,
+                    dbg_bp_predict_taken,
+                    dbg_bp_predict_target,
+                    dbg_bp_predict_counter);
+            end
+`endif
+            stall_scoreboard_count <= stall_scoreboard_count +
+                (u_dut.scoreboard_stall ? 32'd1 : 32'd0);
+            stall_lsu_struct_count <= stall_lsu_struct_count +
+                (u_dut.lsu_struct_stall ? 32'd1 : 32'd0);
+            stall_wb_backpressure_count <= stall_wb_backpressure_count +
+                (u_dut.wb_backpressure ? 32'd1 : 32'd0);
+            stall_clint_count <= stall_clint_count +
+                (u_dut.clint_stall ? 32'd1 : 32'd0);
+            stall_mul_count <= stall_mul_count +
+                (u_dut.ex_mul_stall ? 32'd1 : 32'd0);
         end
     end
 
@@ -399,6 +539,14 @@ end
             $display("~~~~~~~~~~~~~~~~~~ IPC value: %.4f ~~~~~~~~~~~~~~~~~~", ipc);
             $display("~~~~ Branch predictor: branches=%0d hits=%0d predicted_taken=%0d mispredicts=%0d accuracy=%.2f%% ~~~~",
                 bp_branch_count, bp_hit_count, bp_taken_count, bp_mispredict_count, bp_accuracy);
+            $display("~~~~ BP detail: actual_taken=%0d not_taken=%0d dir_mispredict=%0d target_mispredict=%0d btb_miss_taken=%0d correct_taken=%0d correct_not_taken=%0d ~~~~",
+                bp_actual_taken_count,
+                bp_actual_not_taken_count,
+                bp_dir_mispredict_count,
+                bp_target_mispredict_count,
+                bp_btb_miss_taken_count,
+                bp_correct_taken_count,
+                bp_correct_not_taken_count);
             $display("~~~~~~~~~~~~~~~The final x3 Reg value: %d ~~~~~~~~~~~~~", x3);
             $display("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
 
@@ -425,12 +573,41 @@ end
                 $display("fail testnum = %2d", x3);
                 for (r = 0; r < 32; r = r + 1) $display("x%2d = 0x%x", r, u_dut.u_ydrasil_registers.registers[r]);
             end
-            $display("PERF_METRIC: CYCLES=%-d INSTS=%-d IPC=%.4f", cycle_count, instruction_count, ipc);
-            $display("BP_METRIC: BRANCHES=%-d HITS=%-d PRED_TAKEN=%-d MISPRED=%-d ACC=%.2f",
-                bp_branch_count, bp_hit_count, bp_taken_count, bp_mispredict_count, bp_accuracy);
+            print_perf_metrics();
             $finish;
         end
     end
+
+    task automatic print_perf_metrics;
+        real perf_ipc;
+        real perf_bp_accuracy;
+        begin
+            perf_ipc = (instruction_count > 0 && cycle_count > 0) ?
+                (instruction_count * 1.0) / cycle_count : 0.0;
+            perf_bp_accuracy = (bp_branch_count > 0) ?
+                ((bp_branch_count - bp_mispredict_count) * 100.0) / bp_branch_count : 0.0;
+
+            $display("PERF_METRIC: CYCLES=%-d INSTS=%-d IPC=%.4f",
+                cycle_count, instruction_count, perf_ipc);
+            $display("PERF_STALL: SCOREBOARD=%-d LSU_STRUCT=%-d WB_BACKPRESSURE=%-d CLINT=%-d MUL_DIV=%-d",
+                stall_scoreboard_count,
+                stall_lsu_struct_count,
+                stall_wb_backpressure_count,
+                stall_clint_count,
+                stall_mul_count);
+            $display("PERF_BRANCH: BRANCHES=%-d HITS=%-d PRED_TAKEN=%-d MISPRED=%-d ACC=%.2f",
+                bp_branch_count, bp_hit_count, bp_taken_count, bp_mispredict_count, perf_bp_accuracy);
+            $display("PERF_BP_ACC: ACC=%.2f", perf_bp_accuracy);
+            $display("PERF_BP_DETAIL: TAKEN=%-d NOT_TAKEN=%-d DIR_MISPRED=%-d TARGET_MISPRED=%-d BTB_MISS_TAKEN=%-d CORRECT_TAKEN=%-d CORRECT_NOT_TAKEN=%-d",
+                bp_actual_taken_count,
+                bp_actual_not_taken_count,
+                bp_dir_mispredict_count,
+                bp_target_mispredict_count,
+                bp_btb_miss_taken_count,
+                bp_correct_taken_count,
+                bp_correct_not_taken_count);
+        end
+    endtask
 
     // 添加一个任务来显示处理过的testcase名称
     task automatic display_testcase_name;

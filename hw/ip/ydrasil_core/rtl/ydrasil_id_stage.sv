@@ -258,7 +258,8 @@ import ydrasil_pkg::*;
     assign id_fence_i = (if_id_instr_i[6:0] == ydrasil_pkg::RV32I_INS_FENCE) &&
                         (if_id_instr_i[14:12] == 3'b001);
 
-    wire [DATA_WIDTH-1:0] issue_lsu_addr = operand_a + operand_b;
+    wire [DATA_WIDTH-1:0] issue_lsu_addr_fast = issue_rs1_data + issue_imm_ff;
+    wire [DATA_WIDTH-1:0] issue_lsu_addr = issue_lsu_addr_fast;
     wire [1:0] issue_lsu_addr_index = issue_lsu_addr[1:0];
     wire issue_lsu_addr_is_dtcm =
         (issue_lsu_addr[DATA_WIDTH-1:DTCM_TAG_LSB] ==

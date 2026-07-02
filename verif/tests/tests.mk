@@ -115,6 +115,11 @@ rv_sim_%:
 	cycles=$$(grep -o "CYCLES=[0-9]*" $$hw_log | cut -d= -f2); \
 	insts=$$(grep -o "INSTS=[0-9]*" $$hw_log | cut -d= -f2); \
 	ipc=$$(grep -o "IPC=[0-9.]*" $$hw_log | cut -d= -f2); \
+	bp_acc=$$(grep -m1 "^PERF_BP_ACC:" $$hw_log | sed -n 's/.*ACC=\([0-9.]*\).*/\1/p'); \
+	if [ -z "$$bp_acc" ]; then \
+		bp_acc=$$(grep -m1 "^PERF_BRANCH:" $$hw_log | sed -n 's/.*ACC=\([0-9.]*\).*/\1/p'); \
+	fi; \
+	[ -n "$$bp_acc" ] || bp_acc=N/A; \
 	if [ "$(SIM_COMPARE)" = "none" ]; then \
 		match_status=SKIP; \
 	fi; \
@@ -123,7 +128,7 @@ rv_sim_%:
 	else \
 		pass_status=FAIL; \
 	fi; \
-	status_line="[$$typ/$$base] [Cycles: $$cycles | Insts: $$insts | IPC: $$ipc] [$$match_status] [$$pass_status]"; \
+	status_line="[$$typ/$$base] [Cycles: $$cycles | Insts: $$insts | IPC: $$ipc | BP Acc: $$bp_acc%] [$$match_status] [$$pass_status]"; \
 	echo "$$status_line" >> $$result_dir/$$base.log; \
 	echo "$$status_line" > $$result_dir/$$base.status
 
