@@ -232,7 +232,7 @@ coremark_result:
 		tmp=$$(mktemp); \
 		awk '{ \
 			line=$$0; \
-			if (line ~ /^(PERF_METRIC:|PERF_STALL:|PERF_SCOREBOARD_DETAIL:|PERF_FRONTEND:|PERF_BRANCH:|PERF_BP_ACC:|PERF_BP_DETAIL:)/) { \
+			if (line ~ /^PERF_[A-Z0-9_]+:/) { \
 				print line; \
 			} else if (match(line, /(core[[:space:]]+0:|3[[:space:]]+0x)/)) { \
 				prefix=substr(line, 1, RSTART - 1); \
@@ -241,8 +241,8 @@ coremark_result:
 				printf "\n"; \
 			} \
 		} END { printf "\n"; }' "$(COREMARK_RESULT_LOG)" > $$tmp; \
-		if grep -Eq '^(CoreMark Size|Total ticks|Total time \(secs\)|Iterations/Sec|Iterations       |Compiler version|Compiler flags|Memory location|seedcrc|Correct operation validated|CoreMark 1\.0 :|Errors detected|ERROR!|COREMARK DONE|PERF_METRIC:|PERF_STALL:|PERF_SCOREBOARD_DETAIL:|PERF_FRONTEND:|PERF_BRANCH:|PERF_BP_ACC:|PERF_BP_DETAIL:|\[[0-9]+\]crc)' "$$tmp"; then \
-			grep -E '^(CoreMark Size|Total ticks|Total time \(secs\)|Iterations/Sec|Iterations       |Compiler version|Compiler flags|Memory location|seedcrc|Correct operation validated|CoreMark 1\.0 :|Errors detected|ERROR!|COREMARK DONE|PERF_METRIC:|PERF_STALL:|PERF_SCOREBOARD_DETAIL:|PERF_FRONTEND:|PERF_BRANCH:|PERF_BP_ACC:|PERF_BP_DETAIL:|\[[0-9]+\]crc)' "$$tmp" | tee -a "$(PPA_COREMARK_LOG)"; \
+		if grep -Eq '^(CoreMark Size|Total ticks|Total time \(secs\)|Iterations/Sec|Iterations       |Compiler version|Compiler flags|Memory location|seedcrc|Correct operation validated|CoreMark 1\.0 :|Errors detected|ERROR!|COREMARK DONE|PERF_[A-Z0-9_]+:|\[[0-9]+\]crc)' "$$tmp"; then \
+			grep -E '^(CoreMark Size|Total ticks|Total time \(secs\)|Iterations/Sec|Iterations       |Compiler version|Compiler flags|Memory location|seedcrc|Correct operation validated|CoreMark 1\.0 :|Errors detected|ERROR!|COREMARK DONE|PERF_[A-Z0-9_]+:|\[[0-9]+\]crc)' "$$tmp" | tee -a "$(PPA_COREMARK_LOG)"; \
 		else \
 			echo "[COREMARK] No CoreMark result lines found in $(COREMARK_RESULT_LOG)" | tee -a "$(PPA_COREMARK_LOG)"; \
 		fi; \

@@ -32,6 +32,7 @@ import ydrasil_pkg::*;
     ,output wire        dbg_bp_pred_taken_o
     ,output wire [31:0] dbg_bp_pred_target_o
     ,output wire [1:0]  dbg_bp_pred_counter_o
+    ,output wire        dbg_bp_pred_l0_taken_o
     ,output wire [31:0] dbg_bp_pred_next_pc_o
     ,output wire        dbg_bp_mispredict_o
 `endif
@@ -49,6 +50,7 @@ import ydrasil_pkg::*;
 	wire [31:0] if_id_pred_target;
 	wire [1:0]  if_id_pred_counter;
 	wire [31:0] if_id_pred_bht_index;
+	wire        if_id_pred_l0_taken;
 	wire        if_id_valid;
 
 	// CTRL signals
@@ -120,6 +122,7 @@ import ydrasil_pkg::*;
 	wire                        dbg_bp_pred_taken;
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] dbg_bp_pred_target;
 	wire [1:0]                  dbg_bp_pred_counter;
+	wire                        dbg_bp_pred_l0_taken;
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] dbg_bp_pred_next_pc;
 	wire                        dbg_bp_mispredict;
 `endif
@@ -136,6 +139,7 @@ import ydrasil_pkg::*;
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] id_ex_pred_target;
 	wire [1:0]                  id_ex_pred_counter;
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] id_ex_pred_bht_index;
+	wire                        id_ex_pred_l0_taken;
 	wire                        id_ex_valid;
 
 	// LSU request path
@@ -178,6 +182,7 @@ import ydrasil_pkg::*;
 	wire                            id_ctrl_lsu_req;
 	wire                            scoreboard_stall;
 	wire                            id_frontend_stall;
+	wire                            ready_issue_allow;
 	wire                            lsu_struct_stall;
 	wire                            ex_accept_valid;
 	reg [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_q;
@@ -291,6 +296,7 @@ import ydrasil_pkg::*;
 	assign dbg_bp_pred_taken_o = dbg_bp_pred_taken;
 	assign dbg_bp_pred_target_o = dbg_bp_pred_target;
 	assign dbg_bp_pred_counter_o = dbg_bp_pred_counter;
+	assign dbg_bp_pred_l0_taken_o = dbg_bp_pred_l0_taken;
 	assign dbg_bp_pred_next_pc_o = dbg_bp_pred_next_pc;
 	assign dbg_bp_mispredict_o = dbg_bp_mispredict;
 `endif
@@ -332,7 +338,7 @@ import ydrasil_pkg::*;
 		id_ex_rd_issue & id_ctrl_rs1_ren & (id_ctrl_rs1_addr == id_rf_waddr_rd);
 	wire rs2_issue_raw_hzd =
 		id_ex_rd_issue & id_ctrl_rs2_ren & (id_ctrl_rs2_addr == id_rf_waddr_rd);
-	wire rd_issue_hzd =
+	wire rd_issue_raw_hzd =
 		id_ex_rd_issue & id_ctrl_rd_wen & (id_ctrl_rd_addr == id_rf_waddr_rd);
 	wire rs1_pending_stall =
 		id_ctrl_rs1_ren && gpr_pending_q[id_ctrl_rs1_addr] && !rs1_clear_fwd;
@@ -349,8 +355,10 @@ import ydrasil_pkg::*;
 		id_ex_rd_issue & operator_type[ydrasil_pkg::OPERATOR_TYPE_MUL];
 	wire rs1_issue_alu_ready_next = rs1_issue_raw_hzd & issue_alu_producer;
 	wire rs2_issue_alu_ready_next = rs2_issue_raw_hzd & issue_alu_producer;
+	wire rd_issue_alu_ready_next = rd_issue_raw_hzd & issue_alu_producer;
 	wire rs1_issue_hzd = rs1_issue_raw_hzd & !issue_alu_producer;
 	wire rs2_issue_hzd = rs2_issue_raw_hzd & !issue_alu_producer;
+	wire rd_issue_hzd = rd_issue_raw_hzd & !issue_alu_producer;
 	wire issue_src_hzd = rs1_issue_hzd | rs2_issue_hzd;
 
 	assign scoreboard_stall =
@@ -359,6 +367,8 @@ import ydrasil_pkg::*;
 		rs2_pending_stall |
 		rd_waw_stall;
 	assign lsu_struct_stall = id_ctrl_lsu_req & lsu_ctrl_busy;
+	assign ready_issue_allow =
+		!lsu_struct_stall & !clint_stall & !wb_backpressure & !ex_mul_stall;
 	assign bubble_id = scoreboard_stall | lsu_struct_stall | clint_stall | wb_backpressure;
 
 	always_ff @(posedge clk or negedge rst_n) begin
@@ -470,7 +480,9 @@ import ydrasil_pkg::*;
 			.if_id_pred_target_o(if_id_pred_target),
 			.if_id_pred_counter_o(if_id_pred_counter),
 			.if_id_pred_bht_index_o(if_id_pred_bht_index),
+			.if_id_pred_l0_taken_o(if_id_pred_l0_taken),
 			.if_id_valid_o   (if_id_valid),
+			.dbg_sync_bp_redirect_o(),
 			.if_id_instr_o   (if_id_instr)
 		);
 
@@ -487,6 +499,7 @@ import ydrasil_pkg::*;
 		.if_id_pred_target_i (if_id_pred_target),
 		.if_id_pred_counter_i(if_id_pred_counter),
 		.if_id_pred_bht_index_i(if_id_pred_bht_index),
+		.if_id_pred_l0_taken_i(if_id_pred_l0_taken),
 		.if_id_valid_i       (if_id_valid),
 		.rf_addr_rs1_o       (rf_raddr_rs1),
 		.rf_addr_rs2_o      (rf_raddr_rs2),
@@ -503,6 +516,8 @@ import ydrasil_pkg::*;
 		.alu_fwd_data_i     (alu_result),
 		.rs1_issue_alu_ready_next_i(rs1_issue_alu_ready_next),
 		.rs2_issue_alu_ready_next_i(rs2_issue_alu_ready_next),
+		.ready_issue_allow_i(ready_issue_allow),
+		.gpr_pending_i(gpr_pending_for_hazard),
 		.issue_frontend_stall_o(id_frontend_stall),
 		.operand_a_o        (operand_a),
 		.operand_b_o        (operand_b),
@@ -535,6 +550,7 @@ import ydrasil_pkg::*;
 		.id_ex_pred_target_o(id_ex_pred_target),
 		.id_ex_pred_counter_o(id_ex_pred_counter),
 		.id_ex_pred_bht_index_o(id_ex_pred_bht_index),
+		.id_ex_pred_l0_taken_o(id_ex_pred_l0_taken),
 		.id_ex_valid_o      (id_ex_valid),
 		.id_alu_rf_wen_rd_o (id_alu_rf_wen_rd),
 		.id_rf_waddr_rd_o   (id_rf_waddr_rd)
@@ -554,10 +570,11 @@ import ydrasil_pkg::*;
 		.id_ex_jalr_i       (id_ex_jalr),
 		.id_ex_pred_hit_i   (id_ex_pred_hit),
 		.id_ex_pred_taken_i (id_ex_pred_taken),
-		.id_ex_pred_target_i(id_ex_pred_target),
-		.id_ex_pred_counter_i(id_ex_pred_counter),
-		.id_ex_pred_bht_index_i(id_ex_pred_bht_index),
-		.interrupt_i        (interrupt),
+			.id_ex_pred_target_i(id_ex_pred_target),
+			.id_ex_pred_counter_i(id_ex_pred_counter),
+			.id_ex_pred_bht_index_i(id_ex_pred_bht_index),
+			.id_ex_pred_l0_taken_i(id_ex_pred_l0_taken),
+			.interrupt_i        (interrupt),
 		.clint_ex_int_addr_i(clint_ex_int_addr),
 		.id_rf_waddr_rd_i   (id_rf_waddr_rd),
 		.id_alu_rf_wen_rd_i (id_alu_rf_wen_rd),
@@ -601,6 +618,7 @@ import ydrasil_pkg::*;
 		,.dbg_bp_pred_taken_o(dbg_bp_pred_taken)
 		,.dbg_bp_pred_target_o(dbg_bp_pred_target)
 		,.dbg_bp_pred_counter_o(dbg_bp_pred_counter)
+		,.dbg_bp_pred_l0_taken_o(dbg_bp_pred_l0_taken)
 		,.dbg_bp_pred_next_pc_o(dbg_bp_pred_next_pc)
 		,.dbg_bp_mispredict_o(dbg_bp_mispredict)
 `endif

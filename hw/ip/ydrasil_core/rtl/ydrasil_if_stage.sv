@@ -37,7 +37,9 @@ import ydrasil_pkg::*;
 	output wire [31:0] if_id_pred_target_o,
 	output wire [1:0]  if_id_pred_counter_o,
 	output wire [31:0] if_id_pred_bht_index_o,
+	output wire        if_id_pred_l0_taken_o,
 	output wire        if_id_valid_o,
+	output wire        dbg_sync_bp_redirect_o,
 
 	output wire [31:0] if_id_instr_o
 );
@@ -45,7 +47,7 @@ import ydrasil_pkg::*;
 	localparam int FETCH_Q_DEPTH = 4;
 	localparam int FETCH_Q_COUNT_WIDTH = $clog2(FETCH_Q_DEPTH + 1);
 	localparam logic [FETCH_Q_COUNT_WIDTH:0] FETCH_Q_DEPTH_COUNT = FETCH_Q_DEPTH;
-	localparam int L0_ENTRIES = 8;
+	localparam int L0_ENTRIES = 32;
 	localparam int L0_INDEX_WIDTH = $clog2(L0_ENTRIES);
 	localparam int L0_TAG_WIDTH = 32 - L0_INDEX_WIDTH - 2;
 
@@ -79,6 +81,24 @@ import ydrasil_pkg::*;
 	reg [31:0] perf_sync_bp_taken_bubble;
 	reg [31:0] perf_l0_hit;
 	reg [31:0] perf_l0_taken;
+	reg [31:0] perf_fq_occ_0;
+	reg [31:0] perf_fq_occ_1;
+	reg [31:0] perf_fq_occ_2;
+	reg [31:0] perf_fq_occ_3;
+	reg [31:0] perf_fq_occ_4;
+	reg [31:0] perf_fq_flush_drop;
+	reg [31:0] perf_fq_full_block_req;
+	reg [31:0] perf_fq_backend_stall_pop;
+	reg [31:0] perf_fq_empty_id_bubble;
+	reg [31:0] perf_fq_sync_redirect_flush;
+	reg [31:0] perf_fq_ex_redirect_flush;
+	reg [31:0] perf_l0_lookup;
+	reg [31:0] perf_l0_correct_taken;
+	reg [31:0] perf_l0_wrong_taken;
+	reg [31:0] perf_l0_train_taken;
+	reg [31:0] perf_l0_train_not_taken;
+	reg [31:0] perf_l0_counter_inc;
+	reg [31:0] perf_l0_counter_dec;
 
 	wire [31:0] pc_plus4;
 	wire        fetch_q_valid;
@@ -99,6 +119,11 @@ import ydrasil_pkg::*;
 	wire [L0_TAG_WIDTH-1:0]   l0_train_tag;
 	wire                      l0_train_hit;
 	wire                      l0_train_fire;
+	wire                      fq_full_block_req;
+	wire                      fq_empty_id_bubble;
+	wire                      l0_train_pred_taken;
+	wire                      l0_counter_inc;
+	wire                      l0_counter_dec;
 
 	assign pc_plus4 = pc_ff + 32'd4;
 	assign fetch_q_valid = fetch_count_ff != '0;
@@ -115,13 +140,15 @@ import ydrasil_pkg::*;
 	assign if_id_pred_counter_o =
 		(fetch_q_valid && !bp_invalidate_i) ? fetch_pred_counter_ff[0] : 2'b01;
 	assign if_id_pred_bht_index_o = fetch_pred_bht_index_ff[0];
+	assign if_id_pred_l0_taken_o =
+		fetch_q_valid && !bp_invalidate_i && fetch_pred_l0_taken_ff[0];
 
 	assign l0_predict_index = pc_ff[L0_INDEX_WIDTH+1:2];
 	assign l0_predict_tag = pc_ff[31:L0_INDEX_WIDTH+2];
 	assign l0_predict_hit =
 		l0_valid_ff[l0_predict_index] &&
 		(l0_tag_ff[l0_predict_index] == l0_predict_tag);
-	assign l0_predict_taken = l0_predict_hit && (l0_counter_ff[l0_predict_index] == 2'b11);
+	assign l0_predict_taken = l0_predict_hit && l0_counter_ff[l0_predict_index][1];
 	assign l0_predict_target = l0_target_ff[l0_predict_index];
 
 	assign l0_train_index = l0_train_pc_i[L0_INDEX_WIDTH+1:2];
@@ -130,6 +157,14 @@ import ydrasil_pkg::*;
 		l0_valid_ff[l0_train_index] &&
 		(l0_tag_ff[l0_train_index] == l0_train_tag);
 	assign l0_train_fire = l0_train_valid_i && !bp_invalidate_i;
+	assign l0_train_pred_taken =
+		l0_train_hit && l0_counter_ff[l0_train_index][1];
+	assign l0_counter_inc =
+		l0_train_fire && l0_train_taken_i &&
+		(!l0_train_hit || (l0_counter_ff[l0_train_index] != 2'b11));
+	assign l0_counter_dec =
+		l0_train_fire && !l0_train_taken_i && l0_train_hit &&
+		(l0_counter_ff[l0_train_index] != 2'b00);
 
 	assign bp_predict_redirect =
 		!branch_jump_i && !flush_if_i && !stall_if_i && !stall_pc_i &&
@@ -150,6 +185,12 @@ import ydrasil_pkg::*;
 		!stall_pc_i && !bp_invalidate_i &&
 		(reserved_count < FETCH_Q_DEPTH_COUNT);
 	assign flush_queue = flush_if_i | branch_jump_i | bp_predict_redirect;
+	assign fq_full_block_req =
+		!branch_jump_i && !flush_if_i && !bp_predict_redirect &&
+		!stall_pc_i && !bp_invalidate_i &&
+		(reserved_count >= FETCH_Q_DEPTH_COUNT);
+	assign fq_empty_id_bubble = !stall_if_i && !fetch_q_valid;
+	assign dbg_sync_bp_redirect_o = bp_predict_redirect;
 
 	assign pc_n =
 		branch_jump_i       ? branch_target_i :
@@ -176,6 +217,24 @@ import ydrasil_pkg::*;
 			perf_sync_bp_taken_bubble <= '0;
 			perf_l0_hit <= '0;
 			perf_l0_taken <= '0;
+			perf_fq_occ_0 <= '0;
+			perf_fq_occ_1 <= '0;
+			perf_fq_occ_2 <= '0;
+			perf_fq_occ_3 <= '0;
+			perf_fq_occ_4 <= '0;
+			perf_fq_flush_drop <= '0;
+			perf_fq_full_block_req <= '0;
+			perf_fq_backend_stall_pop <= '0;
+			perf_fq_empty_id_bubble <= '0;
+			perf_fq_sync_redirect_flush <= '0;
+			perf_fq_ex_redirect_flush <= '0;
+			perf_l0_lookup <= '0;
+			perf_l0_correct_taken <= '0;
+			perf_l0_wrong_taken <= '0;
+			perf_l0_train_taken <= '0;
+			perf_l0_train_not_taken <= '0;
+			perf_l0_counter_inc <= '0;
+			perf_l0_counter_dec <= '0;
 			for (i = 0; i < FETCH_Q_DEPTH; i = i + 1) begin
 				fetch_valid_ff[i] <= 1'b0;
 				fetch_pc_ff[i] <= ydrasil_pkg::RESET_INS;
@@ -307,6 +366,45 @@ import ydrasil_pkg::*;
 				((request_fire && l0_predict_hit) ? 32'd1 : 32'd0);
 			perf_l0_taken <= perf_l0_taken +
 				((request_fire && l0_predict_taken) ? 32'd1 : 32'd0);
+			perf_fq_occ_0 <= perf_fq_occ_0 +
+				((fetch_count_ff == 0) ? 32'd1 : 32'd0);
+			perf_fq_occ_1 <= perf_fq_occ_1 +
+				((fetch_count_ff == 1) ? 32'd1 : 32'd0);
+			perf_fq_occ_2 <= perf_fq_occ_2 +
+				((fetch_count_ff == 2) ? 32'd1 : 32'd0);
+			perf_fq_occ_3 <= perf_fq_occ_3 +
+				((fetch_count_ff == 3) ? 32'd1 : 32'd0);
+			perf_fq_occ_4 <= perf_fq_occ_4 +
+				((fetch_count_ff == 4) ? 32'd1 : 32'd0);
+			perf_fq_flush_drop <= perf_fq_flush_drop +
+				(flush_queue ? {{(32-FETCH_Q_COUNT_WIDTH){1'b0}}, fetch_count_ff} : 32'd0);
+			perf_fq_full_block_req <= perf_fq_full_block_req +
+				(fq_full_block_req ? 32'd1 : 32'd0);
+			perf_fq_backend_stall_pop <= perf_fq_backend_stall_pop +
+				((stall_if_i && fetch_q_valid) ? 32'd1 : 32'd0);
+			perf_fq_empty_id_bubble <= perf_fq_empty_id_bubble +
+				(fq_empty_id_bubble ? 32'd1 : 32'd0);
+			perf_fq_sync_redirect_flush <= perf_fq_sync_redirect_flush +
+				(bp_predict_redirect ? 32'd1 : 32'd0);
+			perf_fq_ex_redirect_flush <= perf_fq_ex_redirect_flush +
+				(branch_jump_i ? 32'd1 : 32'd0);
+			perf_l0_lookup <= perf_l0_lookup +
+				(request_fire ? 32'd1 : 32'd0);
+			perf_l0_correct_taken <= perf_l0_correct_taken +
+				((l0_train_fire && l0_train_taken_i && l0_train_pred_taken &&
+				  (l0_target_ff[l0_train_index] == l0_train_target_i)) ? 32'd1 : 32'd0);
+			perf_l0_wrong_taken <= perf_l0_wrong_taken +
+				((l0_train_fire && l0_train_pred_taken &&
+				  (!l0_train_taken_i ||
+				   (l0_target_ff[l0_train_index] != l0_train_target_i))) ? 32'd1 : 32'd0);
+			perf_l0_train_taken <= perf_l0_train_taken +
+				((l0_train_fire && l0_train_taken_i) ? 32'd1 : 32'd0);
+			perf_l0_train_not_taken <= perf_l0_train_not_taken +
+				((l0_train_fire && !l0_train_taken_i) ? 32'd1 : 32'd0);
+			perf_l0_counter_inc <= perf_l0_counter_inc +
+				(l0_counter_inc ? 32'd1 : 32'd0);
+			perf_l0_counter_dec <= perf_l0_counter_dec +
+				(l0_counter_dec ? 32'd1 : 32'd0);
 		end
 	end
 

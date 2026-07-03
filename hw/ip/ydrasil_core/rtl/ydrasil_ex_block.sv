@@ -22,6 +22,7 @@ import ydrasil_pkg::*;
     input  wire [DATA_WIDTH-1:0]           id_ex_pred_target_i,
     input  wire [1:0]                      id_ex_pred_counter_i,
     input  wire [DATA_WIDTH-1:0]           id_ex_pred_bht_index_i,
+    input  wire                            id_ex_pred_l0_taken_i,
     input  wire [REGS_ADDR_WIDTH-1:0]      id_rf_waddr_rd_i,
     input  wire                            id_alu_rf_wen_rd_i,
     input  wire                            interrupt_i,
@@ -73,6 +74,7 @@ import ydrasil_pkg::*;
     ,output wire                           dbg_bp_pred_taken_o
     ,output wire [DATA_WIDTH-1:0]          dbg_bp_pred_target_o
     ,output wire [1:0]                     dbg_bp_pred_counter_o
+    ,output wire                           dbg_bp_pred_l0_taken_o
     ,output wire [DATA_WIDTH-1:0]          dbg_bp_pred_next_pc_o
     ,output wire                           dbg_bp_mispredict_o
 `endif
@@ -143,6 +145,7 @@ import ydrasil_pkg::*;
     reg                       dbg_bp_pred_taken_q;
     reg [DATA_WIDTH-1:0]      dbg_bp_pred_target_q;
     reg [1:0]                 dbg_bp_pred_counter_q;
+    reg                       dbg_bp_pred_l0_taken_q;
     reg [DATA_WIDTH-1:0]      dbg_bp_pred_next_pc_q;
     reg                       dbg_bp_mispredict_q;
 `endif
@@ -217,6 +220,7 @@ import ydrasil_pkg::*;
             dbg_bp_pred_taken_q <= 1'b0;
             dbg_bp_pred_target_q <= '0;
             dbg_bp_pred_counter_q <= 2'b01;
+            dbg_bp_pred_l0_taken_q <= 1'b0;
             dbg_bp_pred_next_pc_q <= '0;
             dbg_bp_mispredict_q <= 1'b0;
 `endif
@@ -242,6 +246,7 @@ import ydrasil_pkg::*;
             dbg_bp_pred_taken_q <= 1'b0;
             dbg_bp_pred_target_q <= '0;
             dbg_bp_pred_counter_q <= 2'b01;
+            dbg_bp_pred_l0_taken_q <= 1'b0;
             dbg_bp_pred_next_pc_q <= '0;
             dbg_bp_mispredict_q <= 1'b0;
 `endif
@@ -267,6 +272,7 @@ import ydrasil_pkg::*;
             dbg_bp_pred_taken_q <= id_ex_pred_taken_i;
             dbg_bp_pred_target_q <= id_ex_pred_target_i;
             dbg_bp_pred_counter_q <= id_ex_pred_counter_i;
+            dbg_bp_pred_l0_taken_q <= id_ex_pred_l0_taken_i;
             dbg_bp_pred_next_pc_q <= ex_branch_pred_next_pc;
             dbg_bp_mispredict_q <= ex_branch_mispredict;
 `endif
@@ -294,6 +300,7 @@ import ydrasil_pkg::*;
     assign dbg_bp_pred_taken_o = dbg_bp_pred_taken_q;
     assign dbg_bp_pred_target_o = dbg_bp_pred_target_q;
     assign dbg_bp_pred_counter_o = dbg_bp_pred_counter_q;
+    assign dbg_bp_pred_l0_taken_o = dbg_bp_pred_l0_taken_q;
     assign dbg_bp_pred_next_pc_o = dbg_bp_pred_next_pc_q;
     assign dbg_bp_mispredict_o = dbg_bp_mispredict_q;
 `endif

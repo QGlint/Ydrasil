@@ -18,6 +18,7 @@ import ydrasil_pkg::*;
     input  wire [DATA_WIDTH-1:0]           if_id_pred_target_i,
     input  wire [1:0]                      if_id_pred_counter_i,
     input  wire [DATA_WIDTH-1:0]           if_id_pred_bht_index_i,
+    input  wire                            if_id_pred_l0_taken_i,
     input  wire                            if_id_valid_i,
 
     // Register file read ports 
@@ -36,6 +37,8 @@ import ydrasil_pkg::*;
     input  wire [DATA_WIDTH-1:0]           alu_fwd_data_i,
     input  wire                            rs1_issue_alu_ready_next_i,
     input  wire                            rs2_issue_alu_ready_next_i,
+    input  wire                            ready_issue_allow_i,
+    input  wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_i,
     output wire                            issue_frontend_stall_o,
 
     // Dispatch to EX   
@@ -77,6 +80,7 @@ import ydrasil_pkg::*;
     output wire [DATA_WIDTH-1:0]           id_ex_pred_target_o,
     output wire [1:0]                      id_ex_pred_counter_o,
     output wire [DATA_WIDTH-1:0]           id_ex_pred_bht_index_o,
+    output wire                            id_ex_pred_l0_taken_o,
     output wire                            id_ex_valid_o,
     // Generic writeback information
     output wire                            id_alu_rf_wen_rd_o,
@@ -134,6 +138,7 @@ import ydrasil_pkg::*;
     reg [DATA_WIDTH-1:0]                 id_ex_pred_target_ff;
     reg [1:0]                            id_ex_pred_counter_ff;
     reg [DATA_WIDTH-1:0]                 id_ex_pred_bht_index_ff;
+    reg                                  id_ex_pred_l0_taken_ff;
     reg                                  id_ex_valid_ff;
     reg                                  id_fence_i_ff;
     wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0] 	 csr_reg_raddr;
@@ -162,6 +167,7 @@ import ydrasil_pkg::*;
     reg [DATA_WIDTH-1:0]            skid_pred_target_ff;
     reg [1:0]                       skid_pred_counter_ff;
     reg [DATA_WIDTH-1:0]            skid_pred_bht_index_ff;
+    reg                             skid_pred_l0_taken_ff;
 
     reg                             issue_valid_ff;
     reg                             issue_wait_rs1_ff;
@@ -172,6 +178,7 @@ import ydrasil_pkg::*;
     reg [DATA_WIDTH-1:0]            issue_pred_target_ff;
     reg [1:0]                       issue_pred_counter_ff;
     reg [DATA_WIDTH-1:0]            issue_pred_bht_index_ff;
+    reg                             issue_pred_l0_taken_ff;
     reg [4:0]                       issue_rf_raddr_rs1_ff;
     reg [4:0]                       issue_rf_raddr_rs2_ff;
     reg                             issue_rf_ren_rs1_ff;
@@ -200,13 +207,89 @@ import ydrasil_pkg::*;
     wire [DATA_WIDTH-1:0]            decode_pred_target;
     wire [1:0]                       decode_pred_counter;
     wire [DATA_WIDTH-1:0]            decode_pred_bht_index;
+    wire                             decode_pred_l0_taken;
     wire                             decode_valid;
     wire                             issue_wait_rs1_ready;
     wire                             issue_wait_rs2_ready;
     wire                             issue_wait_block;
+    wire                             issue_slot0_fire;
+    wire                             issue_slot1_bypass_fire;
     wire                             issue_fire;
     wire                             issue_accept;
     wire                             issue_load_from_skid;
+    wire                             skid_fill;
+    wire                             skid_drain;
+    wire                             ri_slot1_valid;
+    wire                             ri_slot1_supported;
+    wire                             ri_slot1_block_raw;
+    wire                             ri_slot1_block_waw;
+    wire                             ri_slot1_block_war;
+    wire                             ri_slot1_block_ctrl;
+    wire                             ri_slot1_block_mem;
+    wire                             ri_slot1_block_unsupported;
+    wire                             ri_slot1_block_old_unsupported;
+    wire                             ri_slot1_block_rs1_pending;
+    wire                             ri_slot1_block_rs2_pending;
+    wire                             ri_slot1_block_rd_pending;
+    wire                             ri_slot1_ready;
+    wire [4:0]                       selected_rf_raddr_rs1;
+    wire [4:0]                       selected_rf_raddr_rs2;
+    wire                             selected_rf_ren_rs1;
+    wire                             selected_rf_ren_rs2;
+    wire [4:0]                       selected_rf_waddr_rd;
+    wire                             selected_rf_wen_rd;
+    wire [DATA_WIDTH-1:0]            selected_pc;
+    wire [DATA_WIDTH-1:0]            selected_imm;
+    wire                             selected_operand_b_rs_sel;
+    wire                             selected_operand_a_pc_sel;
+    wire                             selected_operand_a_imm_sel;
+    wire                             selected_bt_a_rs_sel;
+    wire                             selected_operand_b_jump_sel;
+    wire [ydrasil_pkg::OPERATOR_WIDTH-1:0]       selected_operator;
+    wire [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0]    selected_operator_lsu;
+    wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0]  selected_operator_type;
+    wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0]       selected_csr_reg_raddr;
+    wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0]       selected_csr_ex_waddr;
+    wire [ydrasil_pkg::OP_CSR_INFO_WIDTH-1:0]    selected_csr_op_info;
+    wire [ydrasil_pkg::OP_SYS_INFO_WIDTH-1:0]    selected_sys_op_info;
+    wire                             selected_fence_i;
+    wire                             selected_pred_hit;
+    wire                             selected_pred_taken;
+    wire [DATA_WIDTH-1:0]            selected_pred_target;
+    wire [1:0]                       selected_pred_counter;
+    wire [DATA_WIDTH-1:0]            selected_pred_bht_index;
+    wire                             selected_pred_l0_taken;
+
+    reg [31:0]                       perf_id_decode_valid;
+    reg [31:0]                       perf_id_issue_accept;
+    reg [31:0]                       perf_id_issue_fire;
+    reg [31:0]                       perf_id_issue_slot_valid;
+    reg [31:0]                       perf_id_issue_no_fire;
+    reg [31:0]                       perf_id_issue_wait_block;
+    reg [31:0]                       perf_id_wait_rs1;
+    reg [31:0]                       perf_id_wait_rs2;
+    reg [31:0]                       perf_id_wait_alu_ready_next_rs1;
+    reg [31:0]                       perf_id_wait_alu_ready_next_rs2;
+    reg [31:0]                       perf_id_wait_lsu_fwd_rs1;
+    reg [31:0]                       perf_id_wait_lsu_fwd_rs2;
+    reg [31:0]                       perf_id_wait_wb_fwd_rs1;
+    reg [31:0]                       perf_id_wait_wb_fwd_rs2;
+    reg [31:0]                       perf_id_skid_valid;
+    reg [31:0]                       perf_id_skid_fill;
+    reg [31:0]                       perf_id_skid_drain;
+    reg [31:0]                       perf_id_skid_full_stall;
+    reg [31:0]                       perf_id_frontend_stall;
+    reg [31:0]                       perf_ri_slot0_valid;
+    reg [31:0]                       perf_ri_slot1_valid;
+    reg [31:0]                       perf_ri_slot0_ready;
+    reg [31:0]                       perf_ri_slot1_ready;
+    reg [31:0]                       perf_ri_fire_slot0;
+    reg [31:0]                       perf_ri_fire_slot1_bypass;
+    reg [31:0]                       perf_ri_slot1_block_raw;
+    reg [31:0]                       perf_ri_slot1_block_waw;
+    reg [31:0]                       perf_ri_slot1_block_ctrl;
+    reg [31:0]                       perf_ri_slot1_block_mem;
+    reg [31:0]                       perf_ri_slot1_block_unsupported;
 
     ydrasil_ins_decoder #(
         .DATA_WIDTH(DATA_WIDTH)
@@ -242,42 +325,128 @@ import ydrasil_pkg::*;
     assign decode_pred_target = skid_valid_ff ? skid_pred_target_ff : if_id_pred_target_i;
     assign decode_pred_counter = skid_valid_ff ? skid_pred_counter_ff : if_id_pred_counter_i;
     assign decode_pred_bht_index = skid_valid_ff ? skid_pred_bht_index_ff : if_id_pred_bht_index_i;
+    assign decode_pred_l0_taken = skid_valid_ff ? skid_pred_l0_taken_ff : if_id_pred_l0_taken_i;
     assign decode_valid = skid_valid_ff | if_id_valid_i;
 
-    assign rf_addr_rs1_o = issue_rf_raddr_rs1_ff;
-    assign rf_addr_rs2_o = issue_rf_raddr_rs2_ff;
+    assign selected_rf_raddr_rs1 =
+        issue_slot1_bypass_fire ? rf_raddr_rs1 : issue_rf_raddr_rs1_ff;
+    assign selected_rf_raddr_rs2 =
+        issue_slot1_bypass_fire ? rf_raddr_rs2 : issue_rf_raddr_rs2_ff;
+    assign selected_rf_ren_rs1 =
+        issue_slot1_bypass_fire ? rf_ren_rs1 : issue_rf_ren_rs1_ff;
+    assign selected_rf_ren_rs2 =
+        issue_slot1_bypass_fire ? rf_ren_rs2 : issue_rf_ren_rs2_ff;
+    assign selected_rf_waddr_rd =
+        issue_slot1_bypass_fire ? rf_waddr_rd : issue_rf_waddr_rd_ff;
+    assign selected_rf_wen_rd =
+        issue_slot1_bypass_fire ? rf_wen_rd : issue_rf_wen_rd_ff;
+    assign selected_pc =
+        issue_slot1_bypass_fire ? decode_pc : issue_pc_ff;
+    assign selected_imm =
+        issue_slot1_bypass_fire ? imm_i : issue_imm_ff;
+    assign selected_operand_b_rs_sel =
+        issue_slot1_bypass_fire ? operand_b_rs_sel : issue_operand_b_rs_sel_ff;
+    assign selected_operand_a_pc_sel =
+        issue_slot1_bypass_fire ? operand_a_pc_sel : issue_operand_a_pc_sel_ff;
+    assign selected_operand_a_imm_sel =
+        issue_slot1_bypass_fire ? operand_a_imm_sel : issue_operand_a_imm_sel_ff;
+    assign selected_bt_a_rs_sel =
+        issue_slot1_bypass_fire ? bt_a_rs_sel : issue_bt_a_rs_sel_ff;
+    assign selected_operand_b_jump_sel =
+        issue_slot1_bypass_fire ? operand_b_jump_sel : issue_operand_b_jump_sel_ff;
+    assign selected_operator =
+        issue_slot1_bypass_fire ? operator : issue_operator_ff;
+    assign selected_operator_lsu =
+        issue_slot1_bypass_fire ? operator_lsu : issue_operator_lsu_ff;
+    assign selected_operator_type =
+        issue_slot1_bypass_fire ? operator_type : issue_operator_type_ff;
+    assign selected_csr_reg_raddr =
+        issue_slot1_bypass_fire ? csr_reg_raddr : issue_csr_reg_raddr_ff;
+    assign selected_csr_ex_waddr =
+        issue_slot1_bypass_fire ? csr_ex_waddr : issue_csr_ex_waddr_ff;
+    assign selected_csr_op_info =
+        issue_slot1_bypass_fire ? csr_op_info : issue_csr_op_info_ff;
+    assign selected_sys_op_info =
+        issue_slot1_bypass_fire ? sys_op_info : issue_sys_op_info_ff;
+    assign selected_fence_i =
+        issue_slot1_bypass_fire ? id_fence_i : issue_fence_i_ff;
+    assign selected_pred_hit =
+        issue_slot1_bypass_fire ? decode_pred_hit : issue_pred_hit_ff;
+    assign selected_pred_taken =
+        issue_slot1_bypass_fire ? decode_pred_taken : issue_pred_taken_ff;
+    assign selected_pred_target =
+        issue_slot1_bypass_fire ? decode_pred_target : issue_pred_target_ff;
+    assign selected_pred_counter =
+        issue_slot1_bypass_fire ? decode_pred_counter : issue_pred_counter_ff;
+    assign selected_pred_bht_index =
+        issue_slot1_bypass_fire ? decode_pred_bht_index : issue_pred_bht_index_ff;
+    assign selected_pred_l0_taken =
+        issue_slot1_bypass_fire ? decode_pred_l0_taken : issue_pred_l0_taken_ff;
+
+    assign rf_addr_rs1_o = selected_rf_raddr_rs1;
+    assign rf_addr_rs2_o = selected_rf_raddr_rs2;
 
     // Keep ALU source selection consistent with decoder control outputs.
-    wire rs1_wb_fwd =
+    wire slot0_rs1_wb_fwd =
         wb_fwd_valid_i &&
         issue_rf_ren_rs1_ff &&
         (issue_rf_raddr_rs1_ff != '0) &&
         (issue_rf_raddr_rs1_ff == wb_fwd_addr_i);
-    wire rs2_wb_fwd =
+    wire slot0_rs2_wb_fwd =
         wb_fwd_valid_i &&
         (issue_rf_ren_rs2_ff | issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
         (issue_rf_raddr_rs2_ff != '0) &&
         (issue_rf_raddr_rs2_ff == wb_fwd_addr_i);
-    wire rs1_lsu_fwd =
+    wire slot0_rs1_lsu_fwd =
         lsu_fwd_valid_i &&
         issue_rf_ren_rs1_ff &&
         (issue_rf_raddr_rs1_ff != '0) &&
         (issue_rf_raddr_rs1_ff == lsu_fwd_addr_i);
-    wire rs2_lsu_fwd =
+    wire slot0_rs2_lsu_fwd =
         lsu_fwd_valid_i &&
         (issue_rf_ren_rs2_ff | issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
         (issue_rf_raddr_rs2_ff != '0) &&
         (issue_rf_raddr_rs2_ff == lsu_fwd_addr_i);
-    wire rs1_alu_fwd =
+    wire slot0_rs1_alu_fwd =
         alu_fwd_valid_i &&
         issue_rf_ren_rs1_ff &&
         (issue_rf_raddr_rs1_ff != '0) &&
         (issue_rf_raddr_rs1_ff == alu_fwd_addr_i);
-    wire rs2_alu_fwd =
+    wire slot0_rs2_alu_fwd =
         alu_fwd_valid_i &&
         (issue_rf_ren_rs2_ff | issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
         (issue_rf_raddr_rs2_ff != '0) &&
         (issue_rf_raddr_rs2_ff == alu_fwd_addr_i);
+    wire rs1_wb_fwd =
+        wb_fwd_valid_i &&
+        selected_rf_ren_rs1 &&
+        (selected_rf_raddr_rs1 != '0) &&
+        (selected_rf_raddr_rs1 == wb_fwd_addr_i);
+    wire rs2_wb_fwd =
+        wb_fwd_valid_i &&
+        (selected_rf_ren_rs2 | selected_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
+        (selected_rf_raddr_rs2 != '0) &&
+        (selected_rf_raddr_rs2 == wb_fwd_addr_i);
+    wire rs1_lsu_fwd =
+        lsu_fwd_valid_i &&
+        selected_rf_ren_rs1 &&
+        (selected_rf_raddr_rs1 != '0) &&
+        (selected_rf_raddr_rs1 == lsu_fwd_addr_i);
+    wire rs2_lsu_fwd =
+        lsu_fwd_valid_i &&
+        (selected_rf_ren_rs2 | selected_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
+        (selected_rf_raddr_rs2 != '0) &&
+        (selected_rf_raddr_rs2 == lsu_fwd_addr_i);
+    wire rs1_alu_fwd =
+        alu_fwd_valid_i &&
+        selected_rf_ren_rs1 &&
+        (selected_rf_raddr_rs1 != '0) &&
+        (selected_rf_raddr_rs1 == alu_fwd_addr_i);
+    wire rs2_alu_fwd =
+        alu_fwd_valid_i &&
+        (selected_rf_ren_rs2 | selected_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
+        (selected_rf_raddr_rs2 != '0) &&
+        (selected_rf_raddr_rs2 == alu_fwd_addr_i);
     wire [DATA_WIDTH-1:0] issue_rs1_data =
         rs1_lsu_fwd ? lsu_fwd_data_i :
         rs1_alu_fwd ? alu_fwd_data_i :
@@ -287,42 +456,126 @@ import ydrasil_pkg::*;
         rs2_alu_fwd ? alu_fwd_data_i :
         rs2_wb_fwd  ? wb_fwd_data_i  : rf_rdata_rs2_i;
 
-    assign operand_a     =  issue_operand_a_pc_sel_ff ? issue_pc_ff :
-                            issue_operand_a_imm_sel_ff ? issue_imm_ff : issue_rs1_data;
-    assign operand_b     = issue_operand_b_jump_sel_ff ? 32'h4 :
-                            issue_operand_b_rs_sel_ff ? issue_rs2_data : issue_imm_ff;
+    assign operand_a     =  selected_operand_a_pc_sel ? selected_pc :
+                            selected_operand_a_imm_sel ? selected_imm : issue_rs1_data;
+    assign operand_b     = selected_operand_b_jump_sel ? 32'h4 :
+                            selected_operand_b_rs_sel ? issue_rs2_data : selected_imm;
 
 
-    assign bt_a_operand = issue_bt_a_rs_sel_ff ? issue_rs1_data : issue_pc_ff;
-    assign bt_b_operand = issue_imm_ff;
+    assign bt_a_operand = selected_bt_a_rs_sel ? issue_rs1_data : selected_pc;
+    assign bt_b_operand = selected_imm;
     assign id_fence_i = (decode_instr[6:0] == ydrasil_pkg::RV32I_INS_FENCE) &&
                         (decode_instr[14:12] == 3'b001);
 
-    assign issue_wait_rs1_ready = !issue_wait_rs1_ff | rs1_alu_fwd | rs1_lsu_fwd | rs1_wb_fwd;
-    assign issue_wait_rs2_ready = !issue_wait_rs2_ff | rs2_alu_fwd | rs2_lsu_fwd | rs2_wb_fwd;
+    assign issue_wait_rs1_ready =
+        !issue_wait_rs1_ff | slot0_rs1_alu_fwd | slot0_rs1_lsu_fwd | slot0_rs1_wb_fwd;
+    assign issue_wait_rs2_ready =
+        !issue_wait_rs2_ff | slot0_rs2_alu_fwd | slot0_rs2_lsu_fwd | slot0_rs2_wb_fwd;
     assign issue_wait_block =
         (issue_wait_rs1_ff & !issue_wait_rs1_ready) |
         (issue_wait_rs2_ff & !issue_wait_rs2_ready) |
         rs1_issue_alu_ready_next_i |
         rs2_issue_alu_ready_next_i;
-    assign issue_fire =
+    assign issue_slot0_fire =
         issue_valid_ff & id_advance & !issue_wait_block;
+    assign issue_slot1_bypass_fire =
+        ready_issue_allow_i & issue_valid_ff & issue_wait_block &
+        !stall_id_i & !flush_id_i & ri_slot1_ready;
+    assign issue_fire = issue_slot0_fire | issue_slot1_bypass_fire;
     assign issue_accept =
-        id_advance & decode_valid & (!issue_valid_ff | issue_fire);
+        id_advance & decode_valid & (!issue_valid_ff | issue_slot0_fire);
     assign issue_load_from_skid = issue_accept & skid_valid_ff;
+    assign skid_fill =
+        id_advance && issue_valid_ff && issue_wait_block &&
+        !skid_valid_ff && if_id_valid_i;
+    assign skid_drain = issue_accept & skid_valid_ff;
     assign issue_frontend_stall_o =
         !flush_id_i & !stall_id_i & !bubble_id_i &
         issue_valid_ff & issue_wait_block & skid_valid_ff;
+    assign ri_slot1_valid = skid_valid_ff;
+    assign ri_slot1_supported =
+        ri_slot1_valid &&
+        (operator_type[ydrasil_pkg::OPERATOR_TYPE_ALU] |
+         operator_type[ydrasil_pkg::OPERATOR_TYPE_BITMANIP]) &&
+        !(operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] |
+          operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD] |
+          operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE] |
+          operator_type[ydrasil_pkg::OPERATOR_TYPE_CSR] |
+          operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS] |
+          operator_type[ydrasil_pkg::OPERATOR_TYPE_MUL]);
+    assign ri_slot1_block_raw =
+        ri_slot1_valid && issue_valid_ff && (issue_rf_waddr_rd_ff != '0) &&
+        ((rf_ren_rs1 && (rf_raddr_rs1 == issue_rf_waddr_rd_ff)) |
+         (rf_ren_rs2 && (rf_raddr_rs2 == issue_rf_waddr_rd_ff)));
+    assign ri_slot1_block_waw =
+        ri_slot1_valid && issue_valid_ff && rf_wen_rd &&
+        (rf_waddr_rd != '0) && (rf_waddr_rd == issue_rf_waddr_rd_ff);
+    assign ri_slot1_block_war =
+        ri_slot1_valid && issue_valid_ff && rf_wen_rd && (rf_waddr_rd != '0) &&
+        ((issue_rf_ren_rs1_ff && (issue_rf_raddr_rs1_ff == rf_waddr_rd)) |
+         ((issue_rf_ren_rs2_ff | issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
+          (issue_rf_raddr_rs2_ff == rf_waddr_rd)));
+    assign ri_slot1_block_ctrl =
+        ri_slot1_valid && issue_valid_ff &&
+        issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP];
+    assign ri_slot1_block_mem =
+        ri_slot1_valid && issue_valid_ff &&
+        (issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] |
+         issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]);
+    assign ri_slot1_block_old_unsupported =
+        ri_slot1_valid && issue_valid_ff &&
+        (issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_CSR] |
+         issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_SYS] |
+         issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL]);
+    wire ri_slot1_rs1_clear_fwd =
+        (wb_fwd_valid_i & rf_ren_rs1 & (rf_raddr_rs1 != '0) &
+         (rf_raddr_rs1 == wb_fwd_addr_i)) |
+        (lsu_fwd_valid_i & rf_ren_rs1 & (rf_raddr_rs1 != '0) &
+         (rf_raddr_rs1 == lsu_fwd_addr_i)) |
+        (alu_fwd_valid_i & rf_ren_rs1 & (rf_raddr_rs1 != '0) &
+         (rf_raddr_rs1 == alu_fwd_addr_i));
+    wire ri_slot1_rs2_read = rf_ren_rs2 | operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE];
+    wire ri_slot1_rs2_clear_fwd =
+        (wb_fwd_valid_i & ri_slot1_rs2_read & (rf_raddr_rs2 != '0) &
+         (rf_raddr_rs2 == wb_fwd_addr_i)) |
+        (lsu_fwd_valid_i & ri_slot1_rs2_read & (rf_raddr_rs2 != '0) &
+         (rf_raddr_rs2 == lsu_fwd_addr_i)) |
+        (alu_fwd_valid_i & ri_slot1_rs2_read & (rf_raddr_rs2 != '0) &
+         (rf_raddr_rs2 == alu_fwd_addr_i));
+    wire ri_slot1_rd_clear_fwd =
+        (wb_fwd_valid_i & rf_wen_rd & (rf_waddr_rd != '0) &
+         (rf_waddr_rd == wb_fwd_addr_i)) |
+        (lsu_fwd_valid_i & rf_wen_rd & (rf_waddr_rd != '0) &
+         (rf_waddr_rd == lsu_fwd_addr_i)) |
+        (alu_fwd_valid_i & rf_wen_rd & (rf_waddr_rd != '0) &
+         (rf_waddr_rd == alu_fwd_addr_i));
+    assign ri_slot1_block_rs1_pending =
+        ri_slot1_valid && rf_ren_rs1 && gpr_pending_i[rf_raddr_rs1] &&
+        !ri_slot1_rs1_clear_fwd;
+    assign ri_slot1_block_rs2_pending =
+        ri_slot1_valid && ri_slot1_rs2_read && gpr_pending_i[rf_raddr_rs2] &&
+        !ri_slot1_rs2_clear_fwd;
+    assign ri_slot1_block_rd_pending =
+        ri_slot1_valid && rf_wen_rd && (rf_waddr_rd != '0) &&
+        gpr_pending_i[rf_waddr_rd] && !ri_slot1_rd_clear_fwd;
+    assign ri_slot1_block_unsupported = ri_slot1_valid && !ri_slot1_supported;
+    assign ri_slot1_ready =
+        ri_slot1_valid && ri_slot1_supported &&
+        !ri_slot1_block_raw && !ri_slot1_block_waw &&
+        !ri_slot1_block_war && !ri_slot1_block_ctrl &&
+        !ri_slot1_block_mem && !ri_slot1_block_old_unsupported &&
+        !ri_slot1_block_rs1_pending && !ri_slot1_block_rs2_pending &&
+        !ri_slot1_block_rd_pending;
 
-    wire [DATA_WIDTH-1:0] issue_lsu_addr_fast = issue_rs1_data + issue_imm_ff;
+    wire [DATA_WIDTH-1:0] issue_lsu_addr_fast = issue_rs1_data + selected_imm;
     wire [DATA_WIDTH-1:0] issue_lsu_addr = issue_lsu_addr_fast;
     wire [1:0] issue_lsu_addr_index = issue_lsu_addr[1:0];
     wire issue_lsu_addr_is_dtcm =
         (issue_lsu_addr[DATA_WIDTH-1:DTCM_TAG_LSB] ==
          ydrasil_pkg::DTCM_BASE_ADDR[DATA_WIDTH-1:DTCM_TAG_LSB]);
-    wire issue_lsu_is_sb = issue_operator_lsu_ff[ydrasil_pkg::OP_LSU_SB];
-    wire issue_lsu_is_sh = issue_operator_lsu_ff[ydrasil_pkg::OP_LSU_SH];
-    wire issue_lsu_is_sw = issue_operator_lsu_ff[ydrasil_pkg::OP_LSU_SW];
+    wire issue_lsu_is_sb = selected_operator_lsu[ydrasil_pkg::OP_LSU_SB];
+    wire issue_lsu_is_sh = selected_operator_lsu[ydrasil_pkg::OP_LSU_SH];
+    wire issue_lsu_is_sw = selected_operator_lsu[ydrasil_pkg::OP_LSU_SW];
     wire [3:0] issue_lsu_sb_mask =
         ({4{issue_lsu_addr_index == 2'b00}} & 4'b0001) |
         ({4{issue_lsu_addr_index == 2'b01}} & 4'b0010) |
@@ -356,6 +609,7 @@ import ydrasil_pkg::*;
             skid_pred_target_ff <= '0;
             skid_pred_counter_ff <= 2'b01;
             skid_pred_bht_index_ff <= '0;
+            skid_pred_l0_taken_ff <= 1'b0;
             issue_valid_ff <= 1'b0;
             issue_wait_rs1_ff <= 1'b0;
             issue_wait_rs2_ff <= 1'b0;
@@ -365,6 +619,7 @@ import ydrasil_pkg::*;
             issue_pred_target_ff <= '0;
             issue_pred_counter_ff <= 2'b01;
             issue_pred_bht_index_ff <= '0;
+            issue_pred_l0_taken_ff <= 1'b0;
             issue_rf_raddr_rs1_ff <= '0;
             issue_rf_raddr_rs2_ff <= '0;
             issue_rf_ren_rs1_ff <= 1'b0;
@@ -411,8 +666,39 @@ import ydrasil_pkg::*;
             id_ex_pred_target_ff <= '0;
             id_ex_pred_counter_ff <= 2'b01;
             id_ex_pred_bht_index_ff <= '0;
+            id_ex_pred_l0_taken_ff <= 1'b0;
             id_ex_valid_ff <= 1'b0;
             id_fence_i_ff <= 1'b0;
+            perf_id_decode_valid <= '0;
+            perf_id_issue_accept <= '0;
+            perf_id_issue_fire <= '0;
+            perf_id_issue_slot_valid <= '0;
+            perf_id_issue_no_fire <= '0;
+            perf_id_issue_wait_block <= '0;
+            perf_id_wait_rs1 <= '0;
+            perf_id_wait_rs2 <= '0;
+            perf_id_wait_alu_ready_next_rs1 <= '0;
+            perf_id_wait_alu_ready_next_rs2 <= '0;
+            perf_id_wait_lsu_fwd_rs1 <= '0;
+            perf_id_wait_lsu_fwd_rs2 <= '0;
+            perf_id_wait_wb_fwd_rs1 <= '0;
+            perf_id_wait_wb_fwd_rs2 <= '0;
+            perf_id_skid_valid <= '0;
+            perf_id_skid_fill <= '0;
+            perf_id_skid_drain <= '0;
+            perf_id_skid_full_stall <= '0;
+            perf_id_frontend_stall <= '0;
+            perf_ri_slot0_valid <= '0;
+            perf_ri_slot1_valid <= '0;
+            perf_ri_slot0_ready <= '0;
+            perf_ri_slot1_ready <= '0;
+            perf_ri_fire_slot0 <= '0;
+            perf_ri_fire_slot1_bypass <= '0;
+            perf_ri_slot1_block_raw <= '0;
+            perf_ri_slot1_block_waw <= '0;
+            perf_ri_slot1_block_ctrl <= '0;
+            perf_ri_slot1_block_mem <= '0;
+            perf_ri_slot1_block_unsupported <= '0;
         end else begin
             if (flush_id_i) begin
                 skid_valid_ff <= 1'b0;
@@ -429,6 +715,7 @@ import ydrasil_pkg::*;
                     issue_pred_target_ff <= decode_pred_target;
                     issue_pred_counter_ff <= decode_pred_counter;
                     issue_pred_bht_index_ff <= decode_pred_bht_index;
+                    issue_pred_l0_taken_ff <= decode_pred_l0_taken;
                     issue_rf_raddr_rs1_ff <= rf_raddr_rs1;
                     issue_rf_raddr_rs2_ff <= rf_raddr_rs2;
                     issue_rf_ren_rs1_ff <= rf_ren_rs1;
@@ -457,7 +744,9 @@ import ydrasil_pkg::*;
                     issue_wait_rs2_ff <= issue_wait_rs2_ff | rs2_issue_alu_ready_next_i;
                 end
 
-                if (id_advance) begin
+                if (issue_slot1_bypass_fire) begin
+                    skid_valid_ff <= 1'b0;
+                end else if (id_advance) begin
                     if (issue_load_from_skid) begin
                         skid_valid_ff <= if_id_valid_i;
                         skid_pc_ff <= if_id_pc_i;
@@ -467,6 +756,7 @@ import ydrasil_pkg::*;
                         skid_pred_target_ff <= if_id_pred_target_i;
                         skid_pred_counter_ff <= if_id_pred_counter_i;
                         skid_pred_bht_index_ff <= if_id_pred_bht_index_i;
+                        skid_pred_l0_taken_ff <= if_id_pred_l0_taken_i;
                     end else if (issue_accept) begin
                         skid_valid_ff <= 1'b0;
                     end else if (issue_valid_ff && issue_wait_block && !skid_valid_ff && if_id_valid_i) begin
@@ -478,6 +768,7 @@ import ydrasil_pkg::*;
                         skid_pred_target_ff <= if_id_pred_target_i;
                         skid_pred_counter_ff <= if_id_pred_counter_i;
                         skid_pred_bht_index_ff <= if_id_pred_bht_index_i;
+                        skid_pred_l0_taken_ff <= if_id_pred_l0_taken_i;
                     end
                 end
 
@@ -486,11 +777,11 @@ import ydrasil_pkg::*;
                 end else if (issue_fire) begin
                     operand_a_ff        <= operand_a;
                     operand_b_ff        <= operand_b;
-                    operator_ff         <= issue_operator_ff;
-                    operator_type_ff    <= issue_operator_type_ff;
-                    rf_wen_rd_ff        <= issue_rf_wen_rd_ff;
-                    rf_waddr_rd_ff      <= issue_rf_waddr_rd_ff;
-                    operator_lsu_ff     <= issue_operator_lsu_ff;
+                    operator_ff         <= selected_operator;
+                    operator_type_ff    <= selected_operator_type;
+                    rf_wen_rd_ff        <= selected_rf_wen_rd;
+                    rf_waddr_rd_ff      <= selected_rf_waddr_rd;
+                    operator_lsu_ff     <= selected_operator_lsu;
                     id_lsu_rs2_data_ff  <= issue_rs2_data; // 直接传递寄存器数据，供LSU使用
                     id_lsu_addr_ff      <= issue_lsu_addr;
                     id_lsu_addr_is_dtcm_ff <= issue_lsu_addr_is_dtcm;
@@ -498,21 +789,22 @@ import ydrasil_pkg::*;
                     id_lsu_store_mask_ff <= issue_lsu_store_mask;
                     bt_a_operand_ff     <= bt_a_operand;
                     bt_b_operand_ff     <= bt_b_operand;
-                    csr_reg_raddr_ff <= issue_csr_reg_raddr_ff;
+                    csr_reg_raddr_ff <= selected_csr_reg_raddr;
                     // csr_ex_we_ff <= csr_ex_we;
-                    csr_ex_waddr_ff <= issue_csr_ex_waddr_ff;
-                    csr_op_info_ff <= issue_csr_op_info_ff;
-                    sys_op_info_ff <= issue_sys_op_info_ff;
-                    id_instr_addr_ff <= issue_pc_ff;
-                    id_ex_jalr_ff <= issue_bt_a_rs_sel_ff;
-                    id_ex_pred_hit_ff <= issue_pred_hit_ff;
-                    id_ex_pred_taken_ff <= issue_pred_taken_ff;
-                    id_ex_pred_target_ff <= issue_pred_target_ff;
-                    id_ex_pred_counter_ff <= issue_pred_counter_ff;
-                    id_ex_pred_bht_index_ff <= issue_pred_bht_index_ff;
+                    csr_ex_waddr_ff <= selected_csr_ex_waddr;
+                    csr_op_info_ff <= selected_csr_op_info;
+                    sys_op_info_ff <= selected_sys_op_info;
+                    id_instr_addr_ff <= selected_pc;
+                    id_ex_jalr_ff <= selected_bt_a_rs_sel;
+                    id_ex_pred_hit_ff <= selected_pred_hit;
+                    id_ex_pred_taken_ff <= selected_pred_taken;
+                    id_ex_pred_target_ff <= selected_pred_target;
+                    id_ex_pred_counter_ff <= selected_pred_counter;
+                    id_ex_pred_bht_index_ff <= selected_pred_bht_index;
+                    id_ex_pred_l0_taken_ff <= selected_pred_l0_taken;
                     id_ex_valid_ff <= 1'b1;
-                    id_fence_i_ff <= issue_fence_i_ff;
-                    if (!issue_accept) begin
+                    id_fence_i_ff <= selected_fence_i;
+                    if (issue_slot0_fire && !issue_accept) begin
                         issue_valid_ff <= 1'b0;
                         issue_wait_rs1_ff <= 1'b0;
                         issue_wait_rs2_ff <= 1'b0;
@@ -522,6 +814,55 @@ import ydrasil_pkg::*;
                     id_fence_i_ff <= 1'b0;
                 end
             end
+            perf_id_decode_valid <= perf_id_decode_valid + (decode_valid ? 32'd1 : 32'd0);
+            perf_id_issue_accept <= perf_id_issue_accept + (issue_accept ? 32'd1 : 32'd0);
+            perf_id_issue_fire <= perf_id_issue_fire + (issue_fire ? 32'd1 : 32'd0);
+            perf_id_issue_slot_valid <= perf_id_issue_slot_valid + (issue_valid_ff ? 32'd1 : 32'd0);
+            perf_id_issue_no_fire <= perf_id_issue_no_fire +
+                ((issue_valid_ff && id_advance && !issue_fire) ? 32'd1 : 32'd0);
+            perf_id_issue_wait_block <= perf_id_issue_wait_block +
+                (issue_wait_block ? 32'd1 : 32'd0);
+            perf_id_wait_rs1 <= perf_id_wait_rs1 +
+                ((issue_wait_rs1_ff && !issue_wait_rs1_ready) ? 32'd1 : 32'd0);
+            perf_id_wait_rs2 <= perf_id_wait_rs2 +
+                ((issue_wait_rs2_ff && !issue_wait_rs2_ready) ? 32'd1 : 32'd0);
+            perf_id_wait_alu_ready_next_rs1 <= perf_id_wait_alu_ready_next_rs1 +
+                (rs1_issue_alu_ready_next_i ? 32'd1 : 32'd0);
+            perf_id_wait_alu_ready_next_rs2 <= perf_id_wait_alu_ready_next_rs2 +
+                (rs2_issue_alu_ready_next_i ? 32'd1 : 32'd0);
+            perf_id_wait_lsu_fwd_rs1 <= perf_id_wait_lsu_fwd_rs1 +
+                ((issue_wait_rs1_ff && rs1_lsu_fwd) ? 32'd1 : 32'd0);
+            perf_id_wait_lsu_fwd_rs2 <= perf_id_wait_lsu_fwd_rs2 +
+                ((issue_wait_rs2_ff && rs2_lsu_fwd) ? 32'd1 : 32'd0);
+            perf_id_wait_wb_fwd_rs1 <= perf_id_wait_wb_fwd_rs1 +
+                ((issue_wait_rs1_ff && rs1_wb_fwd) ? 32'd1 : 32'd0);
+            perf_id_wait_wb_fwd_rs2 <= perf_id_wait_wb_fwd_rs2 +
+                ((issue_wait_rs2_ff && rs2_wb_fwd) ? 32'd1 : 32'd0);
+            perf_id_skid_valid <= perf_id_skid_valid + (skid_valid_ff ? 32'd1 : 32'd0);
+            perf_id_skid_fill <= perf_id_skid_fill + (skid_fill ? 32'd1 : 32'd0);
+            perf_id_skid_drain <= perf_id_skid_drain + (skid_drain ? 32'd1 : 32'd0);
+            perf_id_skid_full_stall <= perf_id_skid_full_stall +
+                (issue_frontend_stall_o ? 32'd1 : 32'd0);
+            perf_id_frontend_stall <= perf_id_frontend_stall +
+                (issue_frontend_stall_o ? 32'd1 : 32'd0);
+            perf_ri_slot0_valid <= perf_ri_slot0_valid + (issue_valid_ff ? 32'd1 : 32'd0);
+            perf_ri_slot1_valid <= perf_ri_slot1_valid + (ri_slot1_valid ? 32'd1 : 32'd0);
+            perf_ri_slot0_ready <= perf_ri_slot0_ready +
+                ((issue_valid_ff && !issue_wait_block) ? 32'd1 : 32'd0);
+            perf_ri_slot1_ready <= perf_ri_slot1_ready + (ri_slot1_ready ? 32'd1 : 32'd0);
+            perf_ri_fire_slot0 <= perf_ri_fire_slot0 + (issue_slot0_fire ? 32'd1 : 32'd0);
+            perf_ri_fire_slot1_bypass <= perf_ri_fire_slot1_bypass +
+                (issue_slot1_bypass_fire ? 32'd1 : 32'd0);
+            perf_ri_slot1_block_raw <= perf_ri_slot1_block_raw +
+                (ri_slot1_block_raw ? 32'd1 : 32'd0);
+            perf_ri_slot1_block_waw <= perf_ri_slot1_block_waw +
+                (ri_slot1_block_waw ? 32'd1 : 32'd0);
+            perf_ri_slot1_block_ctrl <= perf_ri_slot1_block_ctrl +
+                (ri_slot1_block_ctrl ? 32'd1 : 32'd0);
+            perf_ri_slot1_block_mem <= perf_ri_slot1_block_mem +
+                (ri_slot1_block_mem ? 32'd1 : 32'd0);
+            perf_ri_slot1_block_unsupported <= perf_ri_slot1_block_unsupported +
+                (ri_slot1_block_unsupported ? 32'd1 : 32'd0);
         end
     end
 
@@ -552,6 +893,7 @@ import ydrasil_pkg::*;
     assign id_ex_pred_target_o = id_ex_pred_target_ff;
     assign id_ex_pred_counter_o = id_ex_pred_counter_ff;
     assign id_ex_pred_bht_index_o = id_ex_pred_bht_index_ff;
+    assign id_ex_pred_l0_taken_o = id_ex_pred_l0_taken_ff;
     assign id_ex_valid_o = id_ex_valid_ff;
 
     assign id_ctrl_rs1_addr_o = issue_rf_raddr_rs1_ff;
