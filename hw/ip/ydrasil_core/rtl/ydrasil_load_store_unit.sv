@@ -287,20 +287,46 @@ import ydrasil_pkg::*;
     wire mmio_wb_out_valid;
     wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] selected_wb_result;
     wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] selected_wb_rd_addr;
+    localparam int DTCM_TAG_LSB = ydrasil_pkg::DTCM_ADDR_WIDTH + 2;
 
     assign is_load = operator_lsu_type_i[ydrasil_pkg::OPERATOR_TYPE_LOAD - ydrasil_pkg::OPERATOR_TYPE_LSU_BASE];
     assign is_store = operator_lsu_type_i[ydrasil_pkg::OPERATOR_TYPE_STORE - ydrasil_pkg::OPERATOR_TYPE_LSU_BASE];
     assign request_valid = is_load | is_store;
-    assign mem_addr_index = id_lsu_addr_i[1:0];
-    assign request_is_dtcm = id_lsu_addr_is_dtcm_i;
+    assign mem_addr_index = ex_lsu_mem_addr_i[1:0];
+    assign request_is_dtcm =
+        (ex_lsu_mem_addr_i[ydrasil_pkg::BUS_ADDR_WIDTH-1:DTCM_TAG_LSB] ==
+         ydrasil_pkg::DTCM_BASE_ADDR[ydrasil_pkg::BUS_ADDR_WIDTH-1:DTCM_TAG_LSB]);
     assign mmio_busy = mmio_req_valid_q | mmio_wait_q | mmio_wb_valid_q;
     assign dtcm_accept = request_valid & request_is_dtcm & !mmio_wb_valid_q;
     assign dtcm_load_req = dtcm_accept & is_load;
     assign dtcm_store_req = dtcm_accept & is_store;
     assign mmio_accept = request_valid & !request_is_dtcm & !mmio_busy;
 
-    assign store_wmask = id_lsu_store_mask_i;
-    assign store_wdata = id_lsu_store_data_i;
+    wire legacy_lsu_is_sb = operator_lsu_i[ydrasil_pkg::OP_LSU_SB];
+    wire legacy_lsu_is_sh = operator_lsu_i[ydrasil_pkg::OP_LSU_SH];
+    wire legacy_lsu_is_sw = operator_lsu_i[ydrasil_pkg::OP_LSU_SW];
+    wire [3:0] legacy_sb_mask =
+        ({4{mem_addr_index == 2'b00}} & 4'b0001) |
+        ({4{mem_addr_index == 2'b01}} & 4'b0010) |
+        ({4{mem_addr_index == 2'b10}} & 4'b0100) |
+        ({4{mem_addr_index == 2'b11}} & 4'b1000);
+    wire [3:0] legacy_sh_mask = mem_addr_index[1] ? 4'b1100 : 4'b0011;
+    wire [31:0] legacy_sb_data =
+        ({32{mem_addr_index == 2'b00}} & {24'b0, id_lsu_rs2_data_i[7:0]}) |
+        ({32{mem_addr_index == 2'b01}} & {16'b0, id_lsu_rs2_data_i[7:0], 8'b0}) |
+        ({32{mem_addr_index == 2'b10}} & {8'b0, id_lsu_rs2_data_i[7:0], 16'b0}) |
+        ({32{mem_addr_index == 2'b11}} & {id_lsu_rs2_data_i[7:0], 24'b0});
+    wire [31:0] legacy_sh_data =
+        mem_addr_index[1] ? {id_lsu_rs2_data_i[15:0], 16'b0} :
+                            {16'b0, id_lsu_rs2_data_i[15:0]};
+    assign store_wmask =
+        ({4{legacy_lsu_is_sb}} & legacy_sb_mask) |
+        ({4{legacy_lsu_is_sh}} & legacy_sh_mask) |
+        ({4{legacy_lsu_is_sw}} & 4'b1111);
+    assign store_wdata =
+        ({32{legacy_lsu_is_sb}} & legacy_sb_data) |
+        ({32{legacy_lsu_is_sh}} & legacy_sh_data) |
+        ({32{legacy_lsu_is_sw}} & id_lsu_rs2_data_i);
 
     always_comb begin
         unique case (load_s1_addr_index_q)
@@ -369,7 +395,7 @@ import ydrasil_pkg::*;
 
     assign dtcm_req_o = dtcm_accept;
     assign dtcm_wen_o = dtcm_store_req;
-    assign dtcm_addr_o = id_lsu_addr_i;
+    assign dtcm_addr_o = ex_lsu_mem_addr_i;
     assign dtcm_wmask_o = dtcm_store_req ? store_wmask : 4'b0000;
     assign dtcm_wdata_o = dtcm_store_req ? store_wdata : 32'b0;
 
@@ -449,7 +475,7 @@ import ydrasil_pkg::*;
                 mmio_req_valid_q    <= 1'b1;
                 mmio_is_load_q      <= is_load;
                 mmio_is_store_q     <= is_store;
-                mmio_addr_q         <= id_lsu_addr_i;
+                mmio_addr_q         <= ex_lsu_mem_addr_i;
                 mmio_wdata_q        <= store_wdata;
                 mmio_wmask_q        <= store_wmask;
                 mmio_addr_index_q   <= mem_addr_index;

@@ -86,6 +86,12 @@ import ydrasil_pkg::*;
 	wire                           id_alu_rf_wen_rd;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    id_rf_waddr_rd;
 	wire                           id_ex_jalr;
+	wire                           pipe1_issue_valid;
+	wire [31:0]                    pipe1_operand_a;
+	wire [31:0]                    pipe1_operand_b;
+	wire [ydrasil_pkg::OPERATOR_WIDTH-1:0] pipe1_operator;
+	wire                           pipe1_rf_wen_rd_issue;
+	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] pipe1_rf_waddr_rd_issue;
 
 	// EX outputs
 	wire                        ex_branch_jump;
@@ -95,6 +101,10 @@ import ydrasil_pkg::*;
 	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] alu_result;
 	wire                        alu_rf_wen_rd;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] alu_rf_waddr_rd;
+	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] pipe1_alu_result;
+	wire                        pipe1_alu_rf_wen_rd;
+	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] pipe1_alu_rf_waddr_rd;
+	wire                        pipe1_instret_inc;
 	wire                        ex_mul_stall;
 	wire                        ex_mul_issue;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] ex_mul_issue_waddr;
@@ -165,6 +175,9 @@ import ydrasil_pkg::*;
 	wire                        rf_wen_rd;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] rf_waddr_rd;
 	wire                        wb_backpressure;
+	wire                        pipe1_resbuf_full;
+	wire                        pipe1_wb_dequeue;
+	wire                        pipe1_wb_enqueue;
 	reg                         wb_hzd_valid_q;
 	reg [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] wb_hzd_addr_q;
 	reg [ydrasil_pkg::REGS_DATA_WIDTH-1:0] wb_hzd_data_q;
@@ -304,14 +317,23 @@ import ydrasil_pkg::*;
 		wb_hzd_valid_q ? (ydrasil_pkg::REGS_NUM'(1) << wb_hzd_addr_q) : '0;
 	wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_issue_mask =
 		id_ex_rd_issue ? (ydrasil_pkg::REGS_NUM'(1) << id_rf_waddr_rd) : '0;
+	wire pipe1_rd_issue =
+		pipe1_issue_valid & pipe1_rf_wen_rd_issue &
+		(pipe1_rf_waddr_rd_issue != '0) & !flush_ex & !interrupt;
+	wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_pipe1_issue_mask =
+		pipe1_rd_issue ? (ydrasil_pkg::REGS_NUM'(1) << pipe1_rf_waddr_rd_issue) : '0;
 	wire id_ex_rd_flush_kill =
 		flush_ex & id_ex_valid & (id_rf_waddr_rd != '0) &
 		(id_alu_rf_wen_rd | operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD]);
+	wire pipe1_rd_flush_kill =
+		flush_ex & pipe1_issue_valid & (pipe1_rf_waddr_rd_issue != '0) &
+		pipe1_rf_wen_rd_issue;
 	wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_flush_kill_mask =
-		id_ex_rd_flush_kill ? (ydrasil_pkg::REGS_NUM'(1) << id_rf_waddr_rd) : '0;
+		(id_ex_rd_flush_kill ? (ydrasil_pkg::REGS_NUM'(1) << id_rf_waddr_rd) : '0) |
+		(pipe1_rd_flush_kill ? (ydrasil_pkg::REGS_NUM'(1) << pipe1_rf_waddr_rd_issue) : '0);
 	wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_for_hazard =
 		(gpr_pending_q & ~gpr_pending_clear_mask & ~gpr_pending_flush_kill_mask) |
-		gpr_pending_issue_mask;
+		gpr_pending_issue_mask | gpr_pending_pipe1_issue_mask;
 
 	wire rs1_clear_fwd =
 		(wb_hzd_valid_q & id_ctrl_rs1_ren & (id_ctrl_rs1_addr != '0) &
@@ -397,7 +419,7 @@ import ydrasil_pkg::*;
 	assign perip_wen = mmio_req && mmio_we;
 	assign perip_mask = mmio_wmask;
 	assign perip_wdata = mmio_wdata;
-	assign instret_inc = ex_instret_inc | lsu_rf_wen_rd | mul_result_valid;
+	assign instret_inc = ex_instret_inc | pipe1_instret_inc | lsu_rf_wen_rd | mul_result_valid;
 
 	ydrasil_load_store_unit u_ydrasil_load_store_unit (
 		.clk               (clk),
@@ -518,6 +540,7 @@ import ydrasil_pkg::*;
 		.rs2_issue_alu_ready_next_i(rs2_issue_alu_ready_next),
 		.ready_issue_allow_i(ready_issue_allow),
 		.gpr_pending_i(gpr_pending_for_hazard),
+		.pipe1_resbuf_full_i(pipe1_resbuf_full),
 		.issue_frontend_stall_o(id_frontend_stall),
 		.operand_a_o        (operand_a),
 		.operand_b_o        (operand_b),
@@ -553,7 +576,13 @@ import ydrasil_pkg::*;
 		.id_ex_pred_l0_taken_o(id_ex_pred_l0_taken),
 		.id_ex_valid_o      (id_ex_valid),
 		.id_alu_rf_wen_rd_o (id_alu_rf_wen_rd),
-		.id_rf_waddr_rd_o   (id_rf_waddr_rd)
+		.id_rf_waddr_rd_o   (id_rf_waddr_rd),
+		.pipe1_issue_valid_o(pipe1_issue_valid),
+		.pipe1_operand_a_o  (pipe1_operand_a),
+		.pipe1_operand_b_o  (pipe1_operand_b),
+		.pipe1_operator_o   (pipe1_operator),
+		.pipe1_rf_wen_rd_o  (pipe1_rf_wen_rd_issue),
+		.pipe1_rf_waddr_rd_o(pipe1_rf_waddr_rd_issue)
 	);
 
 	ydrasil_ex_block u_ydrasil_ex_block (
@@ -578,6 +607,12 @@ import ydrasil_pkg::*;
 		.clint_ex_int_addr_i(clint_ex_int_addr),
 		.id_rf_waddr_rd_i   (id_rf_waddr_rd),
 		.id_alu_rf_wen_rd_i (id_alu_rf_wen_rd),
+		.pipe1_issue_valid_i(pipe1_issue_valid),
+		.pipe1_operand_a_i  (pipe1_operand_a),
+		.pipe1_operand_b_i  (pipe1_operand_b),
+		.pipe1_operator_i   (pipe1_operator),
+		.pipe1_rf_wen_rd_i  (pipe1_rf_wen_rd_issue),
+		.pipe1_rf_waddr_rd_i(pipe1_rf_waddr_rd_issue),
 		.id_ex_csr_waddr_i  (id_ex_csr_waddr) ,
 		.id_op_csr_info_i   (id_op_csr_info) ,
 		.csr_ex_rdata_i     (csr_ex_rdata) ,
@@ -600,6 +635,10 @@ import ydrasil_pkg::*;
 		.alu_result_o       (alu_result),
 		.alu_rf_wen_rd_o    (alu_rf_wen_rd),
 		.alu_rf_waddr_rd_o  (alu_rf_waddr_rd),
+		.pipe1_alu_result_o (pipe1_alu_result),
+		.pipe1_alu_rf_wen_rd_o(pipe1_alu_rf_wen_rd),
+		.pipe1_alu_rf_waddr_rd_o(pipe1_alu_rf_waddr_rd),
+		.pipe1_instret_inc_o(pipe1_instret_inc),
 		.mul_issue_o        (ex_mul_issue),
 		.mul_issue_waddr_o  (ex_mul_issue_waddr),
 		.mul_wdata_rd_o     (mul_wb_result),
@@ -645,6 +684,9 @@ import ydrasil_pkg::*;
 		.alu_wdata_rd_i   (alu_result),
 		.alu_rf_wen_rd_i  (alu_rf_wen_rd),
 		.alu_rf_waddr_rd_i(alu_rf_waddr_rd),
+		.pipe1_alu_wdata_rd_i(pipe1_alu_result),
+		.pipe1_alu_rf_wen_rd_i(pipe1_alu_rf_wen_rd),
+		.pipe1_alu_rf_waddr_rd_i(pipe1_alu_rf_waddr_rd),
 		.lsu_wb_result_i  (lsu_wb_result),
 		.lsu_rf_wen_rd_i  (lsu_rf_wen_rd),
 		.lsu_rf_waddr_rd_i(lsu_rf_waddr_rd),
@@ -654,6 +696,9 @@ import ydrasil_pkg::*;
 		.wb_mul_complete_o(),
 		.wb_mul_complete_waddr_o(),
 		.wb_backpressure_o(wb_backpressure),
+		.pipe1_resbuf_full_o(pipe1_resbuf_full),
+		.pipe1_wb_dequeue_o(pipe1_wb_dequeue),
+		.pipe1_wb_enqueue_o(pipe1_wb_enqueue),
 		.rf_wdata_rd_o    (rf_wdata_rd),
 		.rf_wen_rd_o      (rf_wen_rd),
 		.rf_waddr_rd_o    (rf_waddr_rd)
