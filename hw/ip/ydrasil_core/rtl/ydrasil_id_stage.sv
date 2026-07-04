@@ -239,6 +239,7 @@ import ydrasil_pkg::*;
     wire                             issue_slot0_fire;
     wire                             issue_slot1_bypass_fire;
     wire                             pipe1_dual_fire;
+    wire                             pair1_fire;
     wire                             pipe1_dual_supported;
     wire                             pipe1_dual_no_rf_pressure;
     wire                             pipe1_dual_raw_pipe0;
@@ -688,7 +689,7 @@ import ydrasil_pkg::*;
     assign issue_frontend_stall_o =
         (!flush_id_i & !stall_id_i & !bubble_id_i &
          issue_valid_ff & issue_wait_block & skid_valid_ff) |
-        (pipe1_dual_fire & (PIPE1_REAL_MODE < 2));
+        (pair1_fire & (PIPE1_REAL_MODE < 2));
 
     assign pipe1_dual_pipe0_safe =
         issue_valid_ff &&
@@ -751,6 +752,7 @@ import ydrasil_pkg::*;
 `else
     assign pipe1_dual_fire = 1'b0;
 `endif
+    assign pair1_fire = pipe1_dual_fire;
 
     assign ri_slot1_valid = skid_valid_ff;
     assign ri_slot1_supported =
@@ -1157,7 +1159,7 @@ import ydrasil_pkg::*;
 `endif
             end else begin
                 if (issue_accept) begin
-                    if (pipe1_dual_fire) begin
+                    if (pair1_fire) begin
                         issue_valid_ff <= 1'b0;
                     end else begin
                         issue_pc_ff <= decode_pc;
@@ -1201,7 +1203,7 @@ import ydrasil_pkg::*;
 `ifndef SYNTHESIS
                     pair1_valid_ff <= 1'b0;
 `endif
-                end else if (pipe1_dual_fire) begin
+                end else if (pair1_fire) begin
                     skid_valid_ff <= (PIPE1_REAL_MODE >= 2) & if_id_valid_i;
                     skid_pc_ff <= if_id_pc_i;
                     skid_instr_ff <= if_id_instr_i;
@@ -1342,7 +1344,7 @@ import ydrasil_pkg::*;
                     id_ex_pred_l0_taken_ff <= selected_pred_l0_taken;
                     id_ex_valid_ff <= 1'b1;
                     id_fence_i_ff <= selected_fence_i;
-                    pipe1_issue_valid_ff <= pipe1_dual_fire;
+                    pipe1_issue_valid_ff <= pair1_fire;
                     pipe1_operand_a_ff   <= (operand_a_pc_sel | operator[ydrasil_pkg::OP_ALU_AUIPC]) ? decode_pc :
                                             operand_a_imm_sel ? imm_i : '0;
                     pipe1_operand_b_ff   <= operand_b_rs_sel ? '0 : imm_i;
@@ -1423,9 +1425,9 @@ import ydrasil_pkg::*;
                 (ri_bypass_flush_killed ? 32'd1 : 32'd0);
             perf_di_pipe0_fire <= perf_di_pipe0_fire + (issue_slot0_fire ? 32'd1 : 32'd0);
 `ifdef YDRASIL_ENABLE_PIPE1_REAL
-            perf_di_pipe1_fire <= perf_di_pipe1_fire + (pipe1_dual_fire ? 32'd1 : 32'd0);
-            perf_di_pair_fire <= perf_di_pair_fire + (pipe1_dual_fire ? 32'd1 : 32'd0);
-            perf_di_pair_simple_alu <= perf_di_pair_simple_alu + (pipe1_dual_fire ? 32'd1 : 32'd0);
+            perf_di_pipe1_fire <= perf_di_pipe1_fire + (pair1_fire ? 32'd1 : 32'd0);
+            perf_di_pair_fire <= perf_di_pair_fire + (pair1_fire ? 32'd1 : 32'd0);
+            perf_di_pair_simple_alu <= perf_di_pair_simple_alu + (pair1_fire ? 32'd1 : 32'd0);
             perf_di_pipe1_killed_flush <= perf_di_pipe1_killed_flush +
                 ((pipe1_issue_valid_ff && flush_id_i) ? 32'd1 : 32'd0);
             perf_di_pipe1_block_stall_recheck <= perf_di_pipe1_block_stall_recheck +
@@ -1438,9 +1440,9 @@ import ydrasil_pkg::*;
             perf_di_pipe1_block_timing_guard <= perf_di_pipe1_block_timing_guard +
                 ((pipe1_dual_supported && !pipe1_dual_no_rf_pressure) ? 32'd1 : 32'd0);
             perf_dual_cycles_with_pair_fire <= perf_dual_cycles_with_pair_fire +
-                (pipe1_dual_fire ? 32'd1 : 32'd0);
+                (pair1_fire ? 32'd1 : 32'd0);
             perf_dual_extra_instret_pipe1 <= perf_dual_extra_instret_pipe1 +
-                (pipe1_dual_fire ? 32'd1 : 32'd0);
+                (pair1_fire ? 32'd1 : 32'd0);
 `endif
 `ifndef SYNTHESIS
             perf_ds_cycles <= perf_ds_cycles + 32'd1;
