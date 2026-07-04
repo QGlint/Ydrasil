@@ -94,6 +94,10 @@ else
 $(error Unsupported MEMS_IMPL '$(MEMS_IMPL)'. Use MEMS_IMPL=new or MEMS_IMPL=legacy)
 endif
 
+ifeq ($(YDRASIL_ENABLE_PIPE1_REAL),1)
+DEFINES += YDRASIL_ENABLE_PIPE1_REAL
+endif
+
 ##################################
 # Timestamp
 ##################################

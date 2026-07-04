@@ -40,7 +40,8 @@ import ydrasil_pkg::*;
     // 寄存器写回接口
     output wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]     lsu_wb_result_o,
     output wire                            lsu_rf_rd_wen_o,
-    output wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     lsu_rf_rd_waddr_o
+    output wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     lsu_rf_rd_waddr_o,
+    output wire                            lsu_fast_fwd_valid_o
 );
     if (LSU_MODE == LSU_MODE_NEW) begin : g_new
         localparam [1:0] S_IDLE         = 2'd0;
@@ -177,6 +178,7 @@ import ydrasil_pkg::*;
         assign lsu_wb_result_o = result_q;
         assign lsu_rf_rd_wen_o = result_valid_q;
         assign lsu_rf_rd_waddr_o = result_valid_q ? rd_addr_q : '0;
+        assign lsu_fast_fwd_valid_o = result_valid_q;
 
         always_ff @(posedge clk or negedge rst_n) begin
             if (!rst_n) begin
@@ -414,6 +416,7 @@ import ydrasil_pkg::*;
     assign lsu_wb_result_o = selected_wb_result;
     assign lsu_rf_rd_wen_o = dtcm_wb_valid | mmio_wb_out_valid;
     assign lsu_rf_rd_waddr_o = (dtcm_wb_valid | mmio_wb_out_valid) ? selected_wb_rd_addr : '0;
+    assign lsu_fast_fwd_valid_o = dtcm_wb_valid;
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
