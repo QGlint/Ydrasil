@@ -8,7 +8,7 @@ PPA_DIR ?= $(BUILD_DIR)/PPA
 PPA_RVTEST_LOG ?= $(PPA_DIR)/test_all_summary.log
 PPA_COREMARK_LOG ?= $(PPA_DIR)/coremark_summary.log
 
-export PROJECT_ROOT BUILD_DIR WAVE_DIR LOG_DIR SIM_TOOL IP VERILATOR_MOD UVM USE_BENDER BENDER DIV_IMPL LSU_IMPL MEMS_IMPL YDRASIL_ENABLE_PIPE1_REAL ARCH ABI RISCV_PREFIX CC OBJCOPY OBJDUMP GDB QEMU TRACE_TO_CSV TRACE_COMPARE
+export PROJECT_ROOT BUILD_DIR WAVE_DIR LOG_DIR SIM_TOOL IP VERILATOR_MOD UVM USE_BENDER BENDER DIV_IMPL LSU_IMPL MEMS_IMPL YDRASIL_ENABLE_PIPE1_REAL PIPE1_REAL_MODE ARCH ABI RISCV_PREFIX CC OBJCOPY OBJDUMP GDB QEMU TRACE_TO_CSV TRACE_COMPARE
 
 SYN_DIR ?= $(PROJECT_ROOT)/syn
 SYN_BUILD_DIR ?= $(BUILD_DIR)/syn
@@ -39,7 +39,10 @@ SYN_RTL_DEFINES += YDRASIL_MEMS_IMPL_LEGACY
 else
 $(error Unsupported MEMS_IMPL '$(MEMS_IMPL)'. Use MEMS_IMPL=new or MEMS_IMPL=legacy)
 endif
-ifeq ($(YDRASIL_ENABLE_PIPE1_REAL),1)
+ifneq ($(PIPE1_REAL_MODE),)
+SYN_RTL_DEFINES += YDRASIL_ENABLE_PIPE1_REAL
+SYN_RTL_DEFINES += YDRASIL_PIPE1_REAL_MODE=$(PIPE1_REAL_MODE)
+else ifeq ($(YDRASIL_ENABLE_PIPE1_REAL),1)
 SYN_RTL_DEFINES += YDRASIL_ENABLE_PIPE1_REAL
 endif
 SYN_DEFINE_ARGS = $(foreach define,$(SYN_RTL_DEFINES),--define $(define))
@@ -204,6 +207,7 @@ COREMARK_SW_MAKE_ARGS = \
 		ABI=$(ABI)
 COREMARK_RESULT_LOG ?= $(HW_TRACE_OUT_DIR)/coremark/hw.log
 COREMARK_SIM_COMPARE ?= none
+COREMARK_SCORE_HZ ?= 100000000
 
 coremark:
 	@$(MAKE) -C sw coremark $(COREMARK_SW_MAKE_ARGS)
@@ -232,24 +236,35 @@ coremark_result:
 	rm -f "$(PPA_COREMARK_LOG)"; \
 	if [ -f "$(COREMARK_RESULT_LOG)" ]; then \
 		echo "[COREMARK] Result from $(COREMARK_RESULT_LOG)" | tee -a "$(PPA_COREMARK_LOG)"; \
-		tmp=$$(mktemp); \
-		awk '{ \
-			line=$$0; \
-			if (line ~ /^PERF_[A-Z0-9_]+:/) { \
-				print line; \
-			} else if (match(line, /(core[[:space:]]+0:|3[[:space:]]+0x)/)) { \
-				prefix=substr(line, 1, RSTART - 1); \
-				if (length(prefix) > 0) printf "%s", prefix; \
-			} else if (line == "") { \
-				printf "\n"; \
-			} \
-		} END { printf "\n"; }' "$(COREMARK_RESULT_LOG)" > $$tmp; \
-		if grep -Eq '^(CoreMark Size|Total ticks|Total time \(secs\)|Iterations/Sec|Iterations       |Compiler version|Compiler flags|Memory location|seedcrc|Correct operation validated|CoreMark 1\.0 :|Errors detected|ERROR!|COREMARK DONE|PERF_[A-Z0-9_]+:|\[[0-9]+\]crc)' "$$tmp"; then \
-			grep -E '^(CoreMark Size|Total ticks|Total time \(secs\)|Iterations/Sec|Iterations       |Compiler version|Compiler flags|Memory location|seedcrc|Correct operation validated|CoreMark 1\.0 :|Errors detected|ERROR!|COREMARK DONE|PERF_[A-Z0-9_]+:|\[[0-9]+\]crc)' "$$tmp" | tee -a "$(PPA_COREMARK_LOG)"; \
+		if grep -Eq '^(CoreMark Size|Total ticks|Total time \(secs\)|Iterations       |Compiler version|Compiler flags|Memory location|seedcrc|Correct operation validated|Errors detected|ERROR!|COREMARK DONE|PERF_[A-Z0-9_]+:|\[[0-9]+\]crc)' "$(COREMARK_RESULT_LOG)"; then \
+			grep -E '^(CoreMark Size|Total ticks|Total time \(secs\)|Iterations       |Compiler version|Compiler flags|Memory location|seedcrc|Correct operation validated|Errors detected|ERROR!|COREMARK DONE|PERF_[A-Z0-9_]+:|\[[0-9]+\]crc)' "$(COREMARK_RESULT_LOG)" | tee -a "$(PPA_COREMARK_LOG)"; \
+			awk -v hz="$(COREMARK_SCORE_HZ)" '\
+				/^Iterations[[:space:]]*:/ { iterations=$$3 } \
+				/^Total ticks[[:space:]]*:/ { ticks=$$4 } \
+				/^Total time \(secs\):/ { total_time=$$4 } \
+				/^COREMARK DONE/ { done=1 } \
+				/^PERF_METRIC:/ { \
+					for (i = 1; i <= NF; i++) { \
+						if ($$i ~ /^CYCLES=/) { split($$i, a, "="); cycles=a[2]; } \
+					} \
+				} \
+				END { \
+					if (iterations == "" && (done || cycles > 0)) iterations=1; \
+					if (iterations == "") iterations=0; \
+					if (ticks == "" && cycles > 0) ticks=cycles; \
+					if (ticks == "") ticks=0; \
+					valid10=(total_time + 0 >= 10.0) ? 1 : 0; \
+					ips_ticks=(ticks > 0) ? (iterations * hz / ticks) : 0; \
+					cm_mhz=ips_ticks / (hz / 1000000.0); \
+					printf("COREMARK_SIM_SCORE: ITERATIONS=%d TOTAL_TICKS=%d SCORE_HZ=%d ITERATIONS_PER_SEC_BY_TICKS=%.6f COREMARK_PER_MHZ=%.6f VALID_10S=%d\n", iterations, ticks, hz, ips_ticks, cm_mhz, valid10); \
+					if (cycles > 0) { \
+						ips_cycles=iterations * hz / cycles; \
+						printf("COREMARK_SIM_PERF_SCORE: ITERATIONS_PER_SEC_BY_CYCLES=%.6f COREMARK_PER_MHZ_BY_CYCLES=%.6f\n", ips_cycles, ips_cycles / (hz / 1000000.0)); \
+					} \
+				}' "$(COREMARK_RESULT_LOG)" | tee -a "$(PPA_COREMARK_LOG)"; \
 		else \
 			echo "[COREMARK] No CoreMark result lines found in $(COREMARK_RESULT_LOG)" | tee -a "$(PPA_COREMARK_LOG)"; \
 		fi; \
-		rm -f $$tmp; \
 	else \
 		echo "[COREMARK] HW log not found: $(COREMARK_RESULT_LOG)" | tee -a "$(PPA_COREMARK_LOG)"; \
 	fi

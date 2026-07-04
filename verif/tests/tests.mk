@@ -112,9 +112,10 @@ rv_sim_%:
 	fi; \
 	hw_log=$(HW_TRACE_OUT_DIR)/$$typ/$$base/hw.log; \
 	[ -f "$$hw_log" ] || hw_log=$$result_dir/$$base.log; \
-	cycles=$$(grep -o "CYCLES=[0-9]*" $$hw_log | cut -d= -f2); \
-	insts=$$(grep -o "INSTS=[0-9]*" $$hw_log | cut -d= -f2); \
-	ipc=$$(grep -o "IPC=[0-9.]*" $$hw_log | cut -d= -f2); \
+	metric_line=$$(grep -m1 "^PERF_METRIC:" $$hw_log); \
+	cycles=$$(printf '%s\n' "$$metric_line" | sed -n 's/.*CYCLES=\([0-9][0-9]*\).*/\1/p'); \
+	insts=$$(printf '%s\n' "$$metric_line" | sed -n 's/.*INSTS=\([0-9][0-9]*\).*/\1/p'); \
+	ipc=$$(printf '%s\n' "$$metric_line" | sed -n 's/.*IPC=\([0-9.][0-9.]*\).*/\1/p'); \
 	bp_acc=$$(grep -m1 "^PERF_BP_ACC:" $$hw_log | sed -n 's/.*ACC=\([0-9.]*\).*/\1/p'); \
 	if [ -z "$$bp_acc" ]; then \
 		bp_acc=$$(grep -m1 "^PERF_BRANCH:" $$hw_log | sed -n 's/.*ACC=\([0-9.]*\).*/\1/p'); \

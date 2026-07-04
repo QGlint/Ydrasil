@@ -92,10 +92,28 @@ import ydrasil_pkg::*;
     output wire [DATA_WIDTH-1:0]           pipe1_operand_b_o,
     output wire [ydrasil_pkg::OPERATOR_WIDTH-1:0] pipe1_operator_o,
     output wire                            pipe1_rf_wen_rd_o,
-    output wire [4:0]                      pipe1_rf_waddr_rd_o
+    output wire [4:0]                      pipe1_rf_waddr_rd_o,
+    output wire [DATA_WIDTH-1:0]           pipe1_pc_o,
+    output wire [DATA_WIDTH-1:0]           pipe1_instr_o
+`ifndef SYNTHESIS
+    ,
+    output wire                            commit_trace_alloc_valid_o,
+    output wire [DATA_WIDTH-1:0]           commit_trace_alloc_pc_o,
+    output wire [DATA_WIDTH-1:0]           commit_trace_alloc_instr_o
+`endif
 
 
 );
+`ifdef YDRASIL_ENABLE_PIPE1_REAL
+`ifdef YDRASIL_PIPE1_REAL_MODE
+    localparam int PIPE1_REAL_MODE = `YDRASIL_PIPE1_REAL_MODE;
+`else
+    localparam int PIPE1_REAL_MODE = 1;
+`endif
+`else
+    localparam int PIPE1_REAL_MODE = 0;
+`endif
+
     wire [4:0]                           rf_raddr_rs1;
     wire [4:0]                           rf_raddr_rs2;
     wire                                 rf_ren_rs1;
@@ -336,8 +354,31 @@ import ydrasil_pkg::*;
     reg [ydrasil_pkg::OPERATOR_WIDTH-1:0] pipe1_operator_ff;
     reg                              pipe1_rf_wen_rd_ff;
     reg [4:0]                        pipe1_rf_waddr_rd_ff;
+    reg [DATA_WIDTH-1:0]             pipe1_pc_ff;
+    reg [DATA_WIDTH-1:0]             pipe1_instr_ff;
 
 `ifndef SYNTHESIS
+    wire [4:0]                       if_id_trace_rf_waddr_rd;
+    wire                             if_id_trace_rf_wen_rd;
+    wire [DATA_WIDTH-1:0]            if_id_trace_imm;
+    wire                             if_id_trace_operand_b_rs_sel;
+    wire                             if_id_trace_operand_a_pc_sel;
+    wire                             if_id_trace_operand_a_imm_sel;
+    wire                             if_id_trace_bt_a_rs_sel;
+    wire                             if_id_trace_operand_b_jump_sel;
+    wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0] if_id_trace_csr_reg_raddr;
+    wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0] if_id_trace_csr_ex_waddr;
+    wire [ydrasil_pkg::OP_CSR_INFO_WIDTH-1:0] if_id_trace_csr_op_info;
+    wire [ydrasil_pkg::OP_SYS_INFO_WIDTH-1:0] if_id_trace_sys_op_info;
+    wire [ydrasil_pkg::OPERATOR_WIDTH-1:0] if_id_trace_operator;
+    wire [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0] if_id_trace_operator_lsu;
+    wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] if_id_trace_operator_type;
+    wire [4:0]                       if_id_trace_rf_raddr_rs1;
+    wire [4:0]                       if_id_trace_rf_raddr_rs2;
+    wire                             if_id_trace_rf_ren_rs1;
+    wire                             if_id_trace_rf_ren_rs2;
+    wire                             commit_trace_alloc_if_id;
+
     wire                             ds_pipe0_valid;
     wire                             ds_pipe0_ready;
     wire                             ds_pipe0_ctrl;
@@ -410,6 +451,33 @@ import ydrasil_pkg::*;
         .operator_lsu_o     (operator_lsu),
         .operator_type_o    (operator_type)
     );
+
+`ifndef SYNTHESIS
+    ydrasil_ins_decoder #(
+        .DATA_WIDTH(DATA_WIDTH)
+    ) u_commit_trace_if_id_decoder (
+        .instr_i            (if_id_instr_i),
+        .rf_waddr_rd_o      (if_id_trace_rf_waddr_rd),
+        .rf_raddr_rs1_o     (if_id_trace_rf_raddr_rs1),
+        .rf_raddr_rs2_o     (if_id_trace_rf_raddr_rs2),
+        .rf_ren_rs1_o       (if_id_trace_rf_ren_rs1),
+        .rf_ren_rs2_o       (if_id_trace_rf_ren_rs2),
+        .rf_wen_rd_o        (if_id_trace_rf_wen_rd),
+        .imm_i_o            (if_id_trace_imm),
+        .operand_b_rs_sel_o (if_id_trace_operand_b_rs_sel),
+        .operand_a_pc_sel_o (if_id_trace_operand_a_pc_sel),
+        .operand_a_imm_sel_o(if_id_trace_operand_a_imm_sel),
+        .bt_a_rs_sel_o      (if_id_trace_bt_a_rs_sel),
+        .operand_b_jump_sel_o(if_id_trace_operand_b_jump_sel),
+        .csr_reg_raddr_o    (if_id_trace_csr_reg_raddr),
+        .csr_ex_waddr_o     (if_id_trace_csr_ex_waddr),
+        .csr_op_info_o      (if_id_trace_csr_op_info),
+        .sys_op_info_o      (if_id_trace_sys_op_info),
+        .operator_o         (if_id_trace_operator),
+        .operator_lsu_o     (if_id_trace_operator_lsu),
+        .operator_type_o    (if_id_trace_operator_type)
+    );
+`endif
 
     assign id_advance = !stall_id_i && !bubble_id_i;
     assign decode_pc = skid_valid_ff ? skid_pc_ff : if_id_pc_i;
@@ -586,7 +654,7 @@ import ydrasil_pkg::*;
     assign issue_frontend_stall_o =
         (!flush_id_i & !stall_id_i & !bubble_id_i &
          issue_valid_ff & issue_wait_block & skid_valid_ff) |
-        pipe1_dual_fire;
+        (pipe1_dual_fire & (PIPE1_REAL_MODE < 2));
 
     assign pipe1_dual_pipe0_safe =
         issue_valid_ff &&
@@ -617,11 +685,13 @@ import ydrasil_pkg::*;
          operator[ydrasil_pkg::OP_ALU_XOR] |
          operator[ydrasil_pkg::OP_ALU_OR] |
          operator[ydrasil_pkg::OP_ALU_AND] |
-         operator[ydrasil_pkg::OP_ALU_LUI]);
+         operator[ydrasil_pkg::OP_ALU_LUI] |
+         operator[ydrasil_pkg::OP_ALU_AUIPC]);
     assign pipe1_dual_no_rf_pressure =
         pipe1_dual_supported &&
         !rf_ren_rs1 && !rf_ren_rs2 &&
-        operator[ydrasil_pkg::OP_ALU_LUI];
+        (operator[ydrasil_pkg::OP_ALU_LUI] |
+         operator[ydrasil_pkg::OP_ALU_AUIPC]);
     assign pipe1_dual_raw_pipe0 =
         pipe1_dual_supported && (issue_rf_waddr_rd_ff != '0) &&
         issue_rf_wen_rd_ff &&
@@ -638,6 +708,7 @@ import ydrasil_pkg::*;
         pipe1_dual_supported && gpr_pending_i[rf_waddr_rd];
 `ifdef YDRASIL_ENABLE_PIPE1_REAL
     assign pipe1_dual_fire =
+        (PIPE1_REAL_MODE != 0) &&
         issue_slot0_fire && ready_issue_allow_i && !flush_id_i &&
         pipe1_dual_pipe0_safe && pipe1_dual_no_rf_pressure &&
         !pipe1_dual_raw_pipe0 && !pipe1_dual_waw_pipe0 &&
@@ -943,6 +1014,8 @@ import ydrasil_pkg::*;
             pipe1_operator_ff <= '0;
             pipe1_rf_wen_rd_ff <= 1'b0;
             pipe1_rf_waddr_rd_ff <= '0;
+            pipe1_pc_ff <= '0;
+            pipe1_instr_ff <= '0;
 `ifndef SYNTHESIS
             perf_ds_cycles <= '0;
             perf_ds_pipe0_valid <= '0;
@@ -1017,7 +1090,15 @@ import ydrasil_pkg::*;
                 if (issue_slot1_bypass_fire) begin
                     skid_valid_ff <= 1'b0;
                 end else if (pipe1_dual_fire) begin
-                    skid_valid_ff <= 1'b0;
+                    skid_valid_ff <= (PIPE1_REAL_MODE >= 2) & if_id_valid_i;
+                    skid_pc_ff <= if_id_pc_i;
+                    skid_instr_ff <= if_id_instr_i;
+                    skid_pred_hit_ff <= if_id_pred_hit_i;
+                    skid_pred_taken_ff <= if_id_pred_taken_i;
+                    skid_pred_target_ff <= if_id_pred_target_i;
+                    skid_pred_counter_ff <= if_id_pred_counter_i;
+                    skid_pred_bht_index_ff <= if_id_pred_bht_index_i;
+                    skid_pred_l0_taken_ff <= if_id_pred_l0_taken_i;
                 end else if (id_advance) begin
                     if (issue_load_from_skid) begin
                         skid_valid_ff <= if_id_valid_i;
@@ -1083,6 +1164,8 @@ import ydrasil_pkg::*;
                     pipe1_operator_ff    <= operator;
                     pipe1_rf_wen_rd_ff   <= rf_wen_rd;
                     pipe1_rf_waddr_rd_ff <= rf_waddr_rd;
+                    pipe1_pc_ff          <= decode_pc;
+                    pipe1_instr_ff       <= decode_instr;
                     if (issue_slot0_fire && !issue_accept) begin
                         issue_valid_ff <= 1'b0;
                         issue_wait_rs1_ff <= 1'b0;
@@ -1272,6 +1355,8 @@ import ydrasil_pkg::*;
     assign pipe1_operator_o = pipe1_operator_ff;
     assign pipe1_rf_wen_rd_o = pipe1_rf_wen_rd_ff;
     assign pipe1_rf_waddr_rd_o = pipe1_rf_waddr_rd_ff;
+    assign pipe1_pc_o = pipe1_pc_ff;
+    assign pipe1_instr_o = pipe1_instr_ff;
 `else
     assign pipe1_issue_valid_o = 1'b0;
     assign pipe1_operand_a_o = '0;
@@ -1279,6 +1364,8 @@ import ydrasil_pkg::*;
     assign pipe1_operator_o = '0;
     assign pipe1_rf_wen_rd_o = 1'b0;
     assign pipe1_rf_waddr_rd_o = '0;
+    assign pipe1_pc_o = '0;
+    assign pipe1_instr_o = '0;
 `endif
 
     assign id_ctrl_rs1_addr_o = issue_rf_raddr_rs1_ff;
@@ -1292,5 +1379,20 @@ import ydrasil_pkg::*;
     assign id_ctrl_lsu_req_o = issue_valid_ff &
         (issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] |
          issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]);
+
+`ifndef SYNTHESIS
+    assign commit_trace_alloc_if_id =
+        if_id_valid_i && !flush_id_i &&
+        ((issue_accept && !skid_valid_ff) ||
+         issue_load_from_skid ||
+         skid_fill);
+    assign commit_trace_alloc_valid_o =
+        commit_trace_alloc_if_id &&
+        (if_id_trace_rf_waddr_rd != '0) &&
+        (if_id_trace_rf_wen_rd |
+         if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD]);
+    assign commit_trace_alloc_pc_o = if_id_pc_i;
+    assign commit_trace_alloc_instr_o = if_id_instr_i;
+`endif
 
 endmodule

@@ -92,6 +92,8 @@ import ydrasil_pkg::*;
 	wire [ydrasil_pkg::OPERATOR_WIDTH-1:0] pipe1_operator;
 	wire                           pipe1_rf_wen_rd_issue;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] pipe1_rf_waddr_rd_issue;
+	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] pipe1_pc;
+	wire [ydrasil_pkg::INST_DATA_WIDTH-1:0] pipe1_instr;
 
 	// EX outputs
 	wire                        ex_branch_jump;
@@ -234,6 +236,10 @@ import ydrasil_pkg::*;
 	wire [ydrasil_pkg::INST_DATA_WIDTH-1:0] commit_alu_instr;
 	wire [ydrasil_pkg::INST_DATA_WIDTH-1:0] commit_lsu_instr;
 	wire [ydrasil_pkg::INST_DATA_WIDTH-1:0] commit_mul_instr;
+	wire commit_trace_alloc_valid;
+	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] commit_trace_alloc_pc;
+	wire [ydrasil_pkg::INST_DATA_WIDTH-1:0] commit_trace_alloc_instr;
+	wire commit_pipe0_is_load;
 	reg commit_ex_valid_q;
 	reg [ydrasil_pkg::INST_ADDR_WIDTH-1:0] commit_ex_pc_q;
 	reg [ydrasil_pkg::INST_DATA_WIDTH-1:0] commit_ex_instr_q;
@@ -243,6 +249,9 @@ import ydrasil_pkg::*;
 	reg commit_mul_issue_valid_q;
 	reg [ydrasil_pkg::INST_ADDR_WIDTH-1:0] commit_mul_issue_pc_q;
 	reg [ydrasil_pkg::INST_DATA_WIDTH-1:0] commit_mul_issue_instr_q;
+	reg commit_pipe1_issue_valid_q;
+	reg [ydrasil_pkg::INST_ADDR_WIDTH-1:0] commit_pipe1_issue_pc_q;
+	reg [ydrasil_pkg::INST_DATA_WIDTH-1:0] commit_pipe1_issue_instr_q;
 
 	function automatic [ydrasil_pkg::INST_DATA_WIDTH-1:0] commit_read_instr;
 		input [ydrasil_pkg::INST_ADDR_WIDTH-1:0] pc;
@@ -265,6 +274,7 @@ import ydrasil_pkg::*;
 	assign commit_alu_instr = commit_read_instr(id_instr_addr);
 	assign commit_lsu_instr = commit_read_instr(id_instr_addr);
 	assign commit_mul_instr = commit_read_instr(id_instr_addr);
+	assign commit_pipe0_is_load = operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD];
 
 	always_ff @(posedge clk or negedge rst_n) begin
 		if (!rst_n) begin
@@ -277,16 +287,25 @@ import ydrasil_pkg::*;
 			commit_mul_issue_valid_q <= 1'b0;
 			commit_mul_issue_pc_q <= '0;
 			commit_mul_issue_instr_q <= '0;
+			commit_pipe1_issue_valid_q <= 1'b0;
+			commit_pipe1_issue_pc_q <= '0;
+			commit_pipe1_issue_instr_q <= '0;
 		end else begin
 			commit_ex_valid_q <= id_ex_valid & !interrupt & !flush_ex;
 			commit_ex_pc_q <= id_instr_addr;
 			commit_ex_instr_q <= commit_alu_instr;
-			commit_lsu_issue_valid_q <= ex_accept_valid & operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD];
+			commit_lsu_issue_valid_q <=
+				ex_accept_valid & commit_pipe0_is_load & (id_rf_waddr_rd != '0) & !interrupt;
 			commit_lsu_issue_pc_q <= id_instr_addr;
 			commit_lsu_issue_instr_q <= commit_lsu_instr;
 			commit_mul_issue_valid_q <= ex_mul_issue;
 			commit_mul_issue_pc_q <= id_instr_addr;
 			commit_mul_issue_instr_q <= commit_mul_instr;
+			commit_pipe1_issue_valid_q <=
+				pipe1_issue_valid_to_ex & pipe1_rf_wen_rd_to_ex &
+				(pipe1_rf_waddr_rd_to_ex != '0) & !interrupt & !flush_ex;
+			commit_pipe1_issue_pc_q <= pipe1_pc;
+			commit_pipe1_issue_instr_q <= pipe1_instr;
 		end
 	end
 `endif
@@ -619,7 +638,14 @@ import ydrasil_pkg::*;
 		.pipe1_operand_b_o  (pipe1_operand_b),
 		.pipe1_operator_o   (pipe1_operator),
 		.pipe1_rf_wen_rd_o  (pipe1_rf_wen_rd_issue),
-		.pipe1_rf_waddr_rd_o(pipe1_rf_waddr_rd_issue)
+		.pipe1_rf_waddr_rd_o(pipe1_rf_waddr_rd_issue),
+		.pipe1_pc_o         (pipe1_pc),
+		.pipe1_instr_o      (pipe1_instr)
+`ifndef SYNTHESIS
+		,.commit_trace_alloc_valid_o(commit_trace_alloc_valid)
+		,.commit_trace_alloc_pc_o(commit_trace_alloc_pc)
+		,.commit_trace_alloc_instr_o(commit_trace_alloc_instr)
+`endif
 	);
 
 	ydrasil_ex_block u_ydrasil_ex_block (
@@ -819,6 +845,10 @@ import ydrasil_pkg::*;
 	ydrasil_commit_trace u_ydrasil_commit_trace (
 		.clk              (clk),
 		.rst_n            (rst_n),
+		.flush_i          (flush_id | flush_ex | interrupt),
+		.alloc_valid_i    (commit_trace_alloc_valid),
+		.alloc_pc_i       (commit_trace_alloc_pc),
+		.alloc_instr_i    (commit_trace_alloc_instr),
 		.alu_valid_i      (commit_ex_valid_q & alu_rf_wen_rd),
 		.alu_pc_i         (commit_ex_pc_q),
 		.alu_instr_i      (commit_ex_instr_q),
@@ -835,7 +865,13 @@ import ydrasil_pkg::*;
 		.mul_issue_instr_i(commit_mul_issue_instr_q),
 		.mul_valid_i      (mul_rf_wen_rd),
 		.mul_waddr_i      (mul_rf_waddr_rd),
-		.mul_wdata_i      (mul_wb_result)
+		.mul_wdata_i      (mul_wb_result),
+		.pipe1_issue_valid_i(commit_pipe1_issue_valid_q),
+		.pipe1_issue_pc_i (commit_pipe1_issue_pc_q),
+		.pipe1_issue_instr_i(commit_pipe1_issue_instr_q),
+		.pipe1_valid_i    (pipe1_alu_rf_wen_rd_to_wb),
+		.pipe1_waddr_i    (pipe1_alu_rf_waddr_rd_to_wb),
+		.pipe1_wdata_i    (pipe1_alu_result_to_wb)
 	);
 `endif
 
