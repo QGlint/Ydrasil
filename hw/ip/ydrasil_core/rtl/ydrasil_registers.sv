@@ -22,7 +22,12 @@ import ydrasil_pkg::*;
     input wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]  rf_raddr_rs2_i,  // 读寄存器2地址
 
     // to id
-    output wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] rf_rdata_rs2_o  // 读寄存器2数据
+    output wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] rf_rdata_rs2_o,  // 读寄存器2数据
+
+    input wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]  pipe1_rf_raddr_rs1_i,
+    output wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] pipe1_rf_rdata_rs1_o,
+    input wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]  pipe1_rf_raddr_rs2_i,
+    output wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] pipe1_rf_rdata_rs2_o
 
 );
 
@@ -57,5 +62,9 @@ import ydrasil_pkg::*;
 
     assign rf_rdata_rs1_o = (rf_raddr_rs1_i == '0) ? '0 : registers[rf_raddr_rs1_i];
     assign rf_rdata_rs2_o = (rf_raddr_rs2_i == '0) ? '0 : registers[rf_raddr_rs2_i];
+    assign pipe1_rf_rdata_rs1_o =
+        (pipe1_rf_raddr_rs1_i == '0) ? '0 : registers[pipe1_rf_raddr_rs1_i];
+    assign pipe1_rf_rdata_rs2_o =
+        (pipe1_rf_raddr_rs2_i == '0) ? '0 : registers[pipe1_rf_raddr_rs2_i];
 
 endmodule

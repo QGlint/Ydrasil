@@ -69,6 +69,10 @@ import ydrasil_pkg::*;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] rf_raddr_rs2;
 	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] rf_rdata_rs1;
 	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] rf_rdata_rs2;
+	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] pipe1_rf_raddr_rs1;
+	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] pipe1_rf_raddr_rs2;
+	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] pipe1_rf_rdata_rs1;
+	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] pipe1_rf_rdata_rs2;
 
 	// ID -> EX
 	wire [31:0]                    operand_a;
@@ -107,6 +111,9 @@ import ydrasil_pkg::*;
 	wire                        pipe1_alu_rf_wen_rd;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] pipe1_alu_rf_waddr_rd;
 	wire                        pipe1_instret_inc;
+	wire                        pipe1_wb_fwd_valid;
+	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] pipe1_wb_fwd_addr;
+	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] pipe1_wb_fwd_data;
 	wire                        ex_mul_stall;
 	wire                        ex_mul_issue;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] ex_mul_issue_waddr;
@@ -368,6 +375,8 @@ import ydrasil_pkg::*;
 		 (id_ctrl_rs1_addr == wb_hzd_addr_q)) |
 		(lsu_fast_fwd_valid & id_ctrl_rs1_ren & (id_ctrl_rs1_addr != '0) &
 		 (id_ctrl_rs1_addr == lsu_rf_waddr_rd)) |
+		(pipe1_wb_fwd_valid & id_ctrl_rs1_ren & (id_ctrl_rs1_addr != '0) &
+		 (id_ctrl_rs1_addr == pipe1_wb_fwd_addr)) |
 		(alu_rf_wen_rd & id_ctrl_rs1_ren & (id_ctrl_rs1_addr != '0) &
 		 (id_ctrl_rs1_addr == alu_rf_waddr_rd));
 	wire rs2_clear_fwd =
@@ -375,6 +384,8 @@ import ydrasil_pkg::*;
 		 (id_ctrl_rs2_addr == wb_hzd_addr_q)) |
 		(lsu_fast_fwd_valid & id_ctrl_rs2_ren & (id_ctrl_rs2_addr != '0) &
 		 (id_ctrl_rs2_addr == lsu_rf_waddr_rd)) |
+		(pipe1_wb_fwd_valid & id_ctrl_rs2_ren & (id_ctrl_rs2_addr != '0) &
+		 (id_ctrl_rs2_addr == pipe1_wb_fwd_addr)) |
 		(alu_rf_wen_rd & id_ctrl_rs2_ren & (id_ctrl_rs2_addr != '0) &
 		 (id_ctrl_rs2_addr == alu_rf_waddr_rd));
 	wire rd_clear_fwd =
@@ -390,6 +401,18 @@ import ydrasil_pkg::*;
 		id_ex_rd_issue & id_ctrl_rs2_ren & (id_ctrl_rs2_addr == id_rf_waddr_rd);
 	wire rd_issue_raw_hzd =
 		id_ex_rd_issue & id_ctrl_rd_wen & (id_ctrl_rd_addr == id_rf_waddr_rd);
+`ifdef YDRASIL_ENABLE_PIPE1_REAL
+	wire pipe1_issue_rs1_hzd =
+		pipe1_rd_issue & id_ctrl_rs1_ren & (id_ctrl_rs1_addr == pipe1_rf_waddr_rd_issue);
+	wire pipe1_issue_rs2_hzd =
+		pipe1_rd_issue & id_ctrl_rs2_ren & (id_ctrl_rs2_addr == pipe1_rf_waddr_rd_issue);
+	wire pipe1_issue_rd_hzd =
+		pipe1_rd_issue & id_ctrl_rd_wen & (id_ctrl_rd_addr == pipe1_rf_waddr_rd_issue);
+`else
+	wire pipe1_issue_rs1_hzd = 1'b0;
+	wire pipe1_issue_rs2_hzd = 1'b0;
+	wire pipe1_issue_rd_hzd = 1'b0;
+`endif
 	wire rs1_pending_stall =
 		id_ctrl_rs1_ren && gpr_pending_q[id_ctrl_rs1_addr] && !rs1_clear_fwd;
 	wire rs2_pending_stall =
@@ -413,6 +436,7 @@ import ydrasil_pkg::*;
 
 	assign scoreboard_stall =
 		rs1_issue_hzd | rs2_issue_hzd | rd_issue_hzd |
+		pipe1_issue_rs1_hzd | pipe1_issue_rs2_hzd | pipe1_issue_rd_hzd |
 		rs1_pending_stall |
 		rs2_pending_stall |
 		rd_waw_stall;
@@ -583,6 +607,10 @@ import ydrasil_pkg::*;
 		.rf_addr_rs2_o      (rf_raddr_rs2),
 		.rf_rdata_rs1_i     (rf_rdata_rs1),
 		.rf_rdata_rs2_i     (rf_rdata_rs2),
+		.pipe1_rf_addr_rs1_o(pipe1_rf_raddr_rs1),
+		.pipe1_rf_addr_rs2_o(pipe1_rf_raddr_rs2),
+		.pipe1_rf_rdata_rs1_i(pipe1_rf_rdata_rs1),
+		.pipe1_rf_rdata_rs2_i(pipe1_rf_rdata_rs2),
 		.wb_fwd_valid_i     (wb_hzd_valid_q),
 		.wb_fwd_addr_i      (wb_hzd_addr_q),
 		.wb_fwd_data_i      (wb_hzd_data_q),
@@ -592,6 +620,9 @@ import ydrasil_pkg::*;
 		.alu_fwd_valid_i    (alu_rf_wen_rd),
 		.alu_fwd_addr_i     (alu_rf_waddr_rd),
 		.alu_fwd_data_i     (alu_result),
+		.pipe1_alu_fwd_valid_i(pipe1_wb_fwd_valid),
+		.pipe1_alu_fwd_addr_i(pipe1_wb_fwd_addr),
+		.pipe1_alu_fwd_data_i(pipe1_wb_fwd_data),
 		.rs1_issue_alu_ready_next_i(rs1_issue_alu_ready_next),
 		.rs2_issue_alu_ready_next_i(rs2_issue_alu_ready_next),
 		.ready_issue_allow_i(ready_issue_allow),
@@ -762,6 +793,9 @@ import ydrasil_pkg::*;
 		.pipe1_resbuf_full_o(pipe1_resbuf_full),
 		.pipe1_wb_dequeue_o(pipe1_wb_dequeue),
 		.pipe1_wb_enqueue_o(pipe1_wb_enqueue),
+		.pipe1_fwd_valid_o(pipe1_wb_fwd_valid),
+		.pipe1_fwd_addr_o(pipe1_wb_fwd_addr),
+		.pipe1_fwd_data_o(pipe1_wb_fwd_data),
 		.rf_wdata_rd_o    (rf_wdata_rd),
 		.rf_wen_rd_o      (rf_wen_rd),
 		.rf_waddr_rd_o    (rf_waddr_rd)
@@ -776,7 +810,11 @@ import ydrasil_pkg::*;
 		.rf_raddr_rs1_i(rf_raddr_rs1),
 		.rf_rdata_rs1_o(rf_rdata_rs1),
 		.rf_raddr_rs2_i(rf_raddr_rs2),
-		.rf_rdata_rs2_o(rf_rdata_rs2)
+		.rf_rdata_rs2_o(rf_rdata_rs2),
+		.pipe1_rf_raddr_rs1_i(pipe1_rf_raddr_rs1),
+		.pipe1_rf_rdata_rs1_o(pipe1_rf_rdata_rs1),
+		.pipe1_rf_raddr_rs2_i(pipe1_rf_raddr_rs2),
+		.pipe1_rf_rdata_rs2_o(pipe1_rf_rdata_rs2)
 	);
 
 		ydrasil_ctrl u_ctrl (

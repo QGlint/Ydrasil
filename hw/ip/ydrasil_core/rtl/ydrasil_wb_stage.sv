@@ -28,6 +28,9 @@ import ydrasil_pkg::*;
     output wire                         pipe1_resbuf_full_o,
     output wire                         pipe1_wb_dequeue_o,
     output wire                         pipe1_wb_enqueue_o,
+    output wire                         pipe1_fwd_valid_o,
+    output wire [REGS_ADDR_WIDTH-1:0]   pipe1_fwd_addr_o,
+    output wire [REGS_DATA_WIDTH-1:0]   pipe1_fwd_data_o,
 
     output wire [REGS_DATA_WIDTH-1:0]   rf_wdata_rd_o,
     output wire                         rf_wen_rd_o,
@@ -164,6 +167,9 @@ import ydrasil_pkg::*;
     assign pipe1_resbuf_full_o = p1_fifo_full;
     assign pipe1_wb_dequeue_o = sel_p1_fifo | sel_p1_current;
     assign pipe1_wb_enqueue_o = p1_enqueue_accept | p1_direct_write;
+    assign pipe1_fwd_valid_o = !p1_fifo_empty;
+    assign pipe1_fwd_addr_o = p1_fifo_head_addr;
+    assign pipe1_fwd_data_o = p1_fifo_head_data;
 
     assign rf_wen_rd_o =
         sel_lsu | sel_alu_fifo | sel_alu_current |
