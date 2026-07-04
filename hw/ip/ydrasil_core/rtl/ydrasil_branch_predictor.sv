@@ -11,12 +11,18 @@ import ydrasil_pkg::*;
     input  wire                            rst_n,
 
     input  wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] predict_pc_i,
-    input  wire [ydrasil_pkg::INST_DATA_WIDTH-1:0] predict_instr_i,
     output wire                            predict_hit_o,
     output wire                            predict_taken_o,
     output wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] predict_target_o,
     output wire [1:0]                      predict_counter_o,
     output wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] predict_bht_index_o,
+
+    // RAS training inputs
+    input  wire                            ras_push_valid_i,
+    input  wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] ras_push_addr_i,
+    // RAS prediction outputs (combinational read, no BRAM dep)
+    output wire                            ras_pop_valid_o,
+    output wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] ras_target_o,
 
     input  wire                            train_valid_i,
     input  wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] train_pc_i,
@@ -24,10 +30,6 @@ import ydrasil_pkg::*;
     input  wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] train_target_i,
     input  wire [1:0]                      train_counter_i,
     input  wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] train_bht_index_i,
-
-    // RAS push (on function call: JAL with rd=ra)
-    input  wire                            ras_push_valid_i,
-    input  wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] ras_push_addr_i,
 
     input  wire                            invalidate_i
 );
@@ -39,23 +41,19 @@ import ydrasil_pkg::*;
     localparam int BTB_DATA_WIDTH = BTB_TAG_WIDTH + ydrasil_pkg::INST_ADDR_WIDTH;
     localparam int BP_EPOCH_WIDTH = 2;
     localparam int RAS_ADDR_WIDTH = (RAS_ENTRIES > 1) ? $clog2(RAS_ENTRIES) : 1;
-    localparam int BTB_CHECK = (BTB_ENTRIES >= 2 && ((BTB_ENTRIES & (BTB_ENTRIES - 1)) == 0)) ? 1 : 0;
-    localparam int BHT_CHECK = (BHT_ENTRIES >= 2 && ((BHT_ENTRIES & (BHT_ENTRIES - 1)) == 0)) ? 1 : 0;
 
-    // BTB/BHT arrays
-    logic [BTB_DATA_WIDTH-1:0] btb_mem [0:BTB_ENTRIES-1];
-    logic [1:0] bht_mem [0:BHT_ENTRIES-1];
     logic btb_valid_q [0:BTB_ENTRIES-1];
     logic bht_valid_q [0:BHT_ENTRIES-1];
+    logic [BTB_DATA_WIDTH-1:0] btb_mem [0:BTB_ENTRIES-1];
+    logic [1:0] bht_mem [0:BHT_ENTRIES-1];
     logic [BP_EPOCH_WIDTH-1:0] bp_epoch_q;
     logic [GHR_WIDTH-1:0] ghr_q;
     logic [BP_EPOCH_WIDTH-1:0] btb_epoch_q [0:BTB_ENTRIES-1];
     logic [BP_EPOCH_WIDTH-1:0] bht_epoch_q [0:BHT_ENTRIES-1];
 
-    // RAS (Return Address Stack)
+    // RAS stack
     logic [ydrasil_pkg::INST_ADDR_WIDTH-1:0] ras_stack_q [0:RAS_ENTRIES-1];
     logic [RAS_ADDR_WIDTH-1:0] ras_ptr_q;
-    logic [ydrasil_pkg::INST_ADDR_WIDTH-1:0] ras_predict_pc_prev_q;
 
     wire [BTB_INDEX_WIDTH-1:0] predict_btb_index;
     wire [BHT_INDEX_WIDTH-1:0] predict_bht_index;
@@ -81,23 +79,6 @@ import ydrasil_pkg::*;
     wire       predict_btb_entry_valid;
     wire       predict_bht_entry_valid;
 
-    // RAS detection from predict_instr
-    wire [6:0] predict_opcode;
-    wire       predict_is_jalr;
-    wire [4:0] predict_rs1;
-    wire [4:0] predict_rd;
-    assign predict_opcode  = predict_instr_i[6:0];
-    assign predict_is_jalr = (predict_opcode == ydrasil_pkg::RV32I_INS_JALR);
-    assign predict_rs1     = predict_instr_i[19:15];
-    assign predict_rd      = predict_instr_i[11:7];
-
-    wire ras_hit;
-    wire pc_changed;
-    assign ras_hit = predict_is_jalr && (predict_rs1 == 5'd1) &&
-                     ((predict_rd == 5'd0) || (predict_rd == 5'd1)) &&
-                     (ras_ptr_q != '0);
-    assign pc_changed = (predict_pc_i != ras_predict_pc_prev_q);
-
     assign predict_btb_index = predict_pc_i[BTB_INDEX_WIDTH+1:2];
     assign predict_pc_bht_index = predict_pc_i[BHT_INDEX_WIDTH+1:2];
     assign ghr_index_mask = USE_GSHARE ? {{(BHT_INDEX_WIDTH-GHR_WIDTH){1'b0}}, ghr_q} : '0;
@@ -121,6 +102,11 @@ import ydrasil_pkg::*;
         bht_valid_q[predict_bht_index] &&
         (bht_epoch_q[predict_bht_index] == bp_epoch_q);
 
+    // RAS prediction outputs (combinational from registers, no BRAM delay)
+    assign ras_pop_valid_o = (ras_ptr_q > 0);
+    assign ras_target_o = ras_pop_valid_o ?
+        ras_stack_q[ras_ptr_q - {{(RAS_ADDR_WIDTH-1){1'b0}}, 1'b1}] : '0;
+
     integer i;
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -131,7 +117,6 @@ import ydrasil_pkg::*;
             bp_epoch_q          <= '0;
             ghr_q               <= '0;
             ras_ptr_q           <= '0;
-            ras_predict_pc_prev_q <= '0;
             for (i = 0; i < BTB_ENTRIES; i = i + 1) begin
                 btb_valid_q[i] <= 1'b0;
                 btb_epoch_q[i] <= '0;
@@ -148,27 +133,18 @@ import ydrasil_pkg::*;
             bp_epoch_q          <= bp_epoch_q + {{(BP_EPOCH_WIDTH-1){1'b0}}, 1'b1};
             ghr_q               <= '0;
             ras_ptr_q           <= '0;
-            ras_predict_pc_prev_q <= '0;
         end else begin
             predict_btb_tag_q   <= predict_btb_tag;
             predict_bht_index_q <= predict_bht_index;
             predict_btb_valid_q <= predict_btb_entry_valid;
             predict_bht_valid_q <= predict_bht_entry_valid;
 
-            // RAS push
             if (ras_push_valid_i) begin
                 if (ras_ptr_q < RAS_ADDR_WIDTH'(RAS_ENTRIES)) begin
                     ras_stack_q[ras_ptr_q] <= ras_push_addr_i;
                     ras_ptr_q <= ras_ptr_q + {{(RAS_ADDR_WIDTH-1){1'b0}}, 1'b1};
                 end
             end
-
-            // RAS pop on JALR prediction (only when PC changes)
-            if (ras_hit && pc_changed) begin
-                ras_ptr_q <= ras_ptr_q - {{(RAS_ADDR_WIDTH-1){1'b0}}, 1'b1};
-            end
-
-            ras_predict_pc_prev_q <= predict_pc_i;
 
             if (train_fire) begin
                 btb_valid_q[train_btb_index] <= 1'b1;
@@ -184,19 +160,9 @@ import ydrasil_pkg::*;
 
     assign btb_hit     = predict_btb_valid_q && (btb_rtag == predict_btb_tag_q);
     assign bht_counter = predict_bht_valid_q ? bht_rdata : 2'b01;
-
-    // RAS target
-    wire ras_target_valid;
-    wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] ras_target;
-    assign ras_target_valid = ras_hit && (ras_ptr_q > 0);
-    assign ras_target = ras_target_valid ?
-        ras_stack_q[ras_ptr_q - {{(RAS_ADDR_WIDTH-1){1'b0}}, 1'b1}] : '0;
-
-    // Priority: RAS (JALR returns) > BTB (branches) > static not-taken
-    assign predict_hit_o     = !invalidate_i && (ras_target_valid || btb_hit);
+    assign predict_hit_o     = !invalidate_i && btb_hit;
     assign predict_counter_o = !invalidate_i ? bht_counter : 2'b01;
-    assign predict_taken_o   = ras_target_valid || (predict_hit_o && predict_counter_o[1]);
-    assign predict_target_o  = ras_target_valid ? ras_target :
-                               (predict_hit_o ? btb_rtarget : '0);
+    assign predict_taken_o   = predict_hit_o && predict_counter_o[1];
+    assign predict_target_o  = predict_hit_o ? btb_rtarget : '0;
 
 endmodule

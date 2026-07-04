@@ -435,7 +435,6 @@ import ydrasil_pkg::*;
 		.clk              (clk),
 		.rst_n            (rst_n),
 		.predict_pc_i     (if_mem_addr),
-		.predict_instr_i  (if_mem_rdata),
 		.predict_hit_o    (bp_predict_hit),
 		.predict_taken_o  (bp_predict_taken),
 		.predict_target_o (bp_predict_target),
@@ -449,6 +448,8 @@ import ydrasil_pkg::*;
 		.train_bht_index_i(ex_bp_train_bht_index),
 		.ras_push_valid_i (ras_push_valid),
 		.ras_push_addr_i  (ras_push_addr),
+		.ras_pop_valid_o  (),
+		.ras_target_o     (),
 		.invalidate_i     (id_fence_i)
 	);
 
