@@ -61,6 +61,9 @@ end
     wire [31:0] pc = u_dut.u_ydrasil_if_stage.pc_ff;
     wire [31:0] csr_instret = u_dut.u_ydrasil_registers_csr.instret[31:0];
     wire [31:0] csr_cyclel = u_dut.u_ydrasil_registers_csr.cycle[31:0];
+    wire        tohost_pc_accept =
+        u_dut.if_id_valid && !u_dut.stall_id && !u_dut.flush_id &&
+        (u_dut.if_id_pc == `PC_WRITE_TOHOST);
 
     integer           r;
     reg     [8*300:1] testcase;
@@ -451,23 +454,19 @@ end
         end
     end
 
-    // PC监控逻辑
-    always @(pc) begin
-        if (pc == `PC_WRITE_TOHOST && pc != last_pc) begin
-            pc_write_to_host_cnt = pc_write_to_host_cnt + 1'b1;
-            if (pc_write_to_host_flag == 1'b0) begin
-                pc_write_to_host_cycle = cycle_count;
-                pc_write_to_host_flag  = 1'b1;
-            end
-        end
-    end
-
-    // 添加异步复位逻辑
-    always @(negedge rst_n) begin
+    // PC监控逻辑：双取回时 tohost PC 可能来自 fetch queue slot1，
+    // 因此按 IF/ID 接收的指令 PC 统计，而不是只看取指请求 PC。
+    always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            pc_write_to_host_cnt   = 32'b0;
-            pc_write_to_host_flag  = 1'b0;
-            pc_write_to_host_cycle = 32'b0;
+            pc_write_to_host_cnt   <= 32'b0;
+            pc_write_to_host_flag  <= 1'b0;
+            pc_write_to_host_cycle <= 32'b0;
+        end else if (tohost_pc_accept) begin
+            pc_write_to_host_cnt <= pc_write_to_host_cnt + 1'b1;
+            if (pc_write_to_host_flag == 1'b0) begin
+                pc_write_to_host_cycle <= cycle_count;
+                pc_write_to_host_flag  <= 1'b1;
+            end
         end
     end
 
@@ -778,6 +777,13 @@ end
                 u_dut.u_ydrasil_if_stage.perf_fq_empty_id_bubble,
                 u_dut.u_ydrasil_if_stage.perf_fq_sync_redirect_flush,
                 u_dut.u_ydrasil_if_stage.perf_fq_ex_redirect_flush);
+            $display("PERF_FETCH2: FETCH2_REQ=%-d FETCH2_VALID2=%-d FETCH2_VALID1_ONLY=%-d FETCH2_ALIGN_BLOCK=%-d FETCH2_REDIRECT_KILL_SLOT1=%-d FETCH2_IROM_STALL=%-d",
+                u_dut.u_ydrasil_if_stage.perf_fetch2_req,
+                u_dut.u_ydrasil_if_stage.perf_fetch2_valid2,
+                u_dut.u_ydrasil_if_stage.perf_fetch2_valid1_only,
+                u_dut.u_ydrasil_if_stage.perf_fetch2_align_block,
+                u_dut.u_ydrasil_if_stage.perf_fetch2_redirect_kill_slot1,
+                u_dut.u_ydrasil_if_stage.perf_fetch2_irom_stall);
             $display("PERF_L0: L0_LOOKUP=%-d L0_HIT=%-d L0_TAKEN=%-d L0_CORRECT_TAKEN=%-d L0_WRONG_TAKEN=%-d L0_TRAIN_TAKEN=%-d L0_TRAIN_NOT_TAKEN=%-d L0_COUNTER_INC=%-d L0_COUNTER_DEC=%-d",
                 u_dut.u_ydrasil_if_stage.perf_l0_lookup,
                 u_dut.u_ydrasil_if_stage.perf_l0_hit,

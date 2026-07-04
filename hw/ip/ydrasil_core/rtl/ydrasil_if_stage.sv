@@ -28,7 +28,9 @@ import ydrasil_pkg::*;
 
 	// 指令存储器接口
 	output wire [31:0] if_mem_addr_o,
+	output wire [31:0] if_mem_addr1_o,
 	input  wire [31:0] if_mem_rdata_i,
+	input  wire [31:0] if_mem_rdata1_i,
 
 	// IF/ID 流水寄存器输出
 	output wire [31:0] if_id_pc_o,
@@ -53,9 +55,13 @@ import ydrasil_pkg::*;
 
 	reg [31:0] pc_ff;
 	reg        mem_resp_valid_ff;
+	reg        mem_resp_valid1_ff;
 	reg [31:0] mem_resp_pc_ff;
+	reg [31:0] mem_resp_pc1_ff;
 	reg        mem_resp_l0_taken_ff;
+	reg        mem_resp1_l0_taken_ff;
 	reg [31:0] mem_resp_l0_target_ff;
+	reg [31:0] mem_resp1_l0_target_ff;
 
 	reg        fetch_valid_ff [0:FETCH_Q_DEPTH-1];
 	reg [31:0] fetch_pc_ff [0:FETCH_Q_DEPTH-1];
@@ -99,15 +105,26 @@ import ydrasil_pkg::*;
 	reg [31:0] perf_l0_train_not_taken;
 	reg [31:0] perf_l0_counter_inc;
 	reg [31:0] perf_l0_counter_dec;
+	reg [31:0] perf_fetch2_req;
+	reg [31:0] perf_fetch2_valid2;
+	reg [31:0] perf_fetch2_valid1_only;
+	reg [31:0] perf_fetch2_align_block;
+	reg [31:0] perf_fetch2_redirect_kill_slot1;
+	reg [31:0] perf_fetch2_irom_stall;
 
 	wire [31:0] pc_plus4;
+	wire [31:0] pc_plus8;
 	wire        fetch_q_valid;
 	wire        fetch_q_full;
 	wire        pop_fire;
 	wire        enqueue_fire;
+	wire        enqueue1_fire;
+	wire        enqueue1_killed;
 	wire        request_fire;
+	wire        request_two_fire;
 	wire        bp_predict_redirect;
 	wire [FETCH_Q_COUNT_WIDTH:0] reserved_count;
+	wire [FETCH_Q_COUNT_WIDTH:0] enqueue_count;
 	wire        flush_queue;
 	wire [31:0] pc_n;
 	wire [L0_INDEX_WIDTH-1:0] l0_predict_index;
@@ -115,6 +132,11 @@ import ydrasil_pkg::*;
 	wire                      l0_predict_hit;
 	wire                      l0_predict_taken;
 	wire [31:0]               l0_predict_target;
+	wire [L0_INDEX_WIDTH-1:0] l0_predict1_index;
+	wire [L0_TAG_WIDTH-1:0]   l0_predict1_tag;
+	wire                      l0_predict1_hit;
+	wire                      l0_predict1_taken;
+	wire [31:0]               l0_predict1_target;
 	wire [L0_INDEX_WIDTH-1:0] l0_train_index;
 	wire [L0_TAG_WIDTH-1:0]   l0_train_tag;
 	wire                      l0_train_hit;
@@ -124,8 +146,14 @@ import ydrasil_pkg::*;
 	wire                      l0_train_pred_taken;
 	wire                      l0_counter_inc;
 	wire                      l0_counter_dec;
+	wire [6:0]                mem_resp_opcode;
+	wire                      mem_resp_slot0_kills_slot1;
+	wire                      slot1_replay;
+	wire                      request_two_itcm_ok;
+	wire                      request_two_dtcm_block;
 
 	assign pc_plus4 = pc_ff + 32'd4;
+	assign pc_plus8 = pc_ff + 32'd8;
 	assign fetch_q_valid = fetch_count_ff != '0;
 	assign fetch_q_full = fetch_count_ff == FETCH_Q_DEPTH[FETCH_Q_COUNT_WIDTH-1:0];
 
@@ -150,6 +178,14 @@ import ydrasil_pkg::*;
 		(l0_tag_ff[l0_predict_index] == l0_predict_tag);
 	assign l0_predict_taken = l0_predict_hit && l0_counter_ff[l0_predict_index][1];
 	assign l0_predict_target = l0_target_ff[l0_predict_index];
+	assign l0_predict1_index = pc_plus4[L0_INDEX_WIDTH+1:2];
+	assign l0_predict1_tag = pc_plus4[31:L0_INDEX_WIDTH+2];
+	assign l0_predict1_hit =
+		l0_valid_ff[l0_predict1_index] &&
+		(l0_tag_ff[l0_predict1_index] == l0_predict1_tag);
+	assign l0_predict1_taken =
+		l0_predict1_hit && l0_counter_ff[l0_predict1_index][1];
+	assign l0_predict1_target = l0_target_ff[l0_predict1_index];
 
 	assign l0_train_index = l0_train_pc_i[L0_INDEX_WIDTH+1:2];
 	assign l0_train_tag = l0_train_pc_i[31:L0_INDEX_WIDTH+2];
@@ -165,6 +201,14 @@ import ydrasil_pkg::*;
 	assign l0_counter_dec =
 		l0_train_fire && !l0_train_taken_i && l0_train_hit &&
 		(l0_counter_ff[l0_train_index] != 2'b00);
+	assign request_two_dtcm_block =
+		((pc_ff >= ydrasil_pkg::DTCM_BASE_ADDR) &&
+		 (pc_ff < (ydrasil_pkg::DTCM_BASE_ADDR +
+		           ((32'd1 << ydrasil_pkg::DTCM_ADDR_WIDTH) << 2)))) ||
+		((pc_plus4 >= ydrasil_pkg::DTCM_BASE_ADDR) &&
+		 (pc_plus4 < (ydrasil_pkg::DTCM_BASE_ADDR +
+		              ((32'd1 << ydrasil_pkg::DTCM_ADDR_WIDTH) << 2))));
+	assign request_two_itcm_ok = !request_two_dtcm_block;
 
 	assign bp_predict_redirect =
 		!branch_jump_i && !flush_if_i && !stall_if_i && !stall_pc_i &&
@@ -175,15 +219,30 @@ import ydrasil_pkg::*;
 		!stall_if_i && fetch_q_valid;
 	assign enqueue_fire = !flush_if_i && !bp_predict_redirect &&
 		mem_resp_valid_ff;
+	assign enqueue1_fire = !flush_if_i && !bp_predict_redirect &&
+		mem_resp_valid1_ff && !mem_resp_slot0_kills_slot1;
+	assign enqueue1_killed = mem_resp_valid1_ff &&
+		(flush_queue || mem_resp_slot0_kills_slot1);
+	assign slot1_replay =
+		!branch_jump_i && !flush_if_i && !bp_predict_redirect &&
+		mem_resp_valid1_ff && mem_resp_slot0_kills_slot1;
+	assign enqueue_count =
+		{{FETCH_Q_COUNT_WIDTH{1'b0}}, enqueue_fire} +
+		{{FETCH_Q_COUNT_WIDTH{1'b0}}, enqueue1_fire};
 
 	assign reserved_count =
 		{1'b0, fetch_count_ff} +
-		{{FETCH_Q_COUNT_WIDTH{1'b0}}, mem_resp_valid_ff} -
+		{{FETCH_Q_COUNT_WIDTH{1'b0}}, mem_resp_valid_ff} +
+		{{FETCH_Q_COUNT_WIDTH{1'b0}}, mem_resp_valid1_ff} -
 		{{FETCH_Q_COUNT_WIDTH{1'b0}}, pop_fire};
 	assign request_fire =
 		!branch_jump_i && !flush_if_i && !bp_predict_redirect &&
-		!stall_pc_i && !bp_invalidate_i &&
+		!slot1_replay && !stall_pc_i && !bp_invalidate_i &&
 		(reserved_count < FETCH_Q_DEPTH_COUNT);
+	assign request_two_fire =
+		request_fire && request_two_itcm_ok &&
+		!l0_predict_taken && !l0_predict1_taken &&
+		(reserved_count <= (FETCH_Q_DEPTH_COUNT - FETCH_Q_COUNT_WIDTH'(2)));
 	assign flush_queue = flush_if_i | branch_jump_i | bp_predict_redirect;
 	assign fq_full_block_req =
 		!branch_jump_i && !flush_if_i && !bp_predict_redirect &&
@@ -195,19 +254,36 @@ import ydrasil_pkg::*;
 	assign pc_n =
 		branch_jump_i       ? branch_target_i :
 		bp_predict_redirect ? if_id_pred_target_o :
-		request_fire        ? (l0_predict_taken ? l0_predict_target : pc_plus4) :
+		slot1_replay        ? mem_resp_pc1_ff :
+		request_fire        ? (l0_predict_taken ? l0_predict_target :
+		                       request_two_fire ?
+		                       (l0_predict1_taken ? l0_predict1_target : pc_plus8) :
+		                       pc_plus4) :
 		                      pc_ff;
 
 	assign if_mem_addr_o = pc_ff;
+	assign if_mem_addr1_o = pc_plus4;
+
+	assign mem_resp_opcode = if_mem_rdata_i[6:0];
+	assign mem_resp_slot0_kills_slot1 =
+		mem_resp_valid_ff &&
+		((mem_resp_opcode == ydrasil_pkg::RV32I_INS_JAL) ||
+		 (mem_resp_opcode == ydrasil_pkg::RV32I_INS_JALR) ||
+		 (mem_resp_opcode == ydrasil_pkg::RV32I_INS_FENCE));
 
 	integer i;
+	integer append_idx;
 	always_ff @(posedge clk or negedge rst_n) begin
 		if (!rst_n) begin
 			pc_ff <= ydrasil_pkg::RESET_INS;
 			mem_resp_valid_ff <= 1'b0;
+			mem_resp_valid1_ff <= 1'b0;
 			mem_resp_pc_ff <= ydrasil_pkg::RESET_INS;
+			mem_resp_pc1_ff <= ydrasil_pkg::RESET_INS + 32'd4;
 			mem_resp_l0_taken_ff <= 1'b0;
+			mem_resp1_l0_taken_ff <= 1'b0;
 			mem_resp_l0_target_ff <= '0;
+			mem_resp1_l0_target_ff <= '0;
 			fetch_count_ff <= '0;
 			perf_fetch_q_full <= '0;
 			perf_fetch_q_empty <= '0;
@@ -235,6 +311,12 @@ import ydrasil_pkg::*;
 			perf_l0_train_not_taken <= '0;
 			perf_l0_counter_inc <= '0;
 			perf_l0_counter_dec <= '0;
+			perf_fetch2_req <= '0;
+			perf_fetch2_valid2 <= '0;
+			perf_fetch2_valid1_only <= '0;
+			perf_fetch2_align_block <= '0;
+			perf_fetch2_redirect_kill_slot1 <= '0;
+			perf_fetch2_irom_stall <= '0;
 			for (i = 0; i < FETCH_Q_DEPTH; i = i + 1) begin
 				fetch_valid_ff[i] <= 1'b0;
 				fetch_pc_ff[i] <= ydrasil_pkg::RESET_INS;
@@ -257,13 +339,19 @@ import ydrasil_pkg::*;
 
 			if (flush_queue) begin
 				mem_resp_valid_ff <= 1'b0;
+				mem_resp_valid1_ff <= 1'b0;
 				mem_resp_l0_taken_ff <= 1'b0;
+				mem_resp1_l0_taken_ff <= 1'b0;
 			end else begin
 				mem_resp_valid_ff <= request_fire;
+				mem_resp_valid1_ff <= request_two_fire;
 				if (request_fire) begin
 					mem_resp_pc_ff <= pc_ff;
+					mem_resp_pc1_ff <= pc_plus4;
 					mem_resp_l0_taken_ff <= l0_predict_taken;
 					mem_resp_l0_target_ff <= l0_predict_target;
+					mem_resp1_l0_taken_ff <= request_two_fire && l0_predict1_taken;
+					mem_resp1_l0_target_ff <= l0_predict1_target;
 				end
 			end
 
@@ -272,31 +360,9 @@ import ydrasil_pkg::*;
 				for (i = 0; i < FETCH_Q_DEPTH; i = i + 1) begin
 					fetch_valid_ff[i] <= 1'b0;
 				end
-			end else if (pop_fire && enqueue_fire) begin
-				for (i = 0; i < FETCH_Q_DEPTH-1; i = i + 1) begin
-					if (i < fetch_count_ff - 1'b1) begin
-						fetch_valid_ff[i] <= fetch_valid_ff[i+1];
-						fetch_pc_ff[i] <= fetch_pc_ff[i+1];
-						fetch_instr_ff[i] <= fetch_instr_ff[i+1];
-						fetch_pred_l0_taken_ff[i] <= fetch_pred_l0_taken_ff[i+1];
-						fetch_pred_hit_ff[i] <= fetch_pred_hit_ff[i+1];
-						fetch_pred_taken_ff[i] <= fetch_pred_taken_ff[i+1];
-						fetch_pred_target_ff[i] <= fetch_pred_target_ff[i+1];
-						fetch_pred_counter_ff[i] <= fetch_pred_counter_ff[i+1];
-						fetch_pred_bht_index_ff[i] <= fetch_pred_bht_index_ff[i+1];
-					end
-				end
-				fetch_valid_ff[fetch_count_ff - 1'b1] <= 1'b1;
-				fetch_pc_ff[fetch_count_ff - 1'b1] <= mem_resp_pc_ff;
-				fetch_instr_ff[fetch_count_ff - 1'b1] <= if_mem_rdata_i;
-				fetch_pred_l0_taken_ff[fetch_count_ff - 1'b1] <= mem_resp_l0_taken_ff;
-				fetch_pred_hit_ff[fetch_count_ff - 1'b1] <= mem_resp_l0_taken_ff | bp_predict_hit_i;
-				fetch_pred_taken_ff[fetch_count_ff - 1'b1] <= mem_resp_l0_taken_ff | bp_predict_taken_i;
-				fetch_pred_target_ff[fetch_count_ff - 1'b1] <=
-					mem_resp_l0_taken_ff ? mem_resp_l0_target_ff : bp_predict_target_i;
-				fetch_pred_counter_ff[fetch_count_ff - 1'b1] <= bp_predict_counter_i;
-				fetch_pred_bht_index_ff[fetch_count_ff - 1'b1] <= bp_predict_bht_index_i;
-			end else if (pop_fire) begin
+			end else begin
+				append_idx = fetch_count_ff - (pop_fire ? 1 : 0);
+				if (pop_fire) begin
 				for (i = 0; i < FETCH_Q_DEPTH-1; i = i + 1) begin
 					if (i < fetch_count_ff - 1'b1) begin
 						fetch_valid_ff[i] <= fetch_valid_ff[i+1];
@@ -311,19 +377,34 @@ import ydrasil_pkg::*;
 					end
 				end
 				fetch_valid_ff[fetch_count_ff - 1'b1] <= 1'b0;
-				fetch_count_ff <= fetch_count_ff - 1'b1;
-			end else if (enqueue_fire && !fetch_q_full) begin
-				fetch_valid_ff[fetch_count_ff] <= 1'b1;
-				fetch_pc_ff[fetch_count_ff] <= mem_resp_pc_ff;
-				fetch_instr_ff[fetch_count_ff] <= if_mem_rdata_i;
-				fetch_pred_l0_taken_ff[fetch_count_ff] <= mem_resp_l0_taken_ff;
-				fetch_pred_hit_ff[fetch_count_ff] <= mem_resp_l0_taken_ff | bp_predict_hit_i;
-				fetch_pred_taken_ff[fetch_count_ff] <= mem_resp_l0_taken_ff | bp_predict_taken_i;
-				fetch_pred_target_ff[fetch_count_ff] <=
-					mem_resp_l0_taken_ff ? mem_resp_l0_target_ff : bp_predict_target_i;
-				fetch_pred_counter_ff[fetch_count_ff] <= bp_predict_counter_i;
-				fetch_pred_bht_index_ff[fetch_count_ff] <= bp_predict_bht_index_i;
-				fetch_count_ff <= fetch_count_ff + 1'b1;
+				end
+				if (enqueue_fire && (append_idx < FETCH_Q_DEPTH)) begin
+					fetch_valid_ff[append_idx] <= 1'b1;
+					fetch_pc_ff[append_idx] <= mem_resp_pc_ff;
+					fetch_instr_ff[append_idx] <= if_mem_rdata_i;
+					fetch_pred_l0_taken_ff[append_idx] <= mem_resp_l0_taken_ff;
+					fetch_pred_hit_ff[append_idx] <= mem_resp_l0_taken_ff | bp_predict_hit_i;
+					fetch_pred_taken_ff[append_idx] <= mem_resp_l0_taken_ff | bp_predict_taken_i;
+					fetch_pred_target_ff[append_idx] <=
+						mem_resp_l0_taken_ff ? mem_resp_l0_target_ff : bp_predict_target_i;
+					fetch_pred_counter_ff[append_idx] <= bp_predict_counter_i;
+					fetch_pred_bht_index_ff[append_idx] <= bp_predict_bht_index_i;
+					append_idx = append_idx + 1;
+				end
+				if (enqueue1_fire && (append_idx < FETCH_Q_DEPTH)) begin
+					fetch_valid_ff[append_idx] <= 1'b1;
+					fetch_pc_ff[append_idx] <= mem_resp_pc1_ff;
+					fetch_instr_ff[append_idx] <= if_mem_rdata1_i;
+					fetch_pred_l0_taken_ff[append_idx] <= mem_resp1_l0_taken_ff;
+					fetch_pred_hit_ff[append_idx] <= mem_resp1_l0_taken_ff;
+					fetch_pred_taken_ff[append_idx] <= mem_resp1_l0_taken_ff;
+					fetch_pred_target_ff[append_idx] <= mem_resp1_l0_target_ff;
+					fetch_pred_counter_ff[append_idx] <= 2'b01;
+					fetch_pred_bht_index_ff[append_idx] <= '0;
+				end
+				fetch_count_ff <= fetch_count_ff -
+					(pop_fire ? FETCH_Q_COUNT_WIDTH'(1) : '0) +
+					enqueue_count[FETCH_Q_COUNT_WIDTH-1:0];
 			end
 
 			if (bp_invalidate_i) begin
@@ -355,7 +436,7 @@ import ydrasil_pkg::*;
 			perf_fetch_q_empty <= perf_fetch_q_empty +
 				((!stall_if_i && !fetch_q_valid) ? 32'd1 : 32'd0);
 			perf_fetch_q_push <= perf_fetch_q_push +
-				(enqueue_fire ? 32'd1 : 32'd0);
+				{31'd0, enqueue_fire} + {31'd0, enqueue1_fire};
 			perf_fetch_q_pop <= perf_fetch_q_pop +
 				(pop_fire ? 32'd1 : 32'd0);
 			perf_decode_blocked_by_uopq <= perf_decode_blocked_by_uopq +
@@ -405,6 +486,17 @@ import ydrasil_pkg::*;
 				(l0_counter_inc ? 32'd1 : 32'd0);
 			perf_l0_counter_dec <= perf_l0_counter_dec +
 				(l0_counter_dec ? 32'd1 : 32'd0);
+			perf_fetch2_req <= perf_fetch2_req +
+				(request_two_fire ? 32'd1 : 32'd0);
+			perf_fetch2_valid2 <= perf_fetch2_valid2 +
+				((enqueue_fire && enqueue1_fire) ? 32'd1 : 32'd0);
+			perf_fetch2_valid1_only <= perf_fetch2_valid1_only +
+				((enqueue_fire && !enqueue1_fire) ? 32'd1 : 32'd0);
+			perf_fetch2_align_block <= perf_fetch2_align_block +
+				((request_fire && request_two_dtcm_block) ? 32'd1 : 32'd0);
+			perf_fetch2_redirect_kill_slot1 <= perf_fetch2_redirect_kill_slot1 +
+				(enqueue1_killed ? 32'd1 : 32'd0);
+			perf_fetch2_irom_stall <= perf_fetch2_irom_stall + 32'd0;
 		end
 	end
 

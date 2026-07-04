@@ -8,6 +8,8 @@ import ydrasil_pkg::*;
     // PC访问接口
     input  wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] if_mem_addr_i,   // PC地址
     output wire [ydrasil_pkg::INST_DATA_WIDTH-1:0] if_mem_rdata_o, // 指令输出
+    input  wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] if_mem_addr1_i,
+    output wire [ydrasil_pkg::INST_DATA_WIDTH-1:0] if_mem_rdata1_o,
 
     // EX访问接口
     input  wire [ydrasil_pkg::BUS_ADDR_WIDTH-1:0] lsu_mem_addr_i,  
@@ -24,7 +26,9 @@ import ydrasil_pkg::*;
 
 
     wire [ITCM_ADDR_WIDTH-1:0] itcm_addr;
+    wire [ITCM_ADDR_WIDTH-1:0] itcm_addr1;
     wire [INST_DATA_WIDTH-1:0] itcm_rdata;
+    wire [INST_DATA_WIDTH-1:0] itcm_rdata1;
 
     wire [DTCM_ADDR_WIDTH-1:0] dtcm_addr;
     wire [BUS_DATA_WIDTH-1:0] dtcm_rdata;
@@ -45,29 +49,37 @@ import ydrasil_pkg::*;
 `endif
 
     wire if_dtcm_sel;
+    wire if_dtcm_sel1;
     wire if_dtcm_access;
+    wire if_dtcm_access1;
     wire [DTCM_ADDR_WIDTH-1:0] if_dtcm_addr;
     wire [DTCM_ADDR_WIDTH-1:0] lsu_dtcm_addr;
 
     assign if_dtcm_sel = (if_mem_addr_i >= DTCM_BASE_ADDR) &&
                          (if_mem_addr_i < (DTCM_BASE_ADDR + DTCM_BYTE_SIZE));
+    assign if_dtcm_sel1 = (if_mem_addr1_i >= DTCM_BASE_ADDR) &&
+                          (if_mem_addr1_i < (DTCM_BASE_ADDR + DTCM_BYTE_SIZE));
     assign if_dtcm_access = IF_DTCM_FETCH_ENABLE & if_dtcm_sel;
+    assign if_dtcm_access1 = IF_DTCM_FETCH_ENABLE & if_dtcm_sel1;
     assign if_dtcm_addr = if_mem_addr_i[DTCM_ADDR_WIDTH+1:2];
     assign lsu_dtcm_addr = lsu_mem_addr_i[DTCM_ADDR_WIDTH+1:2];
 
     assign itcm_addr = if_mem_addr_i[ITCM_ADDR_WIDTH+1:2]; // 地址对齐到4字节
+    assign itcm_addr1 = if_mem_addr1_i[ITCM_ADDR_WIDTH+1:2];
     assign dtcm_wdata = lsu_mem_data_i;
     assign dtcm_wmask = (lsu_mem_req_i & lsu_mem_we_i) ? lsu_mem_wmask_i : 4'b0000;
 
     if (MEMS_MODE == MEMS_MODE_NEW) begin : g_new
         assign dtcm_addr = lsu_mem_req_i ? lsu_dtcm_addr : if_dtcm_addr;
         assign if_mem_rdata_o = if_dtcm_access ? dtcm_rdata : itcm_rdata;
+        assign if_mem_rdata1_o = if_dtcm_access1 ? 32'h0000_0013 : itcm_rdata1;
         assign lsu_mem_data_o = dtcm_rdata;
         assign dtcm_en = 1'b1;
         assign dtcm_wen = lsu_mem_req_i & lsu_mem_we_i;
     end else begin : g_legacy
         assign dtcm_addr = lsu_dtcm_addr;
         assign if_mem_rdata_o = itcm_rdata;
+        assign if_mem_rdata1_o = itcm_rdata1;
         assign lsu_mem_data_o = dtcm_rdata;
         assign dtcm_en = 1'b1;
         assign dtcm_wen = lsu_mem_we_i;
@@ -80,7 +92,10 @@ import ydrasil_pkg::*;
         .clk(clk),
         .itcm_en(rst_n), // ITCM在复位后始终使能
         .itcm_addr(itcm_addr),
-        .itcm_data_o(itcm_rdata)
+        .itcm_data_o(itcm_rdata),
+        .itcm_en1(rst_n),
+        .itcm_addr1(itcm_addr1),
+        .itcm_data1_o(itcm_rdata1)
     );
 
     dtcm #(

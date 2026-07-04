@@ -40,7 +40,9 @@ import ydrasil_pkg::*;
 
 	// IF <-> MEMS
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] if_mem_addr;
+	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] if_mem_addr1;
 	wire [ydrasil_pkg::INST_DATA_WIDTH-1:0] if_mem_rdata;
+	wire [ydrasil_pkg::INST_DATA_WIDTH-1:0] if_mem_rdata1;
 
 	// IF/ID pipeline
 	wire [31:0] if_id_pc;
@@ -575,7 +577,9 @@ import ydrasil_pkg::*;
 			.l0_train_taken_i(ex_bp_train_taken),
 			.l0_train_target_i(ex_bp_train_target),
 			.if_mem_addr_o   (if_mem_addr),
+			.if_mem_addr1_o  (if_mem_addr1),
 			.if_mem_rdata_i  (if_mem_rdata),
+			.if_mem_rdata1_i (if_mem_rdata1),
 			.if_id_pc_o      (if_id_pc),
 			.if_id_pred_hit_o(if_id_pred_hit),
 			.if_id_pred_taken_o(if_id_pred_taken),
@@ -762,6 +766,8 @@ import ydrasil_pkg::*;
 		.rst_n         (rst_n),
 		.if_mem_addr_i (if_mem_addr),
 		.if_mem_rdata_o(if_mem_rdata),
+		.if_mem_addr1_i(if_mem_addr1),
+		.if_mem_rdata1_o(if_mem_rdata1),
 		.lsu_mem_addr_i(dtcm_addr),
 		.lsu_mem_data_i(dtcm_wdata),
 		.lsu_mem_data_o(dtcm_rdata),
