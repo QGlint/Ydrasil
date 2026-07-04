@@ -524,6 +524,103 @@ import ydrasil_pkg::*;
     reg [31:0]                       perf_p1sh_block_waw_pair0;
     reg [31:0]                       perf_p1sh_block_pending_rs;
     reg [31:0]                       perf_p1sh_block_ctrl_mem;
+
+    reg [3:0]                        uopq_shadow_valid;
+    reg [DATA_WIDTH-1:0]             uopq_shadow_pc [0:3];
+    reg [DATA_WIDTH-1:0]             uopq_shadow_instr [0:3];
+    reg [31:0]                       uopq_shadow_seq [0:3];
+    reg [31:0]                       uopq_shadow_seq_next_ff;
+    reg [4:0]                        uopq_shadow_rs1 [0:3];
+    reg [4:0]                        uopq_shadow_rs2 [0:3];
+    reg [4:0]                        uopq_shadow_rd [0:3];
+    reg [3:0]                        uopq_shadow_rs1_ren;
+    reg [3:0]                        uopq_shadow_rs2_ren;
+    reg [3:0]                        uopq_shadow_rd_wen;
+    reg [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] uopq_shadow_optype [0:3];
+    reg [ydrasil_pkg::OPERATOR_WIDTH-1:0]      uopq_shadow_operator [0:3];
+    reg [3:0]                        uopq_shadow_simple_alu;
+    reg [3:0]                        uopq_shadow_ctrl;
+    reg [3:0]                        uopq_shadow_mem;
+    reg [3:0]                        uopq_shadow_csr_sys_fence;
+    wire [3:1]                       uopq_shadow_raw_older;
+    wire [3:1]                       uopq_shadow_waw_older;
+    wire [3:1]                       uopq_shadow_older_ctrl_mem;
+    wire [3:1]                       uopq_shadow_pending_rs;
+    wire [3:1]                       uopq_shadow_p1_safe;
+    wire [2:0]                       uopq_shadow_occupancy;
+    reg [31:0]                       perf_uopq_occ_0;
+    reg [31:0]                       perf_uopq_occ_1;
+    reg [31:0]                       perf_uopq_occ_2;
+    reg [31:0]                       perf_uopq_occ_3;
+    reg [31:0]                       perf_uopq_occ_4;
+    reg [31:0]                       perf_uopq_p1_safe_1;
+    reg [31:0]                       perf_uopq_p1_safe_2;
+    reg [31:0]                       perf_uopq_p1_safe_3;
+    reg [31:0]                       perf_uopq_block_older_ctrl_mem;
+    reg [31:0]                       perf_uopq_block_raw_older;
+    reg [31:0]                       perf_uopq_block_waw_older;
+`endif
+
+`ifndef SYNTHESIS
+    function automatic logic is_shadow_simple_alu(
+        input logic [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] op_type,
+        input logic [ydrasil_pkg::OPERATOR_WIDTH-1:0] op
+    );
+        begin
+            is_shadow_simple_alu =
+                op_type[ydrasil_pkg::OPERATOR_TYPE_ALU] &&
+                !op_type[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                !op_type[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
+                !op_type[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
+                !op_type[ydrasil_pkg::OPERATOR_TYPE_CSR] &&
+                !op_type[ydrasil_pkg::OPERATOR_TYPE_SYS] &&
+                !op_type[ydrasil_pkg::OPERATOR_TYPE_MUL] &&
+                !op_type[ydrasil_pkg::OPERATOR_TYPE_BITMANIP] &&
+                (op[ydrasil_pkg::OP_ALU_ADD] |
+                 op[ydrasil_pkg::OP_ALU_SUB] |
+                 op[ydrasil_pkg::OP_ALU_SLT] |
+                 op[ydrasil_pkg::OP_ALU_SLTU] |
+                 op[ydrasil_pkg::OP_ALU_XOR] |
+                 op[ydrasil_pkg::OP_ALU_OR] |
+                 op[ydrasil_pkg::OP_ALU_AND] |
+                 op[ydrasil_pkg::OP_ALU_LUI] |
+                 op[ydrasil_pkg::OP_ALU_AUIPC]);
+        end
+    endfunction
+
+    function automatic logic shadow_raw_dep(
+        input logic       y_valid,
+        input logic       y_rs1_ren,
+        input logic [4:0] y_rs1,
+        input logic       y_rs2_ren,
+        input logic [4:0] y_rs2,
+        input logic       o_valid,
+        input logic       o_rd_wen,
+        input logic [4:0] o_rd
+    );
+        begin
+            shadow_raw_dep =
+                y_valid && o_valid && o_rd_wen && (o_rd != '0) &&
+                ((y_rs1_ren && (y_rs1 == o_rd)) |
+                 (y_rs2_ren && (y_rs2 == o_rd)));
+        end
+    endfunction
+
+    function automatic logic shadow_waw_dep(
+        input logic       y_valid,
+        input logic       y_rd_wen,
+        input logic [4:0] y_rd,
+        input logic       o_valid,
+        input logic       o_rd_wen,
+        input logic [4:0] o_rd
+    );
+        begin
+            shadow_waw_dep =
+                y_valid && y_rd_wen && (y_rd != '0) &&
+                o_valid && o_rd_wen && (o_rd != '0) &&
+                (y_rd == o_rd);
+        end
+    endfunction
 `endif
 
     ydrasil_ins_decoder #(
@@ -1149,6 +1246,73 @@ import ydrasil_pkg::*;
         !p1sh_block_raw_pair0 && !p1sh_block_waw_pair0 &&
         !p1sh_block_pending_rs && !p1sh_block_ctrl_mem &&
         !flush_id_i && !stall_id_i;
+
+    assign uopq_shadow_occupancy =
+        {2'b00, uopq_shadow_valid[0]} +
+        {2'b00, uopq_shadow_valid[1]} +
+        {2'b00, uopq_shadow_valid[2]} +
+        {2'b00, uopq_shadow_valid[3]};
+    assign uopq_shadow_raw_older[1] =
+        shadow_raw_dep(
+            uopq_shadow_valid[1],
+            uopq_shadow_rs1_ren[1], uopq_shadow_rs1[1],
+            uopq_shadow_rs2_ren[1], uopq_shadow_rs2[1],
+            uopq_shadow_valid[0], uopq_shadow_rd_wen[0], uopq_shadow_rd[0]);
+    assign uopq_shadow_waw_older[1] =
+        shadow_waw_dep(
+            uopq_shadow_valid[1], uopq_shadow_rd_wen[1], uopq_shadow_rd[1],
+            uopq_shadow_valid[0], uopq_shadow_rd_wen[0], uopq_shadow_rd[0]);
+    assign uopq_shadow_older_ctrl_mem[1] =
+        uopq_shadow_valid[1] && uopq_shadow_valid[0] &&
+        (uopq_shadow_ctrl[0] | uopq_shadow_mem[0] | uopq_shadow_csr_sys_fence[0]);
+    assign uopq_shadow_pending_rs[1] =
+        uopq_shadow_valid[1] &&
+        ((uopq_shadow_rs1_ren[1] && gpr_pending_i[uopq_shadow_rs1[1]]) |
+         (uopq_shadow_rs2_ren[1] && gpr_pending_i[uopq_shadow_rs2[1]]));
+    assign uopq_shadow_p1_safe[1] =
+        uopq_shadow_valid[1] && uopq_shadow_simple_alu[1] &&
+        !uopq_shadow_raw_older[1] && !uopq_shadow_waw_older[1] &&
+        !uopq_shadow_older_ctrl_mem[1] && !uopq_shadow_pending_rs[1] &&
+        !flush_id_i && !stall_id_i;
+
+    assign uopq_shadow_raw_older[2] =
+        shadow_raw_dep(
+            uopq_shadow_valid[2],
+            uopq_shadow_rs1_ren[2], uopq_shadow_rs1[2],
+            uopq_shadow_rs2_ren[2], uopq_shadow_rs2[2],
+            uopq_shadow_valid[0], uopq_shadow_rd_wen[0], uopq_shadow_rd[0]) |
+        shadow_raw_dep(
+            uopq_shadow_valid[2],
+            uopq_shadow_rs1_ren[2], uopq_shadow_rs1[2],
+            uopq_shadow_rs2_ren[2], uopq_shadow_rs2[2],
+            uopq_shadow_valid[1], uopq_shadow_rd_wen[1], uopq_shadow_rd[1]);
+    assign uopq_shadow_waw_older[2] =
+        shadow_waw_dep(
+            uopq_shadow_valid[2], uopq_shadow_rd_wen[2], uopq_shadow_rd[2],
+            uopq_shadow_valid[0], uopq_shadow_rd_wen[0], uopq_shadow_rd[0]) |
+        shadow_waw_dep(
+            uopq_shadow_valid[2], uopq_shadow_rd_wen[2], uopq_shadow_rd[2],
+            uopq_shadow_valid[1], uopq_shadow_rd_wen[1], uopq_shadow_rd[1]);
+    assign uopq_shadow_older_ctrl_mem[2] =
+        uopq_shadow_valid[2] &&
+        ((uopq_shadow_valid[0] &&
+          (uopq_shadow_ctrl[0] | uopq_shadow_mem[0] | uopq_shadow_csr_sys_fence[0])) |
+         (uopq_shadow_valid[1] &&
+          (uopq_shadow_ctrl[1] | uopq_shadow_mem[1] | uopq_shadow_csr_sys_fence[1])));
+    assign uopq_shadow_pending_rs[2] =
+        uopq_shadow_valid[2] &&
+        ((uopq_shadow_rs1_ren[2] && gpr_pending_i[uopq_shadow_rs1[2]]) |
+         (uopq_shadow_rs2_ren[2] && gpr_pending_i[uopq_shadow_rs2[2]]));
+    assign uopq_shadow_p1_safe[2] =
+        uopq_shadow_valid[2] && uopq_shadow_simple_alu[2] &&
+        !uopq_shadow_raw_older[2] && !uopq_shadow_waw_older[2] &&
+        !uopq_shadow_older_ctrl_mem[2] && !uopq_shadow_pending_rs[2] &&
+        !flush_id_i && !stall_id_i;
+    assign uopq_shadow_raw_older[3] = 1'b0;
+    assign uopq_shadow_waw_older[3] = 1'b0;
+    assign uopq_shadow_older_ctrl_mem[3] = 1'b0;
+    assign uopq_shadow_pending_rs[3] = 1'b0;
+    assign uopq_shadow_p1_safe[3] = 1'b0;
 `endif
 
     always_ff @(posedge clk or negedge rst_n) begin
@@ -1346,6 +1510,36 @@ import ydrasil_pkg::*;
             perf_p1sh_block_waw_pair0 <= '0;
             perf_p1sh_block_pending_rs <= '0;
             perf_p1sh_block_ctrl_mem <= '0;
+            uopq_shadow_valid <= '0;
+            uopq_shadow_seq_next_ff <= '0;
+            for (int uopq_i = 0; uopq_i < 4; uopq_i++) begin
+                uopq_shadow_pc[uopq_i] <= '0;
+                uopq_shadow_instr[uopq_i] <= ydrasil_pkg::RV32I_INS_NOP;
+                uopq_shadow_seq[uopq_i] <= '0;
+                uopq_shadow_rs1[uopq_i] <= '0;
+                uopq_shadow_rs2[uopq_i] <= '0;
+                uopq_shadow_rd[uopq_i] <= '0;
+                uopq_shadow_optype[uopq_i] <= '0;
+                uopq_shadow_operator[uopq_i] <= '0;
+            end
+            uopq_shadow_rs1_ren <= '0;
+            uopq_shadow_rs2_ren <= '0;
+            uopq_shadow_rd_wen <= '0;
+            uopq_shadow_simple_alu <= '0;
+            uopq_shadow_ctrl <= '0;
+            uopq_shadow_mem <= '0;
+            uopq_shadow_csr_sys_fence <= '0;
+            perf_uopq_occ_0 <= '0;
+            perf_uopq_occ_1 <= '0;
+            perf_uopq_occ_2 <= '0;
+            perf_uopq_occ_3 <= '0;
+            perf_uopq_occ_4 <= '0;
+            perf_uopq_p1_safe_1 <= '0;
+            perf_uopq_p1_safe_2 <= '0;
+            perf_uopq_p1_safe_3 <= '0;
+            perf_uopq_block_older_ctrl_mem <= '0;
+            perf_uopq_block_raw_older <= '0;
+            perf_uopq_block_waw_older <= '0;
 `endif
         end else begin
             if (flush_id_i) begin
@@ -1358,6 +1552,7 @@ import ydrasil_pkg::*;
                 pipe1_issue_valid_ff <= 1'b0;
 `ifndef SYNTHESIS
                 pair1_valid_ff <= 1'b0;
+                uopq_shadow_valid <= '0;
 `endif
             end else begin
                 if (issue_accept) begin
@@ -1665,6 +1860,104 @@ import ydrasil_pkg::*;
                     pipe1_issue_valid_ff <= 1'b0;
                 end
             end
+`ifndef SYNTHESIS
+            if (flush_id_i) begin
+                uopq_shadow_valid <= '0;
+            end else begin
+                uopq_shadow_valid[0] <= issue_valid_ff;
+                uopq_shadow_pc[0] <= issue_pc_ff;
+                uopq_shadow_instr[0] <= ydrasil_pkg::RV32I_INS_NOP;
+                uopq_shadow_seq[0] <= '0;
+                uopq_shadow_rs1[0] <= issue_rf_raddr_rs1_ff;
+                uopq_shadow_rs2[0] <= issue_rf_raddr_rs2_ff;
+                uopq_shadow_rd[0] <= issue_rf_waddr_rd_ff;
+                uopq_shadow_rs1_ren[0] <= issue_rf_ren_rs1_ff;
+                uopq_shadow_rs2_ren[0] <= issue_rf_ren_rs2_ff;
+                uopq_shadow_rd_wen[0] <= issue_rf_wen_rd_ff;
+                uopq_shadow_optype[0] <= issue_operator_type_ff;
+                uopq_shadow_operator[0] <= issue_operator_ff;
+                uopq_shadow_simple_alu[0] <= is_shadow_simple_alu(issue_operator_type_ff, issue_operator_ff);
+                uopq_shadow_ctrl[0] <= issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP];
+                uopq_shadow_mem[0] <=
+                    issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] |
+                    issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE];
+                uopq_shadow_csr_sys_fence[0] <=
+                    issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_CSR] |
+                    issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_SYS] |
+                    issue_fence_i_ff;
+
+                uopq_shadow_valid[1] <= pair1_valid_ff;
+                uopq_shadow_pc[1] <= pair1_pc_ff;
+                uopq_shadow_instr[1] <= pair1_instr_ff;
+                uopq_shadow_seq[1] <= pair1_seq_ff;
+                uopq_shadow_rs1[1] <= pair1_rs1_ff;
+                uopq_shadow_rs2[1] <= pair1_rs2_ff;
+                uopq_shadow_rd[1] <= pair1_rd_ff;
+                uopq_shadow_rs1_ren[1] <= pair1_rs1_ren_ff;
+                uopq_shadow_rs2_ren[1] <= pair1_rs2_ren_ff;
+                uopq_shadow_rd_wen[1] <= pair1_rd_wen_ff;
+                uopq_shadow_optype[1] <= pair1_operator_type_ff;
+                uopq_shadow_operator[1] <= pair1_operator_ff;
+                uopq_shadow_simple_alu[1] <= is_shadow_simple_alu(pair1_operator_type_ff, pair1_operator_ff);
+                uopq_shadow_ctrl[1] <= pair1_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP];
+                uopq_shadow_mem[1] <=
+                    pair1_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] |
+                    pair1_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE];
+                uopq_shadow_csr_sys_fence[1] <=
+                    pair1_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_CSR] |
+                    pair1_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_SYS] |
+                    ((pair1_instr_ff[6:0] == ydrasil_pkg::RV32I_INS_FENCE) &&
+                     (pair1_instr_ff[14:12] == 3'b001));
+
+                uopq_shadow_valid[2] <=
+                    if_id_valid_i &&
+                    !(issue_valid_ff && (if_id_pc_i == issue_pc_ff)) &&
+                    !(pair1_valid_ff && (if_id_pc_i == pair1_pc_ff));
+                uopq_shadow_pc[2] <= if_id_pc_i;
+                uopq_shadow_instr[2] <= if_id_instr_i;
+                uopq_shadow_seq[2] <= uopq_shadow_seq_next_ff;
+                uopq_shadow_rs1[2] <= if_id_trace_rf_raddr_rs1;
+                uopq_shadow_rs2[2] <= if_id_trace_rf_raddr_rs2;
+                uopq_shadow_rd[2] <= if_id_trace_rf_waddr_rd;
+                uopq_shadow_rs1_ren[2] <= if_id_trace_rf_ren_rs1;
+                uopq_shadow_rs2_ren[2] <= if_id_trace_rf_ren_rs2;
+                uopq_shadow_rd_wen[2] <= if_id_trace_rf_wen_rd;
+                uopq_shadow_optype[2] <= if_id_trace_operator_type;
+                uopq_shadow_operator[2] <= if_id_trace_operator;
+                uopq_shadow_simple_alu[2] <= is_shadow_simple_alu(if_id_trace_operator_type, if_id_trace_operator);
+                uopq_shadow_ctrl[2] <= if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP];
+                uopq_shadow_mem[2] <=
+                    if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD] |
+                    if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE];
+                uopq_shadow_csr_sys_fence[2] <=
+                    if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_CSR] |
+                    if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS] |
+                    ((if_id_instr_i[6:0] == ydrasil_pkg::RV32I_INS_FENCE) &&
+                     (if_id_instr_i[14:12] == 3'b001));
+
+                uopq_shadow_valid[3] <= 1'b0;
+                uopq_shadow_pc[3] <= '0;
+                uopq_shadow_instr[3] <= ydrasil_pkg::RV32I_INS_NOP;
+                uopq_shadow_seq[3] <= '0;
+                uopq_shadow_rs1[3] <= '0;
+                uopq_shadow_rs2[3] <= '0;
+                uopq_shadow_rd[3] <= '0;
+                uopq_shadow_rs1_ren[3] <= 1'b0;
+                uopq_shadow_rs2_ren[3] <= 1'b0;
+                uopq_shadow_rd_wen[3] <= 1'b0;
+                uopq_shadow_optype[3] <= '0;
+                uopq_shadow_operator[3] <= '0;
+                uopq_shadow_simple_alu[3] <= 1'b0;
+                uopq_shadow_ctrl[3] <= 1'b0;
+                uopq_shadow_mem[3] <= 1'b0;
+                uopq_shadow_csr_sys_fence[3] <= 1'b0;
+                if (if_id_valid_i &&
+                    !(issue_valid_ff && (if_id_pc_i == issue_pc_ff)) &&
+                    !(pair1_valid_ff && (if_id_pc_i == pair1_pc_ff))) begin
+                    uopq_shadow_seq_next_ff <= uopq_shadow_seq_next_ff + 32'd1;
+                end
+            end
+`endif
             perf_id_decode_valid <= perf_id_decode_valid + (decode_valid ? 32'd1 : 32'd0);
             perf_id_issue_accept <= perf_id_issue_accept + (issue_accept ? 32'd1 : 32'd0);
             perf_id_issue_fire <= perf_id_issue_fire + (issue_fire ? 32'd1 : 32'd0);
@@ -1797,6 +2090,34 @@ import ydrasil_pkg::*;
                 (p1sh_block_pending_rs ? 32'd1 : 32'd0);
             perf_p1sh_block_ctrl_mem <= perf_p1sh_block_ctrl_mem +
                 (p1sh_block_ctrl_mem ? 32'd1 : 32'd0);
+            perf_uopq_occ_0 <= perf_uopq_occ_0 +
+                ((uopq_shadow_occupancy == 3'd0) ? 32'd1 : 32'd0);
+            perf_uopq_occ_1 <= perf_uopq_occ_1 +
+                ((uopq_shadow_occupancy == 3'd1) ? 32'd1 : 32'd0);
+            perf_uopq_occ_2 <= perf_uopq_occ_2 +
+                ((uopq_shadow_occupancy == 3'd2) ? 32'd1 : 32'd0);
+            perf_uopq_occ_3 <= perf_uopq_occ_3 +
+                ((uopq_shadow_occupancy == 3'd3) ? 32'd1 : 32'd0);
+            perf_uopq_occ_4 <= perf_uopq_occ_4 +
+                ((uopq_shadow_occupancy == 3'd4) ? 32'd1 : 32'd0);
+            perf_uopq_p1_safe_1 <= perf_uopq_p1_safe_1 +
+                (uopq_shadow_p1_safe[1] ? 32'd1 : 32'd0);
+            perf_uopq_p1_safe_2 <= perf_uopq_p1_safe_2 +
+                (uopq_shadow_p1_safe[2] ? 32'd1 : 32'd0);
+            perf_uopq_p1_safe_3 <= perf_uopq_p1_safe_3 +
+                (uopq_shadow_p1_safe[3] ? 32'd1 : 32'd0);
+            perf_uopq_block_older_ctrl_mem <= perf_uopq_block_older_ctrl_mem +
+                ((uopq_shadow_older_ctrl_mem[1] |
+                  uopq_shadow_older_ctrl_mem[2] |
+                  uopq_shadow_older_ctrl_mem[3]) ? 32'd1 : 32'd0);
+            perf_uopq_block_raw_older <= perf_uopq_block_raw_older +
+                ((uopq_shadow_raw_older[1] |
+                  uopq_shadow_raw_older[2] |
+                  uopq_shadow_raw_older[3]) ? 32'd1 : 32'd0);
+            perf_uopq_block_waw_older <= perf_uopq_block_waw_older +
+                ((uopq_shadow_waw_older[1] |
+                  uopq_shadow_waw_older[2] |
+                  uopq_shadow_waw_older[3]) ? 32'd1 : 32'd0);
 `endif
         end
     end

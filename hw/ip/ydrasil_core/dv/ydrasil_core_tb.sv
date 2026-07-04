@@ -867,6 +867,18 @@ end
                 u_dut.u_ydrasil_id_stage.perf_p1sh_block_waw_pair0,
                 u_dut.u_ydrasil_id_stage.perf_p1sh_block_pending_rs,
                 u_dut.u_ydrasil_id_stage.perf_p1sh_block_ctrl_mem);
+            $display("PERF_UOPQ_SHADOW: UOPQ_OCC_0=%-d UOPQ_OCC_1=%-d UOPQ_OCC_2=%-d UOPQ_OCC_3=%-d UOPQ_OCC_4=%-d UOPQ_P1_SAFE_1=%-d UOPQ_P1_SAFE_2=%-d UOPQ_P1_SAFE_3=%-d UOPQ_BLOCK_OLDER_CTRL_MEM=%-d UOPQ_BLOCK_RAW_OLDER=%-d UOPQ_BLOCK_WAW_OLDER=%-d",
+                u_dut.u_ydrasil_id_stage.perf_uopq_occ_0,
+                u_dut.u_ydrasil_id_stage.perf_uopq_occ_1,
+                u_dut.u_ydrasil_id_stage.perf_uopq_occ_2,
+                u_dut.u_ydrasil_id_stage.perf_uopq_occ_3,
+                u_dut.u_ydrasil_id_stage.perf_uopq_occ_4,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_safe_1,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_safe_2,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_safe_3,
+                u_dut.u_ydrasil_id_stage.perf_uopq_block_older_ctrl_mem,
+                u_dut.u_ydrasil_id_stage.perf_uopq_block_raw_older,
+                u_dut.u_ydrasil_id_stage.perf_uopq_block_waw_older);
             $display("PERF_DUAL_ISSUE: DI_PIPE0_FIRE=%-d DI_PIPE1_FIRE=%-d DI_PAIR_FIRE=%-d DI_PAIR_SIMPLE_ALU=%-d DI_PIPE1_KILLED_FLUSH=%-d DI_PIPE1_BLOCK_STALL_RECHECK=%-d DI_PIPE1_BLOCK_RESBUF_FULL=%-d DI_PIPE1_BLOCK_ALU_FIFO_FULL=%-d DI_PIPE1_BLOCK_PENDING_RECHECK=%-d DI_PIPE1_BLOCK_TIMING_GUARD=%-d",
                 u_dut.u_ydrasil_id_stage.perf_di_pipe0_fire,
                 u_dut.u_ydrasil_id_stage.perf_di_pipe1_fire,
