@@ -853,6 +853,14 @@ end
                 u_dut.u_ydrasil_id_stage.perf_ds_block_flush,
                 u_dut.u_ydrasil_id_stage.perf_ds_block_wb_port,
                 u_dut.u_ydrasil_id_stage.perf_ds_block_forward_complex);
+            $display("PERF_PAIR_SHADOW: P1SH_VALID_CYCLES=%-d P1SH_SIMPLE_ALU=%-d P1SH_SAFE_CAND=%-d P1SH_BLOCK_RAW_PAIR0=%-d P1SH_BLOCK_WAW_PAIR0=%-d P1SH_BLOCK_PENDING_RS=%-d P1SH_BLOCK_CTRL_MEM=%-d",
+                u_dut.u_ydrasil_id_stage.perf_p1sh_valid_cycles,
+                u_dut.u_ydrasil_id_stage.perf_p1sh_simple_alu,
+                u_dut.u_ydrasil_id_stage.perf_p1sh_safe_cand,
+                u_dut.u_ydrasil_id_stage.perf_p1sh_block_raw_pair0,
+                u_dut.u_ydrasil_id_stage.perf_p1sh_block_waw_pair0,
+                u_dut.u_ydrasil_id_stage.perf_p1sh_block_pending_rs,
+                u_dut.u_ydrasil_id_stage.perf_p1sh_block_ctrl_mem);
             $display("PERF_DUAL_ISSUE: DI_PIPE0_FIRE=%-d DI_PIPE1_FIRE=%-d DI_PAIR_FIRE=%-d DI_PAIR_SIMPLE_ALU=%-d DI_PIPE1_KILLED_FLUSH=%-d DI_PIPE1_BLOCK_STALL_RECHECK=%-d DI_PIPE1_BLOCK_RESBUF_FULL=%-d DI_PIPE1_BLOCK_ALU_FIFO_FULL=%-d DI_PIPE1_BLOCK_PENDING_RECHECK=%-d DI_PIPE1_BLOCK_TIMING_GUARD=%-d",
                 u_dut.u_ydrasil_id_stage.perf_di_pipe0_fire,
                 u_dut.u_ydrasil_id_stage.perf_di_pipe1_fire,

@@ -424,6 +424,40 @@ import ydrasil_pkg::*;
     reg [31:0]                       perf_ds_block_flush;
     reg [31:0]                       perf_ds_block_wb_port;
     reg [31:0]                       perf_ds_block_forward_complex;
+
+    reg                              pair1_valid_ff;
+    reg [DATA_WIDTH-1:0]             pair1_pc_ff;
+    reg [DATA_WIDTH-1:0]             pair1_instr_ff;
+    reg [31:0]                       pair1_seq_ff;
+    reg [31:0]                       pair1_seq_next_ff;
+    reg [4:0]                        pair1_rs1_ff;
+    reg [4:0]                        pair1_rs2_ff;
+    reg [4:0]                        pair1_rd_ff;
+    reg                              pair1_rs1_ren_ff;
+    reg                              pair1_rs2_ren_ff;
+    reg                              pair1_rd_wen_ff;
+    reg [ydrasil_pkg::OPERATOR_WIDTH-1:0]      pair1_operator_ff;
+    reg [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] pair1_operator_type_ff;
+    reg [DATA_WIDTH-1:0]             pair1_imm_ff;
+    reg                              pair1_pred_hit_ff;
+    reg                              pair1_pred_taken_ff;
+    reg [DATA_WIDTH-1:0]             pair1_pred_target_ff;
+    reg [1:0]                        pair1_pred_counter_ff;
+    reg [DATA_WIDTH-1:0]             pair1_pred_bht_index_ff;
+    reg                              pair1_pred_l0_taken_ff;
+    wire                             p1sh_simple_alu;
+    wire                             p1sh_block_raw_pair0;
+    wire                             p1sh_block_waw_pair0;
+    wire                             p1sh_block_pending_rs;
+    wire                             p1sh_block_ctrl_mem;
+    wire                             p1sh_safe_cand;
+    reg [31:0]                       perf_p1sh_valid_cycles;
+    reg [31:0]                       perf_p1sh_simple_alu;
+    reg [31:0]                       perf_p1sh_safe_cand;
+    reg [31:0]                       perf_p1sh_block_raw_pair0;
+    reg [31:0]                       perf_p1sh_block_waw_pair0;
+    reg [31:0]                       perf_p1sh_block_pending_rs;
+    reg [31:0]                       perf_p1sh_block_ctrl_mem;
 `endif
 
     ydrasil_ins_decoder #(
@@ -886,6 +920,51 @@ import ydrasil_pkg::*;
         ds_shadow_safe_candidate &&
         issue_rf_wen_rd_ff && (issue_rf_waddr_rd_ff != '0) &&
         rf_wen_rd && (rf_waddr_rd != '0);
+
+    assign p1sh_simple_alu =
+        pair1_valid_ff &&
+        pair1_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_ALU] &&
+        !pair1_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+        !pair1_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
+        !pair1_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
+        !pair1_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_CSR] &&
+        !pair1_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_SYS] &&
+        !pair1_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL] &&
+        !pair1_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BITMANIP] &&
+        (pair1_operator_ff[ydrasil_pkg::OP_ALU_ADD] |
+         pair1_operator_ff[ydrasil_pkg::OP_ALU_SUB] |
+         pair1_operator_ff[ydrasil_pkg::OP_ALU_SLT] |
+         pair1_operator_ff[ydrasil_pkg::OP_ALU_SLTU] |
+         pair1_operator_ff[ydrasil_pkg::OP_ALU_XOR] |
+         pair1_operator_ff[ydrasil_pkg::OP_ALU_OR] |
+         pair1_operator_ff[ydrasil_pkg::OP_ALU_AND] |
+         pair1_operator_ff[ydrasil_pkg::OP_ALU_LUI] |
+         pair1_operator_ff[ydrasil_pkg::OP_ALU_AUIPC]);
+    assign p1sh_block_raw_pair0 =
+        pair1_valid_ff && issue_valid_ff && issue_rf_wen_rd_ff &&
+        (issue_rf_waddr_rd_ff != '0) &&
+        ((pair1_rs1_ren_ff && (pair1_rs1_ff == issue_rf_waddr_rd_ff)) |
+         (pair1_rs2_ren_ff && (pair1_rs2_ff == issue_rf_waddr_rd_ff)));
+    assign p1sh_block_waw_pair0 =
+        pair1_valid_ff && issue_valid_ff && issue_rf_wen_rd_ff &&
+        pair1_rd_wen_ff && (pair1_rd_ff != '0) &&
+        (pair1_rd_ff == issue_rf_waddr_rd_ff);
+    assign p1sh_block_pending_rs =
+        pair1_valid_ff &&
+        ((pair1_rs1_ren_ff && gpr_pending_i[pair1_rs1_ff]) |
+         (pair1_rs2_ren_ff && gpr_pending_i[pair1_rs2_ff]));
+    assign p1sh_block_ctrl_mem =
+        pair1_valid_ff &&
+        (pair1_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] |
+         pair1_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] |
+         pair1_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] |
+         pair1_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_CSR] |
+         pair1_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_SYS]);
+    assign p1sh_safe_cand =
+        p1sh_simple_alu && issue_valid_ff &&
+        !p1sh_block_raw_pair0 && !p1sh_block_waw_pair0 &&
+        !p1sh_block_pending_rs && !p1sh_block_ctrl_mem &&
+        !flush_id_i && !stall_id_i;
 `endif
 
     always_ff @(posedge clk or negedge rst_n) begin
@@ -1036,6 +1115,33 @@ import ydrasil_pkg::*;
             perf_ds_block_flush <= '0;
             perf_ds_block_wb_port <= '0;
             perf_ds_block_forward_complex <= '0;
+            pair1_valid_ff <= 1'b0;
+            pair1_pc_ff <= '0;
+            pair1_instr_ff <= ydrasil_pkg::RV32I_INS_NOP;
+            pair1_seq_ff <= '0;
+            pair1_seq_next_ff <= '0;
+            pair1_rs1_ff <= '0;
+            pair1_rs2_ff <= '0;
+            pair1_rd_ff <= '0;
+            pair1_rs1_ren_ff <= 1'b0;
+            pair1_rs2_ren_ff <= 1'b0;
+            pair1_rd_wen_ff <= 1'b0;
+            pair1_operator_ff <= '0;
+            pair1_operator_type_ff <= '0;
+            pair1_imm_ff <= '0;
+            pair1_pred_hit_ff <= 1'b0;
+            pair1_pred_taken_ff <= 1'b0;
+            pair1_pred_target_ff <= '0;
+            pair1_pred_counter_ff <= 2'b01;
+            pair1_pred_bht_index_ff <= '0;
+            pair1_pred_l0_taken_ff <= 1'b0;
+            perf_p1sh_valid_cycles <= '0;
+            perf_p1sh_simple_alu <= '0;
+            perf_p1sh_safe_cand <= '0;
+            perf_p1sh_block_raw_pair0 <= '0;
+            perf_p1sh_block_waw_pair0 <= '0;
+            perf_p1sh_block_pending_rs <= '0;
+            perf_p1sh_block_ctrl_mem <= '0;
 `endif
         end else begin
             if (flush_id_i) begin
@@ -1046,6 +1152,9 @@ import ydrasil_pkg::*;
                 id_ex_valid_ff <= 1'b0;
                 id_fence_i_ff <= 1'b0;
                 pipe1_issue_valid_ff <= 1'b0;
+`ifndef SYNTHESIS
+                pair1_valid_ff <= 1'b0;
+`endif
             end else begin
                 if (issue_accept) begin
                     if (pipe1_dual_fire) begin
@@ -1089,6 +1198,9 @@ import ydrasil_pkg::*;
 
                 if (issue_slot1_bypass_fire) begin
                     skid_valid_ff <= 1'b0;
+`ifndef SYNTHESIS
+                    pair1_valid_ff <= 1'b0;
+`endif
                 end else if (pipe1_dual_fire) begin
                     skid_valid_ff <= (PIPE1_REAL_MODE >= 2) & if_id_valid_i;
                     skid_pc_ff <= if_id_pc_i;
@@ -1099,6 +1211,30 @@ import ydrasil_pkg::*;
                     skid_pred_counter_ff <= if_id_pred_counter_i;
                     skid_pred_bht_index_ff <= if_id_pred_bht_index_i;
                     skid_pred_l0_taken_ff <= if_id_pred_l0_taken_i;
+`ifndef SYNTHESIS
+                    pair1_valid_ff <= (PIPE1_REAL_MODE >= 2) & if_id_valid_i;
+                    if ((PIPE1_REAL_MODE >= 2) & if_id_valid_i) begin
+                        pair1_pc_ff <= if_id_pc_i;
+                        pair1_instr_ff <= if_id_instr_i;
+                        pair1_seq_ff <= pair1_seq_next_ff;
+                        pair1_seq_next_ff <= pair1_seq_next_ff + 32'd1;
+                        pair1_rs1_ff <= if_id_trace_rf_raddr_rs1;
+                        pair1_rs2_ff <= if_id_trace_rf_raddr_rs2;
+                        pair1_rd_ff <= if_id_trace_rf_waddr_rd;
+                        pair1_rs1_ren_ff <= if_id_trace_rf_ren_rs1;
+                        pair1_rs2_ren_ff <= if_id_trace_rf_ren_rs2;
+                        pair1_rd_wen_ff <= if_id_trace_rf_wen_rd;
+                        pair1_operator_ff <= if_id_trace_operator;
+                        pair1_operator_type_ff <= if_id_trace_operator_type;
+                        pair1_imm_ff <= if_id_trace_imm;
+                        pair1_pred_hit_ff <= if_id_pred_hit_i;
+                        pair1_pred_taken_ff <= if_id_pred_taken_i;
+                        pair1_pred_target_ff <= if_id_pred_target_i;
+                        pair1_pred_counter_ff <= if_id_pred_counter_i;
+                        pair1_pred_bht_index_ff <= if_id_pred_bht_index_i;
+                        pair1_pred_l0_taken_ff <= if_id_pred_l0_taken_i;
+                    end
+`endif
                 end else if (id_advance) begin
                     if (issue_load_from_skid) begin
                         skid_valid_ff <= if_id_valid_i;
@@ -1110,8 +1246,35 @@ import ydrasil_pkg::*;
                         skid_pred_counter_ff <= if_id_pred_counter_i;
                         skid_pred_bht_index_ff <= if_id_pred_bht_index_i;
                         skid_pred_l0_taken_ff <= if_id_pred_l0_taken_i;
+`ifndef SYNTHESIS
+                        pair1_valid_ff <= if_id_valid_i;
+                        if (if_id_valid_i) begin
+                            pair1_pc_ff <= if_id_pc_i;
+                            pair1_instr_ff <= if_id_instr_i;
+                            pair1_seq_ff <= pair1_seq_next_ff;
+                            pair1_seq_next_ff <= pair1_seq_next_ff + 32'd1;
+                            pair1_rs1_ff <= if_id_trace_rf_raddr_rs1;
+                            pair1_rs2_ff <= if_id_trace_rf_raddr_rs2;
+                            pair1_rd_ff <= if_id_trace_rf_waddr_rd;
+                            pair1_rs1_ren_ff <= if_id_trace_rf_ren_rs1;
+                            pair1_rs2_ren_ff <= if_id_trace_rf_ren_rs2;
+                            pair1_rd_wen_ff <= if_id_trace_rf_wen_rd;
+                            pair1_operator_ff <= if_id_trace_operator;
+                            pair1_operator_type_ff <= if_id_trace_operator_type;
+                            pair1_imm_ff <= if_id_trace_imm;
+                            pair1_pred_hit_ff <= if_id_pred_hit_i;
+                            pair1_pred_taken_ff <= if_id_pred_taken_i;
+                            pair1_pred_target_ff <= if_id_pred_target_i;
+                            pair1_pred_counter_ff <= if_id_pred_counter_i;
+                            pair1_pred_bht_index_ff <= if_id_pred_bht_index_i;
+                            pair1_pred_l0_taken_ff <= if_id_pred_l0_taken_i;
+                        end
+`endif
                     end else if (issue_accept) begin
                         skid_valid_ff <= 1'b0;
+`ifndef SYNTHESIS
+                        pair1_valid_ff <= 1'b0;
+`endif
                     end else if (issue_valid_ff && issue_wait_block && !skid_valid_ff && if_id_valid_i) begin
                         skid_valid_ff <= 1'b1;
                         skid_pc_ff <= if_id_pc_i;
@@ -1122,6 +1285,28 @@ import ydrasil_pkg::*;
                         skid_pred_counter_ff <= if_id_pred_counter_i;
                         skid_pred_bht_index_ff <= if_id_pred_bht_index_i;
                         skid_pred_l0_taken_ff <= if_id_pred_l0_taken_i;
+`ifndef SYNTHESIS
+                        pair1_valid_ff <= 1'b1;
+                        pair1_pc_ff <= if_id_pc_i;
+                        pair1_instr_ff <= if_id_instr_i;
+                        pair1_seq_ff <= pair1_seq_next_ff;
+                        pair1_seq_next_ff <= pair1_seq_next_ff + 32'd1;
+                        pair1_rs1_ff <= if_id_trace_rf_raddr_rs1;
+                        pair1_rs2_ff <= if_id_trace_rf_raddr_rs2;
+                        pair1_rd_ff <= if_id_trace_rf_waddr_rd;
+                        pair1_rs1_ren_ff <= if_id_trace_rf_ren_rs1;
+                        pair1_rs2_ren_ff <= if_id_trace_rf_ren_rs2;
+                        pair1_rd_wen_ff <= if_id_trace_rf_wen_rd;
+                        pair1_operator_ff <= if_id_trace_operator;
+                        pair1_operator_type_ff <= if_id_trace_operator_type;
+                        pair1_imm_ff <= if_id_trace_imm;
+                        pair1_pred_hit_ff <= if_id_pred_hit_i;
+                        pair1_pred_taken_ff <= if_id_pred_taken_i;
+                        pair1_pred_target_ff <= if_id_pred_target_i;
+                        pair1_pred_counter_ff <= if_id_pred_counter_i;
+                        pair1_pred_bht_index_ff <= if_id_pred_bht_index_i;
+                        pair1_pred_l0_taken_ff <= if_id_pred_l0_taken_i;
+`endif
                     end
                 end
 
@@ -1295,6 +1480,20 @@ import ydrasil_pkg::*;
                 (ds_block_wb_port ? 32'd1 : 32'd0);
             perf_ds_block_forward_complex <= perf_ds_block_forward_complex +
                 (ds_block_forward_complex ? 32'd1 : 32'd0);
+            perf_p1sh_valid_cycles <= perf_p1sh_valid_cycles +
+                (pair1_valid_ff ? 32'd1 : 32'd0);
+            perf_p1sh_simple_alu <= perf_p1sh_simple_alu +
+                (p1sh_simple_alu ? 32'd1 : 32'd0);
+            perf_p1sh_safe_cand <= perf_p1sh_safe_cand +
+                (p1sh_safe_cand ? 32'd1 : 32'd0);
+            perf_p1sh_block_raw_pair0 <= perf_p1sh_block_raw_pair0 +
+                (p1sh_block_raw_pair0 ? 32'd1 : 32'd0);
+            perf_p1sh_block_waw_pair0 <= perf_p1sh_block_waw_pair0 +
+                (p1sh_block_waw_pair0 ? 32'd1 : 32'd0);
+            perf_p1sh_block_pending_rs <= perf_p1sh_block_pending_rs +
+                (p1sh_block_pending_rs ? 32'd1 : 32'd0);
+            perf_p1sh_block_ctrl_mem <= perf_p1sh_block_ctrl_mem +
+                (p1sh_block_ctrl_mem ? 32'd1 : 32'd0);
 `endif
         end
     end
