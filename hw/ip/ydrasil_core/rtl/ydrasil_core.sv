@@ -121,6 +121,9 @@ import ydrasil_pkg::*;
 	wire                        pipe1_wb_fwd_valid;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] pipe1_wb_fwd_addr;
 	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] pipe1_wb_fwd_data;
+	wire                        wb_buf_fwd_valid;
+	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] wb_buf_fwd_addr;
+	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] wb_buf_fwd_data;
 	wire                        ex_mul_stall;
 	wire                        ex_mul_issue;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] ex_mul_issue_waddr;
@@ -383,7 +386,6 @@ import ydrasil_pkg::*;
 	wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_for_hazard =
 		(gpr_pending_q & ~gpr_pending_clear_mask & ~gpr_pending_flush_kill_mask) |
 		gpr_pending_issue_mask | gpr_pending_pipe1_issue_mask;
-
 	wire rs1_clear_fwd =
 		(wb_hzd_valid_q & id_ctrl_rs1_ren & (id_ctrl_rs1_addr != '0) &
 		 (id_ctrl_rs1_addr == wb_hzd_addr_q)) |
@@ -886,6 +888,9 @@ import ydrasil_pkg::*;
 		.pipe1_fwd_valid_o(pipe1_wb_fwd_valid),
 		.pipe1_fwd_addr_o(pipe1_wb_fwd_addr),
 		.pipe1_fwd_data_o(pipe1_wb_fwd_data),
+		.wb_buf_fwd_valid_o(wb_buf_fwd_valid),
+		.wb_buf_fwd_addr_o(wb_buf_fwd_addr),
+		.wb_buf_fwd_data_o(wb_buf_fwd_data),
 		.rf_wdata_rd_o    (rf_wdata_rd),
 		.rf_wen_rd_o      (rf_wen_rd),
 		.rf_waddr_rd_o    (rf_waddr_rd)

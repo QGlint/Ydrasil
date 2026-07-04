@@ -184,6 +184,11 @@ end
     reg [31:0] p4a_rs1_stable_bypass_count;
     reg [31:0] p4a_rs2_stable_bypass_count;
     reg [31:0] p4a_raw_ready_next_count;
+    reg [31:0] p4b_wb_buf_valid_count;
+    reg [31:0] p4b_rs1_pending_hit_count;
+    reg [31:0] p4b_rs2_pending_hit_count;
+    reg [31:0] p4b_id_wait_rs1_hit_count;
+    reg [31:0] p4b_id_wait_rs2_hit_count;
 
 	ydrasil_core u_dut (
 		.clk      (clk),
@@ -337,6 +342,11 @@ end
             p4a_rs1_stable_bypass_count <= 32'b0;
             p4a_rs2_stable_bypass_count <= 32'b0;
             p4a_raw_ready_next_count <= 32'b0;
+            p4b_wb_buf_valid_count <= 32'b0;
+            p4b_rs1_pending_hit_count <= 32'b0;
+            p4b_rs2_pending_hit_count <= 32'b0;
+            p4b_id_wait_rs1_hit_count <= 32'b0;
+            p4b_id_wait_rs2_hit_count <= 32'b0;
         end else begin
             last_pc     <= pc;
             if (bp_branch_valid) begin
@@ -442,6 +452,28 @@ end
                 (u_dut.rs2_issue_alu_stable_bypass ? 32'd1 : 32'd0);
             p4a_raw_ready_next_count <= p4a_raw_ready_next_count +
                 ((u_dut.rs1_issue_alu_ready_next_raw | u_dut.rs2_issue_alu_ready_next_raw) ? 32'd1 : 32'd0);
+            p4b_wb_buf_valid_count <= p4b_wb_buf_valid_count +
+                (u_dut.wb_buf_fwd_valid ? 32'd1 : 32'd0);
+            p4b_rs1_pending_hit_count <= p4b_rs1_pending_hit_count +
+                ((u_dut.wb_buf_fwd_valid &&
+                  u_dut.id_ctrl_rs1_ren &&
+                  (u_dut.id_ctrl_rs1_addr != '0) &&
+                  u_dut.gpr_pending_q[u_dut.id_ctrl_rs1_addr] &&
+                  (u_dut.id_ctrl_rs1_addr == u_dut.wb_buf_fwd_addr)) ? 32'd1 : 32'd0);
+            p4b_rs2_pending_hit_count <= p4b_rs2_pending_hit_count +
+                ((u_dut.wb_buf_fwd_valid &&
+                  u_dut.id_ctrl_rs2_ren &&
+                  (u_dut.id_ctrl_rs2_addr != '0) &&
+                  u_dut.gpr_pending_q[u_dut.id_ctrl_rs2_addr] &&
+                  (u_dut.id_ctrl_rs2_addr == u_dut.wb_buf_fwd_addr)) ? 32'd1 : 32'd0);
+            p4b_id_wait_rs1_hit_count <= p4b_id_wait_rs1_hit_count +
+                ((u_dut.u_ydrasil_id_stage.issue_wait_rs1_ff &&
+                  !u_dut.wb_hzd_valid_q &&
+                  u_dut.u_ydrasil_id_stage.rs1_wb_fwd) ? 32'd1 : 32'd0);
+            p4b_id_wait_rs2_hit_count <= p4b_id_wait_rs2_hit_count +
+                ((u_dut.u_ydrasil_id_stage.issue_wait_rs2_ff &&
+                  !u_dut.wb_hzd_valid_q &&
+                  u_dut.u_ydrasil_id_stage.rs2_wb_fwd) ? 32'd1 : 32'd0);
             sb_raw_load_wait_count <= sb_raw_load_wait_count +
                 ((u_dut.issue_load_producer & u_dut.issue_src_hzd) ? 32'd1 : 32'd0);
             sb_raw_mul_wait_count <= sb_raw_mul_wait_count +
@@ -767,6 +799,12 @@ end
                 p4a_alu_stable_slot_hit_count,
                 p4a_rs1_stable_bypass_count,
                 p4a_rs2_stable_bypass_count);
+            $display("PERF_PHASE4B_WB_BUF: VALID=%-d RS1_PENDING_HIT=%-d RS2_PENDING_HIT=%-d ID_WAIT_RS1_HIT=%-d ID_WAIT_RS2_HIT=%-d",
+                p4b_wb_buf_valid_count,
+                p4b_rs1_pending_hit_count,
+                p4b_rs2_pending_hit_count,
+                p4b_id_wait_rs1_hit_count,
+                p4b_id_wait_rs2_hit_count);
             $display("PERF_FRONTEND: PRED_TAKEN_REDIRECT=%-d CORRECT_TAKEN_TOTAL=%-d CORRECT_TAKEN_L0=%-d CORRECT_TAKEN_SYNC=%-d CORRECT_TAKEN_SYNC_BUBBLE=%-d CORRECT_TAKEN_ZERO_BUBBLE=%-d WRONG_DIR_FLUSH=%-d BTB_MISS_TAKEN=%-d FETCH_Q_FULL=%-d FETCH_Q_EMPTY=%-d FETCH_Q_PUSH=%-d FETCH_Q_POP=%-d DECODE_BLOCKED_BY_UOPQ=%-d SYNC_BP_TAKEN_BUBBLE=%-d L0_HIT=%-d L0_TAKEN=%-d",
                 fe_pred_taken_redirect_count,
                 fe_correct_taken_redirect_count,
