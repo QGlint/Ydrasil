@@ -180,6 +180,10 @@ end
     reg [31:0] sb_store_data_raw_class_count;
     reg [31:0] sb_can_bypass_with_ready_issue_count;
     reg [31:0] sb_must_stall_in_order_count;
+    reg [31:0] p4a_alu_stable_slot_hit_count;
+    reg [31:0] p4a_rs1_stable_bypass_count;
+    reg [31:0] p4a_rs2_stable_bypass_count;
+    reg [31:0] p4a_raw_ready_next_count;
 
 	ydrasil_core u_dut (
 		.clk      (clk),
@@ -329,6 +333,10 @@ end
             sb_store_data_raw_class_count <= 32'b0;
             sb_can_bypass_with_ready_issue_count <= 32'b0;
             sb_must_stall_in_order_count <= 32'b0;
+            p4a_alu_stable_slot_hit_count <= 32'b0;
+            p4a_rs1_stable_bypass_count <= 32'b0;
+            p4a_rs2_stable_bypass_count <= 32'b0;
+            p4a_raw_ready_next_count <= 32'b0;
         end else begin
             last_pc     <= pc;
             if (bp_branch_valid) begin
@@ -426,6 +434,14 @@ end
                 (u_dut.u_ydrasil_if_stage.bp_predict_redirect ? 32'd1 : 32'd0);
             sb_raw_alu_ready_next_count <= sb_raw_alu_ready_next_count +
                 ((u_dut.rs1_issue_alu_ready_next | u_dut.rs2_issue_alu_ready_next) ? 32'd1 : 32'd0);
+            p4a_alu_stable_slot_hit_count <= p4a_alu_stable_slot_hit_count +
+                (u_dut.issue_alu_stable_slot_hit ? 32'd1 : 32'd0);
+            p4a_rs1_stable_bypass_count <= p4a_rs1_stable_bypass_count +
+                (u_dut.rs1_issue_alu_stable_bypass ? 32'd1 : 32'd0);
+            p4a_rs2_stable_bypass_count <= p4a_rs2_stable_bypass_count +
+                (u_dut.rs2_issue_alu_stable_bypass ? 32'd1 : 32'd0);
+            p4a_raw_ready_next_count <= p4a_raw_ready_next_count +
+                ((u_dut.rs1_issue_alu_ready_next_raw | u_dut.rs2_issue_alu_ready_next_raw) ? 32'd1 : 32'd0);
             sb_raw_load_wait_count <= sb_raw_load_wait_count +
                 ((u_dut.issue_load_producer & u_dut.issue_src_hzd) ? 32'd1 : 32'd0);
             sb_raw_mul_wait_count <= sb_raw_mul_wait_count +
@@ -746,6 +762,11 @@ end
                 sb_store_data_raw_class_count,
                 sb_can_bypass_with_ready_issue_count,
                 sb_must_stall_in_order_count);
+            $display("PERF_PHASE4A_ALU_STABLE: RAW_READY_NEXT=%-d STABLE_SLOT_HIT=%-d RS1_BYPASS=%-d RS2_BYPASS=%-d",
+                p4a_raw_ready_next_count,
+                p4a_alu_stable_slot_hit_count,
+                p4a_rs1_stable_bypass_count,
+                p4a_rs2_stable_bypass_count);
             $display("PERF_FRONTEND: PRED_TAKEN_REDIRECT=%-d CORRECT_TAKEN_TOTAL=%-d CORRECT_TAKEN_L0=%-d CORRECT_TAKEN_SYNC=%-d CORRECT_TAKEN_SYNC_BUBBLE=%-d CORRECT_TAKEN_ZERO_BUBBLE=%-d WRONG_DIR_FLUSH=%-d BTB_MISS_TAKEN=%-d FETCH_Q_FULL=%-d FETCH_Q_EMPTY=%-d FETCH_Q_PUSH=%-d FETCH_Q_POP=%-d DECODE_BLOCKED_BY_UOPQ=%-d SYNC_BP_TAKEN_BUBBLE=%-d L0_HIT=%-d L0_TAKEN=%-d",
                 fe_pred_taken_redirect_count,
                 fe_correct_taken_redirect_count,
