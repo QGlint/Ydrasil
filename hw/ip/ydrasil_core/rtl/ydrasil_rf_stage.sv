@@ -6,6 +6,7 @@ import ydrasil_pkg::*;
     input  wire                            clk,
     input  wire                            rst_n,
     input  wire                            stall_rf_i,
+    input  wire                            bubble_rf_i,
     input  wire                            flush_rf_i,
 
     // ID/RF pipeline register inputs (from id_stage issue_*_ff)
@@ -134,7 +135,7 @@ import ydrasil_pkg::*;
     reg [ydrasil_pkg::OP_CSR_INFO_WIDTH-1:0]   csr_op_info_ff;
     reg [ydrasil_pkg::OP_SYS_INFO_WIDTH-1:0]   sys_op_info_ff;
 
-    assign rf_advance = !stall_rf_i;
+    assign rf_advance = !stall_rf_i && !bubble_rf_i;
 
     // Drive register file read addresses
     assign rf_addr_rs1_o = id_rf_raddr_rs1_i;
@@ -258,6 +259,10 @@ import ydrasil_pkg::*;
         end else if (flush_rf_i) begin
             ex_valid_ff         <= 1'b0;
             fence_i_ff          <= 1'b0;
+        end else if (bubble_rf_i) begin
+            // Scoreboard/LSU/CLINT/WB bubble: clear valid to prevent re-execution in EX
+            ex_valid_ff         <= 1'b0;
+            fence_i_ff          <= 1'b0;
         end else if (rf_advance) begin
             operand_a_ff        <= operand_a;
             operand_b_ff        <= operand_b;
@@ -287,11 +292,8 @@ import ydrasil_pkg::*;
 
             ex_valid_ff         <= id_rf_valid_i;
             fence_i_ff          <= id_rf_valid_i & id_rf_fence_i_i;
-        end else begin
-            // When stalled, insert bubble (prevent re-execution in EX)
-            ex_valid_ff         <= 1'b0;
-            fence_i_ff          <= 1'b0;
         end
+        // else: DIV stall (stall_rf=1, bubble_rf=0): retain ex_valid_ff
     end
 
     // ── Output assignments ──

@@ -17,6 +17,7 @@ import ydrasil_pkg::*;
     output wire                         stall_if_o,
     output wire                         stall_id_o,
     output wire                         stall_rf_o,
+    output wire                         bubble_rf_o,
     output wire                         stall_pc_o,
 
     // flush
@@ -43,10 +44,13 @@ import ydrasil_pkg::*;
     assign flush_rf_o = branch_jump_o;
     assign flush_ex_o = branch_jump_o;
 
-    // 6-stage stall chain: backpressure propagates EX -> RF -> ID -> IF
-    assign stall_rf_o = decode_bubble_stall;
-    assign stall_id_o = decode_bubble_stall;
-    assign stall_if_o = decode_bubble_stall;
-    assign stall_pc_o = decode_bubble_stall;
+    // 6-stage stall chain:
+    // - bubble: scoreboard/LSU/CLINT/WB → insert pipeline bubble (clear valid)
+    // - stall:  DIV in progress → hold pipeline (retain valid)
+    assign bubble_rf_o = decode_bubble_stall;
+    assign stall_rf_o = decode_bubble_stall | ex_mul_stall_i;
+    assign stall_id_o = decode_bubble_stall | ex_mul_stall_i;
+    assign stall_if_o = decode_bubble_stall | ex_mul_stall_i;
+    assign stall_pc_o = decode_bubble_stall | ex_mul_stall_i;
 
 endmodule

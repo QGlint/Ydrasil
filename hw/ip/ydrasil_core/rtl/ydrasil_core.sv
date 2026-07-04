@@ -58,6 +58,7 @@ import ydrasil_pkg::*;
 	wire                        flush_rf;
 	wire                        flush_ex;
 	wire                        bubble_id;
+	wire                        bubble_rf;
 	wire                        branch_jump;
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] branch_target;
 
@@ -526,6 +527,7 @@ import ydrasil_pkg::*;
 		.clk                (clk),
 		.rst_n              (rst_n),
 		.stall_rf_i         (stall_rf),
+		.bubble_rf_i        (bubble_rf),
 		.flush_rf_i         (flush_rf),
 		.id_rf_valid_i          (id_rf_valid),
 		.id_rf_pc_i             (id_rf_pc),
@@ -728,6 +730,7 @@ import ydrasil_pkg::*;
 		.stall_if_o        (stall_if),
 		.stall_id_o        (stall_id),
 		.stall_rf_o        (stall_rf),
+		.bubble_rf_o       (bubble_rf),
 		.stall_pc_o        (stall_pc),
 		.flush_if_o        (flush_if),
 		.flush_id_o        (flush_id),
