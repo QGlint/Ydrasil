@@ -879,6 +879,16 @@ end
                 u_dut.u_ydrasil_id_stage.perf_uopq_block_older_ctrl_mem,
                 u_dut.u_ydrasil_id_stage.perf_uopq_block_raw_older,
                 u_dut.u_ydrasil_id_stage.perf_uopq_block_waw_older);
+            $display("PERF_UOPQ_ISSUE: UOPQ_P1_FIRE_FROM_1=%-d UOPQ_P1_FIRE_FROM_2=%-d UOPQ_P1_FIRE_FROM_3=%-d UOPQ_P1_FIRE_WHEN_P0_READY=%-d UOPQ_P1_FIRE_WHEN_P0_BLOCKED=%-d UOPQ_P1_BLOCK_OLDER_CTRL_MEM=%-d UOPQ_P1_BLOCK_RAW_OLDER=%-d UOPQ_P1_BLOCK_WAW_OLDER=%-d UOPQ_P1_BLOCK_COMMIT_ORDER=%-d",
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_fire_from_1,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_fire_from_2,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_fire_from_3,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_fire_when_p0_ready,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_fire_when_p0_blocked,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_older_ctrl_mem,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_raw_older,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_waw_older,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_commit_order);
             $display("PERF_DUAL_ISSUE: DI_PIPE0_FIRE=%-d DI_PIPE1_FIRE=%-d DI_PAIR_FIRE=%-d DI_PAIR_SIMPLE_ALU=%-d DI_PIPE1_KILLED_FLUSH=%-d DI_PIPE1_BLOCK_STALL_RECHECK=%-d DI_PIPE1_BLOCK_RESBUF_FULL=%-d DI_PIPE1_BLOCK_ALU_FIFO_FULL=%-d DI_PIPE1_BLOCK_PENDING_RECHECK=%-d DI_PIPE1_BLOCK_TIMING_GUARD=%-d",
                 u_dut.u_ydrasil_id_stage.perf_di_pipe0_fire,
                 u_dut.u_ydrasil_id_stage.perf_di_pipe1_fire,
