@@ -189,6 +189,9 @@ end
     reg [31:0] p4b_rs2_pending_hit_count;
     reg [31:0] p4b_id_wait_rs1_hit_count;
     reg [31:0] p4b_id_wait_rs2_hit_count;
+    reg [31:0] p4c_branch_ready_next_bypass_count;
+    reg [31:0] p4c_branch_rs1_ready_next_bypass_count;
+    reg [31:0] p4c_branch_rs2_ready_next_bypass_count;
 
 	ydrasil_core u_dut (
 		.clk      (clk),
@@ -347,6 +350,9 @@ end
             p4b_rs2_pending_hit_count <= 32'b0;
             p4b_id_wait_rs1_hit_count <= 32'b0;
             p4b_id_wait_rs2_hit_count <= 32'b0;
+            p4c_branch_ready_next_bypass_count <= 32'b0;
+            p4c_branch_rs1_ready_next_bypass_count <= 32'b0;
+            p4c_branch_rs2_ready_next_bypass_count <= 32'b0;
         end else begin
             last_pc     <= pc;
             if (bp_branch_valid) begin
@@ -474,6 +480,13 @@ end
                 ((u_dut.u_ydrasil_id_stage.issue_wait_rs2_ff &&
                   !u_dut.wb_hzd_valid_q &&
                   u_dut.u_ydrasil_id_stage.rs2_wb_fwd) ? 32'd1 : 32'd0);
+            p4c_branch_ready_next_bypass_count <= p4c_branch_ready_next_bypass_count +
+                ((u_dut.rs1_branch_ready_next_bypass |
+                  u_dut.rs2_branch_ready_next_bypass) ? 32'd1 : 32'd0);
+            p4c_branch_rs1_ready_next_bypass_count <= p4c_branch_rs1_ready_next_bypass_count +
+                (u_dut.rs1_branch_ready_next_bypass ? 32'd1 : 32'd0);
+            p4c_branch_rs2_ready_next_bypass_count <= p4c_branch_rs2_ready_next_bypass_count +
+                (u_dut.rs2_branch_ready_next_bypass ? 32'd1 : 32'd0);
             sb_raw_load_wait_count <= sb_raw_load_wait_count +
                 ((u_dut.issue_load_producer & u_dut.issue_src_hzd) ? 32'd1 : 32'd0);
             sb_raw_mul_wait_count <= sb_raw_mul_wait_count +
@@ -805,6 +818,10 @@ end
                 p4b_rs2_pending_hit_count,
                 p4b_id_wait_rs1_hit_count,
                 p4b_id_wait_rs2_hit_count);
+            $display("PERF_PHASE4C_BRANCH_BYPASS: READY_NEXT=%-d RS1_READY_NEXT=%-d RS2_READY_NEXT=%-d",
+                p4c_branch_ready_next_bypass_count,
+                p4c_branch_rs1_ready_next_bypass_count,
+                p4c_branch_rs2_ready_next_bypass_count);
             $display("PERF_FRONTEND: PRED_TAKEN_REDIRECT=%-d CORRECT_TAKEN_TOTAL=%-d CORRECT_TAKEN_L0=%-d CORRECT_TAKEN_SYNC=%-d CORRECT_TAKEN_SYNC_BUBBLE=%-d CORRECT_TAKEN_ZERO_BUBBLE=%-d WRONG_DIR_FLUSH=%-d BTB_MISS_TAKEN=%-d FETCH_Q_FULL=%-d FETCH_Q_EMPTY=%-d FETCH_Q_PUSH=%-d FETCH_Q_POP=%-d DECODE_BLOCKED_BY_UOPQ=%-d SYNC_BP_TAKEN_BUBBLE=%-d L0_HIT=%-d L0_TAKEN=%-d",
                 fe_pred_taken_redirect_count,
                 fe_correct_taken_redirect_count,

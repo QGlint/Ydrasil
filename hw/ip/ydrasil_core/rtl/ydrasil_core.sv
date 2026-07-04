@@ -490,14 +490,41 @@ import ydrasil_pkg::*;
 		!rs1_pending_stall & !rd_waw_stall &
 		!rs1_issue_hzd & !rd_issue_hzd &
 		!pipe1_issue_rs1_hzd & !pipe1_issue_rs2_hzd & !pipe1_issue_rd_hzd;
+	wire id_ctrl_branch_consumer =
+		id_ctrl_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP];
+	wire rs1_branch_ready_next_bypass =
+		rs1_issue_alu_ready_next_raw & issue_alu_stable_slot_hit &
+		id_ctrl_branch_consumer &
+		!mul_inflight &
+		!rs2_pending_stall & !rd_waw_stall &
+		!rs2_issue_hzd & !rd_issue_hzd &
+		!pipe1_issue_rs1_hzd & !pipe1_issue_rs2_hzd & !pipe1_issue_rd_hzd;
+	wire rs2_branch_ready_next_bypass =
+		rs2_issue_alu_ready_next_raw & issue_alu_stable_slot_hit &
+		id_ctrl_branch_consumer &
+		!mul_inflight &
+		!rs1_pending_stall & !rd_waw_stall &
+		!rs1_issue_hzd & !rd_issue_hzd &
+		!pipe1_issue_rs1_hzd & !pipe1_issue_rs2_hzd & !pipe1_issue_rd_hzd;
 `else
 	wire rs1_issue_alu_stable_bypass = 1'b0;
 	wire rs2_issue_alu_stable_bypass = 1'b0;
+	wire rs1_branch_ready_next_bypass = 1'b0;
+	wire rs2_branch_ready_next_bypass = 1'b0;
 `endif
+`ifndef SYNTHESIS
+	wire rs1_issue_alu_stable_issue_bypass =
+		rs1_issue_alu_stable_bypass | rs1_branch_ready_next_bypass;
+	wire rs2_issue_alu_stable_issue_bypass =
+		rs2_issue_alu_stable_bypass | rs2_branch_ready_next_bypass;
+`else
 	wire rs1_issue_alu_stable_issue_bypass = 1'b0;
 	wire rs2_issue_alu_stable_issue_bypass = 1'b0;
-	wire rs1_issue_alu_ready_next = rs1_issue_alu_ready_next_raw & !rs1_issue_alu_stable_issue_bypass;
-	wire rs2_issue_alu_ready_next = rs2_issue_alu_ready_next_raw & !rs2_issue_alu_stable_issue_bypass;
+`endif
+	wire rs1_issue_alu_ready_next =
+		rs1_issue_alu_ready_next_raw & !rs1_issue_alu_stable_issue_bypass;
+	wire rs2_issue_alu_ready_next =
+		rs2_issue_alu_ready_next_raw & !rs2_issue_alu_stable_issue_bypass;
 
 	assign scoreboard_stall =
 		rs1_issue_hzd | rs2_issue_hzd | rd_issue_hzd |
