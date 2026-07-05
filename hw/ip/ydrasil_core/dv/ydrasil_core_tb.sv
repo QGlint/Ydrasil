@@ -275,6 +275,12 @@ end
     reg [31:0] sb_branch_order_pipe1_wb_count;
     reg [31:0] sb_branch_order_head_commit_count;
     reg [31:0] sb_branch_order_head_rf_block_count;
+    reg [31:0] sb_branch_head_rf_block_lsu_count;
+    reg [31:0] sb_branch_head_rf_block_alu_fifo_count;
+    reg [31:0] sb_branch_head_rf_block_alu_current_count;
+    reg [31:0] sb_branch_head_rf_block_mul_fifo_count;
+    reg [31:0] sb_branch_head_rf_block_mul_current_count;
+    reg [31:0] sb_branch_head_rf_block_other_count;
     reg [31:0] sb_branch_order_rob_nonhead_count;
     reg [31:0] sb_branch_wait_rs1_pending_count;
     reg [31:0] sb_branch_wait_rs2_pending_count;
@@ -510,6 +516,12 @@ end
             sb_branch_order_pipe1_wb_count <= 32'b0;
             sb_branch_order_head_commit_count <= 32'b0;
             sb_branch_order_head_rf_block_count <= 32'b0;
+            sb_branch_head_rf_block_lsu_count <= 32'b0;
+            sb_branch_head_rf_block_alu_fifo_count <= 32'b0;
+            sb_branch_head_rf_block_alu_current_count <= 32'b0;
+            sb_branch_head_rf_block_mul_fifo_count <= 32'b0;
+            sb_branch_head_rf_block_mul_current_count <= 32'b0;
+            sb_branch_head_rf_block_other_count <= 32'b0;
             sb_branch_order_rob_nonhead_count <= 32'b0;
             sb_branch_wait_rs1_pending_count <= 32'b0;
             sb_branch_wait_rs2_pending_count <= 32'b0;
@@ -812,6 +824,52 @@ end
                   u_dut.rn_real_ctrl_older_rob_block &&
                   u_dut.rn_real_rob_pipe1_q[u_dut.rn_real_rob_head_q] &&
                   u_dut.rn_real_commit0_ready && !u_dut.rn_real_commit0_valid) ? 32'd1 : 32'd0);
+            sb_branch_head_rf_block_lsu_count <= sb_branch_head_rf_block_lsu_count +
+                ((u_dut.scoreboard_stall &&
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.rn_real_ctrl_older_rob_block &&
+                  u_dut.rn_real_rob_pipe1_q[u_dut.rn_real_rob_head_q] &&
+                  u_dut.rn_real_commit0_ready && !u_dut.rn_real_commit0_valid &&
+                  u_dut.u_ydrasil_wb_stage.sel_lsu) ? 32'd1 : 32'd0);
+            sb_branch_head_rf_block_alu_fifo_count <= sb_branch_head_rf_block_alu_fifo_count +
+                ((u_dut.scoreboard_stall &&
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.rn_real_ctrl_older_rob_block &&
+                  u_dut.rn_real_rob_pipe1_q[u_dut.rn_real_rob_head_q] &&
+                  u_dut.rn_real_commit0_ready && !u_dut.rn_real_commit0_valid &&
+                  u_dut.u_ydrasil_wb_stage.sel_alu_fifo) ? 32'd1 : 32'd0);
+            sb_branch_head_rf_block_alu_current_count <= sb_branch_head_rf_block_alu_current_count +
+                ((u_dut.scoreboard_stall &&
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.rn_real_ctrl_older_rob_block &&
+                  u_dut.rn_real_rob_pipe1_q[u_dut.rn_real_rob_head_q] &&
+                  u_dut.rn_real_commit0_ready && !u_dut.rn_real_commit0_valid &&
+                  u_dut.u_ydrasil_wb_stage.sel_alu_current) ? 32'd1 : 32'd0);
+            sb_branch_head_rf_block_mul_fifo_count <= sb_branch_head_rf_block_mul_fifo_count +
+                ((u_dut.scoreboard_stall &&
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.rn_real_ctrl_older_rob_block &&
+                  u_dut.rn_real_rob_pipe1_q[u_dut.rn_real_rob_head_q] &&
+                  u_dut.rn_real_commit0_ready && !u_dut.rn_real_commit0_valid &&
+                  u_dut.u_ydrasil_wb_stage.sel_mul_fifo) ? 32'd1 : 32'd0);
+            sb_branch_head_rf_block_mul_current_count <= sb_branch_head_rf_block_mul_current_count +
+                ((u_dut.scoreboard_stall &&
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.rn_real_ctrl_older_rob_block &&
+                  u_dut.rn_real_rob_pipe1_q[u_dut.rn_real_rob_head_q] &&
+                  u_dut.rn_real_commit0_ready && !u_dut.rn_real_commit0_valid &&
+                  u_dut.u_ydrasil_wb_stage.sel_mul_current) ? 32'd1 : 32'd0);
+            sb_branch_head_rf_block_other_count <= sb_branch_head_rf_block_other_count +
+                ((u_dut.scoreboard_stall &&
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.rn_real_ctrl_older_rob_block &&
+                  u_dut.rn_real_rob_pipe1_q[u_dut.rn_real_rob_head_q] &&
+                  u_dut.rn_real_commit0_ready && !u_dut.rn_real_commit0_valid &&
+                  !u_dut.u_ydrasil_wb_stage.sel_lsu &&
+                  !u_dut.u_ydrasil_wb_stage.sel_alu_fifo &&
+                  !u_dut.u_ydrasil_wb_stage.sel_alu_current &&
+                  !u_dut.u_ydrasil_wb_stage.sel_mul_fifo &&
+                  !u_dut.u_ydrasil_wb_stage.sel_mul_current) ? 32'd1 : 32'd0);
             sb_branch_order_rob_nonhead_count <= sb_branch_order_rob_nonhead_count +
                 ((u_dut.scoreboard_stall &&
                   u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
@@ -1362,6 +1420,13 @@ end
                 sb_branch_order_head_commit_count,
                 sb_branch_order_head_rf_block_count,
                 sb_branch_order_rob_nonhead_count);
+            $display("PERF_BRANCH_HEAD_RF_BLOCK_SPLIT: LSU=%-d ALU_FIFO=%-d ALU_CURRENT=%-d MUL_FIFO=%-d MUL_CURRENT=%-d OTHER=%-d",
+                sb_branch_head_rf_block_lsu_count,
+                sb_branch_head_rf_block_alu_fifo_count,
+                sb_branch_head_rf_block_alu_current_count,
+                sb_branch_head_rf_block_mul_fifo_count,
+                sb_branch_head_rf_block_mul_current_count,
+                sb_branch_head_rf_block_other_count);
             $display("PERF_PHASE4A_ALU_STABLE: RAW_READY_NEXT=%-d STABLE_SLOT_HIT=%-d RS1_BYPASS=%-d RS2_BYPASS=%-d",
                 p4a_raw_ready_next_count,
                 p4a_alu_stable_slot_hit_count,
