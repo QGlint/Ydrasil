@@ -754,6 +754,9 @@ import ydrasil_pkg::*;
     reg [31:0]                       perf_uopq_p1_block_p0_other;
     reg [31:0]                       perf_uopq_p1_block_p0_other_invalid;
     reg [31:0]                       perf_uopq_p1_block_p0_other_no_alu_mul;
+    reg [31:0]                       perf_uopq_p1_block_p0_invalid_issue_accept;
+    reg [31:0]                       perf_uopq_p1_block_p0_invalid_skid;
+    reg [31:0]                       perf_uopq_p1_block_p0_invalid_uopq2_safe;
     reg [31:0]                       perf_uopq_p1_block_younger_flush;
     reg [31:0]                       perf_uopq_p1_block_young_uopq2;
     reg [31:0]                       perf_uopq_p1_block_young_ifid;
@@ -2266,6 +2269,9 @@ import ydrasil_pkg::*;
             perf_uopq_p1_block_p0_other <= '0;
             perf_uopq_p1_block_p0_other_invalid <= '0;
             perf_uopq_p1_block_p0_other_no_alu_mul <= '0;
+            perf_uopq_p1_block_p0_invalid_issue_accept <= '0;
+            perf_uopq_p1_block_p0_invalid_skid <= '0;
+            perf_uopq_p1_block_p0_invalid_uopq2_safe <= '0;
             perf_uopq_p1_block_younger_flush <= '0;
             perf_uopq_p1_block_young_uopq2 <= '0;
             perf_uopq_p1_block_young_ifid <= '0;
@@ -3132,6 +3138,21 @@ import ydrasil_pkg::*;
                   !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS] &&
                   !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_BITMANIP] &&
                   !uopq0_fence_i) ? 32'd1 : 32'd0);
+            perf_uopq_p1_block_p0_invalid_issue_accept <= perf_uopq_p1_block_p0_invalid_issue_accept +
+                (((pipe1_uopq1_supported | pipe1_uopq2_supported) &&
+                  !pipe1_dual_pipe0_safe &&
+                  !uopq0_valid &&
+                  issue_accept) ? 32'd1 : 32'd0);
+            perf_uopq_p1_block_p0_invalid_skid <= perf_uopq_p1_block_p0_invalid_skid +
+                (((pipe1_uopq1_supported | pipe1_uopq2_supported) &&
+                  !pipe1_dual_pipe0_safe &&
+                  !uopq0_valid &&
+                  skid_valid_ff) ? 32'd1 : 32'd0);
+            perf_uopq_p1_block_p0_invalid_uopq2_safe <= perf_uopq_p1_block_p0_invalid_uopq2_safe +
+                (((pipe1_uopq1_supported | pipe1_uopq2_supported) &&
+                  !pipe1_dual_pipe0_safe &&
+                  !uopq0_valid &&
+                  pipe1_uopq2_safe) ? 32'd1 : 32'd0);
             perf_uopq_p1_block_younger_flush <= perf_uopq_p1_block_younger_flush +
                 (((pipe1_p0_ready_context | pipe1_p0_blocked_context) &&
                   ready_issue_allow_i && !flush_id_i &&

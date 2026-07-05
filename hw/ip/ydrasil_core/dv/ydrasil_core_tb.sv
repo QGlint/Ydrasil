@@ -1192,6 +1192,10 @@ end
             $display("PERF_UOPQ_P0_OTHER_SPLIT: INVALID=%-d NO_ALU_MUL=%-d",
                 u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_p0_other_invalid,
                 u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_p0_other_no_alu_mul);
+            $display("PERF_UOPQ_P0_INVALID_SPLIT: ISSUE_ACCEPT=%-d SKID=%-d UOPQ2_SAFE=%-d",
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_p0_invalid_issue_accept,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_p0_invalid_skid,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_p0_invalid_uopq2_safe);
             $display("PERF_UOPQ_YOUNGER_FLUSH_SPLIT: TOTAL=%-d UOPQ2=%-d IFID=%-d",
                 u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_younger_flush,
                 u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_young_uopq2,
