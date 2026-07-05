@@ -265,6 +265,10 @@ import ydrasil_pkg::*;
 	reg [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_q;
 	reg [2:0]                       gpr_pending_count_q [0:ydrasil_pkg::REGS_NUM-1];
 	reg [2:0]                       gpr_pending_count_n [0:ydrasil_pkg::REGS_NUM-1];
+	reg                             ex_mul_stall_q;
+	wire                            id_ex_is_div;
+	wire                            id_ex_div_first_cycle;
+	wire                            id_ex_rd_issue_raw;
 	wire                            id_ex_rd_issue;
 	localparam int RN_REAL_PHYS_REGS = 64;
 	localparam int RN_REAL_ROB_DEPTH = 64;
@@ -884,9 +888,17 @@ import ydrasil_pkg::*;
 `endif
 
 	assign ex_accept_valid = id_ex_valid & !flush_ex;
-	assign id_ex_rd_issue =
+	assign id_ex_is_div =
+		operator_type[ydrasil_pkg::OPERATOR_TYPE_MUL] &
+		(operator[ydrasil_pkg::OP_MUL_DIV]  |
+		 operator[ydrasil_pkg::OP_MUL_DIVU] |
+		 operator[ydrasil_pkg::OP_MUL_REM]  |
+		 operator[ydrasil_pkg::OP_MUL_REMU]);
+	assign id_ex_div_first_cycle = id_ex_is_div & !ex_mul_stall_q;
+	assign id_ex_rd_issue_raw =
 		ex_accept_valid & (id_rf_waddr_rd != '0) & !interrupt &
 		(id_alu_rf_wen_rd | operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD]);
+	assign id_ex_rd_issue = id_ex_rd_issue_raw & (!id_ex_is_div | id_ex_div_first_cycle);
 	assign rn_real_live_rs1_psrc = (if_id_instr[19:15] == '0) ? '0 : rn_real_rat_q[if_id_instr[19:15]];
 	assign rn_real_live_rs2_psrc = (if_id_instr[24:20] == '0) ? '0 : rn_real_rat_q[if_id_instr[24:20]];
 	assign rn_real_rs1_psrc = id_ctrl_rs1_psrc;
@@ -1388,6 +1400,7 @@ import ydrasil_pkg::*;
 	always_ff @(posedge clk or negedge rst_n) begin
 		integer gpr_i;
 		if (!rst_n) begin
+			ex_mul_stall_q <= 1'b0;
 			gpr_pending_q <= '0;
 			for (gpr_i = 0; gpr_i < ydrasil_pkg::REGS_NUM; gpr_i = gpr_i + 1) begin
 				gpr_pending_count_q[gpr_i] <= 3'd0;
@@ -1399,6 +1412,7 @@ import ydrasil_pkg::*;
 			mul_inflight_q <= '0;
 `endif
 		end else if (interrupt) begin
+			ex_mul_stall_q <= 1'b0;
 			gpr_pending_q <= '0;
 			for (gpr_i = 0; gpr_i < ydrasil_pkg::REGS_NUM; gpr_i = gpr_i + 1) begin
 				gpr_pending_count_q[gpr_i] <= 3'd0;
@@ -1410,6 +1424,7 @@ import ydrasil_pkg::*;
 			mul_inflight_q <= '0;
 `endif
 		end else begin
+			ex_mul_stall_q <= ex_mul_stall;
 			gpr_pending_q <= gpr_pending_for_hazard;
 			for (gpr_i = 0; gpr_i < ydrasil_pkg::REGS_NUM; gpr_i = gpr_i + 1) begin
 				gpr_pending_count_q[gpr_i] <= gpr_pending_count_n[gpr_i];
@@ -1424,6 +1439,14 @@ import ydrasil_pkg::*;
 `endif
 		end
 	end
+
+`ifndef SYNTHESIS
+	always_ff @(posedge clk) begin
+		if (rst_n && id_ex_is_div && ex_mul_stall_q && id_ex_rd_issue) begin
+			$fatal(1, "div/rem rd issue repeated while ID/EX is held");
+		end
+	end
+`endif
 
 `ifndef SYNTHESIS
 	always_ff @(posedge clk or negedge rst_n) begin
