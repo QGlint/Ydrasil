@@ -408,6 +408,24 @@ import ydrasil_pkg::*;
 		end
 	endfunction
 
+	function automatic rn_real_rob_has_pipe1;
+		integer j;
+		reg found;
+		reg [RN_REAL_ROB_PTR_BITS-1:0] idx;
+		begin
+			found = 1'b0;
+			rn_real_rob_has_pipe1 = 1'b0;
+			for (j = 0; j < RN_REAL_ROB_DEPTH; j = j + 1) begin
+				idx = rn_real_rob_head_q + RN_REAL_ROB_PTR_BITS'(j);
+				if (!found && rn_real_rob_valid_q[idx] &&
+				    rn_real_rob_pipe1_q[idx]) begin
+					rn_real_rob_has_pipe1 = 1'b1;
+					found = 1'b1;
+				end
+			end
+		end
+	endfunction
+
 	function automatic [RN_REAL_PHYS_REGS-1:0] rn_real_free_from_amt;
 		integer f;
 		begin
@@ -1042,6 +1060,14 @@ import ydrasil_pkg::*;
 		rn_real_rob_valid_q[rn_real_rob_head_q] &
 		id_ctrl_rd_wen & (id_ctrl_pdst != '0) &
 		(rn_real_rob_new_pdst_q[rn_real_rob_head_q] == id_ctrl_pdst);
+	wire rn_real_pipe1_older_uncommitted =
+		rn_real_rob_has_pipe1() |
+		(rn_real_pipe1_pdst_found & rn_real_pipe1_pdst_valid) |
+		(pipe1_issue_valid & (pipe1_rn_pdst_issue != '0));
+	wire rn_real_ctrl_older_rob_block =
+		id_ctrl_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] &
+		rn_real_pipe1_older_uncommitted &
+		!rn_real_ctrl_at_head;
 		assign rn_real_commit0_valid =
 			rn_real_commit0_ready &
 			(!rn_real_rob_pipe1_q[rn_real_rob_head_q] | pipe1_commit_rf_wen);
@@ -1049,10 +1075,7 @@ import ydrasil_pkg::*;
 			(id_ctrl_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] &
 			 ((id_ctrl_rs1_ren & !rn_real_ctrl_rs1_ready) |
 			  (id_ctrl_rs2_ren & !rn_real_ctrl_rs2_ready))) |
-			(id_ctrl_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] &
-			 id_ctrl_rd_wen & (id_ctrl_rd_addr != '0) &
-			 !id_ctrl_rs2_ren & (rn_real_rob_occ_q != '0) &
-			 !rn_real_ctrl_at_head);
+			rn_real_ctrl_older_rob_block;
 
 		always_ff @(posedge clk or negedge rst_n) begin
 			integer rn_i;

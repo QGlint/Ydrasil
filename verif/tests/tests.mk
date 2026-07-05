@@ -125,9 +125,15 @@ rv_sim_%:
 		match_status=SKIP; \
 	fi; \
 	rvtest_pass_count=$$(grep -c "^RISCV_TEST_PASS: tohost=0x00000001$$" $$hw_log 2>/dev/null || true); \
+	rvtest_strict_pass_count=$$(grep -Ec "^RISCV_TEST_TOHOST_WRITE: addr=0x[0-9a-fA-F]{8} data=0x00000001 mask=0xf pc=0x[0-9a-fA-F]{8} write_tohost_store_pc=0x[0-9a-fA-F]{8} last_store_pc=0x[0-9a-fA-F]{8} from_write_tohost=1$$" $$hw_log 2>/dev/null || true); \
 	rvtest_fail_count=$$(grep -c "^RISCV_TEST_FAIL:" $$hw_log 2>/dev/null || true); \
-	if [ "$$match_status" = "MATCH" ] && [ "$$rvtest_pass_count" -eq 1 ] && [ "$$rvtest_fail_count" -eq 0 ]; then \
+	rvtest_timeout_count=$$(grep -c "^\[TB\] timeout reached" $$hw_log 2>/dev/null || true); \
+	rvtest_fatal_count=$$(grep -Ec "(^%Error|\\$$fatal|Fatal|Assertion failed)" $$hw_log 2>/dev/null || true); \
+	if [ "$$rvtest_pass_count" -eq 1 ] && [ "$$rvtest_strict_pass_count" -eq 1 ] && [ "$$rvtest_fail_count" -eq 0 ] && [ "$$rvtest_timeout_count" -eq 0 ] && [ "$$rvtest_fatal_count" -eq 0 ]; then \
 		pass_status=PASS; \
+		if [ "$$match_status" = "MISMATCH" ]; then \
+			match_status=RVTEST; \
+		fi; \
 	else \
 		pass_status=FAIL; \
 	fi; \
@@ -147,6 +153,7 @@ rv_report_%:
 			-e 's/\(\[Cycles:[^]]*\]\)/\\033[34m\1\\033[0m/' \
 			-e 's/\[MISMATCH\]/\\033[31m[MISMATCH]\\033[0m/g' \
 			-e 's/\[MATCH\]/\\033[32m[MATCH]\\033[0m/g' \
+			-e 's/\[RVTEST\]/\\033[32m[RVTEST]\\033[0m/g' \
 			-e 's/\[SKIP\]/\\033[34m[SKIP]\\033[0m/g' \
 			-e 's/\[FAIL\]/\\033[31m[FAIL]\\033[0m/g' \
 			-e 's/\[PASS\]/\\033[32m[PASS]\\033[0m/g'); \
