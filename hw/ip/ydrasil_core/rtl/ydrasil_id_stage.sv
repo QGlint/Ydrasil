@@ -1370,7 +1370,7 @@ import ydrasil_pkg::*;
         id_advance && issue_valid_ff && issue_wait_block &&
         skid_valid_ff && !uopq2_buf_valid_ff &&
         !issue_slot1_bypass_fire && !pair1_fire &&
-        uopq2_buf_capture_operands_ready;
+        uopq2_buf_capture_supported;
     assign skid_drain = issue_accept & skid_valid_ff;
     assign pipe1_refill_skid_from_if =
         (PIPE1_REAL_MODE >= 2) && pair1_fire &&
