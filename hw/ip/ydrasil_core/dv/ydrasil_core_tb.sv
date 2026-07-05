@@ -281,6 +281,11 @@ end
     reg [31:0] sb_branch_ctrl_src_rs2_no_gpr_pending_count;
     reg [31:0] sb_branch_ctrl_src_rs1_uncommitted_count;
     reg [31:0] sb_branch_ctrl_src_rs2_uncommitted_count;
+    reg [31:0] sb_branch_ctrl_src_actual_count;
+    reg [31:0] sb_branch_ctrl_src_rs1_actual_count;
+    reg [31:0] sb_branch_ctrl_src_rs2_actual_count;
+    reg [31:0] sb_branch_ctrl_src_rs1_legacy_fwd_count;
+    reg [31:0] sb_branch_ctrl_src_rs2_legacy_fwd_count;
     reg [31:0] sb_store_addr_raw_class_count;
     reg [31:0] sb_store_data_raw_class_count;
     reg [31:0] sb_can_bypass_with_ready_issue_count;
@@ -504,6 +509,11 @@ end
             sb_branch_ctrl_src_rs2_no_gpr_pending_count <= 32'b0;
             sb_branch_ctrl_src_rs1_uncommitted_count <= 32'b0;
             sb_branch_ctrl_src_rs2_uncommitted_count <= 32'b0;
+            sb_branch_ctrl_src_actual_count <= 32'b0;
+            sb_branch_ctrl_src_rs1_actual_count <= 32'b0;
+            sb_branch_ctrl_src_rs2_actual_count <= 32'b0;
+            sb_branch_ctrl_src_rs1_legacy_fwd_count <= 32'b0;
+            sb_branch_ctrl_src_rs2_legacy_fwd_count <= 32'b0;
             sb_store_addr_raw_class_count <= 32'b0;
             sb_store_data_raw_class_count <= 32'b0;
             sb_can_bypass_with_ready_issue_count <= 32'b0;
@@ -802,6 +812,28 @@ end
                   u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
                   u_dut.id_ctrl_rs2_ren && !u_dut.rn_real_ctrl_rs2_ready &&
                   u_dut.rn_real_rs2_uncommitted) ? 32'd1 : 32'd0);
+            sb_branch_ctrl_src_actual_count <= sb_branch_ctrl_src_actual_count +
+                ((u_dut.scoreboard_stall &&
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  (u_dut.rn_real_ctrl_rs1_block | u_dut.rn_real_ctrl_rs2_block)) ? 32'd1 : 32'd0);
+            sb_branch_ctrl_src_rs1_actual_count <= sb_branch_ctrl_src_rs1_actual_count +
+                ((u_dut.scoreboard_stall &&
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.rn_real_ctrl_rs1_block) ? 32'd1 : 32'd0);
+            sb_branch_ctrl_src_rs2_actual_count <= sb_branch_ctrl_src_rs2_actual_count +
+                ((u_dut.scoreboard_stall &&
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.rn_real_ctrl_rs2_block) ? 32'd1 : 32'd0);
+            sb_branch_ctrl_src_rs1_legacy_fwd_count <= sb_branch_ctrl_src_rs1_legacy_fwd_count +
+                ((u_dut.scoreboard_stall &&
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.id_ctrl_rs1_ren && !u_dut.rn_real_ctrl_rs1_ready &&
+                  u_dut.rn_real_ctrl_rs1_legacy_fwd) ? 32'd1 : 32'd0);
+            sb_branch_ctrl_src_rs2_legacy_fwd_count <= sb_branch_ctrl_src_rs2_legacy_fwd_count +
+                ((u_dut.scoreboard_stall &&
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.id_ctrl_rs2_ren && !u_dut.rn_real_ctrl_rs2_ready &&
+                  u_dut.rn_real_ctrl_rs2_legacy_fwd) ? 32'd1 : 32'd0);
             sb_store_addr_raw_class_count <= sb_store_addr_raw_class_count +
                 ((u_dut.scoreboard_stall &&
                   u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
@@ -1245,6 +1277,12 @@ end
                 sb_branch_ctrl_src_rs2_no_gpr_pending_count,
                 sb_branch_ctrl_src_rs1_uncommitted_count,
                 sb_branch_ctrl_src_rs2_uncommitted_count);
+            $display("PERF_BRANCH_SRC_ACTUAL_SPLIT: ACTUAL=%-d RS1_ACTUAL=%-d RS2_ACTUAL=%-d RS1_LEGACY_FWD=%-d RS2_LEGACY_FWD=%-d",
+                sb_branch_ctrl_src_actual_count,
+                sb_branch_ctrl_src_rs1_actual_count,
+                sb_branch_ctrl_src_rs2_actual_count,
+                sb_branch_ctrl_src_rs1_legacy_fwd_count,
+                sb_branch_ctrl_src_rs2_legacy_fwd_count);
             $display("PERF_BRANCH_ORDER_SPLIT: TOTAL=%-d PIPE1_ISSUE=%-d PIPE1_WB=%-d HEAD_COMMIT=%-d HEAD_RF_BLOCK=%-d ROB_NONHEAD=%-d",
                 sb_branch_wait_ctrl_order_count,
                 sb_branch_order_pipe1_issue_count,
