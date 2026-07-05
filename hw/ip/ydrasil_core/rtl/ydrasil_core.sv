@@ -336,7 +336,6 @@ import ydrasil_pkg::*;
 	wire rn_real_pipe1_rs2_uncommitted;
 	wire pipe1_commit_rf_req;
 	wire pipe1_commit_rf_wen;
-	wire pipe1_commit_stole_alu_wb;
 	wire rn_shadow_alloc1_valid;
 	wire rn_shadow_same_cycle_raw;
 	wire rn_shadow_same_cycle_waw;
@@ -1093,7 +1092,6 @@ import ydrasil_pkg::*;
 		rn_real_commit0_ready &
 		rn_real_rob_pipe1_q[rn_real_rob_head_q] &
 		(rn_real_rob_arch_rd_q[rn_real_rob_head_q] != '0);
-	assign pipe1_commit_stole_alu_wb = pipe1_commit_rf_wen & alu_rf_wen_rd;
 	wire rn_real_ctrl_at_head =
 		rn_real_rob_valid_q[rn_real_rob_head_q] &
 		id_ctrl_rd_wen & (id_ctrl_pdst != '0) &
@@ -1635,11 +1633,9 @@ import ydrasil_pkg::*;
 			for (gpr_i = 0; gpr_i < ydrasil_pkg::REGS_NUM; gpr_i = gpr_i + 1) begin
 				gpr_pending_count_q[gpr_i] <= gpr_pending_count_n[gpr_i];
 			end
-			wb_hzd_valid_q <=
-				pipe1_commit_stole_alu_wb ? (alu_rf_waddr_rd != '0) :
-				(rf_wen_rd & (rf_waddr_rd != '0));
-			wb_hzd_addr_q <= pipe1_commit_stole_alu_wb ? alu_rf_waddr_rd : rf_waddr_rd;
-			wb_hzd_data_q <= pipe1_commit_stole_alu_wb ? alu_result : rf_wdata_rd;
+			wb_hzd_valid_q <= rf_wen_rd & (rf_waddr_rd != '0);
+			wb_hzd_addr_q <= rf_waddr_rd;
+			wb_hzd_data_q <= rf_wdata_rd;
 `ifndef SYNTHESIS
 			mul_inflight_q <= mul_inflight_q +
 				(ex_mul_issue ? 3'd1 : 3'd0) -
