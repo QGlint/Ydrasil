@@ -9,6 +9,9 @@ PPA_RVTEST_LOG ?= $(PPA_DIR)/test_all_summary.log
 PPA_COREMARK_LOG ?= $(PPA_DIR)/coremark_summary.log
 
 export PROJECT_ROOT BUILD_DIR WAVE_DIR LOG_DIR SIM_TOOL IP VERILATOR_MOD UVM USE_BENDER BENDER DIV_IMPL LSU_IMPL MEMS_IMPL YDRASIL_ENABLE_PIPE1_REAL PIPE1_REAL_MODE ARCH ABI RISCV_PREFIX CC OBJCOPY OBJDUMP GDB QEMU TRACE_TO_CSV TRACE_COMPARE
+NM ?= $(RISCV_PREFIX)-nm
+COMPARE_TOHOST_ADDR = $(shell if [ -n "$(COMPARE_ELF)" ] && [ -f "$(COMPARE_ELF)" ]; then $(NM) -n "$(COMPARE_ELF)" 2>/dev/null | awk '$$3 == "tohost" { print $$1; exit }'; fi)
+COMPARE_SIM_DEFINES_WITH_TOHOST = $(strip $(COMPARE_SIM_EXTRA_DEFINES) $(if $(COMPARE_TOHOST_ADDR),+tohost_addr=$(COMPARE_TOHOST_ADDR)))
 
 SYN_DIR ?= $(PROJECT_ROOT)/syn
 SYN_BUILD_DIR ?= $(BUILD_DIR)/syn
@@ -347,14 +350,14 @@ ifeq ($(SIM_COMPARE),none)
 		LOG_OUTPUT=0 \
 		ITCM_FILE=$(abspath $(COMPARE_ITCM)) \
 		DTCM_FILE=$(abspath $(COMPARE_DTCM)) \
-		SIM_EXTRA_DEFINES="$(COMPARE_SIM_EXTRA_DEFINES)" \
+		SIM_EXTRA_DEFINES="$(COMPARE_SIM_DEFINES_WITH_TOHOST)" \
 		> $(COMPARE_HW_LOG) 2>&1
 	@echo "[SIM] HW log: $(COMPARE_HW_LOG)"
 else ifeq ($(SIM_COMPARE),realtime)
 	@$(MAKE) get_spike
 	@echo "[SIM] Realtime compare: $(COMPARE_NAME)"
 	$(PYTHON) $(TRACE_COMPARE) --mode realtime \
-		--hw-cmd "$(MAKE) --no-print-directory -C hw/dv sim VERILATOR_TRACE=0 LOG_OUTPUT=0 ITCM_FILE=$(abspath $(COMPARE_ITCM)) DTCM_FILE=$(abspath $(COMPARE_DTCM)) SIM_EXTRA_DEFINES='$(COMPARE_SIM_EXTRA_DEFINES)'" \
+		--hw-cmd "$(MAKE) --no-print-directory -C hw/dv sim VERILATOR_TRACE=0 LOG_OUTPUT=0 ITCM_FILE=$(abspath $(COMPARE_ITCM)) DTCM_FILE=$(abspath $(COMPARE_DTCM)) SIM_EXTRA_DEFINES='$(COMPARE_SIM_DEFINES_WITH_TOHOST)'" \
 		--spike-cmd "env $(SPIKE_RUN_ENV) $(SPIKE) $(SPIKE_FLAGS) $(spike_stepout) $(spike_extension) $(abspath $(COMPARE_ELF))" \
 		--hw-log $(COMPARE_HW_LOG) \
 		--spike-log $(COMPARE_SPIKE_LOG) \
@@ -378,7 +381,7 @@ else ifeq ($(SIM_COMPARE),csv)
 		LOG_OUTPUT=0 \
 		ITCM_FILE=$(abspath $(COMPARE_ITCM)) \
 		DTCM_FILE=$(abspath $(COMPARE_DTCM)) \
-		SIM_EXTRA_DEFINES="$(COMPARE_SIM_EXTRA_DEFINES)" \
+		SIM_EXTRA_DEFINES="$(COMPARE_SIM_DEFINES_WITH_TOHOST)" \
 		> $(COMPARE_HW_LOG) 2>&1
 	@$(PYTHON) $(TRACE_TO_CSV) --log $(COMPARE_HW_LOG) --csv $(COMPARE_HW_CSV) --source ydrasil
 	@echo "[SIM] HW CSV: $(COMPARE_HW_CSV)"

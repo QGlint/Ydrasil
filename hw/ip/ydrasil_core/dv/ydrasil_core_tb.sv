@@ -20,6 +20,8 @@ string dtcmfile;
 
 longint time_out;
 longint sv_timeout;
+logic [31:0] riscv_tohost_addr;
+logic        riscv_tohost_addr_valid;
 initial begin
     if ($value$plusargs("itcmfile=%s", itcmfile)) begin
       $display("Loading memory from %s", itcmfile);
@@ -39,6 +41,14 @@ initial begin
         sv_timeout = time_out;
     end else begin
         sv_timeout = time_end;
+    end
+
+    if ($value$plusargs("tohost_addr=%h", riscv_tohost_addr)) begin
+        riscv_tohost_addr_valid = 1'b1;
+        $display("[TB] riscv-tests tohost_addr=0x%08h", riscv_tohost_addr);
+    end else begin
+        riscv_tohost_addr_valid = 1'b0;
+        riscv_tohost_addr = 32'b0;
     end
 end
 
@@ -79,9 +89,16 @@ end
     // 添加PC监控变量
     reg [31:0] pc_write_to_host_cnt;
     reg [31:0] pc_write_to_host_cycle;
+    reg [31:0] riscv_tohost_value;
     wire  [31:0] cycle_count = csr_cyclel;
     reg pc_write_to_host_flag;
     reg [31:0] last_pc;
+    wire riscv_tohost_write =
+        riscv_tohost_addr_valid &&
+        perip_wen &&
+        (&perip_mask) &&
+        (perip_addr == riscv_tohost_addr) &&
+        perip_wdata[0];
 
     // 添加指令计数和IPC计算相关变量
     wire [31:0] instruction_count = csr_instret; // Use CSR instret as the retired instruction count.
@@ -740,9 +757,58 @@ end
 
     assign cnt_rdata = cnt_ms;
 
+    // riscv-tests official pass/fail protocol writes an odd value to tohost:
+    // 1 means PASS, and any other odd value is an encoded FAIL code.
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            riscv_tohost_value <= 32'b0;
+        end else if (riscv_tohost_write) begin
+            riscv_tohost_value <= perip_wdata;
+            ipc = (instruction_count > 0 && cycle_count > 0) ? (instruction_count * 1.0) / cycle_count : 0.0;
+            bp_accuracy = (bp_branch_count > 0) ?
+                ((bp_branch_count - bp_mispredict_count) * 100.0) / bp_branch_count : 0.0;
+
+            $display("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
+            $display("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
+            $display("~~~~~~~~~~~~~ Test Result Summary ~~~~~~~~~~~~~~~~~~~~~~");
+            $display("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
+            $display("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
+            $write("~TESTCASE: ");
+            display_testcase_name();
+            $display("~");
+            $display("~~~~~~~~~~~~~~Total cycle_count value: %d ~~~~~~~~~~~~~", cycle_count);
+            $display("~~~~~The test ending reached at cycle: %d ~~~~~~~~~~~~~", cycle_count);
+            $display("~~~~~~~~~~Total instructions executed: %d ~~~~~~~~~~~~~", instruction_count);
+            $display("~~~~~~~~~~~~~~~~~~ IPC value: %.4f ~~~~~~~~~~~~~~~~~~", ipc);
+            $display("~~~~ Branch predictor: branches=%0d hits=%0d predicted_taken=%0d mispredicts=%0d accuracy=%.2f%% ~~~~",
+                bp_branch_count, bp_hit_count, bp_taken_count, bp_mispredict_count, bp_accuracy);
+            $display("~~~~ BP detail: actual_taken=%0d not_taken=%0d dir_mispredict=%0d target_mispredict=%0d btb_miss_taken=%0d correct_taken=%0d correct_not_taken=%0d ~~~~",
+                bp_actual_taken_count,
+                bp_actual_not_taken_count,
+                bp_dir_mispredict_count,
+                bp_target_mispredict_count,
+                bp_btb_miss_taken_count,
+                bp_correct_taken_count,
+                bp_correct_not_taken_count);
+            $display("~~~~~~~~~~~~~~~The final x3 Reg value: %d ~~~~~~~~~~~~~", x3);
+            $display("~~~~~~~~~~~~~~~RISCV tohost value: 0x%08h ~~~~~~~~~~~~~", perip_wdata);
+            $display("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
+
+            if (perip_wdata == 32'h1) begin
+                $display("~~~~~~~~~~~~~~~~~~~ TEST_PASS ~~~~~~~~~~~~~~~~~~~");
+            end else begin
+                $display("~~~~~~~~~~~~~~~~~~~ TEST_FAIL ~~~~~~~~~~~~~~~~~~~~");
+                $display("fail tohost = 0x%08h", perip_wdata);
+                for (r = 0; r < 32; r = r + 1) $display("x%2d = 0x%x", r, u_dut.u_ydrasil_registers.registers[r]);
+            end
+            print_perf_metrics();
+            $finish;
+        end
+    end
+
     // 对pc_write_to_host_cnt的变化进行监控
     always @(pc_write_to_host_cnt) begin
-        if (pc_write_to_host_cnt == 32'd8) begin
+        if (1'b0 && pc_write_to_host_cnt == 32'd8) begin
             ipc = (instruction_count > 0 && cycle_count > 0) ? (instruction_count * 1.0) / cycle_count : 0.0;
             bp_accuracy = (bp_branch_count > 0) ?
                 ((bp_branch_count - bp_mispredict_count) * 100.0) / bp_branch_count : 0.0;
