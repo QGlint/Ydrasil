@@ -1486,7 +1486,6 @@ import ydrasil_pkg::*;
           if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE] |
           if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_CSR] |
           if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS] |
-          if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_MUL] |
           id_fence_i));
     assign pipe1_sel_from1 = pipe1_uopq1_safe;
     assign pipe1_sel_from2 =
