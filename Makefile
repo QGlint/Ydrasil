@@ -211,6 +211,7 @@ COREMARK_SW_MAKE_ARGS = \
 COREMARK_RESULT_LOG ?= $(HW_TRACE_OUT_DIR)/coremark/hw.log
 COREMARK_SIM_COMPARE ?= none
 COREMARK_SCORE_HZ ?= 100000000
+COREMARK_SIM_TIMEOUT ?= 30000000
 
 coremark:
 	@$(MAKE) -C sw coremark $(COREMARK_SW_MAKE_ARGS)
@@ -227,7 +228,7 @@ coremark_sim: coremark comp
 		COMPARE_ITCM=$(BUILD_DIR)/app/coremark/coremark.itcm \
 		COMPARE_DTCM=$(BUILD_DIR)/app/coremark/coremark.dtcm \
 		SIM_COMPARE=$(COREMARK_SIM_COMPARE) \
-		COMPARE_SIM_EXTRA_DEFINES="+cpp_timeout=10000000 +sv_timeout=10000000"; \
+		COMPARE_SIM_EXTRA_DEFINES="+cpp_timeout=$(COREMARK_SIM_TIMEOUT) +sv_timeout=$(COREMARK_SIM_TIMEOUT)"; \
 	rc=$$?; \
 	$(MAKE) --no-print-directory coremark_result; \
 	result_rc=$$?; \
@@ -239,11 +240,14 @@ coremark_run: coremark_sim
 coremark_result:
 	@mkdir -p "$(PPA_DIR)"; \
 	rm -f "$(PPA_COREMARK_LOG)"; \
+	coremark_text="$(PPA_DIR)/coremark_text.log"; \
+	rm -f "$$coremark_text"; \
 	coremark_valid=0; \
 	if [ -f "$(COREMARK_RESULT_LOG)" ]; then \
 		echo "[COREMARK] Result from $(COREMARK_RESULT_LOG)" | tee -a "$(PPA_COREMARK_LOG)"; \
-		if grep -Eq '^(CoreMark Size|Total ticks|Total time \(secs\)|Iterations       |Compiler version|Compiler flags|Memory location|seedcrc|Correct operation validated|Errors detected|ERROR!|COREMARK DONE|PERF_[A-Z0-9_]+:|\[[0-9]+\]crc)' "$(COREMARK_RESULT_LOG)"; then \
-			grep -E '^(CoreMark Size|Total ticks|Total time \(secs\)|Iterations       |Compiler version|Compiler flags|Memory location|seedcrc|Correct operation validated|Errors detected|ERROR!|COREMARK DONE|PERF_[A-Z0-9_]+:|\[[0-9]+\]crc)' "$(COREMARK_RESULT_LOG)" | tee -a "$(PPA_COREMARK_LOG)"; \
+		sed -n -e 's/^COREMARK_UART: //p' -e '/^\(CoreMark Size\|Total ticks\|Total time (secs)\|Iterations       \|Compiler version\|Compiler flags\|Memory location\|seedcrc\|Correct operation validated\|Errors detected\|ERROR!\|COREMARK DONE\|PERF_[A-Z0-9_]*:\|\[[0-9]\+\]crc\)/p' "$(COREMARK_RESULT_LOG)" > "$$coremark_text"; \
+		if grep -Eq '^(CoreMark Size|Total ticks|Total time \(secs\)|Iterations       |Compiler version|Compiler flags|Memory location|seedcrc|Correct operation validated|Errors detected|ERROR!|COREMARK DONE|PERF_[A-Z0-9_]+:|\[[0-9]+\]crc)' "$$coremark_text"; then \
+			grep -E '^(CoreMark Size|Total ticks|Total time \(secs\)|Iterations       |Compiler version|Compiler flags|Memory location|seedcrc|Correct operation validated|Errors detected|ERROR!|COREMARK DONE|PERF_[A-Z0-9_]+:|\[[0-9]+\]crc)' "$$coremark_text" | tee -a "$(PPA_COREMARK_LOG)"; \
 			awk -v hz="$(COREMARK_SCORE_HZ)" '\
 				/^Iterations[[:space:]]*:/ { iterations=$$3 } \
 				/^Total ticks[[:space:]]*:/ { ticks=$$4 } \
@@ -267,8 +271,8 @@ coremark_result:
 						ips_cycles=iterations * hz / cycles; \
 						printf("COREMARK_SIM_PERF_SCORE: ITERATIONS_PER_SEC_BY_CYCLES=%.6f COREMARK_PER_MHZ_BY_CYCLES=%.6f\n", ips_cycles, ips_cycles / (hz / 1000000.0)); \
 					} \
-				}' "$(COREMARK_RESULT_LOG)" | tee -a "$(PPA_COREMARK_LOG)"; \
-			if grep -q '^Correct operation validated\.' "$(COREMARK_RESULT_LOG)" && ! grep -Eq '^(Errors detected|ERROR!)' "$(COREMARK_RESULT_LOG)"; then \
+				}' "$$coremark_text" | tee -a "$(PPA_COREMARK_LOG)"; \
+			if grep -q '^Correct operation validated\.' "$$coremark_text" && ! grep -Eq '^(Errors detected|ERROR!)' "$$coremark_text"; then \
 				coremark_valid=1; \
 			else \
 				echo "[COREMARK] Missing successful validation line or error found in $(COREMARK_RESULT_LOG)" | tee -a "$(PPA_COREMARK_LOG)"; \

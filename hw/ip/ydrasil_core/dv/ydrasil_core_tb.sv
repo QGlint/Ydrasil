@@ -629,6 +629,23 @@ end
 	logic sim_done;
 	logic sim_dump_en;
 	logic [39:0] seg_output;
+	string sim_stdout_line;
+
+	task automatic sim_stdout_putc(input logic [7:0] ch);
+		string one_char;
+		begin
+			if (ch == 8'h0a) begin
+				$display("COREMARK_UART: %s", sim_stdout_line);
+				sim_stdout_line = "";
+			end else if (ch != 8'h0d) begin
+				one_char = " ";
+				one_char.putc(0, ch);
+				if (sim_stdout_line.len() < 512) begin
+					sim_stdout_line = {sim_stdout_line, one_char};
+				end
+			end
+		end
+	endtask
 
 	// we don't care perip_mask in LED, SEG, SW & KEY, only care in DRAM
 	// write process
@@ -638,6 +655,7 @@ end
 			seg_wdata <= 32'h0;
 			sim_done <= 1'b0;
 			sim_dump_en <= 1'b0;
+			sim_stdout_line = "";
 		end else if (perip_wen) begin
 			case (perip_addr)
 				LED_ADDR: begin
@@ -645,7 +663,10 @@ end
 					sim_done <= (perip_wdata != 32'h0);
 				end
 				SEG_ADDR:   seg_wdata <= perip_wdata;
-				SIM_STDOUT_ADDR: $write("%c", perip_wdata[7:0]);
+				SIM_STDOUT_ADDR: begin
+					$write("%c", perip_wdata[7:0]);
+					sim_stdout_putc(perip_wdata[7:0]);
+				end
 				SIM_DUMP_ADDR: sim_dump_en <= perip_wdata[0];
 			endcase
 		end
