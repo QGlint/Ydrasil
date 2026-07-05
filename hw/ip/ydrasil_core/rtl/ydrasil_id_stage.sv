@@ -788,6 +788,11 @@ import ydrasil_pkg::*;
     reg [31:0]                       perf_uopq_p1_blocked_block_ready_allow;
     reg [31:0]                       perf_uopq_p1_blocked_block_pending_rd;
     reg [31:0]                       perf_uopq_p1_blocked_block_resbuf;
+    reg [31:0]                       perf_uopq_p1_blocked_unsup_any_uop;
+    reg [31:0]                       perf_uopq_p1_blocked_unsup_shadow_alu;
+    reg [31:0]                       perf_uopq_p1_blocked_unsup_shift;
+    reg [31:0]                       perf_uopq_p1_blocked_unsup_x0_rs1;
+    reg [31:0]                       perf_uopq_p1_blocked_unsup_lui_auipc;
     reg [31:0]                       perf_uopq_p1_block_younger_flush;
     reg [31:0]                       perf_uopq_p1_block_young_uopq2;
     reg [31:0]                       perf_uopq_p1_block_young_ifid;
@@ -2369,6 +2374,11 @@ import ydrasil_pkg::*;
             perf_uopq_p1_blocked_block_ready_allow <= '0;
             perf_uopq_p1_blocked_block_pending_rd <= '0;
             perf_uopq_p1_blocked_block_resbuf <= '0;
+            perf_uopq_p1_blocked_unsup_any_uop <= '0;
+            perf_uopq_p1_blocked_unsup_shadow_alu <= '0;
+            perf_uopq_p1_blocked_unsup_shift <= '0;
+            perf_uopq_p1_blocked_unsup_x0_rs1 <= '0;
+            perf_uopq_p1_blocked_unsup_lui_auipc <= '0;
             perf_uopq_p1_block_younger_flush <= '0;
             perf_uopq_p1_block_young_uopq2 <= '0;
             perf_uopq_p1_block_young_ifid <= '0;
@@ -3354,6 +3364,31 @@ import ydrasil_pkg::*;
                   pipe1_dual_pipe0_safe && pipe1_dual_operands_ready &&
                   !pipe1_younger_flush_block && ready_issue_allow_i &&
                   !pipe1_dual_pending_rd && pipe1_resbuf_full_i) ? 32'd1 : 32'd0);
+            perf_uopq_p1_blocked_unsup_any_uop <= perf_uopq_p1_blocked_unsup_any_uop +
+                ((pipe1_p0_blocked_context && !pipe1_dual_supported &&
+                  (uopq1_valid || uopq2_valid)) ? 32'd1 : 32'd0);
+            perf_uopq_p1_blocked_unsup_shadow_alu <= perf_uopq_p1_blocked_unsup_shadow_alu +
+                ((pipe1_p0_blocked_context && !pipe1_dual_supported &&
+                  ((uopq1_valid && is_shadow_simple_alu(uopq1_operator_type, uopq1_operator)) ||
+                   (uopq2_valid && is_shadow_simple_alu(uopq2_operator_type, uopq2_operator)))) ? 32'd1 : 32'd0);
+            perf_uopq_p1_blocked_unsup_shift <= perf_uopq_p1_blocked_unsup_shift +
+                ((pipe1_p0_blocked_context && !pipe1_dual_supported &&
+                  ((uopq1_valid && (uopq1_operator[ydrasil_pkg::OP_ALU_SLL] |
+                                    uopq1_operator[ydrasil_pkg::OP_ALU_SRL] |
+                                    uopq1_operator[ydrasil_pkg::OP_ALU_SRA])) ||
+                   (uopq2_valid && (uopq2_operator[ydrasil_pkg::OP_ALU_SLL] |
+                                    uopq2_operator[ydrasil_pkg::OP_ALU_SRL] |
+                                    uopq2_operator[ydrasil_pkg::OP_ALU_SRA])))) ? 32'd1 : 32'd0);
+            perf_uopq_p1_blocked_unsup_x0_rs1 <= perf_uopq_p1_blocked_unsup_x0_rs1 +
+                ((pipe1_p0_blocked_context && !pipe1_dual_supported &&
+                  ((uopq1_valid && uopq1_rf_ren_rs1 && (uopq1_rf_raddr_rs1 == '0)) ||
+                   (uopq2_valid && uopq2_rf_ren_rs1 && (uopq2_rf_raddr_rs1 == '0)))) ? 32'd1 : 32'd0);
+            perf_uopq_p1_blocked_unsup_lui_auipc <= perf_uopq_p1_blocked_unsup_lui_auipc +
+                ((pipe1_p0_blocked_context && !pipe1_dual_supported &&
+                  ((uopq1_valid && (uopq1_operator[ydrasil_pkg::OP_ALU_LUI] |
+                                    uopq1_operator[ydrasil_pkg::OP_ALU_AUIPC])) ||
+                   (uopq2_valid && (uopq2_operator[ydrasil_pkg::OP_ALU_LUI] |
+                                    uopq2_operator[ydrasil_pkg::OP_ALU_AUIPC])))) ? 32'd1 : 32'd0);
             perf_uopq_p1_block_younger_flush <= perf_uopq_p1_block_younger_flush +
                 (((pipe1_p0_ready_context | pipe1_p0_blocked_context) &&
                   ready_issue_allow_i && !flush_id_i &&

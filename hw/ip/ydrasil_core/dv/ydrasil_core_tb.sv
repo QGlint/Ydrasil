@@ -1214,6 +1214,12 @@ end
                 u_dut.u_ydrasil_id_stage.perf_uopq_p1_blocked_block_ready_allow,
                 u_dut.u_ydrasil_id_stage.perf_uopq_p1_blocked_block_pending_rd,
                 u_dut.u_ydrasil_id_stage.perf_uopq_p1_blocked_block_resbuf);
+            $display("PERF_UOPQ_BLOCKED_UNSUP_SPLIT: ANY_UOP=%-d SHADOW_ALU=%-d SHIFT=%-d X0_RS1=%-d LUI_AUIPC=%-d",
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_blocked_unsup_any_uop,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_blocked_unsup_shadow_alu,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_blocked_unsup_shift,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_blocked_unsup_x0_rs1,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_blocked_unsup_lui_auipc);
             $display("PERF_UOPQ_YOUNGER_FLUSH_SPLIT: TOTAL=%-d UOPQ2=%-d IFID=%-d",
                 u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_younger_flush,
                 u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_young_uopq2,
