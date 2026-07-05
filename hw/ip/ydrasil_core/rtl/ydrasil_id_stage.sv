@@ -1193,6 +1193,7 @@ import ydrasil_pkg::*;
         selected_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] |
         selected_operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD] |
         selected_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE] |
+        selected_operator_type[ydrasil_pkg::OPERATOR_TYPE_MUL] |
         selected_operator_type[ydrasil_pkg::OPERATOR_TYPE_CSR];
 	wire selected_prf_rs1_allowed =
 		selected_prf_operand_allowed &&

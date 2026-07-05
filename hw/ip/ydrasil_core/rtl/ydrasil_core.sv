@@ -1470,10 +1470,16 @@ import ydrasil_pkg::*;
 		!id_ctrl_operator_type[ydrasil_pkg::OPERATOR_TYPE_CSR] &
 		!id_ctrl_operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS] &
 		!id_ctrl_operator_type[ydrasil_pkg::OPERATOR_TYPE_MUL];
+	wire id_ctrl_prf_operand_consumer =
+		id_ctrl_operator_type[ydrasil_pkg::OPERATOR_TYPE_ALU] |
+		id_ctrl_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] |
+		id_ctrl_operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD] |
+		id_ctrl_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE] |
+		id_ctrl_operator_type[ydrasil_pkg::OPERATOR_TYPE_MUL];
 	wire rs1_pending_stall_eff =
-		rs1_pending_stall & !(id_ctrl_simple_alu_consumer & rn_real_ctrl_rs1_ready);
+		rs1_pending_stall & !(id_ctrl_prf_operand_consumer & rn_real_ctrl_rs1_ready);
 	wire rs2_pending_stall_eff =
-		rs2_pending_stall & !(id_ctrl_simple_alu_consumer & rn_real_ctrl_rs2_ready);
+		rs2_pending_stall & !(id_ctrl_prf_operand_consumer & rn_real_ctrl_rs2_ready);
 	wire rs1_issue_alu_stable_bypass =
 		rs1_issue_alu_ready_next_raw & issue_alu_stable_slot_hit &
 		id_ctrl_simple_alu_consumer &
