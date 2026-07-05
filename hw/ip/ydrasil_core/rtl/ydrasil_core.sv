@@ -1108,13 +1108,24 @@ import ydrasil_pkg::*;
 		id_ctrl_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] &
 		rn_real_pipe1_older_uncommitted &
 		!rn_real_ctrl_at_head;
+	wire rn_real_ctrl_rs1_legacy_ready =
+		!id_ctrl_rs1_ren | (id_ctrl_rs1_addr == '0) |
+		!gpr_pending_q[id_ctrl_rs1_addr];
+	wire rn_real_ctrl_rs2_legacy_ready =
+		!id_ctrl_rs2_ren | (id_ctrl_rs2_addr == '0) |
+		!gpr_pending_q[id_ctrl_rs2_addr];
+	wire rn_real_ctrl_rs1_block =
+		id_ctrl_rs1_ren & !rn_real_ctrl_rs1_ready &
+		!rn_real_ctrl_rs1_legacy_ready;
+	wire rn_real_ctrl_rs2_block =
+		id_ctrl_rs2_ren & !rn_real_ctrl_rs2_ready &
+		!rn_real_ctrl_rs2_legacy_ready;
 		assign rn_real_commit0_valid =
 			rn_real_commit0_ready &
 			(!rn_real_rob_pipe1_q[rn_real_rob_head_q] | pipe1_commit_rf_wen);
 		assign rn_real_ctrl_block =
 			(id_ctrl_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] &
-			 ((id_ctrl_rs1_ren & !rn_real_ctrl_rs1_ready) |
-			  (id_ctrl_rs2_ren & !rn_real_ctrl_rs2_ready))) |
+			 (rn_real_ctrl_rs1_block | rn_real_ctrl_rs2_block)) |
 			rn_real_ctrl_older_rob_block;
 
 		always_ff @(posedge clk or negedge rst_n) begin
