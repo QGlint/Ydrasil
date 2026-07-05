@@ -22,6 +22,9 @@ logic [31:0] riscv_tohost_addr;
 logic        riscv_tohost_addr_valid;
 logic [31:0] riscv_write_tohost_addr;
 logic        riscv_write_tohost_addr_valid;
+logic [31:0] store_watch_lo;
+logic [31:0] store_watch_hi;
+logic        store_watch_valid;
 initial begin
     if ($value$plusargs("itcmfile=%s", itcmfile)) begin
       $display("Loading memory from %s", itcmfile);
@@ -57,6 +60,16 @@ initial begin
     end else begin
         riscv_write_tohost_addr_valid = 1'b0;
         riscv_write_tohost_addr = 32'b0;
+    end
+
+    if ($value$plusargs("store_watch_lo=%h", store_watch_lo) &&
+        $value$plusargs("store_watch_hi=%h", store_watch_hi)) begin
+        store_watch_valid = 1'b1;
+        $display("[TB] store_watch lo=0x%08h hi=0x%08h", store_watch_lo, store_watch_hi);
+    end else begin
+        store_watch_valid = 1'b0;
+        store_watch_lo = 32'b0;
+        store_watch_hi = 32'b0;
     end
 end
 
@@ -121,6 +134,27 @@ end
         riscv_write_tohost_addr_valid &&
         riscv_last_store_issue_valid &&
         (riscv_last_store_issue_pc == riscv_write_tohost_store_pc);
+
+`ifndef SYNTHESIS
+    wire [31:0] store_watch_addr_lo = u_dut.dtcm_addr;
+    wire [31:0] store_watch_addr_hi = u_dut.dtcm_addr + 32'd3;
+    wire        store_watch_hit =
+        store_watch_valid && u_dut.dtcm_we &&
+        (store_watch_addr_lo <= store_watch_hi) &&
+        (store_watch_addr_hi >= store_watch_lo);
+
+    always_ff @(posedge clk) begin
+        if (rst_n && store_watch_hit) begin
+            $display("STORE_WATCH_HIT: addr=0x%08h data=0x%08h mask=0x%1h pc=0x%08h issue_pc=0x%08h",
+                u_dut.dtcm_addr,
+                u_dut.dtcm_wdata,
+                u_dut.dtcm_wmask,
+                pc,
+                riscv_last_store_issue_pc);
+            $fatal(1, "store watch hit");
+        end
+    end
+`endif
 
     // 添加指令计数和IPC计算相关变量
     wire [31:0] instruction_count = csr_instret; // Use CSR instret as the retired instruction count.

@@ -1285,6 +1285,7 @@ import ydrasil_pkg::*;
          (pipe1_alu_fwd_valid_i && (uopq2_rf_raddr_rs2 == pipe1_alu_fwd_addr_i)));
     assign pipe1_uopq1_safe =
         pipe1_dual_pipe0_safe && pipe1_uopq1_operands_ready &&
+        !gpr_pending_i[uopq1_rf_waddr_rd] &&
         !(uopq0_rf_wen_rd && (uopq0_rf_waddr_rd != '0) &&
           ((uopq1_rf_ren_rs1 && (uopq1_rf_raddr_rs1 == uopq0_rf_waddr_rd)) |
            (uopq1_rf_ren_rs2 && (uopq1_rf_raddr_rs2 == uopq0_rf_waddr_rd)))) &&
@@ -1293,6 +1294,7 @@ import ydrasil_pkg::*;
         pipe1_rename_ready_i && skid_rn_pdst_valid_ff;
     assign pipe1_uopq2_safe =
         !uopq1_valid && pipe1_dual_pipe0_safe && pipe1_uopq2_operands_ready &&
+        !gpr_pending_i[uopq2_rf_waddr_rd] &&
         !(uopq0_rf_wen_rd && (uopq0_rf_waddr_rd != '0) &&
           ((uopq2_rf_ren_rs1 && (uopq2_rf_raddr_rs1 == uopq0_rf_waddr_rd)) |
            (uopq2_rf_ren_rs2 && (uopq2_rf_raddr_rs2 == uopq0_rf_waddr_rd)))) &&
@@ -1466,6 +1468,11 @@ import ydrasil_pkg::*;
     always_ff @(posedge clk) begin
         if (rst_n && pair1_fire && (PIPE1_REAL_MODE < 2)) begin
             $fatal(1, "pipe1 fired without dual rename/ROB allocation support");
+        end
+        if (rst_n && pair1_fire && pipe1_sel_rf_wen_rd &&
+            (pipe1_sel_rf_waddr_rd != '0) &&
+            gpr_pending_i[pipe1_sel_rf_waddr_rd]) begin
+            $fatal(1, "pipe1 fired with pending destination x%0d", pipe1_sel_rf_waddr_rd);
         end
     end
 `endif
