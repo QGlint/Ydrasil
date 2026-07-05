@@ -346,8 +346,24 @@ import ydrasil_pkg::*;
          operator_i[OP_ALU_AUIPC]);
     wire fast_result_wen = id_ex_valid_i & !interrupt_i & !flush_ex_i & !op_bitmanip & !op_m_unit &
         (fast_alu_op | op_load | op_store | op_bjp);
-    wire [31:0] fast_add_result = operand_a + operand_b;
-    wire [32:0] fast_sub_result_ext = {1'b0, operand_a} + {1'b0, ~operand_b} + 33'd1;
+    // DSP48-based ALU: ~3ns fixed latency replacing CARRY4 chains
+    wire [31:0] fast_add_result;
+    wire [32:0] fast_sub_result_ext;
+    wire        fast_add_carry;
+
+    ydrasil_dsp_adder u_dsp_add (
+        .sub_i        (1'b0),
+        .operand_a_i  (operand_a),
+        .operand_b_i  (operand_b),
+        .result_o     ({fast_add_carry, fast_add_result})
+    );
+
+    ydrasil_dsp_adder u_dsp_sub (
+        .sub_i        (1'b1),
+        .operand_a_i  (operand_a),
+        .operand_b_i  (operand_b),
+        .result_o     (fast_sub_result_ext)
+    );
     wire        fast_signs_differ = operand_a[31] ^ operand_b[31];
     wire        fast_slt_signed = fast_signs_differ ? operand_a[31] : fast_sub_result_ext[31];
     wire        fast_slt_unsigned = ~fast_sub_result_ext[32];
