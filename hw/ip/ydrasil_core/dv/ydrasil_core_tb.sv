@@ -252,6 +252,11 @@ end
     reg [31:0] sb_branch_wait_ctrl_block_count;
     reg [31:0] sb_branch_wait_ctrl_src_count;
     reg [31:0] sb_branch_wait_ctrl_order_count;
+    reg [31:0] sb_branch_order_pipe1_issue_count;
+    reg [31:0] sb_branch_order_pipe1_wb_count;
+    reg [31:0] sb_branch_order_head_commit_count;
+    reg [31:0] sb_branch_order_head_rf_block_count;
+    reg [31:0] sb_branch_order_rob_nonhead_count;
     reg [31:0] sb_branch_wait_rs1_pending_count;
     reg [31:0] sb_branch_wait_rs2_pending_count;
     reg [31:0] sb_branch_wait_issue_rs1_count;
@@ -452,6 +457,11 @@ end
             sb_branch_wait_ctrl_block_count <= 32'b0;
             sb_branch_wait_ctrl_src_count <= 32'b0;
             sb_branch_wait_ctrl_order_count <= 32'b0;
+            sb_branch_order_pipe1_issue_count <= 32'b0;
+            sb_branch_order_pipe1_wb_count <= 32'b0;
+            sb_branch_order_head_commit_count <= 32'b0;
+            sb_branch_order_head_rf_block_count <= 32'b0;
+            sb_branch_order_rob_nonhead_count <= 32'b0;
             sb_branch_wait_rs1_pending_count <= 32'b0;
             sb_branch_wait_rs2_pending_count <= 32'b0;
             sb_branch_wait_issue_rs1_count <= 32'b0;
@@ -638,6 +648,35 @@ end
                 ((u_dut.scoreboard_stall &&
                   u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
                   u_dut.rn_real_ctrl_older_rob_block) ? 32'd1 : 32'd0);
+            sb_branch_order_pipe1_issue_count <= sb_branch_order_pipe1_issue_count +
+                ((u_dut.scoreboard_stall &&
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.rn_real_ctrl_older_rob_block &&
+                  u_dut.pipe1_issue_valid && (u_dut.pipe1_rn_pdst_issue != '0)) ? 32'd1 : 32'd0);
+            sb_branch_order_pipe1_wb_count <= sb_branch_order_pipe1_wb_count +
+                ((u_dut.scoreboard_stall &&
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.rn_real_ctrl_older_rob_block &&
+                  u_dut.rn_real_pipe1_pdst_found) ? 32'd1 : 32'd0);
+            sb_branch_order_head_commit_count <= sb_branch_order_head_commit_count +
+                ((u_dut.scoreboard_stall &&
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.rn_real_ctrl_older_rob_block &&
+                  u_dut.rn_real_rob_pipe1_q[u_dut.rn_real_rob_head_q] &&
+                  u_dut.rn_real_commit0_valid) ? 32'd1 : 32'd0);
+            sb_branch_order_head_rf_block_count <= sb_branch_order_head_rf_block_count +
+                ((u_dut.scoreboard_stall &&
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.rn_real_ctrl_older_rob_block &&
+                  u_dut.rn_real_rob_pipe1_q[u_dut.rn_real_rob_head_q] &&
+                  u_dut.rn_real_commit0_ready && !u_dut.rn_real_commit0_valid) ? 32'd1 : 32'd0);
+            sb_branch_order_rob_nonhead_count <= sb_branch_order_rob_nonhead_count +
+                ((u_dut.scoreboard_stall &&
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.rn_real_ctrl_older_rob_block &&
+                  !u_dut.rn_real_rob_pipe1_q[u_dut.rn_real_rob_head_q] &&
+                  !(u_dut.pipe1_issue_valid && (u_dut.pipe1_rn_pdst_issue != '0)) &&
+                  !u_dut.rn_real_pipe1_pdst_found) ? 32'd1 : 32'd0);
             sb_branch_wait_rs1_pending_count <= sb_branch_wait_rs1_pending_count +
                 ((u_dut.scoreboard_stall &&
                   u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
@@ -1086,6 +1125,13 @@ end
                 sb_branch_wait_issue_rs2_count,
                 sb_branch_wait_rd_waw_count,
                 sb_branch_wait_pipe1_hzd_count);
+            $display("PERF_BRANCH_ORDER_SPLIT: TOTAL=%-d PIPE1_ISSUE=%-d PIPE1_WB=%-d HEAD_COMMIT=%-d HEAD_RF_BLOCK=%-d ROB_NONHEAD=%-d",
+                sb_branch_wait_ctrl_order_count,
+                sb_branch_order_pipe1_issue_count,
+                sb_branch_order_pipe1_wb_count,
+                sb_branch_order_head_commit_count,
+                sb_branch_order_head_rf_block_count,
+                sb_branch_order_rob_nonhead_count);
             $display("PERF_PHASE4A_ALU_STABLE: RAW_READY_NEXT=%-d STABLE_SLOT_HIT=%-d RS1_BYPASS=%-d RS2_BYPASS=%-d",
                 p4a_raw_ready_next_count,
                 p4a_alu_stable_slot_hit_count,
