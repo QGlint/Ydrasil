@@ -1459,12 +1459,20 @@ import ydrasil_pkg::*;
         !pipe1_resbuf_full_i;
 `else
     assign pipe1_dual_fire = 1'b0;
-`endif
-    assign pair1_fire = pipe1_dual_fire;
-    assign pipe1_fire_from1 = pair1_fire && pipe1_sel_from1;
-    assign pipe1_fire_from2 = pair1_fire && pipe1_sel_from2;
+	`endif
+	    assign pair1_fire = pipe1_dual_fire;
+	    assign pipe1_fire_from1 = pair1_fire && pipe1_sel_from1;
+	    assign pipe1_fire_from2 = pair1_fire && pipe1_sel_from2;
 
-    assign ri_slot1_valid = skid_valid_ff;
+`ifndef SYNTHESIS
+    always_ff @(posedge clk) begin
+        if (rst_n && pair1_fire && (PIPE1_REAL_MODE < 2)) begin
+            $fatal(1, "pipe1 fired without dual rename/ROB allocation support");
+        end
+    end
+`endif
+
+	    assign ri_slot1_valid = skid_valid_ff;
     assign ri_slot1_supported =
         ri_slot1_valid &&
         (slot1_operator_type[ydrasil_pkg::OPERATOR_TYPE_ALU] |
