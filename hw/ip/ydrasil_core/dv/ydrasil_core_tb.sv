@@ -1189,6 +1189,10 @@ end
                 u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_p0_csr_sys,
                 u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_p0_bitmanip,
                 u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_p0_other);
+            $display("PERF_UOPQ_YOUNGER_FLUSH_SPLIT: TOTAL=%-d UOPQ2=%-d IFID=%-d",
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_younger_flush,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_young_uopq2,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_young_ifid);
             $display("PERF_RENAME_SHADOW: RN_SHADOW_RAW_WB_CAN_REMOVE=%-d RN_SHADOW_WAW_CAN_REMOVE=%-d RN_SHADOW_WAR_CAN_REMOVE=%-d RN_SHADOW_PIPE1_WHEN_P0_BLOCKED_CAN_FIRE=%-d RN_SHADOW_FREE_PREG_MIN=%-d",
                 u_dut.perf_rn_shadow_raw_wb_can_remove,
                 u_dut.perf_rn_shadow_waw_can_remove,

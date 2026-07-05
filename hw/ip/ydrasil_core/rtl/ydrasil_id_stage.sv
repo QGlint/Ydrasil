@@ -752,6 +752,9 @@ import ydrasil_pkg::*;
     reg [31:0]                       perf_uopq_p1_block_p0_csr_sys;
     reg [31:0]                       perf_uopq_p1_block_p0_bitmanip;
     reg [31:0]                       perf_uopq_p1_block_p0_other;
+    reg [31:0]                       perf_uopq_p1_block_younger_flush;
+    reg [31:0]                       perf_uopq_p1_block_young_uopq2;
+    reg [31:0]                       perf_uopq_p1_block_young_ifid;
 `endif
 
 `ifndef SYNTHESIS
@@ -2245,6 +2248,9 @@ import ydrasil_pkg::*;
             perf_uopq_p1_block_p0_csr_sys <= '0;
             perf_uopq_p1_block_p0_bitmanip <= '0;
             perf_uopq_p1_block_p0_other <= '0;
+            perf_uopq_p1_block_younger_flush <= '0;
+            perf_uopq_p1_block_young_uopq2 <= '0;
+            perf_uopq_p1_block_young_ifid <= '0;
 `endif
         end else begin
             if (flush_id_i) begin
@@ -3086,6 +3092,32 @@ import ydrasil_pkg::*;
                   !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS] &&
                   !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_BITMANIP] &&
                   !uopq0_fence_i) ? 32'd1 : 32'd0);
+            perf_uopq_p1_block_younger_flush <= perf_uopq_p1_block_younger_flush +
+                (((pipe1_p0_ready_context | pipe1_p0_blocked_context) &&
+                  ready_issue_allow_i && !flush_id_i &&
+                  pipe1_dual_pipe0_safe && pipe1_dual_operands_ready &&
+                  pipe1_younger_flush_risk &&
+                  !pipe1_dual_raw_pipe0 && !pipe1_dual_waw_pipe0 &&
+                  !pipe1_dual_war_pipe0 && !pipe1_dual_pending_rd &&
+                  !pipe1_resbuf_full_i) ? 32'd1 : 32'd0);
+            perf_uopq_p1_block_young_uopq2 <= perf_uopq_p1_block_young_uopq2 +
+                (((pipe1_p0_ready_context | pipe1_p0_blocked_context) &&
+                  ready_issue_allow_i && !flush_id_i &&
+                  pipe1_dual_pipe0_safe && pipe1_dual_operands_ready &&
+                  pipe1_younger_flush_risk &&
+                  uopq2_valid &&
+                  !pipe1_dual_raw_pipe0 && !pipe1_dual_waw_pipe0 &&
+                  !pipe1_dual_war_pipe0 && !pipe1_dual_pending_rd &&
+                  !pipe1_resbuf_full_i) ? 32'd1 : 32'd0);
+            perf_uopq_p1_block_young_ifid <= perf_uopq_p1_block_young_ifid +
+                (((pipe1_p0_ready_context | pipe1_p0_blocked_context) &&
+                  ready_issue_allow_i && !flush_id_i &&
+                  pipe1_dual_pipe0_safe && pipe1_dual_operands_ready &&
+                  pipe1_younger_flush_risk &&
+                  if_id_valid_i &&
+                  !pipe1_dual_raw_pipe0 && !pipe1_dual_waw_pipe0 &&
+                  !pipe1_dual_war_pipe0 && !pipe1_dual_pending_rd &&
+                  !pipe1_resbuf_full_i) ? 32'd1 : 32'd0);
 `endif
         end
     end
