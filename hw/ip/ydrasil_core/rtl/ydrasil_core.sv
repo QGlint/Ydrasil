@@ -971,6 +971,8 @@ import ydrasil_pkg::*;
 			(!rn_real_rob_pipe1_q[rn_real_rob_head_q] | pipe1_commit_rf_wen);
 		assign rn_real_ctrl_block =
 			id_ctrl_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] &
+			id_ctrl_rd_wen &
+			(id_ctrl_rd_addr != '0) &
 			!id_ctrl_rs2_ren &
 			(rn_real_rob_occ_q != '0);
 
