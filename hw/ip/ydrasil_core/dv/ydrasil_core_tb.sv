@@ -1197,6 +1197,14 @@ end
                 u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_p0_invalid_issue_accept,
                 u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_p0_invalid_skid,
                 u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_p0_invalid_uopq2_safe);
+            $display("PERF_UOPQ_EMPTY_SPLIT: BASE=%-d SUPPORTED=%-d OPERANDS_READY=%-d BLOCK_YOUNGER=%-d BLOCK_READY_ALLOW=%-d BLOCK_PENDING_RD=%-d BLOCK_RESBUF=%-d",
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_empty_base,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_empty_supported,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_empty_operands_ready,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_empty_block_younger,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_empty_block_ready_allow,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_empty_block_pending_rd,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_empty_block_resbuf);
             $display("PERF_UOPQ_YOUNGER_FLUSH_SPLIT: TOTAL=%-d UOPQ2=%-d IFID=%-d",
                 u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_younger_flush,
                 u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_young_uopq2,

@@ -763,6 +763,13 @@ import ydrasil_pkg::*;
     reg [31:0]                       perf_uopq_p1_block_p0_invalid_issue_accept;
     reg [31:0]                       perf_uopq_p1_block_p0_invalid_skid;
     reg [31:0]                       perf_uopq_p1_block_p0_invalid_uopq2_safe;
+    reg [31:0]                       perf_uopq_p1_empty_base;
+    reg [31:0]                       perf_uopq_p1_empty_supported;
+    reg [31:0]                       perf_uopq_p1_empty_operands_ready;
+    reg [31:0]                       perf_uopq_p1_empty_block_younger;
+    reg [31:0]                       perf_uopq_p1_empty_block_ready_allow;
+    reg [31:0]                       perf_uopq_p1_empty_block_pending_rd;
+    reg [31:0]                       perf_uopq_p1_empty_block_resbuf;
     reg [31:0]                       perf_uopq_p1_block_younger_flush;
     reg [31:0]                       perf_uopq_p1_block_young_uopq2;
     reg [31:0]                       perf_uopq_p1_block_young_ifid;
@@ -2319,6 +2326,13 @@ import ydrasil_pkg::*;
             perf_uopq_p1_block_p0_invalid_issue_accept <= '0;
             perf_uopq_p1_block_p0_invalid_skid <= '0;
             perf_uopq_p1_block_p0_invalid_uopq2_safe <= '0;
+            perf_uopq_p1_empty_base <= '0;
+            perf_uopq_p1_empty_supported <= '0;
+            perf_uopq_p1_empty_operands_ready <= '0;
+            perf_uopq_p1_empty_block_younger <= '0;
+            perf_uopq_p1_empty_block_ready_allow <= '0;
+            perf_uopq_p1_empty_block_pending_rd <= '0;
+            perf_uopq_p1_empty_block_resbuf <= '0;
             perf_uopq_p1_block_younger_flush <= '0;
             perf_uopq_p1_block_young_uopq2 <= '0;
             perf_uopq_p1_block_young_ifid <= '0;
@@ -3208,6 +3222,29 @@ import ydrasil_pkg::*;
                   !pipe1_dual_pipe0_safe &&
                   !uopq0_valid &&
                   pipe1_uopq2_safe) ? 32'd1 : 32'd0);
+            perf_uopq_p1_empty_base <= perf_uopq_p1_empty_base +
+                (pipe1_p0_empty_base ? 32'd1 : 32'd0);
+            perf_uopq_p1_empty_supported <= perf_uopq_p1_empty_supported +
+                ((pipe1_p0_empty_base && pipe1_dual_supported) ? 32'd1 : 32'd0);
+            perf_uopq_p1_empty_operands_ready <= perf_uopq_p1_empty_operands_ready +
+                ((pipe1_p0_empty_base && pipe1_dual_supported &&
+                  pipe1_dual_operands_ready) ? 32'd1 : 32'd0);
+            perf_uopq_p1_empty_block_younger <= perf_uopq_p1_empty_block_younger +
+                ((pipe1_p0_empty_base && pipe1_dual_supported &&
+                  pipe1_dual_operands_ready && pipe1_younger_flush_block) ? 32'd1 : 32'd0);
+            perf_uopq_p1_empty_block_ready_allow <= perf_uopq_p1_empty_block_ready_allow +
+                ((pipe1_p0_empty_base && pipe1_dual_supported &&
+                  pipe1_dual_operands_ready && !pipe1_younger_flush_block &&
+                  !ready_issue_allow_i) ? 32'd1 : 32'd0);
+            perf_uopq_p1_empty_block_pending_rd <= perf_uopq_p1_empty_block_pending_rd +
+                ((pipe1_p0_empty_base && pipe1_dual_supported &&
+                  pipe1_dual_operands_ready && !pipe1_younger_flush_block &&
+                  ready_issue_allow_i && pipe1_dual_pending_rd) ? 32'd1 : 32'd0);
+            perf_uopq_p1_empty_block_resbuf <= perf_uopq_p1_empty_block_resbuf +
+                ((pipe1_p0_empty_base && pipe1_dual_supported &&
+                  pipe1_dual_operands_ready && !pipe1_younger_flush_block &&
+                  ready_issue_allow_i && !pipe1_dual_pending_rd &&
+                  pipe1_resbuf_full_i) ? 32'd1 : 32'd0);
             perf_uopq_p1_block_younger_flush <= perf_uopq_p1_block_younger_flush +
                 (((pipe1_p0_ready_context | pipe1_p0_blocked_context) &&
                   ready_issue_allow_i && !flush_id_i &&
