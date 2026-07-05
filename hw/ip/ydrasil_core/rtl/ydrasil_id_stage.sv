@@ -42,14 +42,16 @@ import ydrasil_pkg::*;
     input  wire                            pipe1_alu_fwd_valid_i,
     input  wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] pipe1_alu_fwd_addr_i,
     input  wire [DATA_WIDTH-1:0]           pipe1_alu_fwd_data_i,
-    input  wire                            prf_rs1_ready_i,
-    input  wire                            prf_rs2_ready_i,
-    input  wire [DATA_WIDTH-1:0]           prf_rs1_data_i,
-    input  wire [DATA_WIDTH-1:0]           prf_rs2_data_i,
-    input  wire                            pipe1_prf_rs1_ready_i,
-    input  wire                            pipe1_prf_rs2_ready_i,
-    input  wire [DATA_WIDTH-1:0]           pipe1_prf_rs1_data_i,
-    input  wire [DATA_WIDTH-1:0]           pipe1_prf_rs2_data_i,
+	input  wire                            prf_rs1_ready_i,
+	input  wire                            prf_rs2_ready_i,
+	input  wire [DATA_WIDTH-1:0]           prf_rs1_data_i,
+	input  wire [DATA_WIDTH-1:0]           prf_rs2_data_i,
+	input  wire                            prf_rs1_uncommitted_i,
+	input  wire                            prf_rs2_uncommitted_i,
+	input  wire                            pipe1_prf_rs1_ready_i,
+	input  wire                            pipe1_prf_rs2_ready_i,
+	input  wire [DATA_WIDTH-1:0]           pipe1_prf_rs1_data_i,
+	input  wire [DATA_WIDTH-1:0]           pipe1_prf_rs2_data_i,
     input  wire                            pipe1_rename_ready_i,
     input  wire [5:0]                      rn_if_rs1_psrc_i,
     input  wire [5:0]                      rn_if_rs2_psrc_i,
@@ -1080,15 +1082,13 @@ import ydrasil_pkg::*;
 		selected_prf_operand_allowed &&
 		selected_rf_ren_rs1 &&
 		(selected_rf_raddr_rs1 != '0) &&
-		(gpr_pending_i[selected_rf_raddr_rs1] ||
-		 (selected_rn_rs1_psrc != {1'b0, selected_rf_raddr_rs1})) &&
+		(gpr_pending_i[selected_rf_raddr_rs1] || prf_rs1_uncommitted_i) &&
 		(selected_rn_rs1_psrc != selected_rn_pdst);
 	wire selected_prf_rs2_allowed =
 		selected_prf_operand_allowed &&
 		(selected_rf_ren_rs2 | selected_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
 		(selected_rf_raddr_rs2 != '0) &&
-		(gpr_pending_i[selected_rf_raddr_rs2] ||
-		 (selected_rn_rs2_psrc != {1'b0, selected_rf_raddr_rs2})) &&
+		(gpr_pending_i[selected_rf_raddr_rs2] || prf_rs2_uncommitted_i) &&
 		(selected_rn_rs2_psrc != selected_rn_pdst);
     wire [DATA_WIDTH-1:0] issue_rs1_data =
         rs1_lsu_fwd ? lsu_fwd_data_i :

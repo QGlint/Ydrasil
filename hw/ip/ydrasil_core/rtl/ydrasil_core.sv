@@ -328,6 +328,8 @@ import ydrasil_pkg::*;
 	wire rn_real_commit0_valid;
 	wire rn_real_commit0_ready;
 	wire rn_real_ctrl_block;
+	wire rn_real_rs1_uncommitted;
+	wire rn_real_rs2_uncommitted;
 	wire pipe1_commit_rf_wen;
 	wire rn_shadow_alloc1_valid;
 	wire rn_shadow_same_cycle_raw;
@@ -360,6 +362,27 @@ import ydrasil_pkg::*;
 				    !rn_real_rob_ready_q[idx] &&
 				    (rn_real_rob_arch_rd_q[idx] == arch_rd)) begin
 					rn_real_find_pending_pdst = rn_real_rob_new_pdst_q[idx];
+					found = 1'b1;
+				end
+			end
+		end
+	endfunction
+
+	function automatic rn_real_rob_has_pdst;
+		input [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] arch_rd;
+		input [RN_REAL_PREG_BITS-1:0] pdst;
+		integer j;
+		reg found;
+		reg [RN_REAL_ROB_PTR_BITS-1:0] idx;
+		begin
+			found = 1'b0;
+			rn_real_rob_has_pdst = 1'b0;
+			for (j = 0; j < RN_REAL_ROB_DEPTH; j = j + 1) begin
+				idx = rn_real_rob_head_q + RN_REAL_ROB_PTR_BITS'(j);
+				if (!found && rn_real_rob_valid_q[idx] &&
+				    (rn_real_rob_arch_rd_q[idx] == arch_rd) &&
+				    (rn_real_rob_new_pdst_q[idx] == pdst)) begin
+					rn_real_rob_has_pdst = 1'b1;
 					found = 1'b1;
 				end
 			end
@@ -903,6 +926,14 @@ import ydrasil_pkg::*;
 	assign rn_real_live_rs2_psrc = (if_id_instr[24:20] == '0) ? '0 : rn_real_rat_q[if_id_instr[24:20]];
 	assign rn_real_rs1_psrc = id_ctrl_rs1_psrc;
 	assign rn_real_rs2_psrc = id_ctrl_rs2_psrc;
+	assign rn_real_rs1_uncommitted =
+		id_ctrl_rs1_ren && (id_ctrl_rs1_addr != '0) &&
+		(rn_real_rs1_psrc != '0) &&
+		rn_real_rob_has_pdst(id_ctrl_rs1_addr, rn_real_rs1_psrc);
+	assign rn_real_rs2_uncommitted =
+		id_ctrl_rs2_ren && (id_ctrl_rs2_addr != '0) &&
+		(rn_real_rs2_psrc != '0) &&
+		rn_real_rob_has_pdst(id_ctrl_rs2_addr, rn_real_rs2_psrc);
 	assign rn_real_alloc0_pdst = rn_real_first_free(rn_real_free_q);
 	assign rn_real_can_alloc0 =
 		(rn_real_free_count_q != '0) && (rn_real_rob_occ_q < RN_REAL_ROB_DEPTH_COUNT);
@@ -1685,6 +1716,8 @@ import ydrasil_pkg::*;
 		.prf_rs2_ready_i   (rn_real_rs2_ready),
 		.prf_rs1_data_i    (prf_rd0_data),
 		.prf_rs2_data_i    (prf_rd1_data),
+		.prf_rs1_uncommitted_i(rn_real_rs1_uncommitted),
+		.prf_rs2_uncommitted_i(rn_real_rs2_uncommitted),
 		.pipe1_prf_rs1_ready_i(rn_real_pipe1_rs1_ready),
 		.pipe1_prf_rs2_ready_i(rn_real_pipe1_rs2_ready),
 		.pipe1_prf_rs1_data_i(prf_rd2_data),
