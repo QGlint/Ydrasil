@@ -245,7 +245,11 @@ coremark_result:
 	coremark_valid=0; \
 	if [ -f "$(COREMARK_RESULT_LOG)" ]; then \
 		echo "[COREMARK] Result from $(COREMARK_RESULT_LOG)" | tee -a "$(PPA_COREMARK_LOG)"; \
-		sed -n -e 's/^COREMARK_UART: //p' -e '/^\(CoreMark Size\|Total ticks\|Total time (secs)\|Iterations       \|Compiler version\|Compiler flags\|Memory location\|seedcrc\|Correct operation validated\|Errors detected\|ERROR!\|COREMARK DONE\|PERF_[A-Z0-9_]*:\|\[[0-9]\+\]crc\)/p' "$(COREMARK_RESULT_LOG)" > "$$coremark_text"; \
+		if grep -q '^COREMARK_UART:' "$(COREMARK_RESULT_LOG)"; then \
+			sed -n 's/^COREMARK_UART: //p' "$(COREMARK_RESULT_LOG)" > "$$coremark_text"; \
+		else \
+			sed -n '/^\(CoreMark Size\|Total ticks\|Total time (secs)\|Iterations       \|Compiler version\|Compiler flags\|Memory location\|seedcrc\|Correct operation validated\|Errors detected\|ERROR!\|COREMARK DONE\|PERF_[A-Z0-9_]*:\|\[[0-9]\+\]crc\)/p' "$(COREMARK_RESULT_LOG)" > "$$coremark_text"; \
+		fi; \
 		if grep -Eq '^(CoreMark Size|Total ticks|Total time \(secs\)|Iterations       |Compiler version|Compiler flags|Memory location|seedcrc|Correct operation validated|Errors detected|ERROR!|COREMARK DONE|PERF_[A-Z0-9_]+:|\[[0-9]+\]crc)' "$$coremark_text"; then \
 			grep -E '^(CoreMark Size|Total ticks|Total time \(secs\)|Iterations       |Compiler version|Compiler flags|Memory location|seedcrc|Correct operation validated|Errors detected|ERROR!|COREMARK DONE|PERF_[A-Z0-9_]+:|\[[0-9]+\]crc)' "$$coremark_text" | tee -a "$(PPA_COREMARK_LOG)"; \
 			awk -v hz="$(COREMARK_SCORE_HZ)" '\
@@ -272,7 +276,11 @@ coremark_result:
 						printf("COREMARK_SIM_PERF_SCORE: ITERATIONS_PER_SEC_BY_CYCLES=%.6f COREMARK_PER_MHZ_BY_CYCLES=%.6f\n", ips_cycles, ips_cycles / (hz / 1000000.0)); \
 					} \
 				}' "$$coremark_text" | tee -a "$(PPA_COREMARK_LOG)"; \
-			if grep -q '^Correct operation validated\.' "$$coremark_text" && ! grep -Eq '^(Errors detected|ERROR!)' "$$coremark_text"; then \
+			fatal_coremark_errors=$$(grep -E '^(\[[0-9]+\]ERROR!|ERROR!|Errors detected|Cannot validate operation)' "$$coremark_text" 2>/dev/null | grep -v '^ERROR! Must execute for at least 10 secs' || true); \
+			if grep -q '^COREMARK DONE' "$$coremark_text" && \
+			   grep -q '^\[[0-9]\+\]crcfinal[[:space:]]*:' "$$coremark_text" && \
+			   grep -q '^Correct operation validated\.' "$$coremark_text" && \
+			   [ -z "$$fatal_coremark_errors" ]; then \
 				coremark_valid=1; \
 			else \
 				echo "[COREMARK] Missing successful validation line or error found in $(COREMARK_RESULT_LOG)" | tee -a "$(PPA_COREMARK_LOG)"; \
