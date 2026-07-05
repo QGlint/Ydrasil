@@ -1408,9 +1408,9 @@ import ydrasil_pkg::*;
     assign pipe1_pipe0_present_safe =
         uopq0_valid &&
         (uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_ALU] |
-         uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD] |
          uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_MUL]) &&
         !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+        !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
         !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
         !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_CSR] &&
         !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS] &&
