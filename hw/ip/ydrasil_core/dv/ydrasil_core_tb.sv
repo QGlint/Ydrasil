@@ -249,6 +249,15 @@ end
     reg [31:0] sb_raw_wb_wait_count;
     reg [31:0] sb_waw_only_count;
     reg [31:0] sb_branch_wait_raw_class_count;
+    reg [31:0] sb_branch_wait_ctrl_block_count;
+    reg [31:0] sb_branch_wait_ctrl_src_count;
+    reg [31:0] sb_branch_wait_ctrl_order_count;
+    reg [31:0] sb_branch_wait_rs1_pending_count;
+    reg [31:0] sb_branch_wait_rs2_pending_count;
+    reg [31:0] sb_branch_wait_issue_rs1_count;
+    reg [31:0] sb_branch_wait_issue_rs2_count;
+    reg [31:0] sb_branch_wait_rd_waw_count;
+    reg [31:0] sb_branch_wait_pipe1_hzd_count;
     reg [31:0] sb_store_addr_raw_class_count;
     reg [31:0] sb_store_data_raw_class_count;
     reg [31:0] sb_can_bypass_with_ready_issue_count;
@@ -440,6 +449,15 @@ end
             sb_raw_wb_wait_count <= 32'b0;
             sb_waw_only_count <= 32'b0;
             sb_branch_wait_raw_class_count <= 32'b0;
+            sb_branch_wait_ctrl_block_count <= 32'b0;
+            sb_branch_wait_ctrl_src_count <= 32'b0;
+            sb_branch_wait_ctrl_order_count <= 32'b0;
+            sb_branch_wait_rs1_pending_count <= 32'b0;
+            sb_branch_wait_rs2_pending_count <= 32'b0;
+            sb_branch_wait_issue_rs1_count <= 32'b0;
+            sb_branch_wait_issue_rs2_count <= 32'b0;
+            sb_branch_wait_rd_waw_count <= 32'b0;
+            sb_branch_wait_pipe1_hzd_count <= 32'b0;
             sb_store_addr_raw_class_count <= 32'b0;
             sb_store_data_raw_class_count <= 32'b0;
             sb_can_bypass_with_ready_issue_count <= 32'b0;
@@ -607,6 +625,44 @@ end
             sb_branch_wait_raw_class_count <= sb_branch_wait_raw_class_count +
                 ((u_dut.scoreboard_stall &&
                   u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP]) ? 32'd1 : 32'd0);
+            sb_branch_wait_ctrl_block_count <= sb_branch_wait_ctrl_block_count +
+                ((u_dut.scoreboard_stall &&
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.rn_real_ctrl_block) ? 32'd1 : 32'd0);
+            sb_branch_wait_ctrl_src_count <= sb_branch_wait_ctrl_src_count +
+                ((u_dut.scoreboard_stall &&
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  ((u_dut.id_ctrl_rs1_ren & !u_dut.rn_real_ctrl_rs1_ready) |
+                   (u_dut.id_ctrl_rs2_ren & !u_dut.rn_real_ctrl_rs2_ready))) ? 32'd1 : 32'd0);
+            sb_branch_wait_ctrl_order_count <= sb_branch_wait_ctrl_order_count +
+                ((u_dut.scoreboard_stall &&
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.rn_real_ctrl_older_rob_block) ? 32'd1 : 32'd0);
+            sb_branch_wait_rs1_pending_count <= sb_branch_wait_rs1_pending_count +
+                ((u_dut.scoreboard_stall &&
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.rs1_pending_stall_eff) ? 32'd1 : 32'd0);
+            sb_branch_wait_rs2_pending_count <= sb_branch_wait_rs2_pending_count +
+                ((u_dut.scoreboard_stall &&
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.rs2_pending_stall_eff) ? 32'd1 : 32'd0);
+            sb_branch_wait_issue_rs1_count <= sb_branch_wait_issue_rs1_count +
+                ((u_dut.scoreboard_stall &&
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.rs1_issue_hzd) ? 32'd1 : 32'd0);
+            sb_branch_wait_issue_rs2_count <= sb_branch_wait_issue_rs2_count +
+                ((u_dut.scoreboard_stall &&
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.rs2_issue_hzd) ? 32'd1 : 32'd0);
+            sb_branch_wait_rd_waw_count <= sb_branch_wait_rd_waw_count +
+                ((u_dut.scoreboard_stall &&
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.rd_waw_stall) ? 32'd1 : 32'd0);
+            sb_branch_wait_pipe1_hzd_count <= sb_branch_wait_pipe1_hzd_count +
+                ((u_dut.scoreboard_stall &&
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  (u_dut.pipe1_issue_rs1_hzd | u_dut.pipe1_issue_rs2_hzd |
+                   u_dut.pipe1_issue_rd_hzd)) ? 32'd1 : 32'd0);
             sb_store_addr_raw_class_count <= sb_store_addr_raw_class_count +
                 ((u_dut.scoreboard_stall &&
                   u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
@@ -1019,6 +1075,17 @@ end
                 sb_store_data_raw_class_count,
                 sb_can_bypass_with_ready_issue_count,
                 sb_must_stall_in_order_count);
+            $display("PERF_BRANCH_STALL_SPLIT: TOTAL=%-d CTRL_BLOCK=%-d CTRL_SRC=%-d CTRL_ORDER=%-d RS1_PENDING=%-d RS2_PENDING=%-d ISSUE_RS1=%-d ISSUE_RS2=%-d RD_WAW=%-d PIPE1_HZD=%-d",
+                sb_branch_wait_raw_class_count,
+                sb_branch_wait_ctrl_block_count,
+                sb_branch_wait_ctrl_src_count,
+                sb_branch_wait_ctrl_order_count,
+                sb_branch_wait_rs1_pending_count,
+                sb_branch_wait_rs2_pending_count,
+                sb_branch_wait_issue_rs1_count,
+                sb_branch_wait_issue_rs2_count,
+                sb_branch_wait_rd_waw_count,
+                sb_branch_wait_pipe1_hzd_count);
             $display("PERF_PHASE4A_ALU_STABLE: RAW_READY_NEXT=%-d STABLE_SLOT_HIT=%-d RS1_BYPASS=%-d RS2_BYPASS=%-d",
                 p4a_raw_ready_next_count,
                 p4a_alu_stable_slot_hit_count,
