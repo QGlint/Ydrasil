@@ -1108,12 +1108,28 @@ import ydrasil_pkg::*;
 		id_ctrl_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] &
 		rn_real_pipe1_older_uncommitted &
 		!rn_real_ctrl_at_head;
+	wire rn_real_ctrl_rs1_legacy_fwd =
+		(wb_hzd_valid_q & id_ctrl_rs1_ren & (id_ctrl_rs1_addr != '0) &
+		 (id_ctrl_rs1_addr == wb_hzd_addr_q)) |
+		(lsu_fast_fwd_valid & id_ctrl_rs1_ren & (id_ctrl_rs1_addr != '0) &
+		 (id_ctrl_rs1_addr == lsu_rf_waddr_rd)) |
+		(alu_rf_wen_rd & id_ctrl_rs1_ren & (id_ctrl_rs1_addr != '0) &
+		 (id_ctrl_rs1_addr == alu_rf_waddr_rd));
+	wire rn_real_ctrl_rs2_legacy_fwd =
+		(wb_hzd_valid_q & id_ctrl_rs2_ren & (id_ctrl_rs2_addr != '0) &
+		 (id_ctrl_rs2_addr == wb_hzd_addr_q)) |
+		(lsu_fast_fwd_valid & id_ctrl_rs2_ren & (id_ctrl_rs2_addr != '0) &
+		 (id_ctrl_rs2_addr == lsu_rf_waddr_rd)) |
+		(alu_rf_wen_rd & id_ctrl_rs2_ren & (id_ctrl_rs2_addr != '0) &
+		 (id_ctrl_rs2_addr == alu_rf_waddr_rd));
 	wire rn_real_ctrl_rs1_legacy_ready =
 		!id_ctrl_rs1_ren | (id_ctrl_rs1_addr == '0) |
-		!gpr_pending_q[id_ctrl_rs1_addr];
+		!gpr_pending_q[id_ctrl_rs1_addr] |
+		rn_real_ctrl_rs1_legacy_fwd;
 	wire rn_real_ctrl_rs2_legacy_ready =
 		!id_ctrl_rs2_ren | (id_ctrl_rs2_addr == '0) |
-		!gpr_pending_q[id_ctrl_rs2_addr];
+		!gpr_pending_q[id_ctrl_rs2_addr] |
+		rn_real_ctrl_rs2_legacy_fwd;
 	wire rn_real_ctrl_rs1_block =
 		id_ctrl_rs1_ren & !rn_real_ctrl_rs1_ready &
 		!rn_real_ctrl_rs1_legacy_ready;
