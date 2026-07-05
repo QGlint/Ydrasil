@@ -42,6 +42,10 @@ import ydrasil_pkg::*;
     input  wire                            pipe1_alu_fwd_valid_i,
     input  wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] pipe1_alu_fwd_addr_i,
     input  wire [DATA_WIDTH-1:0]           pipe1_alu_fwd_data_i,
+    input  wire                            prf_rs1_ready_i,
+    input  wire                            prf_rs2_ready_i,
+    input  wire [DATA_WIDTH-1:0]           prf_rs1_data_i,
+    input  wire [DATA_WIDTH-1:0]           prf_rs2_data_i,
     input  wire                            rs1_issue_alu_ready_next_i,
     input  wire                            rs2_issue_alu_ready_next_i,
 `ifndef SYNTHESIS
@@ -1011,18 +1015,44 @@ import ydrasil_pkg::*;
 `else
     wire [DATA_WIDTH-1:0] issue_alu_stable_data = '0;
 `endif
+    wire selected_prf_operand_allowed =
+        selected_operator_type[ydrasil_pkg::OPERATOR_TYPE_ALU] &&
+        !selected_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+        !selected_operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
+        !selected_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
+        !selected_operator_type[ydrasil_pkg::OPERATOR_TYPE_CSR] &&
+        !selected_operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS] &&
+        !selected_operator_type[ydrasil_pkg::OPERATOR_TYPE_MUL] &&
+        !selected_operator_type[ydrasil_pkg::OPERATOR_TYPE_BITMANIP];
+    wire selected_prf_rs1_allowed =
+        selected_prf_operand_allowed &&
+        selected_rf_ren_rs1 &&
+        (selected_rf_raddr_rs1 != '0) &&
+        gpr_pending_i[selected_rf_raddr_rs1] &&
+        !(selected_rf_wen_rd && (selected_rf_waddr_rd != '0) &&
+          selected_rf_ren_rs1 && (selected_rf_waddr_rd == selected_rf_raddr_rs1));
+    wire selected_prf_rs2_allowed =
+        selected_prf_operand_allowed &&
+        (selected_rf_ren_rs2 | selected_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
+        (selected_rf_raddr_rs2 != '0) &&
+        gpr_pending_i[selected_rf_raddr_rs2] &&
+        !(selected_rf_wen_rd && (selected_rf_waddr_rd != '0) &&
+          (selected_rf_ren_rs2 | selected_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
+          (selected_rf_waddr_rd == selected_rf_raddr_rs2));
     wire [DATA_WIDTH-1:0] issue_rs1_data =
         rs1_lsu_fwd ? lsu_fwd_data_i :
         rs1_stable_fwd ? issue_alu_stable_data :
         rs1_alu_fwd ? alu_fwd_data_i :
         rs1_p1alu_fwd ? pipe1_alu_fwd_data_i :
-        rs1_wb_fwd  ? wb_fwd_data_i  : rf_rdata_rs1_i;
+        rs1_wb_fwd  ? wb_fwd_data_i  :
+        (!issue_slot1_bypass_fire && selected_prf_rs1_allowed && prf_rs1_ready_i) ? prf_rs1_data_i : rf_rdata_rs1_i;
     wire [DATA_WIDTH-1:0] issue_rs2_data =
         rs2_lsu_fwd ? lsu_fwd_data_i :
         rs2_stable_fwd ? issue_alu_stable_data :
         rs2_alu_fwd ? alu_fwd_data_i :
         rs2_p1alu_fwd ? pipe1_alu_fwd_data_i :
-        rs2_wb_fwd  ? wb_fwd_data_i  : rf_rdata_rs2_i;
+        rs2_wb_fwd  ? wb_fwd_data_i  :
+        (!issue_slot1_bypass_fire && selected_prf_rs2_allowed && prf_rs2_ready_i) ? prf_rs2_data_i : rf_rdata_rs2_i;
 
     assign operand_a     =  selected_operand_a_pc_sel ? selected_pc :
                             selected_operand_a_imm_sel ? selected_imm : issue_rs1_data;
