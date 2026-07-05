@@ -746,6 +746,12 @@ import ydrasil_pkg::*;
     reg [31:0]                       perf_uopq_p1_block_raw_older;
     reg [31:0]                       perf_uopq_p1_block_waw_older;
     reg [31:0]                       perf_uopq_p1_block_commit_order;
+    reg [31:0]                       perf_uopq_p1_block_p0_bjp;
+    reg [31:0]                       perf_uopq_p1_block_p0_load;
+    reg [31:0]                       perf_uopq_p1_block_p0_store;
+    reg [31:0]                       perf_uopq_p1_block_p0_csr_sys;
+    reg [31:0]                       perf_uopq_p1_block_p0_bitmanip;
+    reg [31:0]                       perf_uopq_p1_block_p0_other;
 `endif
 
 `ifndef SYNTHESIS
@@ -2233,6 +2239,12 @@ import ydrasil_pkg::*;
             perf_uopq_p1_block_raw_older <= '0;
             perf_uopq_p1_block_waw_older <= '0;
             perf_uopq_p1_block_commit_order <= '0;
+            perf_uopq_p1_block_p0_bjp <= '0;
+            perf_uopq_p1_block_p0_load <= '0;
+            perf_uopq_p1_block_p0_store <= '0;
+            perf_uopq_p1_block_p0_csr_sys <= '0;
+            perf_uopq_p1_block_p0_bitmanip <= '0;
+            perf_uopq_p1_block_p0_other <= '0;
 `endif
         end else begin
             if (flush_id_i) begin
@@ -3042,6 +3054,38 @@ import ydrasil_pkg::*;
             perf_uopq_p1_block_commit_order <= perf_uopq_p1_block_commit_order +
                 ((issue_valid_ff && id_advance && issue_wait_block &&
                   pipe1_uopq1_safe && !pipe1_resbuf_full_i) ? 32'd1 : 32'd0);
+            perf_uopq_p1_block_p0_bjp <= perf_uopq_p1_block_p0_bjp +
+                (((pipe1_uopq1_supported | pipe1_uopq2_supported) &&
+                  !pipe1_dual_pipe0_safe &&
+                  uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP]) ? 32'd1 : 32'd0);
+            perf_uopq_p1_block_p0_load <= perf_uopq_p1_block_p0_load +
+                (((pipe1_uopq1_supported | pipe1_uopq2_supported) &&
+                  !pipe1_dual_pipe0_safe &&
+                  uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD]) ? 32'd1 : 32'd0);
+            perf_uopq_p1_block_p0_store <= perf_uopq_p1_block_p0_store +
+                (((pipe1_uopq1_supported | pipe1_uopq2_supported) &&
+                  !pipe1_dual_pipe0_safe &&
+                  uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE]) ? 32'd1 : 32'd0);
+            perf_uopq_p1_block_p0_csr_sys <= perf_uopq_p1_block_p0_csr_sys +
+                (((pipe1_uopq1_supported | pipe1_uopq2_supported) &&
+                  !pipe1_dual_pipe0_safe &&
+                  (uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_CSR] |
+                   uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS] |
+                   uopq0_fence_i)) ? 32'd1 : 32'd0);
+            perf_uopq_p1_block_p0_bitmanip <= perf_uopq_p1_block_p0_bitmanip +
+                (((pipe1_uopq1_supported | pipe1_uopq2_supported) &&
+                  !pipe1_dual_pipe0_safe &&
+                  uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_BITMANIP]) ? 32'd1 : 32'd0);
+            perf_uopq_p1_block_p0_other <= perf_uopq_p1_block_p0_other +
+                (((pipe1_uopq1_supported | pipe1_uopq2_supported) &&
+                  !pipe1_dual_pipe0_safe &&
+                  !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
+                  !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
+                  !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_CSR] &&
+                  !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS] &&
+                  !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_BITMANIP] &&
+                  !uopq0_fence_i) ? 32'd1 : 32'd0);
 `endif
         end
     end

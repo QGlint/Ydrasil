@@ -1182,6 +1182,13 @@ end
                 u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_raw_older,
                 u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_waw_older,
                 u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_commit_order);
+            $display("PERF_UOPQ_P0_BLOCK_SPLIT: BJP=%-d LOAD=%-d STORE=%-d CSR_SYS_FENCE=%-d BITMANIP=%-d OTHER=%-d",
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_p0_bjp,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_p0_load,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_p0_store,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_p0_csr_sys,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_p0_bitmanip,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_p0_other);
             $display("PERF_RENAME_SHADOW: RN_SHADOW_RAW_WB_CAN_REMOVE=%-d RN_SHADOW_WAW_CAN_REMOVE=%-d RN_SHADOW_WAR_CAN_REMOVE=%-d RN_SHADOW_PIPE1_WHEN_P0_BLOCKED_CAN_FIRE=%-d RN_SHADOW_FREE_PREG_MIN=%-d",
                 u_dut.perf_rn_shadow_raw_wb_can_remove,
                 u_dut.perf_rn_shadow_waw_can_remove,
