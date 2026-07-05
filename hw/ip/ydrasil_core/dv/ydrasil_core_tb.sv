@@ -321,6 +321,20 @@ end
     reg [31:0] p4c_branch_ready_next_bypass_count;
     reg [31:0] p4c_branch_rs1_ready_next_bypass_count;
     reg [31:0] p4c_branch_rs2_ready_next_bypass_count;
+    reg [31:0] mul_result_valid_count;
+    reg [31:0] mul_wb_complete_count;
+    reg [31:0] mul_wb_current_count;
+    reg [31:0] mul_wb_fifo_count;
+    reg [31:0] mul_wb_enqueue_count;
+    reg [31:0] mul_wb_wait_cycles_count;
+    reg [31:0] mul_wb_block_lsu_count;
+    reg [31:0] mul_wb_block_alu_count;
+    reg [31:0] mul_wb_block_p1_count;
+    reg [31:0] mul_wb_max_occ_count;
+    reg [31:0] mul_head_wait_count;
+    reg [31:0] mul_head_wait_fifo_nonempty_count;
+    reg [31:0] mul_head_wait_result_valid_count;
+    reg [31:0] mul_head_wait_wb_complete_count;
 
 	ydrasil_core u_dut (
 		.clk      (clk),
@@ -568,6 +582,20 @@ end
             p4c_branch_ready_next_bypass_count <= 32'b0;
             p4c_branch_rs1_ready_next_bypass_count <= 32'b0;
             p4c_branch_rs2_ready_next_bypass_count <= 32'b0;
+            mul_result_valid_count <= 32'b0;
+            mul_wb_complete_count <= 32'b0;
+            mul_wb_current_count <= 32'b0;
+            mul_wb_fifo_count <= 32'b0;
+            mul_wb_enqueue_count <= 32'b0;
+            mul_wb_wait_cycles_count <= 32'b0;
+            mul_wb_block_lsu_count <= 32'b0;
+            mul_wb_block_alu_count <= 32'b0;
+            mul_wb_block_p1_count <= 32'b0;
+            mul_wb_max_occ_count <= 32'b0;
+            mul_head_wait_count <= 32'b0;
+            mul_head_wait_fifo_nonempty_count <= 32'b0;
+            mul_head_wait_result_valid_count <= 32'b0;
+            mul_head_wait_wb_complete_count <= 32'b0;
         end else begin
             last_pc     <= pc;
             if (bp_branch_valid) begin
@@ -697,6 +725,44 @@ end
                   !u_dut.id_ctrl_operator_type[ydrasil_pkg::OPERATOR_TYPE_MUL]) ? 32'd1 : 32'd0);
             p4b_wb_buf_valid_count <= p4b_wb_buf_valid_count +
                 (u_dut.wb_buf_fwd_valid ? 32'd1 : 32'd0);
+            mul_result_valid_count <= mul_result_valid_count +
+                (u_dut.mul_result_valid ? 32'd1 : 32'd0);
+            mul_wb_complete_count <= mul_wb_complete_count +
+                (u_dut.wb_mul_complete ? 32'd1 : 32'd0);
+            mul_wb_current_count <= mul_wb_current_count +
+                (u_dut.u_ydrasil_wb_stage.sel_mul_current ? 32'd1 : 32'd0);
+            mul_wb_fifo_count <= mul_wb_fifo_count +
+                (u_dut.u_ydrasil_wb_stage.sel_mul_fifo ? 32'd1 : 32'd0);
+            mul_wb_enqueue_count <= mul_wb_enqueue_count +
+                (u_dut.u_ydrasil_wb_stage.mul_enqueue_accept ? 32'd1 : 32'd0);
+            mul_wb_wait_cycles_count <= mul_wb_wait_cycles_count +
+                (!u_dut.u_ydrasil_wb_stage.mul_fifo_empty ? 32'd1 : 32'd0);
+            mul_wb_block_lsu_count <= mul_wb_block_lsu_count +
+                ((u_dut.u_ydrasil_wb_stage.mul_enqueue &&
+                  u_dut.u_ydrasil_wb_stage.sel_lsu) ? 32'd1 : 32'd0);
+            mul_wb_block_alu_count <= mul_wb_block_alu_count +
+                ((u_dut.u_ydrasil_wb_stage.mul_enqueue &&
+                  (u_dut.u_ydrasil_wb_stage.sel_alu_fifo |
+                   u_dut.u_ydrasil_wb_stage.sel_alu_current)) ? 32'd1 : 32'd0);
+            mul_wb_block_p1_count <= mul_wb_block_p1_count +
+                ((u_dut.u_ydrasil_wb_stage.mul_enqueue &&
+                  (u_dut.u_ydrasil_wb_stage.sel_p1_fifo |
+                   u_dut.u_ydrasil_wb_stage.sel_p1_current)) ? 32'd1 : 32'd0);
+            if ({27'b0, u_dut.u_ydrasil_wb_stage.mul_fifo_count_q} > mul_wb_max_occ_count) begin
+                mul_wb_max_occ_count <= {27'b0, u_dut.u_ydrasil_wb_stage.mul_fifo_count_q};
+            end
+            if ((u_dut.rn_shadow_rob_occ_q != '0) &&
+                u_dut.rn_shadow_rob_valid_q[u_dut.rn_shadow_rob_head_q] &&
+                !u_dut.rn_shadow_rob_ready_q[u_dut.rn_shadow_rob_head_q] &&
+                (u_dut.rn_shadow_rob_producer_q[u_dut.rn_shadow_rob_head_q] == 3'd3)) begin
+                mul_head_wait_count <= mul_head_wait_count + 32'd1;
+                mul_head_wait_fifo_nonempty_count <= mul_head_wait_fifo_nonempty_count +
+                    (!u_dut.u_ydrasil_wb_stage.mul_fifo_empty ? 32'd1 : 32'd0);
+                mul_head_wait_result_valid_count <= mul_head_wait_result_valid_count +
+                    (u_dut.mul_result_valid ? 32'd1 : 32'd0);
+                mul_head_wait_wb_complete_count <= mul_head_wait_wb_complete_count +
+                    (u_dut.wb_mul_complete ? 32'd1 : 32'd0);
+            end
             p4b_rs1_pending_hit_count <= p4b_rs1_pending_hit_count +
                 ((u_dut.wb_buf_fwd_valid &&
                   u_dut.id_ctrl_rs1_ren &&
@@ -1787,6 +1853,22 @@ end
                 u_dut.u_ydrasil_wb_stage.perf_p1_wb_wait_cycles,
                 u_dut.u_ydrasil_wb_stage.perf_p1_wb_max_occ,
                 u_dut.u_ydrasil_wb_stage.perf_p1_wb_order_fix);
+            $display("PERF_MUL_WB: RESULT_VALID=%-d WB_COMPLETE=%-d CURRENT=%-d FIFO=%-d ENQUEUE=%-d WAIT_CYCLES=%-d MAX_OCC=%-d BLOCK_LSU=%-d BLOCK_ALU=%-d BLOCK_P1=%-d",
+                mul_result_valid_count,
+                mul_wb_complete_count,
+                mul_wb_current_count,
+                mul_wb_fifo_count,
+                mul_wb_enqueue_count,
+                mul_wb_wait_cycles_count,
+                mul_wb_max_occ_count,
+                mul_wb_block_lsu_count,
+                mul_wb_block_alu_count,
+                mul_wb_block_p1_count);
+            $display("PERF_MUL_HEAD_WAIT_DETAIL: HEAD_WAIT=%-d FIFO_NONEMPTY=%-d RESULT_VALID=%-d WB_COMPLETE=%-d",
+                mul_head_wait_count,
+                mul_head_wait_fifo_nonempty_count,
+                mul_head_wait_result_valid_count,
+                mul_head_wait_wb_complete_count);
             $display("PERF_DUAL_GAIN: CYCLES_WITH_PAIR_FIRE=%-d EXTRA_INSTRET_PIPE1=%-d PIPE1_USEFUL_COMMIT=%-d PIPE1_SQUASHED=%-d",
                 u_dut.u_ydrasil_id_stage.perf_dual_cycles_with_pair_fire,
                 u_dut.u_ydrasil_id_stage.perf_dual_extra_instret_pipe1,
