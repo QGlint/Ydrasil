@@ -792,11 +792,15 @@ end
                 bp_correct_not_taken_count);
             $display("~~~~~~~~~~~~~~~The final x3 Reg value: %d ~~~~~~~~~~~~~", x3);
             $display("~~~~~~~~~~~~~~~RISCV tohost value: 0x%08h ~~~~~~~~~~~~~", perip_wdata);
+            $display("RISCV_TEST_TOHOST_WRITE: addr=0x%08h data=0x%08h mask=0x%1h pc=0x%08h",
+                perip_addr, perip_wdata, perip_mask, pc);
             $display("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
 
             if (perip_wdata == 32'h1) begin
+                $display("RISCV_TEST_PASS: tohost=0x%08h", perip_wdata);
                 $display("~~~~~~~~~~~~~~~~~~~ TEST_PASS ~~~~~~~~~~~~~~~~~~~");
             end else begin
+                $display("RISCV_TEST_FAIL: tohost=0x%08h", perip_wdata);
                 $display("~~~~~~~~~~~~~~~~~~~ TEST_FAIL ~~~~~~~~~~~~~~~~~~~~");
                 $display("fail tohost = 0x%08h", perip_wdata);
                 for (r = 0; r < 32; r = r + 1) $display("x%2d = 0x%x", r, u_dut.u_ydrasil_registers.registers[r]);

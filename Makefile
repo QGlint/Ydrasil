@@ -230,13 +230,16 @@ coremark_sim: coremark comp
 		COMPARE_SIM_EXTRA_DEFINES="+cpp_timeout=10000000 +sv_timeout=10000000"; \
 	rc=$$?; \
 	$(MAKE) --no-print-directory coremark_result; \
-	exit $$rc
+	result_rc=$$?; \
+	if [ $$rc -ne 0 ]; then exit $$rc; fi; \
+	exit $$result_rc
 
 coremark_run: coremark_sim
 
 coremark_result:
 	@mkdir -p "$(PPA_DIR)"; \
 	rm -f "$(PPA_COREMARK_LOG)"; \
+	coremark_valid=0; \
 	if [ -f "$(COREMARK_RESULT_LOG)" ]; then \
 		echo "[COREMARK] Result from $(COREMARK_RESULT_LOG)" | tee -a "$(PPA_COREMARK_LOG)"; \
 		if grep -Eq '^(CoreMark Size|Total ticks|Total time \(secs\)|Iterations       |Compiler version|Compiler flags|Memory location|seedcrc|Correct operation validated|Errors detected|ERROR!|COREMARK DONE|PERF_[A-Z0-9_]+:|\[[0-9]+\]crc)' "$(COREMARK_RESULT_LOG)"; then \
@@ -265,12 +268,18 @@ coremark_result:
 						printf("COREMARK_SIM_PERF_SCORE: ITERATIONS_PER_SEC_BY_CYCLES=%.6f COREMARK_PER_MHZ_BY_CYCLES=%.6f\n", ips_cycles, ips_cycles / (hz / 1000000.0)); \
 					} \
 				}' "$(COREMARK_RESULT_LOG)" | tee -a "$(PPA_COREMARK_LOG)"; \
+			if grep -q '^Correct operation validated\.' "$(COREMARK_RESULT_LOG)" && ! grep -Eq '^(Errors detected|ERROR!)' "$(COREMARK_RESULT_LOG)"; then \
+				coremark_valid=1; \
+			else \
+				echo "[COREMARK] Missing successful validation line or error found in $(COREMARK_RESULT_LOG)" | tee -a "$(PPA_COREMARK_LOG)"; \
+			fi; \
 		else \
 			echo "[COREMARK] No CoreMark result lines found in $(COREMARK_RESULT_LOG)" | tee -a "$(PPA_COREMARK_LOG)"; \
 		fi; \
 	else \
 		echo "[COREMARK] HW log not found: $(COREMARK_RESULT_LOG)" | tee -a "$(PPA_COREMARK_LOG)"; \
-	fi
+	fi; \
+	if [ $$coremark_valid -eq 1 ]; then exit 0; else exit 1; fi
 
 coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map:
 	@$(MAKE) -C sw $@ $(COREMARK_SW_MAKE_ARGS)
