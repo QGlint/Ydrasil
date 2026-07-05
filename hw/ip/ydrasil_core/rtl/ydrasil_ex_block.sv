@@ -25,12 +25,14 @@ import ydrasil_pkg::*;
     input  wire                            id_ex_pred_l0_taken_i,
     input  wire [REGS_ADDR_WIDTH-1:0]      id_rf_waddr_rd_i,
     input  wire                            id_alu_rf_wen_rd_i,
+    input  wire [5:0]                      id_rn_pdst_i,
     input  wire                            pipe1_issue_valid_i,
     input  wire [DATA_WIDTH-1:0]           pipe1_operand_a_i,
     input  wire [DATA_WIDTH-1:0]           pipe1_operand_b_i,
     input  wire [OPERATOR_WIDTH-1:0]       pipe1_operator_i,
     input  wire                            pipe1_rf_wen_rd_i,
     input  wire [REGS_ADDR_WIDTH-1:0]      pipe1_rf_waddr_rd_i,
+    input  wire [5:0]                      pipe1_rn_pdst_i,
     input  wire                            interrupt_i,
     input  wire [INST_ADDR_WIDTH-1:0]      clint_ex_int_addr_i,
 
@@ -60,9 +62,11 @@ import ydrasil_pkg::*;
     output wire [REGS_DATA_WIDTH-1:0]      alu_result_o,
     output wire                            alu_rf_wen_rd_o,
     output wire [REGS_ADDR_WIDTH-1:0]      alu_rf_waddr_rd_o,
+    output wire [5:0]                      alu_rn_pdst_o,
     output wire [REGS_DATA_WIDTH-1:0]      pipe1_alu_result_o,
     output wire                            pipe1_alu_rf_wen_rd_o,
     output wire [REGS_ADDR_WIDTH-1:0]      pipe1_alu_rf_waddr_rd_o,
+    output wire [5:0]                      pipe1_alu_rn_pdst_o,
     output wire                            pipe1_instret_inc_o,
 
     output wire                            mul_issue_o,
@@ -163,9 +167,11 @@ import ydrasil_pkg::*;
     reg [REGS_DATA_WIDTH-1:0] alu_result_ff;
     reg                       alu_rf_wen_rd_ff;
     reg [REGS_ADDR_WIDTH-1:0] alu_rf_waddr_rd_ff;
+    reg [5:0]                 alu_rn_pdst_ff;
     reg [REGS_DATA_WIDTH-1:0] pipe1_alu_result_ff;
     reg                       pipe1_alu_rf_wen_rd_ff;
     reg [REGS_ADDR_WIDTH-1:0] pipe1_alu_rf_waddr_rd_ff;
+    reg [5:0]                 pipe1_alu_rn_pdst_ff;
     reg                       pipe1_instret_inc_ff;
 
     wire [31:0] operand_a;
@@ -488,9 +494,11 @@ import ydrasil_pkg::*;
     assign alu_result_o = alu_result_ff;
     assign alu_rf_wen_rd_o = alu_rf_wen_rd_ff;
     assign alu_rf_waddr_rd_o = alu_rf_waddr_rd_ff;
+    assign alu_rn_pdst_o = alu_rn_pdst_ff;
     assign pipe1_alu_result_o = pipe1_alu_result_ff;
     assign pipe1_alu_rf_wen_rd_o = pipe1_alu_rf_wen_rd_ff;
     assign pipe1_alu_rf_waddr_rd_o = pipe1_alu_rf_waddr_rd_ff;
+    assign pipe1_alu_rn_pdst_o = pipe1_alu_rn_pdst_ff;
     assign pipe1_instret_inc_o = pipe1_instret_inc_ff;
 
     always_ff @(posedge clk or negedge rst_n) begin
@@ -498,9 +506,11 @@ import ydrasil_pkg::*;
             alu_result_ff       <= '0;
             alu_rf_wen_rd_ff    <= 1'b0;
             alu_rf_waddr_rd_ff  <= '0;
+            alu_rn_pdst_ff      <= '0;
             pipe1_alu_result_ff <= '0;
             pipe1_alu_rf_wen_rd_ff <= 1'b0;
             pipe1_alu_rf_waddr_rd_ff <= '0;
+            pipe1_alu_rn_pdst_ff <= '0;
             pipe1_instret_inc_ff <= 1'b0;
             ex_csr_wdata_o_ff   <= '0;
             ex_csr_wen_o_ff     <= 1'b0;
@@ -509,9 +519,11 @@ import ydrasil_pkg::*;
             alu_result_ff       <= '0;
             alu_rf_wen_rd_ff    <= 1'b0;
             alu_rf_waddr_rd_ff  <= '0;
+            alu_rn_pdst_ff      <= '0;
             pipe1_alu_result_ff <= '0;
             pipe1_alu_rf_wen_rd_ff <= 1'b0;
             pipe1_alu_rf_waddr_rd_ff <= '0;
+            pipe1_alu_rn_pdst_ff <= '0;
             pipe1_instret_inc_ff <= 1'b0;
             ex_csr_wdata_o_ff   <= '0;
             ex_csr_wen_o_ff     <= 1'b0;
@@ -521,17 +533,20 @@ import ydrasil_pkg::*;
                                   slow_result_wen ? slow_result : alu_result;
             alu_rf_wen_rd_ff   <= ex_rf_wen_rd;
             alu_rf_waddr_rd_ff <= div_rf_wen_rd ? id_rf_waddr_rd_i : alu_rf_waddr_rd;
+            alu_rn_pdst_ff     <= id_rn_pdst_i;
 `ifdef YDRASIL_ENABLE_PIPE1_REAL
             pipe1_alu_result_ff <= pipe1_alu_result;
             pipe1_alu_rf_wen_rd_ff <=
                 pipe1_issue_valid_i & pipe1_rf_wen_rd_i &
                 (pipe1_rf_waddr_rd_i != '0) & !interrupt_i & !flush_ex_i;
             pipe1_alu_rf_waddr_rd_ff <= pipe1_rf_waddr_rd_i;
+            pipe1_alu_rn_pdst_ff <= pipe1_rn_pdst_i;
             pipe1_instret_inc_ff <= pipe1_issue_valid_i & !interrupt_i & !flush_ex_i;
 `else
             pipe1_alu_result_ff <= '0;
             pipe1_alu_rf_wen_rd_ff <= 1'b0;
             pipe1_alu_rf_waddr_rd_ff <= '0;
+            pipe1_alu_rn_pdst_ff <= '0;
             pipe1_instret_inc_ff <= 1'b0;
 `endif
             ex_csr_wdata_o_ff  <= csr_wdata;
