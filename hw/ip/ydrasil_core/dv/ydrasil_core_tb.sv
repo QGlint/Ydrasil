@@ -769,14 +769,29 @@ end
     task automatic print_perf_metrics;
         real perf_ipc;
         real perf_bp_accuracy;
+        real perf_cycles_real;
         begin
             perf_ipc = (instruction_count > 0 && cycle_count > 0) ?
                 (instruction_count * 1.0) / cycle_count : 0.0;
             perf_bp_accuracy = (bp_branch_count > 0) ?
                 ((bp_branch_count - bp_mispredict_count) * 100.0) / bp_branch_count : 0.0;
+            perf_cycles_real = (cycle_count > 0) ? (cycle_count * 1.0) : 1.0;
 
             $display("PERF_METRIC: CYCLES=%-d INSTS=%-d IPC=%.4f",
                 cycle_count, instruction_count, perf_ipc);
+            $display("PERF_CSR_INSTRET: CSR_INSTRET_DELTA0=%-d CSR_INSTRET_DELTA1=%-d CSR_INSTRET_DELTA2=%-d CSR_INSTRET_TOTAL_DELTA=%-d CSR_INSTRET_READ_VALUE=%-d",
+                u_dut.u_ydrasil_registers_csr.perf_csr_instret_delta0,
+                u_dut.u_ydrasil_registers_csr.perf_csr_instret_delta1,
+                u_dut.u_ydrasil_registers_csr.perf_csr_instret_delta2,
+                u_dut.u_ydrasil_registers_csr.perf_csr_instret_total_delta,
+                instruction_count);
+            $display("PERF_RATIO: IPC=%.4f SCOREBOARD_CYC_PCT=%.4f SB_RAW_WB_WAIT_CYC_PCT=%.4f SB_BRANCH_WAIT_RAW_CYC_PCT=%.4f SB_RAW_LOAD_WAIT_CYC_PCT=%.4f RI_SLOT1_FIRE_BLOCKED_BY_WB_ORDER_CYC_PCT=%.4f",
+                perf_ipc,
+                (stall_scoreboard_count * 100.0) / perf_cycles_real,
+                (sb_raw_wb_wait_count * 100.0) / perf_cycles_real,
+                (sb_branch_wait_raw_class_count * 100.0) / perf_cycles_real,
+                (sb_raw_load_wait_count * 100.0) / perf_cycles_real,
+                (u_dut.u_ydrasil_id_stage.perf_ri_slot1_fire_blocked_by_wb_order * 100.0) / perf_cycles_real);
             $display("PERF_STALL: SCOREBOARD=%-d LSU_STRUCT=%-d WB_BACKPRESSURE=%-d CLINT=%-d MUL_DIV=%-d",
                 stall_scoreboard_count,
                 stall_lsu_struct_count,
@@ -915,6 +930,11 @@ end
                 32'd0,
                 32'd0,
                 32'd0);
+            $display("PERF_ALU_RATIO: ALU0_ISSUE_CYC_PCT=%.4f ALU1_ISSUE_CYC_PCT=%.4f DI_PAIR_CYC_PCT=%.4f PIPE1_BLOCKED_P0_FIRE_CYC_PCT=%.4f",
+                (u_dut.u_ydrasil_id_stage.perf_di_pipe0_fire * 100.0) / perf_cycles_real,
+                (u_dut.u_ydrasil_id_stage.perf_di_pipe1_fire * 100.0) / perf_cycles_real,
+                (u_dut.u_ydrasil_id_stage.perf_di_pair_fire * 100.0) / perf_cycles_real,
+                (u_dut.u_ydrasil_id_stage.perf_uopq_p1_fire_when_p0_blocked * 100.0) / perf_cycles_real);
             $display("PERF_DUAL_SHADOW: DS_CYCLES=%-d DS_PIPE0_VALID=%-d DS_PIPE0_READY=%-d DS_PIPE1_VALID=%-d DS_PIPE1_SIMPLE_ALU=%-d DS_SAFE_CANDIDATE=%-d DS_SAFE_WHEN_PIPE0_READY=%-d DS_SAFE_WHEN_PIPE0_BLOCKED=%-d DS_BLOCK_PIPE1_UNSUPPORTED=%-d DS_BLOCK_RAW_PIPE0=%-d DS_BLOCK_WAW_PIPE0=%-d DS_BLOCK_PENDING_RS1=%-d DS_BLOCK_PENDING_RS2=%-d DS_BLOCK_CTRL=%-d DS_BLOCK_MEM=%-d DS_BLOCK_CSR_SYS=%-d DS_BLOCK_FLUSH=%-d DS_BLOCK_WB_PORT=%-d DS_BLOCK_FORWARD_COMPLEX=%-d",
                 u_dut.u_ydrasil_id_stage.perf_ds_cycles,
                 u_dut.u_ydrasil_id_stage.perf_ds_pipe0_valid,
@@ -965,6 +985,84 @@ end
                 u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_raw_older,
                 u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_waw_older,
                 u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_commit_order);
+            $display("PERF_RENAME_SHADOW: RN_SHADOW_RAW_WB_CAN_REMOVE=%-d RN_SHADOW_WAW_CAN_REMOVE=%-d RN_SHADOW_WAR_CAN_REMOVE=%-d RN_SHADOW_PIPE1_WHEN_P0_BLOCKED_CAN_FIRE=%-d RN_SHADOW_FREE_PREG_MIN=%-d",
+                u_dut.perf_rn_shadow_raw_wb_can_remove,
+                u_dut.perf_rn_shadow_waw_can_remove,
+                u_dut.perf_rn_shadow_war_can_remove,
+                u_dut.u_ydrasil_id_stage.perf_ds_safe_when_pipe0_blocked,
+                u_dut.perf_rn_free_min);
+            $display("PERF_RENAME_SHADOW_SPLIT: RAW_WB_CAN_REMOVE_ALU_READY=%-d RAW_WB_CAN_REMOVE_P1_READY=%-d RAW_WB_CAN_REMOVE_LSU_READY=%-d RAW_WB_CAN_REMOVE_MUL_READY=%-d RAW_WB_FALSE_POSITIVE=%-d",
+                u_dut.perf_raw_wb_can_remove_alu_ready,
+                u_dut.perf_raw_wb_can_remove_p1_ready,
+                u_dut.perf_raw_wb_can_remove_lsu_ready,
+                u_dut.perf_raw_wb_can_remove_mul_ready,
+                u_dut.perf_raw_wb_false_positive);
+            $display("PERF_RENAME: RN_ALLOC0=%-d RN_ALLOC1=%-d RN_COMMIT=%-d RN_FREE=%-d RN_FREE_MIN=%-d RN_FULL_STALL=%-d RN_FLUSH_RESTORE=%-d RN_SAME_CYCLE_RAW=%-d RN_SAME_CYCLE_WAW=%-d RN_X0_NO_ALLOC=%-d RN_FULL_STALL_CYC_PCT=%.4f",
+                u_dut.perf_rn_alloc0,
+                u_dut.perf_rn_alloc1,
+                u_dut.perf_rn_commit,
+                u_dut.perf_rn_free,
+                u_dut.perf_rn_free_min,
+                u_dut.perf_rn_full_stall,
+                u_dut.perf_rn_flush_restore,
+                u_dut.perf_rn_same_cycle_raw,
+                u_dut.perf_rn_same_cycle_waw,
+                u_dut.perf_rn_x0_no_alloc,
+                (u_dut.perf_rn_full_stall * 100.0) / perf_cycles_real);
+            $display("PERF_RENAME_STALL: RN_FULL_STALL_FREELIST=%-d RN_FULL_STALL_ROB=%-d",
+                u_dut.perf_rn_full_stall_freelist,
+                u_dut.perf_rn_full_stall_rob);
+            $display("PERF_PRF: PRF_RD0=%-d PRF_RD1=%-d PRF_RD2=%-d PRF_RD3=%-d PRF_WR0=%-d PRF_WR1=%-d PRF_BYPASS_RD0=%-d PRF_BYPASS_RD1=%-d PRF_BYPASS_RD2=%-d PRF_BYPASS_RD3=%-d PRF_BYPASS_USE_CYC_PCT=%.4f",
+                u_dut.perf_prf_rd0,
+                u_dut.perf_prf_rd1,
+                u_dut.perf_prf_rd2,
+                u_dut.perf_prf_rd3,
+                u_dut.perf_prf_wr0,
+                u_dut.perf_prf_wr1,
+                u_dut.perf_prf_bypass_rd0,
+                u_dut.perf_prf_bypass_rd1,
+                u_dut.perf_prf_bypass_rd2,
+                u_dut.perf_prf_bypass_rd3,
+                ((u_dut.perf_prf_bypass_rd0 + u_dut.perf_prf_bypass_rd1 +
+                  u_dut.perf_prf_bypass_rd2 + u_dut.perf_prf_bypass_rd3) * 100.0) / perf_cycles_real);
+            $display("PERF_ISSUEQ: IQ_OCC_0=%-d IQ_OCC_1=%-d IQ_OCC_2=%-d IQ_OCC_3=%-d IQ_OCC_4=%-d IQ_FULL_STALL=%-d IQ_WAKEUP_RS1=%-d IQ_WAKEUP_RS2=%-d IQ_PIPE0_FIRE=%-d IQ_PIPE1_FIRE=%-d IQ_PIPE1_FIRE_WHEN_PIPE0_BLOCKED=%-d IQ_PIPE1_BLOCK_OLDER_CTRL_MEM=%-d IQ_PIPE1_BLOCK_NOT_READY=%-d IQ_FULL_STALL_CYC_PCT=%.4f PIPE1_WHEN_P0_BLOCKED_CYC_PCT=%.4f",
+                u_dut.u_ydrasil_id_stage.perf_uopq_occ_0,
+                u_dut.u_ydrasil_id_stage.perf_uopq_occ_1,
+                u_dut.u_ydrasil_id_stage.perf_uopq_occ_2,
+                u_dut.u_ydrasil_id_stage.perf_uopq_occ_3,
+                u_dut.u_ydrasil_id_stage.perf_uopq_occ_4,
+                32'd0,
+                32'd0,
+                32'd0,
+                u_dut.u_ydrasil_id_stage.perf_di_pipe0_fire,
+                u_dut.u_ydrasil_id_stage.perf_di_pipe1_fire,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_fire_when_p0_blocked,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_older_ctrl_mem,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_raw_older,
+                0.0,
+                (u_dut.u_ydrasil_id_stage.perf_uopq_p1_fire_when_p0_blocked * 100.0) / perf_cycles_real);
+            $display("PERF_ROB: ROB_OCC_0=%-d ROB_OCC_1=%-d ROB_OCC_2=%-d ROB_OCC_3=%-d ROB_OCC_4P=%-d ROB_FULL_STALL=%-d ROB_COMMIT0=%-d ROB_COMMIT1=%-d ROB_HEAD_NOT_READY=%-d ROB_FULL_STALL_CYC_PCT=%.4f",
+                u_dut.perf_rob_occ_0,
+                u_dut.perf_rob_occ_1,
+                u_dut.perf_rob_occ_2,
+                u_dut.perf_rob_occ_3,
+                u_dut.perf_rob_occ_4p,
+                u_dut.perf_rob_full_stall,
+                u_dut.perf_rob_commit0,
+                u_dut.perf_rob_commit1,
+                u_dut.perf_rob_head_not_ready,
+                (u_dut.perf_rob_full_stall * 100.0) / perf_cycles_real);
+            $display("PERF_ROB_HEAD_SPLIT: ROB_HEAD_WAIT_ALU=%-d ROB_HEAD_WAIT_LSU=%-d ROB_HEAD_WAIT_MUL=%-d ROB_HEAD_WAIT_FLUSH_LOST=%-d",
+                u_dut.perf_rob_head_wait_alu,
+                u_dut.perf_rob_head_wait_lsu,
+                u_dut.perf_rob_head_wait_mul,
+                u_dut.perf_rob_head_wait_flush_lost);
+            $display("PERF_COMMIT_SHELL: COMMIT_SHELL_ALLOC=%-d COMMIT_SHELL_READY=%-d COMMIT_SHELL_RETIRE=%-d COMMIT_SHELL_HEAD_WAIT=%-d COMMIT_SHELL_FLUSH_SQUASH=%-d",
+                u_dut.u_ydrasil_commit_trace.perf_commit_shell_alloc,
+                u_dut.u_ydrasil_commit_trace.perf_commit_shell_ready,
+                u_dut.u_ydrasil_commit_trace.perf_commit_shell_retire,
+                u_dut.u_ydrasil_commit_trace.perf_commit_shell_head_wait,
+                u_dut.u_ydrasil_commit_trace.perf_commit_shell_flush_squash);
             $display("PERF_DUAL_ISSUE: DI_PIPE0_FIRE=%-d DI_PIPE1_FIRE=%-d DI_PAIR_FIRE=%-d DI_PAIR_SIMPLE_ALU=%-d DI_PIPE1_KILLED_FLUSH=%-d DI_PIPE1_BLOCK_STALL_RECHECK=%-d DI_PIPE1_BLOCK_RESBUF_FULL=%-d DI_PIPE1_BLOCK_ALU_FIFO_FULL=%-d DI_PIPE1_BLOCK_PENDING_RECHECK=%-d DI_PIPE1_BLOCK_TIMING_GUARD=%-d",
                 u_dut.u_ydrasil_id_stage.perf_di_pipe0_fire,
                 u_dut.u_ydrasil_id_stage.perf_di_pipe1_fire,

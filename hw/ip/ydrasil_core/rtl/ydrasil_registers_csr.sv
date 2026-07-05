@@ -7,7 +7,7 @@ import ydrasil_pkg::*;
 
     input wire clk,
     input wire rst_n,
-    input wire instret_inc_i,
+    input wire [1:0] instret_delta_i,
 
     // form ex
     input wire                          ex_csr_wen_i,     // ex模块写寄存器标志
@@ -48,6 +48,13 @@ import ydrasil_pkg::*;
     reg  [ydrasil_pkg::REGS_DATA_WIDTH-1:0] mtval;
     reg  [ydrasil_pkg::REGS_DATA_WIDTH-1:0] mcounteren;
     reg  [ydrasil_pkg::REGS_DATA_WIDTH-1:0] mcountinhibit;
+
+`ifndef SYNTHESIS
+    reg [31:0] perf_csr_instret_delta0;
+    reg [31:0] perf_csr_instret_delta1;
+    reg [31:0] perf_csr_instret_delta2;
+    reg [31:0] perf_csr_instret_total_delta;
+`endif
 
     assign global_int_en_o   = (mstatus[3] == 1'b1) ? 1'b1 : 1'b0;
 
@@ -230,6 +237,12 @@ import ydrasil_pkg::*;
             mtval         <= {ydrasil_pkg::REGS_DATA_WIDTH{1'b0}};
             mcounteren    <= {ydrasil_pkg::REGS_DATA_WIDTH{1'b0}};
             mcountinhibit <= {ydrasil_pkg::REGS_DATA_WIDTH{1'b0}};
+`ifndef SYNTHESIS
+            perf_csr_instret_delta0 <= 32'b0;
+            perf_csr_instret_delta1 <= 32'b0;
+            perf_csr_instret_delta2 <= 32'b0;
+            perf_csr_instret_total_delta <= 32'b0;
+`endif
         end else begin
             if (mcycle_we) begin
                 cycle[31:0] <= csr_write_data;
@@ -243,9 +256,27 @@ import ydrasil_pkg::*;
                 instret[31:0] <= csr_write_data;
             end else if (minstreth_we) begin
                 instret[63:32] <= csr_write_data;
-            end else if (instret_inc_i && !mcountinhibit[2]) begin
-                instret <= instret + 1'b1;
+            end else if ((instret_delta_i != 2'b00) && !mcountinhibit[2]) begin
+                instret <= instret + {{(ydrasil_pkg::DOUBLE_REGS_WIDTH-2){1'b0}}, instret_delta_i};
             end
+
+`ifndef SYNTHESIS
+            if (!minstret_we && !minstreth_we && !mcountinhibit[2]) begin
+                unique case (instret_delta_i)
+                    2'd0: perf_csr_instret_delta0 <= perf_csr_instret_delta0 + 32'd1;
+                    2'd1: begin
+                        perf_csr_instret_delta1 <= perf_csr_instret_delta1 + 32'd1;
+                        perf_csr_instret_total_delta <= perf_csr_instret_total_delta + 32'd1;
+                    end
+                    2'd2: begin
+                        perf_csr_instret_delta2 <= perf_csr_instret_delta2 + 32'd1;
+                        perf_csr_instret_total_delta <= perf_csr_instret_total_delta + 32'd2;
+                    end
+                    default: begin
+                    end
+                endcase
+            end
+`endif
 
             if (csr_write_en) begin
                 case (csr_write_addr)

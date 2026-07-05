@@ -60,6 +60,12 @@ import ydrasil_pkg::*;
     reg [FIFO_PTR_WIDTH-1:0]  mul_rptr_q;
     reg [FIFO_PTR_WIDTH-1:0]  mul_wptr_q;
 
+    reg [31:0] perf_commit_shell_alloc;
+    reg [31:0] perf_commit_shell_ready;
+    reg [31:0] perf_commit_shell_retire;
+    reg [31:0] perf_commit_shell_head_wait;
+    reg [31:0] perf_commit_shell_flush_squash;
+
     task automatic print_gpr_commit;
         input [INST_ADDR_WIDTH-1:0] pc;
         input [INST_DATA_WIDTH-1:0] instr;
@@ -98,6 +104,7 @@ import ydrasil_pkg::*;
             commit_wdata_q[commit_wptr_q] = wdata;
             commit_ready_q[commit_wptr_q] = 1'b1;
             commit_wptr_q = commit_wptr_q + FIFO_PTR_WIDTH'(1);
+            perf_commit_shell_ready = perf_commit_shell_ready + 32'd1;
         end
     endtask
 
@@ -120,6 +127,7 @@ import ydrasil_pkg::*;
                     commit_waddr_q[idx] = waddr;
                     commit_wdata_q[idx] = wdata;
                     commit_ready_q[idx] = 1'b1;
+                    perf_commit_shell_ready = perf_commit_shell_ready + 32'd1;
                     found = 1'b1;
                 end
             end
@@ -144,13 +152,15 @@ import ydrasil_pkg::*;
 
     task automatic squash_not_ready;
         integer j;
+        reg [FIFO_PTR_WIDTH-1:0] occ;
         reg [FIFO_PTR_WIDTH-1:0] src;
         reg [FIFO_PTR_WIDTH-1:0] dst;
         begin
+            occ = commit_wptr_q - commit_rptr_q;
             dst = commit_rptr_q;
             for (j = 0; j < FIFO_DEPTH; j = j + 1) begin
                 src = commit_rptr_q + FIFO_PTR_WIDTH'(j);
-                if (src != commit_wptr_q) begin
+                if (j < occ) begin
                     if (commit_ready_q[src]) begin
                         if (dst != src) begin
                             commit_pc_q[dst] = commit_pc_q[src];
@@ -163,6 +173,7 @@ import ydrasil_pkg::*;
                         dst = dst + FIFO_PTR_WIDTH'(1);
                     end else begin
                         commit_ready_q[src] = 1'b0;
+                        perf_commit_shell_flush_squash = perf_commit_shell_flush_squash + 32'd1;
                     end
                 end
             end
@@ -179,6 +190,11 @@ import ydrasil_pkg::*;
             lsu_wptr_q = '0;
             mul_rptr_q = '0;
             mul_wptr_q = '0;
+            perf_commit_shell_alloc = '0;
+            perf_commit_shell_ready = '0;
+            perf_commit_shell_retire = '0;
+            perf_commit_shell_head_wait = '0;
+            perf_commit_shell_flush_squash = '0;
             for (i = 0; i < FIFO_DEPTH; i = i + 1) begin
                 commit_pc_q[i] = '0;
                 commit_instr_q[i] = '0;
@@ -193,6 +209,7 @@ import ydrasil_pkg::*;
         end else begin
             if (alloc_valid_i) begin
                 alloc_commit_entry(alloc_pc_i, alloc_instr_i);
+                perf_commit_shell_alloc = perf_commit_shell_alloc + 32'd1;
             end
 
             if (lsu_issue_valid_i) begin
@@ -240,12 +257,17 @@ import ydrasil_pkg::*;
                 squash_not_ready();
             end
 
+            if ((commit_rptr_q != commit_wptr_q) && !commit_ready_q[commit_rptr_q]) begin
+                perf_commit_shell_head_wait = perf_commit_shell_head_wait + 32'd1;
+            end
+
             for (i = 0; i < FIFO_DEPTH; i = i + 1) begin
                 if ((commit_rptr_q != commit_wptr_q) && commit_ready_q[commit_rptr_q]) begin
                     print_gpr_commit(commit_pc_q[commit_rptr_q], commit_instr_q[commit_rptr_q],
                                      commit_waddr_q[commit_rptr_q], commit_wdata_q[commit_rptr_q]);
                     commit_ready_q[commit_rptr_q] = 1'b0;
                     commit_rptr_q = commit_rptr_q + FIFO_PTR_WIDTH'(1);
+                    perf_commit_shell_retire = perf_commit_shell_retire + 32'd1;
                 end
             end
         end
