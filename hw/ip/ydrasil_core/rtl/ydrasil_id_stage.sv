@@ -574,6 +574,7 @@ import ydrasil_pkg::*;
     wire [4:0]                       if_id_trace_rf_raddr_rs2;
     wire                             if_id_trace_rf_ren_rs1;
     wire                             if_id_trace_rf_ren_rs2;
+    wire                             pipe1_refill_skid_from_if;
 
 `ifndef SYNTHESIS
     wire                             commit_trace_alloc_if_id;
@@ -1212,9 +1213,14 @@ import ydrasil_pkg::*;
         id_advance && issue_valid_ff && issue_wait_block &&
         !skid_valid_ff && if_id_valid_i;
     assign skid_drain = issue_accept & skid_valid_ff;
+    assign pipe1_refill_skid_from_if =
+        (PIPE1_REAL_MODE >= 2) && pair1_fire &&
+        !pair1_refill_direct && !pipe1_fire_from2 &&
+        if_id_valid_i;
     assign issue_frontend_stall_o =
         (!flush_id_i & !stall_id_i & !bubble_id_i &
-         issue_valid_ff & issue_wait_block & skid_valid_ff) |
+         issue_valid_ff & issue_wait_block & skid_valid_ff &
+         !((PIPE1_REAL_MODE >= 2) && pair1_fire)) |
         (pair1_fire & (PIPE1_REAL_MODE < 2));
     wire if_id_rn_pdst_valid =
         if_id_valid_i &&
@@ -1446,7 +1452,9 @@ import ydrasil_pkg::*;
         pipe1_dual_supported && (!pipe1_rename_ready_i || !pipe1_sel_pdst_valid);
     assign pipe1_p0_ready_context = issue_slot0_fire;
     assign pipe1_p0_blocked_context =
-        1'b0;
+        (PIPE1_REAL_MODE >= 2) &&
+        issue_valid_ff && issue_wait_block && skid_valid_ff &&
+        !stall_id_i && !flush_id_i;
 `ifdef YDRASIL_ENABLE_PIPE1_REAL
     assign pipe1_dual_fire =
         (PIPE1_REAL_MODE != 0) &&
@@ -1473,6 +1481,11 @@ import ydrasil_pkg::*;
             (pipe1_sel_rf_waddr_rd != '0) &&
             gpr_pending_i[pipe1_sel_rf_waddr_rd]) begin
             $fatal(1, "pipe1 fired with pending destination x%0d", pipe1_sel_rf_waddr_rd);
+        end
+        if (rst_n && pipe1_refill_skid_from_if && if_id_rn_pdst_valid &&
+            !rn_alloc_valid_o) begin
+            $fatal(1, "pipe1 refill from IF/ID without rename allocation pc=0x%08h instr=0x%08h rd=x%0d",
+                   if_id_pc_i, if_id_instr_i, if_id_trace_rf_waddr_rd);
         end
     end
 `endif
@@ -2752,7 +2765,8 @@ import ydrasil_pkg::*;
         !((PIPE1_REAL_MODE < 2) && pair1_fire) &&
         ((issue_accept && !skid_valid_ff) ||
          issue_load_from_skid ||
-         skid_fill);
+         skid_fill ||
+         pipe1_refill_skid_from_if);
     assign rn_alloc_rd_addr_o = if_id_trace_rf_waddr_rd;
     assign id_ctrl_operator_type_o = issue_valid_ff ? issue_operator_type_ff : '0;
 
@@ -2762,7 +2776,8 @@ import ydrasil_pkg::*;
         !((PIPE1_REAL_MODE < 2) && pair1_fire) &&
         ((issue_accept && !skid_valid_ff) ||
          issue_load_from_skid ||
-         skid_fill);
+         skid_fill ||
+         pipe1_refill_skid_from_if);
     assign commit_trace_alloc_valid_o =
         commit_trace_alloc_if_id &&
         (if_id_trace_rf_waddr_rd != '0) &&

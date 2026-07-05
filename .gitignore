@@ -4,3 +4,4 @@ hw/ip/alioth/
 tools/
 spec/
 spec
+verif/sim/__pycache__/
