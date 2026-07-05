@@ -307,6 +307,12 @@ end
     reg [31:0] p4a_rs1_stable_bypass_count;
     reg [31:0] p4a_rs2_stable_bypass_count;
     reg [31:0] p4a_raw_ready_next_count;
+    reg [31:0] p4a_ready_next_cons_alu_count;
+    reg [31:0] p4a_ready_next_cons_branch_count;
+    reg [31:0] p4a_ready_next_cons_load_count;
+    reg [31:0] p4a_ready_next_cons_store_count;
+    reg [31:0] p4a_ready_next_cons_mul_count;
+    reg [31:0] p4a_ready_next_cons_other_count;
     reg [31:0] p4b_wb_buf_valid_count;
     reg [31:0] p4b_rs1_pending_hit_count;
     reg [31:0] p4b_rs2_pending_hit_count;
@@ -548,6 +554,12 @@ end
             p4a_rs1_stable_bypass_count <= 32'b0;
             p4a_rs2_stable_bypass_count <= 32'b0;
             p4a_raw_ready_next_count <= 32'b0;
+            p4a_ready_next_cons_alu_count <= 32'b0;
+            p4a_ready_next_cons_branch_count <= 32'b0;
+            p4a_ready_next_cons_load_count <= 32'b0;
+            p4a_ready_next_cons_store_count <= 32'b0;
+            p4a_ready_next_cons_mul_count <= 32'b0;
+            p4a_ready_next_cons_other_count <= 32'b0;
             p4b_wb_buf_valid_count <= 32'b0;
             p4b_rs1_pending_hit_count <= 32'b0;
             p4b_rs2_pending_hit_count <= 32'b0;
@@ -661,6 +673,28 @@ end
                 (u_dut.rs2_issue_alu_stable_bypass ? 32'd1 : 32'd0);
             p4a_raw_ready_next_count <= p4a_raw_ready_next_count +
                 ((u_dut.rs1_issue_alu_ready_next_raw | u_dut.rs2_issue_alu_ready_next_raw) ? 32'd1 : 32'd0);
+            p4a_ready_next_cons_alu_count <= p4a_ready_next_cons_alu_count +
+                (((u_dut.rs1_issue_alu_ready_next | u_dut.rs2_issue_alu_ready_next) &&
+                  u_dut.id_ctrl_operator_type[ydrasil_pkg::OPERATOR_TYPE_ALU]) ? 32'd1 : 32'd0);
+            p4a_ready_next_cons_branch_count <= p4a_ready_next_cons_branch_count +
+                (((u_dut.rs1_issue_alu_ready_next | u_dut.rs2_issue_alu_ready_next) &&
+                  u_dut.id_ctrl_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP]) ? 32'd1 : 32'd0);
+            p4a_ready_next_cons_load_count <= p4a_ready_next_cons_load_count +
+                (((u_dut.rs1_issue_alu_ready_next | u_dut.rs2_issue_alu_ready_next) &&
+                  u_dut.id_ctrl_operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD]) ? 32'd1 : 32'd0);
+            p4a_ready_next_cons_store_count <= p4a_ready_next_cons_store_count +
+                (((u_dut.rs1_issue_alu_ready_next | u_dut.rs2_issue_alu_ready_next) &&
+                  u_dut.id_ctrl_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE]) ? 32'd1 : 32'd0);
+            p4a_ready_next_cons_mul_count <= p4a_ready_next_cons_mul_count +
+                (((u_dut.rs1_issue_alu_ready_next | u_dut.rs2_issue_alu_ready_next) &&
+                  u_dut.id_ctrl_operator_type[ydrasil_pkg::OPERATOR_TYPE_MUL]) ? 32'd1 : 32'd0);
+            p4a_ready_next_cons_other_count <= p4a_ready_next_cons_other_count +
+                (((u_dut.rs1_issue_alu_ready_next | u_dut.rs2_issue_alu_ready_next) &&
+                  !u_dut.id_ctrl_operator_type[ydrasil_pkg::OPERATOR_TYPE_ALU] &&
+                  !u_dut.id_ctrl_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  !u_dut.id_ctrl_operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
+                  !u_dut.id_ctrl_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
+                  !u_dut.id_ctrl_operator_type[ydrasil_pkg::OPERATOR_TYPE_MUL]) ? 32'd1 : 32'd0);
             p4b_wb_buf_valid_count <= p4b_wb_buf_valid_count +
                 (u_dut.wb_buf_fwd_valid ? 32'd1 : 32'd0);
             p4b_rs1_pending_hit_count <= p4b_rs1_pending_hit_count +
@@ -1432,6 +1466,13 @@ end
                 p4a_alu_stable_slot_hit_count,
                 p4a_rs1_stable_bypass_count,
                 p4a_rs2_stable_bypass_count);
+            $display("PERF_PHASE4A_READY_NEXT_CONS: ALU=%-d BRANCH=%-d LOAD=%-d STORE=%-d MUL=%-d OTHER=%-d",
+                p4a_ready_next_cons_alu_count,
+                p4a_ready_next_cons_branch_count,
+                p4a_ready_next_cons_load_count,
+                p4a_ready_next_cons_store_count,
+                p4a_ready_next_cons_mul_count,
+                p4a_ready_next_cons_other_count);
             $display("PERF_PHASE4B_WB_BUF: VALID=%-d RS1_PENDING_HIT=%-d RS2_PENDING_HIT=%-d ID_WAIT_RS1_HIT=%-d ID_WAIT_RS2_HIT=%-d",
                 p4b_wb_buf_valid_count,
                 p4b_rs1_pending_hit_count,
