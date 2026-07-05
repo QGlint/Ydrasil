@@ -1212,6 +1212,25 @@ import ydrasil_pkg::*;
 `ifndef SYNTHESIS
 	always_ff @(posedge clk) begin
 		if (rst_n) begin
+			if ((alu_rf_wen_rd && (alu_rf_waddr_rd == 5'd22)) ||
+			    (wb_rf_wen_rd && (wb_rf_waddr_rd == 5'd22)) ||
+			    (rf_wen_rd && (rf_waddr_rd == 5'd22))) begin
+				$display("[X22_WB_DBG] alu_wen=%0b alu_data=0x%08h alu_pdst=%0d wb_wen=%0b wb_data=0x%08h rf_wen=%0b rf_data=0x%08h pipe1_commit=%0b prf_wr0=%0b/%0d/0x%08h prf_wr1=%0b/%0d/0x%08h",
+				         alu_rf_wen_rd,
+				         alu_result,
+				         alu_rn_pdst,
+				         wb_rf_wen_rd,
+				         wb_rf_wdata_rd,
+				         rf_wen_rd,
+				         rf_wdata_rd,
+				         pipe1_commit_rf_wen,
+				         prf_wr0_en,
+				         prf_wr0_addr,
+				         prf_wr0_data,
+				         prf_wr1_en,
+				         prf_wr1_addr,
+				         prf_wr1_data);
+			end
 			if (rn_real_pipe1_pdst_found && (rn_real_lsu_pdst_found || rn_real_mul_pdst_found)) begin
 				$display("[PRF_WR1_CONFLICT] p1_pdst=%0d p1_arch=x%0d p1_data=0x%08h lsu_found=%0b lsu_pdst=%0d lsu_arch=x%0d lsu_data=0x%08h mul_found=%0b mul_pdst=%0d mul_arch=x%0d mul_data=0x%08h",
 				         rn_real_pipe1_pdst,
