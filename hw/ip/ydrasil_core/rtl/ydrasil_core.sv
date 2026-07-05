@@ -391,6 +391,25 @@ import ydrasil_pkg::*;
 		end
 	endfunction
 
+	function automatic rn_real_rob_has_arch;
+		input [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] arch_rd;
+		integer j;
+		reg found;
+		reg [RN_REAL_ROB_PTR_BITS-1:0] idx;
+		begin
+			found = 1'b0;
+			rn_real_rob_has_arch = 1'b0;
+			for (j = 0; j < RN_REAL_ROB_DEPTH; j = j + 1) begin
+				idx = rn_real_rob_head_q + RN_REAL_ROB_PTR_BITS'(j);
+				if (!found && rn_real_rob_valid_q[idx] &&
+				    (rn_real_rob_arch_rd_q[idx] == arch_rd)) begin
+					rn_real_rob_has_arch = 1'b1;
+					found = 1'b1;
+				end
+			end
+		end
+	endfunction
+
 	function automatic [RN_REAL_PHYS_REGS-1:0] rn_real_free_from_amt;
 		integer f;
 		begin
@@ -1256,9 +1275,20 @@ import ydrasil_pkg::*;
 	wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_flush_kill_mask =
 		(id_ex_rd_flush_kill ? (ydrasil_pkg::REGS_NUM'(1) << id_rf_waddr_rd) : '0) |
 		(pipe1_rd_flush_kill ? (ydrasil_pkg::REGS_NUM'(1) << pipe1_rf_waddr_rd_issue) : '0);
-	wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_for_hazard =
+	reg [ydrasil_pkg::REGS_NUM-1:0] rn_real_arch_pending_mask;
+	always_comb begin
+		integer rn_arch_i;
+		rn_real_arch_pending_mask = '0;
+		for (rn_arch_i = 1; rn_arch_i < ydrasil_pkg::REGS_NUM; rn_arch_i = rn_arch_i + 1) begin
+			rn_real_arch_pending_mask[rn_arch_i] =
+				rn_real_rob_has_arch(ydrasil_pkg::REGS_ADDR_WIDTH'(rn_arch_i));
+		end
+	end
+	wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_for_hazard_raw =
 		(gpr_pending_q & ~gpr_pending_clear_mask & ~gpr_pending_flush_kill_mask) |
 		gpr_pending_issue_mask | gpr_pending_pipe1_issue_mask;
+	wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_for_hazard =
+		gpr_pending_for_hazard_raw & rn_real_arch_pending_mask;
 
 	always_comb begin
 		integer gpr_i;
@@ -1289,6 +1319,11 @@ import ydrasil_pkg::*;
 		    (gpr_pending_count_n[pipe1_rf_waddr_rd_issue] != 3'd7)) begin
 			gpr_pending_count_n[pipe1_rf_waddr_rd_issue] =
 				gpr_pending_count_n[pipe1_rf_waddr_rd_issue] + 3'd1;
+		end
+		for (gpr_i = 1; gpr_i < ydrasil_pkg::REGS_NUM; gpr_i = gpr_i + 1) begin
+			if (!rn_real_arch_pending_mask[gpr_i]) begin
+				gpr_pending_count_n[gpr_i] = 3'd0;
+			end
 		end
 	end
 
