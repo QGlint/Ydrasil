@@ -541,6 +541,45 @@ import ydrasil_pkg::*;
     wire                             pipe1_fire_from1;
     wire                             pipe1_fire_from2;
 
+    function automatic logic pipe1_simple_alu_supported(
+        input logic [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] op_type,
+        input logic [ydrasil_pkg::OPERATOR_WIDTH-1:0]      op,
+        input logic                                        rf_wen_rd,
+        input logic [4:0]                                  rf_waddr_rd,
+        input logic [4:0]                                  rf_raddr_rs1,
+        input logic                                        rf_ren_rs1,
+        input logic                                        rf_ren_rs2,
+        input logic                                        operand_b_rs_sel
+    );
+        logic allowed_op;
+        begin
+            allowed_op =
+                op[ydrasil_pkg::OP_ALU_ADD] |
+                op[ydrasil_pkg::OP_ALU_SUB] |
+                op[ydrasil_pkg::OP_ALU_SLL] |
+                op[ydrasil_pkg::OP_ALU_SLT] |
+                op[ydrasil_pkg::OP_ALU_SLTU] |
+                op[ydrasil_pkg::OP_ALU_XOR] |
+                op[ydrasil_pkg::OP_ALU_SRL] |
+                op[ydrasil_pkg::OP_ALU_SRA] |
+                op[ydrasil_pkg::OP_ALU_OR] |
+                op[ydrasil_pkg::OP_ALU_AND];
+            pipe1_simple_alu_supported =
+                op_type[ydrasil_pkg::OPERATOR_TYPE_ALU] &&
+                !op_type[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                !op_type[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
+                !op_type[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
+                !op_type[ydrasil_pkg::OPERATOR_TYPE_CSR] &&
+                !op_type[ydrasil_pkg::OPERATOR_TYPE_SYS] &&
+                !op_type[ydrasil_pkg::OPERATOR_TYPE_MUL] &&
+                !op_type[ydrasil_pkg::OPERATOR_TYPE_BITMANIP] &&
+                allowed_op &&
+                rf_wen_rd && (rf_waddr_rd != '0) &&
+                rf_ren_rs1 && (rf_raddr_rs1 != '0) &&
+                (!operand_b_rs_sel || rf_ren_rs2);
+        end
+    endfunction
+
     reg [31:0]                       perf_id_decode_valid;
     reg [31:0]                       perf_id_issue_accept;
     reg [31:0]                       perf_id_issue_fire;
@@ -1319,26 +1358,15 @@ import ydrasil_pkg::*;
         !skid_valid_ff && !uopq2_buf_valid_ff && if_id_valid_i;
     assign uopq2_buf_capture_supported =
         if_id_valid_i &&
-        if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_ALU] &&
-        !if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
-        !if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
-        !if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
-        !if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_CSR] &&
-        !if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS] &&
-        !if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_MUL] &&
-        !if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_BITMANIP] &&
-        if_id_trace_rf_wen_rd && (if_id_trace_rf_waddr_rd != '0) &&
-        (((if_id_trace_operator[ydrasil_pkg::OP_ALU_ADD] |
-           if_id_trace_operator[ydrasil_pkg::OP_ALU_SUB] |
-           if_id_trace_operator[ydrasil_pkg::OP_ALU_SLT] |
-           if_id_trace_operator[ydrasil_pkg::OP_ALU_SLTU]) &&
-          if_id_trace_rf_ren_rs1 && (if_id_trace_rf_raddr_rs1 != '0) &&
-          (!if_id_trace_operand_b_rs_sel || if_id_trace_rf_ren_rs2)) |
-         ((if_id_trace_operator[ydrasil_pkg::OP_ALU_XOR] |
-           if_id_trace_operator[ydrasil_pkg::OP_ALU_OR] |
-           if_id_trace_operator[ydrasil_pkg::OP_ALU_AND]) &&
-          if_id_trace_rf_ren_rs1 && (if_id_trace_rf_raddr_rs1 != '0) &&
-          (!if_id_trace_operand_b_rs_sel || if_id_trace_rf_ren_rs2)));
+        pipe1_simple_alu_supported(
+            if_id_trace_operator_type,
+            if_id_trace_operator,
+            if_id_trace_rf_wen_rd,
+            if_id_trace_rf_waddr_rd,
+            if_id_trace_rf_raddr_rs1,
+            if_id_trace_rf_ren_rs1,
+            if_id_trace_rf_ren_rs2,
+            if_id_trace_operand_b_rs_sel);
     assign uopq2_buf_capture_operands_ready =
         uopq2_buf_capture_supported &&
         (!if_id_trace_rf_ren_rs1 || (if_id_trace_rf_raddr_rs1 == '0) ||
@@ -1406,48 +1434,26 @@ import ydrasil_pkg::*;
         pipe1_pipe0_present_safe | pipe1_pipe0_empty_safe;
     assign pipe1_uopq1_supported =
         uopq1_valid &&
-        uopq1_operator_type[ydrasil_pkg::OPERATOR_TYPE_ALU] &&
-        !uopq1_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
-        !uopq1_operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
-        !uopq1_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
-        !uopq1_operator_type[ydrasil_pkg::OPERATOR_TYPE_CSR] &&
-        !uopq1_operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS] &&
-        !uopq1_operator_type[ydrasil_pkg::OPERATOR_TYPE_MUL] &&
-        !uopq1_operator_type[ydrasil_pkg::OPERATOR_TYPE_BITMANIP] &&
-        uopq1_rf_wen_rd && (uopq1_rf_waddr_rd != '0) &&
-        (((uopq1_operator[ydrasil_pkg::OP_ALU_ADD] |
-           uopq1_operator[ydrasil_pkg::OP_ALU_SUB] |
-           uopq1_operator[ydrasil_pkg::OP_ALU_SLT] |
-           uopq1_operator[ydrasil_pkg::OP_ALU_SLTU]) &&
-          uopq1_rf_ren_rs1 && (uopq1_rf_raddr_rs1 != '0) &&
-          (!uopq1_operand_b_rs_sel || uopq1_rf_ren_rs2)) |
-         ((uopq1_operator[ydrasil_pkg::OP_ALU_XOR] |
-           uopq1_operator[ydrasil_pkg::OP_ALU_OR] |
-           uopq1_operator[ydrasil_pkg::OP_ALU_AND]) &&
-          uopq1_rf_ren_rs1 && (uopq1_rf_raddr_rs1 != '0) &&
-          (!uopq1_operand_b_rs_sel || uopq1_rf_ren_rs2)));
+        pipe1_simple_alu_supported(
+            uopq1_operator_type,
+            uopq1_operator,
+            uopq1_rf_wen_rd,
+            uopq1_rf_waddr_rd,
+            uopq1_rf_raddr_rs1,
+            uopq1_rf_ren_rs1,
+            uopq1_rf_ren_rs2,
+            uopq1_operand_b_rs_sel);
     assign pipe1_uopq2_supported =
         uopq2_valid &&
-        uopq2_operator_type[ydrasil_pkg::OPERATOR_TYPE_ALU] &&
-        !uopq2_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
-        !uopq2_operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
-        !uopq2_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
-        !uopq2_operator_type[ydrasil_pkg::OPERATOR_TYPE_CSR] &&
-        !uopq2_operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS] &&
-        !uopq2_operator_type[ydrasil_pkg::OPERATOR_TYPE_MUL] &&
-        !uopq2_operator_type[ydrasil_pkg::OPERATOR_TYPE_BITMANIP] &&
-        uopq2_rf_wen_rd && (uopq2_rf_waddr_rd != '0) &&
-        (((uopq2_operator[ydrasil_pkg::OP_ALU_ADD] |
-           uopq2_operator[ydrasil_pkg::OP_ALU_SUB] |
-           uopq2_operator[ydrasil_pkg::OP_ALU_SLT] |
-           uopq2_operator[ydrasil_pkg::OP_ALU_SLTU]) &&
-          uopq2_rf_ren_rs1 && (uopq2_rf_raddr_rs1 != '0) &&
-          (!uopq2_operand_b_rs_sel || uopq2_rf_ren_rs2)) |
-         ((uopq2_operator[ydrasil_pkg::OP_ALU_XOR] |
-           uopq2_operator[ydrasil_pkg::OP_ALU_OR] |
-           uopq2_operator[ydrasil_pkg::OP_ALU_AND]) &&
-          uopq2_rf_ren_rs1 && (uopq2_rf_raddr_rs1 != '0) &&
-          (!uopq2_operand_b_rs_sel || uopq2_rf_ren_rs2)));
+        pipe1_simple_alu_supported(
+            uopq2_operator_type,
+            uopq2_operator,
+            uopq2_rf_wen_rd,
+            uopq2_rf_waddr_rd,
+            uopq2_rf_raddr_rs1,
+            uopq2_rf_ren_rs1,
+            uopq2_rf_ren_rs2,
+            uopq2_operand_b_rs_sel);
     assign pipe1_uopq1_operands_ready =
         pipe1_uopq1_supported &&
         (!uopq1_rf_ren_rs1 || (uopq1_rf_raddr_rs1 == '0) ||
