@@ -364,6 +364,7 @@ import ydrasil_pkg::*;
     wire                             pipe1_dual_war_pipe0;
     wire                             pipe1_dual_pending_rd;
     wire                             pipe1_younger_flush_risk;
+    wire                             pipe1_younger_flush_block;
     wire                             pipe1_pipe0_present_safe;
     wire                             pipe1_pipe0_empty_safe;
     wire                             pipe1_dual_pipe0_safe;
@@ -1505,6 +1506,24 @@ import ydrasil_pkg::*;
           if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS] |
           if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_MUL] |
           id_fence_i));
+    assign pipe1_younger_flush_block =
+        (uopq2_valid &&
+         (uopq2_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] |
+          uopq2_operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD] |
+          uopq2_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE] |
+          uopq2_operator_type[ydrasil_pkg::OPERATOR_TYPE_CSR] |
+          uopq2_operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS] |
+          uopq2_operator_type[ydrasil_pkg::OPERATOR_TYPE_MUL] |
+          uopq2_fence_i)) |
+        (if_id_valid_i &&
+         (if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] |
+          if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD] |
+          if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE] |
+          if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_CSR] |
+          if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS] |
+          (if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_MUL] &&
+           !pipe1_p0_empty_context) |
+          id_fence_i));
     assign pipe1_sel_from1 =
         pipe1_uopq1_safe && (pipe1_uopq1_operands_ready || !pipe1_uopq2_safe);
     assign pipe1_sel_from2 =
@@ -1651,7 +1670,7 @@ import ydrasil_pkg::*;
         (pipe1_p0_ready_context | pipe1_p0_blocked_context | pipe1_p0_empty_context) &&
         ready_issue_allow_i && !flush_id_i &&
         pipe1_dual_pipe0_safe && pipe1_dual_operands_ready &&
-        !pipe1_younger_flush_risk &&
+        !pipe1_younger_flush_block &&
         !pipe1_dual_raw_pipe0 && !pipe1_dual_waw_pipe0 &&
         !pipe1_dual_war_pipe0 && !pipe1_dual_pending_rd &&
         !pipe1_resbuf_full_i;
@@ -3193,7 +3212,7 @@ import ydrasil_pkg::*;
                 (((pipe1_p0_ready_context | pipe1_p0_blocked_context) &&
                   ready_issue_allow_i && !flush_id_i &&
                   pipe1_dual_pipe0_safe && pipe1_dual_operands_ready &&
-                  pipe1_younger_flush_risk &&
+                  pipe1_younger_flush_block &&
                   !pipe1_dual_raw_pipe0 && !pipe1_dual_waw_pipe0 &&
                   !pipe1_dual_war_pipe0 && !pipe1_dual_pending_rd &&
                   !pipe1_resbuf_full_i) ? 32'd1 : 32'd0);
@@ -3201,7 +3220,7 @@ import ydrasil_pkg::*;
                 (((pipe1_p0_ready_context | pipe1_p0_blocked_context) &&
                   ready_issue_allow_i && !flush_id_i &&
                   pipe1_dual_pipe0_safe && pipe1_dual_operands_ready &&
-                  pipe1_younger_flush_risk &&
+                  pipe1_younger_flush_block &&
                   uopq2_valid &&
                   !pipe1_dual_raw_pipe0 && !pipe1_dual_waw_pipe0 &&
                   !pipe1_dual_war_pipe0 && !pipe1_dual_pending_rd &&
@@ -3210,7 +3229,7 @@ import ydrasil_pkg::*;
                 (((pipe1_p0_ready_context | pipe1_p0_blocked_context) &&
                   ready_issue_allow_i && !flush_id_i &&
                   pipe1_dual_pipe0_safe && pipe1_dual_operands_ready &&
-                  pipe1_younger_flush_risk &&
+                  pipe1_younger_flush_block &&
                   if_id_valid_i &&
                   !pipe1_dual_raw_pipe0 && !pipe1_dual_waw_pipe0 &&
                   !pipe1_dual_war_pipe0 && !pipe1_dual_pending_rd &&
@@ -3219,7 +3238,7 @@ import ydrasil_pkg::*;
                 (((pipe1_p0_ready_context | pipe1_p0_blocked_context) &&
                   ready_issue_allow_i && !flush_id_i &&
                   pipe1_dual_pipe0_safe && pipe1_dual_operands_ready &&
-                  pipe1_younger_flush_risk && if_id_valid_i &&
+                  pipe1_younger_flush_block && if_id_valid_i &&
                   if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
                   !pipe1_dual_raw_pipe0 && !pipe1_dual_waw_pipe0 &&
                   !pipe1_dual_war_pipe0 && !pipe1_dual_pending_rd &&
@@ -3228,7 +3247,7 @@ import ydrasil_pkg::*;
                 (((pipe1_p0_ready_context | pipe1_p0_blocked_context) &&
                   ready_issue_allow_i && !flush_id_i &&
                   pipe1_dual_pipe0_safe && pipe1_dual_operands_ready &&
-                  pipe1_younger_flush_risk && if_id_valid_i &&
+                  pipe1_younger_flush_block && if_id_valid_i &&
                   if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
                   !pipe1_dual_raw_pipe0 && !pipe1_dual_waw_pipe0 &&
                   !pipe1_dual_war_pipe0 && !pipe1_dual_pending_rd &&
@@ -3237,7 +3256,7 @@ import ydrasil_pkg::*;
                 (((pipe1_p0_ready_context | pipe1_p0_blocked_context) &&
                   ready_issue_allow_i && !flush_id_i &&
                   pipe1_dual_pipe0_safe && pipe1_dual_operands_ready &&
-                  pipe1_younger_flush_risk && if_id_valid_i &&
+                  pipe1_younger_flush_block && if_id_valid_i &&
                   if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
                   !pipe1_dual_raw_pipe0 && !pipe1_dual_waw_pipe0 &&
                   !pipe1_dual_war_pipe0 && !pipe1_dual_pending_rd &&
@@ -3246,7 +3265,7 @@ import ydrasil_pkg::*;
                 (((pipe1_p0_ready_context | pipe1_p0_blocked_context) &&
                   ready_issue_allow_i && !flush_id_i &&
                   pipe1_dual_pipe0_safe && pipe1_dual_operands_ready &&
-                  pipe1_younger_flush_risk && if_id_valid_i &&
+                  pipe1_younger_flush_block && if_id_valid_i &&
                   if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_MUL] &&
                   !pipe1_dual_raw_pipe0 && !pipe1_dual_waw_pipe0 &&
                   !pipe1_dual_war_pipe0 && !pipe1_dual_pending_rd &&
@@ -3255,7 +3274,7 @@ import ydrasil_pkg::*;
                 (((pipe1_p0_ready_context | pipe1_p0_blocked_context) &&
                   ready_issue_allow_i && !flush_id_i &&
                   pipe1_dual_pipe0_safe && pipe1_dual_operands_ready &&
-                  pipe1_younger_flush_risk && if_id_valid_i &&
+                  pipe1_younger_flush_block && if_id_valid_i &&
                   (if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_CSR] |
                    if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS] |
                    id_fence_i) &&
