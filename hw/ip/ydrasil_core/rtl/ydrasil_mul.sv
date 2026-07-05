@@ -78,10 +78,10 @@ import ydrasil_pkg::*;
     wire signed [65:0] product = s2_sum_a_q + s2_sum_b_q;
 
     assign issue_ready_o  = 1'b1;
-    assign result_valid_o = s4_valid_q;
-    assign result_wen_o   = s4_valid_q & s4_wen_q;
-    assign result_waddr_o = s4_waddr_q;
-    assign result_wdata_o = s4_wdata_q;
+    assign result_valid_o = s3_valid_q;
+    assign result_wen_o   = s3_valid_q & s3_wen_q;
+    assign result_waddr_o = s3_waddr_q;
+    assign result_wdata_o = s3_high_q ? s3_product_q[63:32] : s3_product_q[31:0];
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
