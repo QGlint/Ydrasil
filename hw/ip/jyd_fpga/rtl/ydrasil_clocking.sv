@@ -8,7 +8,19 @@ module ydrasil_clocking (
     output wire locked
 );
 
-`ifdef SYN_PLL_FREQ_200
+`ifdef SYN_PLL_FREQ_300
+    localparam real MMCM_CLKFBOUT_MULT_F  = 6.000;
+    localparam real MMCM_CLKOUT0_DIVIDE_F = 24.000;
+    localparam int  MMCM_CLKOUT1_DIVIDE   = 4;
+`elsif SYN_PLL_FREQ_280
+    localparam real MMCM_CLKFBOUT_MULT_F  = 7.000;
+    localparam real MMCM_CLKOUT0_DIVIDE_F = 28.000;
+    localparam int  MMCM_CLKOUT1_DIVIDE   = 5;
+`elsif SYN_PLL_FREQ_250
+    localparam real MMCM_CLKFBOUT_MULT_F  = 5.000;
+    localparam real MMCM_CLKOUT0_DIVIDE_F = 20.000;
+    localparam int  MMCM_CLKOUT1_DIVIDE   = 4;
+`elsif SYN_PLL_FREQ_200
     localparam real MMCM_CLKFBOUT_MULT_F  = 5.000;
     localparam real MMCM_CLKOUT0_DIVIDE_F = 20.000;
     localparam int  MMCM_CLKOUT1_DIVIDE   = 5;
@@ -32,17 +44,18 @@ module ydrasil_clocking (
     wire clkout4_unused;
     wire clkout5_unused;
     wire clkout6_unused;
-    wire clkfboutb_unused;
-    wire clkfbstopped_unused;
-    wire clkinstopped_unused;
-    wire [15:0] do_unused;
-    wire drdy_unused;
-    wire psdone_unused;
+    wire clkfbin_unused;
+    wire clkin1_mmcm;
+    wire locked_int;
 
-    IBUFDS clkin1_ibufds (
-        .O  (clk_in1_mmcm),
+    IBUFGDS #(
+        .DIFF_TERM    ("TRUE"),
+        .IBUF_LOW_PWR ("FALSE"),
+        .IOSTANDARD   ("DIFF_HSTL_II_18")
+    ) u_ibufgds (
         .I  (clk_in1_p),
-        .IB (clk_in1_n)
+        .IB (clk_in1_n),
+        .O  (clk_in1_mmcm)
     );
 
     MMCME2_ADV #(
@@ -64,7 +77,7 @@ module ydrasil_clocking (
         .CLKOUT1_USE_FINE_PS  ("FALSE"),
         .CLKIN1_PERIOD        (5.000),
         .REF_JITTER1          (0.010)
-    ) mmcm_adv_inst (
+    ) u_mmcm (
         .CLKFBOUT     (clkfbout_mmcm),
         .CLKFBOUTB    (clkfboutb_unused),
         .CLKOUT0      (clk_50mhz_mmcm),
@@ -78,6 +91,7 @@ module ydrasil_clocking (
         .CLKOUT4      (clkout4_unused),
         .CLKOUT5      (clkout5_unused),
         .CLKOUT6      (clkout6_unused),
+        .CLKFBOUTB    (clkfbin_unused),
         .CLKFBIN      (clkfbout_buf),
         .CLKIN1       (clk_in1_mmcm),
         .CLKIN2       (1'b0),
@@ -86,33 +100,33 @@ module ydrasil_clocking (
         .DCLK         (1'b0),
         .DEN          (1'b0),
         .DI           (16'h0000),
-        .DO           (do_unused),
-        .DRDY         (drdy_unused),
+        .DO           (),
+        .DRDY         (),
         .DWE          (1'b0),
         .PSCLK        (1'b0),
         .PSEN         (1'b0),
         .PSINCDEC     (1'b0),
-        .PSDONE       (psdone_unused),
-        .LOCKED       (locked),
-        .CLKINSTOPPED (clkinstopped_unused),
-        .CLKFBSTOPPED (clkfbstopped_unused),
+        .PSDONE       (),
+        .LOCKED       (locked_int),
         .PWRDWN       (1'b0),
         .RST          (1'b0)
     );
 
-    BUFG clkfb_buf (
-        .O (clkfbout_buf),
-        .I (clkfbout_mmcm)
+    BUFG u_bufg_clkfb (
+        .I (clkfbout_mmcm),
+        .O (clkfbout_buf)
     );
 
-    BUFG clk50_buf (
-        .O (clk_50mhz),
-        .I (clk_50mhz_mmcm)
+    BUFG u_bufg_cpu_clk (
+        .I (cpu_clk_mmcm),
+        .O (cpu_clk)
     );
 
-    BUFG cpu_clk_buf (
-        .O (cpu_clk),
-        .I (cpu_clk_mmcm)
+    BUFG u_bufg_50mhz (
+        .I (clk_50mhz_mmcm),
+        .O (clk_50mhz)
     );
+
+    assign locked = locked_int;
 
 endmodule
