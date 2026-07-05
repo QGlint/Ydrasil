@@ -284,6 +284,36 @@ end
                      u_dut.lsu_rf_waddr_rd,
                      u_dut.mul_rf_wen_rd,
                      u_dut.mul_rf_waddr_rd);
+            $display("[TB] if_id pc=0x%08h instr=0x%08h valid=%0b flush_if=%0b flush_id=%0b flush_ex=%0b interrupt=%0b branch_jump=%0b target=0x%08h",
+                     u_dut.if_id_pc,
+                     u_dut.if_id_instr,
+                     u_dut.if_id_valid,
+                     u_dut.flush_if,
+                     u_dut.flush_id,
+                     u_dut.flush_ex,
+                     u_dut.interrupt,
+                     u_dut.branch_jump,
+                     u_dut.branch_target);
+            $display("[TB] rn occ=%0d head=%0d tail=%0d ctrl_block=%0b commit_ready=%0b commit_valid=%0b alloc_valid=%0b alloc_rd=%0d alloc_pdst=%0d free=%0d",
+                     u_dut.rn_real_rob_occ_q,
+                     u_dut.rn_real_rob_head_q,
+                     u_dut.rn_real_rob_tail_q,
+                     u_dut.rn_real_ctrl_block,
+                     u_dut.rn_real_commit0_ready,
+                     u_dut.rn_real_commit0_valid,
+                     u_dut.rn_real_alloc0_valid,
+                     u_dut.rn_alloc_rd_addr,
+                     u_dut.rn_real_alloc0_pdst,
+                     u_dut.rn_real_free_count_q);
+            $display("[TB] clint csr_state=0x%02h int_state=0x%01h we=%0b waddr=0x%03h wdata=0x%08h mtvec=0x%08h mepc=0x%08h mcause=0x%08h",
+                     u_dut.u_clint.csr_state,
+                     u_dut.u_clint.int_state,
+                     u_dut.clint_csr_we,
+                     u_dut.clint_csr_waddr,
+                     u_dut.clint_csr_wdata,
+                     u_dut.csr_clint_mtvec,
+                     u_dut.csr_clint_mepc,
+                     u_dut.u_ydrasil_registers_csr.mcause);
             $finish;
         end
         if(sim_done) begin
