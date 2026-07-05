@@ -1152,7 +1152,7 @@ end
                 u_dut.perf_rn_shadow_raw_wb_can_remove,
                 u_dut.perf_rn_shadow_waw_can_remove,
                 u_dut.perf_rn_shadow_war_can_remove,
-                u_dut.u_ydrasil_id_stage.perf_ds_safe_when_pipe0_blocked,
+                u_dut.u_ydrasil_id_stage.perf_ri_slot1_ready_when_slot0_blocked,
                 u_dut.perf_rn_free_min);
             $display("PERF_RENAME_SHADOW_SPLIT: RAW_WB_CAN_REMOVE_ALU_READY=%-d RAW_WB_CAN_REMOVE_P1_READY=%-d RAW_WB_CAN_REMOVE_LSU_READY=%-d RAW_WB_CAN_REMOVE_MUL_READY=%-d RAW_WB_FALSE_POSITIVE=%-d",
                 u_dut.perf_raw_wb_can_remove_alu_ready,
