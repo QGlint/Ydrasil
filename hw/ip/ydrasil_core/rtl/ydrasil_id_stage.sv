@@ -1112,9 +1112,7 @@ import ydrasil_pkg::*;
     always_ff @(posedge clk) begin
         if (rst_n && issue_fire &&
             ((selected_pc >= 32'h8000_007c && selected_pc <= 32'h8000_0090) ||
-             (selected_pc >= 32'h8000_2da8 && selected_pc <= 32'h8000_2dc8) ||
-             (selected_pc >= 32'h8000_1c3c && selected_pc <= 32'h8000_1c48) ||
-             (selected_pc >= 32'h8000_1a10 && selected_pc <= 32'h8000_1a18))) begin
+             (selected_pc >= 32'h8000_2da8 && selected_pc <= 32'h8000_2dc8))) begin
             $display("[ID_RN_DBG] pc=0x%08h instr=0x%08h slot1=%0b rs1=x%0d ren=%0b psrc=%0d prf_ready=%0b prf=0x%08h rf=0x%08h data=0x%08h use_prf=%0b rs2=x%0d psrc=%0d rd=x%0d pdst=%0d gpr_pending_rs1=%0b op_a=0x%08h op_b=0x%08h",
                      selected_pc,
                      (issue_slot1_bypass_fire ? decode_instr : 32'h0),
