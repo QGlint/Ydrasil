@@ -418,9 +418,9 @@ end
             stall_mul_count <= stall_mul_count +
                 (u_dut.ex_mul_stall ? 32'd1 : 32'd0);
             sb_rs1_pending_count <= sb_rs1_pending_count +
-                (u_dut.rs1_pending_stall ? 32'd1 : 32'd0);
+                (u_dut.rs1_pending_stall_eff ? 32'd1 : 32'd0);
             sb_rs2_pending_count <= sb_rs2_pending_count +
-                (u_dut.rs2_pending_stall ? 32'd1 : 32'd0);
+                (u_dut.rs2_pending_stall_eff ? 32'd1 : 32'd0);
             sb_rd_waw_count <= sb_rd_waw_count +
                 (u_dut.rd_waw_stall ? 32'd1 : 32'd0);
             sb_issue_rs1_hzd_count <= sb_issue_rs1_hzd_count +
@@ -441,11 +441,11 @@ end
             sb_store_addr_wait_count <= sb_store_addr_wait_count +
                 ((u_dut.scoreboard_stall &&
                   u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
-                  (u_dut.rs1_pending_stall | u_dut.rs1_issue_hzd)) ? 32'd1 : 32'd0);
+                  (u_dut.rs1_pending_stall_eff | u_dut.rs1_issue_hzd)) ? 32'd1 : 32'd0);
             sb_store_data_wait_count <= sb_store_data_wait_count +
                 ((u_dut.scoreboard_stall &&
                   u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
-                  (u_dut.rs2_pending_stall | u_dut.rs2_issue_hzd)) ? 32'd1 : 32'd0);
+                  (u_dut.rs2_pending_stall_eff | u_dut.rs2_issue_hzd)) ? 32'd1 : 32'd0);
             fe_pred_taken_redirect_count <= fe_pred_taken_redirect_count +
                 (u_dut.u_ydrasil_if_stage.bp_predict_redirect ? 32'd1 : 32'd0);
             sb_raw_alu_ready_next_count <= sb_raw_alu_ready_next_count +
@@ -492,10 +492,14 @@ end
             sb_raw_mul_wait_count <= sb_raw_mul_wait_count +
                 ((u_dut.issue_mul_div_producer & u_dut.issue_src_hzd) ? 32'd1 : 32'd0);
             sb_raw_wb_wait_count <= sb_raw_wb_wait_count +
-                ((u_dut.rs1_pending_stall | u_dut.rs2_pending_stall) ? 32'd1 : 32'd0);
+                (((u_dut.rs1_pending_stall_eff | u_dut.rs2_pending_stall_eff) &&
+                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
+                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
+                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL]) ? 32'd1 : 32'd0);
             sb_waw_only_count <= sb_waw_only_count +
                 ((u_dut.rd_waw_stall &&
-                  !(u_dut.rs1_pending_stall | u_dut.rs2_pending_stall |
+                  !(u_dut.rs1_pending_stall_eff | u_dut.rs2_pending_stall_eff |
                     u_dut.rs1_issue_hzd | u_dut.rs2_issue_hzd)) ? 32'd1 : 32'd0);
             sb_branch_wait_raw_class_count <= sb_branch_wait_raw_class_count +
                 ((u_dut.scoreboard_stall &&
@@ -503,11 +507,11 @@ end
             sb_store_addr_raw_class_count <= sb_store_addr_raw_class_count +
                 ((u_dut.scoreboard_stall &&
                   u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
-                  (u_dut.rs1_pending_stall | u_dut.rs1_issue_hzd)) ? 32'd1 : 32'd0);
+                  (u_dut.rs1_pending_stall_eff | u_dut.rs1_issue_hzd)) ? 32'd1 : 32'd0);
             sb_store_data_raw_class_count <= sb_store_data_raw_class_count +
                 ((u_dut.scoreboard_stall &&
                   u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
-                  (u_dut.rs2_pending_stall | u_dut.rs2_issue_hzd)) ? 32'd1 : 32'd0);
+                  (u_dut.rs2_pending_stall_eff | u_dut.rs2_issue_hzd)) ? 32'd1 : 32'd0);
             sb_can_bypass_with_ready_issue_count <= sb_can_bypass_with_ready_issue_count +
                 ((u_dut.scoreboard_stall && u_dut.u_ydrasil_id_stage.ri_slot1_ready) ? 32'd1 : 32'd0);
             sb_must_stall_in_order_count <= sb_must_stall_in_order_count +
