@@ -1303,7 +1303,11 @@ import ydrasil_pkg::*;
          (wb_fwd_valid_i && (if_id_trace_rf_raddr_rs2 == wb_fwd_addr_i)) ||
          (pipe1_alu_fwd_valid_i && (if_id_trace_rf_raddr_rs2 == pipe1_alu_fwd_addr_i)));
     assign uopq2_buf_capture =
-        1'b0;
+        (PIPE1_REAL_MODE >= 2) &&
+        id_advance && issue_valid_ff && issue_wait_block &&
+        skid_valid_ff && !uopq2_buf_valid_ff &&
+        !issue_slot1_bypass_fire && !pair1_fire &&
+        uopq2_buf_capture_operands_ready;
     assign skid_drain = issue_accept & skid_valid_ff;
     assign pipe1_refill_skid_from_if =
         (PIPE1_REAL_MODE >= 2) && pair1_fire &&
