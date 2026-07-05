@@ -52,7 +52,9 @@ import ydrasil_pkg::*;
 	input  wire                            pipe1_prf_rs2_ready_i,
 	input  wire [DATA_WIDTH-1:0]           pipe1_prf_rs1_data_i,
 	input  wire [DATA_WIDTH-1:0]           pipe1_prf_rs2_data_i,
-    input  wire                            pipe1_rename_ready_i,
+	input  wire                            pipe1_prf_rs1_uncommitted_i,
+	input  wire                            pipe1_prf_rs2_uncommitted_i,
+	input  wire                            pipe1_rename_ready_i,
     input  wire [5:0]                      rn_if_rs1_psrc_i,
     input  wire [5:0]                      rn_if_rs2_psrc_i,
     input  wire [5:0]                      rn_if_pdst_i,
@@ -1374,17 +1376,29 @@ import ydrasil_pkg::*;
     assign pipe1_dual_rs2_ready =
         !pipe1_sel_rf_ren_rs2 || (pipe1_sel_rf_raddr_rs2 == '0) ||
         pipe1_prf_rs2_ready_i;
-    assign pipe1_dual_operands_ready =
-        (pipe1_sel_from1 && pipe1_uopq1_operands_ready) ||
-        (pipe1_sel_from2 && pipe1_uopq2_operands_ready);
-    assign pipe1_dual_rs1_data =
-        pipe1_dual_rs1_alu_fwd ? alu_fwd_data_i :
-        pipe1_dual_rs1_p1alu_fwd ? pipe1_alu_fwd_data_i :
-        pipe1_dual_rs1_wb_fwd  ? wb_fwd_data_i  : pipe1_prf_rs1_data_i;
-    assign pipe1_dual_rs2_data =
-        pipe1_dual_rs2_alu_fwd ? alu_fwd_data_i :
-        pipe1_dual_rs2_p1alu_fwd ? pipe1_alu_fwd_data_i :
-        pipe1_dual_rs2_wb_fwd  ? wb_fwd_data_i  : pipe1_prf_rs2_data_i;
+	assign pipe1_dual_operands_ready =
+		(pipe1_sel_from1 && pipe1_uopq1_operands_ready) ||
+		(pipe1_sel_from2 && pipe1_uopq2_operands_ready);
+	wire pipe1_prf_rs1_allowed =
+		pipe1_sel_rf_ren_rs1 &&
+		(pipe1_sel_rf_raddr_rs1 != '0) &&
+		(gpr_pending_i[pipe1_sel_rf_raddr_rs1] || pipe1_prf_rs1_uncommitted_i) &&
+		(pipe1_sel_rs1_psrc != pipe1_sel_pdst);
+	wire pipe1_prf_rs2_allowed =
+		pipe1_sel_rf_ren_rs2 &&
+		(pipe1_sel_rf_raddr_rs2 != '0) &&
+		(gpr_pending_i[pipe1_sel_rf_raddr_rs2] || pipe1_prf_rs2_uncommitted_i) &&
+		(pipe1_sel_rs2_psrc != pipe1_sel_pdst);
+	assign pipe1_dual_rs1_data =
+		pipe1_dual_rs1_alu_fwd ? alu_fwd_data_i :
+		pipe1_dual_rs1_p1alu_fwd ? pipe1_alu_fwd_data_i :
+		pipe1_dual_rs1_wb_fwd  ? wb_fwd_data_i  :
+		(pipe1_prf_rs1_allowed && pipe1_prf_rs1_ready_i) ? pipe1_prf_rs1_data_i : pipe1_rf_rdata_rs1_i;
+	assign pipe1_dual_rs2_data =
+		pipe1_dual_rs2_alu_fwd ? alu_fwd_data_i :
+		pipe1_dual_rs2_p1alu_fwd ? pipe1_alu_fwd_data_i :
+		pipe1_dual_rs2_wb_fwd  ? wb_fwd_data_i  :
+		(pipe1_prf_rs2_allowed && pipe1_prf_rs2_ready_i) ? pipe1_prf_rs2_data_i : pipe1_rf_rdata_rs2_i;
     assign pipe1_dual_operand_a =
         (pipe1_sel_operand_a_pc_sel | pipe1_sel_operator[ydrasil_pkg::OP_ALU_AUIPC]) ? pipe1_sel_pc :
         pipe1_sel_operand_a_imm_sel ? pipe1_sel_imm : pipe1_dual_rs1_data;
