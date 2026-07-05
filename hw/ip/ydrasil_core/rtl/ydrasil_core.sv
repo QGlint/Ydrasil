@@ -293,6 +293,7 @@ import ydrasil_pkg::*;
 	reg rn_real_load_pdst_valid_q;
 	reg [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] rn_real_load_arch_rd_q;
 	reg [RN_REAL_PREG_BITS-1:0] rn_real_load_pdst_q;
+	reg rn_real_ctrl_inflight_q;
 	wire rn_real_rs1_ready;
 	wire rn_real_rs2_ready;
 	wire rn_real_ctrl_rs1_ready;
@@ -321,6 +322,9 @@ import ydrasil_pkg::*;
 	wire rn_real_alloc_stall;
 	wire rn_real_commit0_valid;
 	wire rn_real_commit0_ready;
+	wire rn_real_ctrl_issue;
+	wire rn_real_ctrl_resolve;
+	wire rn_real_ctrl_block;
 	wire pipe1_commit_rf_wen;
 	wire rn_shadow_alloc1_valid;
 	wire rn_shadow_same_cycle_raw;
@@ -965,13 +969,17 @@ import ydrasil_pkg::*;
 		rn_real_rob_pipe1_q[rn_real_rob_head_q] &
 		(rn_real_rob_arch_rd_q[rn_real_rob_head_q] != '0) &
 		!wb_rf_wen_rd;
-	assign rn_real_commit0_valid =
-		rn_real_commit0_ready &
-		(!rn_real_rob_pipe1_q[rn_real_rob_head_q] | pipe1_commit_rf_wen);
+		assign rn_real_commit0_valid =
+			rn_real_commit0_ready &
+			(!rn_real_rob_pipe1_q[rn_real_rob_head_q] | pipe1_commit_rf_wen);
+		assign rn_real_ctrl_issue =
+			id_ex_valid & operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] & !flush_ex & !interrupt;
+		assign rn_real_ctrl_resolve = ex_bp_train_valid | ex_pc_redirect | interrupt;
+		assign rn_real_ctrl_block = rn_real_ctrl_inflight_q | rn_real_ctrl_issue;
 
-	always_ff @(posedge clk or negedge rst_n) begin
-		integer rn_i;
-		if (!rst_n) begin
+		always_ff @(posedge clk or negedge rst_n) begin
+			integer rn_i;
+			if (!rst_n) begin
 			rn_real_free_q <= 64'hffff_ffff_0000_0000;
 			rn_real_busy_q <= '0;
 			rn_real_free_count_q <= 7'd32;
@@ -981,44 +989,46 @@ import ydrasil_pkg::*;
 			rn_real_ex_pdst_valid_q <= 1'b0;
 			rn_real_ex_arch_rd_q <= '0;
 			rn_real_ex_pdst_q <= '0;
-			rn_real_src_psrc_valid_q <= 1'b0;
-			rn_real_src_rs1_psrc_q <= '0;
-			rn_real_src_rs2_psrc_q <= '0;
-			rn_real_load_pdst_valid_q <= 1'b0;
-			rn_real_load_arch_rd_q <= '0;
-			rn_real_load_pdst_q <= '0;
-			for (rn_i = 0; rn_i < ydrasil_pkg::REGS_NUM; rn_i = rn_i + 1) begin
-				rn_real_rat_q[rn_i] <= rn_i[RN_REAL_PREG_BITS-1:0];
-				rn_real_amt_q[rn_i] <= rn_i[RN_REAL_PREG_BITS-1:0];
-			end
-			for (rn_i = 0; rn_i < RN_REAL_ROB_DEPTH; rn_i = rn_i + 1) begin
+				rn_real_src_psrc_valid_q <= 1'b0;
+				rn_real_src_rs1_psrc_q <= '0;
+				rn_real_src_rs2_psrc_q <= '0;
+				rn_real_load_pdst_valid_q <= 1'b0;
+				rn_real_load_arch_rd_q <= '0;
+				rn_real_load_pdst_q <= '0;
+				rn_real_ctrl_inflight_q <= 1'b0;
+				for (rn_i = 0; rn_i < ydrasil_pkg::REGS_NUM; rn_i = rn_i + 1) begin
+					rn_real_rat_q[rn_i] <= rn_i[RN_REAL_PREG_BITS-1:0];
+					rn_real_amt_q[rn_i] <= rn_i[RN_REAL_PREG_BITS-1:0];
+				end
+				for (rn_i = 0; rn_i < RN_REAL_ROB_DEPTH; rn_i = rn_i + 1) begin
 				rn_real_rob_valid_q[rn_i] <= 1'b0;
 				rn_real_rob_ready_q[rn_i] <= 1'b0;
 				rn_real_rob_arch_rd_q[rn_i] <= '0;
 				rn_real_rob_new_pdst_q[rn_i] <= '0;
 				rn_real_rob_old_pdst_q[rn_i] <= '0;
-				rn_real_rob_pipe1_q[rn_i] <= 1'b0;
-				rn_real_rob_data_q[rn_i] <= '0;
-			end
-		end else if (flush_id | flush_ex | interrupt) begin
-			rn_real_free_q <= rn_real_free_from_amt();
-			rn_real_busy_q <= '0;
-			rn_real_free_count_q <= rn_real_count_free(rn_real_free_from_amt());
+					rn_real_rob_pipe1_q[rn_i] <= 1'b0;
+					rn_real_rob_data_q[rn_i] <= '0;
+				end
+			end else if (interrupt) begin
+				rn_real_free_q <= rn_real_free_from_amt();
+				rn_real_busy_q <= '0;
+				rn_real_free_count_q <= rn_real_count_free(rn_real_free_from_amt());
 			rn_real_rob_head_q <= '0;
 			rn_real_rob_tail_q <= '0;
 			rn_real_rob_occ_q <= '0;
 			rn_real_ex_pdst_valid_q <= 1'b0;
 			rn_real_ex_arch_rd_q <= '0;
 			rn_real_ex_pdst_q <= '0;
-			rn_real_src_psrc_valid_q <= 1'b0;
-			rn_real_src_rs1_psrc_q <= '0;
-			rn_real_src_rs2_psrc_q <= '0;
-			rn_real_load_pdst_valid_q <= 1'b0;
-			rn_real_load_arch_rd_q <= '0;
-			rn_real_load_pdst_q <= '0;
-			for (rn_i = 0; rn_i < ydrasil_pkg::REGS_NUM; rn_i = rn_i + 1) begin
-				rn_real_rat_q[rn_i] <= rn_real_amt_q[rn_i];
-			end
+				rn_real_src_psrc_valid_q <= 1'b0;
+				rn_real_src_rs1_psrc_q <= '0;
+				rn_real_src_rs2_psrc_q <= '0;
+				rn_real_load_pdst_valid_q <= 1'b0;
+				rn_real_load_arch_rd_q <= '0;
+				rn_real_load_pdst_q <= '0;
+				rn_real_ctrl_inflight_q <= 1'b0;
+				for (rn_i = 0; rn_i < ydrasil_pkg::REGS_NUM; rn_i = rn_i + 1) begin
+					rn_real_rat_q[rn_i] <= rn_real_amt_q[rn_i];
+				end
 			for (rn_i = 0; rn_i < RN_REAL_ROB_DEPTH; rn_i = rn_i + 1) begin
 				rn_real_rob_valid_q[rn_i] <= 1'b0;
 				rn_real_rob_ready_q[rn_i] <= 1'b0;
@@ -1026,10 +1036,15 @@ import ydrasil_pkg::*;
 				rn_real_rob_new_pdst_q[rn_i] <= '0;
 				rn_real_rob_old_pdst_q[rn_i] <= '0;
 				rn_real_rob_pipe1_q[rn_i] <= 1'b0;
-				rn_real_rob_data_q[rn_i] <= '0;
-			end
-		end else begin
-			rn_real_ex_pdst_valid_q <= id_ex_rd_issue & id_alu_rf_wen_rd;
+					rn_real_rob_data_q[rn_i] <= '0;
+				end
+			end else begin
+				if (rn_real_ctrl_resolve) begin
+					rn_real_ctrl_inflight_q <= 1'b0;
+				end else if (rn_real_ctrl_issue) begin
+					rn_real_ctrl_inflight_q <= 1'b1;
+				end
+				rn_real_ex_pdst_valid_q <= id_ex_rd_issue & id_alu_rf_wen_rd;
 			rn_real_ex_arch_rd_q <= id_rf_waddr_rd;
 			rn_real_ex_pdst_q <= id_rn_pdst;
 			rn_real_src_psrc_valid_q <= rn_real_alloc0_valid;
@@ -1339,7 +1354,9 @@ import ydrasil_pkg::*;
 	assign lsu_struct_stall = id_ctrl_lsu_req & lsu_ctrl_busy;
 	assign ready_issue_allow =
 		!lsu_struct_stall & !clint_stall & !wb_backpressure & !ex_mul_stall;
-	assign bubble_id = scoreboard_stall | lsu_struct_stall | clint_stall | wb_backpressure;
+	assign bubble_id =
+		scoreboard_stall | rn_real_ctrl_block |
+		lsu_struct_stall | clint_stall | wb_backpressure;
 
 	always_ff @(posedge clk or negedge rst_n) begin
 		if (!rst_n) begin
