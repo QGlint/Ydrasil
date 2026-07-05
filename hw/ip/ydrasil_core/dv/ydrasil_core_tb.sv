@@ -1193,6 +1193,12 @@ end
                 u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_younger_flush,
                 u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_young_uopq2,
                 u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_young_ifid);
+            $display("PERF_UOPQ_IFID_FLUSH_SPLIT: BJP=%-d LOAD=%-d STORE=%-d MUL=%-d CSR_SYS_FENCE=%-d",
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_ifid_bjp,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_ifid_load,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_ifid_store,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_ifid_mul,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_ifid_csr_sys);
             $display("PERF_RENAME_SHADOW: RN_SHADOW_RAW_WB_CAN_REMOVE=%-d RN_SHADOW_WAW_CAN_REMOVE=%-d RN_SHADOW_WAR_CAN_REMOVE=%-d RN_SHADOW_PIPE1_WHEN_P0_BLOCKED_CAN_FIRE=%-d RN_SHADOW_FREE_PREG_MIN=%-d",
                 u_dut.perf_rn_shadow_raw_wb_can_remove,
                 u_dut.perf_rn_shadow_waw_can_remove,
