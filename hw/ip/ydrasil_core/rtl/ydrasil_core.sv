@@ -989,7 +989,7 @@ import ydrasil_pkg::*;
 			  (id_ctrl_rs2_ren & !rn_real_ctrl_rs2_ready))) |
 			(id_ctrl_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] &
 			 id_ctrl_rd_wen & (id_ctrl_rd_addr != '0) &
-			 !id_ctrl_rs2_ren & (rn_real_rob_occ_q != '0));
+			 !id_ctrl_rs2_ren & (rn_real_rob_occ_q > 7'd1));
 
 		always_ff @(posedge clk or negedge rst_n) begin
 			integer rn_i;
