@@ -593,6 +593,10 @@ import ydrasil_pkg::*;
     reg [31:0]                       perf_di_pipe1_operand_block_from1;
     reg [31:0]                       perf_di_pipe1_operand_block_from2;
     reg [31:0]                       perf_di_pipe1_operand_block_recoverable;
+    reg [31:0]                       perf_di_pipe1_alt2_when_from1_block_safe;
+    reg [31:0]                       perf_di_pipe1_alt2_when_from1_block_ready;
+    reg [31:0]                       perf_di_pipe1_alt2_when_recoverable_safe;
+    reg [31:0]                       perf_di_pipe1_alt2_when_recoverable_ready;
     reg [31:0]                       perf_dual_cycles_with_pair_fire;
     reg [31:0]                       perf_dual_extra_instret_pipe1;
     reg [31:0]                       perf_dual_pipe1_useful_commit;
@@ -2227,6 +2231,10 @@ import ydrasil_pkg::*;
             perf_di_pipe1_operand_block_from1 <= '0;
             perf_di_pipe1_operand_block_from2 <= '0;
             perf_di_pipe1_operand_block_recoverable <= '0;
+            perf_di_pipe1_alt2_when_from1_block_safe <= '0;
+            perf_di_pipe1_alt2_when_from1_block_ready <= '0;
+            perf_di_pipe1_alt2_when_recoverable_safe <= '0;
+            perf_di_pipe1_alt2_when_recoverable_ready <= '0;
             perf_dual_cycles_with_pair_fire <= '0;
             perf_dual_extra_instret_pipe1 <= '0;
             perf_dual_pipe1_useful_commit <= '0;
@@ -3085,6 +3093,30 @@ import ydrasil_pkg::*;
                   !pipe1_dual_raw_pipe0 && !pipe1_dual_waw_pipe0 &&
                   !pipe1_dual_war_pipe0 && !pipe1_dual_pending_rd &&
                   !pipe1_resbuf_full_i) ? 32'd1 : 32'd0);
+            perf_di_pipe1_alt2_when_from1_block_safe <= perf_di_pipe1_alt2_when_from1_block_safe +
+                ((pipe1_dual_supported && pipe1_sel_from1 &&
+                  !pipe1_dual_operands_ready && pipe1_uopq2_safe) ? 32'd1 : 32'd0);
+            perf_di_pipe1_alt2_when_from1_block_ready <= perf_di_pipe1_alt2_when_from1_block_ready +
+                ((pipe1_dual_supported && pipe1_sel_from1 &&
+                  !pipe1_dual_operands_ready && pipe1_uopq2_safe &&
+                  pipe1_uopq2_operands_ready && !issue_load_from_uopq2) ? 32'd1 : 32'd0);
+            perf_di_pipe1_alt2_when_recoverable_safe <= perf_di_pipe1_alt2_when_recoverable_safe +
+                (((pipe1_p0_ready_context | pipe1_p0_blocked_context | pipe1_p0_empty_context) &&
+                  ready_issue_allow_i && !flush_id_i &&
+                  pipe1_dual_supported && pipe1_sel_from1 && !pipe1_dual_operands_ready &&
+                  pipe1_dual_pipe0_safe && !pipe1_younger_flush_block &&
+                  !pipe1_dual_raw_pipe0 && !pipe1_dual_waw_pipe0 &&
+                  !pipe1_dual_war_pipe0 && !pipe1_dual_pending_rd &&
+                  !pipe1_resbuf_full_i && pipe1_uopq2_safe) ? 32'd1 : 32'd0);
+            perf_di_pipe1_alt2_when_recoverable_ready <= perf_di_pipe1_alt2_when_recoverable_ready +
+                (((pipe1_p0_ready_context | pipe1_p0_blocked_context | pipe1_p0_empty_context) &&
+                  ready_issue_allow_i && !flush_id_i &&
+                  pipe1_dual_supported && pipe1_sel_from1 && !pipe1_dual_operands_ready &&
+                  pipe1_dual_pipe0_safe && !pipe1_younger_flush_block &&
+                  !pipe1_dual_raw_pipe0 && !pipe1_dual_waw_pipe0 &&
+                  !pipe1_dual_war_pipe0 && !pipe1_dual_pending_rd &&
+                  !pipe1_resbuf_full_i && pipe1_uopq2_safe &&
+                  pipe1_uopq2_operands_ready && !issue_load_from_uopq2) ? 32'd1 : 32'd0);
             perf_dual_cycles_with_pair_fire <= perf_dual_cycles_with_pair_fire +
                 (pair1_fire ? 32'd1 : 32'd0);
             perf_dual_extra_instret_pipe1 <= perf_dual_extra_instret_pipe1 +
