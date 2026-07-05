@@ -587,6 +587,12 @@ import ydrasil_pkg::*;
     reg [31:0]                       perf_di_pipe1_block_alu_fifo_full;
     reg [31:0]                       perf_di_pipe1_block_pending_recheck;
     reg [31:0]                       perf_di_pipe1_block_timing_guard;
+    reg [31:0]                       perf_di_pipe1_operand_block_rs1;
+    reg [31:0]                       perf_di_pipe1_operand_block_rs2;
+    reg [31:0]                       perf_di_pipe1_operand_block_both;
+    reg [31:0]                       perf_di_pipe1_operand_block_from1;
+    reg [31:0]                       perf_di_pipe1_operand_block_from2;
+    reg [31:0]                       perf_di_pipe1_operand_block_recoverable;
     reg [31:0]                       perf_dual_cycles_with_pair_fire;
     reg [31:0]                       perf_dual_extra_instret_pipe1;
     reg [31:0]                       perf_dual_pipe1_useful_commit;
@@ -2215,6 +2221,12 @@ import ydrasil_pkg::*;
             perf_di_pipe1_block_alu_fifo_full <= '0;
             perf_di_pipe1_block_pending_recheck <= '0;
             perf_di_pipe1_block_timing_guard <= '0;
+            perf_di_pipe1_operand_block_rs1 <= '0;
+            perf_di_pipe1_operand_block_rs2 <= '0;
+            perf_di_pipe1_operand_block_both <= '0;
+            perf_di_pipe1_operand_block_from1 <= '0;
+            perf_di_pipe1_operand_block_from2 <= '0;
+            perf_di_pipe1_operand_block_recoverable <= '0;
             perf_dual_cycles_with_pair_fire <= '0;
             perf_dual_extra_instret_pipe1 <= '0;
             perf_dual_pipe1_useful_commit <= '0;
@@ -3052,6 +3064,27 @@ import ydrasil_pkg::*;
                 ((pipe1_dual_supported && pipe1_dual_pending_rd) ? 32'd1 : 32'd0);
             perf_di_pipe1_block_timing_guard <= perf_di_pipe1_block_timing_guard +
                 ((pipe1_dual_supported && !pipe1_dual_operands_ready) ? 32'd1 : 32'd0);
+            perf_di_pipe1_operand_block_rs1 <= perf_di_pipe1_operand_block_rs1 +
+                ((pipe1_dual_supported && !pipe1_dual_rs1_ready) ? 32'd1 : 32'd0);
+            perf_di_pipe1_operand_block_rs2 <= perf_di_pipe1_operand_block_rs2 +
+                ((pipe1_dual_supported && !pipe1_dual_rs2_ready) ? 32'd1 : 32'd0);
+            perf_di_pipe1_operand_block_both <= perf_di_pipe1_operand_block_both +
+                ((pipe1_dual_supported && !pipe1_dual_rs1_ready &&
+                  !pipe1_dual_rs2_ready) ? 32'd1 : 32'd0);
+            perf_di_pipe1_operand_block_from1 <= perf_di_pipe1_operand_block_from1 +
+                ((pipe1_dual_supported && pipe1_sel_from1 &&
+                  !pipe1_dual_operands_ready) ? 32'd1 : 32'd0);
+            perf_di_pipe1_operand_block_from2 <= perf_di_pipe1_operand_block_from2 +
+                ((pipe1_dual_supported && pipe1_sel_from2 &&
+                  !pipe1_dual_operands_ready) ? 32'd1 : 32'd0);
+            perf_di_pipe1_operand_block_recoverable <= perf_di_pipe1_operand_block_recoverable +
+                (((pipe1_p0_ready_context | pipe1_p0_blocked_context | pipe1_p0_empty_context) &&
+                  ready_issue_allow_i && !flush_id_i &&
+                  pipe1_dual_supported && !pipe1_dual_operands_ready &&
+                  pipe1_dual_pipe0_safe && !pipe1_younger_flush_block &&
+                  !pipe1_dual_raw_pipe0 && !pipe1_dual_waw_pipe0 &&
+                  !pipe1_dual_war_pipe0 && !pipe1_dual_pending_rd &&
+                  !pipe1_resbuf_full_i) ? 32'd1 : 32'd0);
             perf_dual_cycles_with_pair_fire <= perf_dual_cycles_with_pair_fire +
                 (pair1_fire ? 32'd1 : 32'd0);
             perf_dual_extra_instret_pipe1 <= perf_dual_extra_instret_pipe1 +

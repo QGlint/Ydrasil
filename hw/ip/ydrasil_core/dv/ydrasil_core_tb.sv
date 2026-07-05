@@ -1304,6 +1304,13 @@ end
                 u_dut.u_ydrasil_id_stage.perf_di_pipe1_block_alu_fifo_full,
                 u_dut.u_ydrasil_id_stage.perf_di_pipe1_block_pending_recheck,
                 u_dut.u_ydrasil_id_stage.perf_di_pipe1_block_timing_guard);
+            $display("PERF_PIPE1_OPERAND_BLOCK_SPLIT: RS1=%-d RS2=%-d BOTH=%-d FROM1=%-d FROM2=%-d RECOVERABLE=%-d",
+                u_dut.u_ydrasil_id_stage.perf_di_pipe1_operand_block_rs1,
+                u_dut.u_ydrasil_id_stage.perf_di_pipe1_operand_block_rs2,
+                u_dut.u_ydrasil_id_stage.perf_di_pipe1_operand_block_both,
+                u_dut.u_ydrasil_id_stage.perf_di_pipe1_operand_block_from1,
+                u_dut.u_ydrasil_id_stage.perf_di_pipe1_operand_block_from2,
+                u_dut.u_ydrasil_id_stage.perf_di_pipe1_operand_block_recoverable);
             $display("PERF_PIPE1_WB: P1_WB_ENQUEUE=%-d P1_WB_DEQUEUE=%-d P1_WB_DIRECT=%-d P1_WB_WAIT_CYCLES=%-d P1_WB_MAX_OCC=%-d P1_WB_ORDER_FIX=%-d",
                 u_dut.u_ydrasil_wb_stage.perf_p1_wb_enqueue,
                 u_dut.u_ydrasil_wb_stage.perf_p1_wb_dequeue,
