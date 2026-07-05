@@ -246,6 +246,18 @@ end
     reg [31:0] sb_raw_alu_ready_next_count;
     reg [31:0] sb_raw_load_wait_count;
     reg [31:0] sb_raw_mul_wait_count;
+    reg [31:0] sb_raw_load_rs1_issue_count;
+    reg [31:0] sb_raw_load_rs2_issue_count;
+    reg [31:0] sb_raw_mul_rs1_issue_count;
+    reg [31:0] sb_raw_mul_rs2_issue_count;
+    reg [31:0] sb_raw_load_cons_branch_count;
+    reg [31:0] sb_raw_load_cons_store_count;
+    reg [31:0] sb_raw_load_cons_alu_count;
+    reg [31:0] sb_raw_load_cons_mul_count;
+    reg [31:0] sb_raw_mul_cons_branch_count;
+    reg [31:0] sb_raw_mul_cons_store_count;
+    reg [31:0] sb_raw_mul_cons_alu_count;
+    reg [31:0] sb_raw_mul_cons_mul_count;
     reg [31:0] sb_raw_wb_wait_count;
     reg [31:0] sb_waw_only_count;
     reg [31:0] sb_branch_wait_raw_class_count;
@@ -263,6 +275,12 @@ end
     reg [31:0] sb_branch_wait_issue_rs2_count;
     reg [31:0] sb_branch_wait_rd_waw_count;
     reg [31:0] sb_branch_wait_pipe1_hzd_count;
+    reg [31:0] sb_branch_ctrl_src_rs1_busy_count;
+    reg [31:0] sb_branch_ctrl_src_rs2_busy_count;
+    reg [31:0] sb_branch_ctrl_src_rs1_no_gpr_pending_count;
+    reg [31:0] sb_branch_ctrl_src_rs2_no_gpr_pending_count;
+    reg [31:0] sb_branch_ctrl_src_rs1_uncommitted_count;
+    reg [31:0] sb_branch_ctrl_src_rs2_uncommitted_count;
     reg [31:0] sb_store_addr_raw_class_count;
     reg [31:0] sb_store_data_raw_class_count;
     reg [31:0] sb_can_bypass_with_ready_issue_count;
@@ -451,6 +469,18 @@ end
             sb_raw_alu_ready_next_count <= 32'b0;
             sb_raw_load_wait_count <= 32'b0;
             sb_raw_mul_wait_count <= 32'b0;
+            sb_raw_load_rs1_issue_count <= 32'b0;
+            sb_raw_load_rs2_issue_count <= 32'b0;
+            sb_raw_mul_rs1_issue_count <= 32'b0;
+            sb_raw_mul_rs2_issue_count <= 32'b0;
+            sb_raw_load_cons_branch_count <= 32'b0;
+            sb_raw_load_cons_store_count <= 32'b0;
+            sb_raw_load_cons_alu_count <= 32'b0;
+            sb_raw_load_cons_mul_count <= 32'b0;
+            sb_raw_mul_cons_branch_count <= 32'b0;
+            sb_raw_mul_cons_store_count <= 32'b0;
+            sb_raw_mul_cons_alu_count <= 32'b0;
+            sb_raw_mul_cons_mul_count <= 32'b0;
             sb_raw_wb_wait_count <= 32'b0;
             sb_waw_only_count <= 32'b0;
             sb_branch_wait_raw_class_count <= 32'b0;
@@ -468,6 +498,12 @@ end
             sb_branch_wait_issue_rs2_count <= 32'b0;
             sb_branch_wait_rd_waw_count <= 32'b0;
             sb_branch_wait_pipe1_hzd_count <= 32'b0;
+            sb_branch_ctrl_src_rs1_busy_count <= 32'b0;
+            sb_branch_ctrl_src_rs2_busy_count <= 32'b0;
+            sb_branch_ctrl_src_rs1_no_gpr_pending_count <= 32'b0;
+            sb_branch_ctrl_src_rs2_no_gpr_pending_count <= 32'b0;
+            sb_branch_ctrl_src_rs1_uncommitted_count <= 32'b0;
+            sb_branch_ctrl_src_rs2_uncommitted_count <= 32'b0;
             sb_store_addr_raw_class_count <= 32'b0;
             sb_store_data_raw_class_count <= 32'b0;
             sb_can_bypass_with_ready_issue_count <= 32'b0;
@@ -622,6 +658,38 @@ end
                 ((u_dut.issue_load_producer & u_dut.issue_src_hzd) ? 32'd1 : 32'd0);
             sb_raw_mul_wait_count <= sb_raw_mul_wait_count +
                 ((u_dut.issue_mul_div_producer & u_dut.issue_src_hzd) ? 32'd1 : 32'd0);
+            sb_raw_load_rs1_issue_count <= sb_raw_load_rs1_issue_count +
+                ((u_dut.issue_load_producer & u_dut.rs1_issue_hzd) ? 32'd1 : 32'd0);
+            sb_raw_load_rs2_issue_count <= sb_raw_load_rs2_issue_count +
+                ((u_dut.issue_load_producer & u_dut.rs2_issue_hzd) ? 32'd1 : 32'd0);
+            sb_raw_mul_rs1_issue_count <= sb_raw_mul_rs1_issue_count +
+                ((u_dut.issue_mul_div_producer & u_dut.rs1_issue_hzd) ? 32'd1 : 32'd0);
+            sb_raw_mul_rs2_issue_count <= sb_raw_mul_rs2_issue_count +
+                ((u_dut.issue_mul_div_producer & u_dut.rs2_issue_hzd) ? 32'd1 : 32'd0);
+            sb_raw_load_cons_branch_count <= sb_raw_load_cons_branch_count +
+                ((u_dut.issue_load_producer & u_dut.issue_src_hzd &
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP]) ? 32'd1 : 32'd0);
+            sb_raw_load_cons_store_count <= sb_raw_load_cons_store_count +
+                ((u_dut.issue_load_producer & u_dut.issue_src_hzd &
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) ? 32'd1 : 32'd0);
+            sb_raw_load_cons_alu_count <= sb_raw_load_cons_alu_count +
+                ((u_dut.issue_load_producer & u_dut.issue_src_hzd &
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_ALU]) ? 32'd1 : 32'd0);
+            sb_raw_load_cons_mul_count <= sb_raw_load_cons_mul_count +
+                ((u_dut.issue_load_producer & u_dut.issue_src_hzd &
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL]) ? 32'd1 : 32'd0);
+            sb_raw_mul_cons_branch_count <= sb_raw_mul_cons_branch_count +
+                ((u_dut.issue_mul_div_producer & u_dut.issue_src_hzd &
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP]) ? 32'd1 : 32'd0);
+            sb_raw_mul_cons_store_count <= sb_raw_mul_cons_store_count +
+                ((u_dut.issue_mul_div_producer & u_dut.issue_src_hzd &
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) ? 32'd1 : 32'd0);
+            sb_raw_mul_cons_alu_count <= sb_raw_mul_cons_alu_count +
+                ((u_dut.issue_mul_div_producer & u_dut.issue_src_hzd &
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_ALU]) ? 32'd1 : 32'd0);
+            sb_raw_mul_cons_mul_count <= sb_raw_mul_cons_mul_count +
+                ((u_dut.issue_mul_div_producer & u_dut.issue_src_hzd &
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL]) ? 32'd1 : 32'd0);
             sb_raw_wb_wait_count <= sb_raw_wb_wait_count +
                 (((u_dut.rs1_pending_stall_eff | u_dut.rs2_pending_stall_eff) &&
                   !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
@@ -702,6 +770,38 @@ end
                   u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
                   (u_dut.pipe1_issue_rs1_hzd | u_dut.pipe1_issue_rs2_hzd |
                    u_dut.pipe1_issue_rd_hzd)) ? 32'd1 : 32'd0);
+            sb_branch_ctrl_src_rs1_busy_count <= sb_branch_ctrl_src_rs1_busy_count +
+                ((u_dut.scoreboard_stall &&
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.id_ctrl_rs1_ren && !u_dut.rn_real_ctrl_rs1_ready &&
+                  (u_dut.rn_real_rs1_psrc != '0) &&
+                  u_dut.rn_real_busy_q[u_dut.rn_real_rs1_psrc]) ? 32'd1 : 32'd0);
+            sb_branch_ctrl_src_rs2_busy_count <= sb_branch_ctrl_src_rs2_busy_count +
+                ((u_dut.scoreboard_stall &&
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.id_ctrl_rs2_ren && !u_dut.rn_real_ctrl_rs2_ready &&
+                  (u_dut.rn_real_rs2_psrc != '0) &&
+                  u_dut.rn_real_busy_q[u_dut.rn_real_rs2_psrc]) ? 32'd1 : 32'd0);
+            sb_branch_ctrl_src_rs1_no_gpr_pending_count <= sb_branch_ctrl_src_rs1_no_gpr_pending_count +
+                ((u_dut.scoreboard_stall &&
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.id_ctrl_rs1_ren && !u_dut.rn_real_ctrl_rs1_ready &&
+                  !u_dut.gpr_pending_q[u_dut.id_ctrl_rs1_addr]) ? 32'd1 : 32'd0);
+            sb_branch_ctrl_src_rs2_no_gpr_pending_count <= sb_branch_ctrl_src_rs2_no_gpr_pending_count +
+                ((u_dut.scoreboard_stall &&
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.id_ctrl_rs2_ren && !u_dut.rn_real_ctrl_rs2_ready &&
+                  !u_dut.gpr_pending_q[u_dut.id_ctrl_rs2_addr]) ? 32'd1 : 32'd0);
+            sb_branch_ctrl_src_rs1_uncommitted_count <= sb_branch_ctrl_src_rs1_uncommitted_count +
+                ((u_dut.scoreboard_stall &&
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.id_ctrl_rs1_ren && !u_dut.rn_real_ctrl_rs1_ready &&
+                  u_dut.rn_real_rs1_uncommitted) ? 32'd1 : 32'd0);
+            sb_branch_ctrl_src_rs2_uncommitted_count <= sb_branch_ctrl_src_rs2_uncommitted_count +
+                ((u_dut.scoreboard_stall &&
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.id_ctrl_rs2_ren && !u_dut.rn_real_ctrl_rs2_ready &&
+                  u_dut.rn_real_rs2_uncommitted) ? 32'd1 : 32'd0);
             sb_store_addr_raw_class_count <= sb_store_addr_raw_class_count +
                 ((u_dut.scoreboard_stall &&
                   u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
@@ -1114,6 +1214,19 @@ end
                 sb_store_data_raw_class_count,
                 sb_can_bypass_with_ready_issue_count,
                 sb_must_stall_in_order_count);
+            $display("PERF_SCOREBOARD_PRODUCER_SPLIT: LOAD_RS1=%-d LOAD_RS2=%-d MUL_RS1=%-d MUL_RS2=%-d LOAD_CONS_BRANCH=%-d LOAD_CONS_STORE=%-d LOAD_CONS_ALU=%-d LOAD_CONS_MUL=%-d MUL_CONS_BRANCH=%-d MUL_CONS_STORE=%-d MUL_CONS_ALU=%-d MUL_CONS_MUL=%-d",
+                sb_raw_load_rs1_issue_count,
+                sb_raw_load_rs2_issue_count,
+                sb_raw_mul_rs1_issue_count,
+                sb_raw_mul_rs2_issue_count,
+                sb_raw_load_cons_branch_count,
+                sb_raw_load_cons_store_count,
+                sb_raw_load_cons_alu_count,
+                sb_raw_load_cons_mul_count,
+                sb_raw_mul_cons_branch_count,
+                sb_raw_mul_cons_store_count,
+                sb_raw_mul_cons_alu_count,
+                sb_raw_mul_cons_mul_count);
             $display("PERF_BRANCH_STALL_SPLIT: TOTAL=%-d CTRL_BLOCK=%-d CTRL_SRC=%-d CTRL_ORDER=%-d RS1_PENDING=%-d RS2_PENDING=%-d ISSUE_RS1=%-d ISSUE_RS2=%-d RD_WAW=%-d PIPE1_HZD=%-d",
                 sb_branch_wait_raw_class_count,
                 sb_branch_wait_ctrl_block_count,
@@ -1125,6 +1238,13 @@ end
                 sb_branch_wait_issue_rs2_count,
                 sb_branch_wait_rd_waw_count,
                 sb_branch_wait_pipe1_hzd_count);
+            $display("PERF_BRANCH_SRC_SPLIT: RS1_BUSY=%-d RS2_BUSY=%-d RS1_NO_GPR_PENDING=%-d RS2_NO_GPR_PENDING=%-d RS1_UNCOMMITTED=%-d RS2_UNCOMMITTED=%-d",
+                sb_branch_ctrl_src_rs1_busy_count,
+                sb_branch_ctrl_src_rs2_busy_count,
+                sb_branch_ctrl_src_rs1_no_gpr_pending_count,
+                sb_branch_ctrl_src_rs2_no_gpr_pending_count,
+                sb_branch_ctrl_src_rs1_uncommitted_count,
+                sb_branch_ctrl_src_rs2_uncommitted_count);
             $display("PERF_BRANCH_ORDER_SPLIT: TOTAL=%-d PIPE1_ISSUE=%-d PIPE1_WB=%-d HEAD_COMMIT=%-d HEAD_RF_BLOCK=%-d ROB_NONHEAD=%-d",
                 sb_branch_wait_ctrl_order_count,
                 sb_branch_order_pipe1_issue_count,
