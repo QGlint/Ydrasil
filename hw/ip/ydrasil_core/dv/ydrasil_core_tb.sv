@@ -1205,6 +1205,15 @@ end
                 u_dut.u_ydrasil_id_stage.perf_uopq_p1_empty_block_ready_allow,
                 u_dut.u_ydrasil_id_stage.perf_uopq_p1_empty_block_pending_rd,
                 u_dut.u_ydrasil_id_stage.perf_uopq_p1_empty_block_resbuf);
+            $display("PERF_UOPQ_BLOCKED_SPLIT: BASE=%-d SUPPORTED=%-d P0_SAFE=%-d OPERANDS_READY=%-d BLOCK_YOUNGER=%-d BLOCK_READY_ALLOW=%-d BLOCK_PENDING_RD=%-d BLOCK_RESBUF=%-d",
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_blocked_base,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_blocked_supported,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_blocked_p0_safe,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_blocked_operands_ready,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_blocked_block_younger,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_blocked_block_ready_allow,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_blocked_block_pending_rd,
+                u_dut.u_ydrasil_id_stage.perf_uopq_p1_blocked_block_resbuf);
             $display("PERF_UOPQ_YOUNGER_FLUSH_SPLIT: TOTAL=%-d UOPQ2=%-d IFID=%-d",
                 u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_younger_flush,
                 u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_young_uopq2,
