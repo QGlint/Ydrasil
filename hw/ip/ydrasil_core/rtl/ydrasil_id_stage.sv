@@ -1487,9 +1487,11 @@ import ydrasil_pkg::*;
           if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS] |
           if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_MUL] |
           id_fence_i));
-    assign pipe1_sel_from1 = pipe1_uopq1_safe;
+    assign pipe1_sel_from1 =
+        pipe1_uopq1_safe && (pipe1_uopq1_operands_ready || !pipe1_uopq2_safe);
     assign pipe1_sel_from2 =
-        !pipe1_sel_from1 && pipe1_uopq2_safe && !issue_load_from_uopq2;
+        (!pipe1_uopq1_safe || !pipe1_uopq1_operands_ready) &&
+        pipe1_uopq2_safe && !issue_load_from_uopq2;
     assign pipe1_sel_pc = pipe1_sel_from2 ? uopq2_pc : uopq1_pc;
     assign pipe1_sel_instr = pipe1_sel_from2 ? uopq2_instr : uopq1_instr;
     assign pipe1_sel_rf_raddr_rs1 = pipe1_sel_from2 ? uopq2_rf_raddr_rs1 : uopq1_rf_raddr_rs1;
