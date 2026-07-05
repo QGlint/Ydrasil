@@ -263,6 +263,8 @@ import ydrasil_pkg::*;
     reg [5:0]                       skid_rn_rs2_psrc_ff;
     reg [5:0]                       skid_rn_pdst_ff;
     reg                             skid_rn_pdst_valid_ff;
+    reg                             skid_rn_rs1_ready_ff;
+    reg                             skid_rn_rs2_ready_ff;
 
     reg                             uopq2_buf_valid_ff;
     reg [DATA_WIDTH-1:0]            uopq2_buf_pc_ff;
@@ -1465,11 +1467,13 @@ import ydrasil_pkg::*;
     assign pipe1_uopq1_operands_ready =
         pipe1_uopq1_supported &&
         (!uopq1_rf_ren_rs1 || (uopq1_rf_raddr_rs1 == '0) ||
+         skid_rn_rs1_ready_ff ||
          !gpr_pending_i[uopq1_rf_raddr_rs1] ||
          (alu_fwd_valid_i && (uopq1_rf_raddr_rs1 == alu_fwd_addr_i)) ||
          (wb_fwd_valid_i && (uopq1_rf_raddr_rs1 == wb_fwd_addr_i)) ||
          (pipe1_alu_fwd_valid_i && (uopq1_rf_raddr_rs1 == pipe1_alu_fwd_addr_i))) &&
         (!uopq1_rf_ren_rs2 || (uopq1_rf_raddr_rs2 == '0) ||
+         skid_rn_rs2_ready_ff ||
          !gpr_pending_i[uopq1_rf_raddr_rs2] ||
          (alu_fwd_valid_i && (uopq1_rf_raddr_rs2 == alu_fwd_addr_i)) ||
          (wb_fwd_valid_i && (uopq1_rf_raddr_rs2 == wb_fwd_addr_i)) ||
@@ -1743,6 +1747,14 @@ import ydrasil_pkg::*;
         if (rst_n && pair1_fire && pipe1_p0_empty_context &&
             !skid_rn_pdst_valid_ff) begin
             $fatal(1, "pipe1 empty-slot0 fire without held rename destination");
+        end
+        if (rst_n && pair1_fire && pipe1_sel_from1 &&
+            ((pipe1_sel_rf_ren_rs1 && (pipe1_sel_rf_raddr_rs1 != '0) &&
+              gpr_pending_i[pipe1_sel_rf_raddr_rs1] && !pipe1_dual_rs1_ready) ||
+             (pipe1_sel_rf_ren_rs2 && (pipe1_sel_rf_raddr_rs2 != '0) &&
+              gpr_pending_i[pipe1_sel_rf_raddr_rs2] && !pipe1_dual_rs2_ready))) begin
+            $fatal(1, "pipe1 from1 fired with stale skid operand ready pc=0x%08h instr=0x%08h",
+                   pipe1_sel_pc, pipe1_sel_instr);
         end
         if (rst_n && uopq2_buf_capture && !rn_alloc_valid_o) begin
             $fatal(1, "uopq2 capture without rename allocation pc=0x%08h instr=0x%08h rd=x%0d",
@@ -2089,6 +2101,8 @@ import ydrasil_pkg::*;
             skid_rn_rs2_psrc_ff <= '0;
             skid_rn_pdst_ff <= '0;
             skid_rn_pdst_valid_ff <= 1'b0;
+            skid_rn_rs1_ready_ff <= 1'b0;
+            skid_rn_rs2_ready_ff <= 1'b0;
             uopq2_buf_valid_ff <= 1'b0;
             uopq2_buf_pc_ff <= '0;
             uopq2_buf_instr_ff <= ydrasil_pkg::RV32I_INS_NOP;
@@ -2396,6 +2410,8 @@ import ydrasil_pkg::*;
                 issue_wait_rs1_ff <= 1'b0;
                 issue_wait_rs2_ff <= 1'b0;
                 skid_rn_pdst_valid_ff <= 1'b0;
+                skid_rn_rs1_ready_ff <= 1'b0;
+                skid_rn_rs2_ready_ff <= 1'b0;
                 issue_rn_pdst_valid_ff <= 1'b0;
                 uopq2_buf_valid_ff <= 1'b0;
                 uopq2_buf_rn_pdst_valid_ff <= 1'b0;
@@ -2499,6 +2515,8 @@ import ydrasil_pkg::*;
 
                 if (issue_slot1_bypass_fire) begin
                     skid_valid_ff <= 1'b0;
+                    skid_rn_rs1_ready_ff <= 1'b0;
+                    skid_rn_rs2_ready_ff <= 1'b0;
 `ifndef SYNTHESIS
                     pair1_valid_ff <= 1'b0;
 `endif
@@ -2549,6 +2567,8 @@ import ydrasil_pkg::*;
                         skid_rn_rs2_psrc_ff <= uopq2_buf_rn_rs2_psrc_ff;
                         skid_rn_pdst_ff <= uopq2_buf_rn_pdst_ff;
                         skid_rn_pdst_valid_ff <= uopq2_buf_rn_pdst_valid_ff;
+                        skid_rn_rs1_ready_ff <= uopq2_buf_rs1_ready_ff;
+                        skid_rn_rs2_ready_ff <= uopq2_buf_rs2_ready_ff;
                         uopq2_buf_valid_ff <= 1'b0;
                         uopq2_buf_rn_pdst_valid_ff <= 1'b0;
 `ifndef SYNTHESIS
@@ -2576,6 +2596,8 @@ import ydrasil_pkg::*;
                     end else if (pipe1_p0_empty_context) begin
                         skid_valid_ff <= 1'b0;
                         skid_rn_pdst_valid_ff <= 1'b0;
+                        skid_rn_rs1_ready_ff <= 1'b0;
+                        skid_rn_rs2_ready_ff <= 1'b0;
 `ifndef SYNTHESIS
                         pair1_valid_ff <= 1'b0;
 `endif
@@ -2614,6 +2636,8 @@ import ydrasil_pkg::*;
                         skid_rn_rs2_psrc_ff <= rn_if_rs2_psrc_i;
                         skid_rn_pdst_ff <= rn_if_pdst_i;
                         skid_rn_pdst_valid_ff <= if_id_rn_pdst_valid;
+                        skid_rn_rs1_ready_ff <= rn_if_rs1_ready_i;
+                        skid_rn_rs2_ready_ff <= rn_if_rs2_ready_i;
 `ifndef SYNTHESIS
                         pair1_valid_ff <= (PIPE1_REAL_MODE >= 2) & if_id_valid_i;
                         if ((PIPE1_REAL_MODE >= 2) & if_id_valid_i) begin
@@ -2674,6 +2698,8 @@ import ydrasil_pkg::*;
                         skid_rn_rs2_psrc_ff <= uopq2_buf_rn_rs2_psrc_ff;
                         skid_rn_pdst_ff <= uopq2_buf_rn_pdst_ff;
                         skid_rn_pdst_valid_ff <= uopq2_buf_rn_pdst_valid_ff;
+                        skid_rn_rs1_ready_ff <= uopq2_buf_rs1_ready_ff;
+                        skid_rn_rs2_ready_ff <= uopq2_buf_rs2_ready_ff;
                         uopq2_buf_valid_ff <= 1'b0;
                         uopq2_buf_rn_pdst_valid_ff <= 1'b0;
 `ifndef SYNTHESIS
@@ -2733,6 +2759,8 @@ import ydrasil_pkg::*;
                         skid_rn_rs2_psrc_ff <= rn_if_rs2_psrc_i;
                         skid_rn_pdst_ff <= rn_if_pdst_i;
                         skid_rn_pdst_valid_ff <= if_id_rn_pdst_valid;
+                        skid_rn_rs1_ready_ff <= rn_if_rs1_ready_i;
+                        skid_rn_rs2_ready_ff <= rn_if_rs2_ready_i;
 `ifndef SYNTHESIS
                         pair1_valid_ff <= if_id_valid_i;
                         if (if_id_valid_i) begin
@@ -2759,6 +2787,8 @@ import ydrasil_pkg::*;
 `endif
                     end else if (issue_accept) begin
                         skid_valid_ff <= 1'b0;
+                        skid_rn_rs1_ready_ff <= 1'b0;
+                        skid_rn_rs2_ready_ff <= 1'b0;
                         if (issue_load_from_uopq2) begin
                             uopq2_buf_valid_ff <= 1'b0;
                             uopq2_buf_rn_pdst_valid_ff <= 1'b0;
@@ -2840,6 +2870,8 @@ import ydrasil_pkg::*;
                         skid_rn_rs2_psrc_ff <= rn_if_rs2_psrc_i;
                         skid_rn_pdst_ff <= rn_if_pdst_i;
                         skid_rn_pdst_valid_ff <= if_id_rn_pdst_valid;
+                        skid_rn_rs1_ready_ff <= rn_if_rs1_ready_i;
+                        skid_rn_rs2_ready_ff <= rn_if_rs2_ready_i;
 `ifndef SYNTHESIS
                         pair1_valid_ff <= 1'b1;
                         pair1_pc_ff <= if_id_pc_i;
