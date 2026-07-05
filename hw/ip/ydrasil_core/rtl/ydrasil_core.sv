@@ -1437,8 +1437,6 @@ import ydrasil_pkg::*;
 		operator_type[ydrasil_pkg::OPERATOR_TYPE_ALU];
 	wire issue_mul_div_producer =
 		id_ex_rd_issue & operator_type[ydrasil_pkg::OPERATOR_TYPE_MUL];
-	wire issue_waitable_src_producer =
-		issue_alu_producer | issue_load_producer | issue_mul_div_producer;
 `ifndef SYNTHESIS
 	wire issue_alu_stable_producer =
 		issue_alu_producer &
@@ -1457,11 +1455,9 @@ import ydrasil_pkg::*;
 `endif
 	wire rs1_issue_alu_ready_next_raw = rs1_issue_raw_hzd & issue_alu_producer;
 	wire rs2_issue_alu_ready_next_raw = rs2_issue_raw_hzd & issue_alu_producer;
-	wire rs1_issue_wait_ready_next_raw = rs1_issue_raw_hzd & issue_waitable_src_producer;
-	wire rs2_issue_wait_ready_next_raw = rs2_issue_raw_hzd & issue_waitable_src_producer;
 	wire rd_issue_alu_ready_next = rd_issue_raw_hzd & issue_alu_producer;
-	wire rs1_issue_hzd = rs1_issue_raw_hzd & !issue_waitable_src_producer;
-	wire rs2_issue_hzd = rs2_issue_raw_hzd & !issue_waitable_src_producer;
+	wire rs1_issue_hzd = rs1_issue_raw_hzd & !issue_alu_producer;
+	wire rs2_issue_hzd = rs2_issue_raw_hzd & !issue_alu_producer;
 	wire rd_issue_hzd = rd_issue_raw_hzd & !issue_alu_producer;
 	wire issue_src_hzd = rs1_issue_hzd | rs2_issue_hzd;
 `ifndef SYNTHESIS
@@ -1532,9 +1528,9 @@ import ydrasil_pkg::*;
 	wire rs2_issue_alu_stable_issue_bypass = 1'b0;
 `endif
 	wire rs1_issue_alu_ready_next =
-		rs1_issue_wait_ready_next_raw & !rs1_issue_alu_stable_issue_bypass;
+		rs1_issue_alu_ready_next_raw & !rs1_issue_alu_stable_issue_bypass;
 	wire rs2_issue_alu_ready_next =
-		rs2_issue_wait_ready_next_raw & !rs2_issue_alu_stable_issue_bypass;
+		rs2_issue_alu_ready_next_raw & !rs2_issue_alu_stable_issue_bypass;
 
 	assign scoreboard_stall =
 		rn_real_ctrl_block |
