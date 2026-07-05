@@ -752,6 +752,8 @@ import ydrasil_pkg::*;
     reg [31:0]                       perf_uopq_p1_block_p0_csr_sys;
     reg [31:0]                       perf_uopq_p1_block_p0_bitmanip;
     reg [31:0]                       perf_uopq_p1_block_p0_other;
+    reg [31:0]                       perf_uopq_p1_block_p0_other_invalid;
+    reg [31:0]                       perf_uopq_p1_block_p0_other_no_alu_mul;
     reg [31:0]                       perf_uopq_p1_block_younger_flush;
     reg [31:0]                       perf_uopq_p1_block_young_uopq2;
     reg [31:0]                       perf_uopq_p1_block_young_ifid;
@@ -2262,6 +2264,8 @@ import ydrasil_pkg::*;
             perf_uopq_p1_block_p0_csr_sys <= '0;
             perf_uopq_p1_block_p0_bitmanip <= '0;
             perf_uopq_p1_block_p0_other <= '0;
+            perf_uopq_p1_block_p0_other_invalid <= '0;
+            perf_uopq_p1_block_p0_other_no_alu_mul <= '0;
             perf_uopq_p1_block_younger_flush <= '0;
             perf_uopq_p1_block_young_uopq2 <= '0;
             perf_uopq_p1_block_young_ifid <= '0;
@@ -3104,6 +3108,23 @@ import ydrasil_pkg::*;
             perf_uopq_p1_block_p0_other <= perf_uopq_p1_block_p0_other +
                 (((pipe1_uopq1_supported | pipe1_uopq2_supported) &&
                   !pipe1_dual_pipe0_safe &&
+                  !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
+                  !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
+                  !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_CSR] &&
+                  !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS] &&
+                  !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_BITMANIP] &&
+                  !uopq0_fence_i) ? 32'd1 : 32'd0);
+            perf_uopq_p1_block_p0_other_invalid <= perf_uopq_p1_block_p0_other_invalid +
+                (((pipe1_uopq1_supported | pipe1_uopq2_supported) &&
+                  !pipe1_dual_pipe0_safe &&
+                  !uopq0_valid) ? 32'd1 : 32'd0);
+            perf_uopq_p1_block_p0_other_no_alu_mul <= perf_uopq_p1_block_p0_other_no_alu_mul +
+                (((pipe1_uopq1_supported | pipe1_uopq2_supported) &&
+                  !pipe1_dual_pipe0_safe &&
+                  uopq0_valid &&
+                  !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_ALU] &&
+                  !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_MUL] &&
                   !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
                   !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
                   !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
