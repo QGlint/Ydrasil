@@ -980,6 +980,10 @@ import ydrasil_pkg::*;
 		rn_real_rob_pipe1_q[rn_real_rob_head_q] &
 		(rn_real_rob_arch_rd_q[rn_real_rob_head_q] != '0) &
 		!wb_rf_wen_rd;
+	wire rn_real_ctrl_at_head =
+		rn_real_rob_valid_q[rn_real_rob_head_q] &
+		id_ctrl_rd_wen & (id_ctrl_pdst != '0) &
+		(rn_real_rob_new_pdst_q[rn_real_rob_head_q] == id_ctrl_pdst);
 		assign rn_real_commit0_valid =
 			rn_real_commit0_ready &
 			(!rn_real_rob_pipe1_q[rn_real_rob_head_q] | pipe1_commit_rf_wen);
@@ -989,7 +993,8 @@ import ydrasil_pkg::*;
 			  (id_ctrl_rs2_ren & !rn_real_ctrl_rs2_ready))) |
 			(id_ctrl_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] &
 			 id_ctrl_rd_wen & (id_ctrl_rd_addr != '0) &
-			 !id_ctrl_rs2_ren & (rn_real_rob_occ_q > 7'd1));
+			 !id_ctrl_rs2_ren & (rn_real_rob_occ_q != '0) &
+			 !rn_real_ctrl_at_head);
 
 		always_ff @(posedge clk or negedge rst_n) begin
 			integer rn_i;
