@@ -404,10 +404,16 @@ import ydrasil_pkg::*;
         ({32{pipe1_operator_i[OP_ALU_XOR]}} & (pipe1_operand_a_i ^ pipe1_operand_b_i)) |
         ({32{pipe1_operator_i[OP_ALU_OR]}}  & (pipe1_operand_a_i | pipe1_operand_b_i)) |
         ({32{pipe1_operator_i[OP_ALU_AND]}} & (pipe1_operand_a_i & pipe1_operand_b_i));
+    wire [4:0] pipe1_shift_amt = pipe1_operand_b_i[4:0];
+    wire [31:0] pipe1_shift_result =
+        ({32{pipe1_operator_i[OP_ALU_SLL]}} & (pipe1_operand_a_i << pipe1_shift_amt)) |
+        ({32{pipe1_operator_i[OP_ALU_SRL]}} & (pipe1_operand_a_i >> pipe1_shift_amt)) |
+        ({32{pipe1_operator_i[OP_ALU_SRA]}} & ($signed(pipe1_operand_a_i) >>> pipe1_shift_amt));
     wire [31:0] pipe1_alu_result =
         ({32{pipe1_operator_i[OP_ALU_SUB]}}  & pipe1_sub_result_ext[31:0]) |
         ({32{pipe1_operator_i[OP_ALU_SLT]}}  & {31'b0, pipe1_slt_signed}) |
         ({32{pipe1_operator_i[OP_ALU_SLTU]}} & {31'b0, pipe1_slt_unsigned}) |
+        ({32{pipe1_operator_i[OP_ALU_SLL] | pipe1_operator_i[OP_ALU_SRL] | pipe1_operator_i[OP_ALU_SRA]}} & pipe1_shift_result) |
         ({32{pipe1_operator_i[OP_ALU_XOR] | pipe1_operator_i[OP_ALU_OR] | pipe1_operator_i[OP_ALU_AND]}} & pipe1_logic_result) |
         ({32{pipe1_operator_i[OP_ALU_LUI]}}  & pipe1_operand_b_i) |
         ({32{pipe1_operator_i[OP_ALU_ADD] | pipe1_operator_i[OP_ALU_AUIPC]}} & pipe1_add_result);
