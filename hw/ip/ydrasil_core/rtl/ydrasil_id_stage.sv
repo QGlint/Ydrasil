@@ -1111,25 +1111,29 @@ import ydrasil_pkg::*;
                             selected_operand_b_rs_sel ? issue_rs2_data : selected_imm;
 
 `ifndef SYNTHESIS
-    always_ff @(posedge clk) begin
-        if (rst_n && issue_fire &&
-            ((selected_pc >= 32'h8000_007c && selected_pc <= 32'h8000_0090) ||
-             (selected_pc >= 32'h8000_2da8 && selected_pc <= 32'h8000_2dc8))) begin
-            $display("[ID_RN_DBG] pc=0x%08h instr=0x%08h slot1=%0b rs1=x%0d ren=%0b psrc=%0d prf_ready=%0b prf=0x%08h rf=0x%08h data=0x%08h use_prf=%0b rs2=x%0d psrc=%0d rd=x%0d pdst=%0d gpr_pending_rs1=%0b op_a=0x%08h op_b=0x%08h",
-                     selected_pc,
-                     (issue_slot1_bypass_fire ? decode_instr : 32'h0),
-                     issue_slot1_bypass_fire,
-                     selected_rf_raddr_rs1,
-                     selected_rf_ren_rs1,
-                     selected_rn_rs1_psrc,
-                     prf_rs1_ready_i,
-                     prf_rs1_data_i,
-                     rf_rdata_rs1_i,
-                     issue_rs1_data,
-                     (!issue_slot1_bypass_fire && selected_prf_rs1_allowed && prf_rs1_ready_i),
-                     selected_rf_raddr_rs2,
-                     selected_rn_rs2_psrc,
-                     selected_rf_waddr_rd,
+	always_ff @(posedge clk) begin
+		if (rst_n && issue_fire &&
+		    ((selected_pc >= 32'h8000_007c && selected_pc <= 32'h8000_0090) ||
+		     (selected_pc >= 32'h8000_2da8 && selected_pc <= 32'h8000_2dc8) ||
+		     (selected_pc >= 32'h8000_1e60 && selected_pc <= 32'h8000_1eb4))) begin
+			$display("[ID_RN_DBG] pc=0x%08h instr=0x%08h slot1=%0b rs1=x%0d ren=%0b psrc=%0d prf_ready=%0b prf_uncomm=%0b prf=0x%08h rf=0x%08h data=0x%08h use_prf=%0b alu_fwd=%0b wb_fwd=%0b rs2=x%0d psrc=%0d rd=x%0d pdst=%0d gpr_pending_rs1=%0b op_a=0x%08h op_b=0x%08h",
+			         selected_pc,
+			         (issue_slot1_bypass_fire ? decode_instr : 32'h0),
+			         issue_slot1_bypass_fire,
+			         selected_rf_raddr_rs1,
+			         selected_rf_ren_rs1,
+			         selected_rn_rs1_psrc,
+			         prf_rs1_ready_i,
+			         prf_rs1_uncommitted_i,
+			         prf_rs1_data_i,
+			         rf_rdata_rs1_i,
+			         issue_rs1_data,
+			         (!issue_slot1_bypass_fire && selected_prf_rs1_allowed && prf_rs1_ready_i),
+			         rs1_alu_fwd,
+			         rs1_wb_fwd,
+			         selected_rf_raddr_rs2,
+			         selected_rn_rs2_psrc,
+			         selected_rf_waddr_rd,
                      selected_rn_pdst,
                      ((selected_rf_raddr_rs1 != '0) ? gpr_pending_i[selected_rf_raddr_rs1] : 1'b0),
                      operand_a,
