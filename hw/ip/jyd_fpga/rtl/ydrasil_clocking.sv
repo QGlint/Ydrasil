@@ -91,7 +91,6 @@ module ydrasil_clocking (
         .CLKOUT4      (clkout4_unused),
         .CLKOUT5      (clkout5_unused),
         .CLKOUT6      (clkout6_unused),
-        .CLKFBOUTB    (clkfbin_unused),
         .CLKFBIN      (clkfbout_buf),
         .CLKIN1       (clk_in1_mmcm),
         .CLKIN2       (1'b0),
