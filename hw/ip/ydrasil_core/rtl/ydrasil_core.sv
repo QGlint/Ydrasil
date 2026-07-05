@@ -1164,8 +1164,18 @@ import ydrasil_pkg::*;
 	assign dbg_bp_pred_next_pc_o = dbg_bp_pred_next_pc;
 	assign dbg_bp_mispredict_o = dbg_bp_mispredict;
 `endif
+	wire [RN_REAL_PREG_BITS-1:0] gpr_pending_clear_rat_pdst =
+		rn_real_rat_q[wb_hzd_addr_q];
+	wire gpr_pending_clear_rat_ready =
+		(gpr_pending_clear_rat_pdst == '0) |
+		!rn_real_busy_q[gpr_pending_clear_rat_pdst] |
+		(rn_real_wb_pdst_found & (rn_real_wb_pdst == gpr_pending_clear_rat_pdst)) |
+		(rn_real_lsu_pdst_found & (rn_real_lsu_pdst == gpr_pending_clear_rat_pdst)) |
+		(rn_real_pipe1_pdst_found & (rn_real_pipe1_pdst == gpr_pending_clear_rat_pdst)) |
+		(rn_real_mul_pdst_found & (rn_real_mul_pdst == gpr_pending_clear_rat_pdst));
 	wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_clear_mask =
-		wb_hzd_valid_q ? (ydrasil_pkg::REGS_NUM'(1) << wb_hzd_addr_q) : '0;
+		(wb_hzd_valid_q & gpr_pending_clear_rat_ready) ?
+		(ydrasil_pkg::REGS_NUM'(1) << wb_hzd_addr_q) : '0;
 	wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_issue_mask =
 		id_ex_rd_issue ? (ydrasil_pkg::REGS_NUM'(1) << id_rf_waddr_rd) : '0;
 `ifdef YDRASIL_ENABLE_PIPE1_REAL
