@@ -296,6 +296,9 @@ import ydrasil_pkg::*;
 	wire rn_real_alloc0_valid;
 	wire rn_real_alloc_stall;
 	wire rn_real_commit0_valid;
+	wire rn_shadow_alloc1_valid;
+	wire rn_shadow_same_cycle_raw;
+	wire rn_shadow_same_cycle_waw;
 
 	function automatic [RN_REAL_PREG_BITS-1:0] rn_real_first_free;
 		input [RN_REAL_PHYS_REGS-1:0] free_map;
@@ -791,6 +794,9 @@ import ydrasil_pkg::*;
 					rn_shadow_rob_occ_q = rn_shadow_rob_occ_q + 5'd1;
 					perf_rn_alloc1 = perf_rn_alloc1 + 32'd1;
 				end
+				if (rn_shadow_alloc1_valid) begin
+					perf_rn_alloc1 = perf_rn_alloc1 + 32'd1;
+				end
 
 				if (id_ex_valid && id_alu_rf_wen_rd && (id_rf_waddr_rd == '0)) begin
 					perf_rn_x0_no_alloc = perf_rn_x0_no_alloc + 32'd1;
@@ -804,8 +810,14 @@ import ydrasil_pkg::*;
 				     ((pipe1_rf_raddr_rs2 != '0) && (pipe1_rf_raddr_rs2 == id_rf_waddr_rd)))) begin
 					perf_rn_same_cycle_raw = perf_rn_same_cycle_raw + 32'd1;
 				end
+				if (rn_shadow_same_cycle_raw) begin
+					perf_rn_same_cycle_raw = perf_rn_same_cycle_raw + 32'd1;
+				end
 				if (id_ex_rd_issue && pipe1_rd_issue &&
 				    (pipe1_rf_waddr_rd_issue == id_rf_waddr_rd)) begin
+					perf_rn_same_cycle_waw = perf_rn_same_cycle_waw + 32'd1;
+				end
+				if (rn_shadow_same_cycle_waw) begin
 					perf_rn_same_cycle_waw = perf_rn_same_cycle_waw + 32'd1;
 				end
 				if (rs1_pending_stall &&
@@ -855,6 +867,15 @@ import ydrasil_pkg::*;
 		(rn_real_free_count_q != '0) && (rn_real_rob_occ_q < RN_REAL_ROB_DEPTH_COUNT);
 	assign rn_real_alloc0_valid = rn_alloc_valid & rn_real_can_alloc0;
 	assign rn_real_alloc_stall = (rn_if_rd_valid | id_ctrl_rd_wen) & !rn_real_can_alloc0;
+	assign rn_shadow_alloc1_valid =
+		rn_alloc_valid & id_ctrl_rd_wen & (id_ctrl_rd_addr != '0) &
+		(rn_alloc_rd_addr != '0);
+	assign rn_shadow_same_cycle_raw =
+		rn_shadow_alloc1_valid &
+		(((if_id_instr[19:15] != '0) && (if_id_instr[19:15] == id_ctrl_rd_addr)) |
+		 ((if_id_instr[24:20] != '0) && (if_id_instr[24:20] == id_ctrl_rd_addr)));
+	assign rn_shadow_same_cycle_waw =
+		rn_shadow_alloc1_valid & (rn_alloc_rd_addr == id_ctrl_rd_addr);
 	assign rn_real_wb_current_alloc =
 		rn_real_ex_pdst_valid_q & alu_rf_wen_rd &
 		(alu_rf_waddr_rd == rn_real_ex_arch_rd_q);
