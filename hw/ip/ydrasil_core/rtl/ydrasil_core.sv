@@ -321,7 +321,6 @@ import ydrasil_pkg::*;
 	wire rn_real_alloc_stall;
 	wire rn_real_commit0_valid;
 	wire rn_real_commit0_ready;
-	wire rn_real_rob_empty;
 	wire pipe1_commit_rf_wen;
 	wire rn_shadow_alloc1_valid;
 	wire rn_shadow_same_cycle_raw;
@@ -958,7 +957,6 @@ import ydrasil_pkg::*;
 		(rn_real_lsu_pdst_found & (rn_real_lsu_pdst == pipe1_ctrl_rs2_psrc)) |
 		(rn_real_mul_pdst_found & (rn_real_mul_pdst == pipe1_ctrl_rs2_psrc));
 	assign rn_real_pipe1_rename_ready = rn_real_can_alloc0;
-	assign rn_real_rob_empty = (rn_real_rob_occ_q == '0);
 	assign rn_real_commit0_ready =
 		rn_real_rob_valid_q[rn_real_rob_head_q] &
 		rn_real_rob_ready_q[rn_real_rob_head_q];
@@ -1619,7 +1617,6 @@ import ydrasil_pkg::*;
 		.ready_issue_allow_i(ready_issue_allow),
 		.gpr_pending_i(gpr_pending_for_hazard),
 		.pipe1_resbuf_full_i(pipe1_resbuf_full_to_id),
-		.rn_real_rob_empty_i(rn_real_rob_empty),
 		.issue_frontend_stall_o(id_frontend_stall),
 		.operand_a_o        (operand_a),
 		.operand_b_o        (operand_b),

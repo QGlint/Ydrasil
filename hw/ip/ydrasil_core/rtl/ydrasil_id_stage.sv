@@ -63,7 +63,6 @@ import ydrasil_pkg::*;
     input  wire                            ready_issue_allow_i,
     input  wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_i,
     input  wire                            pipe1_resbuf_full_i,
-    input  wire                            rn_real_rob_empty_i,
     output wire                            issue_frontend_stall_o,
 
     // Dispatch to EX   
@@ -313,7 +312,6 @@ import ydrasil_pkg::*;
     wire                             decode_valid;
     wire                             issue_wait_rs1_ready;
     wire                             issue_wait_rs2_ready;
-    wire                             issue_ctrl_rename_barrier;
     wire                             issue_wait_block;
     wire                             issue_slot0_fire;
     wire                             issue_slot1_bypass_fire;
@@ -1157,13 +1155,6 @@ import ydrasil_pkg::*;
                      pipe1_uopq1_safe,
                      pipe1_younger_flush_risk);
         end
-        if (rst_n && issue_ctrl_rename_barrier && (selected_pc == 32'h8000_0168)) begin
-            $display("[RN_CTRL_BARRIER] pc=0x%08h rob_empty=%0b rd=x%0d pdst=%0d",
-                     selected_pc,
-                     rn_real_rob_empty_i,
-                     selected_rf_waddr_rd,
-                     selected_rn_pdst);
-        end
     end
 
     assign issue_alu_stable_candidate =
@@ -1197,15 +1188,9 @@ import ydrasil_pkg::*;
     assign issue_wait_rs2_ready =
         !issue_wait_rs2_ff | slot0_rs2_stable_fwd | slot0_rs2_alu_fwd | slot0_rs2_p1alu_fwd |
         slot0_rs2_lsu_fwd | slot0_rs2_wb_fwd | slot0_rs2_pending_cleared;
-    assign issue_ctrl_rename_barrier =
-        (PIPE1_REAL_MODE != 0) &&
-        issue_valid_ff &&
-        issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
-        !rn_real_rob_empty_i;
     assign issue_wait_block =
         (issue_wait_rs1_ff & !issue_wait_rs1_ready) |
         (issue_wait_rs2_ff & !issue_wait_rs2_ready) |
-        issue_ctrl_rename_barrier |
         rs1_issue_alu_ready_next_i |
         rs2_issue_alu_ready_next_i;
     assign issue_slot0_fire =
@@ -1213,7 +1198,6 @@ import ydrasil_pkg::*;
     assign issue_slot1_bypass_fire =
         ready_issue_allow_i & issue_valid_ff & issue_wait_block &
         !stall_id_i & !flush_id_i & ri_slot1_ready &
-        !issue_ctrl_rename_barrier &
         !((PIPE1_REAL_MODE != 0) && pipe1_uopq1_safe && !pipe1_resbuf_full_i);
     assign issue_fire = issue_slot0_fire | issue_slot1_bypass_fire;
     assign issue_accept =
