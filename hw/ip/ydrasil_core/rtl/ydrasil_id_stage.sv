@@ -95,9 +95,7 @@ import ydrasil_pkg::*;
     output wire                            id_ctrl_rd_wen_o,
     output wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     id_ctrl_rd_addr_o,
     output wire                            id_ctrl_lsu_req_o,
-`ifndef SYNTHESIS
     output wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] id_ctrl_operator_type_o,
-`endif
 
     output wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0] 	    id_csr_raddr_o,  
     output wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0] 	    id_ex_csr_waddr_o,  
@@ -2749,9 +2747,7 @@ import ydrasil_pkg::*;
          issue_load_from_skid ||
          skid_fill);
     assign rn_alloc_rd_addr_o = if_id_trace_rf_waddr_rd;
-`ifndef SYNTHESIS
     assign id_ctrl_operator_type_o = issue_valid_ff ? issue_operator_type_ff : '0;
-`endif
 
 `ifndef SYNTHESIS
     assign commit_trace_alloc_if_id =

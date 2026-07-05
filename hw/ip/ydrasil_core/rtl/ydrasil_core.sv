@@ -254,9 +254,7 @@ import ydrasil_pkg::*;
 	wire                            rn_if_rd_valid;
 	wire                            rn_alloc_valid;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    rn_alloc_rd_addr;
-`ifndef SYNTHESIS
 	wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] id_ctrl_operator_type;
-`endif
 	wire                            scoreboard_stall;
 	wire                            id_frontend_stall;
 	wire                            ready_issue_allow;
@@ -1832,9 +1830,7 @@ import ydrasil_pkg::*;
 		.rn_alloc_valid_o   (rn_alloc_valid),
 		.rn_alloc_rd_addr_o (rn_alloc_rd_addr),
 		.rn_if_rd_valid_o   (rn_if_rd_valid),
-`ifndef SYNTHESIS
 		.id_ctrl_operator_type_o(id_ctrl_operator_type),
-`endif
 		.id_csr_raddr_o     (id_csr_raddr),
 		.id_ex_csr_waddr_o  (id_ex_csr_waddr),
 		.id_op_csr_info_o   (id_op_csr_info),
