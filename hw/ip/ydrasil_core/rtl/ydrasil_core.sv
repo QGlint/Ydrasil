@@ -304,6 +304,8 @@ import ydrasil_pkg::*;
 	wire rn_real_ctrl_rd_ready;
 	wire rn_real_pipe1_rs1_ready;
 	wire rn_real_pipe1_rs2_ready;
+	wire rn_real_live_rs1_ready;
+	wire rn_real_live_rs2_ready;
 	wire rn_real_pipe1_rename_ready;
 	wire [RN_REAL_PREG_BITS-1:0] rn_real_rs1_psrc;
 	wire [RN_REAL_PREG_BITS-1:0] rn_real_rs2_psrc;
@@ -1039,6 +1041,20 @@ import ydrasil_pkg::*;
 		(rn_real_pipe1_pdst_found & (rn_real_pipe1_pdst == pipe1_ctrl_rs2_psrc)) |
 		(rn_real_lsu_pdst_found & (rn_real_lsu_pdst == pipe1_ctrl_rs2_psrc)) |
 		(rn_real_mul_pdst_found & (rn_real_mul_pdst == pipe1_ctrl_rs2_psrc));
+	assign rn_real_live_rs1_ready =
+		(rn_real_live_rs1_psrc == '0) |
+		!rn_real_busy_q[rn_real_live_rs1_psrc] |
+		(rn_real_wb_pdst_found & (rn_real_wb_pdst == rn_real_live_rs1_psrc)) |
+		(rn_real_pipe1_pdst_found & (rn_real_pipe1_pdst == rn_real_live_rs1_psrc)) |
+		(rn_real_lsu_pdst_found & (rn_real_lsu_pdst == rn_real_live_rs1_psrc)) |
+		(rn_real_mul_pdst_found & (rn_real_mul_pdst == rn_real_live_rs1_psrc));
+	assign rn_real_live_rs2_ready =
+		(rn_real_live_rs2_psrc == '0) |
+		!rn_real_busy_q[rn_real_live_rs2_psrc] |
+		(rn_real_wb_pdst_found & (rn_real_wb_pdst == rn_real_live_rs2_psrc)) |
+		(rn_real_pipe1_pdst_found & (rn_real_pipe1_pdst == rn_real_live_rs2_psrc)) |
+		(rn_real_lsu_pdst_found & (rn_real_lsu_pdst == rn_real_live_rs2_psrc)) |
+		(rn_real_mul_pdst_found & (rn_real_mul_pdst == rn_real_live_rs2_psrc));
 	assign rn_real_pipe1_rs1_uncommitted =
 		pipe1_ctrl_rs1_ren && (pipe1_rf_raddr_rs1 != '0) &&
 		(pipe1_ctrl_rs1_psrc != '0) &&
@@ -1810,6 +1826,8 @@ import ydrasil_pkg::*;
 		.pipe1_prf_rs1_uncommitted_i(rn_real_pipe1_rs1_uncommitted),
 		.pipe1_prf_rs2_uncommitted_i(rn_real_pipe1_rs2_uncommitted),
 		.pipe1_rename_ready_i(rn_real_pipe1_rename_ready),
+		.rn_if_rs1_ready_i(rn_real_live_rs1_ready),
+		.rn_if_rs2_ready_i(rn_real_live_rs2_ready),
 		.rn_if_rs1_psrc_i  (rn_real_live_rs1_psrc),
 		.rn_if_rs2_psrc_i  (rn_real_live_rs2_psrc),
 		.rn_if_pdst_i      (rn_real_alloc0_pdst),
