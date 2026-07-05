@@ -259,6 +259,13 @@ end
     reg [31:0] sb_raw_mul_cons_alu_count;
     reg [31:0] sb_raw_mul_cons_mul_count;
     reg [31:0] sb_raw_wb_wait_count;
+    reg [31:0] sb_raw_wb_cons_alu_count;
+    reg [31:0] sb_raw_wb_cons_bitmanip_count;
+    reg [31:0] sb_raw_wb_cons_csr_count;
+    reg [31:0] sb_raw_wb_cons_sys_count;
+    reg [31:0] sb_raw_wb_cons_other_count;
+    reg [31:0] sb_raw_wb_rs1_pending_count;
+    reg [31:0] sb_raw_wb_rs2_pending_count;
     reg [31:0] sb_waw_only_count;
     reg [31:0] sb_branch_wait_raw_class_count;
     reg [31:0] sb_branch_wait_ctrl_block_count;
@@ -487,6 +494,13 @@ end
             sb_raw_mul_cons_alu_count <= 32'b0;
             sb_raw_mul_cons_mul_count <= 32'b0;
             sb_raw_wb_wait_count <= 32'b0;
+            sb_raw_wb_cons_alu_count <= 32'b0;
+            sb_raw_wb_cons_bitmanip_count <= 32'b0;
+            sb_raw_wb_cons_csr_count <= 32'b0;
+            sb_raw_wb_cons_sys_count <= 32'b0;
+            sb_raw_wb_cons_other_count <= 32'b0;
+            sb_raw_wb_rs1_pending_count <= 32'b0;
+            sb_raw_wb_rs2_pending_count <= 32'b0;
             sb_waw_only_count <= 32'b0;
             sb_branch_wait_raw_class_count <= 32'b0;
             sb_branch_wait_ctrl_block_count <= 32'b0;
@@ -702,6 +716,56 @@ end
                   u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL]) ? 32'd1 : 32'd0);
             sb_raw_wb_wait_count <= sb_raw_wb_wait_count +
                 (((u_dut.rs1_pending_stall_eff | u_dut.rs2_pending_stall_eff) &&
+                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
+                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
+                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL]) ? 32'd1 : 32'd0);
+            sb_raw_wb_cons_alu_count <= sb_raw_wb_cons_alu_count +
+                (((u_dut.rs1_pending_stall_eff | u_dut.rs2_pending_stall_eff) &&
+                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
+                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
+                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL] &&
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_ALU]) ? 32'd1 : 32'd0);
+            sb_raw_wb_cons_bitmanip_count <= sb_raw_wb_cons_bitmanip_count +
+                (((u_dut.rs1_pending_stall_eff | u_dut.rs2_pending_stall_eff) &&
+                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
+                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
+                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL] &&
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BITMANIP]) ? 32'd1 : 32'd0);
+            sb_raw_wb_cons_csr_count <= sb_raw_wb_cons_csr_count +
+                (((u_dut.rs1_pending_stall_eff | u_dut.rs2_pending_stall_eff) &&
+                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
+                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
+                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL] &&
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_CSR]) ? 32'd1 : 32'd0);
+            sb_raw_wb_cons_sys_count <= sb_raw_wb_cons_sys_count +
+                (((u_dut.rs1_pending_stall_eff | u_dut.rs2_pending_stall_eff) &&
+                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
+                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
+                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL] &&
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_SYS]) ? 32'd1 : 32'd0);
+            sb_raw_wb_cons_other_count <= sb_raw_wb_cons_other_count +
+                (((u_dut.rs1_pending_stall_eff | u_dut.rs2_pending_stall_eff) &&
+                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
+                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
+                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL] &&
+                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_ALU] &&
+                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BITMANIP] &&
+                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_CSR] &&
+                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_SYS]) ? 32'd1 : 32'd0);
+            sb_raw_wb_rs1_pending_count <= sb_raw_wb_rs1_pending_count +
+                ((u_dut.rs1_pending_stall_eff &&
+                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
+                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
+                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL]) ? 32'd1 : 32'd0);
+            sb_raw_wb_rs2_pending_count <= sb_raw_wb_rs2_pending_count +
+                ((u_dut.rs2_pending_stall_eff &&
                   !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
                   !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
                   !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
@@ -1259,6 +1323,14 @@ end
                 sb_raw_mul_cons_store_count,
                 sb_raw_mul_cons_alu_count,
                 sb_raw_mul_cons_mul_count);
+            $display("PERF_SCOREBOARD_WB_SPLIT: ALU=%-d BITMANIP=%-d CSR=%-d SYS=%-d OTHER=%-d RS1_PENDING=%-d RS2_PENDING=%-d",
+                sb_raw_wb_cons_alu_count,
+                sb_raw_wb_cons_bitmanip_count,
+                sb_raw_wb_cons_csr_count,
+                sb_raw_wb_cons_sys_count,
+                sb_raw_wb_cons_other_count,
+                sb_raw_wb_rs1_pending_count,
+                sb_raw_wb_rs2_pending_count);
             $display("PERF_BRANCH_STALL_SPLIT: TOTAL=%-d CTRL_BLOCK=%-d CTRL_SRC=%-d CTRL_ORDER=%-d RS1_PENDING=%-d RS2_PENDING=%-d ISSUE_RS1=%-d ISSUE_RS2=%-d RD_WAW=%-d PIPE1_HZD=%-d",
                 sb_branch_wait_raw_class_count,
                 sb_branch_wait_ctrl_block_count,
