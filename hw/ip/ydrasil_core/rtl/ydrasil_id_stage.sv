@@ -1579,37 +1579,37 @@ import ydrasil_pkg::*;
         issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_ALU] &&
         !ds_pipe0_ctrl && !ds_pipe0_mem && !ds_pipe0_csr_sys && !ds_pipe0_mul;
 
-    assign ds_pipe1_valid = skid_valid_ff;
-    assign ds_pipe1_simple_alu =
-        ds_pipe1_valid &&
-        operator_type[ydrasil_pkg::OPERATOR_TYPE_ALU] &&
-        !operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
-        !operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
-        !operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
-        !operator_type[ydrasil_pkg::OPERATOR_TYPE_CSR] &&
-        !operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS] &&
-        !operator_type[ydrasil_pkg::OPERATOR_TYPE_MUL] &&
-        !operator_type[ydrasil_pkg::OPERATOR_TYPE_BITMANIP] &&
-        (operator[ydrasil_pkg::OP_ALU_ADD] |
-         operator[ydrasil_pkg::OP_ALU_SUB] |
-         operator[ydrasil_pkg::OP_ALU_SLT] |
-         operator[ydrasil_pkg::OP_ALU_SLTU] |
-         operator[ydrasil_pkg::OP_ALU_XOR] |
-         operator[ydrasil_pkg::OP_ALU_OR] |
-         operator[ydrasil_pkg::OP_ALU_AND] |
-         operator[ydrasil_pkg::OP_ALU_LUI] |
-         operator[ydrasil_pkg::OP_ALU_AUIPC]);
-    assign ds_pipe1_unsupported = ds_pipe1_valid && !ds_pipe1_simple_alu;
-    assign ds_pipe1_ctrl = ds_pipe1_valid && operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP];
-    assign ds_pipe1_mem =
-        ds_pipe1_valid &&
-        (operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD] |
-         operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE]);
-    assign ds_pipe1_csr_sys =
-        ds_pipe1_valid &&
-        (operator_type[ydrasil_pkg::OPERATOR_TYPE_CSR] |
-         operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS] |
-         id_fence_i);
+	    assign ds_pipe1_valid = skid_valid_ff;
+	    assign ds_pipe1_simple_alu =
+	        ds_pipe1_valid &&
+	        slot1_operator_type[ydrasil_pkg::OPERATOR_TYPE_ALU] &&
+	        !slot1_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+	        !slot1_operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
+	        !slot1_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
+	        !slot1_operator_type[ydrasil_pkg::OPERATOR_TYPE_CSR] &&
+	        !slot1_operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS] &&
+	        !slot1_operator_type[ydrasil_pkg::OPERATOR_TYPE_MUL] &&
+	        !slot1_operator_type[ydrasil_pkg::OPERATOR_TYPE_BITMANIP] &&
+	        (slot1_operator[ydrasil_pkg::OP_ALU_ADD] |
+	         slot1_operator[ydrasil_pkg::OP_ALU_SUB] |
+	         slot1_operator[ydrasil_pkg::OP_ALU_SLT] |
+	         slot1_operator[ydrasil_pkg::OP_ALU_SLTU] |
+	         slot1_operator[ydrasil_pkg::OP_ALU_XOR] |
+	         slot1_operator[ydrasil_pkg::OP_ALU_OR] |
+	         slot1_operator[ydrasil_pkg::OP_ALU_AND] |
+	         slot1_operator[ydrasil_pkg::OP_ALU_LUI] |
+	         slot1_operator[ydrasil_pkg::OP_ALU_AUIPC]);
+	    assign ds_pipe1_unsupported = ds_pipe1_valid && !ds_pipe1_simple_alu;
+	    assign ds_pipe1_ctrl = ds_pipe1_valid && slot1_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP];
+	    assign ds_pipe1_mem =
+	        ds_pipe1_valid &&
+	        (slot1_operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD] |
+	         slot1_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE]);
+	    assign ds_pipe1_csr_sys =
+	        ds_pipe1_valid &&
+	        (slot1_operator_type[ydrasil_pkg::OPERATOR_TYPE_CSR] |
+	         slot1_operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS] |
+	         slot1_fence_i);
     assign ds_pipe1_rd_valid = !rf_wen_rd || (rf_waddr_rd != '0);
     assign ds_block_raw_pipe0 =
         ds_pipe1_valid && ds_pipe0_valid && (issue_rf_waddr_rd_ff != '0) &&
