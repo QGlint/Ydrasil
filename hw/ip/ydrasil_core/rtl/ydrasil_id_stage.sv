@@ -1439,8 +1439,7 @@ import ydrasil_pkg::*;
          (wb_fwd_valid_i && (uopq2_rf_raddr_rs2 == wb_fwd_addr_i)) ||
          (pipe1_alu_fwd_valid_i && (uopq2_rf_raddr_rs2 == pipe1_alu_fwd_addr_i)));
     assign pipe1_uopq1_safe =
-        pipe1_dual_pipe0_safe && pipe1_uopq1_operands_ready &&
-        !gpr_pending_i[uopq1_rf_waddr_rd] &&
+        pipe1_dual_pipe0_safe && pipe1_uopq1_supported &&
         !(uopq0_rf_wen_rd && (uopq0_rf_waddr_rd != '0) &&
           ((uopq1_rf_ren_rs1 && (uopq1_rf_raddr_rs1 == uopq0_rf_waddr_rd)) |
            (uopq1_rf_ren_rs2 && (uopq1_rf_raddr_rs2 == uopq0_rf_waddr_rd)))) &&
@@ -1458,7 +1457,7 @@ import ydrasil_pkg::*;
          !uopq1_operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS] &&
          !uopq1_fence_i);
     assign pipe1_uopq2_safe =
-        pipe1_dual_pipe0_safe && pipe1_uopq2_operands_ready &&
+        pipe1_dual_pipe0_safe && pipe1_uopq2_supported &&
         !(uopq0_rf_wen_rd && (uopq0_rf_waddr_rd != '0) &&
           ((uopq2_rf_ren_rs1 && (uopq2_rf_raddr_rs1 == uopq0_rf_waddr_rd)) |
            (uopq2_rf_ren_rs2 && (uopq2_rf_raddr_rs2 == uopq0_rf_waddr_rd)))) &&
@@ -1549,8 +1548,7 @@ import ydrasil_pkg::*;
         !pipe1_sel_rf_ren_rs2 || (pipe1_sel_rf_raddr_rs2 == '0) ||
         pipe1_prf_rs2_ready_i;
     assign pipe1_dual_operands_ready =
-        (pipe1_sel_from1 && pipe1_uopq1_operands_ready) ||
-        (pipe1_sel_from2 && pipe1_uopq2_operands_ready);
+        pipe1_dual_supported && pipe1_dual_rs1_ready && pipe1_dual_rs2_ready;
     wire pipe1_prf_rs1_allowed =
         pipe1_sel_rf_ren_rs1 &&
         (pipe1_sel_rf_raddr_rs1 != '0) &&
