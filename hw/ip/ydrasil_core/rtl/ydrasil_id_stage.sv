@@ -1311,10 +1311,21 @@ import ydrasil_pkg::*;
         !uopq2_buf_valid_ff && if_id_valid_i;
     assign pipe1_take_if_id =
         1'b0;
+    wire if_id_live_accept =
+        if_id_valid_i && !flush_id_i &&
+        !((PIPE1_REAL_MODE < 2) && pair1_fire) &&
+        ((issue_accept && !skid_valid_ff && !uopq2_buf_valid_ff) ||
+         (issue_load_from_skid && !uopq2_buf_valid_ff) ||
+         skid_fill ||
+         uopq2_buf_capture ||
+         pipe1_refill_skid_from_if ||
+         pipe1_take_if_id);
     assign issue_frontend_stall_o =
         (!flush_id_i & !stall_id_i & !bubble_id_i &
          issue_valid_ff & issue_wait_block & skid_valid_ff &
          !((PIPE1_REAL_MODE >= 2) && (pair1_fire | uopq2_buf_capture))) |
+        (!flush_id_i & !stall_id_i & !bubble_id_i &
+         if_id_valid_i & !if_id_live_accept) |
         (pair1_fire & (PIPE1_REAL_MODE < 2));
     wire if_id_rn_pdst_valid =
         if_id_valid_i &&
@@ -1620,6 +1631,12 @@ import ydrasil_pkg::*;
         if (rst_n && uopq2_buf_capture && !rn_alloc_valid_o) begin
             $fatal(1, "uopq2 capture without rename allocation pc=0x%08h instr=0x%08h rd=x%0d",
                    if_id_pc_i, if_id_instr_i, if_id_trace_rf_waddr_rd);
+        end
+        if (rst_n && !flush_id_i && !stall_id_i && !bubble_id_i &&
+            if_id_valid_i && !if_id_live_accept && !issue_frontend_stall_o) begin
+            $fatal(1, "IF/ID live instruction neither accepted nor stalled pc=0x%08h instr=0x%08h skid=%0b uopq2=%0b issue_accept=%0b pair1_fire=%0b",
+                   if_id_pc_i, if_id_instr_i, skid_valid_ff, uopq2_buf_valid_ff,
+                   issue_accept, pair1_fire);
         end
         if (rst_n && uopq2_buf_valid_ff && !pipe1_fire_from2 && !issue_load_from_uopq2 &&
             !issue_load_from_skid && !pipe1_refill_skid_from_if && rn_alloc_valid_o) begin
@@ -3109,27 +3126,13 @@ import ydrasil_pkg::*;
     assign id_rn_pdst_o = id_rn_pdst_ff;
     assign rn_if_rd_valid_o = if_id_rn_pdst_valid;
     assign rn_alloc_valid_o =
-        if_id_rn_pdst_valid && !flush_id_i &&
-        !((PIPE1_REAL_MODE < 2) && pair1_fire) &&
-        ((issue_accept && !skid_valid_ff && !uopq2_buf_valid_ff) ||
-         (issue_load_from_skid && !uopq2_buf_valid_ff) ||
-         skid_fill ||
-         uopq2_buf_capture ||
-         pipe1_refill_skid_from_if ||
-         pipe1_take_if_id);
+        if_id_rn_pdst_valid && if_id_live_accept;
     assign rn_alloc_rd_addr_o = if_id_trace_rf_waddr_rd;
     assign id_ctrl_operator_type_o = issue_valid_ff ? issue_operator_type_ff : '0;
 
 `ifndef SYNTHESIS
     assign commit_trace_alloc_if_id =
-        if_id_valid_i && !flush_id_i &&
-        !((PIPE1_REAL_MODE < 2) && pair1_fire) &&
-        ((issue_accept && !skid_valid_ff && !uopq2_buf_valid_ff) ||
-         (issue_load_from_skid && !uopq2_buf_valid_ff) ||
-         skid_fill ||
-         uopq2_buf_capture ||
-         pipe1_refill_skid_from_if ||
-         pipe1_take_if_id);
+        if_id_live_accept;
     assign commit_trace_alloc_valid_o =
         commit_trace_alloc_if_id &&
         (if_id_trace_rf_waddr_rd != '0) &&
