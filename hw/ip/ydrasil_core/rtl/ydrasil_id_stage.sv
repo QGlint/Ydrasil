@@ -1199,13 +1199,15 @@ import ydrasil_pkg::*;
 		selected_prf_operand_allowed &&
 		selected_rf_ren_rs1 &&
 		(selected_rf_raddr_rs1 != '0) &&
-		(gpr_pending_i[selected_rf_raddr_rs1] || prf_rs1_uncommitted_i) &&
+		(gpr_pending_i[selected_rf_raddr_rs1] || prf_rs1_uncommitted_i ||
+         (selected_rn_rs1_psrc != {1'b0, selected_rf_raddr_rs1})) &&
 		(selected_rn_rs1_psrc != selected_rn_pdst);
 	wire selected_prf_rs2_allowed =
 		selected_prf_operand_allowed &&
 		(selected_rf_ren_rs2 | selected_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
 		(selected_rf_raddr_rs2 != '0) &&
-		(gpr_pending_i[selected_rf_raddr_rs2] || prf_rs2_uncommitted_i) &&
+		(gpr_pending_i[selected_rf_raddr_rs2] || prf_rs2_uncommitted_i ||
+         (selected_rn_rs2_psrc != {1'b0, selected_rf_raddr_rs2})) &&
 		(selected_rn_rs2_psrc != selected_rn_pdst);
     wire [DATA_WIDTH-1:0] issue_rs1_data =
         rs1_lsu_fwd ? lsu_fwd_data_i :
