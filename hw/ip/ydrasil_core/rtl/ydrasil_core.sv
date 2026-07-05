@@ -1555,14 +1555,12 @@ import ydrasil_pkg::*;
 	wire rs1_branch_ready_next_bypass =
 		rs1_issue_alu_ready_next_raw & issue_alu_stable_slot_hit &
 		id_ctrl_branch_consumer &
-		!mul_inflight &
 		!rs2_pending_stall_eff & !rd_waw_stall &
 		!rs2_issue_hzd & !rd_issue_hzd &
 		!pipe1_issue_rs1_hzd & !pipe1_issue_rs2_hzd & !pipe1_issue_rd_hzd;
 	wire rs2_branch_ready_next_bypass =
 		rs2_issue_alu_ready_next_raw & issue_alu_stable_slot_hit &
 		id_ctrl_branch_consumer &
-		!mul_inflight &
 		!rs1_pending_stall_eff & !rd_waw_stall &
 		!rs1_issue_hzd & !rd_issue_hzd &
 		!pipe1_issue_rs1_hzd & !pipe1_issue_rs2_hzd & !pipe1_issue_rd_hzd;
