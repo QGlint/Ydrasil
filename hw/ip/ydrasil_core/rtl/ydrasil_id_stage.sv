@@ -1315,17 +1315,7 @@ import ydrasil_pkg::*;
           if_id_trace_rf_ren_rs1 && (if_id_trace_rf_raddr_rs1 != '0) &&
           (!if_id_trace_operand_b_rs_sel || if_id_trace_rf_ren_rs2)));
     assign uopq2_buf_capture_operands_ready =
-        uopq2_buf_capture_supported &&
-        (!if_id_trace_rf_ren_rs1 || (if_id_trace_rf_raddr_rs1 == '0) ||
-         rn_if_rs1_ready_i ||
-         (alu_fwd_valid_i && (if_id_trace_rf_raddr_rs1 == alu_fwd_addr_i)) ||
-         (wb_fwd_valid_i && (if_id_trace_rf_raddr_rs1 == wb_fwd_addr_i)) ||
-         (pipe1_alu_fwd_valid_i && (if_id_trace_rf_raddr_rs1 == pipe1_alu_fwd_addr_i))) &&
-        (!if_id_trace_rf_ren_rs2 || (if_id_trace_rf_raddr_rs2 == '0) ||
-         rn_if_rs2_ready_i ||
-         (alu_fwd_valid_i && (if_id_trace_rf_raddr_rs2 == alu_fwd_addr_i)) ||
-         (wb_fwd_valid_i && (if_id_trace_rf_raddr_rs2 == wb_fwd_addr_i)) ||
-         (pipe1_alu_fwd_valid_i && (if_id_trace_rf_raddr_rs2 == pipe1_alu_fwd_addr_i)));
+        uopq2_buf_capture_supported;
     assign uopq2_buf_capture =
         (PIPE1_REAL_MODE >= 2) &&
         id_advance && issue_valid_ff && issue_wait_block &&
