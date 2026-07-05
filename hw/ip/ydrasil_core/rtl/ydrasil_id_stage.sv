@@ -368,6 +368,7 @@ import ydrasil_pkg::*;
     wire                             pipe1_younger_flush_risk;
     wire                             pipe1_younger_flush_block;
     wire                             pipe1_pipe0_present_safe;
+    wire                             pipe1_pipe0_blocked_load_safe;
     wire                             pipe1_pipe0_empty_safe;
     wire                             pipe1_dual_pipe0_safe;
     wire                             pipe1_dual_rs1_ready;
@@ -1418,8 +1419,23 @@ import ydrasil_pkg::*;
         !uopq0_fence_i;
     assign pipe1_pipe0_empty_safe =
         !uopq0_valid;
+    assign pipe1_pipe0_blocked_load_safe =
+        (PIPE1_REAL_MODE >= 2) &&
+        issue_valid_ff && issue_wait_block &&
+        (skid_valid_ff || uopq2_buf_valid_ff) &&
+        !stall_id_i && !flush_id_i &&
+        uopq0_valid &&
+        uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
+        !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+        !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
+        !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_CSR] &&
+        !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS] &&
+        !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_MUL] &&
+        !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_BITMANIP] &&
+        !uopq0_fence_i;
     assign pipe1_dual_pipe0_safe =
-        pipe1_pipe0_present_safe | pipe1_pipe0_empty_safe;
+        pipe1_pipe0_present_safe | pipe1_pipe0_empty_safe |
+        pipe1_pipe0_blocked_load_safe;
     assign pipe1_uopq1_supported =
         uopq1_valid &&
         uopq1_operator_type[ydrasil_pkg::OPERATOR_TYPE_ALU] &&
