@@ -340,22 +340,22 @@ import ydrasil_pkg::*;
     end
 
     always_comb begin
-        dtcm_load_result = load_s2_shifted_q;
+        dtcm_load_result = load_shifted_data;
         unique case (1'b1)
-            load_s2_operator_lsu_q[ydrasil_pkg::OP_LSU_LB]: begin
-                dtcm_load_result = {{24{load_s2_shifted_q[7]}}, load_s2_shifted_q[7:0]};
+            load_s1_operator_lsu_q[ydrasil_pkg::OP_LSU_LB]: begin
+                dtcm_load_result = {{24{load_shifted_data[7]}}, load_shifted_data[7:0]};
             end
-            load_s2_operator_lsu_q[ydrasil_pkg::OP_LSU_LBU]: begin
-                dtcm_load_result = {24'b0, load_s2_shifted_q[7:0]};
+            load_s1_operator_lsu_q[ydrasil_pkg::OP_LSU_LBU]: begin
+                dtcm_load_result = {24'b0, load_shifted_data[7:0]};
             end
-            load_s2_operator_lsu_q[ydrasil_pkg::OP_LSU_LH]: begin
-                dtcm_load_result = {{16{load_s2_shifted_q[15]}}, load_s2_shifted_q[15:0]};
+            load_s1_operator_lsu_q[ydrasil_pkg::OP_LSU_LH]: begin
+                dtcm_load_result = {{16{load_shifted_data[15]}}, load_shifted_data[15:0]};
             end
-            load_s2_operator_lsu_q[ydrasil_pkg::OP_LSU_LHU]: begin
-                dtcm_load_result = {16'b0, load_s2_shifted_q[15:0]};
+            load_s1_operator_lsu_q[ydrasil_pkg::OP_LSU_LHU]: begin
+                dtcm_load_result = {16'b0, load_shifted_data[15:0]};
             end
             default: begin
-                dtcm_load_result = load_s2_shifted_q;
+                dtcm_load_result = load_shifted_data;
             end
         endcase
     end
@@ -407,10 +407,10 @@ import ydrasil_pkg::*;
     assign mmio_wmask_o = (mmio_req_valid_q & mmio_is_store_q) ? mmio_wmask_q : 4'b0000;
     assign mmio_wdata_o = (mmio_req_valid_q & mmio_is_store_q) ? mmio_wdata_q : 32'b0;
 
-    assign dtcm_wb_valid = load_s2_valid_q;
+    assign dtcm_wb_valid = load_s1_valid_q;
     assign mmio_wb_out_valid = mmio_wb_valid_q & !dtcm_wb_valid;
     assign selected_wb_result = dtcm_wb_valid ? dtcm_load_result : mmio_wb_result_q;
-    assign selected_wb_rd_addr = dtcm_wb_valid ? load_s2_rd_addr_q : mmio_wb_rd_addr_q;
+    assign selected_wb_rd_addr = dtcm_wb_valid ? load_s1_rd_addr_q : mmio_wb_rd_addr_q;
 
     assign lsu_ctrl_busy_o = mmio_busy | mmio_accept;
     assign lsu_wb_result_o = selected_wb_result;
@@ -456,7 +456,7 @@ import ydrasil_pkg::*;
                 load_s2_shifted_q      <= load_shifted_data;
             end
 
-            if (mmio_wb_valid_q && !load_s2_valid_q) begin
+            if (mmio_wb_valid_q && !dtcm_wb_valid) begin
                 mmio_wb_valid_q <= 1'b0;
             end
 
