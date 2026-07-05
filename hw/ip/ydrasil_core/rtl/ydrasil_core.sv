@@ -334,7 +334,6 @@ import ydrasil_pkg::*;
 	wire rn_real_rs2_uncommitted;
 	wire rn_real_pipe1_rs1_uncommitted;
 	wire rn_real_pipe1_rs2_uncommitted;
-	wire pipe1_commit_rf_req;
 	wire pipe1_commit_rf_wen;
 	wire rn_shadow_alloc1_valid;
 	wire rn_shadow_same_cycle_raw;
@@ -1088,10 +1087,11 @@ import ydrasil_pkg::*;
 	assign rn_real_commit0_ready =
 		rn_real_rob_valid_q[rn_real_rob_head_q] &
 		rn_real_rob_ready_q[rn_real_rob_head_q];
-	assign pipe1_commit_rf_req =
+	assign pipe1_commit_rf_wen =
 		rn_real_commit0_ready &
 		rn_real_rob_pipe1_q[rn_real_rob_head_q] &
-		(rn_real_rob_arch_rd_q[rn_real_rob_head_q] != '0);
+		(rn_real_rob_arch_rd_q[rn_real_rob_head_q] != '0) &
+		!wb_rf_wen_rd;
 	wire rn_real_ctrl_at_head =
 		rn_real_rob_valid_q[rn_real_rob_head_q] &
 		id_ctrl_rd_wen & (id_ctrl_pdst != '0) &
@@ -2089,10 +2089,6 @@ import ydrasil_pkg::*;
 		.mul_wdata_rd_i   (mul_wb_result),
 		.mul_rf_wen_rd_i  (mul_rf_wen_rd),
 		.mul_rf_waddr_rd_i(mul_rf_waddr_rd),
-		.pipe1_commit_req_i(pipe1_commit_rf_req),
-		.pipe1_commit_waddr_i(rn_real_rob_arch_rd_q[rn_real_rob_head_q]),
-		.pipe1_commit_wdata_i(rn_real_rob_data_q[rn_real_rob_head_q]),
-		.pipe1_commit_grant_o(pipe1_commit_rf_wen),
 		.wb_mul_complete_o(wb_mul_complete),
 		.wb_mul_complete_waddr_o(wb_mul_complete_waddr),
 		.wb_backpressure_o(wb_backpressure),
@@ -2113,9 +2109,11 @@ import ydrasil_pkg::*;
 		.rf_waddr_rd_o    (wb_rf_waddr_rd)
 	);
 
-	assign arch_rf_wen_rd = wb_rf_wen_rd;
-	assign arch_rf_waddr_rd = wb_rf_waddr_rd;
-	assign arch_rf_wdata_rd = wb_rf_wdata_rd;
+	assign arch_rf_wen_rd = pipe1_commit_rf_wen | wb_rf_wen_rd;
+	assign arch_rf_waddr_rd =
+		pipe1_commit_rf_wen ? rn_real_rob_arch_rd_q[rn_real_rob_head_q] : wb_rf_waddr_rd;
+	assign arch_rf_wdata_rd =
+		pipe1_commit_rf_wen ? rn_real_rob_data_q[rn_real_rob_head_q] : wb_rf_wdata_rd;
 	assign rf_wen_rd = arch_rf_wen_rd;
 	assign rf_waddr_rd = arch_rf_waddr_rd;
 	assign rf_wdata_rd = arch_rf_wdata_rd;

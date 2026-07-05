@@ -24,11 +24,6 @@ import ydrasil_pkg::*;
     input  wire                         mul_rf_wen_rd_i,
     input  wire [REGS_ADDR_WIDTH-1:0]   mul_rf_waddr_rd_i,
 
-    input  wire                         pipe1_commit_req_i,
-    input  wire [REGS_ADDR_WIDTH-1:0]   pipe1_commit_waddr_i,
-    input  wire [REGS_DATA_WIDTH-1:0]   pipe1_commit_wdata_i,
-    output wire                         pipe1_commit_grant_o,
-
     output wire                         wb_mul_complete_o,
     output wire [REGS_ADDR_WIDTH-1:0]   wb_mul_complete_waddr_o,
     output wire                         wb_backpressure_o,
@@ -120,15 +115,12 @@ import ydrasil_pkg::*;
 
     wire sel_lsu = lsu_rf_wen_rd_i;
     wire sel_alu_fifo = !sel_lsu & !alu_fifo_empty;
-    wire sel_pipe1_commit = !sel_lsu & !sel_alu_fifo & pipe1_commit_req_i;
-    wire sel_alu_current = !sel_lsu & alu_fifo_empty & !sel_pipe1_commit & alu_rf_wen_rd_i;
+    wire sel_alu_current = !sel_lsu & alu_fifo_empty & alu_rf_wen_rd_i;
 `ifdef YDRASIL_ENABLE_PIPE1_REAL
     wire pipe1_alu_rf_wen_eff = pipe1_alu_rf_wen_rd_i;
-    wire sel_p1_fifo =
-        !sel_lsu & alu_fifo_empty & !sel_pipe1_commit & !alu_rf_wen_rd_i & !p1_fifo_empty;
+    wire sel_p1_fifo = !sel_lsu & alu_fifo_empty & !alu_rf_wen_rd_i & !p1_fifo_empty;
     wire sel_p1_current =
-        !sel_lsu & alu_fifo_empty & !sel_pipe1_commit & !alu_rf_wen_rd_i &
-        p1_fifo_empty & pipe1_alu_rf_wen_eff;
+        !sel_lsu & alu_fifo_empty & !alu_rf_wen_rd_i & p1_fifo_empty & pipe1_alu_rf_wen_eff;
     wire p1_write_clear = p1_fifo_empty & !pipe1_alu_rf_wen_eff;
 `else
     wire pipe1_alu_rf_wen_eff = 1'b0;
@@ -138,10 +130,10 @@ import ydrasil_pkg::*;
 `endif
     wire sel_mul_fifo =
         !sel_lsu & alu_fifo_empty & !alu_rf_wen_rd_i &
-        !sel_pipe1_commit & p1_write_clear & !mul_fifo_empty;
+        p1_write_clear & !mul_fifo_empty;
     wire sel_mul_current =
         !sel_lsu & alu_fifo_empty & !alu_rf_wen_rd_i &
-        !sel_pipe1_commit & p1_write_clear & mul_fifo_empty & mul_rf_wen_rd_i;
+        p1_write_clear & mul_fifo_empty & mul_rf_wen_rd_i;
 
     wire alu_dequeue = sel_alu_fifo;
     wire alu_direct_write = sel_alu_current;
@@ -216,7 +208,6 @@ import ydrasil_pkg::*;
     assign pipe1_fwd_valid_o = !p1_fifo_empty;
     assign pipe1_fwd_addr_o = p1_fifo_head_addr;
     assign pipe1_fwd_data_o = p1_fifo_head_data;
-    assign pipe1_commit_grant_o = sel_pipe1_commit;
 `ifndef SYNTHESIS
     assign wb_buf_fwd_valid_o = wb_buf_fwd_valid_q;
     assign wb_buf_fwd_addr_o = wb_buf_fwd_addr_q;
@@ -228,33 +219,19 @@ import ydrasil_pkg::*;
 `endif
 
     assign rf_wen_rd_o =
-        sel_lsu | sel_alu_fifo | sel_pipe1_commit | sel_alu_current |
-        sel_mul_fifo | sel_mul_current;
+        sel_lsu | sel_alu_fifo | sel_alu_current | sel_mul_fifo | sel_mul_current;
     assign rf_waddr_rd_o =
         ({REGS_ADDR_WIDTH{sel_lsu}}         & lsu_rf_waddr_rd_i) |
         ({REGS_ADDR_WIDTH{sel_alu_fifo}}    & alu_fifo_head_addr) |
-        ({REGS_ADDR_WIDTH{sel_pipe1_commit}} & pipe1_commit_waddr_i) |
         ({REGS_ADDR_WIDTH{sel_alu_current}} & alu_rf_waddr_rd_i) |
         ({REGS_ADDR_WIDTH{sel_mul_fifo}}    & mul_fifo_head_addr) |
         ({REGS_ADDR_WIDTH{sel_mul_current}} & mul_rf_waddr_rd_i);
     assign rf_wdata_rd_o =
         ({REGS_DATA_WIDTH{sel_lsu}}         & lsu_wb_result_i) |
         ({REGS_DATA_WIDTH{sel_alu_fifo}}    & alu_fifo_head_data) |
-        ({REGS_DATA_WIDTH{sel_pipe1_commit}} & pipe1_commit_wdata_i) |
         ({REGS_DATA_WIDTH{sel_alu_current}} & alu_wdata_rd_i) |
         ({REGS_DATA_WIDTH{sel_mul_fifo}}    & mul_fifo_head_data) |
         ({REGS_DATA_WIDTH{sel_mul_current}} & mul_wdata_rd_i);
-
-`ifndef SYNTHESIS
-    always_ff @(posedge clk) begin
-        if (rst_n && sel_pipe1_commit) begin
-            assert (!sel_lsu && !sel_alu_fifo)
-                else $fatal(1, "pipe1 commit grant overlapped protected WB source");
-            assert (pipe1_commit_waddr_i != '0)
-                else $fatal(1, "pipe1 commit grant to x0");
-        end
-    end
-`endif
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
