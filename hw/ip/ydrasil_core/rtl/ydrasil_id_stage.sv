@@ -1346,12 +1346,12 @@ import ydrasil_pkg::*;
            if_id_trace_operator[ydrasil_pkg::OP_ALU_SUB] |
            if_id_trace_operator[ydrasil_pkg::OP_ALU_SLT] |
            if_id_trace_operator[ydrasil_pkg::OP_ALU_SLTU]) &&
-          if_id_trace_rf_ren_rs1 && (if_id_trace_rf_raddr_rs1 != '0) &&
+          if_id_trace_rf_ren_rs1 &&
           (!if_id_trace_operand_b_rs_sel || if_id_trace_rf_ren_rs2)) |
          ((if_id_trace_operator[ydrasil_pkg::OP_ALU_XOR] |
            if_id_trace_operator[ydrasil_pkg::OP_ALU_OR] |
            if_id_trace_operator[ydrasil_pkg::OP_ALU_AND]) &&
-          if_id_trace_rf_ren_rs1 && (if_id_trace_rf_raddr_rs1 != '0) &&
+          if_id_trace_rf_ren_rs1 &&
           (!if_id_trace_operand_b_rs_sel || if_id_trace_rf_ren_rs2)));
     assign uopq2_buf_capture_operands_ready =
         uopq2_buf_capture_supported &&
@@ -1433,12 +1433,12 @@ import ydrasil_pkg::*;
            uopq1_operator[ydrasil_pkg::OP_ALU_SUB] |
            uopq1_operator[ydrasil_pkg::OP_ALU_SLT] |
            uopq1_operator[ydrasil_pkg::OP_ALU_SLTU]) &&
-          uopq1_rf_ren_rs1 && (uopq1_rf_raddr_rs1 != '0) &&
+          uopq1_rf_ren_rs1 &&
           (!uopq1_operand_b_rs_sel || uopq1_rf_ren_rs2)) |
          ((uopq1_operator[ydrasil_pkg::OP_ALU_XOR] |
            uopq1_operator[ydrasil_pkg::OP_ALU_OR] |
            uopq1_operator[ydrasil_pkg::OP_ALU_AND]) &&
-          uopq1_rf_ren_rs1 && (uopq1_rf_raddr_rs1 != '0) &&
+          uopq1_rf_ren_rs1 &&
           (!uopq1_operand_b_rs_sel || uopq1_rf_ren_rs2)));
     assign pipe1_uopq2_supported =
         uopq2_valid &&
@@ -1455,12 +1455,12 @@ import ydrasil_pkg::*;
            uopq2_operator[ydrasil_pkg::OP_ALU_SUB] |
            uopq2_operator[ydrasil_pkg::OP_ALU_SLT] |
            uopq2_operator[ydrasil_pkg::OP_ALU_SLTU]) &&
-          uopq2_rf_ren_rs1 && (uopq2_rf_raddr_rs1 != '0) &&
+          uopq2_rf_ren_rs1 &&
           (!uopq2_operand_b_rs_sel || uopq2_rf_ren_rs2)) |
          ((uopq2_operator[ydrasil_pkg::OP_ALU_XOR] |
            uopq2_operator[ydrasil_pkg::OP_ALU_OR] |
            uopq2_operator[ydrasil_pkg::OP_ALU_AND]) &&
-          uopq2_rf_ren_rs1 && (uopq2_rf_raddr_rs1 != '0) &&
+          uopq2_rf_ren_rs1 &&
           (!uopq2_operand_b_rs_sel || uopq2_rf_ren_rs2)));
     assign pipe1_uopq1_operands_ready =
         pipe1_uopq1_supported &&
