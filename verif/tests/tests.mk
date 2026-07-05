@@ -124,7 +124,7 @@ rv_sim_%:
 	if [ "$(SIM_COMPARE)" = "none" ]; then \
 		match_status=SKIP; \
 	fi; \
-	rvtest_pass_count=$$(grep -c "^RISCV_TEST_PASS:" $$hw_log 2>/dev/null || true); \
+	rvtest_pass_count=$$(grep -c "^RISCV_TEST_PASS: tohost=0x00000001$$" $$hw_log 2>/dev/null || true); \
 	rvtest_fail_count=$$(grep -c "^RISCV_TEST_FAIL:" $$hw_log 2>/dev/null || true); \
 	if [ "$$match_status" = "MATCH" ] && [ "$$rvtest_pass_count" -eq 1 ] && [ "$$rvtest_fail_count" -eq 0 ]; then \
 		pass_status=PASS; \

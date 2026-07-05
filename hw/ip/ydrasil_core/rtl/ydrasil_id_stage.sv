@@ -1608,16 +1608,16 @@ import ydrasil_pkg::*;
 	        (slot1_operator_type[ydrasil_pkg::OPERATOR_TYPE_CSR] |
 	         slot1_operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS] |
 	         slot1_fence_i);
-    assign ds_pipe1_rd_valid = !rf_wen_rd || (rf_waddr_rd != '0);
+    assign ds_pipe1_rd_valid = !slot1_rf_wen_rd || (slot1_rf_waddr_rd != '0);
     assign ds_block_raw_pipe0 =
         ds_pipe1_valid && ds_pipe0_valid && (issue_rf_waddr_rd_ff != '0) &&
         issue_rf_wen_rd_ff &&
-        ((rf_ren_rs1 && (rf_raddr_rs1 == issue_rf_waddr_rd_ff)) |
-         (rf_ren_rs2 && (rf_raddr_rs2 == issue_rf_waddr_rd_ff)));
+        ((slot1_rf_ren_rs1 && (slot1_rf_raddr_rs1 == issue_rf_waddr_rd_ff)) |
+         (slot1_rf_ren_rs2 && (slot1_rf_raddr_rs2 == issue_rf_waddr_rd_ff)));
     assign ds_block_waw_pipe0 =
-        ds_pipe1_valid && ds_pipe0_valid && rf_wen_rd &&
-        (rf_waddr_rd != '0) && issue_rf_wen_rd_ff &&
-        (rf_waddr_rd == issue_rf_waddr_rd_ff);
+        ds_pipe1_valid && ds_pipe0_valid && slot1_rf_wen_rd &&
+        (slot1_rf_waddr_rd != '0) && issue_rf_wen_rd_ff &&
+        (slot1_rf_waddr_rd == issue_rf_waddr_rd_ff);
     assign ds_block_pending_rs1 = ds_pipe1_valid && ri_slot1_block_rs1_pending;
     assign ds_block_pending_rs2 = ds_pipe1_valid && ri_slot1_block_rs2_pending;
     assign ds_block_ctrl =
@@ -1629,7 +1629,7 @@ import ydrasil_pkg::*;
     assign ds_block_flush = ds_pipe1_valid && flush_id_i;
     assign ds_block_forward_complex =
         ds_pipe1_valid && ds_pipe1_simple_alu &&
-        ((rf_ren_rs1 && ri_slot1_rs1_clear_fwd) |
+        ((slot1_rf_ren_rs1 && ri_slot1_rs1_clear_fwd) |
          (ri_slot1_rs2_read && ri_slot1_rs2_clear_fwd));
     assign ds_shadow_safe_candidate =
         ds_pipe0_valid && ds_pipe1_valid &&
@@ -1642,7 +1642,7 @@ import ydrasil_pkg::*;
     assign ds_block_wb_port =
         ds_shadow_safe_candidate &&
         issue_rf_wen_rd_ff && (issue_rf_waddr_rd_ff != '0) &&
-        rf_wen_rd && (rf_waddr_rd != '0);
+        slot1_rf_wen_rd && (slot1_rf_waddr_rd != '0);
 
     assign p1sh_simple_alu =
         pair1_valid_ff &&

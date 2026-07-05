@@ -12,8 +12,6 @@ module ydrasil_core_tb
 );
 string itcmfile;
 string dtcmfile;
-// ToHost程序地址,用于监控测试是否结束
-`define PC_WRITE_TOHOST 32'h80000040
 // ITCM 访问路径
 `define ITCM u_dut.u_ydrasil_mems.u_itcm.u_irom
 `define DTCM u_dut.u_ydrasil_mems.u_dtcm.u_dram
@@ -22,6 +20,8 @@ longint time_out;
 longint sv_timeout;
 logic [31:0] riscv_tohost_addr;
 logic        riscv_tohost_addr_valid;
+logic [31:0] riscv_write_tohost_addr;
+logic        riscv_write_tohost_addr_valid;
 initial begin
     if ($value$plusargs("itcmfile=%s", itcmfile)) begin
       $display("Loading memory from %s", itcmfile);
@@ -50,6 +50,14 @@ initial begin
         riscv_tohost_addr_valid = 1'b0;
         riscv_tohost_addr = 32'b0;
     end
+
+    if ($value$plusargs("write_tohost_addr=%h", riscv_write_tohost_addr)) begin
+        riscv_write_tohost_addr_valid = 1'b1;
+        $display("[TB] riscv-tests write_tohost_addr=0x%08h", riscv_write_tohost_addr);
+    end else begin
+        riscv_write_tohost_addr_valid = 1'b0;
+        riscv_write_tohost_addr = 32'b0;
+    end
 end
 
 
@@ -71,9 +79,11 @@ end
     wire [31:0] pc = u_dut.u_ydrasil_if_stage.pc_ff;
     wire [31:0] csr_instret = u_dut.u_ydrasil_registers_csr.instret[31:0];
     wire [31:0] csr_cyclel = u_dut.u_ydrasil_registers_csr.cycle[31:0];
+    wire [31:0] riscv_write_tohost_store_pc = riscv_write_tohost_addr + 32'd4;
     wire        tohost_pc_accept =
+        riscv_write_tohost_addr_valid &&
         u_dut.if_id_valid && !u_dut.stall_id && !u_dut.flush_id &&
-        (u_dut.if_id_pc == `PC_WRITE_TOHOST);
+        (u_dut.if_id_pc == riscv_write_tohost_store_pc);
 
     integer           r;
     reg     [8*300:1] testcase;
@@ -93,12 +103,24 @@ end
     wire  [31:0] cycle_count = csr_cyclel;
     reg pc_write_to_host_flag;
     reg [31:0] last_pc;
+    logic [31:0] riscv_last_store_issue_pc;
+    logic        riscv_last_store_issue_valid;
+    wire         riscv_store_issue =
+        u_dut.ex_accept_valid &&
+        u_dut.operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
+        !u_dut.interrupt &&
+        !u_dut.flush_ex;
     wire riscv_tohost_write =
         riscv_tohost_addr_valid &&
         perip_wen &&
         (&perip_mask) &&
         (perip_addr == riscv_tohost_addr) &&
         perip_wdata[0];
+    wire riscv_tohost_write_from_write_tohost =
+        riscv_tohost_write &&
+        riscv_write_tohost_addr_valid &&
+        riscv_last_store_issue_valid &&
+        (riscv_last_store_issue_pc == riscv_write_tohost_store_pc);
 
     // 添加指令计数和IPC计算相关变量
     wire [31:0] instruction_count = csr_instret; // Use CSR instret as the retired instruction count.
@@ -582,6 +604,16 @@ end
         end
     end
 
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            riscv_last_store_issue_pc <= 32'b0;
+            riscv_last_store_issue_valid <= 1'b0;
+        end else if (riscv_store_issue) begin
+            riscv_last_store_issue_pc <= u_dut.id_instr_addr;
+            riscv_last_store_issue_valid <= 1'b1;
+        end
+    end
+
     // 测试用例解析与ITCM加载
     initial begin
         if ($value$plusargs("itcm_init=%s", testcase)) begin
@@ -813,15 +845,21 @@ end
                 bp_correct_not_taken_count);
             $display("~~~~~~~~~~~~~~~The final x3 Reg value: %d ~~~~~~~~~~~~~", x3);
             $display("~~~~~~~~~~~~~~~RISCV tohost value: 0x%08h ~~~~~~~~~~~~~", perip_wdata);
-            $display("RISCV_TEST_TOHOST_WRITE: addr=0x%08h data=0x%08h mask=0x%1h pc=0x%08h",
-                perip_addr, perip_wdata, perip_mask, pc);
+            $display("RISCV_TEST_TOHOST_WRITE: addr=0x%08h data=0x%08h mask=0x%1h pc=0x%08h write_tohost_store_pc=0x%08h last_store_pc=0x%08h from_write_tohost=%0d",
+                perip_addr,
+                perip_wdata,
+                perip_mask,
+                pc,
+                riscv_write_tohost_store_pc,
+                riscv_last_store_issue_pc,
+                riscv_tohost_write_from_write_tohost);
             $display("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
 
-            if (perip_wdata == 32'h1) begin
+            if ((perip_wdata == 32'h1) && riscv_tohost_write_from_write_tohost) begin
                 $display("RISCV_TEST_PASS: tohost=0x%08h", perip_wdata);
                 $display("~~~~~~~~~~~~~~~~~~~ TEST_PASS ~~~~~~~~~~~~~~~~~~~");
             end else begin
-                $display("RISCV_TEST_FAIL: tohost=0x%08h", perip_wdata);
+                $display("RISCV_TEST_FAIL: tohost=0x%08h from_write_tohost=%0d", perip_wdata, riscv_tohost_write_from_write_tohost);
                 $display("~~~~~~~~~~~~~~~~~~~ TEST_FAIL ~~~~~~~~~~~~~~~~~~~~");
                 $display("fail tohost = 0x%08h", perip_wdata);
                 for (r = 0; r < 32; r = r + 1) $display("x%2d = 0x%x", r, u_dut.u_ydrasil_registers.registers[r]);
