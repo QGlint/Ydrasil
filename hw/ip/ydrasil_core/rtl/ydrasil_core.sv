@@ -1446,6 +1446,25 @@ import ydrasil_pkg::*;
 			$fatal(1, "div/rem rd issue repeated while ID/EX is held");
 		end
 	end
+	always_ff @(posedge clk) begin
+		if (rst_n) begin
+			if (flush_id | flush_ex) begin
+				$display("[RN_FLUSH_DBG] flush_id=%0b flush_ex=%0b rob_occ=%0d x11_rat=%0d x11_amt=%0d gpr_pending_x11=%0b count_x11=%0d wb=%0b wb_rd=x%0d wb_data=0x%08h",
+				         flush_id, flush_ex, rn_real_rob_occ_q, rn_real_rat_q[11], rn_real_amt_q[11],
+				         gpr_pending_q[11], gpr_pending_count_q[11], rf_wen_rd, rf_waddr_rd, rf_wdata_rd);
+			end
+			if ((alu_rf_wen_rd && (alu_rf_waddr_rd == 5'd11)) ||
+			    (wb_rf_wen_rd && (wb_rf_waddr_rd == 5'd11)) ||
+			    (rf_wen_rd && (rf_waddr_rd == 5'd11))) begin
+				$display("[X11_WB_DBG] alu=%0b alu_data=0x%08h alu_pdst=%0d wb=%0b wb_data=0x%08h arch=%0b arch_data=0x%08h rat=%0d amt=%0d pending=%0b count=%0d",
+				         alu_rf_wen_rd && (alu_rf_waddr_rd == 5'd11), alu_result, alu_rn_pdst,
+				         wb_rf_wen_rd && (wb_rf_waddr_rd == 5'd11), wb_rf_wdata_rd,
+				         rf_wen_rd && (rf_waddr_rd == 5'd11), rf_wdata_rd,
+				         rn_real_rat_q[11], rn_real_amt_q[11],
+				         gpr_pending_q[11], gpr_pending_count_q[11]);
+			end
+		end
+	end
 `endif
 
 `ifndef SYNTHESIS
