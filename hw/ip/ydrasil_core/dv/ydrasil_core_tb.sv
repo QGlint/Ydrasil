@@ -282,6 +282,13 @@ end
     reg [31:0] sb_branch_head_rf_block_mul_current_count;
     reg [31:0] sb_branch_head_rf_block_other_count;
     reg [31:0] sb_branch_order_rob_nonhead_count;
+    reg [31:0] sb_branch_rob_nonhead_dist1_count;
+    reg [31:0] sb_branch_rob_nonhead_dist1_ready_count;
+    reg [31:0] sb_branch_rob_nonhead_dist1_not_ready_count;
+    reg [31:0] sb_branch_rob_nonhead_dist1_head_commit_count;
+    reg [31:0] sb_branch_rob_nonhead_dist1_head_commit_ready_count;
+    reg [31:0] sb_branch_rob_nonhead_dist1_head_not_commit_count;
+    reg [31:0] sb_branch_rob_nonhead_dist_gt1_count;
     reg [31:0] sb_branch_wait_rs1_pending_count;
     reg [31:0] sb_branch_wait_rs2_pending_count;
     reg [31:0] sb_branch_wait_issue_rs1_count;
@@ -299,6 +306,22 @@ end
     reg [31:0] sb_branch_ctrl_src_rs2_actual_count;
     reg [31:0] sb_branch_ctrl_src_rs1_legacy_fwd_count;
     reg [31:0] sb_branch_ctrl_src_rs2_legacy_fwd_count;
+
+    wire [5:0] branch_rob_nonhead_next_idx =
+        u_dut.rn_real_rob_head_q + 6'd1;
+    wire branch_order_rob_nonhead_event =
+        u_dut.scoreboard_stall &&
+        u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+        u_dut.rn_real_ctrl_older_rob_block &&
+        !u_dut.rn_real_rob_pipe1_q[u_dut.rn_real_rob_head_q] &&
+        !(u_dut.pipe1_issue_valid && (u_dut.pipe1_rn_pdst_issue != '0)) &&
+        !u_dut.rn_real_pipe1_pdst_found;
+    wire branch_rob_nonhead_dist1 =
+        u_dut.rn_real_rob_valid_q[branch_rob_nonhead_next_idx] &&
+        u_dut.rn_real_rob_pipe1_q[branch_rob_nonhead_next_idx];
+    wire branch_rob_nonhead_dist1_ready =
+        branch_rob_nonhead_dist1 &&
+        u_dut.rn_real_rob_ready_q[branch_rob_nonhead_next_idx];
     reg [31:0] sb_store_addr_raw_class_count;
     reg [31:0] sb_store_data_raw_class_count;
     reg [31:0] sb_can_bypass_with_ready_issue_count;
@@ -543,6 +566,13 @@ end
             sb_branch_head_rf_block_mul_current_count <= 32'b0;
             sb_branch_head_rf_block_other_count <= 32'b0;
             sb_branch_order_rob_nonhead_count <= 32'b0;
+            sb_branch_rob_nonhead_dist1_count <= 32'b0;
+            sb_branch_rob_nonhead_dist1_ready_count <= 32'b0;
+            sb_branch_rob_nonhead_dist1_not_ready_count <= 32'b0;
+            sb_branch_rob_nonhead_dist1_head_commit_count <= 32'b0;
+            sb_branch_rob_nonhead_dist1_head_commit_ready_count <= 32'b0;
+            sb_branch_rob_nonhead_dist1_head_not_commit_count <= 32'b0;
+            sb_branch_rob_nonhead_dist_gt1_count <= 32'b0;
             sb_branch_wait_rs1_pending_count <= 32'b0;
             sb_branch_wait_rs2_pending_count <= 32'b0;
             sb_branch_wait_issue_rs1_count <= 32'b0;
@@ -971,12 +1001,25 @@ end
                   !u_dut.u_ydrasil_wb_stage.sel_mul_fifo &&
                   !u_dut.u_ydrasil_wb_stage.sel_mul_current) ? 32'd1 : 32'd0);
             sb_branch_order_rob_nonhead_count <= sb_branch_order_rob_nonhead_count +
-                ((u_dut.scoreboard_stall &&
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
-                  u_dut.rn_real_ctrl_older_rob_block &&
-                  !u_dut.rn_real_rob_pipe1_q[u_dut.rn_real_rob_head_q] &&
-                  !(u_dut.pipe1_issue_valid && (u_dut.pipe1_rn_pdst_issue != '0)) &&
-                  !u_dut.rn_real_pipe1_pdst_found) ? 32'd1 : 32'd0);
+                (branch_order_rob_nonhead_event ? 32'd1 : 32'd0);
+            sb_branch_rob_nonhead_dist1_count <= sb_branch_rob_nonhead_dist1_count +
+                ((branch_order_rob_nonhead_event && branch_rob_nonhead_dist1) ? 32'd1 : 32'd0);
+            sb_branch_rob_nonhead_dist1_ready_count <= sb_branch_rob_nonhead_dist1_ready_count +
+                ((branch_order_rob_nonhead_event && branch_rob_nonhead_dist1_ready) ? 32'd1 : 32'd0);
+            sb_branch_rob_nonhead_dist1_not_ready_count <= sb_branch_rob_nonhead_dist1_not_ready_count +
+                ((branch_order_rob_nonhead_event && branch_rob_nonhead_dist1 &&
+                  !branch_rob_nonhead_dist1_ready) ? 32'd1 : 32'd0);
+            sb_branch_rob_nonhead_dist1_head_commit_count <= sb_branch_rob_nonhead_dist1_head_commit_count +
+                ((branch_order_rob_nonhead_event && branch_rob_nonhead_dist1 &&
+                  u_dut.rn_real_commit0_valid) ? 32'd1 : 32'd0);
+            sb_branch_rob_nonhead_dist1_head_commit_ready_count <= sb_branch_rob_nonhead_dist1_head_commit_ready_count +
+                ((branch_order_rob_nonhead_event && branch_rob_nonhead_dist1_ready &&
+                  u_dut.rn_real_commit0_valid) ? 32'd1 : 32'd0);
+            sb_branch_rob_nonhead_dist1_head_not_commit_count <= sb_branch_rob_nonhead_dist1_head_not_commit_count +
+                ((branch_order_rob_nonhead_event && branch_rob_nonhead_dist1 &&
+                  !u_dut.rn_real_commit0_valid) ? 32'd1 : 32'd0);
+            sb_branch_rob_nonhead_dist_gt1_count <= sb_branch_rob_nonhead_dist_gt1_count +
+                ((branch_order_rob_nonhead_event && !branch_rob_nonhead_dist1) ? 32'd1 : 32'd0);
             sb_branch_wait_rs1_pending_count <= sb_branch_wait_rs1_pending_count +
                 ((u_dut.scoreboard_stall &&
                   u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
@@ -1527,6 +1570,14 @@ end
                 sb_branch_head_rf_block_mul_fifo_count,
                 sb_branch_head_rf_block_mul_current_count,
                 sb_branch_head_rf_block_other_count);
+            $display("PERF_BRANCH_ROB_NONHEAD_SPLIT: DIST1=%-d DIST1_READY=%-d DIST1_NOT_READY=%-d DIST1_HEAD_COMMIT=%-d DIST1_HEAD_COMMIT_READY=%-d DIST1_HEAD_NOT_COMMIT=%-d DIST_GT1=%-d",
+                sb_branch_rob_nonhead_dist1_count,
+                sb_branch_rob_nonhead_dist1_ready_count,
+                sb_branch_rob_nonhead_dist1_not_ready_count,
+                sb_branch_rob_nonhead_dist1_head_commit_count,
+                sb_branch_rob_nonhead_dist1_head_commit_ready_count,
+                sb_branch_rob_nonhead_dist1_head_not_commit_count,
+                sb_branch_rob_nonhead_dist_gt1_count);
             $display("PERF_PHASE4A_ALU_STABLE: RAW_READY_NEXT=%-d STABLE_SLOT_HIT=%-d RS1_BYPASS=%-d RS2_BYPASS=%-d",
                 p4a_raw_ready_next_count,
                 p4a_alu_stable_slot_hit_count,
