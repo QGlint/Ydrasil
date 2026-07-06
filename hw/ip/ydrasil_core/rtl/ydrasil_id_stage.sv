@@ -792,13 +792,18 @@ import ydrasil_pkg::*;
     reg [31:0]                       perf_uopq_p1_blocked_block_pending_rd;
     reg [31:0]                       perf_uopq_p1_blocked_block_resbuf;
     reg [31:0]                       perf_uopq_p1_blocked_unsup_any_uop;
-    reg [31:0]                       perf_uopq_p1_blocked_unsup_shadow_alu;
-    reg [31:0]                       perf_uopq_p1_blocked_unsup_shift;
-    reg [31:0]                       perf_uopq_p1_blocked_unsup_x0_rs1;
-    reg [31:0]                       perf_uopq_p1_blocked_unsup_lui_auipc;
-    reg [31:0]                       perf_uopq_p1_block_younger_flush;
-    reg [31:0]                       perf_uopq_p1_block_young_uopq2;
-    reg [31:0]                       perf_uopq_p1_block_young_ifid;
+	    reg [31:0]                       perf_uopq_p1_blocked_unsup_shadow_alu;
+	    reg [31:0]                       perf_uopq_p1_blocked_unsup_shift;
+	    reg [31:0]                       perf_uopq_p1_blocked_unsup_x0_rs1;
+	    reg [31:0]                       perf_uopq_p1_blocked_unsup_lui_auipc;
+	    reg [31:0]                       perf_uopq_p1_blocked_unsup_relax_ready;
+	    reg [31:0]                       perf_uopq_p1_blocked_unsup_relax_fire_safe;
+	    reg [31:0]                       perf_uopq_p1_blocked_unsup_relax_shift_safe;
+	    reg [31:0]                       perf_uopq_p1_blocked_unsup_relax_x0_safe;
+	    reg [31:0]                       perf_uopq_p1_blocked_unsup_relax_lui_auipc_safe;
+	    reg [31:0]                       perf_uopq_p1_block_younger_flush;
+	    reg [31:0]                       perf_uopq_p1_block_young_uopq2;
+	    reg [31:0]                       perf_uopq_p1_block_young_ifid;
     reg [31:0]                       perf_uopq_p1_block_ifid_bjp;
     reg [31:0]                       perf_uopq_p1_block_ifid_load;
     reg [31:0]                       perf_uopq_p1_block_ifid_store;
@@ -854,10 +859,10 @@ import ydrasil_pkg::*;
         end
     endfunction
 
-    function automatic logic shadow_waw_dep(
-        input logic       y_valid,
-        input logic       y_rd_wen,
-        input logic [4:0] y_rd,
+	    function automatic logic shadow_waw_dep(
+	        input logic       y_valid,
+	        input logic       y_rd_wen,
+	        input logic [4:0] y_rd,
         input logic       o_valid,
         input logic       o_rd_wen,
         input logic [4:0] o_rd
@@ -867,9 +872,100 @@ import ydrasil_pkg::*;
                 y_valid && y_rd_wen && (y_rd != '0) &&
                 o_valid && o_rd_wen && (o_rd != '0) &&
                 (y_rd == o_rd);
-        end
-    endfunction
-`endif
+	        end
+	    endfunction
+
+	    wire uopq1_diag_relax_simple_alu =
+	        uopq1_valid && is_shadow_simple_alu(uopq1_operator_type, uopq1_operator);
+	    wire uopq2_diag_relax_simple_alu =
+	        uopq2_valid && is_shadow_simple_alu(uopq2_operator_type, uopq2_operator);
+	    wire uopq1_diag_relax_shift =
+	        uopq1_operator[ydrasil_pkg::OP_ALU_SLL] |
+	        uopq1_operator[ydrasil_pkg::OP_ALU_SRL] |
+	        uopq1_operator[ydrasil_pkg::OP_ALU_SRA];
+	    wire uopq2_diag_relax_shift =
+	        uopq2_operator[ydrasil_pkg::OP_ALU_SLL] |
+	        uopq2_operator[ydrasil_pkg::OP_ALU_SRL] |
+	        uopq2_operator[ydrasil_pkg::OP_ALU_SRA];
+	    wire uopq1_diag_relax_lui_auipc =
+	        uopq1_operator[ydrasil_pkg::OP_ALU_LUI] |
+	        uopq1_operator[ydrasil_pkg::OP_ALU_AUIPC];
+	    wire uopq2_diag_relax_lui_auipc =
+	        uopq2_operator[ydrasil_pkg::OP_ALU_LUI] |
+	        uopq2_operator[ydrasil_pkg::OP_ALU_AUIPC];
+	    wire uopq1_diag_relax_x0_rs1 =
+	        uopq1_rf_ren_rs1 && (uopq1_rf_raddr_rs1 == '0);
+	    wire uopq2_diag_relax_x0_rs1 =
+	        uopq2_rf_ren_rs1 && (uopq2_rf_raddr_rs1 == '0);
+	    wire uopq1_diag_relax_rs1_ready =
+	        !uopq1_rf_ren_rs1 || (uopq1_rf_raddr_rs1 == '0) ||
+	        skid_rn_rs1_ready_ff || !gpr_pending_i[uopq1_rf_raddr_rs1];
+	    wire uopq1_diag_relax_rs2_ready =
+	        !uopq1_rf_ren_rs2 || (uopq1_rf_raddr_rs2 == '0) ||
+	        skid_rn_rs2_ready_ff || !gpr_pending_i[uopq1_rf_raddr_rs2];
+	    wire uopq2_diag_relax_rs1_ready =
+	        !uopq2_rf_ren_rs1 || (uopq2_rf_raddr_rs1 == '0) ||
+	        uopq2_buf_rs1_ready_ff || !gpr_pending_i[uopq2_rf_raddr_rs1];
+	    wire uopq2_diag_relax_rs2_ready =
+	        !uopq2_rf_ren_rs2 || (uopq2_rf_raddr_rs2 == '0) ||
+	        uopq2_buf_rs2_ready_ff || !gpr_pending_i[uopq2_rf_raddr_rs2];
+	    wire uopq1_diag_relax_ready =
+	        uopq1_diag_relax_simple_alu &&
+	        uopq1_rf_wen_rd && (uopq1_rf_waddr_rd != '0) &&
+	        uopq1_diag_relax_rs1_ready && uopq1_diag_relax_rs2_ready;
+	    wire uopq2_diag_relax_ready =
+	        uopq2_diag_relax_simple_alu &&
+	        uopq2_rf_wen_rd && (uopq2_rf_waddr_rd != '0) &&
+	        uopq2_diag_relax_rs1_ready && uopq2_diag_relax_rs2_ready;
+	    wire uopq1_diag_relax_order_safe =
+	        uopq1_diag_relax_ready &&
+	        !(uopq0_rf_wen_rd && (uopq0_rf_waddr_rd != '0) &&
+	          ((uopq1_rf_ren_rs1 && (uopq1_rf_raddr_rs1 == uopq0_rf_waddr_rd)) |
+	           (uopq1_rf_ren_rs2 && (uopq1_rf_raddr_rs2 == uopq0_rf_waddr_rd)))) &&
+	        !(uopq0_rf_wen_rd && (uopq0_rf_waddr_rd != '0) &&
+	          (uopq1_rf_waddr_rd == uopq0_rf_waddr_rd)) &&
+	        skid_rn_pdst_valid_ff;
+	    wire uopq2_diag_relax_order_safe =
+	        uopq2_diag_relax_ready &&
+	        pipe1_uopq1_order_safe &&
+	        !(uopq0_rf_wen_rd && (uopq0_rf_waddr_rd != '0) &&
+	          ((uopq2_rf_ren_rs1 && (uopq2_rf_raddr_rs1 == uopq0_rf_waddr_rd)) |
+	           (uopq2_rf_ren_rs2 && (uopq2_rf_raddr_rs2 == uopq0_rf_waddr_rd)))) &&
+	        !(uopq0_rf_wen_rd && (uopq0_rf_waddr_rd != '0) &&
+	          (uopq2_rf_waddr_rd == uopq0_rf_waddr_rd)) &&
+	        !(uopq1_valid && uopq1_rf_wen_rd && (uopq1_rf_waddr_rd != '0) &&
+	          ((uopq2_rf_ren_rs1 && (uopq2_rf_raddr_rs1 == uopq1_rf_waddr_rd)) |
+	           (uopq2_rf_ren_rs2 && (uopq2_rf_raddr_rs2 == uopq1_rf_waddr_rd)))) &&
+	        !(uopq1_valid && uopq1_rf_wen_rd && (uopq1_rf_waddr_rd != '0) &&
+	          (uopq2_rf_waddr_rd == uopq1_rf_waddr_rd)) &&
+	        uopq2_buf_rn_pdst_valid_ff && !issue_load_from_uopq2;
+	    wire uopq1_diag_relax_fire_safe =
+	        pipe1_p0_blocked_context && ready_issue_allow_i && !flush_id_i &&
+	        pipe1_dual_pipe0_safe && !pipe1_younger_flush_block &&
+	        !pipe1_resbuf_full_i && uopq1_diag_relax_order_safe;
+	    wire uopq2_diag_relax_fire_safe =
+	        pipe1_p0_blocked_context && ready_issue_allow_i && !flush_id_i &&
+	        pipe1_dual_pipe0_safe && !pipe1_younger_flush_block &&
+	        !pipe1_resbuf_full_i && uopq2_diag_relax_order_safe;
+	    wire uopq_diag_relax_ready =
+	        pipe1_p0_blocked_context && !pipe1_dual_supported &&
+	        (uopq1_diag_relax_ready | uopq2_diag_relax_ready);
+	    wire uopq_diag_relax_fire_safe =
+	        !pipe1_dual_supported &&
+	        (uopq1_diag_relax_fire_safe | uopq2_diag_relax_fire_safe);
+	    wire uopq_diag_relax_shift_safe =
+	        !pipe1_dual_supported &&
+	        ((uopq1_diag_relax_fire_safe && uopq1_diag_relax_shift) |
+	         (uopq2_diag_relax_fire_safe && uopq2_diag_relax_shift));
+	    wire uopq_diag_relax_x0_safe =
+	        !pipe1_dual_supported &&
+	        ((uopq1_diag_relax_fire_safe && uopq1_diag_relax_x0_rs1) |
+	         (uopq2_diag_relax_fire_safe && uopq2_diag_relax_x0_rs1));
+	    wire uopq_diag_relax_lui_auipc_safe =
+	        !pipe1_dual_supported &&
+	        ((uopq1_diag_relax_fire_safe && uopq1_diag_relax_lui_auipc) |
+	         (uopq2_diag_relax_fire_safe && uopq2_diag_relax_lui_auipc));
+	`endif
 
     ydrasil_ins_decoder #(
         .DATA_WIDTH(DATA_WIDTH)
@@ -2407,12 +2503,17 @@ import ydrasil_pkg::*;
             perf_uopq_p1_blocked_block_resbuf <= '0;
             perf_uopq_p1_blocked_unsup_any_uop <= '0;
             perf_uopq_p1_blocked_unsup_shadow_alu <= '0;
-            perf_uopq_p1_blocked_unsup_shift <= '0;
-            perf_uopq_p1_blocked_unsup_x0_rs1 <= '0;
-            perf_uopq_p1_blocked_unsup_lui_auipc <= '0;
-            perf_uopq_p1_block_younger_flush <= '0;
-            perf_uopq_p1_block_young_uopq2 <= '0;
-            perf_uopq_p1_block_young_ifid <= '0;
+	            perf_uopq_p1_blocked_unsup_shift <= '0;
+	            perf_uopq_p1_blocked_unsup_x0_rs1 <= '0;
+	            perf_uopq_p1_blocked_unsup_lui_auipc <= '0;
+	            perf_uopq_p1_blocked_unsup_relax_ready <= '0;
+	            perf_uopq_p1_blocked_unsup_relax_fire_safe <= '0;
+	            perf_uopq_p1_blocked_unsup_relax_shift_safe <= '0;
+	            perf_uopq_p1_blocked_unsup_relax_x0_safe <= '0;
+	            perf_uopq_p1_blocked_unsup_relax_lui_auipc_safe <= '0;
+	            perf_uopq_p1_block_younger_flush <= '0;
+	            perf_uopq_p1_block_young_uopq2 <= '0;
+	            perf_uopq_p1_block_young_ifid <= '0;
             perf_uopq_p1_block_ifid_bjp <= '0;
             perf_uopq_p1_block_ifid_load <= '0;
             perf_uopq_p1_block_ifid_store <= '0;
@@ -3432,15 +3533,25 @@ import ydrasil_pkg::*;
                 ((pipe1_p0_blocked_context && !pipe1_dual_supported &&
                   ((uopq1_valid && uopq1_rf_ren_rs1 && (uopq1_rf_raddr_rs1 == '0)) ||
                    (uopq2_valid && uopq2_rf_ren_rs1 && (uopq2_rf_raddr_rs1 == '0)))) ? 32'd1 : 32'd0);
-            perf_uopq_p1_blocked_unsup_lui_auipc <= perf_uopq_p1_blocked_unsup_lui_auipc +
-                ((pipe1_p0_blocked_context && !pipe1_dual_supported &&
-                  ((uopq1_valid && (uopq1_operator[ydrasil_pkg::OP_ALU_LUI] |
-                                    uopq1_operator[ydrasil_pkg::OP_ALU_AUIPC])) ||
-                   (uopq2_valid && (uopq2_operator[ydrasil_pkg::OP_ALU_LUI] |
-                                    uopq2_operator[ydrasil_pkg::OP_ALU_AUIPC])))) ? 32'd1 : 32'd0);
-            perf_uopq_p1_block_younger_flush <= perf_uopq_p1_block_younger_flush +
-                (((pipe1_p0_ready_context | pipe1_p0_blocked_context) &&
-                  ready_issue_allow_i && !flush_id_i &&
+	            perf_uopq_p1_blocked_unsup_lui_auipc <= perf_uopq_p1_blocked_unsup_lui_auipc +
+	                ((pipe1_p0_blocked_context && !pipe1_dual_supported &&
+	                  ((uopq1_valid && (uopq1_operator[ydrasil_pkg::OP_ALU_LUI] |
+	                                    uopq1_operator[ydrasil_pkg::OP_ALU_AUIPC])) ||
+	                   (uopq2_valid && (uopq2_operator[ydrasil_pkg::OP_ALU_LUI] |
+	                                    uopq2_operator[ydrasil_pkg::OP_ALU_AUIPC])))) ? 32'd1 : 32'd0);
+	            perf_uopq_p1_blocked_unsup_relax_ready <= perf_uopq_p1_blocked_unsup_relax_ready +
+	                (uopq_diag_relax_ready ? 32'd1 : 32'd0);
+	            perf_uopq_p1_blocked_unsup_relax_fire_safe <= perf_uopq_p1_blocked_unsup_relax_fire_safe +
+	                (uopq_diag_relax_fire_safe ? 32'd1 : 32'd0);
+	            perf_uopq_p1_blocked_unsup_relax_shift_safe <= perf_uopq_p1_blocked_unsup_relax_shift_safe +
+	                (uopq_diag_relax_shift_safe ? 32'd1 : 32'd0);
+	            perf_uopq_p1_blocked_unsup_relax_x0_safe <= perf_uopq_p1_blocked_unsup_relax_x0_safe +
+	                (uopq_diag_relax_x0_safe ? 32'd1 : 32'd0);
+	            perf_uopq_p1_blocked_unsup_relax_lui_auipc_safe <= perf_uopq_p1_blocked_unsup_relax_lui_auipc_safe +
+	                (uopq_diag_relax_lui_auipc_safe ? 32'd1 : 32'd0);
+	            perf_uopq_p1_block_younger_flush <= perf_uopq_p1_block_younger_flush +
+	                (((pipe1_p0_ready_context | pipe1_p0_blocked_context) &&
+	                  ready_issue_allow_i && !flush_id_i &&
                   pipe1_dual_pipe0_safe && pipe1_dual_operands_ready &&
                   pipe1_younger_flush_block &&
                   !pipe1_dual_raw_pipe0 && !pipe1_dual_waw_pipe0 &&
