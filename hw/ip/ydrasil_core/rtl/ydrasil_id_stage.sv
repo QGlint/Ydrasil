@@ -1633,9 +1633,13 @@ import ydrasil_pkg::*;
         (pipe1_sel_rf_raddr_rs2 == pipe1_alu_fwd_addr_i);
     assign pipe1_dual_rs1_ready =
         !pipe1_sel_rf_ren_rs1 || (pipe1_sel_rf_raddr_rs1 == '0) ||
+        pipe1_dual_rs1_alu_fwd || pipe1_dual_rs1_p1alu_fwd ||
+        pipe1_dual_rs1_wb_fwd ||
         pipe1_prf_rs1_ready_i;
     assign pipe1_dual_rs2_ready =
         !pipe1_sel_rf_ren_rs2 || (pipe1_sel_rf_raddr_rs2 == '0) ||
+        pipe1_dual_rs2_alu_fwd || pipe1_dual_rs2_p1alu_fwd ||
+        pipe1_dual_rs2_wb_fwd ||
         pipe1_prf_rs2_ready_i;
     assign pipe1_dual_operands_ready =
         pipe1_dual_supported && pipe1_dual_rs1_ready && pipe1_dual_rs2_ready;
