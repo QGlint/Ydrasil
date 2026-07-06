@@ -12,6 +12,7 @@ sources:
       - rtl
     files:
       - rtl/ydrasil_pkg.sv
+      - rtl/ydrasil_rename_ctrl.sv
       - rtl/ydrasil_prf.sv
       - rtl/ydrasil_branch_predictor.sv
       - rtl/ydrasil_alu.sv

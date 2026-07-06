@@ -25,12 +25,15 @@ import ydrasil_pkg::*;
     input wire [DATA_WIDTH-1:0] wb_fwd_data_i,
     input wire lsu_fwd_valid_i,
     input wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] lsu_fwd_addr_i,
+    input wire [5:0] lsu_fwd_pdst_i,
     input wire [DATA_WIDTH-1:0] lsu_fwd_data_i,
     input wire alu_fwd_valid_i,
     input wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] alu_fwd_addr_i,
+    input wire [5:0] alu_fwd_pdst_i,
     input wire [DATA_WIDTH-1:0] alu_fwd_data_i,
     input wire pipe1_alu_fwd_valid_i,
     input wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] pipe1_alu_fwd_addr_i,
+    input wire [5:0] pipe1_alu_fwd_pdst_i,
     input wire [DATA_WIDTH-1:0] pipe1_alu_fwd_data_i,
     input wire prf_rs1_ready_i,
     input wire prf_rs2_ready_i,
@@ -46,6 +49,8 @@ import ydrasil_pkg::*;
     input wire pipe1_prf_rs2_uncommitted_i,
     input wire rn_if_rs1_ready_i,
     input wire rn_if_rs2_ready_i,
+    input wire [5:0] rn_if_rs1_psrc_i,
+    input wire [5:0] rn_if_rs2_psrc_i,
     input wire rs1_issue_alu_ready_next_i,
     input wire rs2_issue_alu_ready_next_i,
 `ifndef SYNTHESIS
@@ -54,6 +59,7 @@ import ydrasil_pkg::*;
 `endif
     input wire ready_issue_allow_i,
     input wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_i,
+    input wire [63:0] rn_preg_ready_i,
     input wire pipe1_resbuf_full_i,
     output wire issue_frontend_stall_o,
     input wire rn_alloc_valid_o,
@@ -590,32 +596,40 @@ import ydrasil_pkg::*;
         wb_fwd_valid_i &&
         issue_rf_ren_rs1_ff &&
         (issue_rf_raddr_rs1_ff != '0) &&
+        (issue_rn_rs1_psrc_ff == {1'b0, issue_rf_raddr_rs1_ff}) &&
+        !prf_rs1_uncommitted_i &&
         (issue_rf_raddr_rs1_ff == wb_fwd_addr_i);
     wire slot0_rs2_wb_fwd =
         wb_fwd_valid_i &&
         (issue_rf_ren_rs2_ff | issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
         (issue_rf_raddr_rs2_ff != '0) &&
+        (issue_rn_rs2_psrc_ff == {1'b0, issue_rf_raddr_rs2_ff}) &&
+        !prf_rs2_uncommitted_i &&
         (issue_rf_raddr_rs2_ff == wb_fwd_addr_i);
     wire slot0_rs1_lsu_fwd =
         lsu_fwd_valid_i &&
         issue_rf_ren_rs1_ff &&
         (issue_rf_raddr_rs1_ff != '0) &&
-        (issue_rf_raddr_rs1_ff == lsu_fwd_addr_i);
+        (issue_rf_raddr_rs1_ff == lsu_fwd_addr_i) &&
+        (issue_rn_rs1_psrc_ff == lsu_fwd_pdst_i);
     wire slot0_rs2_lsu_fwd =
         lsu_fwd_valid_i &&
         (issue_rf_ren_rs2_ff | issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
         (issue_rf_raddr_rs2_ff != '0) &&
-        (issue_rf_raddr_rs2_ff == lsu_fwd_addr_i);
+        (issue_rf_raddr_rs2_ff == lsu_fwd_addr_i) &&
+        (issue_rn_rs2_psrc_ff == lsu_fwd_pdst_i);
     wire slot0_rs1_alu_fwd =
         alu_fwd_valid_i &&
         issue_rf_ren_rs1_ff &&
         (issue_rf_raddr_rs1_ff != '0) &&
-        (issue_rf_raddr_rs1_ff == alu_fwd_addr_i);
+        (issue_rf_raddr_rs1_ff == alu_fwd_addr_i) &&
+        (issue_rn_rs1_psrc_ff == alu_fwd_pdst_i);
     wire slot0_rs2_alu_fwd =
         alu_fwd_valid_i &&
         (issue_rf_ren_rs2_ff | issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
         (issue_rf_raddr_rs2_ff != '0) &&
-        (issue_rf_raddr_rs2_ff == alu_fwd_addr_i);
+        (issue_rf_raddr_rs2_ff == alu_fwd_addr_i) &&
+        (issue_rn_rs2_psrc_ff == alu_fwd_pdst_i);
 `ifndef SYNTHESIS
     wire slot0_rs1_stable_fwd = rs1_issue_alu_stable_bypass_i;
     wire slot0_rs2_stable_fwd = rs2_issue_alu_stable_bypass_i;
@@ -627,20 +641,24 @@ import ydrasil_pkg::*;
         pipe1_alu_fwd_valid_i &&
         issue_rf_ren_rs1_ff &&
         (issue_rf_raddr_rs1_ff != '0) &&
-        (issue_rf_raddr_rs1_ff == pipe1_alu_fwd_addr_i);
+        (issue_rf_raddr_rs1_ff == pipe1_alu_fwd_addr_i) &&
+        (issue_rn_rs1_psrc_ff == pipe1_alu_fwd_pdst_i);
     wire slot0_rs2_p1alu_fwd =
         pipe1_alu_fwd_valid_i &&
         (issue_rf_ren_rs2_ff | issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
         (issue_rf_raddr_rs2_ff != '0) &&
-        (issue_rf_raddr_rs2_ff == pipe1_alu_fwd_addr_i);
+        (issue_rf_raddr_rs2_ff == pipe1_alu_fwd_addr_i) &&
+        (issue_rn_rs2_psrc_ff == pipe1_alu_fwd_pdst_i);
     wire slot0_rs1_pending_cleared =
         issue_rf_ren_rs1_ff &&
         (issue_rf_raddr_rs1_ff != '0) &&
-        !gpr_pending_i[issue_rf_raddr_rs1_ff];
+        (issue_rn_rs1_psrc_ff != issue_rn_pdst_ff) &&
+        rn_preg_ready_i[issue_rn_rs1_psrc_ff];
     wire slot0_rs2_pending_cleared =
         (issue_rf_ren_rs2_ff | issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
         (issue_rf_raddr_rs2_ff != '0) &&
-        !gpr_pending_i[issue_rf_raddr_rs2_ff];
+        (issue_rn_rs2_psrc_ff != issue_rn_pdst_ff) &&
+        rn_preg_ready_i[issue_rn_rs2_psrc_ff];
     assign slot0_rs1_prf_ready =
         issue_rf_ren_rs1_ff &&
         (issue_rf_raddr_rs1_ff != '0) &&
@@ -655,32 +673,40 @@ import ydrasil_pkg::*;
         wb_fwd_valid_i &&
         selected_rf_ren_rs1 &&
         (selected_rf_raddr_rs1 != '0) &&
+        (selected_rn_rs1_psrc == {1'b0, selected_rf_raddr_rs1}) &&
+        !prf_rs1_uncommitted_i &&
         (selected_rf_raddr_rs1 == wb_fwd_addr_i);
     assign rs2_wb_fwd =
         wb_fwd_valid_i &&
         (selected_rf_ren_rs2 | selected_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
         (selected_rf_raddr_rs2 != '0) &&
+        (selected_rn_rs2_psrc == {1'b0, selected_rf_raddr_rs2}) &&
+        !prf_rs2_uncommitted_i &&
         (selected_rf_raddr_rs2 == wb_fwd_addr_i);
     assign rs1_lsu_fwd =
         lsu_fwd_valid_i &&
         selected_rf_ren_rs1 &&
         (selected_rf_raddr_rs1 != '0) &&
-        (selected_rf_raddr_rs1 == lsu_fwd_addr_i);
+        (selected_rf_raddr_rs1 == lsu_fwd_addr_i) &&
+        (selected_rn_rs1_psrc == lsu_fwd_pdst_i);
     assign rs2_lsu_fwd =
         lsu_fwd_valid_i &&
         (selected_rf_ren_rs2 | selected_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
         (selected_rf_raddr_rs2 != '0) &&
-        (selected_rf_raddr_rs2 == lsu_fwd_addr_i);
+        (selected_rf_raddr_rs2 == lsu_fwd_addr_i) &&
+        (selected_rn_rs2_psrc == lsu_fwd_pdst_i);
     wire rs1_alu_fwd =
         alu_fwd_valid_i &&
         selected_rf_ren_rs1 &&
         (selected_rf_raddr_rs1 != '0) &&
-        (selected_rf_raddr_rs1 == alu_fwd_addr_i);
+        (selected_rf_raddr_rs1 == alu_fwd_addr_i) &&
+        (selected_rn_rs1_psrc == alu_fwd_pdst_i);
     wire rs2_alu_fwd =
         alu_fwd_valid_i &&
         (selected_rf_ren_rs2 | selected_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
         (selected_rf_raddr_rs2 != '0) &&
-        (selected_rf_raddr_rs2 == alu_fwd_addr_i);
+        (selected_rf_raddr_rs2 == alu_fwd_addr_i) &&
+        (selected_rn_rs2_psrc == alu_fwd_pdst_i);
 `ifndef SYNTHESIS
     wire rs1_stable_fwd =
         !issue_slot1_bypass_fire && rs1_issue_alu_stable_bypass_i;
@@ -694,12 +720,14 @@ import ydrasil_pkg::*;
         pipe1_alu_fwd_valid_i &&
         selected_rf_ren_rs1 &&
         (selected_rf_raddr_rs1 != '0) &&
-        (selected_rf_raddr_rs1 == pipe1_alu_fwd_addr_i);
+        (selected_rf_raddr_rs1 == pipe1_alu_fwd_addr_i) &&
+        (selected_rn_rs1_psrc == pipe1_alu_fwd_pdst_i);
     wire rs2_p1alu_fwd =
         pipe1_alu_fwd_valid_i &&
         (selected_rf_ren_rs2 | selected_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
         (selected_rf_raddr_rs2 != '0) &&
-        (selected_rf_raddr_rs2 == pipe1_alu_fwd_addr_i);
+        (selected_rf_raddr_rs2 == pipe1_alu_fwd_addr_i) &&
+        (selected_rn_rs2_psrc == pipe1_alu_fwd_pdst_i);
 `ifndef SYNTHESIS
     wire [DATA_WIDTH-1:0] issue_alu_stable_data = alu_stable_data_ff;
 `else
@@ -716,28 +744,32 @@ import ydrasil_pkg::*;
 		selected_prf_operand_allowed &&
 		selected_rf_ren_rs1 &&
 		(selected_rf_raddr_rs1 != '0) &&
-		(gpr_pending_i[selected_rf_raddr_rs1] || prf_rs1_uncommitted_i) &&
+		(selected_rn_rs1_psrc != '0) &&
+		(prf_rs1_uncommitted_i || (selected_rn_rs1_psrc != {1'b0, selected_rf_raddr_rs1})) &&
 		(selected_rn_rs1_psrc != selected_rn_pdst);
 	wire selected_prf_rs2_allowed =
 		selected_prf_operand_allowed &&
 		(selected_rf_ren_rs2 | selected_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
 		(selected_rf_raddr_rs2 != '0) &&
-		(gpr_pending_i[selected_rf_raddr_rs2] || prf_rs2_uncommitted_i) &&
+		(selected_rn_rs2_psrc != '0) &&
+		(prf_rs2_uncommitted_i || (selected_rn_rs2_psrc != {1'b0, selected_rf_raddr_rs2})) &&
 		(selected_rn_rs2_psrc != selected_rn_pdst);
     wire [DATA_WIDTH-1:0] issue_rs1_data =
+        (!issue_slot1_bypass_fire && selected_prf_rs1_allowed && prf_rs1_ready_i) ? prf_rs1_data_i :
         rs1_lsu_fwd ? lsu_fwd_data_i :
         rs1_stable_fwd ? issue_alu_stable_data :
         rs1_alu_fwd ? alu_fwd_data_i :
         rs1_p1alu_fwd ? pipe1_alu_fwd_data_i :
         rs1_wb_fwd  ? wb_fwd_data_i  :
-        (!issue_slot1_bypass_fire && selected_prf_rs1_allowed && prf_rs1_ready_i) ? prf_rs1_data_i : rf_rdata_rs1_i;
+        rf_rdata_rs1_i;
     assign issue_rs2_data =
+        (!issue_slot1_bypass_fire && selected_prf_rs2_allowed && prf_rs2_ready_i) ? prf_rs2_data_i :
         rs2_lsu_fwd ? lsu_fwd_data_i :
         rs2_stable_fwd ? issue_alu_stable_data :
         rs2_alu_fwd ? alu_fwd_data_i :
         rs2_p1alu_fwd ? pipe1_alu_fwd_data_i :
         rs2_wb_fwd  ? wb_fwd_data_i  :
-        (!issue_slot1_bypass_fire && selected_prf_rs2_allowed && prf_rs2_ready_i) ? prf_rs2_data_i : rf_rdata_rs2_i;
+        rf_rdata_rs2_i;
 
     assign operand_a     =  selected_operand_a_pc_sel ? selected_pc :
                             selected_operand_a_imm_sel ? selected_imm : issue_rs1_data;
@@ -831,9 +863,49 @@ import ydrasil_pkg::*;
         !issue_wait_rs2_ff | slot0_rs2_stable_fwd | slot0_rs2_alu_fwd | slot0_rs2_p1alu_fwd |
         slot0_rs2_lsu_fwd | slot0_rs2_wb_fwd | slot0_rs2_pending_cleared |
         slot0_rs2_prf_ready;
+    wire slot0_rs1_phys_block =
+        issue_valid_ff &&
+        issue_rf_ren_rs1_ff &&
+        (issue_rf_raddr_rs1_ff != '0) &&
+        (issue_rn_rs1_psrc_ff != '0) &&
+        (issue_rn_rs1_psrc_ff != issue_rn_pdst_ff) &&
+        !rn_preg_ready_i[issue_rn_rs1_psrc_ff] &&
+        !slot0_rs1_stable_fwd &&
+        !slot0_rs1_alu_fwd &&
+        !slot0_rs1_p1alu_fwd &&
+        !slot0_rs1_lsu_fwd &&
+        !slot0_rs1_wb_fwd;
+    wire slot0_rs2_phys_block =
+        issue_valid_ff &&
+        (issue_rf_ren_rs2_ff | issue_operand_b_rs_sel_ff |
+         issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
+        (issue_rf_raddr_rs2_ff != '0) &&
+        (issue_rn_rs2_psrc_ff != '0) &&
+        (issue_rn_rs2_psrc_ff != issue_rn_pdst_ff) &&
+        !rn_preg_ready_i[issue_rn_rs2_psrc_ff] &&
+        !slot0_rs2_stable_fwd &&
+        !slot0_rs2_alu_fwd &&
+        !slot0_rs2_p1alu_fwd &&
+        !slot0_rs2_lsu_fwd &&
+        !slot0_rs2_wb_fwd;
+    wire slot1_bypass_rs1_phys_ready =
+        !slot1_rf_ren_rs1 ||
+        (slot1_rf_raddr_rs1 == '0) ||
+        (skid_rn_rs1_psrc_ff == '0) ||
+        (rn_preg_ready_i[skid_rn_rs1_psrc_ff] &&
+         (skid_rn_rs1_psrc_ff == {1'b0, slot1_rf_raddr_rs1}));
+    wire slot1_bypass_rs2_phys_ready =
+        !(slot1_rf_ren_rs2 | slot1_operand_b_rs_sel |
+          slot1_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE]) ||
+        (slot1_rf_raddr_rs2 == '0) ||
+        (skid_rn_rs2_psrc_ff == '0) ||
+        (rn_preg_ready_i[skid_rn_rs2_psrc_ff] &&
+         (skid_rn_rs2_psrc_ff == {1'b0, slot1_rf_raddr_rs2}));
     assign issue_wait_block =
         (issue_wait_rs1_ff & !issue_wait_rs1_ready) |
         (issue_wait_rs2_ff & !issue_wait_rs2_ready) |
+        slot0_rs1_phys_block |
+        slot0_rs2_phys_block |
         rs1_issue_alu_ready_next_i |
         rs2_issue_alu_ready_next_i;
     assign issue_slot0_fire =
@@ -841,6 +913,7 @@ import ydrasil_pkg::*;
     assign issue_slot1_bypass_fire =
         ready_issue_allow_i & issue_valid_ff & issue_wait_block &
 	        !stall_id_i & !flush_id_i & ri_slot1_ready &
+	        slot1_bypass_rs1_phys_ready & slot1_bypass_rs2_phys_ready &
 	        !((PIPE1_REAL_MODE != 0) &&
 	          (pipe1_uopq1_safe | pipe1_uopq2_safe | pipe1_uopq3_safe) &&
 	          !pipe1_resbuf_full_i);
@@ -877,15 +950,21 @@ import ydrasil_pkg::*;
     assign uopq2_buf_capture_operands_ready =
         uopq2_buf_capture_supported &&
         (!if_id_trace_rf_ren_rs1 || (if_id_trace_rf_raddr_rs1 == '0) ||
-         rn_if_rs1_ready_i ||
-         (alu_fwd_valid_i && (if_id_trace_rf_raddr_rs1 == alu_fwd_addr_i)) ||
-         (wb_fwd_valid_i && (if_id_trace_rf_raddr_rs1 == wb_fwd_addr_i)) ||
-         (pipe1_alu_fwd_valid_i && (if_id_trace_rf_raddr_rs1 == pipe1_alu_fwd_addr_i))) &&
+	         rn_if_rs1_ready_i ||
+         (alu_fwd_valid_i && (if_id_trace_rf_raddr_rs1 == alu_fwd_addr_i) &&
+          (rn_if_rs1_psrc_i == alu_fwd_pdst_i)) ||
+         (wb_fwd_valid_i && (if_id_trace_rf_raddr_rs1 == wb_fwd_addr_i) &&
+          (rn_if_rs1_psrc_i == {1'b0, if_id_trace_rf_raddr_rs1})) ||
+         (pipe1_alu_fwd_valid_i && (if_id_trace_rf_raddr_rs1 == pipe1_alu_fwd_addr_i) &&
+          (rn_if_rs1_psrc_i == pipe1_alu_fwd_pdst_i))) &&
         (!if_id_trace_rf_ren_rs2 || (if_id_trace_rf_raddr_rs2 == '0) ||
          rn_if_rs2_ready_i ||
-         (alu_fwd_valid_i && (if_id_trace_rf_raddr_rs2 == alu_fwd_addr_i)) ||
-         (wb_fwd_valid_i && (if_id_trace_rf_raddr_rs2 == wb_fwd_addr_i)) ||
-         (pipe1_alu_fwd_valid_i && (if_id_trace_rf_raddr_rs2 == pipe1_alu_fwd_addr_i)));
+         (alu_fwd_valid_i && (if_id_trace_rf_raddr_rs2 == alu_fwd_addr_i) &&
+          (rn_if_rs2_psrc_i == alu_fwd_pdst_i)) ||
+         (wb_fwd_valid_i && (if_id_trace_rf_raddr_rs2 == wb_fwd_addr_i) &&
+          (rn_if_rs2_psrc_i == {1'b0, if_id_trace_rf_raddr_rs2})) ||
+         (pipe1_alu_fwd_valid_i && (if_id_trace_rf_raddr_rs2 == pipe1_alu_fwd_addr_i) &&
+          (rn_if_rs2_psrc_i == pipe1_alu_fwd_pdst_i)));
 	    assign uopq2_buf_capture =
 	        (PIPE1_REAL_MODE >= 2) &&
 	        id_advance && issue_valid_ff && issue_wait_block &&
@@ -932,7 +1011,6 @@ import ydrasil_pkg::*;
         (if_id_trace_rf_waddr_rd != '0) &&
         (if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD] |
          (if_id_trace_rf_wen_rd &&
-          !if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_CSR] &&
           !if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS]));
 
     assign pipe1_pipe0_present_safe =
@@ -1045,74 +1123,74 @@ import ydrasil_pkg::*;
 	           uopq3_operator[ydrasil_pkg::OP_ALU_AND]) &&
 	          uopq3_rf_ren_rs1 && (uopq3_rf_raddr_rs1 != '0) &&
 	          (!uopq3_operand_b_rs_sel || uopq3_rf_ren_rs2)));
-    assign pipe1_uopq1_operands_ready =
-        pipe1_uopq1_supported &&
-        (!uopq1_rf_ren_rs1 || (uopq1_rf_raddr_rs1 == '0) ||
-         skid_rn_rs1_ready_ff ||
-         !gpr_pending_i[uopq1_rf_raddr_rs1] ||
-         (alu_fwd_valid_i && (uopq1_rf_raddr_rs1 == alu_fwd_addr_i)) ||
-         (wb_fwd_valid_i && (uopq1_rf_raddr_rs1 == wb_fwd_addr_i)) ||
-         (pipe1_alu_fwd_valid_i && (uopq1_rf_raddr_rs1 == pipe1_alu_fwd_addr_i))) &&
-        (!uopq1_rf_ren_rs2 || (uopq1_rf_raddr_rs2 == '0) ||
-         skid_rn_rs2_ready_ff ||
-         !gpr_pending_i[uopq1_rf_raddr_rs2] ||
-         (alu_fwd_valid_i && (uopq1_rf_raddr_rs2 == alu_fwd_addr_i)) ||
-         (wb_fwd_valid_i && (uopq1_rf_raddr_rs2 == wb_fwd_addr_i)) ||
-         (pipe1_alu_fwd_valid_i && (uopq1_rf_raddr_rs2 == pipe1_alu_fwd_addr_i)));
+	    assign pipe1_uopq1_operands_ready =
+	        pipe1_uopq1_supported &&
+	        (!uopq1_rf_ren_rs1 || (uopq1_rf_raddr_rs1 == '0) ||
+	         skid_rn_rs1_ready_ff ||
+	         rn_preg_ready_i[skid_rn_rs1_psrc_ff] ||
+	         (alu_fwd_valid_i && (uopq1_rf_raddr_rs1 == alu_fwd_addr_i) &&
+	          (skid_rn_rs1_psrc_ff == alu_fwd_pdst_i)) ||
+	         (wb_fwd_valid_i && (uopq1_rf_raddr_rs1 == wb_fwd_addr_i) &&
+	          (skid_rn_rs1_psrc_ff == {1'b0, uopq1_rf_raddr_rs1})) ||
+	         (pipe1_alu_fwd_valid_i && (uopq1_rf_raddr_rs1 == pipe1_alu_fwd_addr_i) &&
+	          (skid_rn_rs1_psrc_ff == pipe1_alu_fwd_pdst_i))) &&
+	        (!uopq1_rf_ren_rs2 || (uopq1_rf_raddr_rs2 == '0) ||
+	         skid_rn_rs2_ready_ff ||
+	         rn_preg_ready_i[skid_rn_rs2_psrc_ff] ||
+	         (alu_fwd_valid_i && (uopq1_rf_raddr_rs2 == alu_fwd_addr_i) &&
+	          (skid_rn_rs2_psrc_ff == alu_fwd_pdst_i)) ||
+	         (wb_fwd_valid_i && (uopq1_rf_raddr_rs2 == wb_fwd_addr_i) &&
+	          (skid_rn_rs2_psrc_ff == {1'b0, uopq1_rf_raddr_rs2})) ||
+	         (pipe1_alu_fwd_valid_i && (uopq1_rf_raddr_rs2 == pipe1_alu_fwd_addr_i) &&
+	          (skid_rn_rs2_psrc_ff == pipe1_alu_fwd_pdst_i)));
 	    assign pipe1_uopq2_operands_ready =
 	        pipe1_uopq2_supported &&
         (!uopq2_rf_ren_rs1 || (uopq2_rf_raddr_rs1 == '0) ||
          uopq2_buf_rs1_ready_ff ||
-         !gpr_pending_i[uopq2_rf_raddr_rs1] ||
-         (alu_fwd_valid_i && (uopq2_rf_raddr_rs1 == alu_fwd_addr_i)) ||
-         (wb_fwd_valid_i && (uopq2_rf_raddr_rs1 == wb_fwd_addr_i)) ||
-         (pipe1_alu_fwd_valid_i && (uopq2_rf_raddr_rs1 == pipe1_alu_fwd_addr_i))) &&
+         rn_preg_ready_i[uopq2_buf_rn_rs1_psrc_ff] ||
+         (alu_fwd_valid_i && (uopq2_rf_raddr_rs1 == alu_fwd_addr_i) &&
+          (uopq2_buf_rn_rs1_psrc_ff == alu_fwd_pdst_i)) ||
+         (wb_fwd_valid_i && (uopq2_rf_raddr_rs1 == wb_fwd_addr_i) &&
+          (uopq2_buf_rn_rs1_psrc_ff == {1'b0, uopq2_rf_raddr_rs1})) ||
+         (pipe1_alu_fwd_valid_i && (uopq2_rf_raddr_rs1 == pipe1_alu_fwd_addr_i) &&
+          (uopq2_buf_rn_rs1_psrc_ff == pipe1_alu_fwd_pdst_i))) &&
         (!uopq2_rf_ren_rs2 || (uopq2_rf_raddr_rs2 == '0) ||
          uopq2_buf_rs2_ready_ff ||
-         !gpr_pending_i[uopq2_rf_raddr_rs2] ||
-	         (alu_fwd_valid_i && (uopq2_rf_raddr_rs2 == alu_fwd_addr_i)) ||
-	         (wb_fwd_valid_i && (uopq2_rf_raddr_rs2 == wb_fwd_addr_i)) ||
-	         (pipe1_alu_fwd_valid_i && (uopq2_rf_raddr_rs2 == pipe1_alu_fwd_addr_i)));
+         rn_preg_ready_i[uopq2_buf_rn_rs2_psrc_ff] ||
+	         (alu_fwd_valid_i && (uopq2_rf_raddr_rs2 == alu_fwd_addr_i) &&
+	          (uopq2_buf_rn_rs2_psrc_ff == alu_fwd_pdst_i)) ||
+	         (wb_fwd_valid_i && (uopq2_rf_raddr_rs2 == wb_fwd_addr_i) &&
+	          (uopq2_buf_rn_rs2_psrc_ff == {1'b0, uopq2_rf_raddr_rs2})) ||
+	         (pipe1_alu_fwd_valid_i && (uopq2_rf_raddr_rs2 == pipe1_alu_fwd_addr_i) &&
+	          (uopq2_buf_rn_rs2_psrc_ff == pipe1_alu_fwd_pdst_i)));
 	    assign pipe1_uopq3_operands_ready =
 	        pipe1_uopq3_supported &&
 	        (!uopq3_rf_ren_rs1 || (uopq3_rf_raddr_rs1 == '0) ||
 	         uopq3_buf_rs1_ready_ff ||
-	         !gpr_pending_i[uopq3_rf_raddr_rs1] ||
-	         (alu_fwd_valid_i && (uopq3_rf_raddr_rs1 == alu_fwd_addr_i)) ||
-	         (wb_fwd_valid_i && (uopq3_rf_raddr_rs1 == wb_fwd_addr_i)) ||
-	         (pipe1_alu_fwd_valid_i && (uopq3_rf_raddr_rs1 == pipe1_alu_fwd_addr_i))) &&
+	         rn_preg_ready_i[uopq3_buf_rn_rs1_psrc_ff] ||
+	         (alu_fwd_valid_i && (uopq3_rf_raddr_rs1 == alu_fwd_addr_i) &&
+	          (uopq3_buf_rn_rs1_psrc_ff == alu_fwd_pdst_i)) ||
+	         (wb_fwd_valid_i && (uopq3_rf_raddr_rs1 == wb_fwd_addr_i) &&
+	          (uopq3_buf_rn_rs1_psrc_ff == {1'b0, uopq3_rf_raddr_rs1})) ||
+	         (pipe1_alu_fwd_valid_i && (uopq3_rf_raddr_rs1 == pipe1_alu_fwd_addr_i) &&
+	          (uopq3_buf_rn_rs1_psrc_ff == pipe1_alu_fwd_pdst_i))) &&
 	        (!uopq3_rf_ren_rs2 || (uopq3_rf_raddr_rs2 == '0) ||
 	         uopq3_buf_rs2_ready_ff ||
-	         !gpr_pending_i[uopq3_rf_raddr_rs2] ||
-	         (alu_fwd_valid_i && (uopq3_rf_raddr_rs2 == alu_fwd_addr_i)) ||
-	         (wb_fwd_valid_i && (uopq3_rf_raddr_rs2 == wb_fwd_addr_i)) ||
-	         (pipe1_alu_fwd_valid_i && (uopq3_rf_raddr_rs2 == pipe1_alu_fwd_addr_i)));
-    assign pipe1_uopq1_store_war_pipe0 =
-        pipe1_pipe0_blocked_store_safe &&
-        uopq1_rf_wen_rd && (uopq1_rf_waddr_rd != '0) &&
-        ((issue_rf_ren_rs1_ff && (uopq1_rf_waddr_rd == issue_rf_raddr_rs1_ff)) |
-         ((issue_rf_ren_rs2_ff | issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
-          (uopq1_rf_waddr_rd == issue_rf_raddr_rs2_ff)));
+	         rn_preg_ready_i[uopq3_buf_rn_rs2_psrc_ff] ||
+	         (alu_fwd_valid_i && (uopq3_rf_raddr_rs2 == alu_fwd_addr_i) &&
+	          (uopq3_buf_rn_rs2_psrc_ff == alu_fwd_pdst_i)) ||
+	         (wb_fwd_valid_i && (uopq3_rf_raddr_rs2 == wb_fwd_addr_i) &&
+	          (uopq3_buf_rn_rs2_psrc_ff == {1'b0, uopq3_rf_raddr_rs2})) ||
+	         (pipe1_alu_fwd_valid_i && (uopq3_rf_raddr_rs2 == pipe1_alu_fwd_addr_i) &&
+	          (uopq3_buf_rn_rs2_psrc_ff == pipe1_alu_fwd_pdst_i)));
+	    assign pipe1_uopq1_store_war_pipe0 =
+	        1'b0;
 	    assign pipe1_uopq2_store_war_pipe0 =
-	        pipe1_pipe0_blocked_store_safe &&
-        uopq2_rf_wen_rd && (uopq2_rf_waddr_rd != '0) &&
-	        ((issue_rf_ren_rs1_ff && (uopq2_rf_waddr_rd == issue_rf_raddr_rs1_ff)) |
-	         ((issue_rf_ren_rs2_ff | issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
-	          (uopq2_rf_waddr_rd == issue_rf_raddr_rs2_ff)));
+	        1'b0;
 	    assign pipe1_uopq3_store_war_pipe0 =
-	        pipe1_pipe0_blocked_store_safe &&
-	        uopq3_rf_wen_rd && (uopq3_rf_waddr_rd != '0) &&
-	        ((issue_rf_ren_rs1_ff && (uopq3_rf_waddr_rd == issue_rf_raddr_rs1_ff)) |
-	         ((issue_rf_ren_rs2_ff | issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
-	          (uopq3_rf_waddr_rd == issue_rf_raddr_rs2_ff)));
+	        1'b0;
     assign pipe1_uopq1_safe =
         pipe1_dual_pipe0_safe && pipe1_uopq1_supported &&
-        !(uopq0_rf_wen_rd && (uopq0_rf_waddr_rd != '0) &&
-          ((uopq1_rf_ren_rs1 && (uopq1_rf_raddr_rs1 == uopq0_rf_waddr_rd)) |
-           (uopq1_rf_ren_rs2 && (uopq1_rf_raddr_rs2 == uopq0_rf_waddr_rd)))) &&
-        !(uopq0_rf_wen_rd && (uopq0_rf_waddr_rd != '0) &&
-          (uopq1_rf_waddr_rd == uopq0_rf_waddr_rd)) &&
-        !pipe1_uopq1_store_war_pipe0 &&
         skid_rn_pdst_valid_ff;
     assign pipe1_uopq1_order_safe =
         !uopq1_valid ||
@@ -1137,42 +1215,12 @@ import ydrasil_pkg::*;
          !uopq2_fence_i);
 	    assign pipe1_uopq2_safe =
 	        pipe1_dual_pipe0_safe && pipe1_uopq2_supported &&
-        !(uopq0_rf_wen_rd && (uopq0_rf_waddr_rd != '0) &&
-          ((uopq2_rf_ren_rs1 && (uopq2_rf_raddr_rs1 == uopq0_rf_waddr_rd)) |
-           (uopq2_rf_ren_rs2 && (uopq2_rf_raddr_rs2 == uopq0_rf_waddr_rd)))) &&
-        !(uopq0_rf_wen_rd && (uopq0_rf_waddr_rd != '0) &&
-          (uopq2_rf_waddr_rd == uopq0_rf_waddr_rd)) &&
         pipe1_uopq1_order_safe &&
-        !(uopq1_valid && uopq1_rf_wen_rd && (uopq1_rf_waddr_rd != '0) &&
-          ((uopq2_rf_ren_rs1 && (uopq2_rf_raddr_rs1 == uopq1_rf_waddr_rd)) |
-           (uopq2_rf_ren_rs2 && (uopq2_rf_raddr_rs2 == uopq1_rf_waddr_rd)))) &&
-	        !(uopq1_valid && uopq1_rf_wen_rd && (uopq1_rf_waddr_rd != '0) &&
-	          (uopq2_rf_waddr_rd == uopq1_rf_waddr_rd)) &&
-	        !pipe1_uopq2_store_war_pipe0 &&
 	        uopq2_buf_rn_pdst_valid_ff;
 	    assign pipe1_uopq3_safe =
 	        pipe1_dual_pipe0_safe && pipe1_uopq3_supported &&
-	        !(uopq0_rf_wen_rd && (uopq0_rf_waddr_rd != '0) &&
-	          ((uopq3_rf_ren_rs1 && (uopq3_rf_raddr_rs1 == uopq0_rf_waddr_rd)) |
-	           (uopq3_rf_ren_rs2 && (uopq3_rf_raddr_rs2 == uopq0_rf_waddr_rd)))) &&
-	        !(uopq0_rf_wen_rd && (uopq0_rf_waddr_rd != '0) &&
-	          (uopq3_rf_waddr_rd == uopq0_rf_waddr_rd)) &&
 	        pipe1_uopq1_order_safe &&
-	        !(uopq1_valid && uopq1_rf_wen_rd && (uopq1_rf_waddr_rd != '0) &&
-	          ((uopq3_rf_ren_rs1 && (uopq3_rf_raddr_rs1 == uopq1_rf_waddr_rd)) |
-	           (uopq3_rf_ren_rs2 && (uopq3_rf_raddr_rs2 == uopq1_rf_waddr_rd)))) &&
-	        !(uopq1_valid && uopq1_rf_wen_rd && (uopq1_rf_waddr_rd != '0) &&
-	          (uopq3_rf_waddr_rd == uopq1_rf_waddr_rd)) &&
 	        pipe1_uopq2_order_safe &&
-	        !(uopq2_valid && uopq2_rf_wen_rd && (uopq2_rf_waddr_rd != '0) &&
-	          ((uopq3_rf_ren_rs1 && (uopq3_rf_raddr_rs1 == uopq2_rf_waddr_rd)) |
-	           (uopq3_rf_ren_rs2 && (uopq3_rf_raddr_rs2 == uopq2_rf_waddr_rd)))) &&
-	        !(uopq2_valid && uopq2_rf_wen_rd && (uopq2_rf_waddr_rd != '0) &&
-	          (uopq3_rf_waddr_rd == uopq2_rf_waddr_rd)) &&
-	        !(uopq2_valid && uopq3_rf_wen_rd && (uopq3_rf_waddr_rd != '0) &&
-	          ((uopq2_rf_ren_rs1 && (uopq3_rf_waddr_rd == uopq2_rf_raddr_rs1)) |
-	           (uopq2_rf_ren_rs2 && (uopq3_rf_waddr_rd == uopq2_rf_raddr_rs2)))) &&
-	        !pipe1_uopq3_store_war_pipe0 &&
 	        uopq3_buf_rn_pdst_valid_ff;
     assign pipe1_younger_flush_risk =
         (uopq2_valid &&
@@ -1251,27 +1299,35 @@ import ydrasil_pkg::*;
     assign pipe1_dual_rs1_alu_fwd =
         alu_fwd_valid_i && pipe1_sel_rf_ren_rs1 &&
         (pipe1_sel_rf_raddr_rs1 != '0) &&
-        (pipe1_sel_rf_raddr_rs1 == alu_fwd_addr_i);
+        (pipe1_sel_rf_raddr_rs1 == alu_fwd_addr_i) &&
+        (pipe1_sel_rs1_psrc == alu_fwd_pdst_i);
     assign pipe1_dual_rs2_alu_fwd =
         alu_fwd_valid_i && pipe1_sel_rf_ren_rs2 &&
         (pipe1_sel_rf_raddr_rs2 != '0) &&
-        (pipe1_sel_rf_raddr_rs2 == alu_fwd_addr_i);
+        (pipe1_sel_rf_raddr_rs2 == alu_fwd_addr_i) &&
+        (pipe1_sel_rs2_psrc == alu_fwd_pdst_i);
     assign pipe1_dual_rs1_wb_fwd =
         wb_fwd_valid_i && pipe1_sel_rf_ren_rs1 &&
         (pipe1_sel_rf_raddr_rs1 != '0) &&
+        (pipe1_sel_rs1_psrc == {1'b0, pipe1_sel_rf_raddr_rs1}) &&
+        !pipe1_prf_rs1_uncommitted_i &&
         (pipe1_sel_rf_raddr_rs1 == wb_fwd_addr_i);
     assign pipe1_dual_rs2_wb_fwd =
         wb_fwd_valid_i && pipe1_sel_rf_ren_rs2 &&
         (pipe1_sel_rf_raddr_rs2 != '0) &&
+        (pipe1_sel_rs2_psrc == {1'b0, pipe1_sel_rf_raddr_rs2}) &&
+        !pipe1_prf_rs2_uncommitted_i &&
         (pipe1_sel_rf_raddr_rs2 == wb_fwd_addr_i);
     assign pipe1_dual_rs1_p1alu_fwd =
         pipe1_alu_fwd_valid_i && pipe1_sel_rf_ren_rs1 &&
         (pipe1_sel_rf_raddr_rs1 != '0) &&
-        (pipe1_sel_rf_raddr_rs1 == pipe1_alu_fwd_addr_i);
+        (pipe1_sel_rf_raddr_rs1 == pipe1_alu_fwd_addr_i) &&
+        (pipe1_sel_rs1_psrc == pipe1_alu_fwd_pdst_i);
     assign pipe1_dual_rs2_p1alu_fwd =
         pipe1_alu_fwd_valid_i && pipe1_sel_rf_ren_rs2 &&
         (pipe1_sel_rf_raddr_rs2 != '0) &&
-        (pipe1_sel_rf_raddr_rs2 == pipe1_alu_fwd_addr_i);
+        (pipe1_sel_rf_raddr_rs2 == pipe1_alu_fwd_addr_i) &&
+        (pipe1_sel_rs2_psrc == pipe1_alu_fwd_pdst_i);
     assign pipe1_dual_rs1_ready =
         !pipe1_sel_rf_ren_rs1 || (pipe1_sel_rf_raddr_rs1 == '0) ||
         pipe1_prf_rs1_ready_i;
@@ -1280,26 +1336,30 @@ import ydrasil_pkg::*;
         pipe1_prf_rs2_ready_i;
     assign pipe1_dual_operands_ready =
         pipe1_dual_supported && pipe1_dual_rs1_ready && pipe1_dual_rs2_ready;
-    wire pipe1_prf_rs1_allowed =
-        pipe1_sel_rf_ren_rs1 &&
-        (pipe1_sel_rf_raddr_rs1 != '0) &&
-        (gpr_pending_i[pipe1_sel_rf_raddr_rs1] || pipe1_prf_rs1_uncommitted_i) &&
-        (pipe1_sel_rs1_psrc != pipe1_sel_pdst);
-    wire pipe1_prf_rs2_allowed =
-        pipe1_sel_rf_ren_rs2 &&
-        (pipe1_sel_rf_raddr_rs2 != '0) &&
-        (gpr_pending_i[pipe1_sel_rf_raddr_rs2] || pipe1_prf_rs2_uncommitted_i) &&
-        (pipe1_sel_rs2_psrc != pipe1_sel_pdst);
+	    wire pipe1_prf_rs1_allowed =
+	        pipe1_sel_rf_ren_rs1 &&
+	        (pipe1_sel_rf_raddr_rs1 != '0) &&
+	        (pipe1_sel_rs1_psrc != '0) &&
+	        (pipe1_prf_rs1_uncommitted_i || (pipe1_sel_rs1_psrc != {1'b0, pipe1_sel_rf_raddr_rs1})) &&
+	        (pipe1_sel_rs1_psrc != pipe1_sel_pdst);
+	    wire pipe1_prf_rs2_allowed =
+	        pipe1_sel_rf_ren_rs2 &&
+	        (pipe1_sel_rf_raddr_rs2 != '0) &&
+	        (pipe1_sel_rs2_psrc != '0) &&
+	        (pipe1_prf_rs2_uncommitted_i || (pipe1_sel_rs2_psrc != {1'b0, pipe1_sel_rf_raddr_rs2})) &&
+	        (pipe1_sel_rs2_psrc != pipe1_sel_pdst);
     assign pipe1_dual_rs1_data =
+        (pipe1_prf_rs1_allowed && pipe1_prf_rs1_ready_i) ? pipe1_prf_rs1_data_i :
         pipe1_dual_rs1_alu_fwd ? alu_fwd_data_i :
         pipe1_dual_rs1_p1alu_fwd ? pipe1_alu_fwd_data_i :
         pipe1_dual_rs1_wb_fwd  ? wb_fwd_data_i  :
-        (pipe1_prf_rs1_allowed && pipe1_prf_rs1_ready_i) ? pipe1_prf_rs1_data_i : pipe1_rf_rdata_rs1_i;
+        pipe1_rf_rdata_rs1_i;
     assign pipe1_dual_rs2_data =
+        (pipe1_prf_rs2_allowed && pipe1_prf_rs2_ready_i) ? pipe1_prf_rs2_data_i :
         pipe1_dual_rs2_alu_fwd ? alu_fwd_data_i :
         pipe1_dual_rs2_p1alu_fwd ? pipe1_alu_fwd_data_i :
         pipe1_dual_rs2_wb_fwd  ? wb_fwd_data_i  :
-        (pipe1_prf_rs2_allowed && pipe1_prf_rs2_ready_i) ? pipe1_prf_rs2_data_i : pipe1_rf_rdata_rs2_i;
+        pipe1_rf_rdata_rs2_i;
     assign pipe1_dual_operand_a =
         (pipe1_sel_operand_a_pc_sel | pipe1_sel_operator[ydrasil_pkg::OP_ALU_AUIPC]) ? pipe1_sel_pc :
         pipe1_sel_operand_a_imm_sel ? pipe1_sel_imm : pipe1_dual_rs1_data;
@@ -1316,11 +1376,11 @@ import ydrasil_pkg::*;
         ((if_id_trace_rf_ren_rs1 && (if_id_trace_rf_raddr_rs1 == issue_rf_waddr_rd_ff)) |
          (if_id_trace_rf_ren_rs2 && (if_id_trace_rf_raddr_rs2 == issue_rf_waddr_rd_ff)) |
          (if_id_trace_rf_wen_rd && (if_id_trace_rf_waddr_rd == issue_rf_waddr_rd_ff)));
-    assign pair1_refill_srcs_ready =
-        (!if_id_trace_rf_ren_rs1 || (if_id_trace_rf_raddr_rs1 == '0) ||
-         !gpr_pending_i[if_id_trace_rf_raddr_rs1]) &&
-        (!if_id_trace_rf_ren_rs2 || (if_id_trace_rf_raddr_rs2 == '0) ||
-         !gpr_pending_i[if_id_trace_rf_raddr_rs2]);
+	    assign pair1_refill_srcs_ready =
+	        (!if_id_trace_rf_ren_rs1 || (if_id_trace_rf_raddr_rs1 == '0) ||
+	         rn_if_rs1_ready_i) &&
+	        (!if_id_trace_rf_ren_rs2 || (if_id_trace_rf_raddr_rs2 == '0) ||
+	         rn_if_rs2_ready_i);
     assign pair1_refill_simple_alu =
         if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_ALU] &&
         !if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
@@ -1332,14 +1392,10 @@ import ydrasil_pkg::*;
         !if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_BITMANIP];
     assign pair1_refill_direct =
         1'b0;
-    assign pipe1_dual_raw_pipe0 =
-        pipe1_dual_supported && uopq0_valid && (uopq0_rf_waddr_rd != '0) &&
-        uopq0_rf_wen_rd &&
-        ((pipe1_sel_rf_ren_rs1 && (pipe1_sel_rf_raddr_rs1 == uopq0_rf_waddr_rd)) |
-         (pipe1_sel_rf_ren_rs2 && (pipe1_sel_rf_raddr_rs2 == uopq0_rf_waddr_rd)));
-    assign pipe1_dual_waw_pipe0 =
-        pipe1_dual_supported && uopq0_valid && uopq0_rf_wen_rd &&
-        (uopq0_rf_waddr_rd != '0) && (pipe1_sel_rf_waddr_rd == uopq0_rf_waddr_rd);
+	    assign pipe1_dual_raw_pipe0 =
+	        1'b0;
+	    assign pipe1_dual_waw_pipe0 =
+	        1'b0;
 	    assign pipe1_dual_war_pipe0 =
 	        (pipe1_sel_from1 && pipe1_uopq1_store_war_pipe0) |
 	        (pipe1_sel_from2 && pipe1_uopq2_store_war_pipe0) |
@@ -1408,11 +1464,11 @@ import ydrasil_pkg::*;
             !skid_rn_pdst_valid_ff) begin
             $fatal(1, "pipe1 empty-slot0 fire without held rename destination");
         end
-        if (rst_n && pair1_fire && pipe1_sel_from1 &&
-            ((pipe1_sel_rf_ren_rs1 && (pipe1_sel_rf_raddr_rs1 != '0) &&
-              gpr_pending_i[pipe1_sel_rf_raddr_rs1] && !pipe1_dual_rs1_ready) ||
-             (pipe1_sel_rf_ren_rs2 && (pipe1_sel_rf_raddr_rs2 != '0) &&
-              gpr_pending_i[pipe1_sel_rf_raddr_rs2] && !pipe1_dual_rs2_ready))) begin
+	        if (rst_n && pair1_fire && pipe1_sel_from1 &&
+	            ((pipe1_sel_rf_ren_rs1 && (pipe1_sel_rf_raddr_rs1 != '0) &&
+	              !rn_preg_ready_i[pipe1_sel_rs1_psrc] && !pipe1_dual_rs1_ready) ||
+	             (pipe1_sel_rf_ren_rs2 && (pipe1_sel_rf_raddr_rs2 != '0) &&
+	              !rn_preg_ready_i[pipe1_sel_rs2_psrc] && !pipe1_dual_rs2_ready))) begin
             $fatal(1, "pipe1 from1 fired with stale skid operand ready pc=0x%08h instr=0x%08h",
                    pipe1_sel_pc, pipe1_sel_instr);
         end
@@ -1457,18 +1513,12 @@ import ydrasil_pkg::*;
           slot1_operator_type[ydrasil_pkg::OPERATOR_TYPE_CSR] |
           slot1_operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS] |
           slot1_operator_type[ydrasil_pkg::OPERATOR_TYPE_MUL]);
-    assign ri_slot1_block_raw =
-        ri_slot1_valid && issue_valid_ff && (issue_rf_waddr_rd_ff != '0) &&
-        ((slot1_rf_ren_rs1 && (slot1_rf_raddr_rs1 == issue_rf_waddr_rd_ff)) |
-         (slot1_rf_ren_rs2 && (slot1_rf_raddr_rs2 == issue_rf_waddr_rd_ff)));
-    assign ri_slot1_block_waw =
-        ri_slot1_valid && issue_valid_ff && slot1_rf_wen_rd &&
-        (slot1_rf_waddr_rd != '0) && (slot1_rf_waddr_rd == issue_rf_waddr_rd_ff);
-    assign ri_slot1_block_war =
-        ri_slot1_valid && issue_valid_ff && slot1_rf_wen_rd && (slot1_rf_waddr_rd != '0) &&
-        ((issue_rf_ren_rs1_ff && (issue_rf_raddr_rs1_ff == slot1_rf_waddr_rd)) |
-         ((issue_rf_ren_rs2_ff | issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
-          (issue_rf_raddr_rs2_ff == slot1_rf_waddr_rd)));
+	    assign ri_slot1_block_raw =
+	        1'b0;
+	    assign ri_slot1_block_waw =
+	        1'b0;
+	    assign ri_slot1_block_war =
+	        1'b0;
     assign ri_slot1_block_ctrl =
         ri_slot1_valid && issue_valid_ff &&
         issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP];
@@ -1483,22 +1533,30 @@ import ydrasil_pkg::*;
          issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL]);
     assign ri_slot1_rs1_clear_fwd =
         (wb_fwd_valid_i & slot1_rf_ren_rs1 & (slot1_rf_raddr_rs1 != '0) &
+         (skid_rn_rs1_psrc_ff == {1'b0, slot1_rf_raddr_rs1}) &
          (slot1_rf_raddr_rs1 == wb_fwd_addr_i)) |
         (lsu_fwd_valid_i & slot1_rf_ren_rs1 & (slot1_rf_raddr_rs1 != '0) &
+         (skid_rn_rs1_psrc_ff == lsu_fwd_pdst_i) &
          (slot1_rf_raddr_rs1 == lsu_fwd_addr_i)) |
         (alu_fwd_valid_i & slot1_rf_ren_rs1 & (slot1_rf_raddr_rs1 != '0) &
+         (skid_rn_rs1_psrc_ff == alu_fwd_pdst_i) &
          (slot1_rf_raddr_rs1 == alu_fwd_addr_i)) |
         (pipe1_alu_fwd_valid_i & slot1_rf_ren_rs1 & (slot1_rf_raddr_rs1 != '0) &
+         (skid_rn_rs1_psrc_ff == pipe1_alu_fwd_pdst_i) &
          (slot1_rf_raddr_rs1 == pipe1_alu_fwd_addr_i));
     assign ri_slot1_rs2_read = slot1_rf_ren_rs2 | slot1_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE];
     assign ri_slot1_rs2_clear_fwd =
         (wb_fwd_valid_i & ri_slot1_rs2_read & (slot1_rf_raddr_rs2 != '0) &
+         (skid_rn_rs2_psrc_ff == {1'b0, slot1_rf_raddr_rs2}) &
          (slot1_rf_raddr_rs2 == wb_fwd_addr_i)) |
         (lsu_fwd_valid_i & ri_slot1_rs2_read & (slot1_rf_raddr_rs2 != '0) &
+         (skid_rn_rs2_psrc_ff == lsu_fwd_pdst_i) &
          (slot1_rf_raddr_rs2 == lsu_fwd_addr_i)) |
         (alu_fwd_valid_i & ri_slot1_rs2_read & (slot1_rf_raddr_rs2 != '0) &
+         (skid_rn_rs2_psrc_ff == alu_fwd_pdst_i) &
          (slot1_rf_raddr_rs2 == alu_fwd_addr_i)) |
         (pipe1_alu_fwd_valid_i & ri_slot1_rs2_read & (slot1_rf_raddr_rs2 != '0) &
+         (skid_rn_rs2_psrc_ff == pipe1_alu_fwd_pdst_i) &
          (slot1_rf_raddr_rs2 == pipe1_alu_fwd_addr_i));
     wire ri_slot1_rd_clear_fwd =
         (wb_fwd_valid_i & slot1_rf_wen_rd & (slot1_rf_waddr_rd != '0) &
@@ -1509,15 +1567,14 @@ import ydrasil_pkg::*;
          (slot1_rf_waddr_rd == alu_fwd_addr_i)) |
         (pipe1_alu_fwd_valid_i & slot1_rf_wen_rd & (slot1_rf_waddr_rd != '0) &
          (slot1_rf_waddr_rd == pipe1_alu_fwd_addr_i));
-    assign ri_slot1_block_rs1_pending =
-        ri_slot1_valid && slot1_rf_ren_rs1 && gpr_pending_i[slot1_rf_raddr_rs1] &&
-        !ri_slot1_rs1_clear_fwd;
-    assign ri_slot1_block_rs2_pending =
-        ri_slot1_valid && ri_slot1_rs2_read && gpr_pending_i[slot1_rf_raddr_rs2] &&
-        !ri_slot1_rs2_clear_fwd;
-    assign ri_slot1_block_rd_pending =
-        ri_slot1_valid && slot1_rf_wen_rd && (slot1_rf_waddr_rd != '0) &&
-        gpr_pending_i[slot1_rf_waddr_rd] && !ri_slot1_rd_clear_fwd;
+	    assign ri_slot1_block_rs1_pending =
+	        ri_slot1_valid && slot1_rf_ren_rs1 && (slot1_rf_raddr_rs1 != '0) &&
+	        !rn_preg_ready_i[skid_rn_rs1_psrc_ff] && !ri_slot1_rs1_clear_fwd;
+	    assign ri_slot1_block_rs2_pending =
+	        ri_slot1_valid && ri_slot1_rs2_read && (slot1_rf_raddr_rs2 != '0) &&
+	        !rn_preg_ready_i[skid_rn_rs2_psrc_ff] && !ri_slot1_rs2_clear_fwd;
+	    assign ri_slot1_block_rd_pending =
+	        1'b0;
     assign ri_slot1_block_unsupported = ri_slot1_valid && !ri_slot1_supported;
     assign ri_slot1_ready =
         ri_slot1_valid && ri_slot1_supported &&

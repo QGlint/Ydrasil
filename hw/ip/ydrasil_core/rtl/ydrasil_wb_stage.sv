@@ -37,6 +37,7 @@ import ydrasil_pkg::*;
     output wire [REGS_DATA_WIDTH-1:0]   pipe1_wb_data_o,
     output wire                         pipe1_fwd_valid_o,
     output wire [REGS_ADDR_WIDTH-1:0]   pipe1_fwd_addr_o,
+    output wire [5:0]                   pipe1_fwd_pdst_o,
     output wire [REGS_DATA_WIDTH-1:0]   pipe1_fwd_data_o,
     output wire                         wb_buf_fwd_valid_o,
     output wire [REGS_ADDR_WIDTH-1:0]   wb_buf_fwd_addr_o,
@@ -212,6 +213,7 @@ import ydrasil_pkg::*;
     assign pipe1_wb_data_o = sel_p1_current ? pipe1_alu_wdata_rd_i : p1_fifo_head_data;
     assign pipe1_fwd_valid_o = !p1_fifo_empty;
     assign pipe1_fwd_addr_o = p1_fifo_head_addr;
+    assign pipe1_fwd_pdst_o = p1_fifo_head_pdst;
     assign pipe1_fwd_data_o = p1_fifo_head_data;
 `ifndef SYNTHESIS
     assign wb_buf_fwd_valid_o = wb_buf_fwd_valid_q;
