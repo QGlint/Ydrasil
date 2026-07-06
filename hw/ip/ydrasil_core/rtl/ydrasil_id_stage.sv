@@ -297,10 +297,46 @@ import ydrasil_pkg::*;
     reg                             uopq2_buf_fence_i_ff;
     reg [5:0]                       uopq2_buf_rn_rs1_psrc_ff;
     reg [5:0]                       uopq2_buf_rn_rs2_psrc_ff;
-    reg [5:0]                       uopq2_buf_rn_pdst_ff;
-    reg                             uopq2_buf_rn_pdst_valid_ff;
-    reg                             uopq2_buf_rs1_ready_ff;
-    reg                             uopq2_buf_rs2_ready_ff;
+	    reg [5:0]                       uopq2_buf_rn_pdst_ff;
+	    reg                             uopq2_buf_rn_pdst_valid_ff;
+	    reg                             uopq2_buf_rs1_ready_ff;
+	    reg                             uopq2_buf_rs2_ready_ff;
+
+	    reg                             uopq3_buf_valid_ff;
+	    reg [DATA_WIDTH-1:0]            uopq3_buf_pc_ff;
+	    reg [DATA_WIDTH-1:0]            uopq3_buf_instr_ff;
+	    reg                             uopq3_buf_pred_hit_ff;
+	    reg                             uopq3_buf_pred_taken_ff;
+	    reg [DATA_WIDTH-1:0]            uopq3_buf_pred_target_ff;
+	    reg [1:0]                       uopq3_buf_pred_counter_ff;
+	    reg [DATA_WIDTH-1:0]            uopq3_buf_pred_bht_index_ff;
+	    reg                             uopq3_buf_pred_l0_taken_ff;
+	    reg [4:0]                       uopq3_buf_rf_raddr_rs1_ff;
+	    reg [4:0]                       uopq3_buf_rf_raddr_rs2_ff;
+	    reg                             uopq3_buf_rf_ren_rs1_ff;
+	    reg                             uopq3_buf_rf_ren_rs2_ff;
+	    reg [4:0]                       uopq3_buf_rf_waddr_rd_ff;
+	    reg                             uopq3_buf_rf_wen_rd_ff;
+	    reg [DATA_WIDTH-1:0]            uopq3_buf_imm_ff;
+	    reg                             uopq3_buf_operand_b_rs_sel_ff;
+	    reg                             uopq3_buf_operand_a_pc_sel_ff;
+	    reg                             uopq3_buf_operand_a_imm_sel_ff;
+	    reg                             uopq3_buf_bt_a_rs_sel_ff;
+	    reg                             uopq3_buf_operand_b_jump_sel_ff;
+	    reg [ydrasil_pkg::OPERATOR_WIDTH-1:0]       uopq3_buf_operator_ff;
+	    reg [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0]    uopq3_buf_operator_lsu_ff;
+	    reg [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0]  uopq3_buf_operator_type_ff;
+	    reg [ydrasil_pkg::CSR_ADDR_WIDTH-1:0]       uopq3_buf_csr_reg_raddr_ff;
+	    reg [ydrasil_pkg::CSR_ADDR_WIDTH-1:0]       uopq3_buf_csr_ex_waddr_ff;
+	    reg [ydrasil_pkg::OP_CSR_INFO_WIDTH-1:0]    uopq3_buf_csr_op_info_ff;
+	    reg [ydrasil_pkg::OP_SYS_INFO_WIDTH-1:0]    uopq3_buf_sys_op_info_ff;
+	    reg                             uopq3_buf_fence_i_ff;
+	    reg [5:0]                       uopq3_buf_rn_rs1_psrc_ff;
+	    reg [5:0]                       uopq3_buf_rn_rs2_psrc_ff;
+	    reg [5:0]                       uopq3_buf_rn_pdst_ff;
+	    reg                             uopq3_buf_rn_pdst_valid_ff;
+	    reg                             uopq3_buf_rs1_ready_ff;
+	    reg                             uopq3_buf_rs2_ready_ff;
 
     reg                             issue_valid_ff;
     reg                             issue_wait_rs1_ff;
@@ -395,8 +431,9 @@ import ydrasil_pkg::*;
     wire                             issue_load_from_uopq2;
     wire                             skid_fill;
     wire                             skid_drain;
-    wire                             uopq2_buf_capture;
-    wire                             uopq2_buf_capture_supported;
+	    wire                             uopq2_buf_capture;
+	    wire                             uopq3_buf_capture;
+	    wire                             uopq2_buf_capture_supported;
     wire                             uopq2_buf_capture_operands_ready;
     wire                             uopq2_refill_from_if;
 `ifndef SYNTHESIS
@@ -521,11 +558,29 @@ import ydrasil_pkg::*;
     wire                             uopq2_operand_a_pc_sel;
     wire                             uopq2_operand_a_imm_sel;
     wire                             uopq2_operand_b_jump_sel;
-    wire [ydrasil_pkg::OPERATOR_WIDTH-1:0]      uopq2_operator;
-    wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] uopq2_operator_type;
-    wire                             uopq2_fence_i;
-    wire                             pipe1_sel_from1;
-    wire                             pipe1_sel_from2;
+	    wire [ydrasil_pkg::OPERATOR_WIDTH-1:0]      uopq2_operator;
+	    wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] uopq2_operator_type;
+	    wire                             uopq2_fence_i;
+	    wire                             uopq3_valid;
+	    wire [DATA_WIDTH-1:0]            uopq3_pc;
+	    wire [DATA_WIDTH-1:0]            uopq3_instr;
+	    wire [4:0]                       uopq3_rf_raddr_rs1;
+	    wire [4:0]                       uopq3_rf_raddr_rs2;
+	    wire                             uopq3_rf_ren_rs1;
+	    wire                             uopq3_rf_ren_rs2;
+	    wire [4:0]                       uopq3_rf_waddr_rd;
+	    wire                             uopq3_rf_wen_rd;
+	    wire [DATA_WIDTH-1:0]            uopq3_imm;
+	    wire                             uopq3_operand_b_rs_sel;
+	    wire                             uopq3_operand_a_pc_sel;
+	    wire                             uopq3_operand_a_imm_sel;
+	    wire                             uopq3_operand_b_jump_sel;
+	    wire [ydrasil_pkg::OPERATOR_WIDTH-1:0]      uopq3_operator;
+	    wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] uopq3_operator_type;
+	    wire                             uopq3_fence_i;
+	    wire                             pipe1_sel_from1;
+	    wire                             pipe1_sel_from2;
+	    wire                             pipe1_sel_from3;
     wire [DATA_WIDTH-1:0]            pipe1_sel_pc;
     wire [DATA_WIDTH-1:0]            pipe1_sel_instr;
     wire [4:0]                       pipe1_sel_rf_raddr_rs1;
@@ -543,22 +598,27 @@ import ydrasil_pkg::*;
     wire                             pipe1_sel_operand_a_pc_sel;
     wire                             pipe1_sel_operand_a_imm_sel;
     wire                             pipe1_sel_operand_b_jump_sel;
-    wire [ydrasil_pkg::OPERATOR_WIDTH-1:0]      pipe1_sel_operator;
-    wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] pipe1_sel_operator_type;
-    wire                             pipe1_uopq1_supported;
-    wire                             pipe1_uopq2_supported;
-    wire                             pipe1_uopq1_operands_ready;
-    wire                             pipe1_uopq2_operands_ready;
-    wire                             pipe1_uopq1_safe;
-    wire                             pipe1_uopq2_safe;
-    wire                             pipe1_uopq1_store_war_pipe0;
-    wire                             pipe1_uopq2_store_war_pipe0;
+	    wire [ydrasil_pkg::OPERATOR_WIDTH-1:0]      pipe1_sel_operator;
+	    wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] pipe1_sel_operator_type;
+	    wire                             pipe1_uopq1_supported;
+	    wire                             pipe1_uopq2_supported;
+	    wire                             pipe1_uopq3_supported;
+	    wire                             pipe1_uopq1_operands_ready;
+	    wire                             pipe1_uopq2_operands_ready;
+	    wire                             pipe1_uopq3_operands_ready;
+	    wire                             pipe1_uopq1_safe;
+	    wire                             pipe1_uopq2_safe;
+	    wire                             pipe1_uopq3_safe;
+	    wire                             pipe1_uopq1_store_war_pipe0;
+	    wire                             pipe1_uopq2_store_war_pipe0;
+	    wire                             pipe1_uopq3_store_war_pipe0;
     wire                             pipe1_p0_ready_context;
     wire                             pipe1_p0_blocked_context;
     wire                             pipe1_p0_empty_base;
     wire                             pipe1_p0_empty_context;
-    wire                             pipe1_fire_from1;
-    wire                             pipe1_fire_from2;
+	    wire                             pipe1_fire_from1;
+	    wire                             pipe1_fire_from2;
+	    wire                             pipe1_fire_from3;
 
     reg [31:0]                       perf_id_decode_valid;
     reg [31:0]                       perf_id_issue_accept;
@@ -1063,10 +1123,52 @@ import ydrasil_pkg::*;
         uopq2_buf_valid_ff ? uopq2_buf_pred_l0_taken_ff : if_id_pred_l0_taken_i;
     assign decode_valid = skid_valid_ff | uopq2_buf_valid_ff | if_id_valid_i;
 
-    ydrasil_id_issue_stage #(
-        .DATA_WIDTH(DATA_WIDTH),
-        .PIPE1_REAL_MODE(PIPE1_REAL_MODE)
-    ) u_ydrasil_id_issue_stage (.*);
+	    ydrasil_id_issue_stage #(
+	        .DATA_WIDTH(DATA_WIDTH),
+	        .PIPE1_REAL_MODE(PIPE1_REAL_MODE)
+	    ) u_ydrasil_id_issue_stage (.*);
+
+	    task automatic move_uopq3_to_uopq2;
+	        begin
+	            uopq2_buf_valid_ff <= uopq3_buf_valid_ff;
+	            uopq2_buf_pc_ff <= uopq3_buf_pc_ff;
+	            uopq2_buf_instr_ff <= uopq3_buf_instr_ff;
+	            uopq2_buf_pred_hit_ff <= uopq3_buf_pred_hit_ff;
+	            uopq2_buf_pred_taken_ff <= uopq3_buf_pred_taken_ff;
+	            uopq2_buf_pred_target_ff <= uopq3_buf_pred_target_ff;
+	            uopq2_buf_pred_counter_ff <= uopq3_buf_pred_counter_ff;
+	            uopq2_buf_pred_bht_index_ff <= uopq3_buf_pred_bht_index_ff;
+	            uopq2_buf_pred_l0_taken_ff <= uopq3_buf_pred_l0_taken_ff;
+	            uopq2_buf_rf_raddr_rs1_ff <= uopq3_buf_rf_raddr_rs1_ff;
+	            uopq2_buf_rf_raddr_rs2_ff <= uopq3_buf_rf_raddr_rs2_ff;
+	            uopq2_buf_rf_ren_rs1_ff <= uopq3_buf_rf_ren_rs1_ff;
+	            uopq2_buf_rf_ren_rs2_ff <= uopq3_buf_rf_ren_rs2_ff;
+	            uopq2_buf_rf_waddr_rd_ff <= uopq3_buf_rf_waddr_rd_ff;
+	            uopq2_buf_rf_wen_rd_ff <= uopq3_buf_rf_wen_rd_ff;
+	            uopq2_buf_imm_ff <= uopq3_buf_imm_ff;
+	            uopq2_buf_operand_b_rs_sel_ff <= uopq3_buf_operand_b_rs_sel_ff;
+	            uopq2_buf_operand_a_pc_sel_ff <= uopq3_buf_operand_a_pc_sel_ff;
+	            uopq2_buf_operand_a_imm_sel_ff <= uopq3_buf_operand_a_imm_sel_ff;
+	            uopq2_buf_bt_a_rs_sel_ff <= uopq3_buf_bt_a_rs_sel_ff;
+	            uopq2_buf_operand_b_jump_sel_ff <= uopq3_buf_operand_b_jump_sel_ff;
+	            uopq2_buf_operator_ff <= uopq3_buf_operator_ff;
+	            uopq2_buf_operator_lsu_ff <= uopq3_buf_operator_lsu_ff;
+	            uopq2_buf_operator_type_ff <= uopq3_buf_operator_type_ff;
+	            uopq2_buf_csr_reg_raddr_ff <= uopq3_buf_csr_reg_raddr_ff;
+	            uopq2_buf_csr_ex_waddr_ff <= uopq3_buf_csr_ex_waddr_ff;
+	            uopq2_buf_csr_op_info_ff <= uopq3_buf_csr_op_info_ff;
+	            uopq2_buf_sys_op_info_ff <= uopq3_buf_sys_op_info_ff;
+	            uopq2_buf_fence_i_ff <= uopq3_buf_fence_i_ff;
+	            uopq2_buf_rn_rs1_psrc_ff <= uopq3_buf_rn_rs1_psrc_ff;
+	            uopq2_buf_rn_rs2_psrc_ff <= uopq3_buf_rn_rs2_psrc_ff;
+	            uopq2_buf_rn_pdst_ff <= uopq3_buf_rn_pdst_ff;
+	            uopq2_buf_rn_pdst_valid_ff <= uopq3_buf_rn_pdst_valid_ff;
+	            uopq2_buf_rs1_ready_ff <= uopq3_buf_rs1_ready_ff;
+	            uopq2_buf_rs2_ready_ff <= uopq3_buf_rs2_ready_ff;
+	            uopq3_buf_valid_ff <= 1'b0;
+	            uopq3_buf_rn_pdst_valid_ff <= 1'b0;
+	        end
+	    endtask
 
 `ifndef SYNTHESIS
     assign ds_pipe0_valid = issue_valid_ff;
@@ -1263,11 +1365,49 @@ import ydrasil_pkg::*;
         !uopq_shadow_raw_older[2] && !uopq_shadow_waw_older[2] &&
         !uopq_shadow_older_ctrl_mem[2] && !uopq_shadow_pending_rs[2] &&
         !flush_id_i && !stall_id_i;
-    assign uopq_shadow_raw_older[3] = 1'b0;
-    assign uopq_shadow_waw_older[3] = 1'b0;
-    assign uopq_shadow_older_ctrl_mem[3] = 1'b0;
-    assign uopq_shadow_pending_rs[3] = 1'b0;
-    assign uopq_shadow_p1_safe[3] = 1'b0;
+	    assign uopq_shadow_raw_older[3] =
+	        shadow_raw_dep(
+	            uopq_shadow_valid[3],
+	            uopq_shadow_rs1_ren[3], uopq_shadow_rs1[3],
+	            uopq_shadow_rs2_ren[3], uopq_shadow_rs2[3],
+	            uopq_shadow_valid[0], uopq_shadow_rd_wen[0], uopq_shadow_rd[0]) |
+	        shadow_raw_dep(
+	            uopq_shadow_valid[3],
+	            uopq_shadow_rs1_ren[3], uopq_shadow_rs1[3],
+	            uopq_shadow_rs2_ren[3], uopq_shadow_rs2[3],
+	            uopq_shadow_valid[1], uopq_shadow_rd_wen[1], uopq_shadow_rd[1]) |
+	        shadow_raw_dep(
+	            uopq_shadow_valid[3],
+	            uopq_shadow_rs1_ren[3], uopq_shadow_rs1[3],
+	            uopq_shadow_rs2_ren[3], uopq_shadow_rs2[3],
+	            uopq_shadow_valid[2], uopq_shadow_rd_wen[2], uopq_shadow_rd[2]);
+	    assign uopq_shadow_waw_older[3] =
+	        shadow_waw_dep(
+	            uopq_shadow_valid[3], uopq_shadow_rd_wen[3], uopq_shadow_rd[3],
+	            uopq_shadow_valid[0], uopq_shadow_rd_wen[0], uopq_shadow_rd[0]) |
+	        shadow_waw_dep(
+	            uopq_shadow_valid[3], uopq_shadow_rd_wen[3], uopq_shadow_rd[3],
+	            uopq_shadow_valid[1], uopq_shadow_rd_wen[1], uopq_shadow_rd[1]) |
+	        shadow_waw_dep(
+	            uopq_shadow_valid[3], uopq_shadow_rd_wen[3], uopq_shadow_rd[3],
+	            uopq_shadow_valid[2], uopq_shadow_rd_wen[2], uopq_shadow_rd[2]);
+	    assign uopq_shadow_older_ctrl_mem[3] =
+	        uopq_shadow_valid[3] &&
+	        ((uopq_shadow_valid[0] &&
+	          (uopq_shadow_ctrl[0] | uopq_shadow_mem[0] | uopq_shadow_csr_sys_fence[0])) |
+	         (uopq_shadow_valid[1] &&
+	          (uopq_shadow_ctrl[1] | uopq_shadow_mem[1] | uopq_shadow_csr_sys_fence[1])) |
+	         (uopq_shadow_valid[2] &&
+	          (uopq_shadow_ctrl[2] | uopq_shadow_mem[2] | uopq_shadow_csr_sys_fence[2])));
+	    assign uopq_shadow_pending_rs[3] =
+	        uopq_shadow_valid[3] &&
+	        ((uopq_shadow_rs1_ren[3] && gpr_pending_i[uopq_shadow_rs1[3]]) |
+	         (uopq_shadow_rs2_ren[3] && gpr_pending_i[uopq_shadow_rs2[3]]));
+	    assign uopq_shadow_p1_safe[3] =
+	        uopq_shadow_valid[3] && uopq_shadow_simple_alu[3] &&
+	        !uopq_shadow_raw_older[3] && !uopq_shadow_waw_older[3] &&
+	        !uopq_shadow_older_ctrl_mem[3] && !uopq_shadow_pending_rs[3] &&
+	        !flush_id_i && !stall_id_i;
 `endif
 
     always_ff @(posedge clk or negedge rst_n) begin
@@ -1339,9 +1479,44 @@ import ydrasil_pkg::*;
             uopq2_buf_rn_rs1_psrc_ff <= '0;
             uopq2_buf_rn_rs2_psrc_ff <= '0;
             uopq2_buf_rn_pdst_ff <= '0;
-            uopq2_buf_rn_pdst_valid_ff <= 1'b0;
-            uopq2_buf_rs1_ready_ff <= 1'b0;
-            uopq2_buf_rs2_ready_ff <= 1'b0;
+	            uopq2_buf_rn_pdst_valid_ff <= 1'b0;
+	            uopq2_buf_rs1_ready_ff <= 1'b0;
+	            uopq2_buf_rs2_ready_ff <= 1'b0;
+	            uopq3_buf_valid_ff <= 1'b0;
+	            uopq3_buf_pc_ff <= '0;
+	            uopq3_buf_instr_ff <= ydrasil_pkg::RV32I_INS_NOP;
+	            uopq3_buf_pred_hit_ff <= 1'b0;
+	            uopq3_buf_pred_taken_ff <= 1'b0;
+	            uopq3_buf_pred_target_ff <= '0;
+	            uopq3_buf_pred_counter_ff <= 2'b01;
+	            uopq3_buf_pred_bht_index_ff <= '0;
+	            uopq3_buf_pred_l0_taken_ff <= 1'b0;
+	            uopq3_buf_rf_raddr_rs1_ff <= '0;
+	            uopq3_buf_rf_raddr_rs2_ff <= '0;
+	            uopq3_buf_rf_ren_rs1_ff <= 1'b0;
+	            uopq3_buf_rf_ren_rs2_ff <= 1'b0;
+	            uopq3_buf_rf_waddr_rd_ff <= '0;
+	            uopq3_buf_rf_wen_rd_ff <= 1'b0;
+	            uopq3_buf_imm_ff <= '0;
+	            uopq3_buf_operand_b_rs_sel_ff <= 1'b0;
+	            uopq3_buf_operand_a_pc_sel_ff <= 1'b0;
+	            uopq3_buf_operand_a_imm_sel_ff <= 1'b0;
+	            uopq3_buf_bt_a_rs_sel_ff <= 1'b0;
+	            uopq3_buf_operand_b_jump_sel_ff <= 1'b0;
+	            uopq3_buf_operator_ff <= '0;
+	            uopq3_buf_operator_lsu_ff <= '0;
+	            uopq3_buf_operator_type_ff <= '0;
+	            uopq3_buf_csr_reg_raddr_ff <= '0;
+	            uopq3_buf_csr_ex_waddr_ff <= '0;
+	            uopq3_buf_csr_op_info_ff <= '0;
+	            uopq3_buf_sys_op_info_ff <= '0;
+	            uopq3_buf_fence_i_ff <= 1'b0;
+	            uopq3_buf_rn_rs1_psrc_ff <= '0;
+	            uopq3_buf_rn_rs2_psrc_ff <= '0;
+	            uopq3_buf_rn_pdst_ff <= '0;
+	            uopq3_buf_rn_pdst_valid_ff <= 1'b0;
+	            uopq3_buf_rs1_ready_ff <= 1'b0;
+	            uopq3_buf_rs2_ready_ff <= 1'b0;
             issue_valid_ff <= 1'b0;
             issue_wait_rs1_ff <= 1'b0;
             issue_wait_rs2_ff <= 1'b0;
@@ -1624,9 +1799,11 @@ import ydrasil_pkg::*;
                 skid_rn_rs1_ready_ff <= 1'b0;
                 skid_rn_rs2_ready_ff <= 1'b0;
                 issue_rn_pdst_valid_ff <= 1'b0;
-                uopq2_buf_valid_ff <= 1'b0;
-                uopq2_buf_rn_pdst_valid_ff <= 1'b0;
-                id_rn_pdst_ff <= '0;
+	                uopq2_buf_valid_ff <= 1'b0;
+	                uopq2_buf_rn_pdst_valid_ff <= 1'b0;
+	                uopq3_buf_valid_ff <= 1'b0;
+	                uopq3_buf_rn_pdst_valid_ff <= 1'b0;
+	                id_rn_pdst_ff <= '0;
                 id_ex_valid_ff <= 1'b0;
                 id_fence_i_ff <= 1'b0;
 `ifndef SYNTHESIS
@@ -1737,11 +1914,48 @@ import ydrasil_pkg::*;
 `ifndef SYNTHESIS
                         pair1_valid_ff <= 1'b0;
 `endif
-                    end else if (pipe1_fire_from2) begin
-                        skid_valid_ff <= skid_valid_ff;
-                        uopq2_buf_valid_ff <= uopq2_refill_from_if;
-                        if (uopq2_refill_from_if) begin
-                            uopq2_buf_pc_ff <= if_id_pc_i;
+	                    end else if (pipe1_fire_from2) begin
+	                        skid_valid_ff <= skid_valid_ff;
+	                        uopq2_buf_valid_ff <= uopq3_buf_valid_ff | uopq2_refill_from_if;
+	                        if (uopq3_buf_valid_ff) begin
+	                            uopq2_buf_pc_ff <= uopq3_buf_pc_ff;
+	                            uopq2_buf_instr_ff <= uopq3_buf_instr_ff;
+	                            uopq2_buf_pred_hit_ff <= uopq3_buf_pred_hit_ff;
+	                            uopq2_buf_pred_taken_ff <= uopq3_buf_pred_taken_ff;
+	                            uopq2_buf_pred_target_ff <= uopq3_buf_pred_target_ff;
+	                            uopq2_buf_pred_counter_ff <= uopq3_buf_pred_counter_ff;
+	                            uopq2_buf_pred_bht_index_ff <= uopq3_buf_pred_bht_index_ff;
+	                            uopq2_buf_pred_l0_taken_ff <= uopq3_buf_pred_l0_taken_ff;
+	                            uopq2_buf_rf_raddr_rs1_ff <= uopq3_buf_rf_raddr_rs1_ff;
+	                            uopq2_buf_rf_raddr_rs2_ff <= uopq3_buf_rf_raddr_rs2_ff;
+	                            uopq2_buf_rf_ren_rs1_ff <= uopq3_buf_rf_ren_rs1_ff;
+	                            uopq2_buf_rf_ren_rs2_ff <= uopq3_buf_rf_ren_rs2_ff;
+	                            uopq2_buf_rf_waddr_rd_ff <= uopq3_buf_rf_waddr_rd_ff;
+	                            uopq2_buf_rf_wen_rd_ff <= uopq3_buf_rf_wen_rd_ff;
+	                            uopq2_buf_imm_ff <= uopq3_buf_imm_ff;
+	                            uopq2_buf_operand_b_rs_sel_ff <= uopq3_buf_operand_b_rs_sel_ff;
+	                            uopq2_buf_operand_a_pc_sel_ff <= uopq3_buf_operand_a_pc_sel_ff;
+	                            uopq2_buf_operand_a_imm_sel_ff <= uopq3_buf_operand_a_imm_sel_ff;
+	                            uopq2_buf_bt_a_rs_sel_ff <= uopq3_buf_bt_a_rs_sel_ff;
+	                            uopq2_buf_operand_b_jump_sel_ff <= uopq3_buf_operand_b_jump_sel_ff;
+	                            uopq2_buf_operator_ff <= uopq3_buf_operator_ff;
+	                            uopq2_buf_operator_lsu_ff <= uopq3_buf_operator_lsu_ff;
+	                            uopq2_buf_operator_type_ff <= uopq3_buf_operator_type_ff;
+	                            uopq2_buf_csr_reg_raddr_ff <= uopq3_buf_csr_reg_raddr_ff;
+	                            uopq2_buf_csr_ex_waddr_ff <= uopq3_buf_csr_ex_waddr_ff;
+	                            uopq2_buf_csr_op_info_ff <= uopq3_buf_csr_op_info_ff;
+	                            uopq2_buf_sys_op_info_ff <= uopq3_buf_sys_op_info_ff;
+	                            uopq2_buf_fence_i_ff <= uopq3_buf_fence_i_ff;
+	                            uopq2_buf_rn_rs1_psrc_ff <= uopq3_buf_rn_rs1_psrc_ff;
+	                            uopq2_buf_rn_rs2_psrc_ff <= uopq3_buf_rn_rs2_psrc_ff;
+	                            uopq2_buf_rn_pdst_ff <= uopq3_buf_rn_pdst_ff;
+	                            uopq2_buf_rn_pdst_valid_ff <= uopq3_buf_rn_pdst_valid_ff;
+	                            uopq2_buf_rs1_ready_ff <= uopq3_buf_rs1_ready_ff;
+	                            uopq2_buf_rs2_ready_ff <= uopq3_buf_rs2_ready_ff;
+	                            uopq3_buf_valid_ff <= 1'b0;
+	                            uopq3_buf_rn_pdst_valid_ff <= 1'b0;
+	                        end else if (uopq2_refill_from_if) begin
+	                            uopq2_buf_pc_ff <= if_id_pc_i;
                             uopq2_buf_instr_ff <= if_id_instr_i;
                             uopq2_buf_pred_hit_ff <= if_id_pred_hit_i;
                             uopq2_buf_pred_taken_ff <= if_id_pred_taken_i;
@@ -1776,13 +1990,19 @@ import ydrasil_pkg::*;
                             uopq2_buf_rn_pdst_valid_ff <= if_id_rn_pdst_valid;
                             uopq2_buf_rs1_ready_ff <= rn_if_rs1_ready_i;
                             uopq2_buf_rs2_ready_ff <= rn_if_rs2_ready_i;
-                        end else begin
-                            uopq2_buf_rn_pdst_valid_ff <= 1'b0;
-                        end
+	                        end else begin
+	                            uopq2_buf_rn_pdst_valid_ff <= 1'b0;
+	                        end
 `ifndef SYNTHESIS
-                        pair1_valid_ff <= pair1_valid_ff;
+	                        pair1_valid_ff <= pair1_valid_ff;
 `endif
-                    end else if (uopq2_buf_valid_ff) begin
+	                    end else if (pipe1_fire_from3 && !issue_accept) begin
+	                        uopq3_buf_valid_ff <= 1'b0;
+	                        uopq3_buf_rn_pdst_valid_ff <= 1'b0;
+`ifndef SYNTHESIS
+	                        pair1_valid_ff <= pair1_valid_ff;
+`endif
+	                    end else if (uopq2_buf_valid_ff) begin
                         skid_valid_ff <= 1'b1;
                         skid_pc_ff <= uopq2_buf_pc_ff;
                         skid_instr_ff <= uopq2_buf_instr_ff;
@@ -1817,9 +2037,15 @@ import ydrasil_pkg::*;
                         skid_rn_pdst_ff <= uopq2_buf_rn_pdst_ff;
                         skid_rn_pdst_valid_ff <= uopq2_buf_rn_pdst_valid_ff;
                         skid_rn_rs1_ready_ff <= uopq2_buf_rs1_ready_ff;
-                        skid_rn_rs2_ready_ff <= uopq2_buf_rs2_ready_ff;
-                        uopq2_buf_valid_ff <= 1'b0;
-                        uopq2_buf_rn_pdst_valid_ff <= 1'b0;
+	                        skid_rn_rs2_ready_ff <= uopq2_buf_rs2_ready_ff;
+	                        uopq2_buf_valid_ff <= 1'b0;
+	                        uopq2_buf_rn_pdst_valid_ff <= 1'b0;
+	                        if (pipe1_fire_from3) begin
+	                            uopq3_buf_valid_ff <= 1'b0;
+	                            uopq3_buf_rn_pdst_valid_ff <= 1'b0;
+	                        end else begin
+	                            move_uopq3_to_uopq2();
+	                        end
 `ifndef SYNTHESIS
                         pair1_valid_ff <= 1'b1;
                         pair1_pc_ff <= uopq2_buf_pc_ff;
@@ -1948,9 +2174,10 @@ import ydrasil_pkg::*;
                         skid_rn_pdst_ff <= uopq2_buf_rn_pdst_ff;
                         skid_rn_pdst_valid_ff <= uopq2_buf_rn_pdst_valid_ff;
                         skid_rn_rs1_ready_ff <= uopq2_buf_rs1_ready_ff;
-                        skid_rn_rs2_ready_ff <= uopq2_buf_rs2_ready_ff;
-                        uopq2_buf_valid_ff <= 1'b0;
-                        uopq2_buf_rn_pdst_valid_ff <= 1'b0;
+	                        skid_rn_rs2_ready_ff <= uopq2_buf_rs2_ready_ff;
+	                        uopq2_buf_valid_ff <= 1'b0;
+	                        uopq2_buf_rn_pdst_valid_ff <= 1'b0;
+	                        move_uopq3_to_uopq2();
 `ifndef SYNTHESIS
                         pair1_valid_ff <= 1'b1;
                         pair1_pc_ff <= uopq2_buf_pc_ff;
@@ -2038,10 +2265,11 @@ import ydrasil_pkg::*;
                         skid_valid_ff <= 1'b0;
                         skid_rn_rs1_ready_ff <= 1'b0;
                         skid_rn_rs2_ready_ff <= 1'b0;
-                        if (issue_load_from_uopq2) begin
-                            uopq2_buf_valid_ff <= 1'b0;
-                            uopq2_buf_rn_pdst_valid_ff <= 1'b0;
-                        end
+	                        if (issue_load_from_uopq2) begin
+	                            uopq2_buf_valid_ff <= 1'b0;
+	                            uopq2_buf_rn_pdst_valid_ff <= 1'b0;
+	                            move_uopq3_to_uopq2();
+	                        end
 `ifndef SYNTHESIS
                         pair1_valid_ff <= 1'b0;
 `endif
@@ -2079,10 +2307,47 @@ import ydrasil_pkg::*;
                         uopq2_buf_rn_rs1_psrc_ff <= rn_if_rs1_psrc_i;
                         uopq2_buf_rn_rs2_psrc_ff <= rn_if_rs2_psrc_i;
                         uopq2_buf_rn_pdst_ff <= rn_if_pdst_i;
-                        uopq2_buf_rn_pdst_valid_ff <= if_id_rn_pdst_valid;
-                        uopq2_buf_rs1_ready_ff <= rn_if_rs1_ready_i;
-                        uopq2_buf_rs2_ready_ff <= rn_if_rs2_ready_i;
-                    end else if (issue_valid_ff && issue_wait_block && !skid_valid_ff &&
+	                        uopq2_buf_rn_pdst_valid_ff <= if_id_rn_pdst_valid;
+	                        uopq2_buf_rs1_ready_ff <= rn_if_rs1_ready_i;
+	                        uopq2_buf_rs2_ready_ff <= rn_if_rs2_ready_i;
+	                    end else if (uopq3_buf_capture) begin
+	                        uopq3_buf_valid_ff <= 1'b1;
+	                        uopq3_buf_pc_ff <= if_id_pc_i;
+	                        uopq3_buf_instr_ff <= if_id_instr_i;
+	                        uopq3_buf_pred_hit_ff <= if_id_pred_hit_i;
+	                        uopq3_buf_pred_taken_ff <= if_id_pred_taken_i;
+	                        uopq3_buf_pred_target_ff <= if_id_pred_target_i;
+	                        uopq3_buf_pred_counter_ff <= if_id_pred_counter_i;
+	                        uopq3_buf_pred_bht_index_ff <= if_id_pred_bht_index_i;
+	                        uopq3_buf_pred_l0_taken_ff <= if_id_pred_l0_taken_i;
+	                        uopq3_buf_rf_raddr_rs1_ff <= if_id_trace_rf_raddr_rs1;
+	                        uopq3_buf_rf_raddr_rs2_ff <= if_id_trace_rf_raddr_rs2;
+	                        uopq3_buf_rf_ren_rs1_ff <= if_id_trace_rf_ren_rs1;
+	                        uopq3_buf_rf_ren_rs2_ff <= if_id_trace_rf_ren_rs2;
+	                        uopq3_buf_rf_waddr_rd_ff <= if_id_trace_rf_waddr_rd;
+	                        uopq3_buf_rf_wen_rd_ff <= if_id_trace_rf_wen_rd;
+	                        uopq3_buf_imm_ff <= if_id_trace_imm;
+	                        uopq3_buf_operand_b_rs_sel_ff <= if_id_trace_operand_b_rs_sel;
+	                        uopq3_buf_operand_a_pc_sel_ff <= if_id_trace_operand_a_pc_sel;
+	                        uopq3_buf_operand_a_imm_sel_ff <= if_id_trace_operand_a_imm_sel;
+	                        uopq3_buf_bt_a_rs_sel_ff <= if_id_trace_bt_a_rs_sel;
+	                        uopq3_buf_operand_b_jump_sel_ff <= if_id_trace_operand_b_jump_sel;
+	                        uopq3_buf_operator_ff <= if_id_trace_operator;
+	                        uopq3_buf_operator_lsu_ff <= if_id_trace_operator_lsu;
+	                        uopq3_buf_operator_type_ff <= if_id_trace_operator_type;
+	                        uopq3_buf_csr_reg_raddr_ff <= if_id_trace_csr_reg_raddr;
+	                        uopq3_buf_csr_ex_waddr_ff <= if_id_trace_csr_ex_waddr;
+	                        uopq3_buf_csr_op_info_ff <= if_id_trace_csr_op_info;
+	                        uopq3_buf_sys_op_info_ff <= if_id_trace_sys_op_info;
+	                        uopq3_buf_fence_i_ff <= (if_id_instr_i[6:0] == ydrasil_pkg::RV32I_INS_FENCE) &&
+	                                                (if_id_instr_i[14:12] == 3'b001);
+	                        uopq3_buf_rn_rs1_psrc_ff <= rn_if_rs1_psrc_i;
+	                        uopq3_buf_rn_rs2_psrc_ff <= rn_if_rs2_psrc_i;
+	                        uopq3_buf_rn_pdst_ff <= rn_if_pdst_i;
+	                        uopq3_buf_rn_pdst_valid_ff <= if_id_rn_pdst_valid;
+	                        uopq3_buf_rs1_ready_ff <= rn_if_rs1_ready_i;
+	                        uopq3_buf_rs2_ready_ff <= rn_if_rs2_ready_i;
+	                    end else if (issue_valid_ff && issue_wait_block && !skid_valid_ff &&
                                  !uopq2_buf_valid_ff && if_id_valid_i &&
                                  !pipe1_fire_from2) begin
                         skid_valid_ff <= 1'b1;
@@ -2254,53 +2519,52 @@ import ydrasil_pkg::*;
                     ((pair1_instr_ff[6:0] == ydrasil_pkg::RV32I_INS_FENCE) &&
                      (pair1_instr_ff[14:12] == 3'b001));
 
-                uopq_shadow_valid[2] <=
-                    if_id_valid_i &&
-                    !(issue_valid_ff && (if_id_pc_i == issue_pc_ff)) &&
-                    !(pair1_valid_ff && (if_id_pc_i == pair1_pc_ff));
-                uopq_shadow_pc[2] <= if_id_pc_i;
-                uopq_shadow_instr[2] <= if_id_instr_i;
-                uopq_shadow_seq[2] <= uopq_shadow_seq_next_ff;
-                uopq_shadow_rs1[2] <= if_id_trace_rf_raddr_rs1;
-                uopq_shadow_rs2[2] <= if_id_trace_rf_raddr_rs2;
-                uopq_shadow_rd[2] <= if_id_trace_rf_waddr_rd;
-                uopq_shadow_rs1_ren[2] <= if_id_trace_rf_ren_rs1;
-                uopq_shadow_rs2_ren[2] <= if_id_trace_rf_ren_rs2;
-                uopq_shadow_rd_wen[2] <= if_id_trace_rf_wen_rd;
-                uopq_shadow_optype[2] <= if_id_trace_operator_type;
-                uopq_shadow_operator[2] <= if_id_trace_operator;
-                uopq_shadow_simple_alu[2] <= is_shadow_simple_alu(if_id_trace_operator_type, if_id_trace_operator);
-                uopq_shadow_ctrl[2] <= if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP];
-                uopq_shadow_mem[2] <=
-                    if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD] |
-                    if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE];
-                uopq_shadow_csr_sys_fence[2] <=
-                    if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_CSR] |
-                    if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS] |
-                    ((if_id_instr_i[6:0] == ydrasil_pkg::RV32I_INS_FENCE) &&
-                     (if_id_instr_i[14:12] == 3'b001));
+	                uopq_shadow_valid[2] <= uopq2_buf_valid_ff;
+	                uopq_shadow_pc[2] <= uopq2_buf_pc_ff;
+	                uopq_shadow_instr[2] <= uopq2_buf_instr_ff;
+	                uopq_shadow_seq[2] <= uopq_shadow_seq_next_ff;
+	                uopq_shadow_rs1[2] <= uopq2_buf_rf_raddr_rs1_ff;
+	                uopq_shadow_rs2[2] <= uopq2_buf_rf_raddr_rs2_ff;
+	                uopq_shadow_rd[2] <= uopq2_buf_rf_waddr_rd_ff;
+	                uopq_shadow_rs1_ren[2] <= uopq2_buf_rf_ren_rs1_ff;
+	                uopq_shadow_rs2_ren[2] <= uopq2_buf_rf_ren_rs2_ff;
+	                uopq_shadow_rd_wen[2] <= uopq2_buf_rf_wen_rd_ff;
+	                uopq_shadow_optype[2] <= uopq2_buf_operator_type_ff;
+	                uopq_shadow_operator[2] <= uopq2_buf_operator_ff;
+	                uopq_shadow_simple_alu[2] <= is_shadow_simple_alu(uopq2_buf_operator_type_ff, uopq2_buf_operator_ff);
+	                uopq_shadow_ctrl[2] <= uopq2_buf_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP];
+	                uopq_shadow_mem[2] <=
+	                    uopq2_buf_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] |
+	                    uopq2_buf_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE];
+	                uopq_shadow_csr_sys_fence[2] <=
+	                    uopq2_buf_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_CSR] |
+	                    uopq2_buf_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_SYS] |
+	                    uopq2_buf_fence_i_ff;
 
-                uopq_shadow_valid[3] <= 1'b0;
-                uopq_shadow_pc[3] <= '0;
-                uopq_shadow_instr[3] <= ydrasil_pkg::RV32I_INS_NOP;
-                uopq_shadow_seq[3] <= '0;
-                uopq_shadow_rs1[3] <= '0;
-                uopq_shadow_rs2[3] <= '0;
-                uopq_shadow_rd[3] <= '0;
-                uopq_shadow_rs1_ren[3] <= 1'b0;
-                uopq_shadow_rs2_ren[3] <= 1'b0;
-                uopq_shadow_rd_wen[3] <= 1'b0;
-                uopq_shadow_optype[3] <= '0;
-                uopq_shadow_operator[3] <= '0;
-                uopq_shadow_simple_alu[3] <= 1'b0;
-                uopq_shadow_ctrl[3] <= 1'b0;
-                uopq_shadow_mem[3] <= 1'b0;
-                uopq_shadow_csr_sys_fence[3] <= 1'b0;
-                if (if_id_valid_i &&
-                    !(issue_valid_ff && (if_id_pc_i == issue_pc_ff)) &&
-                    !(pair1_valid_ff && (if_id_pc_i == pair1_pc_ff))) begin
-                    uopq_shadow_seq_next_ff <= uopq_shadow_seq_next_ff + 32'd1;
-                end
+	                uopq_shadow_valid[3] <= uopq3_buf_valid_ff;
+	                uopq_shadow_pc[3] <= uopq3_buf_pc_ff;
+	                uopq_shadow_instr[3] <= uopq3_buf_instr_ff;
+	                uopq_shadow_seq[3] <= '0;
+	                uopq_shadow_rs1[3] <= uopq3_buf_rf_raddr_rs1_ff;
+	                uopq_shadow_rs2[3] <= uopq3_buf_rf_raddr_rs2_ff;
+	                uopq_shadow_rd[3] <= uopq3_buf_rf_waddr_rd_ff;
+	                uopq_shadow_rs1_ren[3] <= uopq3_buf_rf_ren_rs1_ff;
+	                uopq_shadow_rs2_ren[3] <= uopq3_buf_rf_ren_rs2_ff;
+	                uopq_shadow_rd_wen[3] <= uopq3_buf_rf_wen_rd_ff;
+	                uopq_shadow_optype[3] <= uopq3_buf_operator_type_ff;
+	                uopq_shadow_operator[3] <= uopq3_buf_operator_ff;
+	                uopq_shadow_simple_alu[3] <= is_shadow_simple_alu(uopq3_buf_operator_type_ff, uopq3_buf_operator_ff);
+	                uopq_shadow_ctrl[3] <= uopq3_buf_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP];
+	                uopq_shadow_mem[3] <=
+	                    uopq3_buf_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] |
+	                    uopq3_buf_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE];
+	                uopq_shadow_csr_sys_fence[3] <=
+	                    uopq3_buf_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_CSR] |
+	                    uopq3_buf_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_SYS] |
+	                    uopq3_buf_fence_i_ff;
+	                if (uopq2_buf_capture | uopq3_buf_capture) begin
+	                    uopq_shadow_seq_next_ff <= uopq_shadow_seq_next_ff + 32'd1;
+	                end
             end
 `endif
             perf_id_decode_valid <= perf_id_decode_valid + (decode_valid ? 32'd1 : 32'd0);
@@ -2516,9 +2780,10 @@ import ydrasil_pkg::*;
                   uopq_shadow_waw_older[3]) ? 32'd1 : 32'd0);
             perf_uopq_p1_fire_from_1 <= perf_uopq_p1_fire_from_1 +
                 (pipe1_fire_from1 ? 32'd1 : 32'd0);
-            perf_uopq_p1_fire_from_2 <= perf_uopq_p1_fire_from_2 +
-                (pipe1_fire_from2 ? 32'd1 : 32'd0);
-            perf_uopq_p1_fire_from_3 <= perf_uopq_p1_fire_from_3 + 32'd0;
+	            perf_uopq_p1_fire_from_2 <= perf_uopq_p1_fire_from_2 +
+	                (pipe1_fire_from2 ? 32'd1 : 32'd0);
+	            perf_uopq_p1_fire_from_3 <= perf_uopq_p1_fire_from_3 +
+	                (pipe1_fire_from3 ? 32'd1 : 32'd0);
             perf_uopq_p1_fire_when_p0_ready <= perf_uopq_p1_fire_when_p0_ready +
                 ((pair1_fire && pipe1_p0_ready_context) ? 32'd1 : 32'd0);
             perf_uopq_p1_fire_when_p0_blocked <= perf_uopq_p1_fire_when_p0_blocked +
@@ -2526,7 +2791,7 @@ import ydrasil_pkg::*;
             perf_uopq_p1_fire_when_p0_empty <= perf_uopq_p1_fire_when_p0_empty +
                 ((pair1_fire && pipe1_p0_empty_context) ? 32'd1 : 32'd0);
             perf_uopq_p1_block_older_ctrl_mem <= perf_uopq_p1_block_older_ctrl_mem +
-                (((pipe1_uopq1_supported | pipe1_uopq2_supported) &&
+	                (((pipe1_uopq1_supported | pipe1_uopq2_supported | pipe1_uopq3_supported) &&
                   !pipe1_dual_pipe0_safe) ? 32'd1 : 32'd0);
             perf_uopq_p1_block_raw_older <= perf_uopq_p1_block_raw_older +
                 (pipe1_dual_raw_pipe0 ? 32'd1 : 32'd0);
@@ -2536,29 +2801,29 @@ import ydrasil_pkg::*;
                 ((issue_valid_ff && id_advance && issue_wait_block &&
                   pipe1_uopq1_safe && !pipe1_resbuf_full_i) ? 32'd1 : 32'd0);
             perf_uopq_p1_block_p0_bjp <= perf_uopq_p1_block_p0_bjp +
-                (((pipe1_uopq1_supported | pipe1_uopq2_supported) &&
+	                (((pipe1_uopq1_supported | pipe1_uopq2_supported | pipe1_uopq3_supported) &&
                   !pipe1_dual_pipe0_safe &&
                   uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP]) ? 32'd1 : 32'd0);
             perf_uopq_p1_block_p0_load <= perf_uopq_p1_block_p0_load +
-                (((pipe1_uopq1_supported | pipe1_uopq2_supported) &&
+	                (((pipe1_uopq1_supported | pipe1_uopq2_supported | pipe1_uopq3_supported) &&
                   !pipe1_dual_pipe0_safe &&
                   uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD]) ? 32'd1 : 32'd0);
             perf_uopq_p1_block_p0_store <= perf_uopq_p1_block_p0_store +
-                (((pipe1_uopq1_supported | pipe1_uopq2_supported) &&
+                (((pipe1_uopq1_supported | pipe1_uopq2_supported | pipe1_uopq3_supported) &&
                   !pipe1_dual_pipe0_safe &&
                   uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE]) ? 32'd1 : 32'd0);
             perf_uopq_p1_block_p0_csr_sys <= perf_uopq_p1_block_p0_csr_sys +
-                (((pipe1_uopq1_supported | pipe1_uopq2_supported) &&
+                (((pipe1_uopq1_supported | pipe1_uopq2_supported | pipe1_uopq3_supported) &&
                   !pipe1_dual_pipe0_safe &&
                   (uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_CSR] |
                    uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS] |
                    uopq0_fence_i)) ? 32'd1 : 32'd0);
             perf_uopq_p1_block_p0_bitmanip <= perf_uopq_p1_block_p0_bitmanip +
-                (((pipe1_uopq1_supported | pipe1_uopq2_supported) &&
+                (((pipe1_uopq1_supported | pipe1_uopq2_supported | pipe1_uopq3_supported) &&
                   !pipe1_dual_pipe0_safe &&
                   uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_BITMANIP]) ? 32'd1 : 32'd0);
             perf_uopq_p1_block_p0_other <= perf_uopq_p1_block_p0_other +
-                (((pipe1_uopq1_supported | pipe1_uopq2_supported) &&
+                (((pipe1_uopq1_supported | pipe1_uopq2_supported | pipe1_uopq3_supported) &&
                   !pipe1_dual_pipe0_safe &&
                   !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
                   !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
@@ -2568,11 +2833,11 @@ import ydrasil_pkg::*;
                   !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_BITMANIP] &&
                   !uopq0_fence_i) ? 32'd1 : 32'd0);
             perf_uopq_p1_block_p0_other_invalid <= perf_uopq_p1_block_p0_other_invalid +
-                (((pipe1_uopq1_supported | pipe1_uopq2_supported) &&
+                (((pipe1_uopq1_supported | pipe1_uopq2_supported | pipe1_uopq3_supported) &&
                   !pipe1_dual_pipe0_safe &&
                   !uopq0_valid) ? 32'd1 : 32'd0);
             perf_uopq_p1_block_p0_other_no_alu_mul <= perf_uopq_p1_block_p0_other_no_alu_mul +
-                (((pipe1_uopq1_supported | pipe1_uopq2_supported) &&
+                (((pipe1_uopq1_supported | pipe1_uopq2_supported | pipe1_uopq3_supported) &&
                   !pipe1_dual_pipe0_safe &&
                   uopq0_valid &&
                   !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_ALU] &&
@@ -2585,17 +2850,17 @@ import ydrasil_pkg::*;
                   !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_BITMANIP] &&
                   !uopq0_fence_i) ? 32'd1 : 32'd0);
             perf_uopq_p1_block_p0_invalid_issue_accept <= perf_uopq_p1_block_p0_invalid_issue_accept +
-                (((pipe1_uopq1_supported | pipe1_uopq2_supported) &&
+                (((pipe1_uopq1_supported | pipe1_uopq2_supported | pipe1_uopq3_supported) &&
                   !pipe1_dual_pipe0_safe &&
                   !uopq0_valid &&
                   issue_accept) ? 32'd1 : 32'd0);
             perf_uopq_p1_block_p0_invalid_skid <= perf_uopq_p1_block_p0_invalid_skid +
-                (((pipe1_uopq1_supported | pipe1_uopq2_supported) &&
+                (((pipe1_uopq1_supported | pipe1_uopq2_supported | pipe1_uopq3_supported) &&
                   !pipe1_dual_pipe0_safe &&
                   !uopq0_valid &&
                   skid_valid_ff) ? 32'd1 : 32'd0);
             perf_uopq_p1_block_p0_invalid_uopq2_safe <= perf_uopq_p1_block_p0_invalid_uopq2_safe +
-                (((pipe1_uopq1_supported | pipe1_uopq2_supported) &&
+                (((pipe1_uopq1_supported | pipe1_uopq2_supported | pipe1_uopq3_supported) &&
                   !pipe1_dual_pipe0_safe &&
                   !uopq0_valid &&
                   pipe1_uopq2_safe) ? 32'd1 : 32'd0);

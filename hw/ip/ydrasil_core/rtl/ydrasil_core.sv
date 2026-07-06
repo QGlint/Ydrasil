@@ -312,6 +312,9 @@ import ydrasil_pkg::*;
 	wire [RN_REAL_PREG_BITS-1:0] rn_real_live_rs1_psrc;
 	wire [RN_REAL_PREG_BITS-1:0] rn_real_live_rs2_psrc;
 	wire [RN_REAL_PREG_BITS-1:0] rn_real_alloc0_pdst;
+	reg [RN_REAL_PREG_BITS-1:0] rn_real_alloc0_pdst_q;
+	wire [RN_REAL_PREG_BITS-1:0] rn_real_alloc0_pdst_next;
+	reg [RN_REAL_PHYS_REGS-1:0] rn_real_free_next_for_alloc;
 	wire [RN_REAL_PREG_BITS-1:0] rn_real_wb_pdst;
 	wire rn_real_wb_pdst_found;
 	wire [RN_REAL_PREG_BITS-1:0] rn_real_lsu_pdst;
@@ -371,6 +374,7 @@ import ydrasil_pkg::*;
 	endfunction
 `endif
 
+`ifndef SYNTHESIS
 	function automatic rn_real_rob_has_pdst;
 		input [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] arch_rd;
 		input [RN_REAL_PREG_BITS-1:0] pdst;
@@ -391,6 +395,7 @@ import ydrasil_pkg::*;
 			end
 		end
 	endfunction
+`endif
 
 `ifndef SYNTHESIS
 	function automatic rn_real_rob_has_arch;
@@ -1007,12 +1012,23 @@ import ydrasil_pkg::*;
 	assign rn_real_rs1_uncommitted =
 		id_ctrl_rs1_ren && (id_ctrl_rs1_addr != '0) &&
 		(rn_real_rs1_psrc != '0) &&
-		rn_real_rob_has_pdst(id_ctrl_rs1_addr, rn_real_rs1_psrc);
+		rn_real_pdst_rob_valid_q[rn_real_rs1_psrc];
 	assign rn_real_rs2_uncommitted =
 		id_ctrl_rs2_ren && (id_ctrl_rs2_addr != '0) &&
 		(rn_real_rs2_psrc != '0) &&
-		rn_real_rob_has_pdst(id_ctrl_rs2_addr, rn_real_rs2_psrc);
-	assign rn_real_alloc0_pdst = rn_real_first_free(rn_real_free_q);
+		rn_real_pdst_rob_valid_q[rn_real_rs2_psrc];
+	assign rn_real_alloc0_pdst = rn_real_alloc0_pdst_q;
+	always_comb begin
+		rn_real_free_next_for_alloc = rn_real_free_q;
+		if (rn_real_commit0_valid &&
+		    (rn_real_rob_old_pdst_q[rn_real_rob_head_q] != '0)) begin
+			rn_real_free_next_for_alloc[rn_real_rob_old_pdst_q[rn_real_rob_head_q]] = 1'b1;
+		end
+		if (rn_real_alloc0_valid && (rn_real_alloc0_pdst_q != '0)) begin
+			rn_real_free_next_for_alloc[rn_real_alloc0_pdst_q] = 1'b0;
+		end
+	end
+	assign rn_real_alloc0_pdst_next = rn_real_first_free(rn_real_free_next_for_alloc);
 	assign rn_real_can_alloc0 =
 		(rn_real_free_count_q != '0) && (rn_real_rob_occ_q < RN_REAL_ROB_DEPTH_COUNT);
 	assign rn_real_alloc0_valid = rn_alloc_valid & rn_real_can_alloc0;
@@ -1104,11 +1120,11 @@ import ydrasil_pkg::*;
 	assign rn_real_pipe1_rs1_uncommitted =
 		pipe1_ctrl_rs1_ren && (pipe1_rf_raddr_rs1 != '0) &&
 		(pipe1_ctrl_rs1_psrc != '0) &&
-		rn_real_rob_has_pdst(pipe1_rf_raddr_rs1, pipe1_ctrl_rs1_psrc);
+		rn_real_pdst_rob_valid_q[pipe1_ctrl_rs1_psrc];
 	assign rn_real_pipe1_rs2_uncommitted =
 		pipe1_ctrl_rs2_ren && (pipe1_rf_raddr_rs2 != '0) &&
 		(pipe1_ctrl_rs2_psrc != '0) &&
-		rn_real_rob_has_pdst(pipe1_rf_raddr_rs2, pipe1_ctrl_rs2_psrc);
+		rn_real_pdst_rob_valid_q[pipe1_ctrl_rs2_psrc];
 	assign rn_real_pipe1_rename_ready = rn_real_can_alloc0;
 	assign rn_real_commit0_ready =
 		rn_real_rob_valid_q[rn_real_rob_head_q] &
@@ -1201,10 +1217,11 @@ import ydrasil_pkg::*;
 		always_ff @(posedge clk or negedge rst_n) begin
 			integer rn_i;
 			if (!rst_n) begin
-			rn_real_free_q <= 64'hffff_ffff_0000_0000;
-			rn_real_busy_q <= '0;
-			rn_real_free_count_q <= 7'd32;
-			rn_real_rob_head_q <= '0;
+				rn_real_free_q <= 64'hffff_ffff_0000_0000;
+				rn_real_busy_q <= '0;
+				rn_real_free_count_q <= 7'd32;
+				rn_real_alloc0_pdst_q <= 6'd32;
+				rn_real_rob_head_q <= '0;
 			rn_real_rob_tail_q <= '0;
 			rn_real_rob_occ_q <= '0;
 				for (rn_i = 0; rn_i < ydrasil_pkg::REGS_NUM; rn_i = rn_i + 1) begin
@@ -1317,12 +1334,13 @@ import ydrasil_pkg::*;
 				rn_real_rob_occ_q +
 				(rn_real_alloc0_valid ? 7'd1 : 7'd0) -
 				(rn_real_commit0_valid ? 7'd1 : 7'd0);
-			rn_real_free_count_q <=
-				rn_real_free_count_q -
-				(rn_real_alloc0_valid ? 7'd1 : 7'd0) +
-				(rn_real_commit0_valid ? 7'd1 : 7'd0);
+				rn_real_free_count_q <=
+					rn_real_free_count_q -
+					(rn_real_alloc0_valid ? 7'd1 : 7'd0) +
+					(rn_real_commit0_valid ? 7'd1 : 7'd0);
+				rn_real_alloc0_pdst_q <= rn_real_alloc0_pdst_next;
+			end
 		end
-	end
 `ifndef SYNTHESIS
 	always_ff @(posedge clk) begin
 		if (rst_n) begin
