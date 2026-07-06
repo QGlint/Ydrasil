@@ -398,6 +398,7 @@ import ydrasil_pkg::*;
     wire                             uopq2_buf_capture;
     wire                             uopq2_buf_capture_supported;
     wire                             uopq2_buf_capture_operands_ready;
+    wire                             uopq2_refill_from_if;
 `ifndef SYNTHESIS
     wire                             issue_alu_stable_candidate;
     wire [DATA_WIDTH-1:0]            issue_alu_stable_result;
@@ -1492,6 +1493,9 @@ import ydrasil_pkg::*;
         (PIPE1_REAL_MODE >= 2) && pair1_fire &&
         !pair1_refill_direct && !pipe1_fire_from2 &&
         !uopq2_buf_valid_ff && !pipe1_p0_empty_base && if_id_valid_i;
+    assign uopq2_refill_from_if =
+        (PIPE1_REAL_MODE >= 2) && pipe1_fire_from2 &&
+        uopq2_buf_capture_supported;
     assign pipe1_take_if_id =
         1'b0;
     wire if_id_live_accept =
@@ -1502,6 +1506,7 @@ import ydrasil_pkg::*;
           !(pipe1_p0_empty_base && pair1_fire)) ||
          skid_fill ||
          uopq2_buf_capture ||
+         uopq2_refill_from_if ||
          pipe1_refill_skid_from_if ||
          pipe1_take_if_id);
     assign issue_frontend_stall_o =
@@ -1924,6 +1929,11 @@ import ydrasil_pkg::*;
         end
         if (rst_n && uopq2_buf_capture && !rn_alloc_valid_o) begin
             $fatal(1, "uopq2 capture without rename allocation pc=0x%08h instr=0x%08h rd=x%0d",
+                   if_id_pc_i, if_id_instr_i, if_id_trace_rf_waddr_rd);
+        end
+        if (rst_n && uopq2_refill_from_if && if_id_rn_pdst_valid &&
+            !rn_alloc_valid_o) begin
+            $fatal(1, "uopq2 refill from IF/ID without rename allocation pc=0x%08h instr=0x%08h rd=x%0d",
                    if_id_pc_i, if_id_instr_i, if_id_trace_rf_waddr_rd);
         end
         if (rst_n && !flush_id_i && !stall_id_i && !bubble_id_i &&
@@ -2701,8 +2711,46 @@ import ydrasil_pkg::*;
 `endif
                     end else if (pipe1_fire_from2) begin
                         skid_valid_ff <= skid_valid_ff;
-                        uopq2_buf_valid_ff <= 1'b0;
-                        uopq2_buf_rn_pdst_valid_ff <= 1'b0;
+                        uopq2_buf_valid_ff <= uopq2_refill_from_if;
+                        if (uopq2_refill_from_if) begin
+                            uopq2_buf_pc_ff <= if_id_pc_i;
+                            uopq2_buf_instr_ff <= if_id_instr_i;
+                            uopq2_buf_pred_hit_ff <= if_id_pred_hit_i;
+                            uopq2_buf_pred_taken_ff <= if_id_pred_taken_i;
+                            uopq2_buf_pred_target_ff <= if_id_pred_target_i;
+                            uopq2_buf_pred_counter_ff <= if_id_pred_counter_i;
+                            uopq2_buf_pred_bht_index_ff <= if_id_pred_bht_index_i;
+                            uopq2_buf_pred_l0_taken_ff <= if_id_pred_l0_taken_i;
+                            uopq2_buf_rf_raddr_rs1_ff <= if_id_trace_rf_raddr_rs1;
+                            uopq2_buf_rf_raddr_rs2_ff <= if_id_trace_rf_raddr_rs2;
+                            uopq2_buf_rf_ren_rs1_ff <= if_id_trace_rf_ren_rs1;
+                            uopq2_buf_rf_ren_rs2_ff <= if_id_trace_rf_ren_rs2;
+                            uopq2_buf_rf_waddr_rd_ff <= if_id_trace_rf_waddr_rd;
+                            uopq2_buf_rf_wen_rd_ff <= if_id_trace_rf_wen_rd;
+                            uopq2_buf_imm_ff <= if_id_trace_imm;
+                            uopq2_buf_operand_b_rs_sel_ff <= if_id_trace_operand_b_rs_sel;
+                            uopq2_buf_operand_a_pc_sel_ff <= if_id_trace_operand_a_pc_sel;
+                            uopq2_buf_operand_a_imm_sel_ff <= if_id_trace_operand_a_imm_sel;
+                            uopq2_buf_bt_a_rs_sel_ff <= if_id_trace_bt_a_rs_sel;
+                            uopq2_buf_operand_b_jump_sel_ff <= if_id_trace_operand_b_jump_sel;
+                            uopq2_buf_operator_ff <= if_id_trace_operator;
+                            uopq2_buf_operator_lsu_ff <= if_id_trace_operator_lsu;
+                            uopq2_buf_operator_type_ff <= if_id_trace_operator_type;
+                            uopq2_buf_csr_reg_raddr_ff <= if_id_trace_csr_reg_raddr;
+                            uopq2_buf_csr_ex_waddr_ff <= if_id_trace_csr_ex_waddr;
+                            uopq2_buf_csr_op_info_ff <= if_id_trace_csr_op_info;
+                            uopq2_buf_sys_op_info_ff <= if_id_trace_sys_op_info;
+                            uopq2_buf_fence_i_ff <= (if_id_instr_i[6:0] == ydrasil_pkg::RV32I_INS_FENCE) &&
+                                                    (if_id_instr_i[14:12] == 3'b001);
+                            uopq2_buf_rn_rs1_psrc_ff <= rn_if_rs1_psrc_i;
+                            uopq2_buf_rn_rs2_psrc_ff <= rn_if_rs2_psrc_i;
+                            uopq2_buf_rn_pdst_ff <= rn_if_pdst_i;
+                            uopq2_buf_rn_pdst_valid_ff <= if_id_rn_pdst_valid;
+                            uopq2_buf_rs1_ready_ff <= rn_if_rs1_ready_i;
+                            uopq2_buf_rs2_ready_ff <= rn_if_rs2_ready_i;
+                        end else begin
+                            uopq2_buf_rn_pdst_valid_ff <= 1'b0;
+                        end
 `ifndef SYNTHESIS
                         pair1_valid_ff <= pair1_valid_ff;
 `endif
