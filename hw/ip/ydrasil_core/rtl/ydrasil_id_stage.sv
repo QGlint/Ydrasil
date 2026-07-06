@@ -65,10 +65,8 @@ import ydrasil_pkg::*;
     input  wire [5:0]                      rn_if_pdst_i,
     input  wire                            rs1_issue_alu_ready_next_i,
     input  wire                            rs2_issue_alu_ready_next_i,
-`ifndef SYNTHESIS
     input  wire                            rs1_issue_alu_stable_bypass_i,
     input  wire                            rs2_issue_alu_stable_bypass_i,
-`endif
 	    input  wire                            ready_issue_allow_i,
 	    input  wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_i,
 	    input  wire [63:0]                     rn_preg_ready_i,
@@ -368,11 +366,9 @@ import ydrasil_pkg::*;
     reg [5:0]                       issue_rn_pdst_ff;
     reg                             issue_rn_pdst_valid_ff;
     reg [5:0]                       id_rn_pdst_ff;
-`ifndef SYNTHESIS
     reg                             alu_stable_valid_ff;
     reg [4:0]                       alu_stable_addr_ff;
     reg [DATA_WIDTH-1:0]            alu_stable_data_ff;
-`endif
 
     wire [DATA_WIDTH-1:0]            decode_pc;
     wire [DATA_WIDTH-1:0]            decode_instr;
@@ -431,10 +427,8 @@ import ydrasil_pkg::*;
 	    wire                             uopq2_buf_capture_supported;
     wire                             uopq2_buf_capture_operands_ready;
     wire                             uopq2_refill_from_if;
-`ifndef SYNTHESIS
     wire                             issue_alu_stable_candidate;
     wire [DATA_WIDTH-1:0]            issue_alu_stable_result;
-`endif
     wire                             ri_slot1_valid;
     wire                             ri_slot1_supported;
     wire                             ri_slot1_block_raw;

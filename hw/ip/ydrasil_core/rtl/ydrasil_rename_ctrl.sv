@@ -22,6 +22,8 @@ import ydrasil_pkg::*;
     input  wire [PREG_BITS-1:0] id_ctrl_rs2_psrc_i,
     input  wire [PREG_BITS-1:0] id_ctrl_pdst_i,
     input  wire [OPERATOR_TYPE_WIDTH-1:0] id_ctrl_operator_type_i,
+    input  wire ctrl_rs1_ready_next_bypass_i,
+    input  wire ctrl_rs2_ready_next_bypass_i,
 
     input  wire pipe1_ctrl_rs1_ren_i,
     input  wire pipe1_ctrl_rs2_ren_i,
@@ -385,10 +387,18 @@ import ydrasil_pkg::*;
         id_ctrl_operator_type_i[OPERATOR_TYPE_BJP] &
         (pipe1_older_uncommitted & !pipe1_branch_order_escape) &
         !ctrl_at_head;
+    wire ctrl_rs1_ready_for_branch =
+        rs1_ready_o |
+        (id_ctrl_operator_type_i[OPERATOR_TYPE_BJP] &
+         ctrl_rs1_ready_next_bypass_i);
+    wire ctrl_rs2_ready_for_branch =
+        rs2_ready_o |
+        (id_ctrl_operator_type_i[OPERATOR_TYPE_BJP] &
+         ctrl_rs2_ready_next_bypass_i);
     wire ctrl_rs1_block =
-        id_ctrl_rs1_ren_i & !rs1_ready_o;
+        id_ctrl_rs1_ren_i & !ctrl_rs1_ready_for_branch;
     wire ctrl_rs2_block =
-        id_ctrl_rs2_ren_i & !rs2_ready_o;
+        id_ctrl_rs2_ren_i & !ctrl_rs2_ready_for_branch;
     assign ctrl_block_o =
         (id_ctrl_operator_type_i[OPERATOR_TYPE_BJP] &
          (ctrl_rs1_block | ctrl_rs2_block)) |

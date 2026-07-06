@@ -358,6 +358,56 @@ end
     reg [31:0] mul_head_wait_fifo_nonempty_count;
     reg [31:0] mul_head_wait_result_valid_count;
     reg [31:0] mul_head_wait_wb_complete_count;
+    reg [31:0] wait_src_rs1_cycles_count;
+    reg [31:0] wait_src_rs2_cycles_count;
+    reg [31:0] wait_branch_cycles_count;
+    reg [31:0] wait_branch_ctrl_src_cycles_count;
+    reg [31:0] wait_branch_ctrl_order_cycles_count;
+    reg [31:0] wait_branch_rs1_cycles_count;
+    reg [31:0] wait_branch_rs2_cycles_count;
+    reg [31:0] wait_src_rs1_events_count;
+    reg [31:0] wait_src_rs2_events_count;
+    reg [31:0] wait_branch_events_count;
+    reg [31:0] wait_branch_ctrl_src_events_count;
+    reg [31:0] wait_branch_ctrl_order_events_count;
+    reg [31:0] wait_branch_rs1_events_count;
+    reg [31:0] wait_branch_rs2_events_count;
+    reg        wait_src_rs1_active_q;
+    reg        wait_src_rs2_active_q;
+    reg        wait_branch_active_q;
+    reg        wait_branch_ctrl_src_active_q;
+    reg        wait_branch_ctrl_order_active_q;
+    reg        wait_branch_rs1_active_q;
+    reg        wait_branch_rs2_active_q;
+
+    wire wait_src_rs1_active =
+        u_dut.u_ydrasil_id_stage.issue_valid_ff &&
+        ((u_dut.u_ydrasil_id_stage.issue_wait_rs1_ff &&
+          !u_dut.u_ydrasil_id_stage.issue_wait_rs1_ready) ||
+         u_dut.u_ydrasil_id_stage.u_ydrasil_id_issue_stage.slot0_rs1_phys_block);
+    wire wait_src_rs2_active =
+        u_dut.u_ydrasil_id_stage.issue_valid_ff &&
+        ((u_dut.u_ydrasil_id_stage.issue_wait_rs2_ff &&
+          !u_dut.u_ydrasil_id_stage.issue_wait_rs2_ready) ||
+         u_dut.u_ydrasil_id_stage.u_ydrasil_id_issue_stage.slot0_rs2_phys_block);
+    wire wait_branch_active =
+        u_dut.scoreboard_stall &&
+        u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP];
+    wire wait_branch_ctrl_src_active =
+        wait_branch_active &&
+        (u_dut.rn_real_ctrl_rs1_block | u_dut.rn_real_ctrl_rs2_block);
+    wire wait_branch_ctrl_order_active =
+        wait_branch_active && u_dut.rn_real_ctrl_older_rob_block;
+    wire wait_branch_rs1_active =
+        wait_branch_active &&
+        (u_dut.rn_real_ctrl_rs1_block |
+         u_dut.rs1_pending_stall_eff |
+         u_dut.rs1_issue_hzd);
+    wire wait_branch_rs2_active =
+        wait_branch_active &&
+        (u_dut.rn_real_ctrl_rs2_block |
+         u_dut.rs2_pending_stall_eff |
+         u_dut.rs2_issue_hzd);
 
 	ydrasil_core u_dut (
 		.clk      (clk),
@@ -626,6 +676,27 @@ end
             mul_head_wait_fifo_nonempty_count <= 32'b0;
             mul_head_wait_result_valid_count <= 32'b0;
             mul_head_wait_wb_complete_count <= 32'b0;
+            wait_src_rs1_cycles_count <= 32'b0;
+            wait_src_rs2_cycles_count <= 32'b0;
+            wait_branch_cycles_count <= 32'b0;
+            wait_branch_ctrl_src_cycles_count <= 32'b0;
+            wait_branch_ctrl_order_cycles_count <= 32'b0;
+            wait_branch_rs1_cycles_count <= 32'b0;
+            wait_branch_rs2_cycles_count <= 32'b0;
+            wait_src_rs1_events_count <= 32'b0;
+            wait_src_rs2_events_count <= 32'b0;
+            wait_branch_events_count <= 32'b0;
+            wait_branch_ctrl_src_events_count <= 32'b0;
+            wait_branch_ctrl_order_events_count <= 32'b0;
+            wait_branch_rs1_events_count <= 32'b0;
+            wait_branch_rs2_events_count <= 32'b0;
+            wait_src_rs1_active_q <= 1'b0;
+            wait_src_rs2_active_q <= 1'b0;
+            wait_branch_active_q <= 1'b0;
+            wait_branch_ctrl_src_active_q <= 1'b0;
+            wait_branch_ctrl_order_active_q <= 1'b0;
+            wait_branch_rs1_active_q <= 1'b0;
+            wait_branch_rs2_active_q <= 1'b0;
         end else begin
             last_pc     <= pc;
             if (bp_branch_valid) begin
@@ -1111,6 +1182,41 @@ end
                 ((u_dut.scoreboard_stall && u_dut.u_ydrasil_id_stage.ri_slot1_ready) ? 32'd1 : 32'd0);
             sb_must_stall_in_order_count <= sb_must_stall_in_order_count +
                 ((u_dut.scoreboard_stall && !u_dut.u_ydrasil_id_stage.ri_slot1_ready) ? 32'd1 : 32'd0);
+            wait_src_rs1_cycles_count <= wait_src_rs1_cycles_count +
+                (wait_src_rs1_active ? 32'd1 : 32'd0);
+            wait_src_rs2_cycles_count <= wait_src_rs2_cycles_count +
+                (wait_src_rs2_active ? 32'd1 : 32'd0);
+            wait_branch_cycles_count <= wait_branch_cycles_count +
+                (wait_branch_active ? 32'd1 : 32'd0);
+            wait_branch_ctrl_src_cycles_count <= wait_branch_ctrl_src_cycles_count +
+                (wait_branch_ctrl_src_active ? 32'd1 : 32'd0);
+            wait_branch_ctrl_order_cycles_count <= wait_branch_ctrl_order_cycles_count +
+                (wait_branch_ctrl_order_active ? 32'd1 : 32'd0);
+            wait_branch_rs1_cycles_count <= wait_branch_rs1_cycles_count +
+                (wait_branch_rs1_active ? 32'd1 : 32'd0);
+            wait_branch_rs2_cycles_count <= wait_branch_rs2_cycles_count +
+                (wait_branch_rs2_active ? 32'd1 : 32'd0);
+            wait_src_rs1_events_count <= wait_src_rs1_events_count +
+                ((wait_src_rs1_active && !wait_src_rs1_active_q) ? 32'd1 : 32'd0);
+            wait_src_rs2_events_count <= wait_src_rs2_events_count +
+                ((wait_src_rs2_active && !wait_src_rs2_active_q) ? 32'd1 : 32'd0);
+            wait_branch_events_count <= wait_branch_events_count +
+                ((wait_branch_active && !wait_branch_active_q) ? 32'd1 : 32'd0);
+            wait_branch_ctrl_src_events_count <= wait_branch_ctrl_src_events_count +
+                ((wait_branch_ctrl_src_active && !wait_branch_ctrl_src_active_q) ? 32'd1 : 32'd0);
+            wait_branch_ctrl_order_events_count <= wait_branch_ctrl_order_events_count +
+                ((wait_branch_ctrl_order_active && !wait_branch_ctrl_order_active_q) ? 32'd1 : 32'd0);
+            wait_branch_rs1_events_count <= wait_branch_rs1_events_count +
+                ((wait_branch_rs1_active && !wait_branch_rs1_active_q) ? 32'd1 : 32'd0);
+            wait_branch_rs2_events_count <= wait_branch_rs2_events_count +
+                ((wait_branch_rs2_active && !wait_branch_rs2_active_q) ? 32'd1 : 32'd0);
+            wait_src_rs1_active_q <= wait_src_rs1_active;
+            wait_src_rs2_active_q <= wait_src_rs2_active;
+            wait_branch_active_q <= wait_branch_active;
+            wait_branch_ctrl_src_active_q <= wait_branch_ctrl_src_active;
+            wait_branch_ctrl_order_active_q <= wait_branch_ctrl_order_active;
+            wait_branch_rs1_active_q <= wait_branch_rs1_active;
+            wait_branch_rs2_active_q <= wait_branch_rs2_active;
         end
     end
 
@@ -1455,6 +1561,14 @@ end
         end
     end
 
+    function automatic real avg_wait;
+        input [31:0] cycles;
+        input [31:0] events;
+        begin
+            avg_wait = (events != 32'd0) ? ((cycles * 1.0) / events) : 0.0;
+        end
+    endfunction
+
     task automatic print_perf_metrics;
         real perf_ipc;
         real perf_bp_accuracy;
@@ -1543,6 +1657,28 @@ end
                 sb_branch_wait_issue_rs2_count,
                 sb_branch_wait_rd_waw_count,
                 sb_branch_wait_pipe1_hzd_count);
+            $display("PERF_WAIT_AVG: SRC_RS1_CYCLES=%-d SRC_RS1_EVENTS=%-d SRC_RS1_AVG=%.4f SRC_RS2_CYCLES=%-d SRC_RS2_EVENTS=%-d SRC_RS2_AVG=%.4f BRANCH_CYCLES=%-d BRANCH_EVENTS=%-d BRANCH_AVG=%.4f BRANCH_CTRL_SRC_CYCLES=%-d BRANCH_CTRL_SRC_EVENTS=%-d BRANCH_CTRL_SRC_AVG=%.4f BRANCH_CTRL_ORDER_CYCLES=%-d BRANCH_CTRL_ORDER_EVENTS=%-d BRANCH_CTRL_ORDER_AVG=%.4f BRANCH_RS1_CYCLES=%-d BRANCH_RS1_EVENTS=%-d BRANCH_RS1_AVG=%.4f BRANCH_RS2_CYCLES=%-d BRANCH_RS2_EVENTS=%-d BRANCH_RS2_AVG=%.4f",
+                wait_src_rs1_cycles_count,
+                wait_src_rs1_events_count,
+                avg_wait(wait_src_rs1_cycles_count, wait_src_rs1_events_count),
+                wait_src_rs2_cycles_count,
+                wait_src_rs2_events_count,
+                avg_wait(wait_src_rs2_cycles_count, wait_src_rs2_events_count),
+                wait_branch_cycles_count,
+                wait_branch_events_count,
+                avg_wait(wait_branch_cycles_count, wait_branch_events_count),
+                wait_branch_ctrl_src_cycles_count,
+                wait_branch_ctrl_src_events_count,
+                avg_wait(wait_branch_ctrl_src_cycles_count, wait_branch_ctrl_src_events_count),
+                wait_branch_ctrl_order_cycles_count,
+                wait_branch_ctrl_order_events_count,
+                avg_wait(wait_branch_ctrl_order_cycles_count, wait_branch_ctrl_order_events_count),
+                wait_branch_rs1_cycles_count,
+                wait_branch_rs1_events_count,
+                avg_wait(wait_branch_rs1_cycles_count, wait_branch_rs1_events_count),
+                wait_branch_rs2_cycles_count,
+                wait_branch_rs2_events_count,
+                avg_wait(wait_branch_rs2_cycles_count, wait_branch_rs2_events_count));
             $display("PERF_BRANCH_SRC_SPLIT: RS1_BUSY=%-d RS2_BUSY=%-d RS1_NO_GPR_PENDING=%-d RS2_NO_GPR_PENDING=%-d RS1_UNCOMMITTED=%-d RS2_UNCOMMITTED=%-d",
                 sb_branch_ctrl_src_rs1_busy_count,
                 sb_branch_ctrl_src_rs2_busy_count,

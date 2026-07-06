@@ -87,6 +87,7 @@ import ydrasil_pkg::*;
     reg [REGS_DATA_WIDTH-1:0] p1_fifo_data_q [0:P1_FIFO_DEPTH-1];
     reg [REGS_ADDR_WIDTH-1:0] p1_fifo_addr_q [0:P1_FIFO_DEPTH-1];
     reg [5:0] p1_fifo_pdst_q [0:P1_FIFO_DEPTH-1];
+    reg p1_fifo_ready_q [0:P1_FIFO_DEPTH-1];
     reg [P1_FIFO_PTR_WIDTH-1:0] p1_fifo_rptr_q;
     reg [P1_FIFO_PTR_WIDTH-1:0] p1_fifo_wptr_q;
     reg [P1_FIFO_COUNT_WIDTH-1:0] p1_fifo_count_q;
@@ -105,6 +106,7 @@ import ydrasil_pkg::*;
     wire [REGS_DATA_WIDTH-1:0] p1_fifo_head_data = p1_fifo_data_q[p1_fifo_rptr_q];
     wire [REGS_ADDR_WIDTH-1:0] p1_fifo_head_addr = p1_fifo_addr_q[p1_fifo_rptr_q];
     wire [5:0] p1_fifo_head_pdst = p1_fifo_pdst_q[p1_fifo_rptr_q];
+    wire p1_fifo_head_ready = p1_fifo_ready_q[p1_fifo_rptr_q];
 
     wire sel_lsu = lsu_rf_wen_rd_i;
     wire sel_alu_fifo = !sel_lsu & !alu_fifo_empty;
@@ -129,6 +131,9 @@ import ydrasil_pkg::*;
     wire p1_direct_write = sel_p1_current;
     wire p1_enqueue = pipe1_alu_rf_wen_eff & !p1_direct_write;
     wire p1_enqueue_accept = p1_enqueue & (!p1_fifo_full | p1_dequeue);
+    wire p1_fifo_ready_event = p1_dequeue & !p1_fifo_head_ready;
+    wire p1_current_ready_event =
+        (p1_direct_write | p1_enqueue_accept) & !p1_fifo_ready_event & !sel_lsu;
     wire mul_dequeue = sel_mul_fifo;
     wire mul_direct_write = sel_mul_current;
     wire mul_enqueue = mul_rf_wen_rd_i & !mul_direct_write;
@@ -177,9 +182,9 @@ import ydrasil_pkg::*;
     assign pipe1_resbuf_full_o = p1_fifo_full;
     assign pipe1_wb_dequeue_o = sel_p1_fifo | sel_p1_current;
     assign pipe1_wb_enqueue_o = p1_enqueue_accept | p1_direct_write;
-    assign pipe1_wb_pdst_valid_o = sel_p1_fifo | sel_p1_current;
-    assign pipe1_wb_pdst_o = sel_p1_current ? pipe1_alu_rn_pdst_i : p1_fifo_head_pdst;
-    assign pipe1_wb_data_o = sel_p1_current ? pipe1_alu_wdata_rd_i : p1_fifo_head_data;
+    assign pipe1_wb_pdst_valid_o = p1_fifo_ready_event | p1_current_ready_event;
+    assign pipe1_wb_pdst_o = p1_fifo_ready_event ? p1_fifo_head_pdst : pipe1_alu_rn_pdst_i;
+    assign pipe1_wb_data_o = p1_fifo_ready_event ? p1_fifo_head_data : pipe1_alu_wdata_rd_i;
     assign pipe1_fwd_valid_o = !p1_fifo_empty;
     assign pipe1_fwd_addr_o = p1_fifo_head_addr;
     assign pipe1_fwd_pdst_o = p1_fifo_head_pdst;
@@ -210,6 +215,7 @@ import ydrasil_pkg::*;
         ({REGS_DATA_WIDTH{sel_mul_current}} & mul_wdata_rd_i);
 
     always_ff @(posedge clk or negedge rst_n) begin
+        integer p1_i;
         if (!rst_n) begin
             alu_fifo_rptr_q     <= '0;
             alu_fifo_wptr_q     <= '0;
@@ -217,6 +223,9 @@ import ydrasil_pkg::*;
             p1_fifo_rptr_q      <= '0;
             p1_fifo_wptr_q      <= '0;
             p1_fifo_count_q     <= '0;
+            for (p1_i = 0; p1_i < P1_FIFO_DEPTH; p1_i = p1_i + 1) begin
+                p1_fifo_ready_q[p1_i] <= 1'b0;
+            end
             perf_p1_wb_enqueue  <= '0;
             perf_p1_wb_dequeue  <= '0;
             perf_p1_wb_direct   <= '0;
@@ -262,10 +271,14 @@ import ydrasil_pkg::*;
                 p1_fifo_data_q[p1_fifo_wptr_q] <= pipe1_alu_wdata_rd_i;
                 p1_fifo_addr_q[p1_fifo_wptr_q] <= pipe1_alu_rf_waddr_rd_i;
                 p1_fifo_pdst_q[p1_fifo_wptr_q] <= pipe1_alu_rn_pdst_i;
+                p1_fifo_ready_q[p1_fifo_wptr_q] <= p1_current_ready_event;
                 p1_fifo_wptr_q <= p1_fifo_wptr_q + P1_FIFO_PTR_WIDTH'(1);
             end
 
             if (p1_dequeue) begin
+                if (!p1_enqueue_accept || (p1_fifo_wptr_q != p1_fifo_rptr_q)) begin
+                    p1_fifo_ready_q[p1_fifo_rptr_q] <= 1'b0;
+                end
                 p1_fifo_rptr_q <= p1_fifo_rptr_q + P1_FIFO_PTR_WIDTH'(1);
             end
 
