@@ -558,6 +558,8 @@ import ydrasil_pkg::*;
     reg [31:0]                       perf_id_wait_lsu_fwd_rs2;
     reg [31:0]                       perf_id_wait_wb_fwd_rs1;
     reg [31:0]                       perf_id_wait_wb_fwd_rs2;
+    reg [31:0]                       perf_id_wait_prf_ready_rs1;
+    reg [31:0]                       perf_id_wait_prf_ready_rs2;
     reg [31:0]                       perf_id_skid_valid;
     reg [31:0]                       perf_id_skid_fill;
     reg [31:0]                       perf_id_skid_drain;
@@ -1233,6 +1235,16 @@ import ydrasil_pkg::*;
         (issue_rf_ren_rs2_ff | issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
         (issue_rf_raddr_rs2_ff != '0) &&
         !gpr_pending_i[issue_rf_raddr_rs2_ff];
+    wire slot0_rs1_prf_ready =
+        issue_rf_ren_rs1_ff &&
+        (issue_rf_raddr_rs1_ff != '0) &&
+        (issue_rn_rs1_psrc_ff != issue_rn_pdst_ff) &&
+        prf_rs1_ready_i;
+    wire slot0_rs2_prf_ready =
+        (issue_rf_ren_rs2_ff | issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
+        (issue_rf_raddr_rs2_ff != '0) &&
+        (issue_rn_rs2_psrc_ff != issue_rn_pdst_ff) &&
+        prf_rs2_ready_i;
     wire rs1_wb_fwd =
         wb_fwd_valid_i &&
         selected_rf_ren_rs1 &&
@@ -1405,10 +1417,12 @@ import ydrasil_pkg::*;
 
     assign issue_wait_rs1_ready =
         !issue_wait_rs1_ff | slot0_rs1_stable_fwd | slot0_rs1_alu_fwd | slot0_rs1_p1alu_fwd |
-        slot0_rs1_lsu_fwd | slot0_rs1_wb_fwd | slot0_rs1_pending_cleared;
+        slot0_rs1_lsu_fwd | slot0_rs1_wb_fwd | slot0_rs1_pending_cleared |
+        slot0_rs1_prf_ready;
     assign issue_wait_rs2_ready =
         !issue_wait_rs2_ff | slot0_rs2_stable_fwd | slot0_rs2_alu_fwd | slot0_rs2_p1alu_fwd |
-        slot0_rs2_lsu_fwd | slot0_rs2_wb_fwd | slot0_rs2_pending_cleared;
+        slot0_rs2_lsu_fwd | slot0_rs2_wb_fwd | slot0_rs2_pending_cleared |
+        slot0_rs2_prf_ready;
     assign issue_wait_block =
         (issue_wait_rs1_ff & !issue_wait_rs1_ready) |
         (issue_wait_rs2_ff & !issue_wait_rs2_ready) |
@@ -2333,6 +2347,8 @@ import ydrasil_pkg::*;
             perf_id_wait_lsu_fwd_rs2 <= '0;
             perf_id_wait_wb_fwd_rs1 <= '0;
             perf_id_wait_wb_fwd_rs2 <= '0;
+            perf_id_wait_prf_ready_rs1 <= '0;
+            perf_id_wait_prf_ready_rs2 <= '0;
             perf_id_skid_valid <= '0;
             perf_id_skid_fill <= '0;
             perf_id_skid_drain <= '0;
@@ -3195,6 +3211,10 @@ import ydrasil_pkg::*;
                 ((issue_wait_rs1_ff && rs1_wb_fwd) ? 32'd1 : 32'd0);
             perf_id_wait_wb_fwd_rs2 <= perf_id_wait_wb_fwd_rs2 +
                 ((issue_wait_rs2_ff && rs2_wb_fwd) ? 32'd1 : 32'd0);
+            perf_id_wait_prf_ready_rs1 <= perf_id_wait_prf_ready_rs1 +
+                ((issue_wait_rs1_ff && slot0_rs1_prf_ready) ? 32'd1 : 32'd0);
+            perf_id_wait_prf_ready_rs2 <= perf_id_wait_prf_ready_rs2 +
+                ((issue_wait_rs2_ff && slot0_rs2_prf_ready) ? 32'd1 : 32'd0);
             perf_id_skid_valid <= perf_id_skid_valid + (skid_valid_ff ? 32'd1 : 32'd0);
             perf_id_skid_fill <= perf_id_skid_fill + (skid_fill ? 32'd1 : 32'd0);
             perf_id_skid_drain <= perf_id_skid_drain + (skid_drain ? 32'd1 : 32'd0);

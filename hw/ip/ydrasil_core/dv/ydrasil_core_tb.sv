@@ -1597,7 +1597,7 @@ end
                 u_dut.u_ydrasil_if_stage.perf_l0_train_not_taken,
                 u_dut.u_ydrasil_if_stage.perf_l0_counter_inc,
                 u_dut.u_ydrasil_if_stage.perf_l0_counter_dec);
-            $display("PERF_ID: ID_DECODE_VALID=%-d ID_ISSUE_ACCEPT=%-d ID_ISSUE_FIRE=%-d ID_ISSUE_SLOT_VALID=%-d ID_ISSUE_NO_FIRE=%-d ID_ISSUE_WAIT_BLOCK=%-d ID_WAIT_RS1=%-d ID_WAIT_RS2=%-d ID_WAIT_ALU_READY_NEXT_RS1=%-d ID_WAIT_ALU_READY_NEXT_RS2=%-d ID_WAIT_LSU_FWD_RS1=%-d ID_WAIT_LSU_FWD_RS2=%-d ID_WAIT_WB_FWD_RS1=%-d ID_WAIT_WB_FWD_RS2=%-d ID_SKID_VALID=%-d ID_SKID_FILL=%-d ID_SKID_DRAIN=%-d ID_SKID_FULL_STALL=%-d ID_FRONTEND_STALL=%-d",
+            $display("PERF_ID: ID_DECODE_VALID=%-d ID_ISSUE_ACCEPT=%-d ID_ISSUE_FIRE=%-d ID_ISSUE_SLOT_VALID=%-d ID_ISSUE_NO_FIRE=%-d ID_ISSUE_WAIT_BLOCK=%-d ID_WAIT_RS1=%-d ID_WAIT_RS2=%-d ID_WAIT_ALU_READY_NEXT_RS1=%-d ID_WAIT_ALU_READY_NEXT_RS2=%-d ID_WAIT_LSU_FWD_RS1=%-d ID_WAIT_LSU_FWD_RS2=%-d ID_WAIT_WB_FWD_RS1=%-d ID_WAIT_WB_FWD_RS2=%-d ID_WAIT_PRF_READY_RS1=%-d ID_WAIT_PRF_READY_RS2=%-d ID_SKID_VALID=%-d ID_SKID_FILL=%-d ID_SKID_DRAIN=%-d ID_SKID_FULL_STALL=%-d ID_FRONTEND_STALL=%-d",
                 u_dut.u_ydrasil_id_stage.perf_id_decode_valid,
                 u_dut.u_ydrasil_id_stage.perf_id_issue_accept,
                 u_dut.u_ydrasil_id_stage.perf_id_issue_fire,
@@ -1612,6 +1612,8 @@ end
                 u_dut.u_ydrasil_id_stage.perf_id_wait_lsu_fwd_rs2,
                 u_dut.u_ydrasil_id_stage.perf_id_wait_wb_fwd_rs1,
                 u_dut.u_ydrasil_id_stage.perf_id_wait_wb_fwd_rs2,
+                u_dut.u_ydrasil_id_stage.perf_id_wait_prf_ready_rs1,
+                u_dut.u_ydrasil_id_stage.perf_id_wait_prf_ready_rs2,
                 u_dut.u_ydrasil_id_stage.perf_id_skid_valid,
                 u_dut.u_ydrasil_id_stage.perf_id_skid_fill,
                 u_dut.u_ydrasil_id_stage.perf_id_skid_drain,
