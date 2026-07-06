@@ -1,8 +1,7 @@
 module ydrasil_id_issue_stage
 import ydrasil_pkg::*;
 #(
-    parameter int DATA_WIDTH = 32,
-    parameter int PIPE1_REAL_MODE = 0
+    parameter int DATA_WIDTH = 32
 )(
     input wire clk,
     input wire rst_n,
@@ -62,7 +61,7 @@ import ydrasil_pkg::*;
     input wire [63:0] rn_preg_ready_i,
     input wire pipe1_resbuf_full_i,
     output wire issue_frontend_stall_o,
-    input wire rn_alloc_valid_o,
+    output wire rn_alloc_valid_o,
     output wire [DATA_WIDTH-1:0] operand_a,
     output wire [DATA_WIDTH-1:0] operand_b,
     output wire [DATA_WIDTH-1:0] bt_a_operand,
@@ -914,8 +913,7 @@ import ydrasil_pkg::*;
         ready_issue_allow_i & issue_valid_ff & issue_wait_block &
 	        !stall_id_i & !flush_id_i & ri_slot1_ready &
 	        slot1_bypass_rs1_phys_ready & slot1_bypass_rs2_phys_ready &
-	        !((PIPE1_REAL_MODE != 0) &&
-	          (pipe1_uopq1_safe | pipe1_uopq2_safe | pipe1_uopq3_safe) &&
+	        !((pipe1_uopq1_safe | pipe1_uopq2_safe | pipe1_uopq3_safe) &&
 	          !pipe1_resbuf_full_i);
     assign issue_fire = issue_slot0_fire | issue_slot1_bypass_fire;
     assign issue_accept =
@@ -966,30 +964,29 @@ import ydrasil_pkg::*;
          (pipe1_alu_fwd_valid_i && (if_id_trace_rf_raddr_rs2 == pipe1_alu_fwd_addr_i) &&
           (rn_if_rs2_psrc_i == pipe1_alu_fwd_pdst_i)));
 	    assign uopq2_buf_capture =
-	        (PIPE1_REAL_MODE >= 2) &&
+	        !flush_id_i &&
 	        id_advance && issue_valid_ff && issue_wait_block &&
 	        skid_valid_ff && !uopq2_buf_valid_ff &&
 	        !issue_slot1_bypass_fire && !pair1_fire &&
 	        uopq2_buf_capture_supported;
 	    assign uopq3_buf_capture =
-	        (PIPE1_REAL_MODE >= 3) &&
+	        !flush_id_i &&
 	        id_advance && issue_valid_ff && issue_wait_block &&
 	        skid_valid_ff && uopq2_buf_valid_ff && !uopq3_buf_valid_ff &&
 	        !issue_slot1_bypass_fire && !pair1_fire &&
 	        uopq2_buf_capture_supported;
     assign skid_drain = issue_accept & skid_valid_ff;
     assign pipe1_refill_skid_from_if =
-        (PIPE1_REAL_MODE >= 2) && pair1_fire &&
+        pair1_fire &&
         !pair1_refill_direct && !pipe1_fire_from2 &&
         !uopq2_buf_valid_ff && !pipe1_p0_empty_base && if_id_valid_i;
 	    assign uopq2_refill_from_if =
-	        (PIPE1_REAL_MODE >= 2) && pipe1_fire_from2 &&
+	        pipe1_fire_from2 &&
 	        !uopq3_buf_valid_ff && uopq2_buf_capture_supported;
     assign pipe1_take_if_id =
         1'b0;
     assign if_id_live_accept =
         if_id_valid_i && !flush_id_i &&
-        !((PIPE1_REAL_MODE < 2) && pair1_fire) &&
         ((issue_accept && !skid_valid_ff && !uopq2_buf_valid_ff) ||
 	         (issue_load_from_skid && !uopq2_buf_valid_ff &&
 	          !(pipe1_p0_empty_base && pair1_fire)) ||
@@ -1002,16 +999,19 @@ import ydrasil_pkg::*;
     assign issue_frontend_stall_o =
         (!flush_id_i & !stall_id_i & !bubble_id_i &
 	         issue_valid_ff & issue_wait_block & skid_valid_ff &
-	         !((PIPE1_REAL_MODE >= 2) && (pair1_fire | uopq2_buf_capture | uopq3_buf_capture))) |
+	         !(pair1_fire | uopq2_buf_capture | uopq3_buf_capture)) |
         (!flush_id_i & !stall_id_i & !bubble_id_i &
-         if_id_valid_i & !if_id_live_accept) |
-        (pair1_fire & (PIPE1_REAL_MODE < 2));
+         if_id_valid_i & !if_id_live_accept);
     assign if_id_rn_pdst_valid =
         if_id_valid_i &&
         (if_id_trace_rf_waddr_rd != '0) &&
         (if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD] |
          (if_id_trace_rf_wen_rd &&
           !if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS]));
+    assign rn_alloc_valid_o =
+        (if_id_rn_pdst_valid |
+         (if_id_valid_i && if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP])) &&
+        if_id_live_accept;
 
     assign pipe1_pipe0_present_safe =
         uopq0_valid &&
@@ -1027,7 +1027,6 @@ import ydrasil_pkg::*;
     assign pipe1_pipe0_empty_safe =
         !uopq0_valid;
     assign pipe1_pipe0_blocked_load_safe =
-        (PIPE1_REAL_MODE >= 2) &&
         issue_valid_ff && issue_wait_block &&
         (skid_valid_ff || uopq2_buf_valid_ff) &&
         !stall_id_i && !flush_id_i &&
@@ -1041,7 +1040,6 @@ import ydrasil_pkg::*;
         !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_BITMANIP] &&
         !uopq0_fence_i;
     assign pipe1_pipe0_blocked_store_safe =
-        (PIPE1_REAL_MODE >= 2) &&
         issue_valid_ff && issue_wait_block &&
         (skid_valid_ff || uopq2_buf_valid_ff) &&
         !stall_id_i && !flush_id_i &&
@@ -1404,19 +1402,15 @@ import ydrasil_pkg::*;
         pipe1_dual_supported && !pipe1_sel_pdst_valid;
     assign pipe1_p0_ready_context = issue_slot0_fire;
 	    assign pipe1_p0_blocked_context =
-	        (PIPE1_REAL_MODE >= 2) &&
 	        issue_valid_ff && issue_wait_block &&
 	        (skid_valid_ff || pipe1_uopq2_safe || pipe1_uopq3_safe) &&
 	        !stall_id_i && !flush_id_i;
 	    assign pipe1_p0_empty_base =
-	        (PIPE1_REAL_MODE >= 2) &&
 	        !issue_valid_ff && skid_valid_ff && !uopq2_buf_valid_ff && !uopq3_buf_valid_ff &&
 	        !stall_id_i && !bubble_id_i && !flush_id_i;
     assign pipe1_p0_empty_context =
         pipe1_p0_empty_base;
-`ifdef YDRASIL_ENABLE_PIPE1_REAL
     assign pipe1_dual_fire =
-        (PIPE1_REAL_MODE != 0) &&
         (pipe1_p0_ready_context | pipe1_p0_blocked_context | pipe1_p0_empty_context) &&
         ready_issue_allow_i && !flush_id_i &&
         pipe1_dual_pipe0_safe && pipe1_dual_operands_ready &&
@@ -1424,9 +1418,6 @@ import ydrasil_pkg::*;
         !pipe1_dual_raw_pipe0 && !pipe1_dual_waw_pipe0 &&
         !pipe1_dual_war_pipe0 && !pipe1_dual_pending_rd &&
         !pipe1_resbuf_full_i;
-`else
-    assign pipe1_dual_fire = 1'b0;
-`endif
     assign pair1_fire = pipe1_dual_fire;
 	    assign pipe1_fire_from1 = pair1_fire && pipe1_sel_from1;
 	    assign pipe1_fire_from2 = pair1_fire && pipe1_sel_from2;
@@ -1434,9 +1425,6 @@ import ydrasil_pkg::*;
 
 `ifndef SYNTHESIS
     always_ff @(posedge clk) begin
-        if (rst_n && pair1_fire && (PIPE1_REAL_MODE < 2)) begin
-            $fatal(1, "pipe1 fired without dual rename/ROB allocation support");
-        end
         if (rst_n && pipe1_refill_skid_from_if && if_id_rn_pdst_valid &&
             !rn_alloc_valid_o) begin
             $fatal(1, "pipe1 refill from IF/ID without rename allocation pc=0x%08h instr=0x%08h rd=x%0d",
@@ -1496,7 +1484,8 @@ import ydrasil_pkg::*;
                    issue_accept, pair1_fire);
         end
         if (rst_n && uopq2_buf_valid_ff && !pipe1_fire_from2 && !issue_load_from_uopq2 &&
-            !issue_load_from_skid && !pipe1_refill_skid_from_if && rn_alloc_valid_o) begin
+            !issue_load_from_skid && !pipe1_refill_skid_from_if &&
+            !uopq3_buf_capture && rn_alloc_valid_o) begin
             $fatal(1, "rename allocation while held uopq2 is not being drained");
         end
     end

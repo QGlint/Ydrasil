@@ -156,16 +156,6 @@ import ydrasil_pkg::*;
 
 
 );
-`ifdef YDRASIL_ENABLE_PIPE1_REAL
-`ifdef YDRASIL_PIPE1_REAL_MODE
-    localparam int PIPE1_REAL_MODE = `YDRASIL_PIPE1_REAL_MODE;
-`else
-    localparam int PIPE1_REAL_MODE = 1;
-`endif
-`else
-    localparam int PIPE1_REAL_MODE = 0;
-`endif
-
     wire [4:0]                           rf_raddr_rs1;
     wire [4:0]                           rf_raddr_rs2;
     wire                                 rf_ren_rs1;
@@ -1129,8 +1119,7 @@ import ydrasil_pkg::*;
     assign decode_valid = skid_valid_ff | uopq2_buf_valid_ff | if_id_valid_i;
 
     ydrasil_id_issue_stage #(
-        .DATA_WIDTH(DATA_WIDTH),
-        .PIPE1_REAL_MODE(PIPE1_REAL_MODE)
+        .DATA_WIDTH(DATA_WIDTH)
     ) u_ydrasil_id_issue_stage (.*);
 
     wire issue_next_from_skid = issue_accept & skid_valid_ff;
@@ -2101,7 +2090,7 @@ import ydrasil_pkg::*;
                         pair1_valid_ff <= 1'b0;
 `endif
                     end else begin
-                        skid_valid_ff <= (PIPE1_REAL_MODE >= 2) & if_id_valid_i;
+                        skid_valid_ff <= if_id_valid_i;
                         skid_pc_ff <= if_id_pc_i;
                         skid_instr_ff <= if_id_instr_i;
                         skid_pred_hit_ff <= if_id_pred_hit_i;
@@ -2138,8 +2127,8 @@ import ydrasil_pkg::*;
                         skid_rn_rs1_ready_ff <= rn_if_rs1_ready_i;
                         skid_rn_rs2_ready_ff <= rn_if_rs2_ready_i;
 `ifndef SYNTHESIS
-                        pair1_valid_ff <= (PIPE1_REAL_MODE >= 2) & if_id_valid_i;
-                        if ((PIPE1_REAL_MODE >= 2) & if_id_valid_i) begin
+                        pair1_valid_ff <= if_id_valid_i;
+                        if (if_id_valid_i) begin
                             pair1_pc_ff <= if_id_pc_i;
                             pair1_instr_ff <= if_id_instr_i;
                             pair1_seq_ff <= pair1_seq_next_ff;
@@ -2655,7 +2644,6 @@ import ydrasil_pkg::*;
             perf_ri_bypass_flush_killed <= perf_ri_bypass_flush_killed +
                 (ri_bypass_flush_killed ? 32'd1 : 32'd0);
             perf_di_pipe0_fire <= perf_di_pipe0_fire + (issue_slot0_fire ? 32'd1 : 32'd0);
-`ifdef YDRASIL_ENABLE_PIPE1_REAL
             perf_di_pipe1_fire <= perf_di_pipe1_fire + (pair1_fire ? 32'd1 : 32'd0);
             perf_di_pair_fire <= perf_di_pair_fire +
                 ((pair1_fire && pipe1_p0_ready_context) ? 32'd1 : 32'd0);
@@ -2721,7 +2709,6 @@ import ydrasil_pkg::*;
                 (pair1_fire ? 32'd1 : 32'd0);
             perf_dual_extra_instret_pipe1 <= perf_dual_extra_instret_pipe1 +
                 (pair1_fire ? 32'd1 : 32'd0);
-`endif
 `ifndef SYNTHESIS
             perf_ds_cycles <= perf_ds_cycles + 32'd1;
             perf_ds_pipe0_valid <= perf_ds_pipe0_valid +
@@ -3105,7 +3092,6 @@ import ydrasil_pkg::*;
     assign id_ex_pred_bht_index_o = id_ex_pred_bht_index_ff;
     assign id_ex_pred_l0_taken_o = id_ex_pred_l0_taken_ff;
     assign id_ex_valid_o = id_ex_valid_ff;
-`ifdef YDRASIL_ENABLE_PIPE1_REAL
     assign pipe1_issue_valid_o = pipe1_issue_valid_ff;
     assign pipe1_operand_a_o = pipe1_operand_a_ff;
     assign pipe1_operand_b_o = pipe1_operand_b_ff;
@@ -3115,17 +3101,6 @@ import ydrasil_pkg::*;
     assign pipe1_rn_pdst_o = pipe1_rn_pdst_ff;
     assign pipe1_pc_o = pipe1_pc_ff;
     assign pipe1_instr_o = pipe1_instr_ff;
-`else
-    assign pipe1_issue_valid_o = 1'b0;
-    assign pipe1_operand_a_o = '0;
-    assign pipe1_operand_b_o = '0;
-    assign pipe1_operator_o = '0;
-    assign pipe1_rf_wen_rd_o = 1'b0;
-    assign pipe1_rf_waddr_rd_o = '0;
-    assign pipe1_rn_pdst_o = '0;
-    assign pipe1_pc_o = '0;
-    assign pipe1_instr_o = '0;
-`endif
 
     assign id_ctrl_rs1_addr_o = issue_rf_raddr_rs1_ff;
     assign id_ctrl_rs2_addr_o = issue_rf_raddr_rs2_ff;
@@ -3150,8 +3125,6 @@ import ydrasil_pkg::*;
     assign rn_if_ctrl_valid_o =
         if_id_valid_i &&
         if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP];
-    assign rn_alloc_valid_o =
-        (if_id_rn_pdst_valid | rn_if_ctrl_valid_o) && if_id_live_accept;
     assign rn_alloc_rd_addr_o = if_id_trace_rf_waddr_rd;
     assign id_ctrl_operator_type_o = issue_valid_ff ? issue_operator_type_ff : '0;
 

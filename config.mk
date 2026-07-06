@@ -13,7 +13,6 @@ VERILATOR_TRACE ?= 1
 DIV_IMPL ?= lzc
 LSU_IMPL ?= legacy
 MEMS_IMPL ?= new
-PIPE1_REAL_MODE ?= 0
 PYTHON ?= python3
 TRACE_TO_CSV ?= $(PROJECT_ROOT)/verif/sim/riscv_trace_csv.py
 TRACE_COMPARE ?= $(PROJECT_ROOT)/verif/sim/ydrasil_sim.py

@@ -56,12 +56,10 @@ import ydrasil_pkg::*;
     localparam int ALU_FIFO_PTR_WIDTH = 4;
     localparam int ALU_FIFO_COUNT_WIDTH = 5;
     localparam int ALU_FIFO_BACKPRESSURE_LEVEL = 10;
-`ifdef YDRASIL_ENABLE_PIPE1_REAL
     localparam int P1_FIFO_DEPTH = 8;
     localparam int P1_FIFO_PTR_WIDTH = 3;
     localparam int P1_FIFO_COUNT_WIDTH = 4;
     localparam int P1_FIFO_BACKPRESSURE_LEVEL = 6;
-`endif
 
     reg [REGS_DATA_WIDTH-1:0] mul_fifo_data_q [0:MUL_FIFO_DEPTH-1];
     reg [REGS_ADDR_WIDTH-1:0] mul_fifo_addr_q [0:MUL_FIFO_DEPTH-1];
@@ -86,14 +84,12 @@ import ydrasil_pkg::*;
     reg [REGS_ADDR_WIDTH-1:0] wb_buf_fwd_addr_q;
     reg [REGS_DATA_WIDTH-1:0] wb_buf_fwd_data_q;
 `endif
-`ifdef YDRASIL_ENABLE_PIPE1_REAL
     reg [REGS_DATA_WIDTH-1:0] p1_fifo_data_q [0:P1_FIFO_DEPTH-1];
     reg [REGS_ADDR_WIDTH-1:0] p1_fifo_addr_q [0:P1_FIFO_DEPTH-1];
     reg [5:0] p1_fifo_pdst_q [0:P1_FIFO_DEPTH-1];
     reg [P1_FIFO_PTR_WIDTH-1:0] p1_fifo_rptr_q;
     reg [P1_FIFO_PTR_WIDTH-1:0] p1_fifo_wptr_q;
     reg [P1_FIFO_COUNT_WIDTH-1:0] p1_fifo_count_q;
-`endif
 
     wire mul_fifo_empty = (mul_fifo_count_q == '0);
     wire mul_fifo_full = (mul_fifo_count_q == MUL_FIFO_COUNT_WIDTH'(MUL_FIFO_DEPTH));
@@ -104,35 +100,20 @@ import ydrasil_pkg::*;
     wire alu_fifo_full = (alu_fifo_count_q == ALU_FIFO_COUNT_WIDTH'(ALU_FIFO_DEPTH));
     wire [REGS_DATA_WIDTH-1:0] alu_fifo_head_data = alu_fifo_data_q[alu_fifo_rptr_q];
     wire [REGS_ADDR_WIDTH-1:0] alu_fifo_head_addr = alu_fifo_addr_q[alu_fifo_rptr_q];
-`ifdef YDRASIL_ENABLE_PIPE1_REAL
     wire p1_fifo_empty = (p1_fifo_count_q == '0);
     wire p1_fifo_full = (p1_fifo_count_q == P1_FIFO_COUNT_WIDTH'(P1_FIFO_DEPTH));
     wire [REGS_DATA_WIDTH-1:0] p1_fifo_head_data = p1_fifo_data_q[p1_fifo_rptr_q];
     wire [REGS_ADDR_WIDTH-1:0] p1_fifo_head_addr = p1_fifo_addr_q[p1_fifo_rptr_q];
     wire [5:0] p1_fifo_head_pdst = p1_fifo_pdst_q[p1_fifo_rptr_q];
-`else
-    wire p1_fifo_empty = 1'b1;
-    wire p1_fifo_full = 1'b0;
-    wire [REGS_DATA_WIDTH-1:0] p1_fifo_head_data = '0;
-    wire [REGS_ADDR_WIDTH-1:0] p1_fifo_head_addr = '0;
-    wire [5:0] p1_fifo_head_pdst = '0;
-`endif
 
     wire sel_lsu = lsu_rf_wen_rd_i;
     wire sel_alu_fifo = !sel_lsu & !alu_fifo_empty;
     wire sel_alu_current = !sel_lsu & alu_fifo_empty & alu_rf_wen_rd_i;
-`ifdef YDRASIL_ENABLE_PIPE1_REAL
     wire pipe1_alu_rf_wen_eff = pipe1_alu_rf_wen_rd_i;
     wire sel_p1_fifo = !sel_lsu & alu_fifo_empty & !alu_rf_wen_rd_i & !p1_fifo_empty;
     wire sel_p1_current =
         !sel_lsu & alu_fifo_empty & !alu_rf_wen_rd_i & p1_fifo_empty & pipe1_alu_rf_wen_eff;
     wire p1_write_clear = p1_fifo_empty & !pipe1_alu_rf_wen_eff;
-`else
-    wire pipe1_alu_rf_wen_eff = 1'b0;
-    wire sel_p1_fifo = 1'b0;
-    wire sel_p1_current = 1'b0;
-    wire p1_write_clear = 1'b1;
-`endif
     wire sel_mul_fifo =
         !sel_lsu & alu_fifo_empty & !alu_rf_wen_rd_i &
         p1_write_clear & !mul_fifo_empty;
@@ -144,16 +125,10 @@ import ydrasil_pkg::*;
     wire alu_direct_write = sel_alu_current;
     wire alu_enqueue = alu_rf_wen_rd_i & !alu_direct_write;
     wire alu_enqueue_accept = alu_enqueue & (!alu_fifo_full | alu_dequeue);
-`ifdef YDRASIL_ENABLE_PIPE1_REAL
     wire p1_dequeue = sel_p1_fifo;
     wire p1_direct_write = sel_p1_current;
     wire p1_enqueue = pipe1_alu_rf_wen_eff & !p1_direct_write;
     wire p1_enqueue_accept = p1_enqueue & (!p1_fifo_full | p1_dequeue);
-`else
-    wire p1_dequeue = 1'b0;
-    wire p1_direct_write = 1'b0;
-    wire p1_enqueue_accept = 1'b0;
-`endif
     wire mul_dequeue = sel_mul_fifo;
     wire mul_direct_write = sel_mul_current;
     wire mul_enqueue = mul_rf_wen_rd_i & !mul_direct_write;
@@ -180,23 +155,17 @@ import ydrasil_pkg::*;
         alu_fifo_count_q +
         (alu_enqueue_accept ? ALU_FIFO_COUNT_WIDTH'(1) : '0) -
         (alu_dequeue ? ALU_FIFO_COUNT_WIDTH'(1) : '0);
-`ifdef YDRASIL_ENABLE_PIPE1_REAL
     wire [P1_FIFO_COUNT_WIDTH-1:0] p1_fifo_count_next =
         p1_fifo_count_q +
         (p1_enqueue_accept ? P1_FIFO_COUNT_WIDTH'(1) : '0) -
         (p1_dequeue ? P1_FIFO_COUNT_WIDTH'(1) : '0);
-`endif
     wire [MUL_FIFO_COUNT_WIDTH-1:0] mul_fifo_count_next =
         mul_fifo_count_q +
         (mul_enqueue_accept ? MUL_FIFO_COUNT_WIDTH'(1) : '0) -
         (mul_dequeue ? MUL_FIFO_COUNT_WIDTH'(1) : '0);
 
-`ifdef YDRASIL_ENABLE_PIPE1_REAL
     wire p1_wb_backpressure =
         p1_fifo_count_q >= P1_FIFO_COUNT_WIDTH'(P1_FIFO_BACKPRESSURE_LEVEL);
-`else
-    wire p1_wb_backpressure = 1'b0;
-`endif
 
     assign wb_mul_complete_o = (sel_mul_fifo | sel_mul_current);
     assign wb_mul_complete_waddr_o = sel_mul_current ? mul_rf_waddr_rd_i : mul_fifo_head_addr;
@@ -245,11 +214,9 @@ import ydrasil_pkg::*;
             alu_fifo_rptr_q     <= '0;
             alu_fifo_wptr_q     <= '0;
             alu_fifo_count_q    <= '0;
-`ifdef YDRASIL_ENABLE_PIPE1_REAL
             p1_fifo_rptr_q      <= '0;
             p1_fifo_wptr_q      <= '0;
             p1_fifo_count_q     <= '0;
-`endif
             perf_p1_wb_enqueue  <= '0;
             perf_p1_wb_dequeue  <= '0;
             perf_p1_wb_direct   <= '0;
@@ -291,7 +258,6 @@ import ydrasil_pkg::*;
 
             alu_fifo_count_q <= alu_fifo_count_next;
 
-`ifdef YDRASIL_ENABLE_PIPE1_REAL
             if (p1_enqueue_accept) begin
                 p1_fifo_data_q[p1_fifo_wptr_q] <= pipe1_alu_wdata_rd_i;
                 p1_fifo_addr_q[p1_fifo_wptr_q] <= pipe1_alu_rf_waddr_rd_i;
@@ -317,7 +283,6 @@ import ydrasil_pkg::*;
             end
             perf_p1_wb_order_fix <= perf_p1_wb_order_fix +
                 ((pipe1_alu_rf_wen_rd_i && (sel_lsu | sel_alu_fifo | sel_alu_current)) ? 32'd1 : 32'd0);
-`endif
 
             if (mul_enqueue_accept) begin
                 mul_fifo_data_q[mul_fifo_wptr_q] <= mul_wdata_rd_i;

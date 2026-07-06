@@ -94,13 +94,6 @@ else
 $(error Unsupported MEMS_IMPL '$(MEMS_IMPL)'. Use MEMS_IMPL=new or MEMS_IMPL=legacy)
 endif
 
-ifneq ($(PIPE1_REAL_MODE),)
-DEFINES += YDRASIL_ENABLE_PIPE1_REAL
-DEFINES += YDRASIL_PIPE1_REAL_MODE=$(PIPE1_REAL_MODE)
-else ifeq ($(YDRASIL_ENABLE_PIPE1_REAL),1)
-DEFINES += YDRASIL_ENABLE_PIPE1_REAL
-endif
-
 ##################################
 # Timestamp
 ##################################
