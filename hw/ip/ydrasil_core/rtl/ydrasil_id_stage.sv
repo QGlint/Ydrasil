@@ -1568,8 +1568,12 @@ import ydrasil_pkg::*;
           uopq2_fence_i)) |
         (if_id_valid_i &&
          (if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] |
+          if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD] |
+          if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE] |
           if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_CSR] |
           if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS] |
+          (if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_MUL] &&
+           !pipe1_p0_empty_context) |
           id_fence_i));
     assign pipe1_sel_from1 =
         pipe1_uopq1_safe && (pipe1_uopq1_operands_ready || !pipe1_uopq2_safe);
