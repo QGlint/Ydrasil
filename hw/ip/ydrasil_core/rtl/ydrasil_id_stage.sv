@@ -369,6 +369,7 @@ import ydrasil_pkg::*;
     wire                             pipe1_younger_flush_block;
     wire                             pipe1_pipe0_present_safe;
     wire                             pipe1_pipe0_blocked_load_safe;
+    wire                             pipe1_pipe0_blocked_store_safe;
     wire                             pipe1_pipe0_empty_safe;
     wire                             pipe1_dual_pipe0_safe;
     wire                             pipe1_dual_rs1_ready;
@@ -537,6 +538,8 @@ import ydrasil_pkg::*;
     wire                             pipe1_uopq2_operands_ready;
     wire                             pipe1_uopq1_safe;
     wire                             pipe1_uopq2_safe;
+    wire                             pipe1_uopq1_store_war_pipe0;
+    wire                             pipe1_uopq2_store_war_pipe0;
     wire                             pipe1_p0_ready_context;
     wire                             pipe1_p0_blocked_context;
     wire                             pipe1_p0_empty_base;
@@ -1543,9 +1546,23 @@ import ydrasil_pkg::*;
         !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_MUL] &&
         !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_BITMANIP] &&
         !uopq0_fence_i;
+    assign pipe1_pipe0_blocked_store_safe =
+        (PIPE1_REAL_MODE >= 2) &&
+        issue_valid_ff && issue_wait_block &&
+        (skid_valid_ff || uopq2_buf_valid_ff) &&
+        !stall_id_i && !flush_id_i &&
+        uopq0_valid &&
+        uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
+        !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+        !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
+        !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_CSR] &&
+        !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS] &&
+        !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_MUL] &&
+        !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_BITMANIP] &&
+        !uopq0_fence_i;
     assign pipe1_dual_pipe0_safe =
         pipe1_pipe0_present_safe | pipe1_pipe0_empty_safe |
-        pipe1_pipe0_blocked_load_safe;
+        pipe1_pipe0_blocked_load_safe | pipe1_pipe0_blocked_store_safe;
     assign pipe1_uopq1_supported =
         uopq1_valid &&
         uopq1_operator_type[ydrasil_pkg::OPERATOR_TYPE_ALU] &&
@@ -1618,6 +1635,18 @@ import ydrasil_pkg::*;
          (alu_fwd_valid_i && (uopq2_rf_raddr_rs2 == alu_fwd_addr_i)) ||
          (wb_fwd_valid_i && (uopq2_rf_raddr_rs2 == wb_fwd_addr_i)) ||
          (pipe1_alu_fwd_valid_i && (uopq2_rf_raddr_rs2 == pipe1_alu_fwd_addr_i)));
+    assign pipe1_uopq1_store_war_pipe0 =
+        pipe1_pipe0_blocked_store_safe &&
+        uopq1_rf_wen_rd && (uopq1_rf_waddr_rd != '0) &&
+        ((issue_rf_ren_rs1_ff && (uopq1_rf_waddr_rd == issue_rf_raddr_rs1_ff)) |
+         ((issue_rf_ren_rs2_ff | issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
+          (uopq1_rf_waddr_rd == issue_rf_raddr_rs2_ff)));
+    assign pipe1_uopq2_store_war_pipe0 =
+        pipe1_pipe0_blocked_store_safe &&
+        uopq2_rf_wen_rd && (uopq2_rf_waddr_rd != '0) &&
+        ((issue_rf_ren_rs1_ff && (uopq2_rf_waddr_rd == issue_rf_raddr_rs1_ff)) |
+         ((issue_rf_ren_rs2_ff | issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
+          (uopq2_rf_waddr_rd == issue_rf_raddr_rs2_ff)));
     assign pipe1_uopq1_safe =
         pipe1_dual_pipe0_safe && pipe1_uopq1_supported &&
         !(uopq0_rf_wen_rd && (uopq0_rf_waddr_rd != '0) &&
@@ -1625,6 +1654,7 @@ import ydrasil_pkg::*;
            (uopq1_rf_ren_rs2 && (uopq1_rf_raddr_rs2 == uopq0_rf_waddr_rd)))) &&
         !(uopq0_rf_wen_rd && (uopq0_rf_waddr_rd != '0) &&
           (uopq1_rf_waddr_rd == uopq0_rf_waddr_rd)) &&
+        !pipe1_uopq1_store_war_pipe0 &&
         skid_rn_pdst_valid_ff;
     assign pipe1_uopq1_order_safe =
         !uopq1_valid ||
@@ -1649,6 +1679,7 @@ import ydrasil_pkg::*;
            (uopq2_rf_ren_rs2 && (uopq2_rf_raddr_rs2 == uopq1_rf_waddr_rd)))) &&
         !(uopq1_valid && uopq1_rf_wen_rd && (uopq1_rf_waddr_rd != '0) &&
           (uopq2_rf_waddr_rd == uopq1_rf_waddr_rd)) &&
+        !pipe1_uopq2_store_war_pipe0 &&
         uopq2_buf_rn_pdst_valid_ff;
     assign pipe1_younger_flush_risk =
         (uopq2_valid &&
@@ -1810,7 +1841,8 @@ import ydrasil_pkg::*;
         pipe1_dual_supported && uopq0_valid && uopq0_rf_wen_rd &&
         (uopq0_rf_waddr_rd != '0) && (pipe1_sel_rf_waddr_rd == uopq0_rf_waddr_rd);
     assign pipe1_dual_war_pipe0 =
-        1'b0;
+        (pipe1_sel_from1 && pipe1_uopq1_store_war_pipe0) |
+        (pipe1_sel_from2 && pipe1_uopq2_store_war_pipe0);
     assign pipe1_dual_pending_rd =
         pipe1_dual_supported && !pipe1_sel_pdst_valid;
     assign pipe1_p0_ready_context = issue_slot0_fire;
@@ -1881,6 +1913,14 @@ import ydrasil_pkg::*;
               gpr_pending_i[pipe1_sel_rf_raddr_rs2] && !pipe1_dual_rs2_ready))) begin
             $fatal(1, "pipe1 from1 fired with stale skid operand ready pc=0x%08h instr=0x%08h",
                    pipe1_sel_pc, pipe1_sel_instr);
+        end
+        if (rst_n && pair1_fire && pipe1_pipe0_blocked_store_safe &&
+            pipe1_sel_rf_wen_rd && (pipe1_sel_rf_waddr_rd != '0) &&
+            ((issue_rf_ren_rs1_ff && (pipe1_sel_rf_waddr_rd == issue_rf_raddr_rs1_ff)) ||
+             ((issue_rf_ren_rs2_ff | issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
+              (pipe1_sel_rf_waddr_rd == issue_rf_raddr_rs2_ff)))) begin
+            $fatal(1, "pipe1 bypassed older blocked store with WAR hazard store_pc=0x%08h pipe1_pc=0x%08h rd=x%0d",
+                   issue_pc_ff, pipe1_sel_pc, pipe1_sel_rf_waddr_rd);
         end
         if (rst_n && uopq2_buf_capture && !rn_alloc_valid_o) begin
             $fatal(1, "uopq2 capture without rename allocation pc=0x%08h instr=0x%08h rd=x%0d",
