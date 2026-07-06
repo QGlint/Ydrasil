@@ -23,9 +23,11 @@ import ydrasil_pkg::*;
     input  wire [REGS_DATA_WIDTH-1:0]   mul_wdata_rd_i,
     input  wire                         mul_rf_wen_rd_i,
     input  wire [REGS_ADDR_WIDTH-1:0]   mul_rf_waddr_rd_i,
+    input  wire [5:0]                   mul_rn_pdst_i,
 
     output wire                         wb_mul_complete_o,
     output wire [REGS_ADDR_WIDTH-1:0]   wb_mul_complete_waddr_o,
+    output wire [5:0]                   wb_mul_complete_pdst_o,
     output wire                         wb_backpressure_o,
     output wire                         pipe1_resbuf_full_o,
     output wire                         pipe1_wb_dequeue_o,
@@ -62,6 +64,7 @@ import ydrasil_pkg::*;
 
     reg [REGS_DATA_WIDTH-1:0] mul_fifo_data_q [0:MUL_FIFO_DEPTH-1];
     reg [REGS_ADDR_WIDTH-1:0] mul_fifo_addr_q [0:MUL_FIFO_DEPTH-1];
+    reg [5:0] mul_fifo_pdst_q [0:MUL_FIFO_DEPTH-1];
     reg [MUL_FIFO_PTR_WIDTH-1:0] mul_fifo_rptr_q;
     reg [MUL_FIFO_PTR_WIDTH-1:0] mul_fifo_wptr_q;
     reg [MUL_FIFO_COUNT_WIDTH-1:0] mul_fifo_count_q;
@@ -95,6 +98,7 @@ import ydrasil_pkg::*;
     wire mul_fifo_full = (mul_fifo_count_q == MUL_FIFO_COUNT_WIDTH'(MUL_FIFO_DEPTH));
     wire [REGS_DATA_WIDTH-1:0] mul_fifo_head_data = mul_fifo_data_q[mul_fifo_rptr_q];
     wire [REGS_ADDR_WIDTH-1:0] mul_fifo_head_addr = mul_fifo_addr_q[mul_fifo_rptr_q];
+    wire [5:0] mul_fifo_head_pdst = mul_fifo_pdst_q[mul_fifo_rptr_q];
     wire alu_fifo_empty = (alu_fifo_count_q == '0);
     wire alu_fifo_full = (alu_fifo_count_q == ALU_FIFO_COUNT_WIDTH'(ALU_FIFO_DEPTH));
     wire [REGS_DATA_WIDTH-1:0] alu_fifo_head_data = alu_fifo_data_q[alu_fifo_rptr_q];
@@ -195,6 +199,7 @@ import ydrasil_pkg::*;
 
     assign wb_mul_complete_o = (sel_mul_fifo | sel_mul_current);
     assign wb_mul_complete_waddr_o = sel_mul_current ? mul_rf_waddr_rd_i : mul_fifo_head_addr;
+    assign wb_mul_complete_pdst_o = sel_mul_current ? mul_rn_pdst_i : mul_fifo_head_pdst;
     assign wb_backpressure_o =
         (alu_fifo_count_q >= ALU_FIFO_COUNT_WIDTH'(ALU_FIFO_BACKPRESSURE_LEVEL)) |
         p1_wb_backpressure |
@@ -315,6 +320,7 @@ import ydrasil_pkg::*;
             if (mul_enqueue_accept) begin
                 mul_fifo_data_q[mul_fifo_wptr_q] <= mul_wdata_rd_i;
                 mul_fifo_addr_q[mul_fifo_wptr_q] <= mul_rf_waddr_rd_i;
+                mul_fifo_pdst_q[mul_fifo_wptr_q] <= mul_rn_pdst_i;
                 mul_fifo_wptr_q <= mul_fifo_wptr_q + MUL_FIFO_PTR_WIDTH'(1);
             end
 

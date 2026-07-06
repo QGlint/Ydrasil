@@ -8,6 +8,7 @@ import ydrasil_pkg::*;
 
     input wire [ydrasil_pkg::BUS_ADDR_WIDTH-1:0]       ex_lsu_mem_addr_i,
     input wire [ 4:0]                      id_rd_waddr_i,
+    input wire [5:0]                       id_rn_pdst_i,
     input wire [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0]    operator_lsu_i,
     input wire [1:0]                       operator_lsu_type_i,
     input wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]      id_lsu_rs2_data_i, // 存储操作的源寄存器数据
@@ -41,6 +42,7 @@ import ydrasil_pkg::*;
     output wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]     lsu_wb_result_o,
     output wire                            lsu_rf_rd_wen_o,
     output wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     lsu_rf_rd_waddr_o,
+    output wire [5:0]                      lsu_rn_pdst_o,
     output wire                            lsu_fast_fwd_valid_o
 );
     if (LSU_MODE == LSU_MODE_NEW) begin : g_new
@@ -60,6 +62,7 @@ import ydrasil_pkg::*;
         reg store_cross_q;
         reg [REGS_DATA_WIDTH-1:0] result_q;
         reg result_valid_q;
+        reg [5:0] rd_pdst_q;
 
         wire [REGS_DATA_WIDTH-1:0] lsu_rs2_data;
         wire is_load;
@@ -178,6 +181,7 @@ import ydrasil_pkg::*;
         assign lsu_wb_result_o = result_q;
         assign lsu_rf_rd_wen_o = result_valid_q;
         assign lsu_rf_rd_waddr_o = result_valid_q ? rd_addr_q : '0;
+        assign lsu_rn_pdst_o = result_valid_q ? rd_pdst_q : '0;
         assign lsu_fast_fwd_valid_o = result_valid_q;
 
         always_ff @(posedge clk or negedge rst_n) begin
@@ -193,6 +197,7 @@ import ydrasil_pkg::*;
                 store_cross_q   <= 1'b0;
                 result_q        <= '0;
                 result_valid_q  <= 1'b0;
+                rd_pdst_q       <= '0;
             end else begin
                 result_valid_q <= 1'b0;
 
@@ -203,6 +208,7 @@ import ydrasil_pkg::*;
                             store_data_q   <= mem_rs2_data;
                             operator_lsu_q <= operator_lsu_i;
                             rd_addr_q      <= id_rd_waddr_i;
+                            rd_pdst_q      <= id_rn_pdst_i;
                             addr_index_q   <= mem_addr_index;
                             load_cross_q   <= request_crosses_word & is_load;
                             store_cross_q  <= request_crosses_word & is_store;
@@ -265,18 +271,22 @@ import ydrasil_pkg::*;
     reg [1:0]                                  mmio_addr_index_q;
     reg [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0]   mmio_operator_lsu_q;
     reg [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     mmio_rd_addr_q;
+    reg [5:0]                                  mmio_pdst_q;
     reg        mmio_wb_valid_q;
     reg [ydrasil_pkg::REGS_DATA_WIDTH-1:0]     mmio_wb_result_q;
     reg [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     mmio_wb_rd_addr_q;
+    reg [5:0]                                  mmio_wb_pdst_q;
 
     reg        load_s1_valid_q;
     reg [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     load_s1_rd_addr_q;
+    reg [5:0]                                  load_s1_pdst_q;
     reg [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0]   load_s1_operator_lsu_q;
     reg [1:0]                                  load_s1_addr_index_q;
     reg                                        load_s1_crosses_word_q;
 
     reg        load_s2_valid_q;
     reg [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     load_s2_rd_addr_q;
+    reg [5:0]                                  load_s2_pdst_q;
     reg [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0]   load_s2_operator_lsu_q;
     reg [ydrasil_pkg::REGS_DATA_WIDTH-1:0]     load_s2_shifted_q;
 
@@ -292,6 +302,7 @@ import ydrasil_pkg::*;
     wire mmio_wb_out_valid;
     wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] selected_wb_result;
     wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] selected_wb_rd_addr;
+    wire [5:0] selected_wb_pdst;
     localparam int DTCM_TAG_LSB = ydrasil_pkg::DTCM_ADDR_WIDTH + 2;
 
     assign is_load = operator_lsu_type_i[ydrasil_pkg::OPERATOR_TYPE_LOAD - ydrasil_pkg::OPERATOR_TYPE_LSU_BASE];
@@ -446,11 +457,15 @@ import ydrasil_pkg::*;
     assign selected_wb_rd_addr =
         load_s1_fast_wb ? load_s1_rd_addr_q :
         load_s2_valid_q ? load_s2_rd_addr_q : mmio_wb_rd_addr_q;
+    assign selected_wb_pdst =
+        load_s1_fast_wb ? load_s1_pdst_q :
+        load_s2_valid_q ? load_s2_pdst_q : mmio_wb_pdst_q;
 
     assign lsu_ctrl_busy_o = mmio_busy | mmio_accept;
     assign lsu_wb_result_o = selected_wb_result;
     assign lsu_rf_rd_wen_o = dtcm_wb_valid | mmio_wb_out_valid;
     assign lsu_rf_rd_waddr_o = (dtcm_wb_valid | mmio_wb_out_valid) ? selected_wb_rd_addr : '0;
+    assign lsu_rn_pdst_o = (dtcm_wb_valid | mmio_wb_out_valid) ? selected_wb_pdst : '0;
     assign lsu_fast_fwd_valid_o = dtcm_wb_valid;
 
     always_ff @(posedge clk or negedge rst_n) begin
@@ -465,22 +480,27 @@ import ydrasil_pkg::*;
             mmio_addr_index_q      <= '0;
             mmio_operator_lsu_q    <= '0;
             mmio_rd_addr_q         <= '0;
+            mmio_pdst_q            <= '0;
             mmio_wb_valid_q        <= 1'b0;
             mmio_wb_result_q       <= '0;
             mmio_wb_rd_addr_q      <= '0;
+            mmio_wb_pdst_q         <= '0;
             load_s1_valid_q        <= 1'b0;
             load_s1_rd_addr_q      <= '0;
+            load_s1_pdst_q         <= '0;
             load_s1_operator_lsu_q <= '0;
             load_s1_addr_index_q   <= '0;
             load_s1_crosses_word_q <= 1'b0;
             load_s2_valid_q        <= 1'b0;
             load_s2_rd_addr_q      <= '0;
+            load_s2_pdst_q         <= '0;
             load_s2_operator_lsu_q <= '0;
             load_s2_shifted_q      <= '0;
         end else begin
             load_s1_valid_q <= dtcm_load_req;
             if (dtcm_load_req) begin
                 load_s1_rd_addr_q      <= id_rd_waddr_i;
+                load_s1_pdst_q         <= id_rn_pdst_i;
                 load_s1_operator_lsu_q <= operator_lsu_i;
                 load_s1_addr_index_q   <= mem_addr_index;
                 load_s1_crosses_word_q <= request_crosses_word;
@@ -489,6 +509,7 @@ import ydrasil_pkg::*;
             load_s2_valid_q <= load_s1_valid_q && load_s1_crosses_word_q;
             if (load_s1_valid_q && load_s1_crosses_word_q) begin
                 load_s2_rd_addr_q      <= load_s1_rd_addr_q;
+                load_s2_pdst_q         <= load_s1_pdst_q;
                 load_s2_operator_lsu_q <= load_s1_operator_lsu_q;
                 load_s2_shifted_q      <= load_shifted_data;
             end
@@ -502,6 +523,7 @@ import ydrasil_pkg::*;
                 mmio_wb_valid_q   <= 1'b1;
                 mmio_wb_result_q  <= mmio_load_result;
                 mmio_wb_rd_addr_q <= mmio_rd_addr_q;
+                mmio_wb_pdst_q    <= mmio_pdst_q;
             end
 
             if (mmio_req_valid_q) begin
@@ -521,6 +543,7 @@ import ydrasil_pkg::*;
                 mmio_addr_index_q   <= mem_addr_index;
                 mmio_operator_lsu_q <= operator_lsu_i;
                 mmio_rd_addr_q      <= id_rd_waddr_i;
+                mmio_pdst_q         <= id_rn_pdst_i;
             end
         end
     end

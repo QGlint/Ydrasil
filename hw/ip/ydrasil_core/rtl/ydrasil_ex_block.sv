@@ -74,6 +74,7 @@ import ydrasil_pkg::*;
     output wire [REGS_DATA_WIDTH-1:0]      mul_wdata_rd_o,
     output wire                            mul_rf_wen_rd_o,
     output wire [REGS_ADDR_WIDTH-1:0]      mul_rf_waddr_rd_o,
+    output wire [5:0]                      mul_rn_pdst_o,
     output wire                            mul_result_valid_o,
 
     output wire                            ex_instret_inc_o,
@@ -461,9 +462,11 @@ import ydrasil_pkg::*;
         .operator_i      (operator_i),
         .issue_wen_i     (mul_issue_wen),
         .issue_waddr_i   (id_rf_waddr_rd_i),
+        .issue_pdst_i    (id_rn_pdst_i),
         .result_valid_o  (mul_result_valid),
         .result_wen_o    (mul_rf_wen_rd_o),
         .result_waddr_o  (mul_rf_waddr_rd_o),
+        .result_pdst_o   (mul_rn_pdst_o),
         .result_wdata_o  (mul_wdata_rd_o)
     );
 

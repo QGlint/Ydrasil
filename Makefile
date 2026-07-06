@@ -248,11 +248,18 @@ coremark_result:
 		echo "[COREMARK] Result from $(COREMARK_RESULT_LOG)" | tee -a "$(PPA_COREMARK_LOG)"; \
 		if grep -q '^COREMARK_UART:' "$(COREMARK_RESULT_LOG)"; then \
 			sed -n 's/^COREMARK_UART: //p' "$(COREMARK_RESULT_LOG)" > "$$coremark_text"; \
+			sed -n '/^PERF_[A-Z0-9_]*:/p' "$(COREMARK_RESULT_LOG)" >> "$$coremark_text"; \
 		else \
 			sed -n '/^\(CoreMark Size\|Total ticks\|Total time (secs)\|Iterations       \|Compiler version\|Compiler flags\|Memory location\|seedcrc\|Correct operation validated\|Errors detected\|ERROR!\|COREMARK DONE\|PERF_[A-Z0-9_]*:\|\[[0-9]\+\]crc\)/p' "$(COREMARK_RESULT_LOG)" > "$$coremark_text"; \
 		fi; \
 		if grep -Eq '^(CoreMark Size|Total ticks|Total time \(secs\)|Iterations       |Compiler version|Compiler flags|Memory location|seedcrc|Correct operation validated|Errors detected|ERROR!|COREMARK DONE|PERF_[A-Z0-9_]+:|\[[0-9]+\]crc)' "$$coremark_text"; then \
 			grep -E '^(CoreMark Size|Total ticks|Total time \(secs\)|Iterations       |Compiler version|Compiler flags|Memory location|seedcrc|Correct operation validated|Errors detected|ERROR!|COREMARK DONE|PERF_[A-Z0-9_]+:|\[[0-9]+\]crc)' "$$coremark_text" | tee -a "$(PPA_COREMARK_LOG)"; \
+			perf_keys="PERF_METRIC PERF_CSR_INSTRET PERF_RATIO PERF_STALL PERF_SCOREBOARD_CLASS PERF_FRONTEND PERF_ID PERF_READY_ISSUE PERF_ALU_RATIO PERF_DUAL_SHADOW PERF_UOPQ_ISSUE PERF_RENAME PERF_PRF PERF_ISSUEQ PERF_ROB PERF_ROB_HEAD_SPLIT PERF_DUAL_ISSUE PERF_PIPE1_OPERAND_BLOCK_SPLIT PERF_DUAL_GAIN PERF_BRANCH"; \
+			for key in $$perf_keys; do \
+				if ! grep -q "^$$key" "$$coremark_text"; then \
+					echo "MISSING: $$key"; \
+				fi; \
+			done | tee -a "$(PPA_COREMARK_LOG)"; \
 			awk -v hz="$(COREMARK_SCORE_HZ)" '\
 				/^Iterations[[:space:]]*:/ { iterations=$$3 } \
 				/^Total ticks[[:space:]]*:/ { ticks=$$4 } \
