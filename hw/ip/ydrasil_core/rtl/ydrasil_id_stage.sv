@@ -1631,14 +1631,6 @@ import ydrasil_pkg::*;
         pipe1_alu_fwd_valid_i && pipe1_sel_rf_ren_rs2 &&
         (pipe1_sel_rf_raddr_rs2 != '0) &&
         (pipe1_sel_rf_raddr_rs2 == pipe1_alu_fwd_addr_i);
-    assign pipe1_dual_rs1_ready =
-        !pipe1_sel_rf_ren_rs1 || (pipe1_sel_rf_raddr_rs1 == '0) ||
-        pipe1_prf_rs1_ready_i;
-    assign pipe1_dual_rs2_ready =
-        !pipe1_sel_rf_ren_rs2 || (pipe1_sel_rf_raddr_rs2 == '0) ||
-        pipe1_prf_rs2_ready_i;
-    assign pipe1_dual_operands_ready =
-        pipe1_dual_supported && pipe1_dual_rs1_ready && pipe1_dual_rs2_ready;
     wire pipe1_prf_rs1_allowed =
         pipe1_sel_rf_ren_rs1 &&
         (pipe1_sel_rf_raddr_rs1 != '0) &&
@@ -1649,6 +1641,24 @@ import ydrasil_pkg::*;
         (pipe1_sel_rf_raddr_rs2 != '0) &&
         (gpr_pending_i[pipe1_sel_rf_raddr_rs2] || pipe1_prf_rs2_uncommitted_i) &&
         (pipe1_sel_rs2_psrc != pipe1_sel_pdst);
+    wire pipe1_arch_rs1_ready =
+        pipe1_sel_rf_ren_rs1 && (pipe1_sel_rf_raddr_rs1 != '0) &&
+        !gpr_pending_i[pipe1_sel_rf_raddr_rs1] &&
+        !pipe1_prf_rs1_uncommitted_i;
+    wire pipe1_arch_rs2_ready =
+        pipe1_sel_rf_ren_rs2 && (pipe1_sel_rf_raddr_rs2 != '0) &&
+        !gpr_pending_i[pipe1_sel_rf_raddr_rs2] &&
+        !pipe1_prf_rs2_uncommitted_i;
+    assign pipe1_dual_rs1_ready =
+        !pipe1_sel_rf_ren_rs1 || (pipe1_sel_rf_raddr_rs1 == '0) ||
+        pipe1_arch_rs1_ready ||
+        (pipe1_prf_rs1_allowed && pipe1_prf_rs1_ready_i);
+    assign pipe1_dual_rs2_ready =
+        !pipe1_sel_rf_ren_rs2 || (pipe1_sel_rf_raddr_rs2 == '0) ||
+        pipe1_arch_rs2_ready ||
+        (pipe1_prf_rs2_allowed && pipe1_prf_rs2_ready_i);
+    assign pipe1_dual_operands_ready =
+        pipe1_dual_supported && pipe1_dual_rs1_ready && pipe1_dual_rs2_ready;
     assign pipe1_dual_rs1_data =
         pipe1_dual_rs1_alu_fwd ? alu_fwd_data_i :
         pipe1_dual_rs1_p1alu_fwd ? pipe1_alu_fwd_data_i :
