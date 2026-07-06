@@ -1099,6 +1099,17 @@ import ydrasil_pkg::*;
 	wire rn_real_pipe1_head_committing =
 		rn_real_rob_pipe1_q[rn_real_rob_head_q] &
 		pipe1_commit_rf_wen;
+	wire rn_real_pipe1_head_rf_block =
+		rn_real_rob_valid_q[rn_real_rob_head_q] &
+		rn_real_rob_pipe1_q[rn_real_rob_head_q] &
+		rn_real_rob_ready_q[rn_real_rob_head_q] &
+		!pipe1_commit_rf_wen &
+		wb_rf_wen_rd;
+	wire rn_real_pipe1_only_head_rf_block =
+		rn_real_pipe1_head_rf_block &
+		!rn_real_rob_has_pipe1_not_head() &
+		!(rn_real_pipe1_pdst_found & rn_real_pipe1_pdst_valid) &
+		!(pipe1_issue_valid & (pipe1_rn_pdst_issue != '0));
 	wire rn_real_pipe1_older_uncommitted =
 		(rn_real_rob_pipe1_q[rn_real_rob_head_q] & !rn_real_pipe1_head_committing) |
 		rn_real_rob_has_pipe1_not_head() |
@@ -1106,8 +1117,11 @@ import ydrasil_pkg::*;
 		(pipe1_issue_valid & (pipe1_rn_pdst_issue != '0));
 	wire rn_real_ctrl_older_rob_block =
 		id_ctrl_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] &
-		rn_real_pipe1_older_uncommitted &
+		(rn_real_pipe1_older_uncommitted & !rn_real_pipe1_only_head_rf_block) &
 		!rn_real_ctrl_at_head;
+`ifndef SYNTHESIS
+	reg rn_real_branch_head_rf_escape_q;
+`endif
 	wire rn_real_ctrl_rs1_legacy_fwd =
 		(wb_hzd_valid_q & id_ctrl_rs1_ren & (id_ctrl_rs1_addr != '0) &
 		 (id_ctrl_rs1_addr == wb_hzd_addr_q)) |
@@ -1644,15 +1658,36 @@ import ydrasil_pkg::*;
 		end
 	end
 
-`ifndef SYNTHESIS
-	always_ff @(posedge clk) begin
-		if (rst_n && id_ex_is_div && ex_mul_stall_q && id_ex_rd_issue) begin
-			$fatal(1, "div/rem rd issue repeated while ID/EX is held");
+	`ifndef SYNTHESIS
+		always_ff @(posedge clk) begin
+			if (rst_n && id_ex_is_div && ex_mul_stall_q && id_ex_rd_issue) begin
+				$fatal(1, "div/rem rd issue repeated while ID/EX is held");
+			end
 		end
-	end
-`endif
 
-`ifndef SYNTHESIS
+		always_ff @(posedge clk or negedge rst_n) begin
+			if (!rst_n) begin
+				rn_real_branch_head_rf_escape_q <= 1'b0;
+			end else begin
+				if (rn_real_branch_head_rf_escape_q &&
+				    (flush_ex | interrupt) && !pipe1_commit_rf_wen) begin
+					$fatal(1, "branch escaped ready pipe1 head before pipe1 committed");
+				end
+				if (pipe1_commit_rf_wen | flush_ex | interrupt) begin
+					rn_real_branch_head_rf_escape_q <= 1'b0;
+				end else if (id_ctrl_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+				             rn_real_pipe1_only_head_rf_block &&
+				             !rn_real_ctrl_at_head &&
+				             !rn_real_ctrl_rs1_block &&
+				             !rn_real_ctrl_rs2_block &&
+				             !bubble_id && !stall_id && !flush_id) begin
+					rn_real_branch_head_rf_escape_q <= 1'b1;
+				end
+			end
+		end
+	`endif
+
+	`ifndef SYNTHESIS
 	always_ff @(posedge clk or negedge rst_n) begin
 		if (!rst_n) begin
 			perf_prf_rd0 <= '0;
