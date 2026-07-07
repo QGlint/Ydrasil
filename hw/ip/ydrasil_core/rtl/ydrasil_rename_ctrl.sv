@@ -340,9 +340,7 @@ import ydrasil_pkg::*;
         rob_pipe1_q[rob_head_q] &
         (rob_arch_rd_q[rob_head_q] != '0) &
         !wb_rf_wen_i;
-    assign commit0_valid_o =
-        commit0_ready &
-        (!rob_pipe1_q[rob_head_q] | pipe1_commit_rf_wen_o);
+    assign commit0_valid_o = commit0_ready;
     assign commit0_ready_o = commit0_ready;
     assign pipe1_commit_arch_rd_o = rob_arch_rd_q[rob_head_q];
     assign pipe1_commit_data_o = rob_data_q[rob_head_q];
@@ -383,10 +381,7 @@ import ydrasil_pkg::*;
         rob_has_pipe1_not_head() |
         (pipe1_pdst_found_o & (pipe1_wb_pdst_i != '0)) |
         (pipe1_issue_valid_i & (pipe1_issue_pdst_i != '0));
-    wire ctrl_older_rob_block =
-        id_ctrl_operator_type_i[OPERATOR_TYPE_BJP] &
-        (pipe1_older_uncommitted & !pipe1_branch_order_escape) &
-        !ctrl_at_head;
+    wire ctrl_older_rob_block = 1'b0;
     wire ctrl_rs1_ready_for_branch =
         rs1_ready_o |
         (id_ctrl_operator_type_i[OPERATOR_TYPE_BJP] &

@@ -173,9 +173,7 @@ import ydrasil_pkg::*;
     input wire [5:0] issue_rn_rs2_psrc_ff,
     input wire [5:0] issue_rn_pdst_ff,
     input wire issue_rn_pdst_valid_ff,
-`ifndef SYNTHESIS
     input wire [DATA_WIDTH-1:0] alu_stable_data_ff,
-`endif
     input wire [DATA_WIDTH-1:0] decode_pc,
     input wire [DATA_WIDTH-1:0] decode_instr,
     input wire decode_pred_hit,
@@ -1240,10 +1238,7 @@ import ydrasil_pkg::*;
 	        pipe1_uopq2_safe && !issue_load_from_uopq2 && pipe1_uopq2_operands_ready;
 	    wire pipe1_uopq3_ready_candidate =
 	        pipe1_uopq3_safe && pipe1_uopq3_operands_ready;
-	    assign pipe1_sel_from1 =
-	        pipe1_uopq1_safe &&
-	        (pipe1_uopq1_operands_ready ||
-	         (!pipe1_uopq2_ready_candidate && !pipe1_uopq3_ready_candidate));
+	    assign pipe1_sel_from1 = 1'b0;
 	    assign pipe1_sel_from2 =
 	        (!pipe1_uopq1_safe || !pipe1_uopq1_operands_ready) &&
 	        pipe1_uopq2_safe && !issue_load_from_uopq2 &&

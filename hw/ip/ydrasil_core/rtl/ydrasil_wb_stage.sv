@@ -133,7 +133,8 @@ import ydrasil_pkg::*;
     wire p1_enqueue_accept = p1_enqueue & (!p1_fifo_full | p1_dequeue);
     wire p1_fifo_ready_event = p1_dequeue & !p1_fifo_head_ready;
     wire p1_current_ready_event =
-        (p1_direct_write | p1_enqueue_accept) & !p1_fifo_ready_event & !sel_lsu;
+        pipe1_alu_rf_wen_eff & !p1_fifo_ready_event &
+        !(alu_rf_wen_rd_i & lsu_rf_wen_rd_i);
     wire mul_dequeue = sel_mul_fifo;
     wire mul_direct_write = sel_mul_current;
     wire mul_enqueue = mul_rf_wen_rd_i & !mul_direct_write;

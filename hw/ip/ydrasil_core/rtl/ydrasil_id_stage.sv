@@ -130,11 +130,9 @@ import ydrasil_pkg::*;
     output wire [4:0]                      rn_alloc_rd_addr_o,
     output wire                            rn_if_rd_valid_o,
     output wire                            rn_if_ctrl_valid_o,
-`ifndef SYNTHESIS
     output wire                            id_alu_stable_valid_o,
     output wire [4:0]                      id_alu_stable_addr_o,
     output wire [DATA_WIDTH-1:0]           id_alu_stable_data_o,
-`endif
 
     output wire                            pipe1_issue_valid_o,
     output wire [DATA_WIDTH-1:0]           pipe1_operand_a_o,
@@ -1559,11 +1557,9 @@ import ydrasil_pkg::*;
             issue_rn_pdst_ff <= '0;
             issue_rn_pdst_valid_ff <= 1'b0;
             id_rn_pdst_ff <= '0;
-`ifndef SYNTHESIS
             alu_stable_valid_ff <= 1'b0;
             alu_stable_addr_ff <= '0;
             alu_stable_data_ff <= '0;
-`endif
             operand_a_ff        <= '0;
             operand_b_ff        <= '0;
             operator_ff         <= '0;
@@ -1813,9 +1809,7 @@ import ydrasil_pkg::*;
 	                id_rn_pdst_ff <= '0;
                 id_ex_valid_ff <= 1'b0;
                 id_fence_i_ff <= 1'b0;
-`ifndef SYNTHESIS
                 alu_stable_valid_ff <= 1'b0;
-`endif
                 pipe1_issue_valid_ff <= 1'b0;
 `ifndef SYNTHESIS
                 pair1_valid_ff <= 1'b0;
@@ -2457,11 +2451,9 @@ import ydrasil_pkg::*;
                             issue_wait_rs1_ff <= 1'b0;
                             issue_wait_rs2_ff <= 1'b0;
                         end
-`ifndef SYNTHESIS
                         alu_stable_valid_ff <= issue_alu_stable_candidate;
                         alu_stable_addr_ff <= issue_rf_waddr_rd_ff;
                         alu_stable_data_ff <= issue_alu_stable_result;
-`endif
                     end else begin
                         id_ex_valid_ff <= 1'b0;
                         id_fence_i_ff <= 1'b0;
@@ -3057,11 +3049,9 @@ import ydrasil_pkg::*;
     assign operator_o           = operator_ff;
     assign id_alu_rf_wen_rd_o   = rf_wen_rd_ff;
     assign id_rf_waddr_rd_o     = rf_waddr_rd_ff;
-`ifndef SYNTHESIS
     assign id_alu_stable_valid_o = alu_stable_valid_ff;
     assign id_alu_stable_addr_o  = alu_stable_addr_ff;
     assign id_alu_stable_data_o  = alu_stable_data_ff;
-`endif
     assign operator_lsu_o       = operator_lsu_ff;
     assign operator_type_o      = operator_type_ff;
     assign id_lsu_rs2_data_o    = id_lsu_rs2_data_ff; // 直接传递寄存器数据，供LSU使用

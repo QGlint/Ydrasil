@@ -14,32 +14,30 @@ import ydrasil_pkg::*;
     input  wire [INST_ADDR_WIDTH-1:0] alloc_pc_i,
     input  wire [INST_DATA_WIDTH-1:0] alloc_instr_i,
 
-    input  wire alu_valid_i,
-    input  wire [INST_ADDR_WIDTH-1:0] alu_pc_i,
-    input  wire [INST_DATA_WIDTH-1:0] alu_instr_i,
-    input  wire [REGS_ADDR_WIDTH-1:0] alu_waddr_i,
-    input  wire [REGS_DATA_WIDTH-1:0] alu_wdata_i,
+    input  wire pipe0_issue_valid_i,
+    input  wire [INST_ADDR_WIDTH-1:0] pipe0_issue_pc_i,
+    input  wire pipe0_issue_load_i,
+    input  wire [REGS_ADDR_WIDTH-1:0] pipe0_issue_waddr_i,
 
-    input  wire lsu_issue_valid_i,
-    input  wire [INST_ADDR_WIDTH-1:0] lsu_issue_pc_i,
-    input  wire [INST_DATA_WIDTH-1:0] lsu_issue_instr_i,
-    input  wire lsu_valid_i,
-    input  wire [REGS_ADDR_WIDTH-1:0] lsu_waddr_i,
-    input  wire [REGS_DATA_WIDTH-1:0] lsu_wdata_i,
+    input  wire alu_wb_valid_i,
+    input  wire [REGS_ADDR_WIDTH-1:0] alu_wb_waddr_i,
+    input  wire [REGS_DATA_WIDTH-1:0] alu_wb_wdata_i,
+
+    input  wire lsu_wb_valid_i,
+    input  wire [REGS_ADDR_WIDTH-1:0] lsu_wb_waddr_i,
+    input  wire [REGS_DATA_WIDTH-1:0] lsu_wb_wdata_i,
 
     input  wire mul_issue_valid_i,
     input  wire [INST_ADDR_WIDTH-1:0] mul_issue_pc_i,
-    input  wire [INST_DATA_WIDTH-1:0] mul_issue_instr_i,
-    input  wire mul_valid_i,
-    input  wire [REGS_ADDR_WIDTH-1:0] mul_waddr_i,
-    input  wire [REGS_DATA_WIDTH-1:0] mul_wdata_i,
+    input  wire mul_wb_valid_i,
+    input  wire [REGS_ADDR_WIDTH-1:0] mul_wb_waddr_i,
+    input  wire [REGS_DATA_WIDTH-1:0] mul_wb_wdata_i,
 
     input  wire pipe1_issue_valid_i,
     input  wire [INST_ADDR_WIDTH-1:0] pipe1_issue_pc_i,
-    input  wire [INST_DATA_WIDTH-1:0] pipe1_issue_instr_i,
-    input  wire pipe1_valid_i,
-    input  wire [REGS_ADDR_WIDTH-1:0] pipe1_waddr_i,
-    input  wire [REGS_DATA_WIDTH-1:0] pipe1_wdata_i
+    input  wire pipe1_wb_valid_i,
+    input  wire [REGS_ADDR_WIDTH-1:0] pipe1_wb_waddr_i,
+    input  wire [REGS_DATA_WIDTH-1:0] pipe1_wb_wdata_i
 );
 
     reg [INST_ADDR_WIDTH-1:0] commit_pc_q    [0:FIFO_DEPTH-1];
@@ -51,14 +49,25 @@ import ydrasil_pkg::*;
     reg [FIFO_PTR_WIDTH-1:0]  commit_wptr_q;
 
     reg [INST_ADDR_WIDTH-1:0] lsu_pc_q    [0:FIFO_DEPTH-1];
-    reg [INST_DATA_WIDTH-1:0] lsu_instr_q [0:FIFO_DEPTH-1];
     reg [FIFO_PTR_WIDTH-1:0]  lsu_rptr_q;
     reg [FIFO_PTR_WIDTH-1:0]  lsu_wptr_q;
 
     reg [INST_ADDR_WIDTH-1:0] mul_pc_q    [0:FIFO_DEPTH-1];
-    reg [INST_DATA_WIDTH-1:0] mul_instr_q [0:FIFO_DEPTH-1];
     reg [FIFO_PTR_WIDTH-1:0]  mul_rptr_q;
     reg [FIFO_PTR_WIDTH-1:0]  mul_wptr_q;
+
+    reg [INST_ADDR_WIDTH-1:0] pipe1_pc_q    [0:FIFO_DEPTH-1];
+    reg [FIFO_PTR_WIDTH-1:0]  pipe1_rptr_q;
+    reg [FIFO_PTR_WIDTH-1:0]  pipe1_wptr_q;
+
+    reg pipe0_issue_valid_q;
+    reg [INST_ADDR_WIDTH-1:0] pipe0_issue_pc_q;
+    reg pipe0_load_issue_valid_q;
+    reg [INST_ADDR_WIDTH-1:0] pipe0_load_issue_pc_q;
+    reg mul_issue_valid_q;
+    reg [INST_ADDR_WIDTH-1:0] mul_issue_pc_q;
+    reg pipe1_issue_valid_q;
+    reg [INST_ADDR_WIDTH-1:0] pipe1_issue_pc_q;
 
     reg [31:0] perf_commit_shell_alloc;
     reg [31:0] perf_commit_shell_ready;
@@ -110,7 +119,6 @@ import ydrasil_pkg::*;
 
     task automatic mark_matching_ready;
         input [INST_ADDR_WIDTH-1:0] pc;
-        input [INST_DATA_WIDTH-1:0] instr;
         input [REGS_ADDR_WIDTH-1:0] waddr;
         input [REGS_DATA_WIDTH-1:0] wdata;
         output reg found;
@@ -122,8 +130,7 @@ import ydrasil_pkg::*;
                 idx = commit_rptr_q + FIFO_PTR_WIDTH'(j);
                 if (!found && (idx != commit_wptr_q) &&
                     !commit_ready_q[idx] &&
-                    (commit_pc_q[idx] == pc) &&
-                    (commit_instr_q[idx] == instr)) begin
+                    (commit_pc_q[idx] == pc)) begin
                     commit_waddr_q[idx] = waddr;
                     commit_wdata_q[idx] = wdata;
                     commit_ready_q[idx] = 1'b1;
@@ -136,19 +143,41 @@ import ydrasil_pkg::*;
 
     task automatic mark_or_alloc_ready;
         input [INST_ADDR_WIDTH-1:0] pc;
-        input [INST_DATA_WIDTH-1:0] instr;
         input [REGS_ADDR_WIDTH-1:0] waddr;
         input [REGS_DATA_WIDTH-1:0] wdata;
         reg found;
         begin
             if (waddr != '0) begin
-                mark_matching_ready(pc, instr, waddr, wdata, found);
+                mark_matching_ready(pc, waddr, wdata, found);
                 if (!found) begin
-                    alloc_ready_entry(pc, instr, waddr, wdata);
+                    alloc_ready_entry(pc, '0, waddr, wdata);
                 end
             end
         end
     endtask
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            pipe0_issue_valid_q <= 1'b0;
+            pipe0_issue_pc_q <= '0;
+            pipe0_load_issue_valid_q <= 1'b0;
+            pipe0_load_issue_pc_q <= '0;
+            mul_issue_valid_q <= 1'b0;
+            mul_issue_pc_q <= '0;
+            pipe1_issue_valid_q <= 1'b0;
+            pipe1_issue_pc_q <= '0;
+        end else begin
+            pipe0_issue_valid_q <= pipe0_issue_valid_i;
+            pipe0_issue_pc_q <= pipe0_issue_pc_i;
+            pipe0_load_issue_valid_q <=
+                pipe0_issue_valid_i & pipe0_issue_load_i & (pipe0_issue_waddr_i != '0);
+            pipe0_load_issue_pc_q <= pipe0_issue_pc_i;
+            mul_issue_valid_q <= mul_issue_valid_i;
+            mul_issue_pc_q <= mul_issue_pc_i;
+            pipe1_issue_valid_q <= pipe1_issue_valid_i;
+            pipe1_issue_pc_q <= pipe1_issue_pc_i;
+        end
+    end
 
     task automatic squash_not_ready;
         integer j;
@@ -190,6 +219,8 @@ import ydrasil_pkg::*;
             lsu_wptr_q = '0;
             mul_rptr_q = '0;
             mul_wptr_q = '0;
+            pipe1_rptr_q = '0;
+            pipe1_wptr_q = '0;
             perf_commit_shell_alloc = '0;
             perf_commit_shell_ready = '0;
             perf_commit_shell_retire = '0;
@@ -202,9 +233,8 @@ import ydrasil_pkg::*;
                 commit_wdata_q[i] = '0;
                 commit_ready_q[i] = 1'b0;
                 lsu_pc_q[i] = '0;
-                lsu_instr_q[i] = '0;
                 mul_pc_q[i] = '0;
-                mul_instr_q[i] = '0;
+                pipe1_pc_q[i] = '0;
             end
         end else begin
             if (alloc_valid_i) begin
@@ -212,45 +242,53 @@ import ydrasil_pkg::*;
                 perf_commit_shell_alloc = perf_commit_shell_alloc + 32'd1;
             end
 
-            if (lsu_issue_valid_i) begin
-                lsu_pc_q[lsu_wptr_q] = lsu_issue_pc_i;
-                lsu_instr_q[lsu_wptr_q] = lsu_issue_instr_i;
+            if (pipe0_load_issue_valid_q) begin
+                lsu_pc_q[lsu_wptr_q] = pipe0_load_issue_pc_q;
                 lsu_wptr_q = lsu_wptr_q + FIFO_PTR_WIDTH'(1);
             end
 
-            if (mul_issue_valid_i) begin
-                mul_pc_q[mul_wptr_q] = mul_issue_pc_i;
-                mul_instr_q[mul_wptr_q] = mul_issue_instr_i;
+            if (mul_issue_valid_q) begin
+                mul_pc_q[mul_wptr_q] = mul_issue_pc_q;
                 mul_wptr_q = mul_wptr_q + FIFO_PTR_WIDTH'(1);
             end
 
-            if (alu_valid_i) begin
-                mark_or_alloc_ready(alu_pc_i, alu_instr_i, alu_waddr_i, alu_wdata_i);
+            if (pipe1_issue_valid_q) begin
+                pipe1_pc_q[pipe1_wptr_q] = pipe1_issue_pc_q;
+                pipe1_wptr_q = pipe1_wptr_q + FIFO_PTR_WIDTH'(1);
             end
 
-            if (mul_valid_i) begin
+            if (pipe0_issue_valid_q && alu_wb_valid_i) begin
+                mark_or_alloc_ready(pipe0_issue_pc_q, alu_wb_waddr_i, alu_wb_wdata_i);
+            end
+
+            if (mul_wb_valid_i) begin
                 if (mul_rptr_q != mul_wptr_q) begin
-                    mark_or_alloc_ready(mul_pc_q[mul_rptr_q], mul_instr_q[mul_rptr_q],
-                                        mul_waddr_i, mul_wdata_i);
+                    mark_or_alloc_ready(mul_pc_q[mul_rptr_q],
+                                        mul_wb_waddr_i, mul_wb_wdata_i);
                     mul_rptr_q = mul_rptr_q + FIFO_PTR_WIDTH'(1);
                 end else begin
-                    mark_or_alloc_ready('0, '0, mul_waddr_i, mul_wdata_i);
+                    mark_or_alloc_ready('0, mul_wb_waddr_i, mul_wb_wdata_i);
                 end
             end
 
-            if (lsu_valid_i) begin
+            if (lsu_wb_valid_i) begin
                 if (lsu_rptr_q != lsu_wptr_q) begin
-                    mark_or_alloc_ready(lsu_pc_q[lsu_rptr_q], lsu_instr_q[lsu_rptr_q],
-                                        lsu_waddr_i, lsu_wdata_i);
+                    mark_or_alloc_ready(lsu_pc_q[lsu_rptr_q],
+                                        lsu_wb_waddr_i, lsu_wb_wdata_i);
                     lsu_rptr_q = lsu_rptr_q + FIFO_PTR_WIDTH'(1);
                 end else begin
-                    mark_or_alloc_ready('0, '0, lsu_waddr_i, lsu_wdata_i);
+                    mark_or_alloc_ready('0, lsu_wb_waddr_i, lsu_wb_wdata_i);
                 end
             end
 
-            if (pipe1_valid_i) begin
-                mark_or_alloc_ready(pipe1_issue_pc_i, pipe1_issue_instr_i,
-                                    pipe1_waddr_i, pipe1_wdata_i);
+            if (pipe1_wb_valid_i) begin
+                if (pipe1_rptr_q != pipe1_wptr_q) begin
+                    mark_or_alloc_ready(pipe1_pc_q[pipe1_rptr_q],
+                                        pipe1_wb_waddr_i, pipe1_wb_wdata_i);
+                    pipe1_rptr_q = pipe1_rptr_q + FIFO_PTR_WIDTH'(1);
+                end else begin
+                    mark_or_alloc_ready('0, pipe1_wb_waddr_i, pipe1_wb_wdata_i);
+                end
             end
 
             if (flush_i) begin

@@ -37,6 +37,7 @@ sources:
 
   - target: ip_tb
     files:
+      - dv/ydrasil_core_observer.sv
       - dv/ydrasil_commit_trace.sv
       - dv/ydrasil_core_tb.sv
       - dv/ydrasil_branch_predictor_tb.sv
