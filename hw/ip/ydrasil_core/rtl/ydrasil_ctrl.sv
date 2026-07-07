@@ -42,6 +42,9 @@ import ydrasil_pkg::*;
 	    input wire                          pipe1_commit_rf_wen_i,
 	    input wire [REGS_ADDR_WIDTH-1:0]    pipe1_commit_arch_rd_i,
 	    input wire [REGS_DATA_WIDTH-1:0]    pipe1_commit_data_i,
+	    input wire                          pipe1_commit1_rf_wen_i,
+	    input wire [REGS_ADDR_WIDTH-1:0]    pipe1_commit1_arch_rd_i,
+	    input wire [REGS_DATA_WIDTH-1:0]    pipe1_commit1_data_i,
 	    input wire                          wb_rf_wen_rd_i,
 	    input wire [REGS_ADDR_WIDTH-1:0]    wb_rf_waddr_rd_i,
 	    input wire [REGS_DATA_WIDTH-1:0]    wb_rf_wdata_rd_i,
@@ -64,6 +67,12 @@ import ydrasil_pkg::*;
 	    output wire                         rf_wen_rd_o,
 	    output wire [REGS_ADDR_WIDTH-1:0]   rf_waddr_rd_o,
 	    output wire [REGS_DATA_WIDTH-1:0]   rf_wdata_rd_o,
+	    output wire                         rf_wen1_rd_o,
+	    output wire [REGS_ADDR_WIDTH-1:0]   rf_waddr1_rd_o,
+	    output wire [REGS_DATA_WIDTH-1:0]   rf_wdata1_rd_o,
+	    output wire                         rf_wen2_rd_o,
+	    output wire [REGS_ADDR_WIDTH-1:0]   rf_waddr2_rd_o,
+	    output wire [REGS_DATA_WIDTH-1:0]   rf_wdata2_rd_o,
 
 	    output wire                         stall_if_o,
     output wire                         stall_id_o,
@@ -136,11 +145,15 @@ import ydrasil_pkg::*;
 	        rn_pipe1_pdst_found_i ? pipe1_wb_data_i :
 	        (rn_lsu_pdst_found_i ? lsu_wb_result_i : wb_rf_wdata_rd_i);
 
-	    assign rf_wen_rd_o = pipe1_commit_rf_wen_i | wb_rf_wen_rd_i;
-	    assign rf_waddr_rd_o =
-	        pipe1_commit_rf_wen_i ? pipe1_commit_arch_rd_i : wb_rf_waddr_rd_i;
-	    assign rf_wdata_rd_o =
-	        pipe1_commit_rf_wen_i ? pipe1_commit_data_i : wb_rf_wdata_rd_i;
+	    assign rf_wen_rd_o = wb_rf_wen_rd_i;
+	    assign rf_waddr_rd_o = wb_rf_waddr_rd_i;
+	    assign rf_wdata_rd_o = wb_rf_wdata_rd_i;
+	    assign rf_wen1_rd_o = pipe1_commit_rf_wen_i;
+	    assign rf_waddr1_rd_o = pipe1_commit_arch_rd_i;
+	    assign rf_wdata1_rd_o = pipe1_commit_data_i;
+	    assign rf_wen2_rd_o = pipe1_commit1_rf_wen_i;
+	    assign rf_waddr2_rd_o = pipe1_commit1_arch_rd_i;
+	    assign rf_wdata2_rd_o = pipe1_commit1_data_i;
 
 		    always_ff @(posedge clk or negedge rst_n) begin
 	        if (!rst_n) begin

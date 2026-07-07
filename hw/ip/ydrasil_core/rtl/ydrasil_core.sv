@@ -219,6 +219,12 @@ import ydrasil_pipeline_pkg::*;
 	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] rf_wdata_rd;
 	wire                        rf_wen_rd;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] rf_waddr_rd;
+	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] rf_wdata1_rd;
+	wire                        rf_wen1_rd;
+	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] rf_waddr1_rd;
+	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] rf_wdata2_rd;
+	wire                        rf_wen2_rd;
+	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] rf_waddr2_rd;
 	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] wb_rf_wdata_rd;
 	wire                        wb_rf_wen_rd;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] wb_rf_waddr_rd;
@@ -335,6 +341,9 @@ import ydrasil_pipeline_pkg::*;
 	wire pipe1_commit_rf_wen;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] pipe1_commit_arch_rd;
 	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] pipe1_commit_data;
+	wire pipe1_commit1_rf_wen;
+	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] pipe1_commit1_arch_rd;
+	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] pipe1_commit1_data;
 `ifndef SYNTHESIS
 	wire rn_real_ctrl_rs1_block;
 	wire rn_real_ctrl_rs2_block;
@@ -493,6 +502,9 @@ import ydrasil_pipeline_pkg::*;
 		.pipe1_commit_rf_wen_o(pipe1_commit_rf_wen),
 		.pipe1_commit_arch_rd_o(pipe1_commit_arch_rd),
 		.pipe1_commit_data_o(pipe1_commit_data),
+		.pipe1_commit1_rf_wen_o(pipe1_commit1_rf_wen),
+		.pipe1_commit1_arch_rd_o(pipe1_commit1_arch_rd),
+		.pipe1_commit1_data_o(pipe1_commit1_data),
 `ifndef SYNTHESIS
 		.ctrl_rs1_block_o(rn_real_ctrl_rs1_block),
 		.ctrl_rs2_block_o(rn_real_ctrl_rs2_block),
@@ -1015,6 +1027,12 @@ import ydrasil_pipeline_pkg::*;
 		.rf_wen_rd_i  (rf_wen_rd),
 		.rf_waddr_rd_i(rf_waddr_rd),
 		.rf_wdata_rd_i(rf_wdata_rd),
+		.rf_wen1_rd_i  (rf_wen1_rd),
+		.rf_waddr1_rd_i(rf_waddr1_rd),
+		.rf_wdata1_rd_i(rf_wdata1_rd),
+		.rf_wen2_rd_i  (rf_wen2_rd),
+		.rf_waddr2_rd_i(rf_waddr2_rd),
+		.rf_wdata2_rd_i(rf_wdata2_rd),
 		.rf_raddr_rs1_i(rf_raddr_rs1),
 		.rf_rdata_rs1_o(rf_rdata_rs1),
 		.rf_raddr_rs2_i(rf_raddr_rs2),
@@ -1064,6 +1082,9 @@ import ydrasil_pipeline_pkg::*;
 					.pipe1_commit_rf_wen_i(pipe1_commit_rf_wen),
 					.pipe1_commit_arch_rd_i(pipe1_commit_arch_rd),
 					.pipe1_commit_data_i(pipe1_commit_data),
+					.pipe1_commit1_rf_wen_i(pipe1_commit1_rf_wen),
+					.pipe1_commit1_arch_rd_i(pipe1_commit1_arch_rd),
+					.pipe1_commit1_data_i(pipe1_commit1_data),
 					.wb_rf_wen_rd_i(wb_rf_wen_rd),
 					.wb_rf_waddr_rd_i(wb_rf_waddr_rd),
 					.wb_rf_wdata_rd_i(wb_rf_wdata_rd),
@@ -1085,6 +1106,12 @@ import ydrasil_pipeline_pkg::*;
 				.rf_wen_rd_o(rf_wen_rd),
 				.rf_waddr_rd_o(rf_waddr_rd),
 				.rf_wdata_rd_o(rf_wdata_rd),
+				.rf_wen1_rd_o(rf_wen1_rd),
+				.rf_waddr1_rd_o(rf_waddr1_rd),
+				.rf_wdata1_rd_o(rf_wdata1_rd),
+				.rf_wen2_rd_o(rf_wen2_rd),
+				.rf_waddr2_rd_o(rf_waddr2_rd),
+				.rf_wdata2_rd_o(rf_wdata2_rd),
 				.stall_if_o        (stall_if),
 				.stall_id_o        (stall_id),
 			.stall_pc_o        (stall_pc),

@@ -101,6 +101,9 @@ import ydrasil_pkg::*;
     output wire pipe1_commit_rf_wen_o,
     output wire [REGS_ADDR_WIDTH-1:0] pipe1_commit_arch_rd_o,
     output wire [REGS_DATA_WIDTH-1:0] pipe1_commit_data_o,
+    output wire pipe1_commit1_rf_wen_o,
+    output wire [REGS_ADDR_WIDTH-1:0] pipe1_commit1_arch_rd_o,
+    output wire [REGS_DATA_WIDTH-1:0] pipe1_commit1_data_o,
 
 `ifndef SYNTHESIS
     output wire ctrl_rs1_block_o,
@@ -116,6 +119,7 @@ import ydrasil_pkg::*;
     reg [PREG_BITS-1:0] rat_q [0:REGS_NUM-1];
     reg [PREG_BITS-1:0] amt_q [0:REGS_NUM-1];
     reg [PHYS_REGS-1:0] free_q;
+    reg [PHYS_REGS-1:0] amt_free_q;
     reg [PHYS_REGS-1:0] busy_q;
     reg [6:0] free_count_q;
     reg [PREG_BITS-1:0] alloc_pdst_q;
@@ -140,7 +144,6 @@ import ydrasil_pkg::*;
     reg [PREG_BITS-1:0] first_free_next_for_alloc;
     reg [PREG_BITS-1:0] first_free_flush_map;
     reg [PREG_BITS-1:0] first_free_without_alloc0;
-    reg [6:0] flush_free_count;
     reg rob_has_pipe1_not_head_comb;
     reg rob_has_pipe1_after_next_comb;
 
@@ -159,15 +162,6 @@ import ydrasil_pkg::*;
             if (free_q[k] && (k[PREG_BITS-1:0] != alloc_pdst_q)) begin
                 first_free_without_alloc0 = k[PREG_BITS-1:0];
             end
-        end
-    end
-
-    always_comb begin
-        integer f;
-        flush_free_count = '0;
-        for (f = 0; f < PHYS_REGS; f = f + 1) begin
-            flush_free_count = flush_free_count +
-                (flush_free_map[f] ? 7'd1 : 7'd0);
         end
     end
 
@@ -286,34 +280,10 @@ import ydrasil_pkg::*;
 
     always_comb begin
         integer a;
-        integer r;
-        reg stop_at_redirect;
-        reg [ROB_PTR_BITS-1:0] idx;
 
-        flush_free_map = '1;
+        flush_free_map = amt_free_q;
         for (a = 0; a < REGS_NUM; a = a + 1) begin
             flush_rat_map[a] = amt_q[a];
-            flush_free_map[amt_q[a]] = 1'b0;
-        end
-
-        stop_at_redirect = 1'b0;
-        for (r = 0; r < ROB_DEPTH; r = r + 1) begin
-            idx = rob_head_q + ROB_PTR_BITS'(r);
-            if (!stop_at_redirect && rob_valid_q[idx]) begin
-                if (rob_ready_q[idx] &&
-                    (rob_arch_rd_q[idx] != '0) &&
-                    (rob_new_pdst_q[idx] != '0)) begin
-                    if (flush_rat_map[rob_arch_rd_q[idx]] != rob_new_pdst_q[idx]) begin
-                        flush_free_map[flush_rat_map[rob_arch_rd_q[idx]]] = 1'b1;
-                    end
-                    flush_rat_map[rob_arch_rd_q[idx]] = rob_new_pdst_q[idx];
-                    flush_free_map[rob_new_pdst_q[idx]] = 1'b0;
-                end
-
-                if (rob_ctrl_q[idx]) begin
-                    stop_at_redirect = 1'b1;
-                end
-            end
         end
 
         if (redirect_wb_preserve) begin
@@ -364,19 +334,30 @@ import ydrasil_pkg::*;
     assign pipe1_commit_rf_wen_o =
         commit0_ready &
         rob_pipe1_q[rob_head_q] &
-        (rob_arch_rd_q[rob_head_q] != '0) &
-        !wb_rf_wen_i;
+        (rob_arch_rd_q[rob_head_q] != '0);
     wire pipe1_head_wait_rf_port =
-        commit0_ready &
-        rob_pipe1_q[rob_head_q] &
-        (rob_arch_rd_q[rob_head_q] != '0) &
-        wb_rf_wen_i;
-    assign commit0_valid_o = commit0_ready & !pipe1_head_wait_rf_port;
-    assign commit0_ready_o = commit0_ready & !pipe1_head_wait_rf_port;
+        1'b0;
+    assign commit0_valid_o = commit0_ready;
+    assign commit0_ready_o = commit0_ready;
     assign pipe1_commit_arch_rd_o = rob_arch_rd_q[rob_head_q];
     assign pipe1_commit_data_o = rob_data_q[rob_head_q];
-    wire commit_frees_preg =
+    wire [ROB_PTR_BITS-1:0] rob_next_head = rob_head_q + ROB_PTR_BITS'(1);
+    wire commit1_valid =
+        commit0_valid_o &&
+        !rob_ctrl_q[rob_head_q] &&
+        !rob_ctrl_q[rob_next_head] &&
+        rob_valid_q[rob_next_head] &&
+        rob_ready_q[rob_next_head];
+    assign pipe1_commit1_rf_wen_o =
+        commit1_valid &
+        rob_pipe1_q[rob_next_head] &
+        (rob_arch_rd_q[rob_next_head] != '0);
+    assign pipe1_commit1_arch_rd_o = rob_arch_rd_q[rob_next_head];
+    assign pipe1_commit1_data_o = rob_data_q[rob_next_head];
+    wire commit0_frees_preg =
         commit0_valid_o & (rob_old_pdst_q[rob_head_q] != '0);
+    wire commit1_frees_preg =
+        commit1_valid & (rob_old_pdst_q[rob_next_head] != '0);
 
     wire ctrl_at_head =
         rob_valid_q[rob_head_q] &
@@ -393,7 +374,6 @@ import ydrasil_pkg::*;
         !rob_has_pipe1_not_head_comb &
         !(pipe1_pdst_found_o & (pipe1_wb_pdst_i != '0)) &
         !(pipe1_issue_valid_i & (pipe1_issue_pdst_i != '0));
-    wire [ROB_PTR_BITS-1:0] rob_next_head = rob_head_q + ROB_PTR_BITS'(1);
     wire pipe1_only_next_head_after_commit =
         commit0_valid_o &
         !rob_pipe1_q[rob_head_q] &
@@ -437,8 +417,11 @@ import ydrasil_pkg::*;
 
     always_comb begin
         free_next_for_alloc = free_q;
-        if (commit_frees_preg) begin
+        if (commit0_frees_preg) begin
             free_next_for_alloc[rob_old_pdst_q[rob_head_q]] = 1'b1;
+        end
+        if (commit1_frees_preg) begin
+            free_next_for_alloc[rob_old_pdst_q[rob_next_head]] = 1'b1;
         end
         if (alloc_rd_valid && (alloc_pdst_q != '0)) begin
             free_next_for_alloc[alloc_pdst_q] = 1'b0;
@@ -452,8 +435,9 @@ import ydrasil_pkg::*;
 
     always_ff @(posedge clk or negedge rst_n) begin
         integer i;
-	        if (!rst_n) begin
+        if (!rst_n) begin
             free_q <= 64'hffff_ffff_0000_0000;
+            amt_free_q <= 64'hffff_ffff_0000_0000;
             busy_q <= '0;
             free_count_q <= 7'd32;
             alloc_pdst_q <= 6'd32;
@@ -478,8 +462,9 @@ import ydrasil_pkg::*;
             end
         end else if (flush_id_i | flush_ex_i | interrupt_i) begin
             free_q <= flush_free_map;
+            amt_free_q <= flush_free_map;
             busy_q <= '0;
-            free_count_q <= flush_free_count;
+            free_count_q <= 7'd32;
             alloc_pdst_q <= first_free_flush_map;
             rob_head_q <= '0;
             rob_tail_q <= '0;
@@ -546,10 +531,14 @@ import ydrasil_pkg::*;
             if (commit0_valid_o) begin
                 if (rob_arch_rd_q[rob_head_q] != '0) begin
                     amt_q[rob_arch_rd_q[rob_head_q]] <= rob_new_pdst_q[rob_head_q];
+                    if (rob_new_pdst_q[rob_head_q] != '0) begin
+                        amt_free_q[rob_new_pdst_q[rob_head_q]] <= 1'b0;
+                    end
                     pdst_rob_valid_q[rob_new_pdst_q[rob_head_q]] <= 1'b0;
                 end
-                if (commit_frees_preg) begin
+                if (commit0_frees_preg) begin
                     free_q[rob_old_pdst_q[rob_head_q]] <= 1'b1;
+                    amt_free_q[rob_old_pdst_q[rob_head_q]] <= 1'b1;
                     pdst_rob_valid_q[rob_old_pdst_q[rob_head_q]] <= 1'b0;
                 end
                 rob_valid_q[rob_head_q] <= 1'b0;
@@ -557,7 +546,27 @@ import ydrasil_pkg::*;
                 rob_pipe1_q[rob_head_q] <= 1'b0;
                 rob_ctrl_q[rob_head_q] <= 1'b0;
                 rob_data_q[rob_head_q] <= '0;
-                rob_head_q <= rob_head_q + ROB_PTR_BITS'(1);
+                rob_head_q <= rob_head_q + ROB_PTR_BITS'(commit1_valid ? 2 : 1);
+            end
+
+            if (commit1_valid) begin
+                if (rob_arch_rd_q[rob_next_head] != '0) begin
+                    amt_q[rob_arch_rd_q[rob_next_head]] <= rob_new_pdst_q[rob_next_head];
+                    if (rob_new_pdst_q[rob_next_head] != '0) begin
+                        amt_free_q[rob_new_pdst_q[rob_next_head]] <= 1'b0;
+                    end
+                    pdst_rob_valid_q[rob_new_pdst_q[rob_next_head]] <= 1'b0;
+                end
+                if (commit1_frees_preg) begin
+                    free_q[rob_old_pdst_q[rob_next_head]] <= 1'b1;
+                    amt_free_q[rob_old_pdst_q[rob_next_head]] <= 1'b1;
+                    pdst_rob_valid_q[rob_old_pdst_q[rob_next_head]] <= 1'b0;
+                end
+                rob_valid_q[rob_next_head] <= 1'b0;
+                rob_ready_q[rob_next_head] <= 1'b0;
+                rob_pipe1_q[rob_next_head] <= 1'b0;
+                rob_ctrl_q[rob_next_head] <= 1'b0;
+                rob_data_q[rob_next_head] <= '0;
             end
 
             if (alloc_valid) begin
@@ -606,12 +615,14 @@ import ydrasil_pkg::*;
                 rob_occ_q +
                 (alloc_valid ? 7'd1 : 7'd0) +
                 (alloc1_valid ? 7'd1 : 7'd0) -
-                (commit0_valid_o ? 7'd1 : 7'd0);
+                (commit0_valid_o ? 7'd1 : 7'd0) -
+                (commit1_valid ? 7'd1 : 7'd0);
             free_count_q <=
                 free_count_q -
                 (alloc_rd_valid ? 7'd1 : 7'd0) -
                 (alloc1_rd_valid ? 7'd1 : 7'd0) +
-                (commit_frees_preg ? 7'd1 : 7'd0);
+                (commit0_frees_preg ? 7'd1 : 7'd0) +
+                (commit1_frees_preg ? 7'd1 : 7'd0);
             alloc_pdst_q <= alloc_pdst_next;
         end
     end

@@ -11,6 +11,12 @@ import ydrasil_pkg::*;
     input wire                         rf_wen_rd_i,     // 写寄存器标志
     input wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]  rf_waddr_rd_i,  // 写寄存器地址
     input wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]  rf_wdata_rd_i,  // 写寄存器数据
+    input wire                         rf_wen1_rd_i,
+    input wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]  rf_waddr1_rd_i,
+    input wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]  rf_wdata1_rd_i,
+    input wire                         rf_wen2_rd_i,
+    input wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]  rf_waddr2_rd_i,
+    input wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]  rf_wdata2_rd_i,
 
     // from id
     input wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]  rf_raddr_rs1_i,  // 读寄存器1地址
@@ -40,7 +46,10 @@ import ydrasil_pkg::*;
     genvar i;
     generate
         for (i = 1; i < ydrasil_pkg::REGS_NUM; i = i + 1) begin : gen_regs_we
-            assign registers_wen[i] = (rf_wen_rd_i ) && (rf_waddr_rd_i == i) && (rst_n);
+            assign registers_wen[i] =
+                ((rf_wen_rd_i && (rf_waddr_rd_i == i)) ||
+                 (rf_wen1_rd_i && (rf_waddr1_rd_i == i)) ||
+                 (rf_wen2_rd_i && (rf_waddr2_rd_i == i))) && rst_n;
         end
     endgenerate
 
@@ -51,7 +60,11 @@ import ydrasil_pkg::*;
                 if (!rst_n) begin
                     registers[j] <= '0;
                 end else begin
-                    if (registers_wen[j]) begin
+                    if ((j != 0) && rf_wen2_rd_i && (rf_waddr2_rd_i == j)) begin
+                        registers[j] <= rf_wdata2_rd_i;
+                    end else if ((j != 0) && rf_wen1_rd_i && (rf_waddr1_rd_i == j)) begin
+                        registers[j] <= rf_wdata1_rd_i;
+                    end else if (registers_wen[j]) begin
                         registers[j] <= rf_wdata_rd_i;
                     end
                 end

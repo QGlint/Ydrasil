@@ -207,8 +207,7 @@ import ydrasil_pipeline_pkg::*;
         decode_pair_ctrl.decode_pair_allow =
             if_id_fetch_pair_i.pair_ctrl.slot1_valid &&
             slot0_dec.valid && slot1_dec.valid &&
-            !slot0_pair_stop && !slot1_pair_unsupported &&
-            !slot_pair_raw && !slot_pair_waw;
+            !slot0_pair_stop && !slot1_pair_unsupported;
         if (if_id_fetch_pair_i.pair_ctrl.block_reason == PAIR_BLOCK_NONE &&
             if_id_fetch_pair_i.pair_ctrl.slot1_valid &&
             !decode_pair_ctrl.decode_pair_allow) begin
