@@ -116,6 +116,7 @@ import ydrasil_pipeline_pkg::*;
 	wire [31:0]                    pipe1_operand_a;
 	wire [31:0]                    pipe1_operand_b;
 	wire [ydrasil_pkg::OPERATOR_WIDTH-1:0] pipe1_operator;
+	wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] pipe1_operator_type;
 	wire                           pipe1_rf_wen_rd_issue;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] pipe1_rf_waddr_rd_issue;
 	wire [5:0]                     pipe1_rn_pdst_issue;
@@ -599,6 +600,7 @@ import ydrasil_pipeline_pkg::*;
 	wire [31:0] pipe1_operand_a_to_ex = pipe1_operand_a;
 	wire [31:0] pipe1_operand_b_to_ex = pipe1_operand_b;
 	wire [ydrasil_pkg::OPERATOR_WIDTH-1:0] pipe1_operator_to_ex = pipe1_operator;
+	wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] pipe1_operator_type_to_ex = pipe1_operator_type;
 		wire pipe1_rf_wen_rd_to_ex = pipe1_rf_wen_rd_issue;
 		wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] pipe1_rf_waddr_rd_to_ex = pipe1_rf_waddr_rd_issue;
 		wire [5:0] pipe1_rn_pdst_to_ex = pipe1_rn_pdst_issue;
@@ -838,6 +840,7 @@ import ydrasil_pipeline_pkg::*;
 		.pipe1_operand_a_o  (pipe1_operand_a),
 		.pipe1_operand_b_o  (pipe1_operand_b),
 		.pipe1_operator_o   (pipe1_operator),
+		.pipe1_operator_type_o(pipe1_operator_type),
 		.pipe1_rf_wen_rd_o  (pipe1_rf_wen_rd_issue),
 		.pipe1_rf_waddr_rd_o(pipe1_rf_waddr_rd_issue),
 		.pipe1_rn_pdst_o    (pipe1_rn_pdst_issue),
@@ -874,6 +877,7 @@ import ydrasil_pipeline_pkg::*;
 		.pipe1_operand_a_i  (pipe1_operand_a_to_ex),
 		.pipe1_operand_b_i  (pipe1_operand_b_to_ex),
 		.pipe1_operator_i   (pipe1_operator_to_ex),
+		.pipe1_operator_type_i(pipe1_operator_type_to_ex),
 			.pipe1_rf_wen_rd_i  (pipe1_rf_wen_rd_to_ex),
 			.pipe1_rf_waddr_rd_i(pipe1_rf_waddr_rd_to_ex),
 			.pipe1_rn_pdst_i    (pipe1_rn_pdst_to_ex),

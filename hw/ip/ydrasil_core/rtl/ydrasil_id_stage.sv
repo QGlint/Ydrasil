@@ -119,7 +119,7 @@ import ydrasil_pipeline_pkg::*;
     decode_pair_pkt_t decode_pair_ff;
     pair_ctrl_t  decode_pair_ctrl;
     wire slot0_pair_stop;
-    wire slot1_pair_simple_alu;
+    wire slot1_pair_simple_int;
     wire slot1_pair_unsupported;
     wire slot0_pair_writes_rd;
     wire slot1_pair_uses_rs2;
@@ -171,17 +171,17 @@ import ydrasil_pipeline_pkg::*;
         slot0_dec.operator_type[ydrasil_pkg::OPERATOR_TYPE_CSR] |
         slot0_dec.operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS] |
         slot0_dec.fence_i;
-    assign slot1_pair_simple_alu =
-        slot1_dec.operator_type[ydrasil_pkg::OPERATOR_TYPE_ALU] &&
+    assign slot1_pair_simple_int =
+        (slot1_dec.operator_type[ydrasil_pkg::OPERATOR_TYPE_ALU] ||
+         slot1_dec.operator_type[ydrasil_pkg::OPERATOR_TYPE_BITMANIP]) &&
         !slot1_dec.operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
         !slot1_dec.operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
         !slot1_dec.operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
         !slot1_dec.operator_type[ydrasil_pkg::OPERATOR_TYPE_CSR] &&
         !slot1_dec.operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS] &&
         !slot1_dec.operator_type[ydrasil_pkg::OPERATOR_TYPE_MUL] &&
-        !slot1_dec.operator_type[ydrasil_pkg::OPERATOR_TYPE_BITMANIP] &&
         !slot1_dec.fence_i;
-    assign slot1_pair_unsupported = slot1_dec.valid && !slot1_pair_simple_alu;
+    assign slot1_pair_unsupported = slot1_dec.valid && !slot1_pair_simple_int;
     assign slot0_pair_writes_rd =
         slot0_dec.valid &&
         (slot0_dec.rf_wen_rd || slot0_dec.operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD]) &&

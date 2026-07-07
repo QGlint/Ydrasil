@@ -108,6 +108,7 @@ import ydrasil_pipeline_pkg::*;
     output wire [DATA_WIDTH-1:0]           pipe1_operand_a_o,
     output wire [DATA_WIDTH-1:0]           pipe1_operand_b_o,
     output wire [OPERATOR_WIDTH-1:0]       pipe1_operator_o,
+    output wire [OPERATOR_TYPE_WIDTH-1:0]  pipe1_operator_type_o,
     output wire                            pipe1_rf_wen_rd_o,
     output wire [4:0]                      pipe1_rf_waddr_rd_o,
     output wire [5:0]                      pipe1_rn_pdst_o,
@@ -247,7 +248,7 @@ import ydrasil_pipeline_pkg::*;
 
     wire iq_uses_rs2 [0:IQ_DEPTH-1];
     wire iq_writes_rd [0:IQ_DEPTH-1];
-    wire iq_pipe1_alu [0:IQ_DEPTH-1];
+    wire iq_pipe1_simple_int [0:IQ_DEPTH-1];
     wire iq_serial_before_pipe1 [0:IQ_DEPTH-1];
     wire iq_src1_arch_map [0:IQ_DEPTH-1];
     wire iq_src2_arch_map [0:IQ_DEPTH-1];
@@ -274,16 +275,16 @@ import ydrasil_pipeline_pkg::*;
                  iq_q[iq_i].dec.operator_type[OPERATOR_TYPE_LOAD]) &&
                 (iq_q[iq_i].dec.rf_waddr_rd != '0) &&
                 !iq_q[iq_i].dec.operator_type[OPERATOR_TYPE_SYS];
-            assign iq_pipe1_alu[iq_i] =
+            assign iq_pipe1_simple_int[iq_i] =
                 iq_q[iq_i].dec.valid &&
-                iq_q[iq_i].dec.operator_type[OPERATOR_TYPE_ALU] &&
+                (iq_q[iq_i].dec.operator_type[OPERATOR_TYPE_ALU] ||
+                 iq_q[iq_i].dec.operator_type[OPERATOR_TYPE_BITMANIP]) &&
                 !iq_q[iq_i].dec.operator_type[OPERATOR_TYPE_BJP] &&
                 !iq_q[iq_i].dec.operator_type[OPERATOR_TYPE_LOAD] &&
                 !iq_q[iq_i].dec.operator_type[OPERATOR_TYPE_STORE] &&
                 !iq_q[iq_i].dec.operator_type[OPERATOR_TYPE_CSR] &&
                 !iq_q[iq_i].dec.operator_type[OPERATOR_TYPE_SYS] &&
                 !iq_q[iq_i].dec.operator_type[OPERATOR_TYPE_MUL] &&
-                !iq_q[iq_i].dec.operator_type[OPERATOR_TYPE_BITMANIP] &&
                 !iq_q[iq_i].dec.fence_i;
             assign iq_serial_before_pipe1[iq_i] =
                 iq_q[iq_i].dec.valid &&
@@ -396,7 +397,7 @@ import ydrasil_pipeline_pkg::*;
             if (!pipe1_sel_valid &&
                 (sel_i < iq_count_q) &&
                 iq_q[sel_i].dec.valid &&
-                iq_pipe1_alu[sel_i] &&
+                iq_pipe1_simple_int[sel_i] &&
                 iq_operands_ready[sel_i] &&
                 !older_serial) begin
                 pipe1_sel_valid = 1'b1;
@@ -544,7 +545,8 @@ import ydrasil_pipeline_pkg::*;
         pipe0_pkt.dec.imm;
     wire [DATA_WIDTH-1:0] pipe1_operand_a =
         (pipe1_pkt.dec.operand_a_pc_sel ||
-         pipe1_pkt.dec.operator[OP_ALU_AUIPC]) ? pipe1_pkt.dec.pc :
+         (pipe1_pkt.dec.operator_type[OPERATOR_TYPE_ALU] &&
+          pipe1_pkt.dec.operator[OP_ALU_AUIPC])) ? pipe1_pkt.dec.pc :
         pipe1_pkt.dec.operand_a_imm_sel ? pipe1_pkt.dec.imm :
         pipe1_rs1_data;
     wire [DATA_WIDTH-1:0] pipe1_operand_b =
@@ -616,6 +618,7 @@ import ydrasil_pipeline_pkg::*;
     assign pipe1_operand_a_o = pipe1_operand_a;
     assign pipe1_operand_b_o = pipe1_operand_b;
     assign pipe1_operator_o = pipe1_pkt.dec.operator;
+    assign pipe1_operator_type_o = pipe1_pkt.dec.operator_type;
     assign pipe1_rf_wen_rd_o = pipe1_pkt.dec.rf_wen_rd;
     assign pipe1_rf_waddr_rd_o = pipe1_pkt.dec.rf_waddr_rd;
     assign pipe1_rn_pdst_o = pipe1_writes_rd ? pipe1_pkt.rn.pdst : '0;

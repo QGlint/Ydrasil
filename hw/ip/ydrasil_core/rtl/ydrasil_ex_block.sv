@@ -30,6 +30,7 @@ import ydrasil_pkg::*;
     input  wire [DATA_WIDTH-1:0]           pipe1_operand_a_i,
     input  wire [DATA_WIDTH-1:0]           pipe1_operand_b_i,
     input  wire [OPERATOR_WIDTH-1:0]       pipe1_operator_i,
+    input  wire [OPERATOR_TYPE_WIDTH-1:0]  pipe1_operator_type_i,
 	    input  wire                            pipe1_rf_wen_rd_i,
 	    input  wire [REGS_ADDR_WIDTH-1:0]      pipe1_rf_waddr_rd_i,
 	    input  wire [5:0]                      pipe1_rn_pdst_i,
@@ -399,9 +400,8 @@ import ydrasil_pkg::*;
     wire [31:0] fast_result =
         fast_alu_op ? fast_alu_result : fast_add_result;
 
-    wire [OPERATOR_TYPE_WIDTH-1:0] pipe1_operator_type =
-        OPERATOR_TYPE_WIDTH'(1 << OPERATOR_TYPE_ALU);
     wire [31:0] pipe1_alu_result;
+    wire [31:0] pipe1_bitmanip_result;
     wire        pipe1_alu_comp_unused;
     wire        pipe1_alu_wen_unused;
     wire [REGS_ADDR_WIDTH-1:0] pipe1_alu_waddr_unused;
@@ -428,7 +428,7 @@ import ydrasil_pkg::*;
         .operand_a_i          (pipe1_operand_a_i),
         .operand_b_i          (pipe1_operand_b_i),
         .operator_i           (pipe1_operator_i),
-        .operator_type_i      (pipe1_operator_type),
+        .operator_type_i      (pipe1_operator_type_i),
         .interrupt_i          (interrupt_i),
         .id_rf_waddr_rd_i     (pipe1_rf_waddr_rd_i),
         .id_alu_rf_wen_rd_i   (pipe1_rf_wen_rd_i),
@@ -436,6 +436,14 @@ import ydrasil_pkg::*;
         .alu_result_o         (pipe1_alu_result),
         .alu_rf_wen_rd_o      (pipe1_alu_wen_unused),
         .alu_rf_waddr_rd_o    (pipe1_alu_waddr_unused)
+    );
+
+    ydrasil_bitmanip u_ydrasil_pipe1_bitmanip (
+        .operand_a_i     (pipe1_operand_a_i),
+        .operand_b_i     (pipe1_operand_b_i),
+        .operator_i      (pipe1_operator_i),
+        .operator_type_i (pipe1_operator_type_i),
+        .result_o        (pipe1_bitmanip_result)
     );
 
     ydrasil_div u_ydrasil_div (
@@ -549,7 +557,9 @@ import ydrasil_pkg::*;
             alu_rf_wen_rd_ff   <= ex_rf_wen_rd;
             alu_rf_waddr_rd_ff <= div_rf_wen_rd ? id_rf_waddr_rd_i : alu_rf_waddr_rd;
             alu_rn_pdst_ff     <= id_rn_pdst_i;
-            pipe1_alu_result_ff <= pipe1_alu_result;
+            pipe1_alu_result_ff <=
+                pipe1_operator_type_i[OPERATOR_TYPE_BITMANIP] ?
+                pipe1_bitmanip_result : pipe1_alu_result;
             pipe1_alu_rf_wen_rd_ff <=
                 pipe1_issue_valid_i & pipe1_rf_wen_rd_i &
                 (pipe1_rf_waddr_rd_i != '0) & !interrupt_i & !flush_ex_i;
