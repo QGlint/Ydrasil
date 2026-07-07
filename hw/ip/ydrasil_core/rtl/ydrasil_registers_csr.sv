@@ -7,7 +7,7 @@ import ydrasil_pkg::*;
 
     input wire clk,
     input wire rst_n,
-    input wire instret_inc_i,
+	    input wire [1:0] instret_inc_i,
 
     // form ex
     input wire                          ex_csr_wen_i,     // ex模块写寄存器标志
@@ -243,9 +243,9 @@ import ydrasil_pkg::*;
                 instret[31:0] <= csr_write_data;
             end else if (minstreth_we) begin
                 instret[63:32] <= csr_write_data;
-            end else if (instret_inc_i && !mcountinhibit[2]) begin
-                instret <= instret + 1'b1;
-            end
+	            end else if ((instret_inc_i != 2'b00) && !mcountinhibit[2]) begin
+	                instret <= instret + {{(ydrasil_pkg::DOUBLE_REGS_WIDTH-2){1'b0}}, instret_inc_i};
+	            end
 
             if (csr_write_en) begin
                 case (csr_write_addr)

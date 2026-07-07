@@ -47,6 +47,9 @@ import ydrasil_pkg::*;
     reg [ALU_FIFO_PTR_WIDTH-1:0] alu_fifo_rptr_q;
     reg [ALU_FIFO_PTR_WIDTH-1:0] alu_fifo_wptr_q;
     reg [ALU_FIFO_COUNT_WIDTH-1:0] alu_fifo_count_q;
+    reg [REGS_DATA_WIDTH-1:0] rf_wdata_rd_q;
+    reg                       rf_wen_rd_q;
+    reg [REGS_ADDR_WIDTH-1:0] rf_waddr_rd_q;
 
     wire mul_fifo_empty = (mul_fifo_count_q == '0);
     wire mul_fifo_full = (mul_fifo_count_q == MUL_FIFO_COUNT_WIDTH'(MUL_FIFO_DEPTH));
@@ -88,20 +91,24 @@ import ydrasil_pkg::*;
         (alu_fifo_count_q >= ALU_FIFO_COUNT_WIDTH'(ALU_FIFO_BACKPRESSURE_LEVEL)) |
         (mul_fifo_count_q >= MUL_FIFO_COUNT_WIDTH'(MUL_FIFO_BACKPRESSURE_LEVEL));
 
-    assign rf_wen_rd_o =
+    wire rf_wen_rd_d =
         sel_lsu | sel_alu_fifo | sel_alu_current | sel_mul_fifo | sel_mul_current;
-    assign rf_waddr_rd_o =
+    wire [REGS_ADDR_WIDTH-1:0] rf_waddr_rd_d =
         ({REGS_ADDR_WIDTH{sel_lsu}}         & lsu_rf_waddr_rd_i) |
         ({REGS_ADDR_WIDTH{sel_alu_fifo}}    & alu_fifo_head_addr) |
         ({REGS_ADDR_WIDTH{sel_alu_current}} & alu_rf_waddr_rd_i) |
         ({REGS_ADDR_WIDTH{sel_mul_fifo}}    & mul_fifo_head_addr) |
         ({REGS_ADDR_WIDTH{sel_mul_current}} & mul_rf_waddr_rd_i);
-    assign rf_wdata_rd_o =
+    wire [REGS_DATA_WIDTH-1:0] rf_wdata_rd_d =
         ({REGS_DATA_WIDTH{sel_lsu}}         & lsu_wb_result_i) |
         ({REGS_DATA_WIDTH{sel_alu_fifo}}    & alu_fifo_head_data) |
         ({REGS_DATA_WIDTH{sel_alu_current}} & alu_wdata_rd_i) |
         ({REGS_DATA_WIDTH{sel_mul_fifo}}    & mul_fifo_head_data) |
         ({REGS_DATA_WIDTH{sel_mul_current}} & mul_wdata_rd_i);
+
+    assign rf_wen_rd_o = rf_wen_rd_q;
+    assign rf_waddr_rd_o = rf_waddr_rd_q;
+    assign rf_wdata_rd_o = rf_wdata_rd_q;
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -111,7 +118,14 @@ import ydrasil_pkg::*;
             mul_fifo_rptr_q     <= '0;
             mul_fifo_wptr_q     <= '0;
             mul_fifo_count_q    <= '0;
+            rf_wdata_rd_q       <= '0;
+            rf_wen_rd_q         <= 1'b0;
+            rf_waddr_rd_q       <= '0;
         end else begin
+            rf_wdata_rd_q <= rf_wdata_rd_d;
+            rf_wen_rd_q <= rf_wen_rd_d;
+            rf_waddr_rd_q <= rf_waddr_rd_d;
+
             if (alu_enqueue_accept) begin
                 alu_fifo_data_q[alu_fifo_wptr_q] <= alu_wdata_rd_i;
                 alu_fifo_addr_q[alu_fifo_wptr_q] <= alu_rf_waddr_rd_i;

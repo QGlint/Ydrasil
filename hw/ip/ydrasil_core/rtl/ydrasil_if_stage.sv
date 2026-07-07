@@ -17,6 +17,7 @@ import ydrasil_pkg::*;
 		input  wire [31:0] branch_target_i,
 
 		// 分支预测
+		output wire [31:0] bp_predict_pc_o,
 		input  wire        bp_predict_hit_i,
 		input  wire        bp_predict_taken_i,
 		input  wire [31:0] bp_predict_target_i,
@@ -46,6 +47,7 @@ import ydrasil_pkg::*;
 
 	wire [31:0] pc_n;
 	wire [31:0] pc_plus4;
+	wire [31:0] if_mem_addr;
 	wire [31:0] if_id_instr;
 	wire [31:0] pc_now;
 	reg [31:0] pc_ff;
@@ -88,7 +90,9 @@ import ydrasil_pkg::*;
 						bp_invalidate_i ? pc_plus4 :
 						bp_predict_redirect ? if_id_pred_target : pc_plus4;
 
-	assign if_mem_addr_o = pc_ff;
+	assign if_mem_addr = pc_ff;
+	assign if_mem_addr_o = if_mem_addr;
+	assign bp_predict_pc_o = pc_ff;
 
 	assign if_id_pc_o    = if_id_pc_ff;
 	assign if_id_pred_hit_o = if_id_valid_ff && !bp_invalidate_i && if_id_pred_hit;
