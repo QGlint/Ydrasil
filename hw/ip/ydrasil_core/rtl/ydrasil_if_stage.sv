@@ -26,6 +26,7 @@ import ydrasil_pkg::*;
 
 		// 指令存储器接口
 		output wire [31:0] if_mem_addr_o,
+		output wire [31:0] bp_lookup_pc_o,
 		input  wire [31:0] if_mem_rdata_i,
 
 		// IF/ID 流水寄存器输出
@@ -91,6 +92,7 @@ import ydrasil_pkg::*;
 						bp_predict_redirect ? bp_redirect_next_pc : pc_plus4;
 
 	assign if_mem_addr_o = bp_predict_redirect ? if_id_pred_target : pc_ff;
+	assign bp_lookup_pc_o = pc_ff;
 
 	assign if_id_pc_o    = if_id_pc_ff;
 	assign if_id_pred_hit_o = if_id_valid_ff && !bp_invalidate_i && if_id_pred_hit;
@@ -148,7 +150,7 @@ import ydrasil_pkg::*;
 				flush_if_ff     <= 1'b1;
 			end else if (bp_predict_redirect) begin
 				if_id_pc_ff    <= if_id_pred_target;
-				pred_hold_valid_ff <= 1'b0;
+				pred_hold_valid_ff <= 1'b1;
 				pred_hold_hit_ff <= 1'b0;
 				pred_hold_taken_ff <= 1'b0;
 				pred_hold_target_ff <= '0;

@@ -38,6 +38,7 @@ import ydrasil_pkg::*;
 
 	// IF <-> MEMS
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] if_mem_addr;
+	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] bp_lookup_pc;
 	wire [ydrasil_pkg::INST_DATA_WIDTH-1:0] if_mem_rdata;
 
 	// IF/ID pipeline
@@ -275,7 +276,7 @@ import ydrasil_pkg::*;
 		ex_accept_valid & (id_rf_waddr_rd != '0) & !interrupt &
 		(id_alu_rf_wen_rd | operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD]);
 `ifndef SYNTHESIS
-	assign dbg_bp_predict_pc_o = if_mem_addr;
+	assign dbg_bp_predict_pc_o = bp_lookup_pc;
 	assign dbg_bp_predict_hit_o = bp_predict_hit;
 	assign dbg_bp_predict_taken_o = bp_predict_taken;
 	assign dbg_bp_predict_target_o = bp_predict_target;
@@ -422,7 +423,7 @@ import ydrasil_pkg::*;
 		) u_ydrasil_branch_predictor (
 			.clk              (clk),
 			.rst_n            (rst_n),
-			.predict_pc_i     (if_mem_addr),
+			.predict_pc_i     (bp_lookup_pc),
 			.predict_hit_o    (bp_predict_hit),
 			.predict_taken_o  (bp_predict_taken),
 			.predict_target_o (bp_predict_target),
@@ -452,6 +453,7 @@ import ydrasil_pkg::*;
 			.bp_predict_bht_index_i(bp_predict_bht_index),
 			.bp_invalidate_i(id_fence_i),
 			.if_mem_addr_o   (if_mem_addr),
+			.bp_lookup_pc_o   (bp_lookup_pc),
 			.if_mem_rdata_i  (if_mem_rdata),
 			.if_id_pc_o      (if_id_pc),
 			.if_id_pred_hit_o(if_id_pred_hit),
