@@ -105,7 +105,11 @@ import ydrasil_pkg::*;
     wire                       bitmanip_rf_wen_rd;
     wire                       normal_alu_rf_wen_rd;
     wire                       div_rf_wen_rd;
+    wire                       div_complete;
     wire                       ex_rf_wen_rd;
+    reg                        div_active_q;
+    reg                        div_wen_q;
+    reg [REGS_ADDR_WIDTH-1:0]  div_waddr_q;
 
     wire ex_is_branch;
     wire ex_is_jump;
@@ -321,9 +325,10 @@ import ydrasil_pkg::*;
     assign mul_issue_o = mul_issue_valid & mul_issue_wen;
     assign mul_issue_waddr_o = id_rf_waddr_rd_i;
 
-    assign div_start = id_ex_valid_i & op_div & !div_busy & !div_done & !interrupt_i & !flush_ex_i;
-    assign div_rf_wen_rd = id_ex_valid_i & op_div & div_done & id_alu_rf_wen_rd_i & !interrupt_i & !flush_ex_i;
-    assign ex_mul_stall_o = id_ex_valid_i & op_div & !div_done & !flush_ex_i;
+    assign div_start = id_ex_valid_i & op_div & !div_active_q & !div_busy & !div_done & !interrupt_i & !flush_ex_i;
+    assign div_complete = div_active_q & div_done & !interrupt_i & !flush_ex_i;
+    assign div_rf_wen_rd = div_complete & div_wen_q;
+    assign ex_mul_stall_o = ((id_ex_valid_i & op_div) | div_active_q) & !div_done & !flush_ex_i;
 
     assign bitmanip_rf_wen_rd = id_ex_valid_i & op_bitmanip & id_alu_rf_wen_rd_i & !interrupt_i & !flush_ex_i;
     assign normal_alu_rf_wen_rd = id_ex_valid_i & alu_rf_wen_rd & !op_m_unit & !op_bitmanip & !flush_ex_i;
@@ -331,7 +336,7 @@ import ydrasil_pkg::*;
     assign mul_result_valid_o = mul_result_valid;
     assign ex_instret_inc_o =
         (id_ex_valid_i & !interrupt_i & !flush_ex_i & !op_load & !op_mul & !op_div) |
-        (id_ex_valid_i & !interrupt_i & !flush_ex_i & op_div & div_done);
+        div_complete;
 
     wire fast_alu_op =
         operator_type_i[OPERATOR_TYPE_ALU] & !op_m_unit & !op_bitmanip &
@@ -453,6 +458,9 @@ import ydrasil_pkg::*;
             ex_csr_wdata_o_ff   <= '0;
             ex_csr_wen_o_ff     <= 1'b0;
             ex_csr_waddr_o_ff   <= '0;
+            div_active_q        <= 1'b0;
+            div_wen_q           <= 1'b0;
+            div_waddr_q         <= '0;
         end else if (flush_ex_i) begin
             alu_result_ff       <= '0;
             alu_rf_wen_rd_ff    <= 1'b0;
@@ -460,14 +468,27 @@ import ydrasil_pkg::*;
             ex_csr_wdata_o_ff   <= '0;
             ex_csr_wen_o_ff     <= 1'b0;
             ex_csr_waddr_o_ff   <= '0;
+            div_active_q        <= 1'b0;
+            div_wen_q           <= 1'b0;
+            div_waddr_q         <= '0;
         end else begin
             alu_result_ff      <= fast_result_wen ? fast_result :
                                   slow_result_wen ? slow_result : alu_result;
             alu_rf_wen_rd_ff   <= ex_rf_wen_rd;
-            alu_rf_waddr_rd_ff <= div_rf_wen_rd ? id_rf_waddr_rd_i : alu_rf_waddr_rd;
+            alu_rf_waddr_rd_ff <= div_rf_wen_rd ? div_waddr_q : alu_rf_waddr_rd;
             ex_csr_wdata_o_ff  <= csr_wdata;
             ex_csr_wen_o_ff    <= csr_wen;
             ex_csr_waddr_o_ff  <= id_ex_csr_waddr_i;
+
+            if (div_start) begin
+                div_active_q <= 1'b1;
+                div_wen_q    <= id_alu_rf_wen_rd_i & (id_rf_waddr_rd_i != '0);
+                div_waddr_q  <= id_rf_waddr_rd_i;
+            end else if (div_done) begin
+                div_active_q <= 1'b0;
+                div_wen_q    <= 1'b0;
+                div_waddr_q  <= '0;
+            end
         end
     end
 
