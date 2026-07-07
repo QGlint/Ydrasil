@@ -161,8 +161,9 @@ end
     reg [31:0] sb_store_data_wait_count;
     reg [31:0] fe_pred_taken_redirect_count;
     reg [31:0] fe_correct_taken_redirect_count;
-    reg [31:0] fe_correct_taken_bubble_count;
+    reg [31:0] fe_pred_taken_bubble_count;
     reg [31:0] fe_wrong_dir_flush_count;
+    reg        bp_predict_redirect_q;
 
 	ydrasil_core u_dut (
 		.clk      (clk),
@@ -296,9 +297,11 @@ end
             sb_store_data_wait_count <= 32'b0;
             fe_pred_taken_redirect_count <= 32'b0;
             fe_correct_taken_redirect_count <= 32'b0;
-            fe_correct_taken_bubble_count <= 32'b0;
+            fe_pred_taken_bubble_count <= 32'b0;
             fe_wrong_dir_flush_count <= 32'b0;
+            bp_predict_redirect_q <= 1'b0;
         end else begin
+            bp_predict_redirect_q <= u_dut.u_ydrasil_if_stage.bp_predict_redirect;
             last_pc     <= pc;
             if (bp_branch_valid) begin
                 bp_branch_count <= bp_branch_count + 1;
@@ -313,7 +316,6 @@ end
                 bp_correct_taken_count <= bp_correct_taken_count + (bp_correct_taken ? 32'd1 : 32'd0);
                 bp_correct_not_taken_count <= bp_correct_not_taken_count + (bp_correct_not_taken ? 32'd1 : 32'd0);
                 fe_correct_taken_redirect_count <= fe_correct_taken_redirect_count + (bp_correct_taken ? 32'd1 : 32'd0);
-                fe_correct_taken_bubble_count <= fe_correct_taken_bubble_count + (bp_correct_taken ? 32'd1 : 32'd0);
                 fe_wrong_dir_flush_count <= fe_wrong_dir_flush_count + (bp_dir_mispredict ? 32'd1 : 32'd0);
 `ifndef SYNTHESIS
                 if (bp_trace_en) begin
@@ -386,6 +388,8 @@ end
                   (u_dut.rs2_pending_stall | u_dut.rs2_issue_hzd)) ? 32'd1 : 32'd0);
             fe_pred_taken_redirect_count <= fe_pred_taken_redirect_count +
                 (u_dut.u_ydrasil_if_stage.bp_predict_redirect ? 32'd1 : 32'd0);
+            fe_pred_taken_bubble_count <= fe_pred_taken_bubble_count +
+                ((bp_predict_redirect_q && !u_dut.u_ydrasil_if_stage.if_id_valid_o) ? 32'd1 : 32'd0);
         end
     end
 
@@ -604,10 +608,10 @@ end
                 sb_branch_src_wait_count,
                 sb_store_addr_wait_count,
                 sb_store_data_wait_count);
-            $display("PERF_FRONTEND: PRED_TAKEN_REDIRECT=%-d CORRECT_TAKEN_REDIRECT=%-d CORRECT_TAKEN_BUBBLE=%-d WRONG_DIR_FLUSH=%-d BTB_MISS_TAKEN=%-d",
+            $display("PERF_FRONTEND: PRED_TAKEN_REDIRECT=%-d CORRECT_TAKEN_REDIRECT=%-d PRED_TAKEN_BUBBLE=%-d WRONG_DIR_FLUSH=%-d BTB_MISS_TAKEN=%-d",
                 fe_pred_taken_redirect_count,
                 fe_correct_taken_redirect_count,
-                fe_correct_taken_bubble_count,
+                fe_pred_taken_bubble_count,
                 fe_wrong_dir_flush_count,
                 bp_btb_miss_taken_count);
             $display("PERF_BRANCH: BRANCHES=%-d HITS=%-d PRED_TAKEN=%-d MISPRED=%-d ACC=%.2f",

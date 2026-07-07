@@ -46,6 +46,7 @@ import ydrasil_pkg::*;
 
 	wire [31:0] pc_n;
 	wire [31:0] pc_plus4;
+	wire [31:0] bp_redirect_next_pc;
 	wire [31:0] if_id_instr;
 	wire [31:0] pc_now;
 	reg [31:0] pc_ff;
@@ -69,6 +70,7 @@ import ydrasil_pkg::*;
 
 	// 默认顺序取指地址：PC + 4
 	assign pc_plus4   = pc_ff + 32'd4;
+	assign bp_redirect_next_pc = if_id_pred_target + 32'd4;
 	assign if_id_pred_hit = pred_hold_valid_ff ? pred_hold_hit_ff :
 	                        bp_predict_hit_i;
 	assign if_id_pred_taken = pred_hold_valid_ff ? pred_hold_taken_ff :
@@ -86,9 +88,9 @@ import ydrasil_pkg::*;
 	assign pc_n       = branch_jump_i ? branch_target_i :
 						stall_pc_i ? pc_ff :
 						bp_invalidate_i ? pc_plus4 :
-						bp_predict_redirect ? if_id_pred_target : pc_plus4;
+						bp_predict_redirect ? bp_redirect_next_pc : pc_plus4;
 
-	assign if_mem_addr_o = pc_ff;
+	assign if_mem_addr_o = bp_predict_redirect ? if_id_pred_target : pc_ff;
 
 	assign if_id_pc_o    = if_id_pc_ff;
 	assign if_id_pred_hit_o = if_id_valid_ff && !bp_invalidate_i && if_id_pred_hit;
@@ -145,15 +147,15 @@ import ydrasil_pkg::*;
 				if_id_valid_ff <= 1'b0;
 				flush_if_ff     <= 1'b1;
 			end else if (bp_predict_redirect) begin
-				if_id_pc_ff    <= pc_now;
+				if_id_pc_ff    <= if_id_pred_target;
 				pred_hold_valid_ff <= 1'b0;
 				pred_hold_hit_ff <= 1'b0;
 				pred_hold_taken_ff <= 1'b0;
 				pred_hold_target_ff <= '0;
 				pred_hold_counter_ff <= 2'b01;
 				pred_hold_bht_index_ff <= '0;
-				if_id_valid_ff <= 1'b0;
-				flush_if_ff     <= 1'b1;
+				if_id_valid_ff <= 1'b1;
+				flush_if_ff     <= 1'b0;
 			end else if(stall_if_i) begin
 				pred_hold_valid_ff <= if_id_valid_ff;
 				pred_hold_hit_ff <= if_id_pred_hit;
