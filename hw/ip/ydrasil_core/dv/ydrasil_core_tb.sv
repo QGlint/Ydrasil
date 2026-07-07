@@ -311,7 +311,7 @@ end
         u_dut.rn_real_rob_head_q + 6'd1;
     wire branch_order_rob_nonhead_event =
         u_dut.scoreboard_stall &&
-        u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+        u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
         u_dut.rn_real_ctrl_older_rob_block &&
         !u_dut.rn_real_rob_pipe1_q[u_dut.rn_real_rob_head_q] &&
         !(u_dut.pipe1_issue_valid && (u_dut.pipe1_rn_pdst_issue != '0)) &&
@@ -381,18 +381,18 @@ end
     reg        wait_branch_rs2_active_q;
 
     wire wait_src_rs1_active =
-        u_dut.u_ydrasil_id_stage.issue_valid_ff &&
-        ((u_dut.u_ydrasil_id_stage.issue_wait_rs1_ff &&
-          !u_dut.u_ydrasil_id_stage.issue_wait_rs1_ready) ||
-         u_dut.u_ydrasil_id_stage.u_ydrasil_id_issue_stage.slot0_rs1_phys_block);
+        u_dut.u_ydrasil_issue_stage.issue_valid_ff &&
+        ((u_dut.u_ydrasil_issue_stage.issue_wait_rs1_ff &&
+          !u_dut.u_ydrasil_issue_stage.issue_wait_rs1_ready) ||
+         u_dut.u_ydrasil_issue_stage.u_ydrasil_id_issue_stage.slot0_rs1_phys_block);
     wire wait_src_rs2_active =
-        u_dut.u_ydrasil_id_stage.issue_valid_ff &&
-        ((u_dut.u_ydrasil_id_stage.issue_wait_rs2_ff &&
-          !u_dut.u_ydrasil_id_stage.issue_wait_rs2_ready) ||
-         u_dut.u_ydrasil_id_stage.u_ydrasil_id_issue_stage.slot0_rs2_phys_block);
+        u_dut.u_ydrasil_issue_stage.issue_valid_ff &&
+        ((u_dut.u_ydrasil_issue_stage.issue_wait_rs2_ff &&
+          !u_dut.u_ydrasil_issue_stage.issue_wait_rs2_ready) ||
+         u_dut.u_ydrasil_issue_stage.u_ydrasil_id_issue_stage.slot0_rs2_phys_block);
     wire wait_branch_active =
         u_dut.scoreboard_stall &&
-        u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP];
+        u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP];
     wire wait_branch_ctrl_src_active =
         wait_branch_active &&
         (u_dut.rn_real_ctrl_rs1_block | u_dut.rn_real_ctrl_rs2_block);
@@ -781,14 +781,14 @@ end
                 ((u_dut.u_ctrl.issue_mul_div_producer & u_dut.u_ctrl.issue_src_hzd) ? 32'd1 : 32'd0);
             sb_branch_src_wait_count <= sb_branch_src_wait_count +
                 ((u_dut.scoreboard_stall &&
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP]) ? 32'd1 : 32'd0);
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP]) ? 32'd1 : 32'd0);
             sb_store_addr_wait_count <= sb_store_addr_wait_count +
                 ((u_dut.scoreboard_stall &&
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
                   (u_dut.u_ctrl.rs1_pending_stall_eff | u_dut.u_ctrl.rs1_issue_hzd)) ? 32'd1 : 32'd0);
             sb_store_data_wait_count <= sb_store_data_wait_count +
                 ((u_dut.scoreboard_stall &&
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
                   (u_dut.u_ctrl.rs2_pending_stall_eff | u_dut.u_ctrl.rs2_issue_hzd)) ? 32'd1 : 32'd0);
             fe_pred_taken_redirect_count <= fe_pred_taken_redirect_count +
                 (u_dut.u_ydrasil_if_stage.bp_predict_redirect ? 32'd1 : 32'd0);
@@ -877,13 +877,13 @@ end
                   u_dut.u_ydrasil_core_observer.gpr_pending_q[u_dut.id_ctrl_rs2_addr] &&
                   (u_dut.id_ctrl_rs2_addr == u_dut.wb_buf_fwd_addr)) ? 32'd1 : 32'd0);
             p4b_id_wait_rs1_hit_count <= p4b_id_wait_rs1_hit_count +
-                ((u_dut.u_ydrasil_id_stage.issue_wait_rs1_ff &&
+                ((u_dut.u_ydrasil_issue_stage.issue_wait_rs1_ff &&
                   !u_dut.wb_hzd_valid_q &&
-                  u_dut.u_ydrasil_id_stage.rs1_wb_fwd) ? 32'd1 : 32'd0);
+                  u_dut.u_ydrasil_issue_stage.rs1_wb_fwd) ? 32'd1 : 32'd0);
             p4b_id_wait_rs2_hit_count <= p4b_id_wait_rs2_hit_count +
-                ((u_dut.u_ydrasil_id_stage.issue_wait_rs2_ff &&
+                ((u_dut.u_ydrasil_issue_stage.issue_wait_rs2_ff &&
                   !u_dut.wb_hzd_valid_q &&
-                  u_dut.u_ydrasil_id_stage.rs2_wb_fwd) ? 32'd1 : 32'd0);
+                  u_dut.u_ydrasil_issue_stage.rs2_wb_fwd) ? 32'd1 : 32'd0);
             p4c_branch_ready_next_bypass_count <= p4c_branch_ready_next_bypass_count +
                 ((u_dut.rs1_branch_ready_next_bypass |
                   u_dut.rs2_branch_ready_next_bypass) ? 32'd1 : 32'd0);
@@ -905,164 +905,164 @@ end
                 ((u_dut.u_ctrl.issue_mul_div_producer & u_dut.u_ctrl.rs2_issue_hzd) ? 32'd1 : 32'd0);
             sb_raw_load_cons_branch_count <= sb_raw_load_cons_branch_count +
                 ((u_dut.u_ctrl.issue_load_producer & u_dut.u_ctrl.issue_src_hzd &
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP]) ? 32'd1 : 32'd0);
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP]) ? 32'd1 : 32'd0);
             sb_raw_load_cons_store_count <= sb_raw_load_cons_store_count +
                 ((u_dut.u_ctrl.issue_load_producer & u_dut.u_ctrl.issue_src_hzd &
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) ? 32'd1 : 32'd0);
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) ? 32'd1 : 32'd0);
             sb_raw_load_cons_alu_count <= sb_raw_load_cons_alu_count +
                 ((u_dut.u_ctrl.issue_load_producer & u_dut.u_ctrl.issue_src_hzd &
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_ALU]) ? 32'd1 : 32'd0);
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_ALU]) ? 32'd1 : 32'd0);
             sb_raw_load_cons_mul_count <= sb_raw_load_cons_mul_count +
                 ((u_dut.u_ctrl.issue_load_producer & u_dut.u_ctrl.issue_src_hzd &
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL]) ? 32'd1 : 32'd0);
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL]) ? 32'd1 : 32'd0);
             sb_raw_mul_cons_branch_count <= sb_raw_mul_cons_branch_count +
                 ((u_dut.u_ctrl.issue_mul_div_producer & u_dut.u_ctrl.issue_src_hzd &
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP]) ? 32'd1 : 32'd0);
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP]) ? 32'd1 : 32'd0);
             sb_raw_mul_cons_store_count <= sb_raw_mul_cons_store_count +
                 ((u_dut.u_ctrl.issue_mul_div_producer & u_dut.u_ctrl.issue_src_hzd &
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) ? 32'd1 : 32'd0);
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) ? 32'd1 : 32'd0);
             sb_raw_mul_cons_alu_count <= sb_raw_mul_cons_alu_count +
                 ((u_dut.u_ctrl.issue_mul_div_producer & u_dut.u_ctrl.issue_src_hzd &
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_ALU]) ? 32'd1 : 32'd0);
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_ALU]) ? 32'd1 : 32'd0);
             sb_raw_mul_cons_mul_count <= sb_raw_mul_cons_mul_count +
                 ((u_dut.u_ctrl.issue_mul_div_producer & u_dut.u_ctrl.issue_src_hzd &
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL]) ? 32'd1 : 32'd0);
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL]) ? 32'd1 : 32'd0);
             sb_raw_wb_wait_count <= sb_raw_wb_wait_count +
                 (((u_dut.u_ctrl.rs1_pending_stall_eff | u_dut.u_ctrl.rs2_pending_stall_eff) &&
-                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
-                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
-                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
-                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL]) ? 32'd1 : 32'd0);
+                  !u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  !u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
+                  !u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
+                  !u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL]) ? 32'd1 : 32'd0);
             sb_raw_wb_cons_alu_count <= sb_raw_wb_cons_alu_count +
                 (((u_dut.u_ctrl.rs1_pending_stall_eff | u_dut.u_ctrl.rs2_pending_stall_eff) &&
-                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
-                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
-                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
-                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL] &&
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_ALU]) ? 32'd1 : 32'd0);
+                  !u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  !u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
+                  !u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
+                  !u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL] &&
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_ALU]) ? 32'd1 : 32'd0);
             sb_raw_wb_cons_bitmanip_count <= sb_raw_wb_cons_bitmanip_count +
                 (((u_dut.u_ctrl.rs1_pending_stall_eff | u_dut.u_ctrl.rs2_pending_stall_eff) &&
-                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
-                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
-                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
-                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL] &&
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BITMANIP]) ? 32'd1 : 32'd0);
+                  !u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  !u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
+                  !u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
+                  !u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL] &&
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BITMANIP]) ? 32'd1 : 32'd0);
             sb_raw_wb_cons_csr_count <= sb_raw_wb_cons_csr_count +
                 (((u_dut.u_ctrl.rs1_pending_stall_eff | u_dut.u_ctrl.rs2_pending_stall_eff) &&
-                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
-                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
-                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
-                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL] &&
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_CSR]) ? 32'd1 : 32'd0);
+                  !u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  !u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
+                  !u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
+                  !u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL] &&
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_CSR]) ? 32'd1 : 32'd0);
             sb_raw_wb_cons_sys_count <= sb_raw_wb_cons_sys_count +
                 (((u_dut.u_ctrl.rs1_pending_stall_eff | u_dut.u_ctrl.rs2_pending_stall_eff) &&
-                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
-                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
-                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
-                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL] &&
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_SYS]) ? 32'd1 : 32'd0);
+                  !u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  !u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
+                  !u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
+                  !u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL] &&
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_SYS]) ? 32'd1 : 32'd0);
             sb_raw_wb_cons_other_count <= sb_raw_wb_cons_other_count +
                 (((u_dut.u_ctrl.rs1_pending_stall_eff | u_dut.u_ctrl.rs2_pending_stall_eff) &&
-                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
-                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
-                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
-                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL] &&
-                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_ALU] &&
-                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BITMANIP] &&
-                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_CSR] &&
-                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_SYS]) ? 32'd1 : 32'd0);
+                  !u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  !u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
+                  !u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
+                  !u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL] &&
+                  !u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_ALU] &&
+                  !u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BITMANIP] &&
+                  !u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_CSR] &&
+                  !u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_SYS]) ? 32'd1 : 32'd0);
             sb_raw_wb_rs1_pending_count <= sb_raw_wb_rs1_pending_count +
                 ((u_dut.u_ctrl.rs1_pending_stall_eff &&
-                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
-                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
-                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
-                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL]) ? 32'd1 : 32'd0);
+                  !u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  !u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
+                  !u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
+                  !u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL]) ? 32'd1 : 32'd0);
             sb_raw_wb_rs2_pending_count <= sb_raw_wb_rs2_pending_count +
                 ((u_dut.u_ctrl.rs2_pending_stall_eff &&
-                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
-                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
-                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
-                  !u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL]) ? 32'd1 : 32'd0);
+                  !u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  !u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
+                  !u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
+                  !u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL]) ? 32'd1 : 32'd0);
             sb_waw_only_count <= sb_waw_only_count +
                 ((u_dut.u_ctrl.rd_waw_stall &&
                   !(u_dut.u_ctrl.rs1_pending_stall_eff | u_dut.u_ctrl.rs2_pending_stall_eff |
                     u_dut.u_ctrl.rs1_issue_hzd | u_dut.u_ctrl.rs2_issue_hzd)) ? 32'd1 : 32'd0);
             sb_branch_wait_raw_class_count <= sb_branch_wait_raw_class_count +
                 ((u_dut.scoreboard_stall &&
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP]) ? 32'd1 : 32'd0);
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP]) ? 32'd1 : 32'd0);
             sb_branch_wait_ctrl_block_count <= sb_branch_wait_ctrl_block_count +
                 ((u_dut.scoreboard_stall &&
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
                   u_dut.rn_real_ctrl_block) ? 32'd1 : 32'd0);
             sb_branch_wait_ctrl_src_count <= sb_branch_wait_ctrl_src_count +
                 ((u_dut.scoreboard_stall &&
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
                   ((u_dut.id_ctrl_rs1_ren & !u_dut.rn_real_ctrl_rs1_ready) |
                    (u_dut.id_ctrl_rs2_ren & !u_dut.rn_real_ctrl_rs2_ready))) ? 32'd1 : 32'd0);
             sb_branch_wait_ctrl_order_count <= sb_branch_wait_ctrl_order_count +
                 ((u_dut.scoreboard_stall &&
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
                   u_dut.rn_real_ctrl_older_rob_block) ? 32'd1 : 32'd0);
             sb_branch_order_pipe1_issue_count <= sb_branch_order_pipe1_issue_count +
                 ((u_dut.scoreboard_stall &&
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
                   u_dut.rn_real_ctrl_older_rob_block &&
                   u_dut.pipe1_issue_valid && (u_dut.pipe1_rn_pdst_issue != '0)) ? 32'd1 : 32'd0);
             sb_branch_order_pipe1_wb_count <= sb_branch_order_pipe1_wb_count +
                 ((u_dut.scoreboard_stall &&
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
                   u_dut.rn_real_ctrl_older_rob_block &&
                   u_dut.rn_real_pipe1_pdst_found) ? 32'd1 : 32'd0);
             sb_branch_order_head_commit_count <= sb_branch_order_head_commit_count +
                 ((u_dut.scoreboard_stall &&
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
                   u_dut.rn_real_ctrl_older_rob_block &&
                   u_dut.rn_real_rob_pipe1_q[u_dut.rn_real_rob_head_q] &&
                   u_dut.rn_real_commit0_valid) ? 32'd1 : 32'd0);
             sb_branch_order_head_rf_block_count <= sb_branch_order_head_rf_block_count +
                 ((u_dut.scoreboard_stall &&
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
                   u_dut.rn_real_ctrl_older_rob_block &&
                   u_dut.rn_real_rob_pipe1_q[u_dut.rn_real_rob_head_q] &&
                   u_dut.rn_real_commit0_ready && !u_dut.rn_real_commit0_valid) ? 32'd1 : 32'd0);
             sb_branch_head_rf_block_lsu_count <= sb_branch_head_rf_block_lsu_count +
                 ((u_dut.scoreboard_stall &&
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
                   u_dut.rn_real_ctrl_older_rob_block &&
                   u_dut.rn_real_rob_pipe1_q[u_dut.rn_real_rob_head_q] &&
                   u_dut.rn_real_commit0_ready && !u_dut.rn_real_commit0_valid &&
                   u_dut.u_ydrasil_wb_stage.sel_lsu) ? 32'd1 : 32'd0);
             sb_branch_head_rf_block_alu_fifo_count <= sb_branch_head_rf_block_alu_fifo_count +
                 ((u_dut.scoreboard_stall &&
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
                   u_dut.rn_real_ctrl_older_rob_block &&
                   u_dut.rn_real_rob_pipe1_q[u_dut.rn_real_rob_head_q] &&
                   u_dut.rn_real_commit0_ready && !u_dut.rn_real_commit0_valid &&
                   u_dut.u_ydrasil_wb_stage.sel_alu_fifo) ? 32'd1 : 32'd0);
             sb_branch_head_rf_block_alu_current_count <= sb_branch_head_rf_block_alu_current_count +
                 ((u_dut.scoreboard_stall &&
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
                   u_dut.rn_real_ctrl_older_rob_block &&
                   u_dut.rn_real_rob_pipe1_q[u_dut.rn_real_rob_head_q] &&
                   u_dut.rn_real_commit0_ready && !u_dut.rn_real_commit0_valid &&
                   u_dut.u_ydrasil_wb_stage.sel_alu_current) ? 32'd1 : 32'd0);
             sb_branch_head_rf_block_mul_fifo_count <= sb_branch_head_rf_block_mul_fifo_count +
                 ((u_dut.scoreboard_stall &&
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
                   u_dut.rn_real_ctrl_older_rob_block &&
                   u_dut.rn_real_rob_pipe1_q[u_dut.rn_real_rob_head_q] &&
                   u_dut.rn_real_commit0_ready && !u_dut.rn_real_commit0_valid &&
                   u_dut.u_ydrasil_wb_stage.sel_mul_fifo) ? 32'd1 : 32'd0);
             sb_branch_head_rf_block_mul_current_count <= sb_branch_head_rf_block_mul_current_count +
                 ((u_dut.scoreboard_stall &&
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
                   u_dut.rn_real_ctrl_older_rob_block &&
                   u_dut.rn_real_rob_pipe1_q[u_dut.rn_real_rob_head_q] &&
                   u_dut.rn_real_commit0_ready && !u_dut.rn_real_commit0_valid &&
                   u_dut.u_ydrasil_wb_stage.sel_mul_current) ? 32'd1 : 32'd0);
             sb_branch_head_rf_block_other_count <= sb_branch_head_rf_block_other_count +
                 ((u_dut.scoreboard_stall &&
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
                   u_dut.rn_real_ctrl_older_rob_block &&
                   u_dut.rn_real_rob_pipe1_q[u_dut.rn_real_rob_head_q] &&
                   u_dut.rn_real_commit0_ready && !u_dut.rn_real_commit0_valid &&
@@ -1093,95 +1093,95 @@ end
                 ((branch_order_rob_nonhead_event && !branch_rob_nonhead_dist1) ? 32'd1 : 32'd0);
             sb_branch_wait_rs1_pending_count <= sb_branch_wait_rs1_pending_count +
                 ((u_dut.scoreboard_stall &&
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
                   u_dut.u_ctrl.rs1_pending_stall_eff) ? 32'd1 : 32'd0);
             sb_branch_wait_rs2_pending_count <= sb_branch_wait_rs2_pending_count +
                 ((u_dut.scoreboard_stall &&
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
                   u_dut.u_ctrl.rs2_pending_stall_eff) ? 32'd1 : 32'd0);
             sb_branch_wait_issue_rs1_count <= sb_branch_wait_issue_rs1_count +
                 ((u_dut.scoreboard_stall &&
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
                   u_dut.u_ctrl.rs1_issue_hzd) ? 32'd1 : 32'd0);
             sb_branch_wait_issue_rs2_count <= sb_branch_wait_issue_rs2_count +
                 ((u_dut.scoreboard_stall &&
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
                   u_dut.u_ctrl.rs2_issue_hzd) ? 32'd1 : 32'd0);
             sb_branch_wait_rd_waw_count <= sb_branch_wait_rd_waw_count +
                 ((u_dut.scoreboard_stall &&
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
                   u_dut.u_ctrl.rd_waw_stall) ? 32'd1 : 32'd0);
             sb_branch_wait_pipe1_hzd_count <= sb_branch_wait_pipe1_hzd_count +
                 ((u_dut.scoreboard_stall &&
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
                   (u_dut.u_ctrl.pipe1_issue_rs1_hzd | u_dut.u_ctrl.pipe1_issue_rs2_hzd |
                    u_dut.u_ctrl.pipe1_issue_rd_hzd)) ? 32'd1 : 32'd0);
             sb_branch_ctrl_src_rs1_busy_count <= sb_branch_ctrl_src_rs1_busy_count +
                 ((u_dut.scoreboard_stall &&
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
                   u_dut.id_ctrl_rs1_ren && !u_dut.rn_real_ctrl_rs1_ready &&
                   (u_dut.rn_real_rs1_psrc != '0) &&
                   u_dut.rn_real_busy_q[u_dut.rn_real_rs1_psrc]) ? 32'd1 : 32'd0);
             sb_branch_ctrl_src_rs2_busy_count <= sb_branch_ctrl_src_rs2_busy_count +
                 ((u_dut.scoreboard_stall &&
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
                   u_dut.id_ctrl_rs2_ren && !u_dut.rn_real_ctrl_rs2_ready &&
                   (u_dut.rn_real_rs2_psrc != '0) &&
                   u_dut.rn_real_busy_q[u_dut.rn_real_rs2_psrc]) ? 32'd1 : 32'd0);
             sb_branch_ctrl_src_rs1_no_gpr_pending_count <= sb_branch_ctrl_src_rs1_no_gpr_pending_count +
                 ((u_dut.scoreboard_stall &&
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
                   u_dut.id_ctrl_rs1_ren && !u_dut.rn_real_ctrl_rs1_ready &&
                   !u_dut.u_ydrasil_core_observer.gpr_pending_q[u_dut.id_ctrl_rs1_addr]) ? 32'd1 : 32'd0);
             sb_branch_ctrl_src_rs2_no_gpr_pending_count <= sb_branch_ctrl_src_rs2_no_gpr_pending_count +
                 ((u_dut.scoreboard_stall &&
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
                   u_dut.id_ctrl_rs2_ren && !u_dut.rn_real_ctrl_rs2_ready &&
                   !u_dut.u_ydrasil_core_observer.gpr_pending_q[u_dut.id_ctrl_rs2_addr]) ? 32'd1 : 32'd0);
             sb_branch_ctrl_src_rs1_uncommitted_count <= sb_branch_ctrl_src_rs1_uncommitted_count +
                 ((u_dut.scoreboard_stall &&
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
                   u_dut.id_ctrl_rs1_ren && !u_dut.rn_real_ctrl_rs1_ready &&
                   u_dut.rn_real_rs1_uncommitted) ? 32'd1 : 32'd0);
             sb_branch_ctrl_src_rs2_uncommitted_count <= sb_branch_ctrl_src_rs2_uncommitted_count +
                 ((u_dut.scoreboard_stall &&
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
                   u_dut.id_ctrl_rs2_ren && !u_dut.rn_real_ctrl_rs2_ready &&
                   u_dut.rn_real_rs2_uncommitted) ? 32'd1 : 32'd0);
             sb_branch_ctrl_src_actual_count <= sb_branch_ctrl_src_actual_count +
                 ((u_dut.scoreboard_stall &&
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
                   (u_dut.rn_real_ctrl_rs1_block | u_dut.rn_real_ctrl_rs2_block)) ? 32'd1 : 32'd0);
             sb_branch_ctrl_src_rs1_actual_count <= sb_branch_ctrl_src_rs1_actual_count +
                 ((u_dut.scoreboard_stall &&
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
                   u_dut.rn_real_ctrl_rs1_block) ? 32'd1 : 32'd0);
             sb_branch_ctrl_src_rs2_actual_count <= sb_branch_ctrl_src_rs2_actual_count +
                 ((u_dut.scoreboard_stall &&
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
                   u_dut.rn_real_ctrl_rs2_block) ? 32'd1 : 32'd0);
             sb_branch_ctrl_src_rs1_legacy_fwd_count <= sb_branch_ctrl_src_rs1_legacy_fwd_count +
                 ((u_dut.scoreboard_stall &&
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
                   u_dut.id_ctrl_rs1_ren && !u_dut.rn_real_ctrl_rs1_ready &&
                   u_dut.rn_real_ctrl_rs1_legacy_fwd) ? 32'd1 : 32'd0);
             sb_branch_ctrl_src_rs2_legacy_fwd_count <= sb_branch_ctrl_src_rs2_legacy_fwd_count +
                 ((u_dut.scoreboard_stall &&
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
                   u_dut.id_ctrl_rs2_ren && !u_dut.rn_real_ctrl_rs2_ready &&
                   u_dut.rn_real_ctrl_rs2_legacy_fwd) ? 32'd1 : 32'd0);
             sb_store_addr_raw_class_count <= sb_store_addr_raw_class_count +
                 ((u_dut.scoreboard_stall &&
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
                   (u_dut.u_ctrl.rs1_pending_stall_eff | u_dut.u_ctrl.rs1_issue_hzd)) ? 32'd1 : 32'd0);
             sb_store_data_raw_class_count <= sb_store_data_raw_class_count +
                 ((u_dut.scoreboard_stall &&
-                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
+                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
                   (u_dut.u_ctrl.rs2_pending_stall_eff | u_dut.u_ctrl.rs2_issue_hzd)) ? 32'd1 : 32'd0);
             sb_can_bypass_with_ready_issue_count <= sb_can_bypass_with_ready_issue_count +
-                ((u_dut.scoreboard_stall && u_dut.u_ydrasil_id_stage.ri_slot1_ready) ? 32'd1 : 32'd0);
+                ((u_dut.scoreboard_stall && u_dut.u_ydrasil_issue_stage.ri_slot1_ready) ? 32'd1 : 32'd0);
             sb_must_stall_in_order_count <= sb_must_stall_in_order_count +
-                ((u_dut.scoreboard_stall && !u_dut.u_ydrasil_id_stage.ri_slot1_ready) ? 32'd1 : 32'd0);
+                ((u_dut.scoreboard_stall && !u_dut.u_ydrasil_issue_stage.ri_slot1_ready) ? 32'd1 : 32'd0);
             wait_src_rs1_cycles_count <= wait_src_rs1_cycles_count +
                 (wait_src_rs1_active ? 32'd1 : 32'd0);
             wait_src_rs2_cycles_count <= wait_src_rs2_cycles_count +
@@ -1594,7 +1594,7 @@ end
                 (sb_raw_wb_wait_count * 100.0) / perf_cycles_real,
                 (sb_branch_wait_raw_class_count * 100.0) / perf_cycles_real,
                 (sb_raw_load_wait_count * 100.0) / perf_cycles_real,
-                (u_dut.u_ydrasil_id_stage.perf_ri_slot1_fire_blocked_by_wb_order * 100.0) / perf_cycles_real);
+                (u_dut.u_ydrasil_issue_stage.perf_ri_slot1_fire_blocked_by_wb_order * 100.0) / perf_cycles_real);
             $display("PERF_STALL: SCOREBOARD=%-d LSU_STRUCT=%-d WB_BACKPRESSURE=%-d CLINT=%-d MUL_DIV=%-d",
                 stall_scoreboard_count,
                 stall_lsu_struct_count,
@@ -1785,167 +1785,167 @@ end
                 u_dut.u_ydrasil_if_stage.perf_l0_counter_inc,
                 u_dut.u_ydrasil_if_stage.perf_l0_counter_dec);
             $display("PERF_ID: ID_DECODE_VALID=%-d ID_ISSUE_ACCEPT=%-d ID_ISSUE_FIRE=%-d ID_ISSUE_SLOT_VALID=%-d ID_ISSUE_NO_FIRE=%-d ID_ISSUE_WAIT_BLOCK=%-d ID_WAIT_RS1=%-d ID_WAIT_RS2=%-d ID_WAIT_ALU_READY_NEXT_RS1=%-d ID_WAIT_ALU_READY_NEXT_RS2=%-d ID_WAIT_LSU_FWD_RS1=%-d ID_WAIT_LSU_FWD_RS2=%-d ID_WAIT_WB_FWD_RS1=%-d ID_WAIT_WB_FWD_RS2=%-d ID_WAIT_PRF_READY_RS1=%-d ID_WAIT_PRF_READY_RS2=%-d ID_SKID_VALID=%-d ID_SKID_FILL=%-d ID_SKID_DRAIN=%-d ID_SKID_FULL_STALL=%-d ID_FRONTEND_STALL=%-d",
-                u_dut.u_ydrasil_id_stage.perf_id_decode_valid,
-                u_dut.u_ydrasil_id_stage.perf_id_issue_accept,
-                u_dut.u_ydrasil_id_stage.perf_id_issue_fire,
-                u_dut.u_ydrasil_id_stage.perf_id_issue_slot_valid,
-                u_dut.u_ydrasil_id_stage.perf_id_issue_no_fire,
-                u_dut.u_ydrasil_id_stage.perf_id_issue_wait_block,
-                u_dut.u_ydrasil_id_stage.perf_id_wait_rs1,
-                u_dut.u_ydrasil_id_stage.perf_id_wait_rs2,
-                u_dut.u_ydrasil_id_stage.perf_id_wait_alu_ready_next_rs1,
-                u_dut.u_ydrasil_id_stage.perf_id_wait_alu_ready_next_rs2,
-                u_dut.u_ydrasil_id_stage.perf_id_wait_lsu_fwd_rs1,
-                u_dut.u_ydrasil_id_stage.perf_id_wait_lsu_fwd_rs2,
-                u_dut.u_ydrasil_id_stage.perf_id_wait_wb_fwd_rs1,
-                u_dut.u_ydrasil_id_stage.perf_id_wait_wb_fwd_rs2,
-                u_dut.u_ydrasil_id_stage.perf_id_wait_prf_ready_rs1,
-                u_dut.u_ydrasil_id_stage.perf_id_wait_prf_ready_rs2,
-                u_dut.u_ydrasil_id_stage.perf_id_skid_valid,
-                u_dut.u_ydrasil_id_stage.perf_id_skid_fill,
-                u_dut.u_ydrasil_id_stage.perf_id_skid_drain,
-                u_dut.u_ydrasil_id_stage.perf_id_skid_full_stall,
-                u_dut.u_ydrasil_id_stage.perf_id_frontend_stall);
+                u_dut.u_ydrasil_issue_stage.perf_id_decode_valid,
+                u_dut.u_ydrasil_issue_stage.perf_id_issue_accept,
+                u_dut.u_ydrasil_issue_stage.perf_id_issue_fire,
+                u_dut.u_ydrasil_issue_stage.perf_id_issue_slot_valid,
+                u_dut.u_ydrasil_issue_stage.perf_id_issue_no_fire,
+                u_dut.u_ydrasil_issue_stage.perf_id_issue_wait_block,
+                u_dut.u_ydrasil_issue_stage.perf_id_wait_rs1,
+                u_dut.u_ydrasil_issue_stage.perf_id_wait_rs2,
+                u_dut.u_ydrasil_issue_stage.perf_id_wait_alu_ready_next_rs1,
+                u_dut.u_ydrasil_issue_stage.perf_id_wait_alu_ready_next_rs2,
+                u_dut.u_ydrasil_issue_stage.perf_id_wait_lsu_fwd_rs1,
+                u_dut.u_ydrasil_issue_stage.perf_id_wait_lsu_fwd_rs2,
+                u_dut.u_ydrasil_issue_stage.perf_id_wait_wb_fwd_rs1,
+                u_dut.u_ydrasil_issue_stage.perf_id_wait_wb_fwd_rs2,
+                u_dut.u_ydrasil_issue_stage.perf_id_wait_prf_ready_rs1,
+                u_dut.u_ydrasil_issue_stage.perf_id_wait_prf_ready_rs2,
+                u_dut.u_ydrasil_issue_stage.perf_id_skid_valid,
+                u_dut.u_ydrasil_issue_stage.perf_id_skid_fill,
+                u_dut.u_ydrasil_issue_stage.perf_id_skid_drain,
+                u_dut.u_ydrasil_issue_stage.perf_id_skid_full_stall,
+                u_dut.u_ydrasil_issue_stage.perf_id_frontend_stall);
             $display("PERF_READY_ISSUE: RI_SLOT0_VALID=%-d RI_SLOT1_VALID=%-d RI_SLOT0_READY=%-d RI_SLOT1_READY=%-d RI_FIRE_SLOT0=%-d RI_FIRE_SLOT1_BYPASS=%-d RI_SLOT1_BLOCK_RAW=%-d RI_SLOT1_BLOCK_WAW=%-d RI_SLOT1_BLOCK_CTRL=%-d RI_SLOT1_BLOCK_MEM=%-d RI_SLOT1_BLOCK_UNSUPPORTED=%-d RI_SLOT1_READY_WHEN_SLOT0_BLOCKED=%-d RI_SLOT1_READY_WHEN_SLOT0_READY=%-d RI_SLOT1_FIRE_BLOCKED_BY_SINGLE_ISSUE=%-d RI_SLOT1_FIRE_BLOCKED_BY_OPERAND_PORT=%-d RI_SLOT1_FIRE_BLOCKED_BY_WB_ORDER=%-d RI_BYPASS_FLUSH_KILLED=%-d",
-                u_dut.u_ydrasil_id_stage.perf_ri_slot0_valid,
-                u_dut.u_ydrasil_id_stage.perf_ri_slot1_valid,
-                u_dut.u_ydrasil_id_stage.perf_ri_slot0_ready,
-                u_dut.u_ydrasil_id_stage.perf_ri_slot1_ready,
-                u_dut.u_ydrasil_id_stage.perf_ri_fire_slot0,
-                u_dut.u_ydrasil_id_stage.perf_ri_fire_slot1_bypass,
-                u_dut.u_ydrasil_id_stage.perf_ri_slot1_block_raw,
-                u_dut.u_ydrasil_id_stage.perf_ri_slot1_block_waw,
-                u_dut.u_ydrasil_id_stage.perf_ri_slot1_block_ctrl,
-                u_dut.u_ydrasil_id_stage.perf_ri_slot1_block_mem,
-                u_dut.u_ydrasil_id_stage.perf_ri_slot1_block_unsupported,
-                u_dut.u_ydrasil_id_stage.perf_ri_slot1_ready_when_slot0_blocked,
-                u_dut.u_ydrasil_id_stage.perf_ri_slot1_ready_when_slot0_ready,
-                u_dut.u_ydrasil_id_stage.perf_ri_slot1_fire_blocked_by_single_issue,
-                u_dut.u_ydrasil_id_stage.perf_ri_slot1_fire_blocked_by_operand_port,
-                u_dut.u_ydrasil_id_stage.perf_ri_slot1_fire_blocked_by_wb_order,
-                u_dut.u_ydrasil_id_stage.perf_ri_bypass_flush_killed);
+                u_dut.u_ydrasil_issue_stage.perf_ri_slot0_valid,
+                u_dut.u_ydrasil_issue_stage.perf_ri_slot1_valid,
+                u_dut.u_ydrasil_issue_stage.perf_ri_slot0_ready,
+                u_dut.u_ydrasil_issue_stage.perf_ri_slot1_ready,
+                u_dut.u_ydrasil_issue_stage.perf_ri_fire_slot0,
+                u_dut.u_ydrasil_issue_stage.perf_ri_fire_slot1_bypass,
+                u_dut.u_ydrasil_issue_stage.perf_ri_slot1_block_raw,
+                u_dut.u_ydrasil_issue_stage.perf_ri_slot1_block_waw,
+                u_dut.u_ydrasil_issue_stage.perf_ri_slot1_block_ctrl,
+                u_dut.u_ydrasil_issue_stage.perf_ri_slot1_block_mem,
+                u_dut.u_ydrasil_issue_stage.perf_ri_slot1_block_unsupported,
+                u_dut.u_ydrasil_issue_stage.perf_ri_slot1_ready_when_slot0_blocked,
+                u_dut.u_ydrasil_issue_stage.perf_ri_slot1_ready_when_slot0_ready,
+                u_dut.u_ydrasil_issue_stage.perf_ri_slot1_fire_blocked_by_single_issue,
+                u_dut.u_ydrasil_issue_stage.perf_ri_slot1_fire_blocked_by_operand_port,
+                u_dut.u_ydrasil_issue_stage.perf_ri_slot1_fire_blocked_by_wb_order,
+                u_dut.u_ydrasil_issue_stage.perf_ri_bypass_flush_killed);
             $display("PERF_ALU_RESOURCE: ALU0_ISSUE=%-d ALU1_ISSUE_CANDIDATE=%-d ALU1_BLOCKED_NO_PORT=%-d ALU1_BLOCKED_WB_PORT=%-d ALU1_BLOCKED_RF_PORT=%-d ALU1_BLOCKED_FORWARD_PORT=%-d",
-                u_dut.u_ydrasil_id_stage.perf_ri_fire_slot0,
-                u_dut.u_ydrasil_id_stage.perf_ri_slot1_ready_when_slot0_ready,
-                u_dut.u_ydrasil_id_stage.perf_ri_slot1_fire_blocked_by_single_issue,
+                u_dut.u_ydrasil_issue_stage.perf_ri_fire_slot0,
+                u_dut.u_ydrasil_issue_stage.perf_ri_slot1_ready_when_slot0_ready,
+                u_dut.u_ydrasil_issue_stage.perf_ri_slot1_fire_blocked_by_single_issue,
                 32'd0,
                 32'd0,
                 32'd0);
             $display("PERF_ALU_RATIO: ALU0_ISSUE_CYC_PCT=%.4f ALU1_ISSUE_CYC_PCT=%.4f DI_PAIR_CYC_PCT=%.4f PIPE1_BLOCKED_P0_FIRE_CYC_PCT=%.4f",
-                (u_dut.u_ydrasil_id_stage.perf_di_pipe0_fire * 100.0) / perf_cycles_real,
-                (u_dut.u_ydrasil_id_stage.perf_di_pipe1_fire * 100.0) / perf_cycles_real,
-                (u_dut.u_ydrasil_id_stage.perf_di_pair_fire * 100.0) / perf_cycles_real,
-                (u_dut.u_ydrasil_id_stage.perf_uopq_p1_fire_when_p0_blocked * 100.0) / perf_cycles_real);
+                (u_dut.u_ydrasil_issue_stage.perf_di_pipe0_fire * 100.0) / perf_cycles_real,
+                (u_dut.u_ydrasil_issue_stage.perf_di_pipe1_fire * 100.0) / perf_cycles_real,
+                (u_dut.u_ydrasil_issue_stage.perf_di_pair_fire * 100.0) / perf_cycles_real,
+                (u_dut.u_ydrasil_issue_stage.perf_uopq_p1_fire_when_p0_blocked * 100.0) / perf_cycles_real);
             $display("PERF_DUAL_SHADOW: DS_CYCLES=%-d DS_PIPE0_VALID=%-d DS_PIPE0_READY=%-d DS_PIPE1_VALID=%-d DS_PIPE1_SIMPLE_ALU=%-d DS_SAFE_CANDIDATE=%-d DS_SAFE_WHEN_PIPE0_READY=%-d DS_SAFE_WHEN_PIPE0_BLOCKED=%-d DS_BLOCK_PIPE1_UNSUPPORTED=%-d DS_BLOCK_RAW_PIPE0=%-d DS_BLOCK_WAW_PIPE0=%-d DS_BLOCK_PENDING_RS1=%-d DS_BLOCK_PENDING_RS2=%-d DS_BLOCK_CTRL=%-d DS_BLOCK_MEM=%-d DS_BLOCK_CSR_SYS=%-d DS_BLOCK_FLUSH=%-d DS_BLOCK_WB_PORT=%-d DS_BLOCK_FORWARD_COMPLEX=%-d",
-                u_dut.u_ydrasil_id_stage.perf_ds_cycles,
-                u_dut.u_ydrasil_id_stage.perf_ds_pipe0_valid,
-                u_dut.u_ydrasil_id_stage.perf_ds_pipe0_ready,
-                u_dut.u_ydrasil_id_stage.perf_ds_pipe1_valid,
-                u_dut.u_ydrasil_id_stage.perf_ds_pipe1_simple_alu,
-                u_dut.u_ydrasil_id_stage.perf_ds_safe_candidate,
-                u_dut.u_ydrasil_id_stage.perf_ds_safe_when_pipe0_ready,
-                u_dut.u_ydrasil_id_stage.perf_ds_safe_when_pipe0_blocked,
-                u_dut.u_ydrasil_id_stage.perf_ds_block_pipe1_unsupported,
-                u_dut.u_ydrasil_id_stage.perf_ds_block_raw_pipe0,
-                u_dut.u_ydrasil_id_stage.perf_ds_block_waw_pipe0,
-                u_dut.u_ydrasil_id_stage.perf_ds_block_pending_rs1,
-                u_dut.u_ydrasil_id_stage.perf_ds_block_pending_rs2,
-                u_dut.u_ydrasil_id_stage.perf_ds_block_ctrl,
-                u_dut.u_ydrasil_id_stage.perf_ds_block_mem,
-                u_dut.u_ydrasil_id_stage.perf_ds_block_csr_sys,
-                u_dut.u_ydrasil_id_stage.perf_ds_block_flush,
-                u_dut.u_ydrasil_id_stage.perf_ds_block_wb_port,
-                u_dut.u_ydrasil_id_stage.perf_ds_block_forward_complex);
+                u_dut.u_ydrasil_issue_stage.perf_ds_cycles,
+                u_dut.u_ydrasil_issue_stage.perf_ds_pipe0_valid,
+                u_dut.u_ydrasil_issue_stage.perf_ds_pipe0_ready,
+                u_dut.u_ydrasil_issue_stage.perf_ds_pipe1_valid,
+                u_dut.u_ydrasil_issue_stage.perf_ds_pipe1_simple_alu,
+                u_dut.u_ydrasil_issue_stage.perf_ds_safe_candidate,
+                u_dut.u_ydrasil_issue_stage.perf_ds_safe_when_pipe0_ready,
+                u_dut.u_ydrasil_issue_stage.perf_ds_safe_when_pipe0_blocked,
+                u_dut.u_ydrasil_issue_stage.perf_ds_block_pipe1_unsupported,
+                u_dut.u_ydrasil_issue_stage.perf_ds_block_raw_pipe0,
+                u_dut.u_ydrasil_issue_stage.perf_ds_block_waw_pipe0,
+                u_dut.u_ydrasil_issue_stage.perf_ds_block_pending_rs1,
+                u_dut.u_ydrasil_issue_stage.perf_ds_block_pending_rs2,
+                u_dut.u_ydrasil_issue_stage.perf_ds_block_ctrl,
+                u_dut.u_ydrasil_issue_stage.perf_ds_block_mem,
+                u_dut.u_ydrasil_issue_stage.perf_ds_block_csr_sys,
+                u_dut.u_ydrasil_issue_stage.perf_ds_block_flush,
+                u_dut.u_ydrasil_issue_stage.perf_ds_block_wb_port,
+                u_dut.u_ydrasil_issue_stage.perf_ds_block_forward_complex);
             $display("PERF_PAIR_SHADOW: P1SH_VALID_CYCLES=%-d P1SH_SIMPLE_ALU=%-d P1SH_SAFE_CAND=%-d P1SH_BLOCK_RAW_PAIR0=%-d P1SH_BLOCK_WAW_PAIR0=%-d P1SH_BLOCK_PENDING_RS=%-d P1SH_BLOCK_CTRL_MEM=%-d",
-                u_dut.u_ydrasil_id_stage.perf_p1sh_valid_cycles,
-                u_dut.u_ydrasil_id_stage.perf_p1sh_simple_alu,
-                u_dut.u_ydrasil_id_stage.perf_p1sh_safe_cand,
-                u_dut.u_ydrasil_id_stage.perf_p1sh_block_raw_pair0,
-                u_dut.u_ydrasil_id_stage.perf_p1sh_block_waw_pair0,
-                u_dut.u_ydrasil_id_stage.perf_p1sh_block_pending_rs,
-                u_dut.u_ydrasil_id_stage.perf_p1sh_block_ctrl_mem);
+                u_dut.u_ydrasil_issue_stage.perf_p1sh_valid_cycles,
+                u_dut.u_ydrasil_issue_stage.perf_p1sh_simple_alu,
+                u_dut.u_ydrasil_issue_stage.perf_p1sh_safe_cand,
+                u_dut.u_ydrasil_issue_stage.perf_p1sh_block_raw_pair0,
+                u_dut.u_ydrasil_issue_stage.perf_p1sh_block_waw_pair0,
+                u_dut.u_ydrasil_issue_stage.perf_p1sh_block_pending_rs,
+                u_dut.u_ydrasil_issue_stage.perf_p1sh_block_ctrl_mem);
             $display("PERF_UOPQ_SHADOW: UOPQ_OCC_0=%-d UOPQ_OCC_1=%-d UOPQ_OCC_2=%-d UOPQ_OCC_3=%-d UOPQ_OCC_4=%-d UOPQ_P1_SAFE_1=%-d UOPQ_P1_SAFE_2=%-d UOPQ_P1_SAFE_3=%-d UOPQ_BLOCK_OLDER_CTRL_MEM=%-d UOPQ_BLOCK_RAW_OLDER=%-d UOPQ_BLOCK_WAW_OLDER=%-d",
-                u_dut.u_ydrasil_id_stage.perf_uopq_occ_0,
-                u_dut.u_ydrasil_id_stage.perf_uopq_occ_1,
-                u_dut.u_ydrasil_id_stage.perf_uopq_occ_2,
-                u_dut.u_ydrasil_id_stage.perf_uopq_occ_3,
-                u_dut.u_ydrasil_id_stage.perf_uopq_occ_4,
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_safe_1,
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_safe_2,
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_safe_3,
-                u_dut.u_ydrasil_id_stage.perf_uopq_block_older_ctrl_mem,
-                u_dut.u_ydrasil_id_stage.perf_uopq_block_raw_older,
-                u_dut.u_ydrasil_id_stage.perf_uopq_block_waw_older);
+                u_dut.u_ydrasil_issue_stage.perf_uopq_occ_0,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_occ_1,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_occ_2,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_occ_3,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_occ_4,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_safe_1,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_safe_2,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_safe_3,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_block_older_ctrl_mem,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_block_raw_older,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_block_waw_older);
 	            $display("PERF_UOPQ_ISSUE: UOPQ_P1_FIRE_FROM_1=%-d UOPQ_P1_FIRE_FROM_2=%-d UOPQ_P1_FIRE_FROM_3=%-d UOPQ_P1_FIRE_WHEN_P0_READY=%-d UOPQ_P1_FIRE_WHEN_P0_BLOCKED=%-d UOPQ_P1_FIRE_WHEN_P0_EMPTY=%-d UOPQ_P1_BLOCK_OLDER_CTRL_MEM=%-d UOPQ_P1_BLOCK_RAW_OLDER=%-d UOPQ_P1_BLOCK_WAW_OLDER=%-d UOPQ_P1_BLOCK_COMMIT_ORDER=%-d",
-	                u_dut.u_ydrasil_id_stage.perf_uopq_p1_fire_from_1,
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_fire_from_2,
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_fire_from_3,
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_fire_when_p0_ready,
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_fire_when_p0_blocked,
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_fire_when_p0_empty,
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_older_ctrl_mem,
-	                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_raw_older,
-	                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_waw_older,
-	                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_commit_order);
+	                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_fire_from_1,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_fire_from_2,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_fire_from_3,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_fire_when_p0_ready,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_fire_when_p0_blocked,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_fire_when_p0_empty,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_block_older_ctrl_mem,
+	                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_block_raw_older,
+	                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_block_waw_older,
+	                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_block_commit_order);
 	            $display("PERF_TIMING_CUT: ROB_SCAN_SYNTH_PATH=0 ID_OPERAND_USES_ROB_HEAD_COMB=0");
 	            $display("PERF_UOPQ_P0_BLOCK_SPLIT: BJP=%-d LOAD=%-d STORE=%-d CSR_SYS_FENCE=%-d BITMANIP=%-d OTHER=%-d",
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_p0_bjp,
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_p0_load,
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_p0_store,
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_p0_csr_sys,
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_p0_bitmanip,
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_p0_other);
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_block_p0_bjp,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_block_p0_load,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_block_p0_store,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_block_p0_csr_sys,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_block_p0_bitmanip,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_block_p0_other);
             $display("PERF_UOPQ_P0_OTHER_SPLIT: INVALID=%-d NO_ALU_MUL=%-d",
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_p0_other_invalid,
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_p0_other_no_alu_mul);
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_block_p0_other_invalid,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_block_p0_other_no_alu_mul);
             $display("PERF_UOPQ_P0_INVALID_SPLIT: ISSUE_ACCEPT=%-d SKID=%-d UOPQ2_SAFE=%-d",
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_p0_invalid_issue_accept,
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_p0_invalid_skid,
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_p0_invalid_uopq2_safe);
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_block_p0_invalid_issue_accept,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_block_p0_invalid_skid,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_block_p0_invalid_uopq2_safe);
             $display("PERF_UOPQ_EMPTY_SPLIT: BASE=%-d SUPPORTED=%-d OPERANDS_READY=%-d BLOCK_YOUNGER=%-d BLOCK_READY_ALLOW=%-d BLOCK_PENDING_RD=%-d BLOCK_RESBUF=%-d",
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_empty_base,
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_empty_supported,
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_empty_operands_ready,
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_empty_block_younger,
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_empty_block_ready_allow,
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_empty_block_pending_rd,
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_empty_block_resbuf);
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_empty_base,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_empty_supported,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_empty_operands_ready,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_empty_block_younger,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_empty_block_ready_allow,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_empty_block_pending_rd,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_empty_block_resbuf);
             $display("PERF_UOPQ_BLOCKED_SPLIT: BASE=%-d SUPPORTED=%-d P0_SAFE=%-d OPERANDS_READY=%-d BLOCK_YOUNGER=%-d BLOCK_READY_ALLOW=%-d BLOCK_PENDING_RD=%-d BLOCK_RESBUF=%-d",
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_blocked_base,
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_blocked_supported,
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_blocked_p0_safe,
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_blocked_operands_ready,
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_blocked_block_younger,
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_blocked_block_ready_allow,
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_blocked_block_pending_rd,
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_blocked_block_resbuf);
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_blocked_base,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_blocked_supported,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_blocked_p0_safe,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_blocked_operands_ready,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_blocked_block_younger,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_blocked_block_ready_allow,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_blocked_block_pending_rd,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_blocked_block_resbuf);
 	            $display("PERF_UOPQ_BLOCKED_UNSUP_SPLIT: ANY_UOP=%-d SHADOW_ALU=%-d SHIFT=%-d X0_RS1=%-d LUI_AUIPC=%-d",
-	                u_dut.u_ydrasil_id_stage.perf_uopq_p1_blocked_unsup_any_uop,
-	                u_dut.u_ydrasil_id_stage.perf_uopq_p1_blocked_unsup_shadow_alu,
-	                u_dut.u_ydrasil_id_stage.perf_uopq_p1_blocked_unsup_shift,
-	                u_dut.u_ydrasil_id_stage.perf_uopq_p1_blocked_unsup_x0_rs1,
-	                u_dut.u_ydrasil_id_stage.perf_uopq_p1_blocked_unsup_lui_auipc);
+	                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_blocked_unsup_any_uop,
+	                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_blocked_unsup_shadow_alu,
+	                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_blocked_unsup_shift,
+	                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_blocked_unsup_x0_rs1,
+	                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_blocked_unsup_lui_auipc);
 	            $display("PERF_UOPQ_BLOCKED_UNSUP_RELAX: READY=%-d FIRE_SAFE=%-d SHIFT_SAFE=%-d X0_RS1_SAFE=%-d LUI_AUIPC_SAFE=%-d",
-	                u_dut.u_ydrasil_id_stage.perf_uopq_p1_blocked_unsup_relax_ready,
-	                u_dut.u_ydrasil_id_stage.perf_uopq_p1_blocked_unsup_relax_fire_safe,
-	                u_dut.u_ydrasil_id_stage.perf_uopq_p1_blocked_unsup_relax_shift_safe,
-	                u_dut.u_ydrasil_id_stage.perf_uopq_p1_blocked_unsup_relax_x0_safe,
-	                u_dut.u_ydrasil_id_stage.perf_uopq_p1_blocked_unsup_relax_lui_auipc_safe);
+	                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_blocked_unsup_relax_ready,
+	                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_blocked_unsup_relax_fire_safe,
+	                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_blocked_unsup_relax_shift_safe,
+	                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_blocked_unsup_relax_x0_safe,
+	                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_blocked_unsup_relax_lui_auipc_safe);
 	            $display("PERF_UOPQ_YOUNGER_FLUSH_SPLIT: TOTAL=%-d UOPQ2=%-d IFID=%-d",
-	                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_younger_flush,
-	                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_young_uopq2,
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_young_ifid);
+	                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_block_younger_flush,
+	                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_block_young_uopq2,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_block_young_ifid);
             $display("PERF_UOPQ_IFID_FLUSH_SPLIT: BJP=%-d LOAD=%-d STORE=%-d MUL=%-d CSR_SYS_FENCE=%-d",
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_ifid_bjp,
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_ifid_load,
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_ifid_store,
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_ifid_mul,
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_ifid_csr_sys);
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_block_ifid_bjp,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_block_ifid_load,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_block_ifid_store,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_block_ifid_mul,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_block_ifid_csr_sys);
             $display("PERF_RENAME_SHADOW: RN_SHADOW_RAW_WB_CAN_REMOVE=%-d RN_SHADOW_WAW_CAN_REMOVE=%-d RN_SHADOW_WAR_CAN_REMOVE=%-d RN_SHADOW_PIPE1_WHEN_P0_BLOCKED_CAN_FIRE=%-d RN_SHADOW_FREE_PREG_MIN=%-d",
                 u_dut.u_ydrasil_core_observer.perf_rn_shadow_raw_wb_can_remove,
                 u_dut.u_ydrasil_core_observer.perf_rn_shadow_waw_can_remove,
                 u_dut.u_ydrasil_core_observer.perf_rn_shadow_war_can_remove,
-                u_dut.u_ydrasil_id_stage.perf_ri_slot1_ready_when_slot0_blocked,
+                u_dut.u_ydrasil_issue_stage.perf_ri_slot1_ready_when_slot0_blocked,
                 u_dut.u_ydrasil_core_observer.perf_rn_free_min);
             $display("PERF_RENAME_SHADOW_SPLIT: RAW_WB_CAN_REMOVE_ALU_READY=%-d RAW_WB_CAN_REMOVE_P1_READY=%-d RAW_WB_CAN_REMOVE_LSU_READY=%-d RAW_WB_CAN_REMOVE_MUL_READY=%-d RAW_WB_FALSE_POSITIVE=%-d",
                 u_dut.u_ydrasil_core_observer.perf_raw_wb_can_remove_alu_ready,
@@ -1982,21 +1982,21 @@ end
                 ((u_dut.u_ydrasil_core_observer.perf_prf_bypass_rd0 + u_dut.u_ydrasil_core_observer.perf_prf_bypass_rd1 +
                   u_dut.u_ydrasil_core_observer.perf_prf_bypass_rd2 + u_dut.u_ydrasil_core_observer.perf_prf_bypass_rd3) * 100.0) / perf_cycles_real);
             $display("PERF_ISSUEQ: IQ_OCC_0=%-d IQ_OCC_1=%-d IQ_OCC_2=%-d IQ_OCC_3=%-d IQ_OCC_4=%-d IQ_FULL_STALL=%-d IQ_WAKEUP_RS1=%-d IQ_WAKEUP_RS2=%-d IQ_PIPE0_FIRE=%-d IQ_PIPE1_FIRE=%-d IQ_PIPE1_FIRE_WHEN_PIPE0_BLOCKED=%-d IQ_PIPE1_BLOCK_OLDER_CTRL_MEM=%-d IQ_PIPE1_BLOCK_NOT_READY=%-d IQ_FULL_STALL_CYC_PCT=%.4f PIPE1_WHEN_P0_BLOCKED_CYC_PCT=%.4f",
-                u_dut.u_ydrasil_id_stage.perf_uopq_occ_0,
-                u_dut.u_ydrasil_id_stage.perf_uopq_occ_1,
-                u_dut.u_ydrasil_id_stage.perf_uopq_occ_2,
-                u_dut.u_ydrasil_id_stage.perf_uopq_occ_3,
-                u_dut.u_ydrasil_id_stage.perf_uopq_occ_4,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_occ_0,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_occ_1,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_occ_2,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_occ_3,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_occ_4,
                 32'd0,
                 32'd0,
                 32'd0,
-                u_dut.u_ydrasil_id_stage.perf_di_pipe0_fire,
-                u_dut.u_ydrasil_id_stage.perf_di_pipe1_fire,
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_fire_when_p0_blocked,
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_older_ctrl_mem,
-                u_dut.u_ydrasil_id_stage.perf_uopq_p1_block_raw_older,
+                u_dut.u_ydrasil_issue_stage.perf_di_pipe0_fire,
+                u_dut.u_ydrasil_issue_stage.perf_di_pipe1_fire,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_fire_when_p0_blocked,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_block_older_ctrl_mem,
+                u_dut.u_ydrasil_issue_stage.perf_uopq_p1_block_raw_older,
                 0.0,
-                (u_dut.u_ydrasil_id_stage.perf_uopq_p1_fire_when_p0_blocked * 100.0) / perf_cycles_real);
+                (u_dut.u_ydrasil_issue_stage.perf_uopq_p1_fire_when_p0_blocked * 100.0) / perf_cycles_real);
             $display("PERF_ROB: ROB_OCC_0=%-d ROB_OCC_1=%-d ROB_OCC_2=%-d ROB_OCC_3=%-d ROB_OCC_4P=%-d ROB_FULL_STALL=%-d ROB_COMMIT0=%-d ROB_COMMIT1=%-d ROB_HEAD_NOT_READY=%-d ROB_FULL_STALL_CYC_PCT=%.4f",
                 u_dut.u_ydrasil_core_observer.perf_rob_occ_0,
                 u_dut.u_ydrasil_core_observer.perf_rob_occ_1,
@@ -2020,28 +2020,28 @@ end
                 u_dut.u_ydrasil_core_observer.u_ydrasil_commit_trace.perf_commit_shell_head_wait,
                 u_dut.u_ydrasil_core_observer.u_ydrasil_commit_trace.perf_commit_shell_flush_squash);
             $display("PERF_DUAL_ISSUE: DI_PIPE0_FIRE=%-d DI_PIPE1_FIRE=%-d DI_PAIR_FIRE=%-d DI_PAIR_SIMPLE_ALU=%-d DI_PIPE1_KILLED_FLUSH=%-d DI_PIPE1_BLOCK_STALL_RECHECK=%-d DI_PIPE1_BLOCK_RESBUF_FULL=%-d DI_PIPE1_BLOCK_ALU_FIFO_FULL=%-d DI_PIPE1_BLOCK_PENDING_RECHECK=%-d DI_PIPE1_BLOCK_TIMING_GUARD=%-d",
-                u_dut.u_ydrasil_id_stage.perf_di_pipe0_fire,
-                u_dut.u_ydrasil_id_stage.perf_di_pipe1_fire,
-                u_dut.u_ydrasil_id_stage.perf_di_pair_fire,
-                u_dut.u_ydrasil_id_stage.perf_di_pair_simple_alu,
-                u_dut.u_ydrasil_id_stage.perf_di_pipe1_killed_flush,
-                u_dut.u_ydrasil_id_stage.perf_di_pipe1_block_stall_recheck,
-                u_dut.u_ydrasil_id_stage.perf_di_pipe1_block_resbuf_full,
-                u_dut.u_ydrasil_id_stage.perf_di_pipe1_block_alu_fifo_full,
-                u_dut.u_ydrasil_id_stage.perf_di_pipe1_block_pending_recheck,
-                u_dut.u_ydrasil_id_stage.perf_di_pipe1_block_timing_guard);
+                u_dut.u_ydrasil_issue_stage.perf_di_pipe0_fire,
+                u_dut.u_ydrasil_issue_stage.perf_di_pipe1_fire,
+                u_dut.u_ydrasil_issue_stage.perf_di_pair_fire,
+                u_dut.u_ydrasil_issue_stage.perf_di_pair_simple_alu,
+                u_dut.u_ydrasil_issue_stage.perf_di_pipe1_killed_flush,
+                u_dut.u_ydrasil_issue_stage.perf_di_pipe1_block_stall_recheck,
+                u_dut.u_ydrasil_issue_stage.perf_di_pipe1_block_resbuf_full,
+                u_dut.u_ydrasil_issue_stage.perf_di_pipe1_block_alu_fifo_full,
+                u_dut.u_ydrasil_issue_stage.perf_di_pipe1_block_pending_recheck,
+                u_dut.u_ydrasil_issue_stage.perf_di_pipe1_block_timing_guard);
             $display("PERF_PIPE1_OPERAND_BLOCK_SPLIT: RS1=%-d RS2=%-d BOTH=%-d FROM1=%-d FROM2=%-d RECOVERABLE=%-d",
-                u_dut.u_ydrasil_id_stage.perf_di_pipe1_operand_block_rs1,
-                u_dut.u_ydrasil_id_stage.perf_di_pipe1_operand_block_rs2,
-                u_dut.u_ydrasil_id_stage.perf_di_pipe1_operand_block_both,
-                u_dut.u_ydrasil_id_stage.perf_di_pipe1_operand_block_from1,
-                u_dut.u_ydrasil_id_stage.perf_di_pipe1_operand_block_from2,
-                u_dut.u_ydrasil_id_stage.perf_di_pipe1_operand_block_recoverable);
+                u_dut.u_ydrasil_issue_stage.perf_di_pipe1_operand_block_rs1,
+                u_dut.u_ydrasil_issue_stage.perf_di_pipe1_operand_block_rs2,
+                u_dut.u_ydrasil_issue_stage.perf_di_pipe1_operand_block_both,
+                u_dut.u_ydrasil_issue_stage.perf_di_pipe1_operand_block_from1,
+                u_dut.u_ydrasil_issue_stage.perf_di_pipe1_operand_block_from2,
+                u_dut.u_ydrasil_issue_stage.perf_di_pipe1_operand_block_recoverable);
             $display("PERF_PIPE1_ALT2_WHEN_FROM1_BLOCK: SAFE=%-d ARCH_READY=%-d REC_SAFE=%-d REC_ARCH_READY=%-d",
-                u_dut.u_ydrasil_id_stage.perf_di_pipe1_alt2_when_from1_block_safe,
-                u_dut.u_ydrasil_id_stage.perf_di_pipe1_alt2_when_from1_block_ready,
-                u_dut.u_ydrasil_id_stage.perf_di_pipe1_alt2_when_recoverable_safe,
-                u_dut.u_ydrasil_id_stage.perf_di_pipe1_alt2_when_recoverable_ready);
+                u_dut.u_ydrasil_issue_stage.perf_di_pipe1_alt2_when_from1_block_safe,
+                u_dut.u_ydrasil_issue_stage.perf_di_pipe1_alt2_when_from1_block_ready,
+                u_dut.u_ydrasil_issue_stage.perf_di_pipe1_alt2_when_recoverable_safe,
+                u_dut.u_ydrasil_issue_stage.perf_di_pipe1_alt2_when_recoverable_ready);
             $display("PERF_PIPE1_WB: P1_WB_ENQUEUE=%-d P1_WB_DEQUEUE=%-d P1_WB_DIRECT=%-d P1_WB_WAIT_CYCLES=%-d P1_WB_MAX_OCC=%-d P1_WB_ORDER_FIX=%-d",
                 u_dut.u_ydrasil_wb_stage.perf_p1_wb_enqueue,
                 u_dut.u_ydrasil_wb_stage.perf_p1_wb_dequeue,
@@ -2066,10 +2066,10 @@ end
                 mul_head_wait_result_valid_count,
                 mul_head_wait_wb_complete_count);
             $display("PERF_DUAL_GAIN: CYCLES_WITH_PAIR_FIRE=%-d EXTRA_INSTRET_PIPE1=%-d PIPE1_USEFUL_COMMIT=%-d PIPE1_SQUASHED=%-d",
-                u_dut.u_ydrasil_id_stage.perf_dual_cycles_with_pair_fire,
-                u_dut.u_ydrasil_id_stage.perf_dual_extra_instret_pipe1,
+                u_dut.u_ydrasil_issue_stage.perf_dual_cycles_with_pair_fire,
+                u_dut.u_ydrasil_issue_stage.perf_dual_extra_instret_pipe1,
                 u_dut.u_ydrasil_wb_stage.perf_p1_wb_dequeue,
-                u_dut.u_ydrasil_id_stage.perf_dual_pipe1_squashed);
+                u_dut.u_ydrasil_issue_stage.perf_dual_pipe1_squashed);
             $display("PERF_BRANCH: BRANCHES=%-d HITS=%-d PRED_TAKEN=%-d MISPRED=%-d ACC=%.2f",
                 bp_branch_count, bp_hit_count, bp_taken_count, bp_mispredict_count, perf_bp_accuracy);
             $display("PERF_BP_ACC: ACC=%.2f", perf_bp_accuracy);

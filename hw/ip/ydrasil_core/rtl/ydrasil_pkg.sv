@@ -289,4 +289,89 @@ package ydrasil_pkg;
 	localparam int BP_BTB_ENTRIES = 512;
 	localparam int BP_BHT_ENTRIES = 512;
 
+	typedef logic [REGS_ADDR_WIDTH-1:0] gpr_addr_t;
+	typedef logic [REGS_DATA_WIDTH-1:0] xlen_t;
+	typedef logic [INST_DATA_WIDTH-1:0] instr_t;
+	typedef logic [INST_ADDR_WIDTH-1:0] pc_t;
+	typedef logic [5:0] preg_t;
+	typedef logic [CSR_ADDR_WIDTH-1:0] csr_addr_t;
+	typedef logic [OPERATOR_WIDTH-1:0] alu_op_t;
+	typedef logic [OP_LSU_INFO_WIDTH-1:0] lsu_op_t;
+	typedef logic [OPERATOR_TYPE_WIDTH-1:0] op_type_t;
+	typedef logic [OP_CSR_INFO_WIDTH-1:0] csr_op_t;
+	typedef logic [OP_SYS_INFO_WIDTH-1:0] sys_op_t;
+
+endpackage
+
+package ydrasil_pipeline_pkg;
+	import ydrasil_pkg::*;
+
+	typedef struct packed {
+		logic       valid;
+		pc_t        pc;
+		instr_t     instr;
+		logic       pred_hit;
+		logic       pred_taken;
+		xlen_t      pred_target;
+		logic [1:0] pred_counter;
+		xlen_t      pred_bht_index;
+		logic       pred_l0_taken;
+
+		gpr_addr_t  rf_raddr_rs1;
+		gpr_addr_t  rf_raddr_rs2;
+		logic       rf_ren_rs1;
+		logic       rf_ren_rs2;
+		gpr_addr_t  rf_waddr_rd;
+		logic       rf_wen_rd;
+
+		xlen_t      imm;
+		logic       operand_b_rs_sel;
+		logic       operand_a_pc_sel;
+		logic       operand_a_imm_sel;
+		logic       bt_a_rs_sel;
+		logic       operand_b_jump_sel;
+
+		alu_op_t    operator;
+		lsu_op_t    operator_lsu;
+		op_type_t   operator_type;
+		csr_addr_t  csr_reg_raddr;
+		csr_addr_t  csr_ex_waddr;
+		csr_op_t    csr_op_info;
+		sys_op_t    sys_op_info;
+		logic       fence_i;
+	} decode_pkt_t;
+
+	typedef struct packed {
+		logic  rs1_ready;
+		logic  rs2_ready;
+		preg_t rs1_psrc;
+		preg_t rs2_psrc;
+		preg_t pdst;
+		logic  pdst_valid;
+	} rename_pkt_t;
+
+	typedef struct packed {
+		decode_pkt_t dec;
+		rename_pkt_t rn;
+		logic        wait_rs1;
+		logic        wait_rs2;
+	} issue_pkt_t;
+
+	typedef struct packed {
+		decode_pkt_t slot0;
+		decode_pkt_t slot1;
+	} decode_pair_pkt_t;
+
+	typedef struct packed {
+		issue_pkt_t slot0;
+		issue_pkt_t slot1;
+	} issue_pair_pkt_t;
+
+	typedef struct packed {
+		logic      valid;
+		logic      rf_wen;
+		gpr_addr_t rf_waddr;
+		preg_t     pdst;
+		xlen_t     data;
+	} wb_pkt_t;
 endpackage

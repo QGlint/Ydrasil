@@ -1,0 +1,3182 @@
+
+module ydrasil_issue_stage
+import ydrasil_pkg::*;
+import ydrasil_pipeline_pkg::*;
+ #(
+    parameter int DATA_WIDTH = 32
+)(
+    input  wire                            clk,
+    input  wire                            rst_n,
+    input  wire                            stall_id_i,
+    input  wire                            bubble_id_i,
+    input  wire                            flush_id_i,
+
+    // ID/ISSUE packet input
+    input  issue_pair_pkt_t                id_issue_pair_i,
+
+    // Register file read ports 
+    output wire [4:0]                      rf_addr_rs1_o,
+    output wire [4:0]                      rf_addr_rs2_o,
+    input  wire [DATA_WIDTH-1:0]           rf_rdata_rs1_i,
+    input  wire [DATA_WIDTH-1:0]           rf_rdata_rs2_i,
+    output wire [4:0]                      pipe1_rf_addr_rs1_o,
+    output wire [4:0]                      pipe1_rf_addr_rs2_o,
+    input  wire [DATA_WIDTH-1:0]           pipe1_rf_rdata_rs1_i,
+    input  wire [DATA_WIDTH-1:0]           pipe1_rf_rdata_rs2_i,
+    input  wire                            wb_fwd_valid_i,
+    input  wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] wb_fwd_addr_i,
+    input  wire [DATA_WIDTH-1:0]           wb_fwd_data_i,
+    input  wire                            lsu_fwd_valid_i,
+    input  wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] lsu_fwd_addr_i,
+    input  wire [5:0]                      lsu_fwd_pdst_i,
+    input  wire [DATA_WIDTH-1:0]           lsu_fwd_data_i,
+    input  wire                            alu_fwd_valid_i,
+    input  wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] alu_fwd_addr_i,
+    input  wire [5:0]                      alu_fwd_pdst_i,
+    input  wire [DATA_WIDTH-1:0]           alu_fwd_data_i,
+    input  wire                            pipe1_alu_fwd_valid_i,
+    input  wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] pipe1_alu_fwd_addr_i,
+    input  wire [5:0]                      pipe1_alu_fwd_pdst_i,
+    input  wire [DATA_WIDTH-1:0]           pipe1_alu_fwd_data_i,
+	input  wire                            prf_rs1_ready_i,
+	input  wire                            prf_rs2_ready_i,
+	input  wire [DATA_WIDTH-1:0]           prf_rs1_data_i,
+	input  wire [DATA_WIDTH-1:0]           prf_rs2_data_i,
+	input  wire                            prf_rs1_uncommitted_i,
+	input  wire                            prf_rs2_uncommitted_i,
+	input  wire                            pipe1_prf_rs1_ready_i,
+	input  wire                            pipe1_prf_rs2_ready_i,
+	input  wire [DATA_WIDTH-1:0]           pipe1_prf_rs1_data_i,
+	input  wire [DATA_WIDTH-1:0]           pipe1_prf_rs2_data_i,
+	input  wire                            pipe1_prf_rs1_uncommitted_i,
+	input  wire                            pipe1_prf_rs2_uncommitted_i,
+		input  wire                            pipe1_rename_ready_i,
+    input  wire                            rs1_issue_alu_ready_next_i,
+    input  wire                            rs2_issue_alu_ready_next_i,
+    input  wire                            rs1_issue_alu_stable_bypass_i,
+    input  wire                            rs2_issue_alu_stable_bypass_i,
+	    input  wire                            ready_issue_allow_i,
+	    input  wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_i,
+	    input  wire [63:0]                     rn_preg_ready_i,
+	    input  wire                            pipe1_resbuf_full_i,
+    output wire                            issue_frontend_stall_o,
+
+    // Dispatch to EX   
+    // output wire                            alu_valid_o,
+    output wire [DATA_WIDTH-1:0]           operand_a_o,
+    output wire [DATA_WIDTH-1:0]           operand_b_o,
+    output wire [ydrasil_pkg::OPERATOR_WIDTH-1:0]      operator_o, // 统一的ALU操作信息信号
+
+    output wire [DATA_WIDTH-1:0]           bt_a_operand_o,
+    output wire [DATA_WIDTH-1:0]           bt_b_operand_o,
+
+    output wire [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0]   operator_lsu_o,
+    output wire [DATA_WIDTH-1:0]           id_lsu_rs2_data_o, // 操作类型信号
+    output wire [DATA_WIDTH-1:0]           id_lsu_addr_o,
+    output wire                            id_lsu_addr_is_dtcm_o,
+    output wire [DATA_WIDTH-1:0]           id_lsu_store_data_o,
+    output wire [3:0]                      id_lsu_store_mask_o,
+
+    output wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] operator_type_o, // 操作类型信号
+
+    output wire                            id_ex_jalr_o,
+    output wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     id_ctrl_rs1_addr_o,
+    output wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     id_ctrl_rs2_addr_o,
+    output wire                            id_ctrl_rs1_ren_o,
+    output wire                            id_ctrl_rs2_ren_o,
+    output wire                            id_ctrl_rd_wen_o,
+    output wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     id_ctrl_rd_addr_o,
+    output wire                            id_ctrl_lsu_req_o,
+    output wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] id_ctrl_operator_type_o,
+
+    output wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0] 	    id_csr_raddr_o,  
+    output wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0] 	    id_ex_csr_waddr_o,  
+    output wire [ydrasil_pkg::OP_CSR_INFO_WIDTH-1:0]    id_op_csr_info_o,
+    output wire [ydrasil_pkg::OP_SYS_INFO_WIDTH-1:0]    id_op_sys_info_o,
+
+    output wire [DATA_WIDTH-1:0]           id_instr_addr_o, // 当前指令地址，供CLINT使用
+    output wire                            id_fence_i_o,
+    output wire                            id_ex_pred_hit_o,
+    output wire                            id_ex_pred_taken_o,
+    output wire [DATA_WIDTH-1:0]           id_ex_pred_target_o,
+    output wire [1:0]                      id_ex_pred_counter_o,
+    output wire [DATA_WIDTH-1:0]           id_ex_pred_bht_index_o,
+    output wire                            id_ex_pred_l0_taken_o,
+    output wire                            id_ex_valid_o,
+    // Generic writeback information
+    output wire                            id_alu_rf_wen_rd_o,
+    output wire [4:0]                      id_rf_waddr_rd_o,
+    output wire [5:0]                      id_rn_pdst_o,
+    output wire [5:0]                      id_ctrl_rs1_psrc_o,
+    output wire [5:0]                      id_ctrl_rs2_psrc_o,
+    output wire [5:0]                      id_ctrl_pdst_o,
+    output wire                            pipe1_ctrl_rs1_ren_o,
+    output wire                            pipe1_ctrl_rs2_ren_o,
+    output wire [5:0]                      pipe1_ctrl_rs1_psrc_o,
+    output wire [5:0]                      pipe1_ctrl_rs2_psrc_o,
+    output wire                            rn_alloc_valid_o,
+    output wire [4:0]                      rn_alloc_rd_addr_o,
+    output wire                            rn_if_rd_valid_o,
+    output wire                            rn_if_ctrl_valid_o,
+    output wire                            id_alu_stable_valid_o,
+    output wire [4:0]                      id_alu_stable_addr_o,
+    output wire [DATA_WIDTH-1:0]           id_alu_stable_data_o,
+
+    output wire                            pipe1_issue_valid_o,
+    output wire [DATA_WIDTH-1:0]           pipe1_operand_a_o,
+    output wire [DATA_WIDTH-1:0]           pipe1_operand_b_o,
+    output wire [ydrasil_pkg::OPERATOR_WIDTH-1:0] pipe1_operator_o,
+    output wire                            pipe1_rf_wen_rd_o,
+    output wire [4:0]                      pipe1_rf_waddr_rd_o,
+    output wire [5:0]                      pipe1_rn_pdst_o,
+    output wire [DATA_WIDTH-1:0]           pipe1_pc_o,
+    output wire [DATA_WIDTH-1:0]           pipe1_instr_o
+`ifndef SYNTHESIS
+    ,
+    output wire                            commit_trace_alloc_valid_o,
+    output wire [DATA_WIDTH-1:0]           commit_trace_alloc_pc_o,
+    output wire [DATA_WIDTH-1:0]           commit_trace_alloc_instr_o
+`endif
+
+
+);
+    issue_pkt_t id_issue_pkt_i;
+    issue_pkt_t id_issue_slot1_pkt;
+
+    assign id_issue_pkt_i = id_issue_pair_i.slot0;
+    assign id_issue_slot1_pkt = id_issue_pair_i.slot1;
+
+    wire [DATA_WIDTH-1:0]                 if_id_pc_i = id_issue_pkt_i.dec.pc;
+    wire [DATA_WIDTH-1:0]                 if_id_instr_i = id_issue_pkt_i.dec.instr;
+    wire                                  if_id_pred_hit_i = id_issue_pkt_i.dec.pred_hit;
+    wire                                  if_id_pred_taken_i = id_issue_pkt_i.dec.pred_taken;
+    wire [DATA_WIDTH-1:0]                 if_id_pred_target_i = id_issue_pkt_i.dec.pred_target;
+    wire [1:0]                            if_id_pred_counter_i = id_issue_pkt_i.dec.pred_counter;
+    wire [DATA_WIDTH-1:0]                 if_id_pred_bht_index_i = id_issue_pkt_i.dec.pred_bht_index;
+    wire                                  if_id_pred_l0_taken_i = id_issue_pkt_i.dec.pred_l0_taken;
+    wire                                  if_id_valid_i = id_issue_pkt_i.dec.valid;
+    wire                                  rn_if_rs1_ready_i = id_issue_pkt_i.rn.rs1_ready;
+    wire                                  rn_if_rs2_ready_i = id_issue_pkt_i.rn.rs2_ready;
+    wire [5:0]                            rn_if_rs1_psrc_i = id_issue_pkt_i.rn.rs1_psrc;
+    wire [5:0]                            rn_if_rs2_psrc_i = id_issue_pkt_i.rn.rs2_psrc;
+    wire [5:0]                            rn_if_pdst_i = id_issue_pkt_i.rn.pdst;
+
+    wire [4:0]                           rf_raddr_rs1;
+    wire [4:0]                           rf_raddr_rs2;
+    wire                                 rf_ren_rs1;
+    wire                                 rf_ren_rs2;
+
+    wire [4:0]                           rf_waddr_rd;
+    wire                                 rf_wen_rd;
+
+    reg [4:0]                           rf_waddr_rd_ff;
+    reg                                 rf_wen_rd_ff;
+
+    wire [DATA_WIDTH-1:0]                imm_i;
+    wire                                 operand_b_rs_sel;
+    wire                                 operand_a_pc_sel;
+    wire                                 operand_a_imm_sel;
+    wire                                 bt_a_rs_sel;
+
+    reg [DATA_WIDTH-1:0]                id_lsu_rs2_data_ff;
+    reg [DATA_WIDTH-1:0]                id_lsu_addr_ff;
+    reg                                 id_lsu_addr_is_dtcm_ff;
+    reg [DATA_WIDTH-1:0]                id_lsu_store_data_ff;
+    reg [3:0]                           id_lsu_store_mask_ff;
+
+    wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0]      operator_type;
+    reg [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0]       operator_type_ff;
+
+    wire [DATA_WIDTH-1:0]                operand_a;
+    wire [DATA_WIDTH-1:0]                operand_b;
+    wire [ydrasil_pkg::OPERATOR_WIDTH-1:0]           operator;
+
+
+    reg [DATA_WIDTH-1:0]                operand_a_ff;
+    reg [DATA_WIDTH-1:0]                operand_b_ff;
+    reg [ydrasil_pkg::OPERATOR_WIDTH-1:0]           operator_ff;
+
+    wire [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0]        operator_lsu;
+    reg [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0]         operator_lsu_ff;
+
+    wire [DATA_WIDTH-1:0]                bt_a_operand;
+    wire [DATA_WIDTH-1:0]                bt_b_operand;
+    reg [DATA_WIDTH-1:0]                 bt_a_operand_ff;
+    reg [DATA_WIDTH-1:0]                 bt_b_operand_ff;
+    reg [DATA_WIDTH-1:0]                 id_instr_addr_ff;
+    reg                                  id_ex_jalr_ff;
+    reg                                  id_ex_pred_hit_ff;
+    reg                                  id_ex_pred_taken_ff;
+    reg [DATA_WIDTH-1:0]                 id_ex_pred_target_ff;
+    reg [1:0]                            id_ex_pred_counter_ff;
+    reg [DATA_WIDTH-1:0]                 id_ex_pred_bht_index_ff;
+    reg                                  id_ex_pred_l0_taken_ff;
+    reg                                  id_ex_valid_ff;
+    reg                                  id_fence_i_ff;
+    wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0] 	 csr_reg_raddr;
+   
+    wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0] 	  csr_ex_waddr;
+	wire [ydrasil_pkg::OP_CSR_INFO_WIDTH-1:0]  csr_op_info;
+
+    reg [ydrasil_pkg::CSR_ADDR_WIDTH-1:0] 	 csr_reg_raddr_ff;
+
+    reg [ydrasil_pkg::CSR_ADDR_WIDTH-1:0] 	  csr_ex_waddr_ff; 
+	reg [ydrasil_pkg::OP_CSR_INFO_WIDTH-1:0]  csr_op_info_ff;
+
+    wire [ydrasil_pkg::OP_SYS_INFO_WIDTH-1:0]  sys_op_info;
+    reg [ydrasil_pkg::OP_SYS_INFO_WIDTH-1:0]   sys_op_info_ff;
+    wire                            operand_b_jump_sel;
+    wire                            id_fence_i;
+
+    wire                            id_advance;
+
+    reg                             skid_valid_ff;
+    reg [DATA_WIDTH-1:0]            skid_pc_ff;
+    reg [DATA_WIDTH-1:0]            skid_instr_ff;
+    reg                             skid_pred_hit_ff;
+    reg                             skid_pred_taken_ff;
+    reg [DATA_WIDTH-1:0]            skid_pred_target_ff;
+    reg [1:0]                       skid_pred_counter_ff;
+    reg [DATA_WIDTH-1:0]            skid_pred_bht_index_ff;
+    reg                             skid_pred_l0_taken_ff;
+    reg [4:0]                       skid_rf_raddr_rs1_ff;
+    reg [4:0]                       skid_rf_raddr_rs2_ff;
+    reg                             skid_rf_ren_rs1_ff;
+    reg                             skid_rf_ren_rs2_ff;
+    reg [4:0]                       skid_rf_waddr_rd_ff;
+    reg                             skid_rf_wen_rd_ff;
+    reg [DATA_WIDTH-1:0]            skid_imm_ff;
+    reg                             skid_operand_b_rs_sel_ff;
+    reg                             skid_operand_a_pc_sel_ff;
+    reg                             skid_operand_a_imm_sel_ff;
+    reg                             skid_bt_a_rs_sel_ff;
+    reg                             skid_operand_b_jump_sel_ff;
+    reg [ydrasil_pkg::OPERATOR_WIDTH-1:0]       skid_operator_ff;
+    reg [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0]    skid_operator_lsu_ff;
+    reg [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0]  skid_operator_type_ff;
+    reg [ydrasil_pkg::CSR_ADDR_WIDTH-1:0]       skid_csr_reg_raddr_ff;
+    reg [ydrasil_pkg::CSR_ADDR_WIDTH-1:0]       skid_csr_ex_waddr_ff;
+    reg [ydrasil_pkg::OP_CSR_INFO_WIDTH-1:0]    skid_csr_op_info_ff;
+    reg [ydrasil_pkg::OP_SYS_INFO_WIDTH-1:0]    skid_sys_op_info_ff;
+    reg                             skid_fence_i_ff;
+    reg [5:0]                       skid_rn_rs1_psrc_ff;
+    reg [5:0]                       skid_rn_rs2_psrc_ff;
+    reg [5:0]                       skid_rn_pdst_ff;
+    reg                             skid_rn_pdst_valid_ff;
+    reg                             skid_rn_rs1_ready_ff;
+    reg                             skid_rn_rs2_ready_ff;
+
+    reg                             uopq2_buf_valid_ff;
+    reg [DATA_WIDTH-1:0]            uopq2_buf_pc_ff;
+    reg [DATA_WIDTH-1:0]            uopq2_buf_instr_ff;
+    reg                             uopq2_buf_pred_hit_ff;
+    reg                             uopq2_buf_pred_taken_ff;
+    reg [DATA_WIDTH-1:0]            uopq2_buf_pred_target_ff;
+    reg [1:0]                       uopq2_buf_pred_counter_ff;
+    reg [DATA_WIDTH-1:0]            uopq2_buf_pred_bht_index_ff;
+    reg                             uopq2_buf_pred_l0_taken_ff;
+    reg [4:0]                       uopq2_buf_rf_raddr_rs1_ff;
+    reg [4:0]                       uopq2_buf_rf_raddr_rs2_ff;
+    reg                             uopq2_buf_rf_ren_rs1_ff;
+    reg                             uopq2_buf_rf_ren_rs2_ff;
+    reg [4:0]                       uopq2_buf_rf_waddr_rd_ff;
+    reg                             uopq2_buf_rf_wen_rd_ff;
+    reg [DATA_WIDTH-1:0]            uopq2_buf_imm_ff;
+    reg                             uopq2_buf_operand_b_rs_sel_ff;
+    reg                             uopq2_buf_operand_a_pc_sel_ff;
+    reg                             uopq2_buf_operand_a_imm_sel_ff;
+    reg                             uopq2_buf_bt_a_rs_sel_ff;
+    reg                             uopq2_buf_operand_b_jump_sel_ff;
+    reg [ydrasil_pkg::OPERATOR_WIDTH-1:0]       uopq2_buf_operator_ff;
+    reg [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0]    uopq2_buf_operator_lsu_ff;
+    reg [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0]  uopq2_buf_operator_type_ff;
+    reg [ydrasil_pkg::CSR_ADDR_WIDTH-1:0]       uopq2_buf_csr_reg_raddr_ff;
+    reg [ydrasil_pkg::CSR_ADDR_WIDTH-1:0]       uopq2_buf_csr_ex_waddr_ff;
+    reg [ydrasil_pkg::OP_CSR_INFO_WIDTH-1:0]    uopq2_buf_csr_op_info_ff;
+    reg [ydrasil_pkg::OP_SYS_INFO_WIDTH-1:0]    uopq2_buf_sys_op_info_ff;
+    reg                             uopq2_buf_fence_i_ff;
+    reg [5:0]                       uopq2_buf_rn_rs1_psrc_ff;
+    reg [5:0]                       uopq2_buf_rn_rs2_psrc_ff;
+	    reg [5:0]                       uopq2_buf_rn_pdst_ff;
+	    reg                             uopq2_buf_rn_pdst_valid_ff;
+	    reg                             uopq2_buf_rs1_ready_ff;
+	    reg                             uopq2_buf_rs2_ready_ff;
+
+	    reg                             uopq3_buf_valid_ff;
+	    reg [DATA_WIDTH-1:0]            uopq3_buf_pc_ff;
+	    reg [DATA_WIDTH-1:0]            uopq3_buf_instr_ff;
+	    reg                             uopq3_buf_pred_hit_ff;
+	    reg                             uopq3_buf_pred_taken_ff;
+	    reg [DATA_WIDTH-1:0]            uopq3_buf_pred_target_ff;
+	    reg [1:0]                       uopq3_buf_pred_counter_ff;
+	    reg [DATA_WIDTH-1:0]            uopq3_buf_pred_bht_index_ff;
+	    reg                             uopq3_buf_pred_l0_taken_ff;
+	    reg [4:0]                       uopq3_buf_rf_raddr_rs1_ff;
+	    reg [4:0]                       uopq3_buf_rf_raddr_rs2_ff;
+	    reg                             uopq3_buf_rf_ren_rs1_ff;
+	    reg                             uopq3_buf_rf_ren_rs2_ff;
+	    reg [4:0]                       uopq3_buf_rf_waddr_rd_ff;
+	    reg                             uopq3_buf_rf_wen_rd_ff;
+	    reg [DATA_WIDTH-1:0]            uopq3_buf_imm_ff;
+	    reg                             uopq3_buf_operand_b_rs_sel_ff;
+	    reg                             uopq3_buf_operand_a_pc_sel_ff;
+	    reg                             uopq3_buf_operand_a_imm_sel_ff;
+	    reg                             uopq3_buf_bt_a_rs_sel_ff;
+	    reg                             uopq3_buf_operand_b_jump_sel_ff;
+	    reg [ydrasil_pkg::OPERATOR_WIDTH-1:0]       uopq3_buf_operator_ff;
+	    reg [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0]    uopq3_buf_operator_lsu_ff;
+	    reg [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0]  uopq3_buf_operator_type_ff;
+	    reg [ydrasil_pkg::CSR_ADDR_WIDTH-1:0]       uopq3_buf_csr_reg_raddr_ff;
+	    reg [ydrasil_pkg::CSR_ADDR_WIDTH-1:0]       uopq3_buf_csr_ex_waddr_ff;
+	    reg [ydrasil_pkg::OP_CSR_INFO_WIDTH-1:0]    uopq3_buf_csr_op_info_ff;
+	    reg [ydrasil_pkg::OP_SYS_INFO_WIDTH-1:0]    uopq3_buf_sys_op_info_ff;
+	    reg                             uopq3_buf_fence_i_ff;
+	    reg [5:0]                       uopq3_buf_rn_rs1_psrc_ff;
+	    reg [5:0]                       uopq3_buf_rn_rs2_psrc_ff;
+	    reg [5:0]                       uopq3_buf_rn_pdst_ff;
+	    reg                             uopq3_buf_rn_pdst_valid_ff;
+	    reg                             uopq3_buf_rs1_ready_ff;
+	    reg                             uopq3_buf_rs2_ready_ff;
+
+    reg                             issue_valid_ff;
+    reg                             issue_wait_rs1_ff;
+    reg                             issue_wait_rs2_ff;
+    reg [DATA_WIDTH-1:0]            issue_pc_ff;
+    reg                             issue_pred_hit_ff;
+    reg                             issue_pred_taken_ff;
+    reg [DATA_WIDTH-1:0]            issue_pred_target_ff;
+    reg [1:0]                       issue_pred_counter_ff;
+    reg [DATA_WIDTH-1:0]            issue_pred_bht_index_ff;
+    reg                             issue_pred_l0_taken_ff;
+    reg [4:0]                       issue_rf_raddr_rs1_ff;
+    reg [4:0]                       issue_rf_raddr_rs2_ff;
+    reg                             issue_rf_ren_rs1_ff;
+    reg                             issue_rf_ren_rs2_ff;
+    reg [4:0]                       issue_rf_waddr_rd_ff;
+    reg                             issue_rf_wen_rd_ff;
+    reg [DATA_WIDTH-1:0]            issue_imm_ff;
+    reg                             issue_operand_b_rs_sel_ff;
+    reg                             issue_operand_a_pc_sel_ff;
+    reg                             issue_operand_a_imm_sel_ff;
+    reg                             issue_bt_a_rs_sel_ff;
+    reg                             issue_operand_b_jump_sel_ff;
+    reg [ydrasil_pkg::OPERATOR_WIDTH-1:0]       issue_operator_ff;
+    reg [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0]    issue_operator_lsu_ff;
+    reg [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0]  issue_operator_type_ff;
+    reg [ydrasil_pkg::CSR_ADDR_WIDTH-1:0]       issue_csr_reg_raddr_ff;
+    reg [ydrasil_pkg::CSR_ADDR_WIDTH-1:0]       issue_csr_ex_waddr_ff;
+    reg [ydrasil_pkg::OP_CSR_INFO_WIDTH-1:0]    issue_csr_op_info_ff;
+    reg [ydrasil_pkg::OP_SYS_INFO_WIDTH-1:0]    issue_sys_op_info_ff;
+    reg                             issue_fence_i_ff;
+    reg [5:0]                       issue_rn_rs1_psrc_ff;
+    reg [5:0]                       issue_rn_rs2_psrc_ff;
+    reg [5:0]                       issue_rn_pdst_ff;
+    reg                             issue_rn_pdst_valid_ff;
+    reg [5:0]                       id_rn_pdst_ff;
+    reg                             alu_stable_valid_ff;
+    reg [4:0]                       alu_stable_addr_ff;
+    reg [DATA_WIDTH-1:0]            alu_stable_data_ff;
+
+    wire [DATA_WIDTH-1:0]            decode_pc;
+    wire [DATA_WIDTH-1:0]            decode_instr;
+    wire                             decode_pred_hit;
+    wire                             decode_pred_taken;
+    wire [DATA_WIDTH-1:0]            decode_pred_target;
+    wire [1:0]                       decode_pred_counter;
+    wire [DATA_WIDTH-1:0]            decode_pred_bht_index;
+    wire                             decode_pred_l0_taken;
+    wire                             decode_valid;
+    wire                             issue_wait_rs1_ready;
+    wire                             issue_wait_rs2_ready;
+    wire                             issue_wait_block;
+    wire                             issue_slot0_fire;
+    wire                             issue_slot1_bypass_fire;
+    wire                             pipe1_dual_fire;
+    wire                             pair1_fire;
+    wire                             pipe1_dual_supported;
+    wire                             pipe1_dual_operands_ready;
+    wire                             pipe1_dual_raw_pipe0;
+    wire                             pipe1_dual_waw_pipe0;
+    wire                             pipe1_dual_war_pipe0;
+    wire                             pipe1_dual_pending_rd;
+    wire                             pipe1_younger_flush_risk;
+    wire                             pipe1_younger_flush_block;
+    wire                             pipe1_pipe0_present_safe;
+    wire                             pipe1_pipe0_blocked_load_safe;
+    wire                             pipe1_pipe0_blocked_store_safe;
+    wire                             pipe1_pipe0_empty_safe;
+    wire                             pipe1_dual_pipe0_safe;
+    wire                             pipe1_dual_rs1_ready;
+    wire                             pipe1_dual_rs2_ready;
+    wire                             pipe1_dual_rs1_alu_fwd;
+    wire                             pipe1_dual_rs2_alu_fwd;
+    wire                             pipe1_dual_rs1_p1alu_fwd;
+    wire                             pipe1_dual_rs2_p1alu_fwd;
+    wire                             pipe1_dual_rs1_wb_fwd;
+    wire                             pipe1_dual_rs2_wb_fwd;
+    wire [DATA_WIDTH-1:0]            pipe1_dual_rs1_data;
+    wire [DATA_WIDTH-1:0]            pipe1_dual_rs2_data;
+    wire [DATA_WIDTH-1:0]            pipe1_dual_operand_a;
+    wire [DATA_WIDTH-1:0]            pipe1_dual_operand_b;
+    wire                             pair1_refill_dep_p1;
+    wire                             pair1_refill_dep_p0;
+    wire                             pair1_refill_srcs_ready;
+    wire                             pair1_refill_simple_alu;
+    wire                             pair1_refill_direct;
+    wire                             issue_fire;
+    wire                             issue_accept;
+    wire                             issue_load_from_skid;
+    wire                             issue_load_from_uopq2;
+    wire                             skid_fill;
+    wire                             skid_drain;
+	    wire                             uopq2_buf_capture;
+	    wire                             uopq3_buf_capture;
+	    wire                             uopq2_buf_capture_supported;
+    wire                             uopq2_buf_capture_operands_ready;
+    wire                             uopq2_refill_from_if;
+    wire                             issue_alu_stable_candidate;
+    wire [DATA_WIDTH-1:0]            issue_alu_stable_result;
+    wire                             ri_slot1_valid;
+    wire                             ri_slot1_supported;
+    wire                             ri_slot1_block_raw;
+    wire                             ri_slot1_block_waw;
+    wire                             ri_slot1_block_war;
+    wire                             ri_slot1_block_ctrl;
+    wire                             ri_slot1_block_mem;
+    wire                             ri_slot1_block_unsupported;
+    wire                             ri_slot1_block_old_unsupported;
+    wire                             ri_slot1_block_rs1_pending;
+    wire                             ri_slot1_block_rs2_pending;
+    wire                             ri_slot1_block_rd_pending;
+    wire                             ri_slot1_ready;
+    wire                             ri_slot1_ready_when_slot0_blocked;
+    wire                             ri_slot1_ready_when_slot0_ready;
+    wire                             ri_slot1_fire_blocked_by_single_issue;
+    wire                             ri_slot1_fire_blocked_by_wb_order;
+    wire                             ri_bypass_flush_killed;
+    wire                             ri_slot1_rs1_clear_fwd;
+    wire                             ri_slot1_rs2_read;
+    wire                             ri_slot1_rs2_clear_fwd;
+    wire                             if_id_rn_pdst_valid;
+    wire                             if_id_live_accept;
+    wire [DATA_WIDTH-1:0]            issue_rs2_data;
+    wire                             rs1_lsu_fwd;
+    wire                             rs2_lsu_fwd;
+    wire                             rs1_wb_fwd;
+    wire                             rs2_wb_fwd;
+    wire                             slot0_rs1_prf_ready;
+    wire                             slot0_rs2_prf_ready;
+    wire [4:0]                       selected_rf_raddr_rs1;
+    wire [4:0]                       selected_rf_raddr_rs2;
+    wire                             selected_rf_ren_rs1;
+    wire                             selected_rf_ren_rs2;
+    wire [4:0]                       selected_rf_waddr_rd;
+    wire                             selected_rf_wen_rd;
+    wire [DATA_WIDTH-1:0]            selected_pc;
+    wire [DATA_WIDTH-1:0]            selected_imm;
+    wire                             selected_operand_b_rs_sel;
+    wire                             selected_operand_a_pc_sel;
+    wire                             selected_operand_a_imm_sel;
+    wire                             selected_bt_a_rs_sel;
+    wire                             selected_operand_b_jump_sel;
+    wire [ydrasil_pkg::OPERATOR_WIDTH-1:0]       selected_operator;
+    wire [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0]    selected_operator_lsu;
+    wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0]  selected_operator_type;
+    wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0]       selected_csr_reg_raddr;
+    wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0]       selected_csr_ex_waddr;
+    wire [ydrasil_pkg::OP_CSR_INFO_WIDTH-1:0]    selected_csr_op_info;
+    wire [ydrasil_pkg::OP_SYS_INFO_WIDTH-1:0]    selected_sys_op_info;
+    wire                             selected_fence_i;
+    wire [5:0]                       selected_rn_rs1_psrc;
+    wire [5:0]                       selected_rn_rs2_psrc;
+    wire [5:0]                       selected_rn_pdst;
+    wire                             selected_rn_pdst_valid;
+    wire                             selected_pred_hit;
+    wire                             selected_pred_taken;
+    wire [DATA_WIDTH-1:0]            selected_pred_target;
+    wire [1:0]                       selected_pred_counter;
+    wire [DATA_WIDTH-1:0]            selected_pred_bht_index;
+    wire                             selected_pred_l0_taken;
+    wire [4:0]                       slot1_rf_raddr_rs1;
+    wire [4:0]                       slot1_rf_raddr_rs2;
+    wire                             slot1_rf_ren_rs1;
+    wire                             slot1_rf_ren_rs2;
+    wire [4:0]                       slot1_rf_waddr_rd;
+    wire                             slot1_rf_wen_rd;
+    wire [DATA_WIDTH-1:0]            slot1_imm;
+    wire                             slot1_operand_b_rs_sel;
+    wire                             slot1_operand_a_pc_sel;
+    wire                             slot1_operand_a_imm_sel;
+    wire                             slot1_bt_a_rs_sel;
+    wire                             slot1_operand_b_jump_sel;
+    wire [ydrasil_pkg::OPERATOR_WIDTH-1:0]       slot1_operator;
+    wire [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0]    slot1_operator_lsu;
+    wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0]  slot1_operator_type;
+    wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0]       slot1_csr_reg_raddr;
+    wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0]       slot1_csr_ex_waddr;
+    wire [ydrasil_pkg::OP_CSR_INFO_WIDTH-1:0]    slot1_csr_op_info;
+    wire [ydrasil_pkg::OP_SYS_INFO_WIDTH-1:0]    slot1_sys_op_info;
+    wire                             slot1_fence_i;
+    wire                             uopq0_valid;
+    wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] uopq0_operator_type;
+    wire [ydrasil_pkg::OPERATOR_WIDTH-1:0]      uopq0_operator;
+    wire                             uopq0_fence_i;
+    wire                             uopq0_rf_wen_rd;
+    wire [4:0]                       uopq0_rf_waddr_rd;
+    wire                             uopq1_valid;
+    wire [DATA_WIDTH-1:0]            uopq1_pc;
+    wire [DATA_WIDTH-1:0]            uopq1_instr;
+    wire [4:0]                       uopq1_rf_raddr_rs1;
+    wire [4:0]                       uopq1_rf_raddr_rs2;
+    wire                             uopq1_rf_ren_rs1;
+    wire                             uopq1_rf_ren_rs2;
+    wire [4:0]                       uopq1_rf_waddr_rd;
+    wire                             uopq1_rf_wen_rd;
+    wire [DATA_WIDTH-1:0]            uopq1_imm;
+    wire                             uopq1_operand_b_rs_sel;
+    wire                             uopq1_operand_a_pc_sel;
+    wire                             uopq1_operand_a_imm_sel;
+    wire                             uopq1_operand_b_jump_sel;
+    wire [ydrasil_pkg::OPERATOR_WIDTH-1:0]      uopq1_operator;
+    wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] uopq1_operator_type;
+    wire                             uopq1_fence_i;
+    wire                             uopq2_valid;
+    wire [DATA_WIDTH-1:0]            uopq2_pc;
+    wire [DATA_WIDTH-1:0]            uopq2_instr;
+    wire [4:0]                       uopq2_rf_raddr_rs1;
+    wire [4:0]                       uopq2_rf_raddr_rs2;
+    wire                             uopq2_rf_ren_rs1;
+    wire                             uopq2_rf_ren_rs2;
+    wire [4:0]                       uopq2_rf_waddr_rd;
+    wire                             uopq2_rf_wen_rd;
+    wire [DATA_WIDTH-1:0]            uopq2_imm;
+    wire                             uopq2_operand_b_rs_sel;
+    wire                             uopq2_operand_a_pc_sel;
+    wire                             uopq2_operand_a_imm_sel;
+    wire                             uopq2_operand_b_jump_sel;
+	    wire [ydrasil_pkg::OPERATOR_WIDTH-1:0]      uopq2_operator;
+	    wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] uopq2_operator_type;
+	    wire                             uopq2_fence_i;
+	    wire                             uopq3_valid;
+	    wire [DATA_WIDTH-1:0]            uopq3_pc;
+	    wire [DATA_WIDTH-1:0]            uopq3_instr;
+	    wire [4:0]                       uopq3_rf_raddr_rs1;
+	    wire [4:0]                       uopq3_rf_raddr_rs2;
+	    wire                             uopq3_rf_ren_rs1;
+	    wire                             uopq3_rf_ren_rs2;
+	    wire [4:0]                       uopq3_rf_waddr_rd;
+	    wire                             uopq3_rf_wen_rd;
+	    wire [DATA_WIDTH-1:0]            uopq3_imm;
+	    wire                             uopq3_operand_b_rs_sel;
+	    wire                             uopq3_operand_a_pc_sel;
+	    wire                             uopq3_operand_a_imm_sel;
+	    wire                             uopq3_operand_b_jump_sel;
+	    wire [ydrasil_pkg::OPERATOR_WIDTH-1:0]      uopq3_operator;
+	    wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] uopq3_operator_type;
+	    wire                             uopq3_fence_i;
+	    wire                             pipe1_sel_from1;
+	    wire                             pipe1_sel_from2;
+	    wire                             pipe1_sel_from3;
+    wire [DATA_WIDTH-1:0]            pipe1_sel_pc;
+    wire [DATA_WIDTH-1:0]            pipe1_sel_instr;
+    wire [4:0]                       pipe1_sel_rf_raddr_rs1;
+    wire [4:0]                       pipe1_sel_rf_raddr_rs2;
+    wire                             pipe1_sel_rf_ren_rs1;
+    wire                             pipe1_sel_rf_ren_rs2;
+    wire [4:0]                       pipe1_sel_rf_waddr_rd;
+    wire                             pipe1_sel_rf_wen_rd;
+    wire [5:0]                       pipe1_sel_rs1_psrc;
+    wire [5:0]                       pipe1_sel_rs2_psrc;
+    wire [5:0]                       pipe1_sel_pdst;
+    wire                             pipe1_sel_pdst_valid;
+    wire [DATA_WIDTH-1:0]            pipe1_sel_imm;
+    wire                             pipe1_sel_operand_b_rs_sel;
+    wire                             pipe1_sel_operand_a_pc_sel;
+    wire                             pipe1_sel_operand_a_imm_sel;
+    wire                             pipe1_sel_operand_b_jump_sel;
+	    wire [ydrasil_pkg::OPERATOR_WIDTH-1:0]      pipe1_sel_operator;
+	    wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] pipe1_sel_operator_type;
+	    wire                             pipe1_uopq1_supported;
+	    wire                             pipe1_uopq2_supported;
+	    wire                             pipe1_uopq3_supported;
+	    wire                             pipe1_uopq1_operands_ready;
+	    wire                             pipe1_uopq2_operands_ready;
+	    wire                             pipe1_uopq3_operands_ready;
+	    wire                             pipe1_uopq1_safe;
+	    wire                             pipe1_uopq2_safe;
+	    wire                             pipe1_uopq3_safe;
+	    wire                             pipe1_uopq1_store_war_pipe0;
+	    wire                             pipe1_uopq2_store_war_pipe0;
+	    wire                             pipe1_uopq3_store_war_pipe0;
+    wire                             pipe1_p0_ready_context;
+    wire                             pipe1_p0_blocked_context;
+    wire                             pipe1_p0_empty_base;
+    wire                             pipe1_p0_empty_context;
+	    wire                             pipe1_fire_from1;
+	    wire                             pipe1_fire_from2;
+	    wire                             pipe1_fire_from3;
+
+    reg [31:0]                       perf_id_decode_valid;
+    reg [31:0]                       perf_id_issue_accept;
+    reg [31:0]                       perf_id_issue_fire;
+    reg [31:0]                       perf_id_issue_slot_valid;
+    reg [31:0]                       perf_id_issue_no_fire;
+    reg [31:0]                       perf_id_issue_wait_block;
+    reg [31:0]                       perf_id_wait_rs1;
+    reg [31:0]                       perf_id_wait_rs2;
+    reg [31:0]                       perf_id_wait_alu_ready_next_rs1;
+    reg [31:0]                       perf_id_wait_alu_ready_next_rs2;
+    reg [31:0]                       perf_id_wait_lsu_fwd_rs1;
+    reg [31:0]                       perf_id_wait_lsu_fwd_rs2;
+    reg [31:0]                       perf_id_wait_wb_fwd_rs1;
+    reg [31:0]                       perf_id_wait_wb_fwd_rs2;
+    reg [31:0]                       perf_id_wait_prf_ready_rs1;
+    reg [31:0]                       perf_id_wait_prf_ready_rs2;
+    reg [31:0]                       perf_id_skid_valid;
+    reg [31:0]                       perf_id_skid_fill;
+    reg [31:0]                       perf_id_skid_drain;
+    reg [31:0]                       perf_id_skid_full_stall;
+    reg [31:0]                       perf_id_frontend_stall;
+    reg [31:0]                       perf_ri_slot0_valid;
+    reg [31:0]                       perf_ri_slot1_valid;
+    reg [31:0]                       perf_ri_slot0_ready;
+    reg [31:0]                       perf_ri_slot1_ready;
+    reg [31:0]                       perf_ri_fire_slot0;
+    reg [31:0]                       perf_ri_fire_slot1_bypass;
+    reg [31:0]                       perf_ri_slot1_block_raw;
+    reg [31:0]                       perf_ri_slot1_block_waw;
+    reg [31:0]                       perf_ri_slot1_block_ctrl;
+    reg [31:0]                       perf_ri_slot1_block_mem;
+    reg [31:0]                       perf_ri_slot1_block_unsupported;
+    reg [31:0]                       perf_ri_slot1_ready_when_slot0_blocked;
+    reg [31:0]                       perf_ri_slot1_ready_when_slot0_ready;
+    reg [31:0]                       perf_ri_slot1_fire_blocked_by_single_issue;
+    reg [31:0]                       perf_ri_slot1_fire_blocked_by_operand_port;
+    reg [31:0]                       perf_ri_slot1_fire_blocked_by_wb_order;
+    reg [31:0]                       perf_ri_bypass_flush_killed;
+    reg [31:0]                       perf_di_pipe0_fire;
+    reg [31:0]                       perf_di_pipe1_fire;
+    reg [31:0]                       perf_di_pair_fire;
+    reg [31:0]                       perf_di_pair_simple_alu;
+    reg [31:0]                       perf_di_pipe1_killed_flush;
+    reg [31:0]                       perf_di_pipe1_block_stall_recheck;
+    reg [31:0]                       perf_di_pipe1_block_resbuf_full;
+    reg [31:0]                       perf_di_pipe1_block_alu_fifo_full;
+    reg [31:0]                       perf_di_pipe1_block_pending_recheck;
+    reg [31:0]                       perf_di_pipe1_block_timing_guard;
+    reg [31:0]                       perf_di_pipe1_operand_block_rs1;
+    reg [31:0]                       perf_di_pipe1_operand_block_rs2;
+    reg [31:0]                       perf_di_pipe1_operand_block_both;
+    reg [31:0]                       perf_di_pipe1_operand_block_from1;
+    reg [31:0]                       perf_di_pipe1_operand_block_from2;
+    reg [31:0]                       perf_di_pipe1_operand_block_recoverable;
+    reg [31:0]                       perf_di_pipe1_alt2_when_from1_block_safe;
+    reg [31:0]                       perf_di_pipe1_alt2_when_from1_block_ready;
+    reg [31:0]                       perf_di_pipe1_alt2_when_recoverable_safe;
+    reg [31:0]                       perf_di_pipe1_alt2_when_recoverable_ready;
+    reg [31:0]                       perf_dual_cycles_with_pair_fire;
+    reg [31:0]                       perf_dual_extra_instret_pipe1;
+    reg [31:0]                       perf_dual_pipe1_useful_commit;
+    reg [31:0]                       perf_dual_pipe1_squashed;
+
+    reg                              pipe1_issue_valid_ff;
+    reg [DATA_WIDTH-1:0]             pipe1_operand_a_ff;
+    reg [DATA_WIDTH-1:0]             pipe1_operand_b_ff;
+    reg [ydrasil_pkg::OPERATOR_WIDTH-1:0] pipe1_operator_ff;
+    reg                              pipe1_rf_wen_rd_ff;
+    reg [4:0]                        pipe1_rf_waddr_rd_ff;
+    reg [5:0]                        pipe1_rn_pdst_ff;
+    reg [DATA_WIDTH-1:0]             pipe1_pc_ff;
+    reg [DATA_WIDTH-1:0]             pipe1_instr_ff;
+
+    wire [4:0]                       if_id_trace_rf_waddr_rd;
+    wire                             if_id_trace_rf_wen_rd;
+    wire [DATA_WIDTH-1:0]            if_id_trace_imm;
+    wire                             if_id_trace_operand_b_rs_sel;
+    wire                             if_id_trace_operand_a_pc_sel;
+    wire                             if_id_trace_operand_a_imm_sel;
+    wire                             if_id_trace_bt_a_rs_sel;
+    wire                             if_id_trace_operand_b_jump_sel;
+    wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0] if_id_trace_csr_reg_raddr;
+    wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0] if_id_trace_csr_ex_waddr;
+    wire [ydrasil_pkg::OP_CSR_INFO_WIDTH-1:0] if_id_trace_csr_op_info;
+    wire [ydrasil_pkg::OP_SYS_INFO_WIDTH-1:0] if_id_trace_sys_op_info;
+    wire [ydrasil_pkg::OPERATOR_WIDTH-1:0] if_id_trace_operator;
+    wire [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0] if_id_trace_operator_lsu;
+    wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] if_id_trace_operator_type;
+    wire [4:0]                       if_id_trace_rf_raddr_rs1;
+    wire [4:0]                       if_id_trace_rf_raddr_rs2;
+    wire                             if_id_trace_rf_ren_rs1;
+    wire                             if_id_trace_rf_ren_rs2;
+    wire                             pipe1_refill_skid_from_if;
+    wire                             pipe1_take_if_id;
+    wire                             pipe1_uopq1_order_safe;
+
+`ifndef SYNTHESIS
+    wire                             commit_trace_alloc_if_id;
+
+    wire                             ds_pipe0_valid;
+    wire                             ds_pipe0_ready;
+    wire                             ds_pipe0_ctrl;
+    wire                             ds_pipe0_mem;
+    wire                             ds_pipe0_csr_sys;
+    wire                             ds_pipe0_mul;
+    wire                             ds_pipe0_no_side_effect;
+    wire                             ds_pipe1_valid;
+    wire                             ds_pipe1_simple_alu;
+    wire                             ds_pipe1_unsupported;
+    wire                             ds_pipe1_ctrl;
+    wire                             ds_pipe1_mem;
+    wire                             ds_pipe1_csr_sys;
+    wire                             ds_pipe1_rd_valid;
+    wire                             ds_block_raw_pipe0;
+    wire                             ds_block_waw_pipe0;
+    wire                             ds_block_pending_rs1;
+    wire                             ds_block_pending_rs2;
+    wire                             ds_block_ctrl;
+    wire                             ds_block_mem;
+    wire                             ds_block_csr_sys;
+    wire                             ds_block_flush;
+    wire                             ds_block_wb_port;
+    wire                             ds_block_forward_complex;
+    wire                             ds_shadow_safe_candidate;
+
+    reg [31:0]                       perf_ds_cycles;
+    reg [31:0]                       perf_ds_pipe0_valid;
+    reg [31:0]                       perf_ds_pipe0_ready;
+    reg [31:0]                       perf_ds_pipe1_valid;
+    reg [31:0]                       perf_ds_pipe1_simple_alu;
+    reg [31:0]                       perf_ds_safe_candidate;
+    reg [31:0]                       perf_ds_safe_when_pipe0_ready;
+    reg [31:0]                       perf_ds_safe_when_pipe0_blocked;
+    reg [31:0]                       perf_ds_block_pipe1_unsupported;
+    reg [31:0]                       perf_ds_block_raw_pipe0;
+    reg [31:0]                       perf_ds_block_waw_pipe0;
+    reg [31:0]                       perf_ds_block_pending_rs1;
+    reg [31:0]                       perf_ds_block_pending_rs2;
+    reg [31:0]                       perf_ds_block_ctrl;
+    reg [31:0]                       perf_ds_block_mem;
+    reg [31:0]                       perf_ds_block_csr_sys;
+    reg [31:0]                       perf_ds_block_flush;
+    reg [31:0]                       perf_ds_block_wb_port;
+    reg [31:0]                       perf_ds_block_forward_complex;
+
+    reg                              pair1_valid_ff;
+    reg [DATA_WIDTH-1:0]             pair1_pc_ff;
+    reg [DATA_WIDTH-1:0]             pair1_instr_ff;
+    reg [31:0]                       pair1_seq_ff;
+    reg [31:0]                       pair1_seq_next_ff;
+    reg [4:0]                        pair1_rs1_ff;
+    reg [4:0]                        pair1_rs2_ff;
+    reg [4:0]                        pair1_rd_ff;
+    reg                              pair1_rs1_ren_ff;
+    reg                              pair1_rs2_ren_ff;
+    reg                              pair1_rd_wen_ff;
+    reg [ydrasil_pkg::OPERATOR_WIDTH-1:0]      pair1_operator_ff;
+    reg [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] pair1_operator_type_ff;
+    reg [DATA_WIDTH-1:0]             pair1_imm_ff;
+    reg                              pair1_pred_hit_ff;
+    reg                              pair1_pred_taken_ff;
+    reg [DATA_WIDTH-1:0]             pair1_pred_target_ff;
+    reg [1:0]                        pair1_pred_counter_ff;
+    reg [DATA_WIDTH-1:0]             pair1_pred_bht_index_ff;
+    reg                              pair1_pred_l0_taken_ff;
+    wire                             p1sh_simple_alu;
+    wire                             p1sh_block_raw_pair0;
+    wire                             p1sh_block_waw_pair0;
+    wire                             p1sh_block_pending_rs;
+    wire                             p1sh_block_ctrl_mem;
+    wire                             p1sh_safe_cand;
+    reg [31:0]                       perf_p1sh_valid_cycles;
+    reg [31:0]                       perf_p1sh_simple_alu;
+    reg [31:0]                       perf_p1sh_safe_cand;
+    reg [31:0]                       perf_p1sh_block_raw_pair0;
+    reg [31:0]                       perf_p1sh_block_waw_pair0;
+    reg [31:0]                       perf_p1sh_block_pending_rs;
+    reg [31:0]                       perf_p1sh_block_ctrl_mem;
+
+    reg [3:0]                        uopq_shadow_valid;
+    reg [DATA_WIDTH-1:0]             uopq_shadow_pc [0:3];
+    reg [DATA_WIDTH-1:0]             uopq_shadow_instr [0:3];
+    reg [31:0]                       uopq_shadow_seq [0:3];
+    reg [31:0]                       uopq_shadow_seq_next_ff;
+    reg [4:0]                        uopq_shadow_rs1 [0:3];
+    reg [4:0]                        uopq_shadow_rs2 [0:3];
+    reg [4:0]                        uopq_shadow_rd [0:3];
+    reg [3:0]                        uopq_shadow_rs1_ren;
+    reg [3:0]                        uopq_shadow_rs2_ren;
+    reg [3:0]                        uopq_shadow_rd_wen;
+    reg [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] uopq_shadow_optype [0:3];
+    reg [ydrasil_pkg::OPERATOR_WIDTH-1:0]      uopq_shadow_operator [0:3];
+    reg [3:0]                        uopq_shadow_simple_alu;
+    reg [3:0]                        uopq_shadow_ctrl;
+    reg [3:0]                        uopq_shadow_mem;
+    reg [3:0]                        uopq_shadow_csr_sys_fence;
+    wire [3:1]                       uopq_shadow_raw_older;
+    wire [3:1]                       uopq_shadow_waw_older;
+    wire [3:1]                       uopq_shadow_older_ctrl_mem;
+    wire [3:1]                       uopq_shadow_pending_rs;
+    wire [3:1]                       uopq_shadow_p1_safe;
+    wire [2:0]                       uopq_shadow_occupancy;
+    reg [31:0]                       perf_uopq_occ_0;
+    reg [31:0]                       perf_uopq_occ_1;
+    reg [31:0]                       perf_uopq_occ_2;
+    reg [31:0]                       perf_uopq_occ_3;
+    reg [31:0]                       perf_uopq_occ_4;
+    reg [31:0]                       perf_uopq_p1_safe_1;
+    reg [31:0]                       perf_uopq_p1_safe_2;
+    reg [31:0]                       perf_uopq_p1_safe_3;
+    reg [31:0]                       perf_uopq_block_older_ctrl_mem;
+    reg [31:0]                       perf_uopq_block_raw_older;
+    reg [31:0]                       perf_uopq_block_waw_older;
+    reg [31:0]                       perf_uopq_p1_fire_from_1;
+    reg [31:0]                       perf_uopq_p1_fire_from_2;
+    reg [31:0]                       perf_uopq_p1_fire_from_3;
+    reg [31:0]                       perf_uopq_p1_fire_when_p0_ready;
+    reg [31:0]                       perf_uopq_p1_fire_when_p0_blocked;
+    reg [31:0]                       perf_uopq_p1_fire_when_p0_empty;
+    reg [31:0]                       perf_uopq_p1_block_older_ctrl_mem;
+    reg [31:0]                       perf_uopq_p1_block_raw_older;
+    reg [31:0]                       perf_uopq_p1_block_waw_older;
+    reg [31:0]                       perf_uopq_p1_block_commit_order;
+    reg [31:0]                       perf_uopq_p1_block_p0_bjp;
+    reg [31:0]                       perf_uopq_p1_block_p0_load;
+    reg [31:0]                       perf_uopq_p1_block_p0_store;
+    reg [31:0]                       perf_uopq_p1_block_p0_csr_sys;
+    reg [31:0]                       perf_uopq_p1_block_p0_bitmanip;
+    reg [31:0]                       perf_uopq_p1_block_p0_other;
+    reg [31:0]                       perf_uopq_p1_block_p0_other_invalid;
+    reg [31:0]                       perf_uopq_p1_block_p0_other_no_alu_mul;
+    reg [31:0]                       perf_uopq_p1_block_p0_invalid_issue_accept;
+    reg [31:0]                       perf_uopq_p1_block_p0_invalid_skid;
+    reg [31:0]                       perf_uopq_p1_block_p0_invalid_uopq2_safe;
+    reg [31:0]                       perf_uopq_p1_empty_base;
+    reg [31:0]                       perf_uopq_p1_empty_supported;
+    reg [31:0]                       perf_uopq_p1_empty_operands_ready;
+    reg [31:0]                       perf_uopq_p1_empty_block_younger;
+    reg [31:0]                       perf_uopq_p1_empty_block_ready_allow;
+    reg [31:0]                       perf_uopq_p1_empty_block_pending_rd;
+    reg [31:0]                       perf_uopq_p1_empty_block_resbuf;
+    reg [31:0]                       perf_uopq_p1_blocked_base;
+    reg [31:0]                       perf_uopq_p1_blocked_supported;
+    reg [31:0]                       perf_uopq_p1_blocked_p0_safe;
+    reg [31:0]                       perf_uopq_p1_blocked_operands_ready;
+    reg [31:0]                       perf_uopq_p1_blocked_block_younger;
+    reg [31:0]                       perf_uopq_p1_blocked_block_ready_allow;
+    reg [31:0]                       perf_uopq_p1_blocked_block_pending_rd;
+    reg [31:0]                       perf_uopq_p1_blocked_block_resbuf;
+    reg [31:0]                       perf_uopq_p1_blocked_unsup_any_uop;
+	    reg [31:0]                       perf_uopq_p1_blocked_unsup_shadow_alu;
+	    reg [31:0]                       perf_uopq_p1_blocked_unsup_shift;
+	    reg [31:0]                       perf_uopq_p1_blocked_unsup_x0_rs1;
+	    reg [31:0]                       perf_uopq_p1_blocked_unsup_lui_auipc;
+	    reg [31:0]                       perf_uopq_p1_blocked_unsup_relax_ready;
+	    reg [31:0]                       perf_uopq_p1_blocked_unsup_relax_fire_safe;
+	    reg [31:0]                       perf_uopq_p1_blocked_unsup_relax_shift_safe;
+	    reg [31:0]                       perf_uopq_p1_blocked_unsup_relax_x0_safe;
+	    reg [31:0]                       perf_uopq_p1_blocked_unsup_relax_lui_auipc_safe;
+	    reg [31:0]                       perf_uopq_p1_block_younger_flush;
+	    reg [31:0]                       perf_uopq_p1_block_young_uopq2;
+	    reg [31:0]                       perf_uopq_p1_block_young_ifid;
+    reg [31:0]                       perf_uopq_p1_block_ifid_bjp;
+    reg [31:0]                       perf_uopq_p1_block_ifid_load;
+    reg [31:0]                       perf_uopq_p1_block_ifid_store;
+    reg [31:0]                       perf_uopq_p1_block_ifid_mul;
+    reg [31:0]                       perf_uopq_p1_block_ifid_csr_sys;
+`endif
+
+`ifndef SYNTHESIS
+    function automatic logic is_shadow_simple_alu(
+        input logic [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] op_type,
+        input logic [ydrasil_pkg::OPERATOR_WIDTH-1:0] op
+    );
+        begin
+            is_shadow_simple_alu =
+                op_type[ydrasil_pkg::OPERATOR_TYPE_ALU] &&
+                !op_type[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                !op_type[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
+                !op_type[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
+                !op_type[ydrasil_pkg::OPERATOR_TYPE_CSR] &&
+                !op_type[ydrasil_pkg::OPERATOR_TYPE_SYS] &&
+                !op_type[ydrasil_pkg::OPERATOR_TYPE_MUL] &&
+                !op_type[ydrasil_pkg::OPERATOR_TYPE_BITMANIP] &&
+                (op[ydrasil_pkg::OP_ALU_ADD] |
+                 op[ydrasil_pkg::OP_ALU_SUB] |
+                 op[ydrasil_pkg::OP_ALU_SLL] |
+                 op[ydrasil_pkg::OP_ALU_SLT] |
+                 op[ydrasil_pkg::OP_ALU_SLTU] |
+                 op[ydrasil_pkg::OP_ALU_XOR] |
+                 op[ydrasil_pkg::OP_ALU_SRL] |
+                 op[ydrasil_pkg::OP_ALU_SRA] |
+                 op[ydrasil_pkg::OP_ALU_OR] |
+                 op[ydrasil_pkg::OP_ALU_AND] |
+                 op[ydrasil_pkg::OP_ALU_LUI] |
+                 op[ydrasil_pkg::OP_ALU_AUIPC]);
+        end
+    endfunction
+
+    function automatic logic shadow_raw_dep(
+        input logic       y_valid,
+        input logic       y_rs1_ren,
+        input logic [4:0] y_rs1,
+        input logic       y_rs2_ren,
+        input logic [4:0] y_rs2,
+        input logic       o_valid,
+        input logic       o_rd_wen,
+        input logic [4:0] o_rd
+    );
+        begin
+            shadow_raw_dep =
+                y_valid && o_valid && o_rd_wen && (o_rd != '0) &&
+                ((y_rs1_ren && (y_rs1 == o_rd)) |
+                 (y_rs2_ren && (y_rs2 == o_rd)));
+        end
+    endfunction
+
+	    function automatic logic shadow_waw_dep(
+	        input logic       y_valid,
+	        input logic       y_rd_wen,
+	        input logic [4:0] y_rd,
+        input logic       o_valid,
+        input logic       o_rd_wen,
+        input logic [4:0] o_rd
+    );
+        begin
+            shadow_waw_dep =
+                y_valid && y_rd_wen && (y_rd != '0) &&
+                o_valid && o_rd_wen && (o_rd != '0) &&
+                (y_rd == o_rd);
+	        end
+	    endfunction
+
+	    wire uopq1_diag_relax_simple_alu =
+	        uopq1_valid && is_shadow_simple_alu(uopq1_operator_type, uopq1_operator);
+	    wire uopq2_diag_relax_simple_alu =
+	        uopq2_valid && is_shadow_simple_alu(uopq2_operator_type, uopq2_operator);
+	    wire uopq1_diag_relax_shift =
+	        uopq1_operator[ydrasil_pkg::OP_ALU_SLL] |
+	        uopq1_operator[ydrasil_pkg::OP_ALU_SRL] |
+	        uopq1_operator[ydrasil_pkg::OP_ALU_SRA];
+	    wire uopq2_diag_relax_shift =
+	        uopq2_operator[ydrasil_pkg::OP_ALU_SLL] |
+	        uopq2_operator[ydrasil_pkg::OP_ALU_SRL] |
+	        uopq2_operator[ydrasil_pkg::OP_ALU_SRA];
+	    wire uopq1_diag_relax_lui_auipc =
+	        uopq1_operator[ydrasil_pkg::OP_ALU_LUI] |
+	        uopq1_operator[ydrasil_pkg::OP_ALU_AUIPC];
+	    wire uopq2_diag_relax_lui_auipc =
+	        uopq2_operator[ydrasil_pkg::OP_ALU_LUI] |
+	        uopq2_operator[ydrasil_pkg::OP_ALU_AUIPC];
+	    wire uopq1_diag_relax_x0_rs1 =
+	        uopq1_rf_ren_rs1 && (uopq1_rf_raddr_rs1 == '0);
+	    wire uopq2_diag_relax_x0_rs1 =
+	        uopq2_rf_ren_rs1 && (uopq2_rf_raddr_rs1 == '0);
+		    wire uopq1_diag_relax_rs1_ready =
+		        !uopq1_rf_ren_rs1 || (uopq1_rf_raddr_rs1 == '0) ||
+		        skid_rn_rs1_ready_ff || rn_preg_ready_i[skid_rn_rs1_psrc_ff];
+		    wire uopq1_diag_relax_rs2_ready =
+		        !uopq1_rf_ren_rs2 || (uopq1_rf_raddr_rs2 == '0) ||
+		        skid_rn_rs2_ready_ff || rn_preg_ready_i[skid_rn_rs2_psrc_ff];
+		    wire uopq2_diag_relax_rs1_ready =
+		        !uopq2_rf_ren_rs1 || (uopq2_rf_raddr_rs1 == '0) ||
+		        uopq2_buf_rs1_ready_ff || rn_preg_ready_i[uopq2_buf_rn_rs1_psrc_ff];
+		    wire uopq2_diag_relax_rs2_ready =
+		        !uopq2_rf_ren_rs2 || (uopq2_rf_raddr_rs2 == '0) ||
+		        uopq2_buf_rs2_ready_ff || rn_preg_ready_i[uopq2_buf_rn_rs2_psrc_ff];
+	    wire uopq1_diag_relax_ready =
+	        uopq1_diag_relax_simple_alu &&
+	        uopq1_rf_wen_rd && (uopq1_rf_waddr_rd != '0) &&
+	        uopq1_diag_relax_rs1_ready && uopq1_diag_relax_rs2_ready;
+	    wire uopq2_diag_relax_ready =
+	        uopq2_diag_relax_simple_alu &&
+	        uopq2_rf_wen_rd && (uopq2_rf_waddr_rd != '0) &&
+	        uopq2_diag_relax_rs1_ready && uopq2_diag_relax_rs2_ready;
+	    wire uopq1_diag_relax_order_safe =
+	        uopq1_diag_relax_ready &&
+	        !(uopq0_rf_wen_rd && (uopq0_rf_waddr_rd != '0) &&
+	          ((uopq1_rf_ren_rs1 && (uopq1_rf_raddr_rs1 == uopq0_rf_waddr_rd)) |
+	           (uopq1_rf_ren_rs2 && (uopq1_rf_raddr_rs2 == uopq0_rf_waddr_rd)))) &&
+	        !(uopq0_rf_wen_rd && (uopq0_rf_waddr_rd != '0) &&
+	          (uopq1_rf_waddr_rd == uopq0_rf_waddr_rd)) &&
+	        skid_rn_pdst_valid_ff;
+	    wire uopq2_diag_relax_order_safe =
+	        uopq2_diag_relax_ready &&
+	        pipe1_uopq1_order_safe &&
+	        !(uopq0_rf_wen_rd && (uopq0_rf_waddr_rd != '0) &&
+	          ((uopq2_rf_ren_rs1 && (uopq2_rf_raddr_rs1 == uopq0_rf_waddr_rd)) |
+	           (uopq2_rf_ren_rs2 && (uopq2_rf_raddr_rs2 == uopq0_rf_waddr_rd)))) &&
+	        !(uopq0_rf_wen_rd && (uopq0_rf_waddr_rd != '0) &&
+	          (uopq2_rf_waddr_rd == uopq0_rf_waddr_rd)) &&
+	        !(uopq1_valid && uopq1_rf_wen_rd && (uopq1_rf_waddr_rd != '0) &&
+	          ((uopq2_rf_ren_rs1 && (uopq2_rf_raddr_rs1 == uopq1_rf_waddr_rd)) |
+	           (uopq2_rf_ren_rs2 && (uopq2_rf_raddr_rs2 == uopq1_rf_waddr_rd)))) &&
+	        !(uopq1_valid && uopq1_rf_wen_rd && (uopq1_rf_waddr_rd != '0) &&
+	          (uopq2_rf_waddr_rd == uopq1_rf_waddr_rd)) &&
+	        uopq2_buf_rn_pdst_valid_ff && !issue_load_from_uopq2;
+	    wire uopq1_diag_relax_fire_safe =
+	        pipe1_p0_blocked_context && ready_issue_allow_i && !flush_id_i &&
+	        pipe1_dual_pipe0_safe && !pipe1_younger_flush_block &&
+	        !pipe1_resbuf_full_i && uopq1_diag_relax_order_safe;
+	    wire uopq2_diag_relax_fire_safe =
+	        pipe1_p0_blocked_context && ready_issue_allow_i && !flush_id_i &&
+	        pipe1_dual_pipe0_safe && !pipe1_younger_flush_block &&
+	        !pipe1_resbuf_full_i && uopq2_diag_relax_order_safe;
+	    wire uopq_diag_relax_ready =
+	        pipe1_p0_blocked_context && !pipe1_dual_supported &&
+	        (uopq1_diag_relax_ready | uopq2_diag_relax_ready);
+	    wire uopq_diag_relax_fire_safe =
+	        !pipe1_dual_supported &&
+	        (uopq1_diag_relax_fire_safe | uopq2_diag_relax_fire_safe);
+	    wire uopq_diag_relax_shift_safe =
+	        !pipe1_dual_supported &&
+	        ((uopq1_diag_relax_fire_safe && uopq1_diag_relax_shift) |
+	         (uopq2_diag_relax_fire_safe && uopq2_diag_relax_shift));
+	    wire uopq_diag_relax_x0_safe =
+	        !pipe1_dual_supported &&
+	        ((uopq1_diag_relax_fire_safe && uopq1_diag_relax_x0_rs1) |
+	         (uopq2_diag_relax_fire_safe && uopq2_diag_relax_x0_rs1));
+	    wire uopq_diag_relax_lui_auipc_safe =
+	        !pipe1_dual_supported &&
+	        ((uopq1_diag_relax_fire_safe && uopq1_diag_relax_lui_auipc) |
+	         (uopq2_diag_relax_fire_safe && uopq2_diag_relax_lui_auipc));
+	`endif
+
+    assign rf_raddr_rs1 =
+        skid_valid_ff ? slot1_rf_raddr_rs1 :
+        uopq2_buf_valid_ff ? uopq2_buf_rf_raddr_rs1_ff :
+        id_issue_pkt_i.dec.rf_raddr_rs1;
+    assign rf_raddr_rs2 =
+        skid_valid_ff ? slot1_rf_raddr_rs2 :
+        uopq2_buf_valid_ff ? uopq2_buf_rf_raddr_rs2_ff :
+        id_issue_pkt_i.dec.rf_raddr_rs2;
+    assign rf_ren_rs1 =
+        skid_valid_ff ? slot1_rf_ren_rs1 :
+        uopq2_buf_valid_ff ? uopq2_buf_rf_ren_rs1_ff :
+        id_issue_pkt_i.dec.rf_ren_rs1;
+    assign rf_ren_rs2 =
+        skid_valid_ff ? slot1_rf_ren_rs2 :
+        uopq2_buf_valid_ff ? uopq2_buf_rf_ren_rs2_ff :
+        id_issue_pkt_i.dec.rf_ren_rs2;
+    assign rf_waddr_rd =
+        skid_valid_ff ? slot1_rf_waddr_rd :
+        uopq2_buf_valid_ff ? uopq2_buf_rf_waddr_rd_ff :
+        id_issue_pkt_i.dec.rf_waddr_rd;
+    assign rf_wen_rd =
+        skid_valid_ff ? slot1_rf_wen_rd :
+        uopq2_buf_valid_ff ? uopq2_buf_rf_wen_rd_ff :
+        id_issue_pkt_i.dec.rf_wen_rd;
+    assign imm_i =
+        skid_valid_ff ? slot1_imm :
+        uopq2_buf_valid_ff ? uopq2_buf_imm_ff :
+        id_issue_pkt_i.dec.imm;
+    assign operand_b_rs_sel =
+        skid_valid_ff ? slot1_operand_b_rs_sel :
+        uopq2_buf_valid_ff ? uopq2_buf_operand_b_rs_sel_ff :
+        id_issue_pkt_i.dec.operand_b_rs_sel;
+    assign operand_a_pc_sel =
+        skid_valid_ff ? slot1_operand_a_pc_sel :
+        uopq2_buf_valid_ff ? uopq2_buf_operand_a_pc_sel_ff :
+        id_issue_pkt_i.dec.operand_a_pc_sel;
+    assign operand_a_imm_sel =
+        skid_valid_ff ? slot1_operand_a_imm_sel :
+        uopq2_buf_valid_ff ? uopq2_buf_operand_a_imm_sel_ff :
+        id_issue_pkt_i.dec.operand_a_imm_sel;
+    assign bt_a_rs_sel =
+        skid_valid_ff ? slot1_bt_a_rs_sel :
+        uopq2_buf_valid_ff ? uopq2_buf_bt_a_rs_sel_ff :
+        id_issue_pkt_i.dec.bt_a_rs_sel;
+    assign operand_b_jump_sel =
+        skid_valid_ff ? slot1_operand_b_jump_sel :
+        uopq2_buf_valid_ff ? uopq2_buf_operand_b_jump_sel_ff :
+        id_issue_pkt_i.dec.operand_b_jump_sel;
+    assign csr_reg_raddr =
+        skid_valid_ff ? slot1_csr_reg_raddr :
+        uopq2_buf_valid_ff ? uopq2_buf_csr_reg_raddr_ff :
+        id_issue_pkt_i.dec.csr_reg_raddr;
+    assign csr_ex_waddr =
+        skid_valid_ff ? slot1_csr_ex_waddr :
+        uopq2_buf_valid_ff ? uopq2_buf_csr_ex_waddr_ff :
+        id_issue_pkt_i.dec.csr_ex_waddr;
+    assign csr_op_info =
+        skid_valid_ff ? slot1_csr_op_info :
+        uopq2_buf_valid_ff ? uopq2_buf_csr_op_info_ff :
+        id_issue_pkt_i.dec.csr_op_info;
+    assign sys_op_info =
+        skid_valid_ff ? slot1_sys_op_info :
+        uopq2_buf_valid_ff ? uopq2_buf_sys_op_info_ff :
+        id_issue_pkt_i.dec.sys_op_info;
+    assign operator =
+        skid_valid_ff ? slot1_operator :
+        uopq2_buf_valid_ff ? uopq2_buf_operator_ff :
+        id_issue_pkt_i.dec.operator;
+    assign operator_lsu =
+        skid_valid_ff ? slot1_operator_lsu :
+        uopq2_buf_valid_ff ? uopq2_buf_operator_lsu_ff :
+        id_issue_pkt_i.dec.operator_lsu;
+    assign operator_type =
+        skid_valid_ff ? slot1_operator_type :
+        uopq2_buf_valid_ff ? uopq2_buf_operator_type_ff :
+        id_issue_pkt_i.dec.operator_type;
+
+    assign if_id_trace_rf_waddr_rd = id_issue_pkt_i.dec.rf_waddr_rd;
+    assign if_id_trace_rf_raddr_rs1 = id_issue_pkt_i.dec.rf_raddr_rs1;
+    assign if_id_trace_rf_raddr_rs2 = id_issue_pkt_i.dec.rf_raddr_rs2;
+    assign if_id_trace_rf_ren_rs1 = id_issue_pkt_i.dec.rf_ren_rs1;
+    assign if_id_trace_rf_ren_rs2 = id_issue_pkt_i.dec.rf_ren_rs2;
+    assign if_id_trace_rf_wen_rd = id_issue_pkt_i.dec.rf_wen_rd;
+    assign if_id_trace_imm = id_issue_pkt_i.dec.imm;
+    assign if_id_trace_operand_b_rs_sel = id_issue_pkt_i.dec.operand_b_rs_sel;
+    assign if_id_trace_operand_a_pc_sel = id_issue_pkt_i.dec.operand_a_pc_sel;
+    assign if_id_trace_operand_a_imm_sel = id_issue_pkt_i.dec.operand_a_imm_sel;
+    assign if_id_trace_bt_a_rs_sel = id_issue_pkt_i.dec.bt_a_rs_sel;
+    assign if_id_trace_operand_b_jump_sel = id_issue_pkt_i.dec.operand_b_jump_sel;
+    assign if_id_trace_csr_reg_raddr = id_issue_pkt_i.dec.csr_reg_raddr;
+    assign if_id_trace_csr_ex_waddr = id_issue_pkt_i.dec.csr_ex_waddr;
+    assign if_id_trace_csr_op_info = id_issue_pkt_i.dec.csr_op_info;
+    assign if_id_trace_sys_op_info = id_issue_pkt_i.dec.sys_op_info;
+    assign if_id_trace_operator = id_issue_pkt_i.dec.operator;
+    assign if_id_trace_operator_lsu = id_issue_pkt_i.dec.operator_lsu;
+    assign if_id_trace_operator_type = id_issue_pkt_i.dec.operator_type;
+
+    assign id_advance = !stall_id_i && !bubble_id_i;
+    assign decode_pc =
+        skid_valid_ff ? skid_pc_ff :
+        uopq2_buf_valid_ff ? uopq2_buf_pc_ff : if_id_pc_i;
+    assign decode_instr =
+        skid_valid_ff ? skid_instr_ff :
+        uopq2_buf_valid_ff ? uopq2_buf_instr_ff : if_id_instr_i;
+    assign decode_pred_hit =
+        skid_valid_ff ? skid_pred_hit_ff :
+        uopq2_buf_valid_ff ? uopq2_buf_pred_hit_ff : if_id_pred_hit_i;
+    assign decode_pred_taken =
+        skid_valid_ff ? skid_pred_taken_ff :
+        uopq2_buf_valid_ff ? uopq2_buf_pred_taken_ff : if_id_pred_taken_i;
+    assign decode_pred_target =
+        skid_valid_ff ? skid_pred_target_ff :
+        uopq2_buf_valid_ff ? uopq2_buf_pred_target_ff : if_id_pred_target_i;
+    assign decode_pred_counter =
+        skid_valid_ff ? skid_pred_counter_ff :
+        uopq2_buf_valid_ff ? uopq2_buf_pred_counter_ff : if_id_pred_counter_i;
+    assign decode_pred_bht_index =
+        skid_valid_ff ? skid_pred_bht_index_ff :
+        uopq2_buf_valid_ff ? uopq2_buf_pred_bht_index_ff : if_id_pred_bht_index_i;
+    assign decode_pred_l0_taken =
+        skid_valid_ff ? skid_pred_l0_taken_ff :
+        uopq2_buf_valid_ff ? uopq2_buf_pred_l0_taken_ff : if_id_pred_l0_taken_i;
+    assign decode_valid = skid_valid_ff | uopq2_buf_valid_ff | if_id_valid_i;
+
+    ydrasil_id_issue_stage #(
+        .DATA_WIDTH(DATA_WIDTH)
+    ) u_ydrasil_id_issue_stage (.*);
+
+    wire issue_next_from_skid = issue_accept & skid_valid_ff;
+    wire issue_next_from_uopq2 = issue_accept & !skid_valid_ff & uopq2_buf_valid_ff;
+    wire issue_next_from_if = issue_accept & !skid_valid_ff & !uopq2_buf_valid_ff;
+    wire issue_next_rs1_wait =
+        (issue_next_from_skid &&
+         slot1_rf_ren_rs1 && (slot1_rf_raddr_rs1 != '0) &&
+         !skid_rn_rs1_ready_ff && !rn_preg_ready_i[skid_rn_rs1_psrc_ff]) |
+        (issue_next_from_uopq2 &&
+         uopq2_rf_ren_rs1 && (uopq2_rf_raddr_rs1 != '0) &&
+         !uopq2_buf_rs1_ready_ff && !rn_preg_ready_i[uopq2_buf_rn_rs1_psrc_ff]) |
+        (issue_next_from_if &&
+         if_id_trace_rf_ren_rs1 && (if_id_trace_rf_raddr_rs1 != '0) &&
+         !rn_if_rs1_ready_i);
+    wire issue_next_rs2_wait =
+        (issue_next_from_skid &&
+         (slot1_rf_ren_rs2 | slot1_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
+         (slot1_rf_raddr_rs2 != '0) &&
+         !skid_rn_rs2_ready_ff && !rn_preg_ready_i[skid_rn_rs2_psrc_ff]) |
+        (issue_next_from_uopq2 &&
+         (uopq2_rf_ren_rs2 | uopq2_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
+         (uopq2_rf_raddr_rs2 != '0) &&
+         !uopq2_buf_rs2_ready_ff && !rn_preg_ready_i[uopq2_buf_rn_rs2_psrc_ff]) |
+        (issue_next_from_if &&
+         (if_id_trace_rf_ren_rs2 | if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
+         (if_id_trace_rf_raddr_rs2 != '0) &&
+         !rn_if_rs2_ready_i);
+
+	    task automatic move_uopq3_to_uopq2;
+	        begin
+	            uopq2_buf_valid_ff <= uopq3_buf_valid_ff;
+	            uopq2_buf_pc_ff <= uopq3_buf_pc_ff;
+	            uopq2_buf_instr_ff <= uopq3_buf_instr_ff;
+	            uopq2_buf_pred_hit_ff <= uopq3_buf_pred_hit_ff;
+	            uopq2_buf_pred_taken_ff <= uopq3_buf_pred_taken_ff;
+	            uopq2_buf_pred_target_ff <= uopq3_buf_pred_target_ff;
+	            uopq2_buf_pred_counter_ff <= uopq3_buf_pred_counter_ff;
+	            uopq2_buf_pred_bht_index_ff <= uopq3_buf_pred_bht_index_ff;
+	            uopq2_buf_pred_l0_taken_ff <= uopq3_buf_pred_l0_taken_ff;
+	            uopq2_buf_rf_raddr_rs1_ff <= uopq3_buf_rf_raddr_rs1_ff;
+	            uopq2_buf_rf_raddr_rs2_ff <= uopq3_buf_rf_raddr_rs2_ff;
+	            uopq2_buf_rf_ren_rs1_ff <= uopq3_buf_rf_ren_rs1_ff;
+	            uopq2_buf_rf_ren_rs2_ff <= uopq3_buf_rf_ren_rs2_ff;
+	            uopq2_buf_rf_waddr_rd_ff <= uopq3_buf_rf_waddr_rd_ff;
+	            uopq2_buf_rf_wen_rd_ff <= uopq3_buf_rf_wen_rd_ff;
+	            uopq2_buf_imm_ff <= uopq3_buf_imm_ff;
+	            uopq2_buf_operand_b_rs_sel_ff <= uopq3_buf_operand_b_rs_sel_ff;
+	            uopq2_buf_operand_a_pc_sel_ff <= uopq3_buf_operand_a_pc_sel_ff;
+	            uopq2_buf_operand_a_imm_sel_ff <= uopq3_buf_operand_a_imm_sel_ff;
+	            uopq2_buf_bt_a_rs_sel_ff <= uopq3_buf_bt_a_rs_sel_ff;
+	            uopq2_buf_operand_b_jump_sel_ff <= uopq3_buf_operand_b_jump_sel_ff;
+	            uopq2_buf_operator_ff <= uopq3_buf_operator_ff;
+	            uopq2_buf_operator_lsu_ff <= uopq3_buf_operator_lsu_ff;
+	            uopq2_buf_operator_type_ff <= uopq3_buf_operator_type_ff;
+	            uopq2_buf_csr_reg_raddr_ff <= uopq3_buf_csr_reg_raddr_ff;
+	            uopq2_buf_csr_ex_waddr_ff <= uopq3_buf_csr_ex_waddr_ff;
+	            uopq2_buf_csr_op_info_ff <= uopq3_buf_csr_op_info_ff;
+	            uopq2_buf_sys_op_info_ff <= uopq3_buf_sys_op_info_ff;
+	            uopq2_buf_fence_i_ff <= uopq3_buf_fence_i_ff;
+	            uopq2_buf_rn_rs1_psrc_ff <= uopq3_buf_rn_rs1_psrc_ff;
+	            uopq2_buf_rn_rs2_psrc_ff <= uopq3_buf_rn_rs2_psrc_ff;
+	            uopq2_buf_rn_pdst_ff <= uopq3_buf_rn_pdst_ff;
+	            uopq2_buf_rn_pdst_valid_ff <= uopq3_buf_rn_pdst_valid_ff;
+	            uopq2_buf_rs1_ready_ff <= uopq3_buf_rs1_ready_ff;
+	            uopq2_buf_rs2_ready_ff <= uopq3_buf_rs2_ready_ff;
+	            uopq3_buf_valid_ff <= 1'b0;
+	            uopq3_buf_rn_pdst_valid_ff <= 1'b0;
+	        end
+	    endtask
+
+`ifndef SYNTHESIS
+    assign ds_pipe0_valid = issue_valid_ff;
+    assign ds_pipe0_ready = issue_valid_ff && !issue_wait_block && id_advance;
+    assign ds_pipe0_ctrl = issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP];
+    assign ds_pipe0_mem =
+        issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] |
+        issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE];
+    assign ds_pipe0_csr_sys =
+        issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_CSR] |
+        issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_SYS] |
+        issue_fence_i_ff;
+    assign ds_pipe0_mul = issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL];
+    assign ds_pipe0_no_side_effect =
+        issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_ALU] &&
+        !ds_pipe0_ctrl && !ds_pipe0_mem && !ds_pipe0_csr_sys && !ds_pipe0_mul;
+
+	    assign ds_pipe1_valid = skid_valid_ff;
+	    assign ds_pipe1_simple_alu =
+	        ds_pipe1_valid &&
+	        slot1_operator_type[ydrasil_pkg::OPERATOR_TYPE_ALU] &&
+	        !slot1_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+	        !slot1_operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
+	        !slot1_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
+	        !slot1_operator_type[ydrasil_pkg::OPERATOR_TYPE_CSR] &&
+	        !slot1_operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS] &&
+	        !slot1_operator_type[ydrasil_pkg::OPERATOR_TYPE_MUL] &&
+	        !slot1_operator_type[ydrasil_pkg::OPERATOR_TYPE_BITMANIP] &&
+	        (slot1_operator[ydrasil_pkg::OP_ALU_ADD] |
+	         slot1_operator[ydrasil_pkg::OP_ALU_SUB] |
+	         slot1_operator[ydrasil_pkg::OP_ALU_SLL] |
+	         slot1_operator[ydrasil_pkg::OP_ALU_SLT] |
+	         slot1_operator[ydrasil_pkg::OP_ALU_SLTU] |
+	         slot1_operator[ydrasil_pkg::OP_ALU_XOR] |
+	         slot1_operator[ydrasil_pkg::OP_ALU_SRL] |
+	         slot1_operator[ydrasil_pkg::OP_ALU_SRA] |
+	         slot1_operator[ydrasil_pkg::OP_ALU_OR] |
+	         slot1_operator[ydrasil_pkg::OP_ALU_AND] |
+	         slot1_operator[ydrasil_pkg::OP_ALU_LUI] |
+	         slot1_operator[ydrasil_pkg::OP_ALU_AUIPC]);
+	    assign ds_pipe1_unsupported = ds_pipe1_valid && !ds_pipe1_simple_alu;
+	    assign ds_pipe1_ctrl = ds_pipe1_valid && slot1_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP];
+	    assign ds_pipe1_mem =
+	        ds_pipe1_valid &&
+	        (slot1_operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD] |
+	         slot1_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE]);
+	    assign ds_pipe1_csr_sys =
+	        ds_pipe1_valid &&
+	        (slot1_operator_type[ydrasil_pkg::OPERATOR_TYPE_CSR] |
+	         slot1_operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS] |
+	         slot1_fence_i);
+    assign ds_pipe1_rd_valid = !slot1_rf_wen_rd || (slot1_rf_waddr_rd != '0);
+    assign ds_block_raw_pipe0 =
+        ds_pipe1_valid && ds_pipe0_valid && (issue_rf_waddr_rd_ff != '0) &&
+        issue_rf_wen_rd_ff &&
+        ((slot1_rf_ren_rs1 && (slot1_rf_raddr_rs1 == issue_rf_waddr_rd_ff)) |
+         (slot1_rf_ren_rs2 && (slot1_rf_raddr_rs2 == issue_rf_waddr_rd_ff)));
+    assign ds_block_waw_pipe0 =
+        ds_pipe1_valid && ds_pipe0_valid && slot1_rf_wen_rd &&
+        (slot1_rf_waddr_rd != '0) && issue_rf_wen_rd_ff &&
+        (slot1_rf_waddr_rd == issue_rf_waddr_rd_ff);
+    assign ds_block_pending_rs1 = ds_pipe1_valid && ri_slot1_block_rs1_pending;
+    assign ds_block_pending_rs2 = ds_pipe1_valid && ri_slot1_block_rs2_pending;
+    assign ds_block_ctrl =
+        ds_pipe1_valid && (ds_pipe0_ctrl | ds_pipe1_ctrl);
+    assign ds_block_mem =
+        ds_pipe1_valid && (ds_pipe0_mem | ds_pipe1_mem);
+    assign ds_block_csr_sys =
+        ds_pipe1_valid && (ds_pipe0_csr_sys | ds_pipe1_csr_sys);
+    assign ds_block_flush = ds_pipe1_valid && flush_id_i;
+    assign ds_block_forward_complex =
+        ds_pipe1_valid && ds_pipe1_simple_alu &&
+        ((slot1_rf_ren_rs1 && ri_slot1_rs1_clear_fwd) |
+         (ri_slot1_rs2_read && ri_slot1_rs2_clear_fwd));
+    assign ds_shadow_safe_candidate =
+        ds_pipe0_valid && ds_pipe1_valid &&
+        ds_pipe0_no_side_effect && ds_pipe1_simple_alu &&
+        ds_pipe1_rd_valid &&
+        !ds_block_raw_pipe0 && !ds_block_waw_pipe0 &&
+        !ds_block_pending_rs1 && !ds_block_pending_rs2 &&
+        !ds_block_ctrl && !ds_block_mem && !ds_block_csr_sys &&
+        !ds_block_flush && !stall_id_i && ready_issue_allow_i;
+    assign ds_block_wb_port =
+        ds_shadow_safe_candidate &&
+        issue_rf_wen_rd_ff && (issue_rf_waddr_rd_ff != '0) &&
+        slot1_rf_wen_rd && (slot1_rf_waddr_rd != '0);
+
+    assign p1sh_simple_alu =
+        pair1_valid_ff &&
+        pair1_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_ALU] &&
+        !pair1_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+        !pair1_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
+        !pair1_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
+        !pair1_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_CSR] &&
+        !pair1_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_SYS] &&
+        !pair1_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL] &&
+        !pair1_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BITMANIP] &&
+        (pair1_operator_ff[ydrasil_pkg::OP_ALU_ADD] |
+         pair1_operator_ff[ydrasil_pkg::OP_ALU_SUB] |
+         pair1_operator_ff[ydrasil_pkg::OP_ALU_SLL] |
+         pair1_operator_ff[ydrasil_pkg::OP_ALU_SLT] |
+         pair1_operator_ff[ydrasil_pkg::OP_ALU_SLTU] |
+         pair1_operator_ff[ydrasil_pkg::OP_ALU_XOR] |
+         pair1_operator_ff[ydrasil_pkg::OP_ALU_SRL] |
+         pair1_operator_ff[ydrasil_pkg::OP_ALU_SRA] |
+         pair1_operator_ff[ydrasil_pkg::OP_ALU_OR] |
+         pair1_operator_ff[ydrasil_pkg::OP_ALU_AND] |
+         pair1_operator_ff[ydrasil_pkg::OP_ALU_LUI] |
+         pair1_operator_ff[ydrasil_pkg::OP_ALU_AUIPC]);
+    assign p1sh_block_raw_pair0 =
+        pair1_valid_ff && issue_valid_ff && issue_rf_wen_rd_ff &&
+        (issue_rf_waddr_rd_ff != '0) &&
+        ((pair1_rs1_ren_ff && (pair1_rs1_ff == issue_rf_waddr_rd_ff)) |
+         (pair1_rs2_ren_ff && (pair1_rs2_ff == issue_rf_waddr_rd_ff)));
+    assign p1sh_block_waw_pair0 =
+        pair1_valid_ff && issue_valid_ff && issue_rf_wen_rd_ff &&
+        pair1_rd_wen_ff && (pair1_rd_ff != '0) &&
+        (pair1_rd_ff == issue_rf_waddr_rd_ff);
+	    assign p1sh_block_pending_rs =
+	        1'b0;
+    assign p1sh_block_ctrl_mem =
+        pair1_valid_ff &&
+        (pair1_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] |
+         pair1_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] |
+         pair1_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] |
+         pair1_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_CSR] |
+         pair1_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_SYS]);
+    assign p1sh_safe_cand =
+        p1sh_simple_alu && issue_valid_ff &&
+        !p1sh_block_raw_pair0 && !p1sh_block_waw_pair0 &&
+        !p1sh_block_pending_rs && !p1sh_block_ctrl_mem &&
+        !flush_id_i && !stall_id_i;
+
+    assign uopq_shadow_occupancy =
+        {2'b00, uopq_shadow_valid[0]} +
+        {2'b00, uopq_shadow_valid[1]} +
+        {2'b00, uopq_shadow_valid[2]} +
+        {2'b00, uopq_shadow_valid[3]};
+    assign uopq_shadow_raw_older[1] =
+        shadow_raw_dep(
+            uopq_shadow_valid[1],
+            uopq_shadow_rs1_ren[1], uopq_shadow_rs1[1],
+            uopq_shadow_rs2_ren[1], uopq_shadow_rs2[1],
+            uopq_shadow_valid[0], uopq_shadow_rd_wen[0], uopq_shadow_rd[0]);
+    assign uopq_shadow_waw_older[1] =
+        shadow_waw_dep(
+            uopq_shadow_valid[1], uopq_shadow_rd_wen[1], uopq_shadow_rd[1],
+            uopq_shadow_valid[0], uopq_shadow_rd_wen[0], uopq_shadow_rd[0]);
+    assign uopq_shadow_older_ctrl_mem[1] =
+        uopq_shadow_valid[1] && uopq_shadow_valid[0] &&
+        (uopq_shadow_ctrl[0] | uopq_shadow_mem[0] | uopq_shadow_csr_sys_fence[0]);
+	    assign uopq_shadow_pending_rs[1] =
+	        1'b0;
+    assign uopq_shadow_p1_safe[1] =
+        uopq_shadow_valid[1] && uopq_shadow_simple_alu[1] &&
+        !uopq_shadow_raw_older[1] && !uopq_shadow_waw_older[1] &&
+        !uopq_shadow_older_ctrl_mem[1] && !uopq_shadow_pending_rs[1] &&
+        !flush_id_i && !stall_id_i;
+
+    assign uopq_shadow_raw_older[2] =
+        shadow_raw_dep(
+            uopq_shadow_valid[2],
+            uopq_shadow_rs1_ren[2], uopq_shadow_rs1[2],
+            uopq_shadow_rs2_ren[2], uopq_shadow_rs2[2],
+            uopq_shadow_valid[0], uopq_shadow_rd_wen[0], uopq_shadow_rd[0]) |
+        shadow_raw_dep(
+            uopq_shadow_valid[2],
+            uopq_shadow_rs1_ren[2], uopq_shadow_rs1[2],
+            uopq_shadow_rs2_ren[2], uopq_shadow_rs2[2],
+            uopq_shadow_valid[1], uopq_shadow_rd_wen[1], uopq_shadow_rd[1]);
+    assign uopq_shadow_waw_older[2] =
+        shadow_waw_dep(
+            uopq_shadow_valid[2], uopq_shadow_rd_wen[2], uopq_shadow_rd[2],
+            uopq_shadow_valid[0], uopq_shadow_rd_wen[0], uopq_shadow_rd[0]) |
+        shadow_waw_dep(
+            uopq_shadow_valid[2], uopq_shadow_rd_wen[2], uopq_shadow_rd[2],
+            uopq_shadow_valid[1], uopq_shadow_rd_wen[1], uopq_shadow_rd[1]);
+    assign uopq_shadow_older_ctrl_mem[2] =
+        uopq_shadow_valid[2] &&
+        ((uopq_shadow_valid[0] &&
+          (uopq_shadow_ctrl[0] | uopq_shadow_mem[0] | uopq_shadow_csr_sys_fence[0])) |
+         (uopq_shadow_valid[1] &&
+          (uopq_shadow_ctrl[1] | uopq_shadow_mem[1] | uopq_shadow_csr_sys_fence[1])));
+	    assign uopq_shadow_pending_rs[2] =
+	        1'b0;
+    assign uopq_shadow_p1_safe[2] =
+        uopq_shadow_valid[2] && uopq_shadow_simple_alu[2] &&
+        !uopq_shadow_raw_older[2] && !uopq_shadow_waw_older[2] &&
+        !uopq_shadow_older_ctrl_mem[2] && !uopq_shadow_pending_rs[2] &&
+        !flush_id_i && !stall_id_i;
+	    assign uopq_shadow_raw_older[3] =
+	        shadow_raw_dep(
+	            uopq_shadow_valid[3],
+	            uopq_shadow_rs1_ren[3], uopq_shadow_rs1[3],
+	            uopq_shadow_rs2_ren[3], uopq_shadow_rs2[3],
+	            uopq_shadow_valid[0], uopq_shadow_rd_wen[0], uopq_shadow_rd[0]) |
+	        shadow_raw_dep(
+	            uopq_shadow_valid[3],
+	            uopq_shadow_rs1_ren[3], uopq_shadow_rs1[3],
+	            uopq_shadow_rs2_ren[3], uopq_shadow_rs2[3],
+	            uopq_shadow_valid[1], uopq_shadow_rd_wen[1], uopq_shadow_rd[1]) |
+	        shadow_raw_dep(
+	            uopq_shadow_valid[3],
+	            uopq_shadow_rs1_ren[3], uopq_shadow_rs1[3],
+	            uopq_shadow_rs2_ren[3], uopq_shadow_rs2[3],
+	            uopq_shadow_valid[2], uopq_shadow_rd_wen[2], uopq_shadow_rd[2]);
+	    assign uopq_shadow_waw_older[3] =
+	        shadow_waw_dep(
+	            uopq_shadow_valid[3], uopq_shadow_rd_wen[3], uopq_shadow_rd[3],
+	            uopq_shadow_valid[0], uopq_shadow_rd_wen[0], uopq_shadow_rd[0]) |
+	        shadow_waw_dep(
+	            uopq_shadow_valid[3], uopq_shadow_rd_wen[3], uopq_shadow_rd[3],
+	            uopq_shadow_valid[1], uopq_shadow_rd_wen[1], uopq_shadow_rd[1]) |
+	        shadow_waw_dep(
+	            uopq_shadow_valid[3], uopq_shadow_rd_wen[3], uopq_shadow_rd[3],
+	            uopq_shadow_valid[2], uopq_shadow_rd_wen[2], uopq_shadow_rd[2]);
+	    assign uopq_shadow_older_ctrl_mem[3] =
+	        uopq_shadow_valid[3] &&
+	        ((uopq_shadow_valid[0] &&
+	          (uopq_shadow_ctrl[0] | uopq_shadow_mem[0] | uopq_shadow_csr_sys_fence[0])) |
+	         (uopq_shadow_valid[1] &&
+	          (uopq_shadow_ctrl[1] | uopq_shadow_mem[1] | uopq_shadow_csr_sys_fence[1])) |
+	         (uopq_shadow_valid[2] &&
+	          (uopq_shadow_ctrl[2] | uopq_shadow_mem[2] | uopq_shadow_csr_sys_fence[2])));
+		    assign uopq_shadow_pending_rs[3] =
+		        1'b0;
+	    assign uopq_shadow_p1_safe[3] =
+	        uopq_shadow_valid[3] && uopq_shadow_simple_alu[3] &&
+	        !uopq_shadow_raw_older[3] && !uopq_shadow_waw_older[3] &&
+	        !uopq_shadow_older_ctrl_mem[3] && !uopq_shadow_pending_rs[3] &&
+	        !flush_id_i && !stall_id_i;
+`endif
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            skid_valid_ff <= 1'b0;
+            skid_pc_ff <= '0;
+            skid_instr_ff <= ydrasil_pkg::RV32I_INS_NOP;
+            skid_pred_hit_ff <= 1'b0;
+            skid_pred_taken_ff <= 1'b0;
+            skid_pred_target_ff <= '0;
+            skid_pred_counter_ff <= 2'b01;
+            skid_pred_bht_index_ff <= '0;
+            skid_pred_l0_taken_ff <= 1'b0;
+            skid_rf_raddr_rs1_ff <= '0;
+            skid_rf_raddr_rs2_ff <= '0;
+            skid_rf_ren_rs1_ff <= 1'b0;
+            skid_rf_ren_rs2_ff <= 1'b0;
+            skid_rf_waddr_rd_ff <= '0;
+            skid_rf_wen_rd_ff <= 1'b0;
+            skid_imm_ff <= '0;
+            skid_operand_b_rs_sel_ff <= 1'b0;
+            skid_operand_a_pc_sel_ff <= 1'b0;
+            skid_operand_a_imm_sel_ff <= 1'b0;
+            skid_bt_a_rs_sel_ff <= 1'b0;
+            skid_operand_b_jump_sel_ff <= 1'b0;
+            skid_operator_ff <= '0;
+            skid_operator_lsu_ff <= '0;
+            skid_operator_type_ff <= '0;
+            skid_csr_reg_raddr_ff <= '0;
+            skid_csr_ex_waddr_ff <= '0;
+            skid_csr_op_info_ff <= '0;
+            skid_sys_op_info_ff <= '0;
+            skid_fence_i_ff <= 1'b0;
+            skid_rn_rs1_psrc_ff <= '0;
+            skid_rn_rs2_psrc_ff <= '0;
+            skid_rn_pdst_ff <= '0;
+            skid_rn_pdst_valid_ff <= 1'b0;
+            skid_rn_rs1_ready_ff <= 1'b0;
+            skid_rn_rs2_ready_ff <= 1'b0;
+            uopq2_buf_valid_ff <= 1'b0;
+            uopq2_buf_pc_ff <= '0;
+            uopq2_buf_instr_ff <= ydrasil_pkg::RV32I_INS_NOP;
+            uopq2_buf_pred_hit_ff <= 1'b0;
+            uopq2_buf_pred_taken_ff <= 1'b0;
+            uopq2_buf_pred_target_ff <= '0;
+            uopq2_buf_pred_counter_ff <= 2'b01;
+            uopq2_buf_pred_bht_index_ff <= '0;
+            uopq2_buf_pred_l0_taken_ff <= 1'b0;
+            uopq2_buf_rf_raddr_rs1_ff <= '0;
+            uopq2_buf_rf_raddr_rs2_ff <= '0;
+            uopq2_buf_rf_ren_rs1_ff <= 1'b0;
+            uopq2_buf_rf_ren_rs2_ff <= 1'b0;
+            uopq2_buf_rf_waddr_rd_ff <= '0;
+            uopq2_buf_rf_wen_rd_ff <= 1'b0;
+            uopq2_buf_imm_ff <= '0;
+            uopq2_buf_operand_b_rs_sel_ff <= 1'b0;
+            uopq2_buf_operand_a_pc_sel_ff <= 1'b0;
+            uopq2_buf_operand_a_imm_sel_ff <= 1'b0;
+            uopq2_buf_bt_a_rs_sel_ff <= 1'b0;
+            uopq2_buf_operand_b_jump_sel_ff <= 1'b0;
+            uopq2_buf_operator_ff <= '0;
+            uopq2_buf_operator_lsu_ff <= '0;
+            uopq2_buf_operator_type_ff <= '0;
+            uopq2_buf_csr_reg_raddr_ff <= '0;
+            uopq2_buf_csr_ex_waddr_ff <= '0;
+            uopq2_buf_csr_op_info_ff <= '0;
+            uopq2_buf_sys_op_info_ff <= '0;
+            uopq2_buf_fence_i_ff <= 1'b0;
+            uopq2_buf_rn_rs1_psrc_ff <= '0;
+            uopq2_buf_rn_rs2_psrc_ff <= '0;
+            uopq2_buf_rn_pdst_ff <= '0;
+	            uopq2_buf_rn_pdst_valid_ff <= 1'b0;
+	            uopq2_buf_rs1_ready_ff <= 1'b0;
+	            uopq2_buf_rs2_ready_ff <= 1'b0;
+	            uopq3_buf_valid_ff <= 1'b0;
+	            uopq3_buf_pc_ff <= '0;
+	            uopq3_buf_instr_ff <= ydrasil_pkg::RV32I_INS_NOP;
+	            uopq3_buf_pred_hit_ff <= 1'b0;
+	            uopq3_buf_pred_taken_ff <= 1'b0;
+	            uopq3_buf_pred_target_ff <= '0;
+	            uopq3_buf_pred_counter_ff <= 2'b01;
+	            uopq3_buf_pred_bht_index_ff <= '0;
+	            uopq3_buf_pred_l0_taken_ff <= 1'b0;
+	            uopq3_buf_rf_raddr_rs1_ff <= '0;
+	            uopq3_buf_rf_raddr_rs2_ff <= '0;
+	            uopq3_buf_rf_ren_rs1_ff <= 1'b0;
+	            uopq3_buf_rf_ren_rs2_ff <= 1'b0;
+	            uopq3_buf_rf_waddr_rd_ff <= '0;
+	            uopq3_buf_rf_wen_rd_ff <= 1'b0;
+	            uopq3_buf_imm_ff <= '0;
+	            uopq3_buf_operand_b_rs_sel_ff <= 1'b0;
+	            uopq3_buf_operand_a_pc_sel_ff <= 1'b0;
+	            uopq3_buf_operand_a_imm_sel_ff <= 1'b0;
+	            uopq3_buf_bt_a_rs_sel_ff <= 1'b0;
+	            uopq3_buf_operand_b_jump_sel_ff <= 1'b0;
+	            uopq3_buf_operator_ff <= '0;
+	            uopq3_buf_operator_lsu_ff <= '0;
+	            uopq3_buf_operator_type_ff <= '0;
+	            uopq3_buf_csr_reg_raddr_ff <= '0;
+	            uopq3_buf_csr_ex_waddr_ff <= '0;
+	            uopq3_buf_csr_op_info_ff <= '0;
+	            uopq3_buf_sys_op_info_ff <= '0;
+	            uopq3_buf_fence_i_ff <= 1'b0;
+	            uopq3_buf_rn_rs1_psrc_ff <= '0;
+	            uopq3_buf_rn_rs2_psrc_ff <= '0;
+	            uopq3_buf_rn_pdst_ff <= '0;
+	            uopq3_buf_rn_pdst_valid_ff <= 1'b0;
+	            uopq3_buf_rs1_ready_ff <= 1'b0;
+	            uopq3_buf_rs2_ready_ff <= 1'b0;
+            issue_valid_ff <= 1'b0;
+	                    issue_wait_rs1_ff <= issue_next_rs1_wait;
+	                    issue_wait_rs2_ff <= issue_next_rs2_wait;
+            issue_pc_ff <= '0;
+            issue_pred_hit_ff <= 1'b0;
+            issue_pred_taken_ff <= 1'b0;
+            issue_pred_target_ff <= '0;
+            issue_pred_counter_ff <= 2'b01;
+            issue_pred_bht_index_ff <= '0;
+            issue_pred_l0_taken_ff <= 1'b0;
+            issue_rf_raddr_rs1_ff <= '0;
+            issue_rf_raddr_rs2_ff <= '0;
+            issue_rf_ren_rs1_ff <= 1'b0;
+            issue_rf_ren_rs2_ff <= 1'b0;
+            issue_rf_waddr_rd_ff <= '0;
+            issue_rf_wen_rd_ff <= 1'b0;
+            issue_imm_ff <= '0;
+            issue_operand_b_rs_sel_ff <= 1'b0;
+            issue_operand_a_pc_sel_ff <= 1'b0;
+            issue_operand_a_imm_sel_ff <= 1'b0;
+            issue_bt_a_rs_sel_ff <= 1'b0;
+            issue_operand_b_jump_sel_ff <= 1'b0;
+            issue_operator_ff <= '0;
+            issue_operator_lsu_ff <= '0;
+            issue_operator_type_ff <= '0;
+            issue_csr_reg_raddr_ff <= '0;
+            issue_csr_ex_waddr_ff <= '0;
+            issue_csr_op_info_ff <= '0;
+            issue_sys_op_info_ff <= '0;
+            issue_fence_i_ff <= 1'b0;
+            issue_rn_rs1_psrc_ff <= '0;
+            issue_rn_rs2_psrc_ff <= '0;
+            issue_rn_pdst_ff <= '0;
+            issue_rn_pdst_valid_ff <= 1'b0;
+            id_rn_pdst_ff <= '0;
+            alu_stable_valid_ff <= 1'b0;
+            alu_stable_addr_ff <= '0;
+            alu_stable_data_ff <= '0;
+            operand_a_ff        <= '0;
+            operand_b_ff        <= '0;
+            operator_ff         <= '0;
+            operator_type_ff    <= '0;
+            rf_wen_rd_ff        <= '0;
+            rf_waddr_rd_ff      <= '0;
+            operator_lsu_ff     <= '0;
+            id_lsu_rs2_data_ff  <= '0;
+            id_lsu_addr_ff      <= '0;
+            id_lsu_addr_is_dtcm_ff <= 1'b0;
+            id_lsu_store_data_ff <= '0;
+            id_lsu_store_mask_ff <= 4'b0000;
+            bt_a_operand_ff     <= '0;
+            bt_b_operand_ff     <= '0;
+            csr_reg_raddr_ff <= '0;
+            // csr_ex_we_ff <= 1'b0;
+            csr_ex_waddr_ff <= '0;
+            csr_op_info_ff <= '0;
+            sys_op_info_ff <= '0;
+            id_instr_addr_ff <= '0;
+            id_ex_jalr_ff <= 1'b0;
+            id_ex_pred_hit_ff <= 1'b0;
+            id_ex_pred_taken_ff <= 1'b0;
+            id_ex_pred_target_ff <= '0;
+            id_ex_pred_counter_ff <= 2'b01;
+            id_ex_pred_bht_index_ff <= '0;
+            id_ex_pred_l0_taken_ff <= 1'b0;
+            id_ex_valid_ff <= 1'b0;
+            id_fence_i_ff <= 1'b0;
+            perf_id_decode_valid <= '0;
+            perf_id_issue_accept <= '0;
+            perf_id_issue_fire <= '0;
+            perf_id_issue_slot_valid <= '0;
+            perf_id_issue_no_fire <= '0;
+            perf_id_issue_wait_block <= '0;
+            perf_id_wait_rs1 <= '0;
+            perf_id_wait_rs2 <= '0;
+            perf_id_wait_alu_ready_next_rs1 <= '0;
+            perf_id_wait_alu_ready_next_rs2 <= '0;
+            perf_id_wait_lsu_fwd_rs1 <= '0;
+            perf_id_wait_lsu_fwd_rs2 <= '0;
+            perf_id_wait_wb_fwd_rs1 <= '0;
+            perf_id_wait_wb_fwd_rs2 <= '0;
+            perf_id_wait_prf_ready_rs1 <= '0;
+            perf_id_wait_prf_ready_rs2 <= '0;
+            perf_id_skid_valid <= '0;
+            perf_id_skid_fill <= '0;
+            perf_id_skid_drain <= '0;
+            perf_id_skid_full_stall <= '0;
+            perf_id_frontend_stall <= '0;
+            perf_ri_slot0_valid <= '0;
+            perf_ri_slot1_valid <= '0;
+            perf_ri_slot0_ready <= '0;
+            perf_ri_slot1_ready <= '0;
+            perf_ri_fire_slot0 <= '0;
+            perf_ri_fire_slot1_bypass <= '0;
+            perf_ri_slot1_block_raw <= '0;
+            perf_ri_slot1_block_waw <= '0;
+            perf_ri_slot1_block_ctrl <= '0;
+            perf_ri_slot1_block_mem <= '0;
+            perf_ri_slot1_block_unsupported <= '0;
+            perf_ri_slot1_ready_when_slot0_blocked <= '0;
+            perf_ri_slot1_ready_when_slot0_ready <= '0;
+            perf_ri_slot1_fire_blocked_by_single_issue <= '0;
+            perf_ri_slot1_fire_blocked_by_operand_port <= '0;
+            perf_ri_slot1_fire_blocked_by_wb_order <= '0;
+            perf_ri_bypass_flush_killed <= '0;
+            perf_di_pipe0_fire <= '0;
+            perf_di_pipe1_fire <= '0;
+            perf_di_pair_fire <= '0;
+            perf_di_pair_simple_alu <= '0;
+            perf_di_pipe1_killed_flush <= '0;
+            perf_di_pipe1_block_stall_recheck <= '0;
+            perf_di_pipe1_block_resbuf_full <= '0;
+            perf_di_pipe1_block_alu_fifo_full <= '0;
+            perf_di_pipe1_block_pending_recheck <= '0;
+            perf_di_pipe1_block_timing_guard <= '0;
+            perf_di_pipe1_operand_block_rs1 <= '0;
+            perf_di_pipe1_operand_block_rs2 <= '0;
+            perf_di_pipe1_operand_block_both <= '0;
+            perf_di_pipe1_operand_block_from1 <= '0;
+            perf_di_pipe1_operand_block_from2 <= '0;
+            perf_di_pipe1_operand_block_recoverable <= '0;
+            perf_di_pipe1_alt2_when_from1_block_safe <= '0;
+            perf_di_pipe1_alt2_when_from1_block_ready <= '0;
+            perf_di_pipe1_alt2_when_recoverable_safe <= '0;
+            perf_di_pipe1_alt2_when_recoverable_ready <= '0;
+            perf_dual_cycles_with_pair_fire <= '0;
+            perf_dual_extra_instret_pipe1 <= '0;
+            perf_dual_pipe1_useful_commit <= '0;
+            perf_dual_pipe1_squashed <= '0;
+            pipe1_issue_valid_ff <= 1'b0;
+            pipe1_operand_a_ff <= '0;
+            pipe1_operand_b_ff <= '0;
+            pipe1_operator_ff <= '0;
+            pipe1_rf_wen_rd_ff <= 1'b0;
+            pipe1_rf_waddr_rd_ff <= '0;
+            pipe1_rn_pdst_ff <= '0;
+            pipe1_pc_ff <= '0;
+            pipe1_instr_ff <= '0;
+`ifndef SYNTHESIS
+            perf_ds_cycles <= '0;
+            perf_ds_pipe0_valid <= '0;
+            perf_ds_pipe0_ready <= '0;
+            perf_ds_pipe1_valid <= '0;
+            perf_ds_pipe1_simple_alu <= '0;
+            perf_ds_safe_candidate <= '0;
+            perf_ds_safe_when_pipe0_ready <= '0;
+            perf_ds_safe_when_pipe0_blocked <= '0;
+            perf_ds_block_pipe1_unsupported <= '0;
+            perf_ds_block_raw_pipe0 <= '0;
+            perf_ds_block_waw_pipe0 <= '0;
+            perf_ds_block_pending_rs1 <= '0;
+            perf_ds_block_pending_rs2 <= '0;
+            perf_ds_block_ctrl <= '0;
+            perf_ds_block_mem <= '0;
+            perf_ds_block_csr_sys <= '0;
+            perf_ds_block_flush <= '0;
+            perf_ds_block_wb_port <= '0;
+            perf_ds_block_forward_complex <= '0;
+            pair1_valid_ff <= 1'b0;
+            pair1_pc_ff <= '0;
+            pair1_instr_ff <= ydrasil_pkg::RV32I_INS_NOP;
+            pair1_seq_ff <= '0;
+            pair1_seq_next_ff <= '0;
+            pair1_rs1_ff <= '0;
+            pair1_rs2_ff <= '0;
+            pair1_rd_ff <= '0;
+            pair1_rs1_ren_ff <= 1'b0;
+            pair1_rs2_ren_ff <= 1'b0;
+            pair1_rd_wen_ff <= 1'b0;
+            pair1_operator_ff <= '0;
+            pair1_operator_type_ff <= '0;
+            pair1_imm_ff <= '0;
+            pair1_pred_hit_ff <= 1'b0;
+            pair1_pred_taken_ff <= 1'b0;
+            pair1_pred_target_ff <= '0;
+            pair1_pred_counter_ff <= 2'b01;
+            pair1_pred_bht_index_ff <= '0;
+            pair1_pred_l0_taken_ff <= 1'b0;
+            perf_p1sh_valid_cycles <= '0;
+            perf_p1sh_simple_alu <= '0;
+            perf_p1sh_safe_cand <= '0;
+            perf_p1sh_block_raw_pair0 <= '0;
+            perf_p1sh_block_waw_pair0 <= '0;
+            perf_p1sh_block_pending_rs <= '0;
+            perf_p1sh_block_ctrl_mem <= '0;
+            uopq_shadow_valid <= '0;
+            uopq_shadow_seq_next_ff <= '0;
+            for (int uopq_i = 0; uopq_i < 4; uopq_i++) begin
+                uopq_shadow_pc[uopq_i] <= '0;
+                uopq_shadow_instr[uopq_i] <= ydrasil_pkg::RV32I_INS_NOP;
+                uopq_shadow_seq[uopq_i] <= '0;
+                uopq_shadow_rs1[uopq_i] <= '0;
+                uopq_shadow_rs2[uopq_i] <= '0;
+                uopq_shadow_rd[uopq_i] <= '0;
+                uopq_shadow_optype[uopq_i] <= '0;
+                uopq_shadow_operator[uopq_i] <= '0;
+            end
+            uopq_shadow_rs1_ren <= '0;
+            uopq_shadow_rs2_ren <= '0;
+            uopq_shadow_rd_wen <= '0;
+            uopq_shadow_simple_alu <= '0;
+            uopq_shadow_ctrl <= '0;
+            uopq_shadow_mem <= '0;
+            uopq_shadow_csr_sys_fence <= '0;
+            perf_uopq_occ_0 <= '0;
+            perf_uopq_occ_1 <= '0;
+            perf_uopq_occ_2 <= '0;
+            perf_uopq_occ_3 <= '0;
+            perf_uopq_occ_4 <= '0;
+            perf_uopq_p1_safe_1 <= '0;
+            perf_uopq_p1_safe_2 <= '0;
+            perf_uopq_p1_safe_3 <= '0;
+            perf_uopq_block_older_ctrl_mem <= '0;
+            perf_uopq_block_raw_older <= '0;
+            perf_uopq_block_waw_older <= '0;
+            perf_uopq_p1_fire_from_1 <= '0;
+            perf_uopq_p1_fire_from_2 <= '0;
+            perf_uopq_p1_fire_from_3 <= '0;
+            perf_uopq_p1_fire_when_p0_ready <= '0;
+            perf_uopq_p1_fire_when_p0_blocked <= '0;
+            perf_uopq_p1_fire_when_p0_empty <= '0;
+            perf_uopq_p1_block_older_ctrl_mem <= '0;
+            perf_uopq_p1_block_raw_older <= '0;
+            perf_uopq_p1_block_waw_older <= '0;
+            perf_uopq_p1_block_commit_order <= '0;
+            perf_uopq_p1_block_p0_bjp <= '0;
+            perf_uopq_p1_block_p0_load <= '0;
+            perf_uopq_p1_block_p0_store <= '0;
+            perf_uopq_p1_block_p0_csr_sys <= '0;
+            perf_uopq_p1_block_p0_bitmanip <= '0;
+            perf_uopq_p1_block_p0_other <= '0;
+            perf_uopq_p1_block_p0_other_invalid <= '0;
+            perf_uopq_p1_block_p0_other_no_alu_mul <= '0;
+            perf_uopq_p1_block_p0_invalid_issue_accept <= '0;
+            perf_uopq_p1_block_p0_invalid_skid <= '0;
+            perf_uopq_p1_block_p0_invalid_uopq2_safe <= '0;
+            perf_uopq_p1_empty_base <= '0;
+            perf_uopq_p1_empty_supported <= '0;
+            perf_uopq_p1_empty_operands_ready <= '0;
+            perf_uopq_p1_empty_block_younger <= '0;
+            perf_uopq_p1_empty_block_ready_allow <= '0;
+            perf_uopq_p1_empty_block_pending_rd <= '0;
+            perf_uopq_p1_empty_block_resbuf <= '0;
+            perf_uopq_p1_blocked_base <= '0;
+            perf_uopq_p1_blocked_supported <= '0;
+            perf_uopq_p1_blocked_p0_safe <= '0;
+            perf_uopq_p1_blocked_operands_ready <= '0;
+            perf_uopq_p1_blocked_block_younger <= '0;
+            perf_uopq_p1_blocked_block_ready_allow <= '0;
+            perf_uopq_p1_blocked_block_pending_rd <= '0;
+            perf_uopq_p1_blocked_block_resbuf <= '0;
+            perf_uopq_p1_blocked_unsup_any_uop <= '0;
+            perf_uopq_p1_blocked_unsup_shadow_alu <= '0;
+	            perf_uopq_p1_blocked_unsup_shift <= '0;
+	            perf_uopq_p1_blocked_unsup_x0_rs1 <= '0;
+	            perf_uopq_p1_blocked_unsup_lui_auipc <= '0;
+	            perf_uopq_p1_blocked_unsup_relax_ready <= '0;
+	            perf_uopq_p1_blocked_unsup_relax_fire_safe <= '0;
+	            perf_uopq_p1_blocked_unsup_relax_shift_safe <= '0;
+	            perf_uopq_p1_blocked_unsup_relax_x0_safe <= '0;
+	            perf_uopq_p1_blocked_unsup_relax_lui_auipc_safe <= '0;
+	            perf_uopq_p1_block_younger_flush <= '0;
+	            perf_uopq_p1_block_young_uopq2 <= '0;
+	            perf_uopq_p1_block_young_ifid <= '0;
+            perf_uopq_p1_block_ifid_bjp <= '0;
+            perf_uopq_p1_block_ifid_load <= '0;
+            perf_uopq_p1_block_ifid_store <= '0;
+            perf_uopq_p1_block_ifid_mul <= '0;
+            perf_uopq_p1_block_ifid_csr_sys <= '0;
+`endif
+        end else begin
+            if (flush_id_i) begin
+                skid_valid_ff <= 1'b0;
+                issue_valid_ff <= 1'b0;
+                issue_wait_rs1_ff <= 1'b0;
+                issue_wait_rs2_ff <= 1'b0;
+                skid_rn_pdst_valid_ff <= 1'b0;
+                skid_rn_rs1_ready_ff <= 1'b0;
+                skid_rn_rs2_ready_ff <= 1'b0;
+                issue_rn_pdst_valid_ff <= 1'b0;
+	                uopq2_buf_valid_ff <= 1'b0;
+	                uopq2_buf_rn_pdst_valid_ff <= 1'b0;
+	                uopq3_buf_valid_ff <= 1'b0;
+	                uopq3_buf_rn_pdst_valid_ff <= 1'b0;
+	                id_rn_pdst_ff <= '0;
+                id_ex_valid_ff <= 1'b0;
+                id_fence_i_ff <= 1'b0;
+                alu_stable_valid_ff <= 1'b0;
+                pipe1_issue_valid_ff <= 1'b0;
+`ifndef SYNTHESIS
+                pair1_valid_ff <= 1'b0;
+                uopq_shadow_valid <= '0;
+`endif
+            end else begin
+                if (issue_accept) begin
+                    if (pair1_refill_direct) begin
+                        issue_pc_ff <= if_id_pc_i;
+                        issue_pred_hit_ff <= if_id_pred_hit_i;
+                        issue_pred_taken_ff <= if_id_pred_taken_i;
+                        issue_pred_target_ff <= if_id_pred_target_i;
+                        issue_pred_counter_ff <= if_id_pred_counter_i;
+                        issue_pred_bht_index_ff <= if_id_pred_bht_index_i;
+                        issue_pred_l0_taken_ff <= if_id_pred_l0_taken_i;
+                        issue_rf_raddr_rs1_ff <= if_id_trace_rf_raddr_rs1;
+                        issue_rf_raddr_rs2_ff <= if_id_trace_rf_raddr_rs2;
+                        issue_rf_ren_rs1_ff <= if_id_trace_rf_ren_rs1;
+                        issue_rf_ren_rs2_ff <= if_id_trace_rf_ren_rs2;
+                        issue_rf_waddr_rd_ff <= if_id_trace_rf_waddr_rd;
+                        issue_rf_wen_rd_ff <= if_id_trace_rf_wen_rd;
+                        issue_imm_ff <= if_id_trace_imm;
+                        issue_operand_b_rs_sel_ff <= if_id_trace_operand_b_rs_sel;
+                        issue_operand_a_pc_sel_ff <= if_id_trace_operand_a_pc_sel;
+                        issue_operand_a_imm_sel_ff <= if_id_trace_operand_a_imm_sel;
+                        issue_bt_a_rs_sel_ff <= if_id_trace_bt_a_rs_sel;
+                        issue_operand_b_jump_sel_ff <= if_id_trace_operand_b_jump_sel;
+                        issue_operator_ff <= if_id_trace_operator;
+                        issue_operator_lsu_ff <= if_id_trace_operator_lsu;
+                        issue_operator_type_ff <= if_id_trace_operator_type;
+                        issue_csr_reg_raddr_ff <= if_id_trace_csr_reg_raddr;
+                        issue_csr_ex_waddr_ff <= if_id_trace_csr_ex_waddr;
+                        issue_csr_op_info_ff <= if_id_trace_csr_op_info;
+                        issue_sys_op_info_ff <= if_id_trace_sys_op_info;
+                        issue_fence_i_ff <= (if_id_instr_i[6:0] == ydrasil_pkg::RV32I_INS_FENCE) &&
+                                            (if_id_instr_i[14:12] == 3'b001);
+                        issue_rn_rs1_psrc_ff <= rn_if_rs1_psrc_i;
+                        issue_rn_rs2_psrc_ff <= rn_if_rs2_psrc_i;
+                        issue_rn_pdst_ff <= rn_if_pdst_i;
+                        issue_rn_pdst_valid_ff <= if_id_rn_pdst_valid;
+                        issue_valid_ff <= if_id_valid_i;
+                    end else if (pair1_fire) begin
+                        issue_valid_ff <= 1'b0;
+                    end else begin
+                        issue_pc_ff <= decode_pc;
+                        issue_pred_hit_ff <= decode_pred_hit;
+                        issue_pred_taken_ff <= decode_pred_taken;
+                        issue_pred_target_ff <= decode_pred_target;
+                        issue_pred_counter_ff <= decode_pred_counter;
+                        issue_pred_bht_index_ff <= decode_pred_bht_index;
+                        issue_pred_l0_taken_ff <= decode_pred_l0_taken;
+                        issue_rf_raddr_rs1_ff <= skid_valid_ff ? slot1_rf_raddr_rs1 : rf_raddr_rs1;
+                        issue_rf_raddr_rs2_ff <= skid_valid_ff ? slot1_rf_raddr_rs2 : rf_raddr_rs2;
+                        issue_rf_ren_rs1_ff <= skid_valid_ff ? slot1_rf_ren_rs1 : rf_ren_rs1;
+                        issue_rf_ren_rs2_ff <= skid_valid_ff ? slot1_rf_ren_rs2 : rf_ren_rs2;
+                        issue_rf_waddr_rd_ff <= skid_valid_ff ? slot1_rf_waddr_rd : rf_waddr_rd;
+                        issue_rf_wen_rd_ff <= skid_valid_ff ? slot1_rf_wen_rd : rf_wen_rd;
+                        issue_imm_ff <= skid_valid_ff ? slot1_imm : imm_i;
+                        issue_operand_b_rs_sel_ff <= skid_valid_ff ? slot1_operand_b_rs_sel : operand_b_rs_sel;
+                        issue_operand_a_pc_sel_ff <= skid_valid_ff ? slot1_operand_a_pc_sel : operand_a_pc_sel;
+                        issue_operand_a_imm_sel_ff <= skid_valid_ff ? slot1_operand_a_imm_sel : operand_a_imm_sel;
+                        issue_bt_a_rs_sel_ff <= skid_valid_ff ? slot1_bt_a_rs_sel : bt_a_rs_sel;
+                        issue_operand_b_jump_sel_ff <= skid_valid_ff ? slot1_operand_b_jump_sel : operand_b_jump_sel;
+                        issue_operator_ff <= skid_valid_ff ? slot1_operator : operator;
+                        issue_operator_lsu_ff <= skid_valid_ff ? slot1_operator_lsu : operator_lsu;
+                        issue_operator_type_ff <= skid_valid_ff ? slot1_operator_type : operator_type;
+                        issue_csr_reg_raddr_ff <= skid_valid_ff ? slot1_csr_reg_raddr : csr_reg_raddr;
+                        issue_csr_ex_waddr_ff <= skid_valid_ff ? slot1_csr_ex_waddr : csr_ex_waddr;
+                        issue_csr_op_info_ff <= skid_valid_ff ? slot1_csr_op_info : csr_op_info;
+                        issue_sys_op_info_ff <= skid_valid_ff ? slot1_sys_op_info : sys_op_info;
+                        issue_fence_i_ff <= skid_valid_ff ? slot1_fence_i : id_fence_i;
+                        issue_rn_rs1_psrc_ff <=
+                            skid_valid_ff ? skid_rn_rs1_psrc_ff :
+                            uopq2_buf_valid_ff ? uopq2_buf_rn_rs1_psrc_ff : rn_if_rs1_psrc_i;
+                        issue_rn_rs2_psrc_ff <=
+                            skid_valid_ff ? skid_rn_rs2_psrc_ff :
+                            uopq2_buf_valid_ff ? uopq2_buf_rn_rs2_psrc_ff : rn_if_rs2_psrc_i;
+                        issue_rn_pdst_ff <=
+                            skid_valid_ff ? skid_rn_pdst_ff :
+                            uopq2_buf_valid_ff ? uopq2_buf_rn_pdst_ff : rn_if_pdst_i;
+                        issue_rn_pdst_valid_ff <=
+                            skid_valid_ff ? skid_rn_pdst_valid_ff :
+                            uopq2_buf_valid_ff ? uopq2_buf_rn_pdst_valid_ff : if_id_rn_pdst_valid;
+                        issue_valid_ff <= 1'b1;
+                    end
+                    issue_wait_rs1_ff <= 1'b0;
+                    issue_wait_rs2_ff <= 1'b0;
+                end else if (id_advance && issue_valid_ff) begin
+                    issue_wait_rs1_ff <= issue_wait_rs1_ff | rs1_issue_alu_ready_next_i;
+                    issue_wait_rs2_ff <= issue_wait_rs2_ff | rs2_issue_alu_ready_next_i;
+                end
+
+                if (issue_slot1_bypass_fire) begin
+                    skid_valid_ff <= 1'b0;
+                    skid_rn_rs1_ready_ff <= 1'b0;
+                    skid_rn_rs2_ready_ff <= 1'b0;
+`ifndef SYNTHESIS
+                    pair1_valid_ff <= 1'b0;
+`endif
+                end else if (pair1_fire) begin
+                    if (pair1_refill_direct) begin
+                        skid_valid_ff <= 1'b0;
+`ifndef SYNTHESIS
+                        pair1_valid_ff <= 1'b0;
+`endif
+	                    end else if (pipe1_fire_from2) begin
+	                        skid_valid_ff <= skid_valid_ff;
+	                        uopq2_buf_valid_ff <= uopq3_buf_valid_ff | uopq2_refill_from_if;
+	                        if (uopq3_buf_valid_ff) begin
+	                            uopq2_buf_pc_ff <= uopq3_buf_pc_ff;
+	                            uopq2_buf_instr_ff <= uopq3_buf_instr_ff;
+	                            uopq2_buf_pred_hit_ff <= uopq3_buf_pred_hit_ff;
+	                            uopq2_buf_pred_taken_ff <= uopq3_buf_pred_taken_ff;
+	                            uopq2_buf_pred_target_ff <= uopq3_buf_pred_target_ff;
+	                            uopq2_buf_pred_counter_ff <= uopq3_buf_pred_counter_ff;
+	                            uopq2_buf_pred_bht_index_ff <= uopq3_buf_pred_bht_index_ff;
+	                            uopq2_buf_pred_l0_taken_ff <= uopq3_buf_pred_l0_taken_ff;
+	                            uopq2_buf_rf_raddr_rs1_ff <= uopq3_buf_rf_raddr_rs1_ff;
+	                            uopq2_buf_rf_raddr_rs2_ff <= uopq3_buf_rf_raddr_rs2_ff;
+	                            uopq2_buf_rf_ren_rs1_ff <= uopq3_buf_rf_ren_rs1_ff;
+	                            uopq2_buf_rf_ren_rs2_ff <= uopq3_buf_rf_ren_rs2_ff;
+	                            uopq2_buf_rf_waddr_rd_ff <= uopq3_buf_rf_waddr_rd_ff;
+	                            uopq2_buf_rf_wen_rd_ff <= uopq3_buf_rf_wen_rd_ff;
+	                            uopq2_buf_imm_ff <= uopq3_buf_imm_ff;
+	                            uopq2_buf_operand_b_rs_sel_ff <= uopq3_buf_operand_b_rs_sel_ff;
+	                            uopq2_buf_operand_a_pc_sel_ff <= uopq3_buf_operand_a_pc_sel_ff;
+	                            uopq2_buf_operand_a_imm_sel_ff <= uopq3_buf_operand_a_imm_sel_ff;
+	                            uopq2_buf_bt_a_rs_sel_ff <= uopq3_buf_bt_a_rs_sel_ff;
+	                            uopq2_buf_operand_b_jump_sel_ff <= uopq3_buf_operand_b_jump_sel_ff;
+	                            uopq2_buf_operator_ff <= uopq3_buf_operator_ff;
+	                            uopq2_buf_operator_lsu_ff <= uopq3_buf_operator_lsu_ff;
+	                            uopq2_buf_operator_type_ff <= uopq3_buf_operator_type_ff;
+	                            uopq2_buf_csr_reg_raddr_ff <= uopq3_buf_csr_reg_raddr_ff;
+	                            uopq2_buf_csr_ex_waddr_ff <= uopq3_buf_csr_ex_waddr_ff;
+	                            uopq2_buf_csr_op_info_ff <= uopq3_buf_csr_op_info_ff;
+	                            uopq2_buf_sys_op_info_ff <= uopq3_buf_sys_op_info_ff;
+	                            uopq2_buf_fence_i_ff <= uopq3_buf_fence_i_ff;
+	                            uopq2_buf_rn_rs1_psrc_ff <= uopq3_buf_rn_rs1_psrc_ff;
+	                            uopq2_buf_rn_rs2_psrc_ff <= uopq3_buf_rn_rs2_psrc_ff;
+	                            uopq2_buf_rn_pdst_ff <= uopq3_buf_rn_pdst_ff;
+	                            uopq2_buf_rn_pdst_valid_ff <= uopq3_buf_rn_pdst_valid_ff;
+	                            uopq2_buf_rs1_ready_ff <= uopq3_buf_rs1_ready_ff;
+	                            uopq2_buf_rs2_ready_ff <= uopq3_buf_rs2_ready_ff;
+	                            uopq3_buf_valid_ff <= 1'b0;
+	                            uopq3_buf_rn_pdst_valid_ff <= 1'b0;
+	                        end else if (uopq2_refill_from_if) begin
+	                            uopq2_buf_pc_ff <= if_id_pc_i;
+                            uopq2_buf_instr_ff <= if_id_instr_i;
+                            uopq2_buf_pred_hit_ff <= if_id_pred_hit_i;
+                            uopq2_buf_pred_taken_ff <= if_id_pred_taken_i;
+                            uopq2_buf_pred_target_ff <= if_id_pred_target_i;
+                            uopq2_buf_pred_counter_ff <= if_id_pred_counter_i;
+                            uopq2_buf_pred_bht_index_ff <= if_id_pred_bht_index_i;
+                            uopq2_buf_pred_l0_taken_ff <= if_id_pred_l0_taken_i;
+                            uopq2_buf_rf_raddr_rs1_ff <= if_id_trace_rf_raddr_rs1;
+                            uopq2_buf_rf_raddr_rs2_ff <= if_id_trace_rf_raddr_rs2;
+                            uopq2_buf_rf_ren_rs1_ff <= if_id_trace_rf_ren_rs1;
+                            uopq2_buf_rf_ren_rs2_ff <= if_id_trace_rf_ren_rs2;
+                            uopq2_buf_rf_waddr_rd_ff <= if_id_trace_rf_waddr_rd;
+                            uopq2_buf_rf_wen_rd_ff <= if_id_trace_rf_wen_rd;
+                            uopq2_buf_imm_ff <= if_id_trace_imm;
+                            uopq2_buf_operand_b_rs_sel_ff <= if_id_trace_operand_b_rs_sel;
+                            uopq2_buf_operand_a_pc_sel_ff <= if_id_trace_operand_a_pc_sel;
+                            uopq2_buf_operand_a_imm_sel_ff <= if_id_trace_operand_a_imm_sel;
+                            uopq2_buf_bt_a_rs_sel_ff <= if_id_trace_bt_a_rs_sel;
+                            uopq2_buf_operand_b_jump_sel_ff <= if_id_trace_operand_b_jump_sel;
+                            uopq2_buf_operator_ff <= if_id_trace_operator;
+                            uopq2_buf_operator_lsu_ff <= if_id_trace_operator_lsu;
+                            uopq2_buf_operator_type_ff <= if_id_trace_operator_type;
+                            uopq2_buf_csr_reg_raddr_ff <= if_id_trace_csr_reg_raddr;
+                            uopq2_buf_csr_ex_waddr_ff <= if_id_trace_csr_ex_waddr;
+                            uopq2_buf_csr_op_info_ff <= if_id_trace_csr_op_info;
+                            uopq2_buf_sys_op_info_ff <= if_id_trace_sys_op_info;
+                            uopq2_buf_fence_i_ff <= (if_id_instr_i[6:0] == ydrasil_pkg::RV32I_INS_FENCE) &&
+                                                    (if_id_instr_i[14:12] == 3'b001);
+                            uopq2_buf_rn_rs1_psrc_ff <= rn_if_rs1_psrc_i;
+                            uopq2_buf_rn_rs2_psrc_ff <= rn_if_rs2_psrc_i;
+                            uopq2_buf_rn_pdst_ff <= rn_if_pdst_i;
+                            uopq2_buf_rn_pdst_valid_ff <= if_id_rn_pdst_valid;
+                            uopq2_buf_rs1_ready_ff <= rn_if_rs1_ready_i;
+                            uopq2_buf_rs2_ready_ff <= rn_if_rs2_ready_i;
+	                        end else begin
+	                            uopq2_buf_rn_pdst_valid_ff <= 1'b0;
+	                        end
+`ifndef SYNTHESIS
+	                        pair1_valid_ff <= pair1_valid_ff;
+`endif
+	                    end else if (pipe1_fire_from3 && !issue_accept) begin
+	                        uopq3_buf_valid_ff <= 1'b0;
+	                        uopq3_buf_rn_pdst_valid_ff <= 1'b0;
+`ifndef SYNTHESIS
+	                        pair1_valid_ff <= pair1_valid_ff;
+`endif
+	                    end else if (uopq2_buf_valid_ff) begin
+                        skid_valid_ff <= 1'b1;
+                        skid_pc_ff <= uopq2_buf_pc_ff;
+                        skid_instr_ff <= uopq2_buf_instr_ff;
+                        skid_pred_hit_ff <= uopq2_buf_pred_hit_ff;
+                        skid_pred_taken_ff <= uopq2_buf_pred_taken_ff;
+                        skid_pred_target_ff <= uopq2_buf_pred_target_ff;
+                        skid_pred_counter_ff <= uopq2_buf_pred_counter_ff;
+                        skid_pred_bht_index_ff <= uopq2_buf_pred_bht_index_ff;
+                        skid_pred_l0_taken_ff <= uopq2_buf_pred_l0_taken_ff;
+                        skid_rf_raddr_rs1_ff <= uopq2_buf_rf_raddr_rs1_ff;
+                        skid_rf_raddr_rs2_ff <= uopq2_buf_rf_raddr_rs2_ff;
+                        skid_rf_ren_rs1_ff <= uopq2_buf_rf_ren_rs1_ff;
+                        skid_rf_ren_rs2_ff <= uopq2_buf_rf_ren_rs2_ff;
+                        skid_rf_waddr_rd_ff <= uopq2_buf_rf_waddr_rd_ff;
+                        skid_rf_wen_rd_ff <= uopq2_buf_rf_wen_rd_ff;
+                        skid_imm_ff <= uopq2_buf_imm_ff;
+                        skid_operand_b_rs_sel_ff <= uopq2_buf_operand_b_rs_sel_ff;
+                        skid_operand_a_pc_sel_ff <= uopq2_buf_operand_a_pc_sel_ff;
+                        skid_operand_a_imm_sel_ff <= uopq2_buf_operand_a_imm_sel_ff;
+                        skid_bt_a_rs_sel_ff <= uopq2_buf_bt_a_rs_sel_ff;
+                        skid_operand_b_jump_sel_ff <= uopq2_buf_operand_b_jump_sel_ff;
+                        skid_operator_ff <= uopq2_buf_operator_ff;
+                        skid_operator_lsu_ff <= uopq2_buf_operator_lsu_ff;
+                        skid_operator_type_ff <= uopq2_buf_operator_type_ff;
+                        skid_csr_reg_raddr_ff <= uopq2_buf_csr_reg_raddr_ff;
+                        skid_csr_ex_waddr_ff <= uopq2_buf_csr_ex_waddr_ff;
+                        skid_csr_op_info_ff <= uopq2_buf_csr_op_info_ff;
+                        skid_sys_op_info_ff <= uopq2_buf_sys_op_info_ff;
+                        skid_fence_i_ff <= uopq2_buf_fence_i_ff;
+                        skid_rn_rs1_psrc_ff <= uopq2_buf_rn_rs1_psrc_ff;
+                        skid_rn_rs2_psrc_ff <= uopq2_buf_rn_rs2_psrc_ff;
+                        skid_rn_pdst_ff <= uopq2_buf_rn_pdst_ff;
+                        skid_rn_pdst_valid_ff <= uopq2_buf_rn_pdst_valid_ff;
+                        skid_rn_rs1_ready_ff <= uopq2_buf_rs1_ready_ff;
+	                        skid_rn_rs2_ready_ff <= uopq2_buf_rs2_ready_ff;
+	                        uopq2_buf_valid_ff <= 1'b0;
+	                        uopq2_buf_rn_pdst_valid_ff <= 1'b0;
+	                        if (pipe1_fire_from3) begin
+	                            uopq3_buf_valid_ff <= 1'b0;
+	                            uopq3_buf_rn_pdst_valid_ff <= 1'b0;
+	                        end else begin
+	                            move_uopq3_to_uopq2();
+	                        end
+`ifndef SYNTHESIS
+                        pair1_valid_ff <= 1'b1;
+                        pair1_pc_ff <= uopq2_buf_pc_ff;
+                        pair1_instr_ff <= uopq2_buf_instr_ff;
+                        pair1_seq_ff <= pair1_seq_next_ff;
+                        pair1_seq_next_ff <= pair1_seq_next_ff + 32'd1;
+                        pair1_rs1_ff <= uopq2_buf_rf_raddr_rs1_ff;
+                        pair1_rs2_ff <= uopq2_buf_rf_raddr_rs2_ff;
+                        pair1_rd_ff <= uopq2_buf_rf_waddr_rd_ff;
+                        pair1_rs1_ren_ff <= uopq2_buf_rf_ren_rs1_ff;
+                        pair1_rs2_ren_ff <= uopq2_buf_rf_ren_rs2_ff;
+                        pair1_rd_wen_ff <= uopq2_buf_rf_wen_rd_ff;
+                        pair1_operator_ff <= uopq2_buf_operator_ff;
+                        pair1_operator_type_ff <= uopq2_buf_operator_type_ff;
+                        pair1_imm_ff <= uopq2_buf_imm_ff;
+                        pair1_pred_hit_ff <= uopq2_buf_pred_hit_ff;
+                        pair1_pred_taken_ff <= uopq2_buf_pred_taken_ff;
+                        pair1_pred_target_ff <= uopq2_buf_pred_target_ff;
+                        pair1_pred_counter_ff <= uopq2_buf_pred_counter_ff;
+                        pair1_pred_bht_index_ff <= uopq2_buf_pred_bht_index_ff;
+                        pair1_pred_l0_taken_ff <= uopq2_buf_pred_l0_taken_ff;
+`endif
+                    end else if (pipe1_p0_empty_context) begin
+                        skid_valid_ff <= 1'b0;
+                        skid_rn_pdst_valid_ff <= 1'b0;
+                        skid_rn_rs1_ready_ff <= 1'b0;
+                        skid_rn_rs2_ready_ff <= 1'b0;
+`ifndef SYNTHESIS
+                        pair1_valid_ff <= 1'b0;
+`endif
+                    end else begin
+                        skid_valid_ff <= if_id_valid_i;
+                        skid_pc_ff <= if_id_pc_i;
+                        skid_instr_ff <= if_id_instr_i;
+                        skid_pred_hit_ff <= if_id_pred_hit_i;
+                        skid_pred_taken_ff <= if_id_pred_taken_i;
+                        skid_pred_target_ff <= if_id_pred_target_i;
+                        skid_pred_counter_ff <= if_id_pred_counter_i;
+                        skid_pred_bht_index_ff <= if_id_pred_bht_index_i;
+                        skid_pred_l0_taken_ff <= if_id_pred_l0_taken_i;
+                        skid_rf_raddr_rs1_ff <= if_id_trace_rf_raddr_rs1;
+                        skid_rf_raddr_rs2_ff <= if_id_trace_rf_raddr_rs2;
+                        skid_rf_ren_rs1_ff <= if_id_trace_rf_ren_rs1;
+                        skid_rf_ren_rs2_ff <= if_id_trace_rf_ren_rs2;
+                        skid_rf_waddr_rd_ff <= if_id_trace_rf_waddr_rd;
+                        skid_rf_wen_rd_ff <= if_id_trace_rf_wen_rd;
+                        skid_imm_ff <= if_id_trace_imm;
+                        skid_operand_b_rs_sel_ff <= if_id_trace_operand_b_rs_sel;
+                        skid_operand_a_pc_sel_ff <= if_id_trace_operand_a_pc_sel;
+                        skid_operand_a_imm_sel_ff <= if_id_trace_operand_a_imm_sel;
+                        skid_bt_a_rs_sel_ff <= if_id_trace_bt_a_rs_sel;
+                        skid_operand_b_jump_sel_ff <= if_id_trace_operand_b_jump_sel;
+                        skid_operator_ff <= if_id_trace_operator;
+                        skid_operator_lsu_ff <= if_id_trace_operator_lsu;
+                        skid_operator_type_ff <= if_id_trace_operator_type;
+                        skid_csr_reg_raddr_ff <= if_id_trace_csr_reg_raddr;
+                        skid_csr_ex_waddr_ff <= if_id_trace_csr_ex_waddr;
+                        skid_csr_op_info_ff <= if_id_trace_csr_op_info;
+                        skid_sys_op_info_ff <= if_id_trace_sys_op_info;
+                        skid_fence_i_ff <= (if_id_instr_i[6:0] == ydrasil_pkg::RV32I_INS_FENCE) &&
+                                           (if_id_instr_i[14:12] == 3'b001);
+                        skid_rn_rs1_psrc_ff <= rn_if_rs1_psrc_i;
+                        skid_rn_rs2_psrc_ff <= rn_if_rs2_psrc_i;
+                        skid_rn_pdst_ff <= rn_if_pdst_i;
+                        skid_rn_pdst_valid_ff <= if_id_rn_pdst_valid;
+                        skid_rn_rs1_ready_ff <= rn_if_rs1_ready_i;
+                        skid_rn_rs2_ready_ff <= rn_if_rs2_ready_i;
+`ifndef SYNTHESIS
+                        pair1_valid_ff <= if_id_valid_i;
+                        if (if_id_valid_i) begin
+                            pair1_pc_ff <= if_id_pc_i;
+                            pair1_instr_ff <= if_id_instr_i;
+                            pair1_seq_ff <= pair1_seq_next_ff;
+                            pair1_seq_next_ff <= pair1_seq_next_ff + 32'd1;
+                            pair1_rs1_ff <= if_id_trace_rf_raddr_rs1;
+                            pair1_rs2_ff <= if_id_trace_rf_raddr_rs2;
+                            pair1_rd_ff <= if_id_trace_rf_waddr_rd;
+                            pair1_rs1_ren_ff <= if_id_trace_rf_ren_rs1;
+                            pair1_rs2_ren_ff <= if_id_trace_rf_ren_rs2;
+                            pair1_rd_wen_ff <= if_id_trace_rf_wen_rd;
+                            pair1_operator_ff <= if_id_trace_operator;
+                            pair1_operator_type_ff <= if_id_trace_operator_type;
+                            pair1_imm_ff <= if_id_trace_imm;
+                            pair1_pred_hit_ff <= if_id_pred_hit_i;
+                            pair1_pred_taken_ff <= if_id_pred_taken_i;
+                            pair1_pred_target_ff <= if_id_pred_target_i;
+                            pair1_pred_counter_ff <= if_id_pred_counter_i;
+                            pair1_pred_bht_index_ff <= if_id_pred_bht_index_i;
+                            pair1_pred_l0_taken_ff <= if_id_pred_l0_taken_i;
+                        end
+`endif
+                    end
+                end else if (id_advance) begin
+                    if (issue_load_from_skid && uopq2_buf_valid_ff) begin
+                        skid_valid_ff <= 1'b1;
+                        skid_pc_ff <= uopq2_buf_pc_ff;
+                        skid_instr_ff <= uopq2_buf_instr_ff;
+                        skid_pred_hit_ff <= uopq2_buf_pred_hit_ff;
+                        skid_pred_taken_ff <= uopq2_buf_pred_taken_ff;
+                        skid_pred_target_ff <= uopq2_buf_pred_target_ff;
+                        skid_pred_counter_ff <= uopq2_buf_pred_counter_ff;
+                        skid_pred_bht_index_ff <= uopq2_buf_pred_bht_index_ff;
+                        skid_pred_l0_taken_ff <= uopq2_buf_pred_l0_taken_ff;
+                        skid_rf_raddr_rs1_ff <= uopq2_buf_rf_raddr_rs1_ff;
+                        skid_rf_raddr_rs2_ff <= uopq2_buf_rf_raddr_rs2_ff;
+                        skid_rf_ren_rs1_ff <= uopq2_buf_rf_ren_rs1_ff;
+                        skid_rf_ren_rs2_ff <= uopq2_buf_rf_ren_rs2_ff;
+                        skid_rf_waddr_rd_ff <= uopq2_buf_rf_waddr_rd_ff;
+                        skid_rf_wen_rd_ff <= uopq2_buf_rf_wen_rd_ff;
+                        skid_imm_ff <= uopq2_buf_imm_ff;
+                        skid_operand_b_rs_sel_ff <= uopq2_buf_operand_b_rs_sel_ff;
+                        skid_operand_a_pc_sel_ff <= uopq2_buf_operand_a_pc_sel_ff;
+                        skid_operand_a_imm_sel_ff <= uopq2_buf_operand_a_imm_sel_ff;
+                        skid_bt_a_rs_sel_ff <= uopq2_buf_bt_a_rs_sel_ff;
+                        skid_operand_b_jump_sel_ff <= uopq2_buf_operand_b_jump_sel_ff;
+                        skid_operator_ff <= uopq2_buf_operator_ff;
+                        skid_operator_lsu_ff <= uopq2_buf_operator_lsu_ff;
+                        skid_operator_type_ff <= uopq2_buf_operator_type_ff;
+                        skid_csr_reg_raddr_ff <= uopq2_buf_csr_reg_raddr_ff;
+                        skid_csr_ex_waddr_ff <= uopq2_buf_csr_ex_waddr_ff;
+                        skid_csr_op_info_ff <= uopq2_buf_csr_op_info_ff;
+                        skid_sys_op_info_ff <= uopq2_buf_sys_op_info_ff;
+                        skid_fence_i_ff <= uopq2_buf_fence_i_ff;
+                        skid_rn_rs1_psrc_ff <= uopq2_buf_rn_rs1_psrc_ff;
+                        skid_rn_rs2_psrc_ff <= uopq2_buf_rn_rs2_psrc_ff;
+                        skid_rn_pdst_ff <= uopq2_buf_rn_pdst_ff;
+                        skid_rn_pdst_valid_ff <= uopq2_buf_rn_pdst_valid_ff;
+                        skid_rn_rs1_ready_ff <= uopq2_buf_rs1_ready_ff;
+	                        skid_rn_rs2_ready_ff <= uopq2_buf_rs2_ready_ff;
+	                        uopq2_buf_valid_ff <= 1'b0;
+	                        uopq2_buf_rn_pdst_valid_ff <= 1'b0;
+	                        move_uopq3_to_uopq2();
+`ifndef SYNTHESIS
+                        pair1_valid_ff <= 1'b1;
+                        pair1_pc_ff <= uopq2_buf_pc_ff;
+                        pair1_instr_ff <= uopq2_buf_instr_ff;
+                        pair1_seq_ff <= pair1_seq_next_ff;
+                        pair1_seq_next_ff <= pair1_seq_next_ff + 32'd1;
+                        pair1_rs1_ff <= uopq2_buf_rf_raddr_rs1_ff;
+                        pair1_rs2_ff <= uopq2_buf_rf_raddr_rs2_ff;
+                        pair1_rd_ff <= uopq2_buf_rf_waddr_rd_ff;
+                        pair1_rs1_ren_ff <= uopq2_buf_rf_ren_rs1_ff;
+                        pair1_rs2_ren_ff <= uopq2_buf_rf_ren_rs2_ff;
+                        pair1_rd_wen_ff <= uopq2_buf_rf_wen_rd_ff;
+                        pair1_operator_ff <= uopq2_buf_operator_ff;
+                        pair1_operator_type_ff <= uopq2_buf_operator_type_ff;
+                        pair1_imm_ff <= uopq2_buf_imm_ff;
+                        pair1_pred_hit_ff <= uopq2_buf_pred_hit_ff;
+                        pair1_pred_taken_ff <= uopq2_buf_pred_taken_ff;
+                        pair1_pred_target_ff <= uopq2_buf_pred_target_ff;
+                        pair1_pred_counter_ff <= uopq2_buf_pred_counter_ff;
+                        pair1_pred_bht_index_ff <= uopq2_buf_pred_bht_index_ff;
+                        pair1_pred_l0_taken_ff <= uopq2_buf_pred_l0_taken_ff;
+`endif
+                    end else if (issue_load_from_skid) begin
+                        skid_valid_ff <= if_id_valid_i;
+                        skid_pc_ff <= if_id_pc_i;
+                        skid_instr_ff <= if_id_instr_i;
+                        skid_pred_hit_ff <= if_id_pred_hit_i;
+                        skid_pred_taken_ff <= if_id_pred_taken_i;
+                        skid_pred_target_ff <= if_id_pred_target_i;
+                        skid_pred_counter_ff <= if_id_pred_counter_i;
+                        skid_pred_bht_index_ff <= if_id_pred_bht_index_i;
+                        skid_pred_l0_taken_ff <= if_id_pred_l0_taken_i;
+                        skid_rf_raddr_rs1_ff <= if_id_trace_rf_raddr_rs1;
+                        skid_rf_raddr_rs2_ff <= if_id_trace_rf_raddr_rs2;
+                        skid_rf_ren_rs1_ff <= if_id_trace_rf_ren_rs1;
+                        skid_rf_ren_rs2_ff <= if_id_trace_rf_ren_rs2;
+                        skid_rf_waddr_rd_ff <= if_id_trace_rf_waddr_rd;
+                        skid_rf_wen_rd_ff <= if_id_trace_rf_wen_rd;
+                        skid_imm_ff <= if_id_trace_imm;
+                        skid_operand_b_rs_sel_ff <= if_id_trace_operand_b_rs_sel;
+                        skid_operand_a_pc_sel_ff <= if_id_trace_operand_a_pc_sel;
+                        skid_operand_a_imm_sel_ff <= if_id_trace_operand_a_imm_sel;
+                        skid_bt_a_rs_sel_ff <= if_id_trace_bt_a_rs_sel;
+                        skid_operand_b_jump_sel_ff <= if_id_trace_operand_b_jump_sel;
+                        skid_operator_ff <= if_id_trace_operator;
+                        skid_operator_lsu_ff <= if_id_trace_operator_lsu;
+                        skid_operator_type_ff <= if_id_trace_operator_type;
+                        skid_csr_reg_raddr_ff <= if_id_trace_csr_reg_raddr;
+                        skid_csr_ex_waddr_ff <= if_id_trace_csr_ex_waddr;
+                        skid_csr_op_info_ff <= if_id_trace_csr_op_info;
+                        skid_sys_op_info_ff <= if_id_trace_sys_op_info;
+                        skid_fence_i_ff <= (if_id_instr_i[6:0] == ydrasil_pkg::RV32I_INS_FENCE) &&
+                                           (if_id_instr_i[14:12] == 3'b001);
+                        skid_rn_rs1_psrc_ff <= rn_if_rs1_psrc_i;
+                        skid_rn_rs2_psrc_ff <= rn_if_rs2_psrc_i;
+                        skid_rn_pdst_ff <= rn_if_pdst_i;
+                        skid_rn_pdst_valid_ff <= if_id_rn_pdst_valid;
+                        skid_rn_rs1_ready_ff <= rn_if_rs1_ready_i;
+                        skid_rn_rs2_ready_ff <= rn_if_rs2_ready_i;
+`ifndef SYNTHESIS
+                        pair1_valid_ff <= if_id_valid_i;
+                        if (if_id_valid_i) begin
+                            pair1_pc_ff <= if_id_pc_i;
+                            pair1_instr_ff <= if_id_instr_i;
+                            pair1_seq_ff <= pair1_seq_next_ff;
+                            pair1_seq_next_ff <= pair1_seq_next_ff + 32'd1;
+                            pair1_rs1_ff <= if_id_trace_rf_raddr_rs1;
+                            pair1_rs2_ff <= if_id_trace_rf_raddr_rs2;
+                            pair1_rd_ff <= if_id_trace_rf_waddr_rd;
+                            pair1_rs1_ren_ff <= if_id_trace_rf_ren_rs1;
+                            pair1_rs2_ren_ff <= if_id_trace_rf_ren_rs2;
+                            pair1_rd_wen_ff <= if_id_trace_rf_wen_rd;
+                            pair1_operator_ff <= if_id_trace_operator;
+                            pair1_operator_type_ff <= if_id_trace_operator_type;
+                            pair1_imm_ff <= if_id_trace_imm;
+                            pair1_pred_hit_ff <= if_id_pred_hit_i;
+                            pair1_pred_taken_ff <= if_id_pred_taken_i;
+                            pair1_pred_target_ff <= if_id_pred_target_i;
+                            pair1_pred_counter_ff <= if_id_pred_counter_i;
+                            pair1_pred_bht_index_ff <= if_id_pred_bht_index_i;
+                            pair1_pred_l0_taken_ff <= if_id_pred_l0_taken_i;
+                        end
+`endif
+                    end else if (issue_accept) begin
+                        skid_valid_ff <= 1'b0;
+                        skid_rn_rs1_ready_ff <= 1'b0;
+                        skid_rn_rs2_ready_ff <= 1'b0;
+	                        if (issue_load_from_uopq2) begin
+	                            uopq2_buf_valid_ff <= 1'b0;
+	                            uopq2_buf_rn_pdst_valid_ff <= 1'b0;
+	                            move_uopq3_to_uopq2();
+	                        end
+`ifndef SYNTHESIS
+                        pair1_valid_ff <= 1'b0;
+`endif
+                    end else if (uopq2_buf_capture) begin
+                        uopq2_buf_valid_ff <= 1'b1;
+                        uopq2_buf_pc_ff <= if_id_pc_i;
+                        uopq2_buf_instr_ff <= if_id_instr_i;
+                        uopq2_buf_pred_hit_ff <= if_id_pred_hit_i;
+                        uopq2_buf_pred_taken_ff <= if_id_pred_taken_i;
+                        uopq2_buf_pred_target_ff <= if_id_pred_target_i;
+                        uopq2_buf_pred_counter_ff <= if_id_pred_counter_i;
+                        uopq2_buf_pred_bht_index_ff <= if_id_pred_bht_index_i;
+                        uopq2_buf_pred_l0_taken_ff <= if_id_pred_l0_taken_i;
+                        uopq2_buf_rf_raddr_rs1_ff <= if_id_trace_rf_raddr_rs1;
+                        uopq2_buf_rf_raddr_rs2_ff <= if_id_trace_rf_raddr_rs2;
+                        uopq2_buf_rf_ren_rs1_ff <= if_id_trace_rf_ren_rs1;
+                        uopq2_buf_rf_ren_rs2_ff <= if_id_trace_rf_ren_rs2;
+                        uopq2_buf_rf_waddr_rd_ff <= if_id_trace_rf_waddr_rd;
+                        uopq2_buf_rf_wen_rd_ff <= if_id_trace_rf_wen_rd;
+                        uopq2_buf_imm_ff <= if_id_trace_imm;
+                        uopq2_buf_operand_b_rs_sel_ff <= if_id_trace_operand_b_rs_sel;
+                        uopq2_buf_operand_a_pc_sel_ff <= if_id_trace_operand_a_pc_sel;
+                        uopq2_buf_operand_a_imm_sel_ff <= if_id_trace_operand_a_imm_sel;
+                        uopq2_buf_bt_a_rs_sel_ff <= if_id_trace_bt_a_rs_sel;
+                        uopq2_buf_operand_b_jump_sel_ff <= if_id_trace_operand_b_jump_sel;
+                        uopq2_buf_operator_ff <= if_id_trace_operator;
+                        uopq2_buf_operator_lsu_ff <= if_id_trace_operator_lsu;
+                        uopq2_buf_operator_type_ff <= if_id_trace_operator_type;
+                        uopq2_buf_csr_reg_raddr_ff <= if_id_trace_csr_reg_raddr;
+                        uopq2_buf_csr_ex_waddr_ff <= if_id_trace_csr_ex_waddr;
+                        uopq2_buf_csr_op_info_ff <= if_id_trace_csr_op_info;
+                        uopq2_buf_sys_op_info_ff <= if_id_trace_sys_op_info;
+                        uopq2_buf_fence_i_ff <= (if_id_instr_i[6:0] == ydrasil_pkg::RV32I_INS_FENCE) &&
+                                                (if_id_instr_i[14:12] == 3'b001);
+                        uopq2_buf_rn_rs1_psrc_ff <= rn_if_rs1_psrc_i;
+                        uopq2_buf_rn_rs2_psrc_ff <= rn_if_rs2_psrc_i;
+                        uopq2_buf_rn_pdst_ff <= rn_if_pdst_i;
+	                        uopq2_buf_rn_pdst_valid_ff <= if_id_rn_pdst_valid;
+	                        uopq2_buf_rs1_ready_ff <= rn_if_rs1_ready_i;
+	                        uopq2_buf_rs2_ready_ff <= rn_if_rs2_ready_i;
+	                    end else if (uopq3_buf_capture) begin
+	                        uopq3_buf_valid_ff <= 1'b1;
+	                        uopq3_buf_pc_ff <= if_id_pc_i;
+	                        uopq3_buf_instr_ff <= if_id_instr_i;
+	                        uopq3_buf_pred_hit_ff <= if_id_pred_hit_i;
+	                        uopq3_buf_pred_taken_ff <= if_id_pred_taken_i;
+	                        uopq3_buf_pred_target_ff <= if_id_pred_target_i;
+	                        uopq3_buf_pred_counter_ff <= if_id_pred_counter_i;
+	                        uopq3_buf_pred_bht_index_ff <= if_id_pred_bht_index_i;
+	                        uopq3_buf_pred_l0_taken_ff <= if_id_pred_l0_taken_i;
+	                        uopq3_buf_rf_raddr_rs1_ff <= if_id_trace_rf_raddr_rs1;
+	                        uopq3_buf_rf_raddr_rs2_ff <= if_id_trace_rf_raddr_rs2;
+	                        uopq3_buf_rf_ren_rs1_ff <= if_id_trace_rf_ren_rs1;
+	                        uopq3_buf_rf_ren_rs2_ff <= if_id_trace_rf_ren_rs2;
+	                        uopq3_buf_rf_waddr_rd_ff <= if_id_trace_rf_waddr_rd;
+	                        uopq3_buf_rf_wen_rd_ff <= if_id_trace_rf_wen_rd;
+	                        uopq3_buf_imm_ff <= if_id_trace_imm;
+	                        uopq3_buf_operand_b_rs_sel_ff <= if_id_trace_operand_b_rs_sel;
+	                        uopq3_buf_operand_a_pc_sel_ff <= if_id_trace_operand_a_pc_sel;
+	                        uopq3_buf_operand_a_imm_sel_ff <= if_id_trace_operand_a_imm_sel;
+	                        uopq3_buf_bt_a_rs_sel_ff <= if_id_trace_bt_a_rs_sel;
+	                        uopq3_buf_operand_b_jump_sel_ff <= if_id_trace_operand_b_jump_sel;
+	                        uopq3_buf_operator_ff <= if_id_trace_operator;
+	                        uopq3_buf_operator_lsu_ff <= if_id_trace_operator_lsu;
+	                        uopq3_buf_operator_type_ff <= if_id_trace_operator_type;
+	                        uopq3_buf_csr_reg_raddr_ff <= if_id_trace_csr_reg_raddr;
+	                        uopq3_buf_csr_ex_waddr_ff <= if_id_trace_csr_ex_waddr;
+	                        uopq3_buf_csr_op_info_ff <= if_id_trace_csr_op_info;
+	                        uopq3_buf_sys_op_info_ff <= if_id_trace_sys_op_info;
+	                        uopq3_buf_fence_i_ff <= (if_id_instr_i[6:0] == ydrasil_pkg::RV32I_INS_FENCE) &&
+	                                                (if_id_instr_i[14:12] == 3'b001);
+	                        uopq3_buf_rn_rs1_psrc_ff <= rn_if_rs1_psrc_i;
+	                        uopq3_buf_rn_rs2_psrc_ff <= rn_if_rs2_psrc_i;
+	                        uopq3_buf_rn_pdst_ff <= rn_if_pdst_i;
+	                        uopq3_buf_rn_pdst_valid_ff <= if_id_rn_pdst_valid;
+	                        uopq3_buf_rs1_ready_ff <= rn_if_rs1_ready_i;
+	                        uopq3_buf_rs2_ready_ff <= rn_if_rs2_ready_i;
+	                    end else if (issue_valid_ff && issue_wait_block && !skid_valid_ff &&
+                                 !uopq2_buf_valid_ff && if_id_valid_i &&
+                                 !pipe1_fire_from2) begin
+                        skid_valid_ff <= 1'b1;
+                        skid_pc_ff <= if_id_pc_i;
+                        skid_instr_ff <= if_id_instr_i;
+                        skid_pred_hit_ff <= if_id_pred_hit_i;
+                        skid_pred_taken_ff <= if_id_pred_taken_i;
+                        skid_pred_target_ff <= if_id_pred_target_i;
+                        skid_pred_counter_ff <= if_id_pred_counter_i;
+                        skid_pred_bht_index_ff <= if_id_pred_bht_index_i;
+                        skid_pred_l0_taken_ff <= if_id_pred_l0_taken_i;
+                        skid_rf_raddr_rs1_ff <= if_id_trace_rf_raddr_rs1;
+                        skid_rf_raddr_rs2_ff <= if_id_trace_rf_raddr_rs2;
+                        skid_rf_ren_rs1_ff <= if_id_trace_rf_ren_rs1;
+                        skid_rf_ren_rs2_ff <= if_id_trace_rf_ren_rs2;
+                        skid_rf_waddr_rd_ff <= if_id_trace_rf_waddr_rd;
+                        skid_rf_wen_rd_ff <= if_id_trace_rf_wen_rd;
+                        skid_imm_ff <= if_id_trace_imm;
+                        skid_operand_b_rs_sel_ff <= if_id_trace_operand_b_rs_sel;
+                        skid_operand_a_pc_sel_ff <= if_id_trace_operand_a_pc_sel;
+                        skid_operand_a_imm_sel_ff <= if_id_trace_operand_a_imm_sel;
+                        skid_bt_a_rs_sel_ff <= if_id_trace_bt_a_rs_sel;
+                        skid_operand_b_jump_sel_ff <= if_id_trace_operand_b_jump_sel;
+                        skid_operator_ff <= if_id_trace_operator;
+                        skid_operator_lsu_ff <= if_id_trace_operator_lsu;
+                        skid_operator_type_ff <= if_id_trace_operator_type;
+                        skid_csr_reg_raddr_ff <= if_id_trace_csr_reg_raddr;
+                        skid_csr_ex_waddr_ff <= if_id_trace_csr_ex_waddr;
+                        skid_csr_op_info_ff <= if_id_trace_csr_op_info;
+                        skid_sys_op_info_ff <= if_id_trace_sys_op_info;
+                        skid_fence_i_ff <= (if_id_instr_i[6:0] == ydrasil_pkg::RV32I_INS_FENCE) &&
+                                           (if_id_instr_i[14:12] == 3'b001);
+                        skid_rn_rs1_psrc_ff <= rn_if_rs1_psrc_i;
+                        skid_rn_rs2_psrc_ff <= rn_if_rs2_psrc_i;
+                        skid_rn_pdst_ff <= rn_if_pdst_i;
+                        skid_rn_pdst_valid_ff <= if_id_rn_pdst_valid;
+                        skid_rn_rs1_ready_ff <= rn_if_rs1_ready_i;
+                        skid_rn_rs2_ready_ff <= rn_if_rs2_ready_i;
+`ifndef SYNTHESIS
+                        pair1_valid_ff <= 1'b1;
+                        pair1_pc_ff <= if_id_pc_i;
+                        pair1_instr_ff <= if_id_instr_i;
+                        pair1_seq_ff <= pair1_seq_next_ff;
+                        pair1_seq_next_ff <= pair1_seq_next_ff + 32'd1;
+                        pair1_rs1_ff <= if_id_trace_rf_raddr_rs1;
+                        pair1_rs2_ff <= if_id_trace_rf_raddr_rs2;
+                        pair1_rd_ff <= if_id_trace_rf_waddr_rd;
+                        pair1_rs1_ren_ff <= if_id_trace_rf_ren_rs1;
+                        pair1_rs2_ren_ff <= if_id_trace_rf_ren_rs2;
+                        pair1_rd_wen_ff <= if_id_trace_rf_wen_rd;
+                        pair1_operator_ff <= if_id_trace_operator;
+                        pair1_operator_type_ff <= if_id_trace_operator_type;
+                        pair1_imm_ff <= if_id_trace_imm;
+                        pair1_pred_hit_ff <= if_id_pred_hit_i;
+                        pair1_pred_taken_ff <= if_id_pred_taken_i;
+                        pair1_pred_target_ff <= if_id_pred_target_i;
+                        pair1_pred_counter_ff <= if_id_pred_counter_i;
+                        pair1_pred_bht_index_ff <= if_id_pred_bht_index_i;
+                        pair1_pred_l0_taken_ff <= if_id_pred_l0_taken_i;
+`endif
+                    end
+                end
+
+                if (stall_id_i) begin
+                    // Hold ID/EX stable while EX finishes a multi-cycle operation.
+                end else begin
+                    if (issue_fire) begin
+                        operand_a_ff        <= operand_a;
+                        operand_b_ff        <= operand_b;
+                        operator_ff         <= selected_operator;
+                        operator_type_ff    <= selected_operator_type;
+                        rf_wen_rd_ff        <= selected_rf_wen_rd;
+                        rf_waddr_rd_ff      <= selected_rf_waddr_rd;
+                        id_rn_pdst_ff       <= selected_rn_pdst_valid ? selected_rn_pdst : '0;
+                        operator_lsu_ff     <= selected_operator_lsu;
+                        id_lsu_rs2_data_ff  <= issue_rs2_data; // 直接传递寄存器数据，供LSU使用
+                        id_lsu_addr_ff      <= '0;
+                        id_lsu_addr_is_dtcm_ff <= 1'b0;
+                        id_lsu_store_data_ff <= issue_rs2_data;
+                        id_lsu_store_mask_ff <= 4'b0000;
+                        bt_a_operand_ff     <= bt_a_operand;
+                        bt_b_operand_ff     <= bt_b_operand;
+                        csr_reg_raddr_ff <= selected_csr_reg_raddr;
+                        // csr_ex_we_ff <= csr_ex_we;
+                        csr_ex_waddr_ff <= selected_csr_ex_waddr;
+                        csr_op_info_ff <= selected_csr_op_info;
+                        sys_op_info_ff <= selected_sys_op_info;
+                        id_instr_addr_ff <= selected_pc;
+                        id_ex_jalr_ff <= selected_bt_a_rs_sel;
+                        id_ex_pred_hit_ff <= selected_pred_hit;
+                        id_ex_pred_taken_ff <= selected_pred_taken;
+                        id_ex_pred_target_ff <= selected_pred_target;
+                        id_ex_pred_counter_ff <= selected_pred_counter;
+                        id_ex_pred_bht_index_ff <= selected_pred_bht_index;
+                        id_ex_pred_l0_taken_ff <= selected_pred_l0_taken;
+                        id_ex_valid_ff <= 1'b1;
+                        id_fence_i_ff <= selected_fence_i;
+                        if (issue_slot0_fire && !issue_accept) begin
+                            issue_valid_ff <= 1'b0;
+                            issue_wait_rs1_ff <= 1'b0;
+                            issue_wait_rs2_ff <= 1'b0;
+                        end
+                        alu_stable_valid_ff <= issue_alu_stable_candidate;
+                        alu_stable_addr_ff <= issue_rf_waddr_rd_ff;
+                        alu_stable_data_ff <= issue_alu_stable_result;
+                    end else begin
+                        id_ex_valid_ff <= 1'b0;
+                        id_fence_i_ff <= 1'b0;
+                    end
+                    pipe1_issue_valid_ff <= pair1_fire;
+                    pipe1_operand_a_ff   <= pipe1_dual_operand_a;
+                    pipe1_operand_b_ff   <= pipe1_dual_operand_b;
+                    pipe1_operator_ff    <= pipe1_sel_operator;
+                    pipe1_rf_wen_rd_ff   <= pipe1_sel_rf_wen_rd;
+                    pipe1_rf_waddr_rd_ff <= pipe1_sel_rf_waddr_rd;
+                    pipe1_rn_pdst_ff     <= (pair1_fire && pipe1_sel_pdst_valid) ? pipe1_sel_pdst : '0;
+                    pipe1_pc_ff          <= pipe1_sel_pc;
+                    pipe1_instr_ff       <= pipe1_sel_instr;
+                end
+            end
+`ifndef SYNTHESIS
+            if (flush_id_i) begin
+                uopq_shadow_valid <= '0;
+            end else begin
+                uopq_shadow_valid[0] <= issue_valid_ff;
+                uopq_shadow_pc[0] <= issue_pc_ff;
+                uopq_shadow_instr[0] <= ydrasil_pkg::RV32I_INS_NOP;
+                uopq_shadow_seq[0] <= '0;
+                uopq_shadow_rs1[0] <= issue_rf_raddr_rs1_ff;
+                uopq_shadow_rs2[0] <= issue_rf_raddr_rs2_ff;
+                uopq_shadow_rd[0] <= issue_rf_waddr_rd_ff;
+                uopq_shadow_rs1_ren[0] <= issue_rf_ren_rs1_ff;
+                uopq_shadow_rs2_ren[0] <= issue_rf_ren_rs2_ff;
+                uopq_shadow_rd_wen[0] <= issue_rf_wen_rd_ff;
+                uopq_shadow_optype[0] <= issue_operator_type_ff;
+                uopq_shadow_operator[0] <= issue_operator_ff;
+                uopq_shadow_simple_alu[0] <= is_shadow_simple_alu(issue_operator_type_ff, issue_operator_ff);
+                uopq_shadow_ctrl[0] <= issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP];
+                uopq_shadow_mem[0] <=
+                    issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] |
+                    issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE];
+                uopq_shadow_csr_sys_fence[0] <=
+                    issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_CSR] |
+                    issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_SYS] |
+                    issue_fence_i_ff;
+
+                uopq_shadow_valid[1] <= pair1_valid_ff;
+                uopq_shadow_pc[1] <= pair1_pc_ff;
+                uopq_shadow_instr[1] <= pair1_instr_ff;
+                uopq_shadow_seq[1] <= pair1_seq_ff;
+                uopq_shadow_rs1[1] <= pair1_rs1_ff;
+                uopq_shadow_rs2[1] <= pair1_rs2_ff;
+                uopq_shadow_rd[1] <= pair1_rd_ff;
+                uopq_shadow_rs1_ren[1] <= pair1_rs1_ren_ff;
+                uopq_shadow_rs2_ren[1] <= pair1_rs2_ren_ff;
+                uopq_shadow_rd_wen[1] <= pair1_rd_wen_ff;
+                uopq_shadow_optype[1] <= pair1_operator_type_ff;
+                uopq_shadow_operator[1] <= pair1_operator_ff;
+                uopq_shadow_simple_alu[1] <= is_shadow_simple_alu(pair1_operator_type_ff, pair1_operator_ff);
+                uopq_shadow_ctrl[1] <= pair1_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP];
+                uopq_shadow_mem[1] <=
+                    pair1_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] |
+                    pair1_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE];
+                uopq_shadow_csr_sys_fence[1] <=
+                    pair1_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_CSR] |
+                    pair1_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_SYS] |
+                    ((pair1_instr_ff[6:0] == ydrasil_pkg::RV32I_INS_FENCE) &&
+                     (pair1_instr_ff[14:12] == 3'b001));
+
+	                uopq_shadow_valid[2] <= uopq2_buf_valid_ff;
+	                uopq_shadow_pc[2] <= uopq2_buf_pc_ff;
+	                uopq_shadow_instr[2] <= uopq2_buf_instr_ff;
+	                uopq_shadow_seq[2] <= uopq_shadow_seq_next_ff;
+	                uopq_shadow_rs1[2] <= uopq2_buf_rf_raddr_rs1_ff;
+	                uopq_shadow_rs2[2] <= uopq2_buf_rf_raddr_rs2_ff;
+	                uopq_shadow_rd[2] <= uopq2_buf_rf_waddr_rd_ff;
+	                uopq_shadow_rs1_ren[2] <= uopq2_buf_rf_ren_rs1_ff;
+	                uopq_shadow_rs2_ren[2] <= uopq2_buf_rf_ren_rs2_ff;
+	                uopq_shadow_rd_wen[2] <= uopq2_buf_rf_wen_rd_ff;
+	                uopq_shadow_optype[2] <= uopq2_buf_operator_type_ff;
+	                uopq_shadow_operator[2] <= uopq2_buf_operator_ff;
+	                uopq_shadow_simple_alu[2] <= is_shadow_simple_alu(uopq2_buf_operator_type_ff, uopq2_buf_operator_ff);
+	                uopq_shadow_ctrl[2] <= uopq2_buf_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP];
+	                uopq_shadow_mem[2] <=
+	                    uopq2_buf_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] |
+	                    uopq2_buf_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE];
+	                uopq_shadow_csr_sys_fence[2] <=
+	                    uopq2_buf_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_CSR] |
+	                    uopq2_buf_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_SYS] |
+	                    uopq2_buf_fence_i_ff;
+
+	                uopq_shadow_valid[3] <= uopq3_buf_valid_ff;
+	                uopq_shadow_pc[3] <= uopq3_buf_pc_ff;
+	                uopq_shadow_instr[3] <= uopq3_buf_instr_ff;
+	                uopq_shadow_seq[3] <= '0;
+	                uopq_shadow_rs1[3] <= uopq3_buf_rf_raddr_rs1_ff;
+	                uopq_shadow_rs2[3] <= uopq3_buf_rf_raddr_rs2_ff;
+	                uopq_shadow_rd[3] <= uopq3_buf_rf_waddr_rd_ff;
+	                uopq_shadow_rs1_ren[3] <= uopq3_buf_rf_ren_rs1_ff;
+	                uopq_shadow_rs2_ren[3] <= uopq3_buf_rf_ren_rs2_ff;
+	                uopq_shadow_rd_wen[3] <= uopq3_buf_rf_wen_rd_ff;
+	                uopq_shadow_optype[3] <= uopq3_buf_operator_type_ff;
+	                uopq_shadow_operator[3] <= uopq3_buf_operator_ff;
+	                uopq_shadow_simple_alu[3] <= is_shadow_simple_alu(uopq3_buf_operator_type_ff, uopq3_buf_operator_ff);
+	                uopq_shadow_ctrl[3] <= uopq3_buf_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP];
+	                uopq_shadow_mem[3] <=
+	                    uopq3_buf_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] |
+	                    uopq3_buf_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE];
+	                uopq_shadow_csr_sys_fence[3] <=
+	                    uopq3_buf_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_CSR] |
+	                    uopq3_buf_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_SYS] |
+	                    uopq3_buf_fence_i_ff;
+	                if (uopq2_buf_capture | uopq3_buf_capture) begin
+	                    uopq_shadow_seq_next_ff <= uopq_shadow_seq_next_ff + 32'd1;
+	                end
+            end
+`endif
+            perf_id_decode_valid <= perf_id_decode_valid + (decode_valid ? 32'd1 : 32'd0);
+            perf_id_issue_accept <= perf_id_issue_accept + (issue_accept ? 32'd1 : 32'd0);
+            perf_id_issue_fire <= perf_id_issue_fire + (issue_fire ? 32'd1 : 32'd0);
+            perf_id_issue_slot_valid <= perf_id_issue_slot_valid + (issue_valid_ff ? 32'd1 : 32'd0);
+            perf_id_issue_no_fire <= perf_id_issue_no_fire +
+                ((issue_valid_ff && id_advance && !issue_fire) ? 32'd1 : 32'd0);
+            perf_id_issue_wait_block <= perf_id_issue_wait_block +
+                (issue_wait_block ? 32'd1 : 32'd0);
+            perf_id_wait_rs1 <= perf_id_wait_rs1 +
+                ((issue_wait_rs1_ff && !issue_wait_rs1_ready) ? 32'd1 : 32'd0);
+            perf_id_wait_rs2 <= perf_id_wait_rs2 +
+                ((issue_wait_rs2_ff && !issue_wait_rs2_ready) ? 32'd1 : 32'd0);
+            perf_id_wait_alu_ready_next_rs1 <= perf_id_wait_alu_ready_next_rs1 +
+                (rs1_issue_alu_ready_next_i ? 32'd1 : 32'd0);
+            perf_id_wait_alu_ready_next_rs2 <= perf_id_wait_alu_ready_next_rs2 +
+                (rs2_issue_alu_ready_next_i ? 32'd1 : 32'd0);
+            perf_id_wait_lsu_fwd_rs1 <= perf_id_wait_lsu_fwd_rs1 +
+                ((issue_wait_rs1_ff && rs1_lsu_fwd) ? 32'd1 : 32'd0);
+            perf_id_wait_lsu_fwd_rs2 <= perf_id_wait_lsu_fwd_rs2 +
+                ((issue_wait_rs2_ff && rs2_lsu_fwd) ? 32'd1 : 32'd0);
+            perf_id_wait_wb_fwd_rs1 <= perf_id_wait_wb_fwd_rs1 +
+                ((issue_wait_rs1_ff && rs1_wb_fwd) ? 32'd1 : 32'd0);
+            perf_id_wait_wb_fwd_rs2 <= perf_id_wait_wb_fwd_rs2 +
+                ((issue_wait_rs2_ff && rs2_wb_fwd) ? 32'd1 : 32'd0);
+            perf_id_wait_prf_ready_rs1 <= perf_id_wait_prf_ready_rs1 +
+                ((issue_wait_rs1_ff && slot0_rs1_prf_ready) ? 32'd1 : 32'd0);
+            perf_id_wait_prf_ready_rs2 <= perf_id_wait_prf_ready_rs2 +
+                ((issue_wait_rs2_ff && slot0_rs2_prf_ready) ? 32'd1 : 32'd0);
+            perf_id_skid_valid <= perf_id_skid_valid + (skid_valid_ff ? 32'd1 : 32'd0);
+            perf_id_skid_fill <= perf_id_skid_fill + (skid_fill ? 32'd1 : 32'd0);
+            perf_id_skid_drain <= perf_id_skid_drain + (skid_drain ? 32'd1 : 32'd0);
+            perf_id_skid_full_stall <= perf_id_skid_full_stall +
+                (issue_frontend_stall_o ? 32'd1 : 32'd0);
+            perf_id_frontend_stall <= perf_id_frontend_stall +
+                (issue_frontend_stall_o ? 32'd1 : 32'd0);
+            perf_ri_slot0_valid <= perf_ri_slot0_valid + (issue_valid_ff ? 32'd1 : 32'd0);
+            perf_ri_slot1_valid <= perf_ri_slot1_valid + (ri_slot1_valid ? 32'd1 : 32'd0);
+            perf_ri_slot0_ready <= perf_ri_slot0_ready +
+                ((issue_valid_ff && !issue_wait_block) ? 32'd1 : 32'd0);
+            perf_ri_slot1_ready <= perf_ri_slot1_ready + (ri_slot1_ready ? 32'd1 : 32'd0);
+            perf_ri_fire_slot0 <= perf_ri_fire_slot0 + (issue_slot0_fire ? 32'd1 : 32'd0);
+            perf_ri_fire_slot1_bypass <= perf_ri_fire_slot1_bypass +
+                (issue_slot1_bypass_fire ? 32'd1 : 32'd0);
+            perf_ri_slot1_block_raw <= perf_ri_slot1_block_raw +
+                (ri_slot1_block_raw ? 32'd1 : 32'd0);
+            perf_ri_slot1_block_waw <= perf_ri_slot1_block_waw +
+                (ri_slot1_block_waw ? 32'd1 : 32'd0);
+            perf_ri_slot1_block_ctrl <= perf_ri_slot1_block_ctrl +
+                (ri_slot1_block_ctrl ? 32'd1 : 32'd0);
+            perf_ri_slot1_block_mem <= perf_ri_slot1_block_mem +
+                (ri_slot1_block_mem ? 32'd1 : 32'd0);
+            perf_ri_slot1_block_unsupported <= perf_ri_slot1_block_unsupported +
+                (ri_slot1_block_unsupported ? 32'd1 : 32'd0);
+            perf_ri_slot1_ready_when_slot0_blocked <= perf_ri_slot1_ready_when_slot0_blocked +
+                (ri_slot1_ready_when_slot0_blocked ? 32'd1 : 32'd0);
+            perf_ri_slot1_ready_when_slot0_ready <= perf_ri_slot1_ready_when_slot0_ready +
+                (ri_slot1_ready_when_slot0_ready ? 32'd1 : 32'd0);
+            perf_ri_slot1_fire_blocked_by_single_issue <= perf_ri_slot1_fire_blocked_by_single_issue +
+                (ri_slot1_fire_blocked_by_single_issue ? 32'd1 : 32'd0);
+            perf_ri_slot1_fire_blocked_by_wb_order <= perf_ri_slot1_fire_blocked_by_wb_order +
+                (ri_slot1_fire_blocked_by_wb_order ? 32'd1 : 32'd0);
+            perf_ri_bypass_flush_killed <= perf_ri_bypass_flush_killed +
+                (ri_bypass_flush_killed ? 32'd1 : 32'd0);
+            perf_di_pipe0_fire <= perf_di_pipe0_fire + (issue_slot0_fire ? 32'd1 : 32'd0);
+            perf_di_pipe1_fire <= perf_di_pipe1_fire + (pair1_fire ? 32'd1 : 32'd0);
+            perf_di_pair_fire <= perf_di_pair_fire +
+                ((pair1_fire && pipe1_p0_ready_context) ? 32'd1 : 32'd0);
+            perf_di_pair_simple_alu <= perf_di_pair_simple_alu +
+                ((pair1_fire && pipe1_p0_ready_context) ? 32'd1 : 32'd0);
+            perf_di_pipe1_killed_flush <= perf_di_pipe1_killed_flush +
+                ((pipe1_issue_valid_ff && flush_id_i) ? 32'd1 : 32'd0);
+            perf_di_pipe1_block_stall_recheck <= perf_di_pipe1_block_stall_recheck +
+                ((pipe1_dual_supported && issue_slot0_fire && stall_id_i) ? 32'd1 : 32'd0);
+            perf_di_pipe1_block_resbuf_full <= perf_di_pipe1_block_resbuf_full +
+                ((pipe1_dual_supported && pipe1_resbuf_full_i) ? 32'd1 : 32'd0);
+            perf_di_pipe1_block_alu_fifo_full <= perf_di_pipe1_block_alu_fifo_full + 32'd0;
+            perf_di_pipe1_block_pending_recheck <= perf_di_pipe1_block_pending_recheck +
+                ((pipe1_dual_supported && pipe1_dual_pending_rd) ? 32'd1 : 32'd0);
+            perf_di_pipe1_block_timing_guard <= perf_di_pipe1_block_timing_guard +
+                ((pipe1_dual_supported && !pipe1_dual_operands_ready) ? 32'd1 : 32'd0);
+            perf_di_pipe1_operand_block_rs1 <= perf_di_pipe1_operand_block_rs1 +
+                ((pipe1_dual_supported && !pipe1_dual_rs1_ready) ? 32'd1 : 32'd0);
+            perf_di_pipe1_operand_block_rs2 <= perf_di_pipe1_operand_block_rs2 +
+                ((pipe1_dual_supported && !pipe1_dual_rs2_ready) ? 32'd1 : 32'd0);
+            perf_di_pipe1_operand_block_both <= perf_di_pipe1_operand_block_both +
+                ((pipe1_dual_supported && !pipe1_dual_rs1_ready &&
+                  !pipe1_dual_rs2_ready) ? 32'd1 : 32'd0);
+            perf_di_pipe1_operand_block_from1 <= perf_di_pipe1_operand_block_from1 +
+                ((pipe1_dual_supported && pipe1_sel_from1 &&
+                  !pipe1_dual_operands_ready) ? 32'd1 : 32'd0);
+            perf_di_pipe1_operand_block_from2 <= perf_di_pipe1_operand_block_from2 +
+                ((pipe1_dual_supported && pipe1_sel_from2 &&
+                  !pipe1_dual_operands_ready) ? 32'd1 : 32'd0);
+            perf_di_pipe1_operand_block_recoverable <= perf_di_pipe1_operand_block_recoverable +
+                (((pipe1_p0_ready_context | pipe1_p0_blocked_context | pipe1_p0_empty_context) &&
+                  ready_issue_allow_i && !flush_id_i &&
+                  pipe1_dual_supported && !pipe1_dual_operands_ready &&
+                  pipe1_dual_pipe0_safe && !pipe1_younger_flush_block &&
+                  !pipe1_dual_raw_pipe0 && !pipe1_dual_waw_pipe0 &&
+                  !pipe1_dual_war_pipe0 && !pipe1_dual_pending_rd &&
+                  !pipe1_resbuf_full_i) ? 32'd1 : 32'd0);
+            perf_di_pipe1_alt2_when_from1_block_safe <= perf_di_pipe1_alt2_when_from1_block_safe +
+                ((pipe1_dual_supported && pipe1_sel_from1 &&
+                  !pipe1_dual_operands_ready && pipe1_uopq2_safe) ? 32'd1 : 32'd0);
+            perf_di_pipe1_alt2_when_from1_block_ready <= perf_di_pipe1_alt2_when_from1_block_ready +
+                ((pipe1_dual_supported && pipe1_sel_from1 &&
+                  !pipe1_dual_operands_ready && pipe1_uopq2_safe &&
+                  pipe1_uopq2_operands_ready && !issue_load_from_uopq2) ? 32'd1 : 32'd0);
+            perf_di_pipe1_alt2_when_recoverable_safe <= perf_di_pipe1_alt2_when_recoverable_safe +
+                (((pipe1_p0_ready_context | pipe1_p0_blocked_context | pipe1_p0_empty_context) &&
+                  ready_issue_allow_i && !flush_id_i &&
+                  pipe1_dual_supported && pipe1_sel_from1 && !pipe1_dual_operands_ready &&
+                  pipe1_dual_pipe0_safe && !pipe1_younger_flush_block &&
+                  !pipe1_dual_raw_pipe0 && !pipe1_dual_waw_pipe0 &&
+                  !pipe1_dual_war_pipe0 && !pipe1_dual_pending_rd &&
+                  !pipe1_resbuf_full_i && pipe1_uopq2_safe) ? 32'd1 : 32'd0);
+            perf_di_pipe1_alt2_when_recoverable_ready <= perf_di_pipe1_alt2_when_recoverable_ready +
+                (((pipe1_p0_ready_context | pipe1_p0_blocked_context | pipe1_p0_empty_context) &&
+                  ready_issue_allow_i && !flush_id_i &&
+                  pipe1_dual_supported && pipe1_sel_from1 && !pipe1_dual_operands_ready &&
+                  pipe1_dual_pipe0_safe && !pipe1_younger_flush_block &&
+                  !pipe1_dual_raw_pipe0 && !pipe1_dual_waw_pipe0 &&
+                  !pipe1_dual_war_pipe0 && !pipe1_dual_pending_rd &&
+                  !pipe1_resbuf_full_i && pipe1_uopq2_safe &&
+                  pipe1_uopq2_operands_ready && !issue_load_from_uopq2) ? 32'd1 : 32'd0);
+            perf_dual_cycles_with_pair_fire <= perf_dual_cycles_with_pair_fire +
+                (pair1_fire ? 32'd1 : 32'd0);
+            perf_dual_extra_instret_pipe1 <= perf_dual_extra_instret_pipe1 +
+                (pair1_fire ? 32'd1 : 32'd0);
+`ifndef SYNTHESIS
+            perf_ds_cycles <= perf_ds_cycles + 32'd1;
+            perf_ds_pipe0_valid <= perf_ds_pipe0_valid +
+                (ds_pipe0_valid ? 32'd1 : 32'd0);
+            perf_ds_pipe0_ready <= perf_ds_pipe0_ready +
+                (ds_pipe0_ready ? 32'd1 : 32'd0);
+            perf_ds_pipe1_valid <= perf_ds_pipe1_valid +
+                (ds_pipe1_valid ? 32'd1 : 32'd0);
+            perf_ds_pipe1_simple_alu <= perf_ds_pipe1_simple_alu +
+                (ds_pipe1_simple_alu ? 32'd1 : 32'd0);
+            perf_ds_safe_candidate <= perf_ds_safe_candidate +
+                (ds_shadow_safe_candidate ? 32'd1 : 32'd0);
+            perf_ds_safe_when_pipe0_ready <= perf_ds_safe_when_pipe0_ready +
+                ((ds_shadow_safe_candidate && !issue_wait_block) ? 32'd1 : 32'd0);
+            perf_ds_safe_when_pipe0_blocked <= perf_ds_safe_when_pipe0_blocked +
+                ((ds_shadow_safe_candidate && issue_wait_block) ? 32'd1 : 32'd0);
+            perf_ds_block_pipe1_unsupported <= perf_ds_block_pipe1_unsupported +
+                (ds_pipe1_unsupported ? 32'd1 : 32'd0);
+            perf_ds_block_raw_pipe0 <= perf_ds_block_raw_pipe0 +
+                (ds_block_raw_pipe0 ? 32'd1 : 32'd0);
+            perf_ds_block_waw_pipe0 <= perf_ds_block_waw_pipe0 +
+                (ds_block_waw_pipe0 ? 32'd1 : 32'd0);
+            perf_ds_block_pending_rs1 <= perf_ds_block_pending_rs1 +
+                (ds_block_pending_rs1 ? 32'd1 : 32'd0);
+            perf_ds_block_pending_rs2 <= perf_ds_block_pending_rs2 +
+                (ds_block_pending_rs2 ? 32'd1 : 32'd0);
+            perf_ds_block_ctrl <= perf_ds_block_ctrl +
+                (ds_block_ctrl ? 32'd1 : 32'd0);
+            perf_ds_block_mem <= perf_ds_block_mem +
+                (ds_block_mem ? 32'd1 : 32'd0);
+            perf_ds_block_csr_sys <= perf_ds_block_csr_sys +
+                (ds_block_csr_sys ? 32'd1 : 32'd0);
+            perf_ds_block_flush <= perf_ds_block_flush +
+                (ds_block_flush ? 32'd1 : 32'd0);
+            perf_ds_block_wb_port <= perf_ds_block_wb_port +
+                (ds_block_wb_port ? 32'd1 : 32'd0);
+            perf_ds_block_forward_complex <= perf_ds_block_forward_complex +
+                (ds_block_forward_complex ? 32'd1 : 32'd0);
+            perf_p1sh_valid_cycles <= perf_p1sh_valid_cycles +
+                (pair1_valid_ff ? 32'd1 : 32'd0);
+            perf_p1sh_simple_alu <= perf_p1sh_simple_alu +
+                (p1sh_simple_alu ? 32'd1 : 32'd0);
+            perf_p1sh_safe_cand <= perf_p1sh_safe_cand +
+                (p1sh_safe_cand ? 32'd1 : 32'd0);
+            perf_p1sh_block_raw_pair0 <= perf_p1sh_block_raw_pair0 +
+                (p1sh_block_raw_pair0 ? 32'd1 : 32'd0);
+            perf_p1sh_block_waw_pair0 <= perf_p1sh_block_waw_pair0 +
+                (p1sh_block_waw_pair0 ? 32'd1 : 32'd0);
+            perf_p1sh_block_pending_rs <= perf_p1sh_block_pending_rs +
+                (p1sh_block_pending_rs ? 32'd1 : 32'd0);
+            perf_p1sh_block_ctrl_mem <= perf_p1sh_block_ctrl_mem +
+                (p1sh_block_ctrl_mem ? 32'd1 : 32'd0);
+            perf_uopq_occ_0 <= perf_uopq_occ_0 +
+                ((uopq_shadow_occupancy == 3'd0) ? 32'd1 : 32'd0);
+            perf_uopq_occ_1 <= perf_uopq_occ_1 +
+                ((uopq_shadow_occupancy == 3'd1) ? 32'd1 : 32'd0);
+            perf_uopq_occ_2 <= perf_uopq_occ_2 +
+                ((uopq_shadow_occupancy == 3'd2) ? 32'd1 : 32'd0);
+            perf_uopq_occ_3 <= perf_uopq_occ_3 +
+                ((uopq_shadow_occupancy == 3'd3) ? 32'd1 : 32'd0);
+            perf_uopq_occ_4 <= perf_uopq_occ_4 +
+                ((uopq_shadow_occupancy == 3'd4) ? 32'd1 : 32'd0);
+            perf_uopq_p1_safe_1 <= perf_uopq_p1_safe_1 +
+                (uopq_shadow_p1_safe[1] ? 32'd1 : 32'd0);
+            perf_uopq_p1_safe_2 <= perf_uopq_p1_safe_2 +
+                (uopq_shadow_p1_safe[2] ? 32'd1 : 32'd0);
+            perf_uopq_p1_safe_3 <= perf_uopq_p1_safe_3 +
+                (uopq_shadow_p1_safe[3] ? 32'd1 : 32'd0);
+            perf_uopq_block_older_ctrl_mem <= perf_uopq_block_older_ctrl_mem +
+                ((uopq_shadow_older_ctrl_mem[1] |
+                  uopq_shadow_older_ctrl_mem[2] |
+                  uopq_shadow_older_ctrl_mem[3]) ? 32'd1 : 32'd0);
+            perf_uopq_block_raw_older <= perf_uopq_block_raw_older +
+                ((uopq_shadow_raw_older[1] |
+                  uopq_shadow_raw_older[2] |
+                  uopq_shadow_raw_older[3]) ? 32'd1 : 32'd0);
+            perf_uopq_block_waw_older <= perf_uopq_block_waw_older +
+                ((uopq_shadow_waw_older[1] |
+                  uopq_shadow_waw_older[2] |
+                  uopq_shadow_waw_older[3]) ? 32'd1 : 32'd0);
+            perf_uopq_p1_fire_from_1 <= perf_uopq_p1_fire_from_1 +
+                (pipe1_fire_from1 ? 32'd1 : 32'd0);
+	            perf_uopq_p1_fire_from_2 <= perf_uopq_p1_fire_from_2 +
+	                (pipe1_fire_from2 ? 32'd1 : 32'd0);
+	            perf_uopq_p1_fire_from_3 <= perf_uopq_p1_fire_from_3 +
+	                (pipe1_fire_from3 ? 32'd1 : 32'd0);
+            perf_uopq_p1_fire_when_p0_ready <= perf_uopq_p1_fire_when_p0_ready +
+                ((pair1_fire && pipe1_p0_ready_context) ? 32'd1 : 32'd0);
+            perf_uopq_p1_fire_when_p0_blocked <= perf_uopq_p1_fire_when_p0_blocked +
+                ((pair1_fire && pipe1_p0_blocked_context) ? 32'd1 : 32'd0);
+            perf_uopq_p1_fire_when_p0_empty <= perf_uopq_p1_fire_when_p0_empty +
+                ((pair1_fire && pipe1_p0_empty_context) ? 32'd1 : 32'd0);
+            perf_uopq_p1_block_older_ctrl_mem <= perf_uopq_p1_block_older_ctrl_mem +
+	                (((pipe1_uopq1_supported | pipe1_uopq2_supported | pipe1_uopq3_supported) &&
+                  !pipe1_dual_pipe0_safe) ? 32'd1 : 32'd0);
+            perf_uopq_p1_block_raw_older <= perf_uopq_p1_block_raw_older +
+                (pipe1_dual_raw_pipe0 ? 32'd1 : 32'd0);
+            perf_uopq_p1_block_waw_older <= perf_uopq_p1_block_waw_older +
+                (pipe1_dual_waw_pipe0 ? 32'd1 : 32'd0);
+            perf_uopq_p1_block_commit_order <= perf_uopq_p1_block_commit_order +
+                ((issue_valid_ff && id_advance && issue_wait_block &&
+                  pipe1_uopq1_safe && !pipe1_resbuf_full_i) ? 32'd1 : 32'd0);
+            perf_uopq_p1_block_p0_bjp <= perf_uopq_p1_block_p0_bjp +
+	                (((pipe1_uopq1_supported | pipe1_uopq2_supported | pipe1_uopq3_supported) &&
+                  !pipe1_dual_pipe0_safe &&
+                  uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP]) ? 32'd1 : 32'd0);
+            perf_uopq_p1_block_p0_load <= perf_uopq_p1_block_p0_load +
+	                (((pipe1_uopq1_supported | pipe1_uopq2_supported | pipe1_uopq3_supported) &&
+                  !pipe1_dual_pipe0_safe &&
+                  uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD]) ? 32'd1 : 32'd0);
+            perf_uopq_p1_block_p0_store <= perf_uopq_p1_block_p0_store +
+                (((pipe1_uopq1_supported | pipe1_uopq2_supported | pipe1_uopq3_supported) &&
+                  !pipe1_dual_pipe0_safe &&
+                  uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE]) ? 32'd1 : 32'd0);
+            perf_uopq_p1_block_p0_csr_sys <= perf_uopq_p1_block_p0_csr_sys +
+                (((pipe1_uopq1_supported | pipe1_uopq2_supported | pipe1_uopq3_supported) &&
+                  !pipe1_dual_pipe0_safe &&
+                  (uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_CSR] |
+                   uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS] |
+                   uopq0_fence_i)) ? 32'd1 : 32'd0);
+            perf_uopq_p1_block_p0_bitmanip <= perf_uopq_p1_block_p0_bitmanip +
+                (((pipe1_uopq1_supported | pipe1_uopq2_supported | pipe1_uopq3_supported) &&
+                  !pipe1_dual_pipe0_safe &&
+                  uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_BITMANIP]) ? 32'd1 : 32'd0);
+            perf_uopq_p1_block_p0_other <= perf_uopq_p1_block_p0_other +
+                (((pipe1_uopq1_supported | pipe1_uopq2_supported | pipe1_uopq3_supported) &&
+                  !pipe1_dual_pipe0_safe &&
+                  !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
+                  !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
+                  !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_CSR] &&
+                  !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS] &&
+                  !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_BITMANIP] &&
+                  !uopq0_fence_i) ? 32'd1 : 32'd0);
+            perf_uopq_p1_block_p0_other_invalid <= perf_uopq_p1_block_p0_other_invalid +
+                (((pipe1_uopq1_supported | pipe1_uopq2_supported | pipe1_uopq3_supported) &&
+                  !pipe1_dual_pipe0_safe &&
+                  !uopq0_valid) ? 32'd1 : 32'd0);
+            perf_uopq_p1_block_p0_other_no_alu_mul <= perf_uopq_p1_block_p0_other_no_alu_mul +
+                (((pipe1_uopq1_supported | pipe1_uopq2_supported | pipe1_uopq3_supported) &&
+                  !pipe1_dual_pipe0_safe &&
+                  uopq0_valid &&
+                  !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_ALU] &&
+                  !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_MUL] &&
+                  !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
+                  !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
+                  !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_CSR] &&
+                  !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS] &&
+                  !uopq0_operator_type[ydrasil_pkg::OPERATOR_TYPE_BITMANIP] &&
+                  !uopq0_fence_i) ? 32'd1 : 32'd0);
+            perf_uopq_p1_block_p0_invalid_issue_accept <= perf_uopq_p1_block_p0_invalid_issue_accept +
+                (((pipe1_uopq1_supported | pipe1_uopq2_supported | pipe1_uopq3_supported) &&
+                  !pipe1_dual_pipe0_safe &&
+                  !uopq0_valid &&
+                  issue_accept) ? 32'd1 : 32'd0);
+            perf_uopq_p1_block_p0_invalid_skid <= perf_uopq_p1_block_p0_invalid_skid +
+                (((pipe1_uopq1_supported | pipe1_uopq2_supported | pipe1_uopq3_supported) &&
+                  !pipe1_dual_pipe0_safe &&
+                  !uopq0_valid &&
+                  skid_valid_ff) ? 32'd1 : 32'd0);
+            perf_uopq_p1_block_p0_invalid_uopq2_safe <= perf_uopq_p1_block_p0_invalid_uopq2_safe +
+                (((pipe1_uopq1_supported | pipe1_uopq2_supported | pipe1_uopq3_supported) &&
+                  !pipe1_dual_pipe0_safe &&
+                  !uopq0_valid &&
+                  pipe1_uopq2_safe) ? 32'd1 : 32'd0);
+            perf_uopq_p1_empty_base <= perf_uopq_p1_empty_base +
+                (pipe1_p0_empty_base ? 32'd1 : 32'd0);
+            perf_uopq_p1_empty_supported <= perf_uopq_p1_empty_supported +
+                ((pipe1_p0_empty_base && pipe1_dual_supported) ? 32'd1 : 32'd0);
+            perf_uopq_p1_empty_operands_ready <= perf_uopq_p1_empty_operands_ready +
+                ((pipe1_p0_empty_base && pipe1_dual_supported &&
+                  pipe1_dual_operands_ready) ? 32'd1 : 32'd0);
+            perf_uopq_p1_empty_block_younger <= perf_uopq_p1_empty_block_younger +
+                ((pipe1_p0_empty_base && pipe1_dual_supported &&
+                  pipe1_dual_operands_ready && pipe1_younger_flush_block) ? 32'd1 : 32'd0);
+            perf_uopq_p1_empty_block_ready_allow <= perf_uopq_p1_empty_block_ready_allow +
+                ((pipe1_p0_empty_base && pipe1_dual_supported &&
+                  pipe1_dual_operands_ready && !pipe1_younger_flush_block &&
+                  !ready_issue_allow_i) ? 32'd1 : 32'd0);
+            perf_uopq_p1_empty_block_pending_rd <= perf_uopq_p1_empty_block_pending_rd +
+                ((pipe1_p0_empty_base && pipe1_dual_supported &&
+                  pipe1_dual_operands_ready && !pipe1_younger_flush_block &&
+                  ready_issue_allow_i && pipe1_dual_pending_rd) ? 32'd1 : 32'd0);
+            perf_uopq_p1_empty_block_resbuf <= perf_uopq_p1_empty_block_resbuf +
+                ((pipe1_p0_empty_base && pipe1_dual_supported &&
+                  pipe1_dual_operands_ready && !pipe1_younger_flush_block &&
+                  ready_issue_allow_i && !pipe1_dual_pending_rd &&
+                  pipe1_resbuf_full_i) ? 32'd1 : 32'd0);
+            perf_uopq_p1_blocked_base <= perf_uopq_p1_blocked_base +
+                (pipe1_p0_blocked_context ? 32'd1 : 32'd0);
+            perf_uopq_p1_blocked_supported <= perf_uopq_p1_blocked_supported +
+                ((pipe1_p0_blocked_context && pipe1_dual_supported) ? 32'd1 : 32'd0);
+            perf_uopq_p1_blocked_p0_safe <= perf_uopq_p1_blocked_p0_safe +
+                ((pipe1_p0_blocked_context && pipe1_dual_supported &&
+                  pipe1_dual_pipe0_safe) ? 32'd1 : 32'd0);
+            perf_uopq_p1_blocked_operands_ready <= perf_uopq_p1_blocked_operands_ready +
+                ((pipe1_p0_blocked_context && pipe1_dual_supported &&
+                  pipe1_dual_pipe0_safe && pipe1_dual_operands_ready) ? 32'd1 : 32'd0);
+            perf_uopq_p1_blocked_block_younger <= perf_uopq_p1_blocked_block_younger +
+                ((pipe1_p0_blocked_context && pipe1_dual_supported &&
+                  pipe1_dual_pipe0_safe && pipe1_dual_operands_ready &&
+                  pipe1_younger_flush_block) ? 32'd1 : 32'd0);
+            perf_uopq_p1_blocked_block_ready_allow <= perf_uopq_p1_blocked_block_ready_allow +
+                ((pipe1_p0_blocked_context && pipe1_dual_supported &&
+                  pipe1_dual_pipe0_safe && pipe1_dual_operands_ready &&
+                  !pipe1_younger_flush_block && !ready_issue_allow_i) ? 32'd1 : 32'd0);
+            perf_uopq_p1_blocked_block_pending_rd <= perf_uopq_p1_blocked_block_pending_rd +
+                ((pipe1_p0_blocked_context && pipe1_dual_supported &&
+                  pipe1_dual_pipe0_safe && pipe1_dual_operands_ready &&
+                  !pipe1_younger_flush_block && ready_issue_allow_i &&
+                  pipe1_dual_pending_rd) ? 32'd1 : 32'd0);
+            perf_uopq_p1_blocked_block_resbuf <= perf_uopq_p1_blocked_block_resbuf +
+                ((pipe1_p0_blocked_context && pipe1_dual_supported &&
+                  pipe1_dual_pipe0_safe && pipe1_dual_operands_ready &&
+                  !pipe1_younger_flush_block && ready_issue_allow_i &&
+                  !pipe1_dual_pending_rd && pipe1_resbuf_full_i) ? 32'd1 : 32'd0);
+            perf_uopq_p1_blocked_unsup_any_uop <= perf_uopq_p1_blocked_unsup_any_uop +
+                ((pipe1_p0_blocked_context && !pipe1_dual_supported &&
+                  (uopq1_valid || uopq2_valid)) ? 32'd1 : 32'd0);
+            perf_uopq_p1_blocked_unsup_shadow_alu <= perf_uopq_p1_blocked_unsup_shadow_alu +
+                ((pipe1_p0_blocked_context && !pipe1_dual_supported &&
+                  ((uopq1_valid && is_shadow_simple_alu(uopq1_operator_type, uopq1_operator)) ||
+                   (uopq2_valid && is_shadow_simple_alu(uopq2_operator_type, uopq2_operator)))) ? 32'd1 : 32'd0);
+            perf_uopq_p1_blocked_unsup_shift <= perf_uopq_p1_blocked_unsup_shift +
+                ((pipe1_p0_blocked_context && !pipe1_dual_supported &&
+                  ((uopq1_valid && (uopq1_operator[ydrasil_pkg::OP_ALU_SLL] |
+                                    uopq1_operator[ydrasil_pkg::OP_ALU_SRL] |
+                                    uopq1_operator[ydrasil_pkg::OP_ALU_SRA])) ||
+                   (uopq2_valid && (uopq2_operator[ydrasil_pkg::OP_ALU_SLL] |
+                                    uopq2_operator[ydrasil_pkg::OP_ALU_SRL] |
+                                    uopq2_operator[ydrasil_pkg::OP_ALU_SRA])))) ? 32'd1 : 32'd0);
+            perf_uopq_p1_blocked_unsup_x0_rs1 <= perf_uopq_p1_blocked_unsup_x0_rs1 +
+                ((pipe1_p0_blocked_context && !pipe1_dual_supported &&
+                  ((uopq1_valid && uopq1_rf_ren_rs1 && (uopq1_rf_raddr_rs1 == '0)) ||
+                   (uopq2_valid && uopq2_rf_ren_rs1 && (uopq2_rf_raddr_rs1 == '0)))) ? 32'd1 : 32'd0);
+	            perf_uopq_p1_blocked_unsup_lui_auipc <= perf_uopq_p1_blocked_unsup_lui_auipc +
+	                ((pipe1_p0_blocked_context && !pipe1_dual_supported &&
+	                  ((uopq1_valid && (uopq1_operator[ydrasil_pkg::OP_ALU_LUI] |
+	                                    uopq1_operator[ydrasil_pkg::OP_ALU_AUIPC])) ||
+	                   (uopq2_valid && (uopq2_operator[ydrasil_pkg::OP_ALU_LUI] |
+	                                    uopq2_operator[ydrasil_pkg::OP_ALU_AUIPC])))) ? 32'd1 : 32'd0);
+	            perf_uopq_p1_blocked_unsup_relax_ready <= perf_uopq_p1_blocked_unsup_relax_ready +
+	                (uopq_diag_relax_ready ? 32'd1 : 32'd0);
+	            perf_uopq_p1_blocked_unsup_relax_fire_safe <= perf_uopq_p1_blocked_unsup_relax_fire_safe +
+	                (uopq_diag_relax_fire_safe ? 32'd1 : 32'd0);
+	            perf_uopq_p1_blocked_unsup_relax_shift_safe <= perf_uopq_p1_blocked_unsup_relax_shift_safe +
+	                (uopq_diag_relax_shift_safe ? 32'd1 : 32'd0);
+	            perf_uopq_p1_blocked_unsup_relax_x0_safe <= perf_uopq_p1_blocked_unsup_relax_x0_safe +
+	                (uopq_diag_relax_x0_safe ? 32'd1 : 32'd0);
+	            perf_uopq_p1_blocked_unsup_relax_lui_auipc_safe <= perf_uopq_p1_blocked_unsup_relax_lui_auipc_safe +
+	                (uopq_diag_relax_lui_auipc_safe ? 32'd1 : 32'd0);
+	            perf_uopq_p1_block_younger_flush <= perf_uopq_p1_block_younger_flush +
+	                (((pipe1_p0_ready_context | pipe1_p0_blocked_context) &&
+	                  ready_issue_allow_i && !flush_id_i &&
+                  pipe1_dual_pipe0_safe && pipe1_dual_operands_ready &&
+                  pipe1_younger_flush_block &&
+                  !pipe1_dual_raw_pipe0 && !pipe1_dual_waw_pipe0 &&
+                  !pipe1_dual_war_pipe0 && !pipe1_dual_pending_rd &&
+                  !pipe1_resbuf_full_i) ? 32'd1 : 32'd0);
+            perf_uopq_p1_block_young_uopq2 <= perf_uopq_p1_block_young_uopq2 +
+                (((pipe1_p0_ready_context | pipe1_p0_blocked_context) &&
+                  ready_issue_allow_i && !flush_id_i &&
+                  pipe1_dual_pipe0_safe && pipe1_dual_operands_ready &&
+                  pipe1_younger_flush_block &&
+                  uopq2_valid &&
+                  !pipe1_dual_raw_pipe0 && !pipe1_dual_waw_pipe0 &&
+                  !pipe1_dual_war_pipe0 && !pipe1_dual_pending_rd &&
+                  !pipe1_resbuf_full_i) ? 32'd1 : 32'd0);
+            perf_uopq_p1_block_young_ifid <= perf_uopq_p1_block_young_ifid +
+                (((pipe1_p0_ready_context | pipe1_p0_blocked_context) &&
+                  ready_issue_allow_i && !flush_id_i &&
+                  pipe1_dual_pipe0_safe && pipe1_dual_operands_ready &&
+                  pipe1_younger_flush_block &&
+                  if_id_valid_i &&
+                  !pipe1_dual_raw_pipe0 && !pipe1_dual_waw_pipe0 &&
+                  !pipe1_dual_war_pipe0 && !pipe1_dual_pending_rd &&
+                  !pipe1_resbuf_full_i) ? 32'd1 : 32'd0);
+            perf_uopq_p1_block_ifid_bjp <= perf_uopq_p1_block_ifid_bjp +
+                (((pipe1_p0_ready_context | pipe1_p0_blocked_context) &&
+                  ready_issue_allow_i && !flush_id_i &&
+                  pipe1_dual_pipe0_safe && pipe1_dual_operands_ready &&
+                  pipe1_younger_flush_block && if_id_valid_i &&
+                  if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+                  !pipe1_dual_raw_pipe0 && !pipe1_dual_waw_pipe0 &&
+                  !pipe1_dual_war_pipe0 && !pipe1_dual_pending_rd &&
+                  !pipe1_resbuf_full_i) ? 32'd1 : 32'd0);
+            perf_uopq_p1_block_ifid_load <= perf_uopq_p1_block_ifid_load +
+                (((pipe1_p0_ready_context | pipe1_p0_blocked_context) &&
+                  ready_issue_allow_i && !flush_id_i &&
+                  pipe1_dual_pipe0_safe && pipe1_dual_operands_ready &&
+                  pipe1_younger_flush_block && if_id_valid_i &&
+                  if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
+                  !pipe1_dual_raw_pipe0 && !pipe1_dual_waw_pipe0 &&
+                  !pipe1_dual_war_pipe0 && !pipe1_dual_pending_rd &&
+                  !pipe1_resbuf_full_i) ? 32'd1 : 32'd0);
+            perf_uopq_p1_block_ifid_store <= perf_uopq_p1_block_ifid_store +
+                (((pipe1_p0_ready_context | pipe1_p0_blocked_context) &&
+                  ready_issue_allow_i && !flush_id_i &&
+                  pipe1_dual_pipe0_safe && pipe1_dual_operands_ready &&
+                  pipe1_younger_flush_block && if_id_valid_i &&
+                  if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
+                  !pipe1_dual_raw_pipe0 && !pipe1_dual_waw_pipe0 &&
+                  !pipe1_dual_war_pipe0 && !pipe1_dual_pending_rd &&
+                  !pipe1_resbuf_full_i) ? 32'd1 : 32'd0);
+            perf_uopq_p1_block_ifid_mul <= perf_uopq_p1_block_ifid_mul +
+                (((pipe1_p0_ready_context | pipe1_p0_blocked_context) &&
+                  ready_issue_allow_i && !flush_id_i &&
+                  pipe1_dual_pipe0_safe && pipe1_dual_operands_ready &&
+                  pipe1_younger_flush_block && if_id_valid_i &&
+                  if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_MUL] &&
+                  !pipe1_dual_raw_pipe0 && !pipe1_dual_waw_pipe0 &&
+                  !pipe1_dual_war_pipe0 && !pipe1_dual_pending_rd &&
+                  !pipe1_resbuf_full_i) ? 32'd1 : 32'd0);
+            perf_uopq_p1_block_ifid_csr_sys <= perf_uopq_p1_block_ifid_csr_sys +
+                (((pipe1_p0_ready_context | pipe1_p0_blocked_context) &&
+                  ready_issue_allow_i && !flush_id_i &&
+                  pipe1_dual_pipe0_safe && pipe1_dual_operands_ready &&
+                  pipe1_younger_flush_block && if_id_valid_i &&
+                  (if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_CSR] |
+                   if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS] |
+                   id_fence_i) &&
+                  !pipe1_dual_raw_pipe0 && !pipe1_dual_waw_pipe0 &&
+                  !pipe1_dual_war_pipe0 && !pipe1_dual_pending_rd &&
+                  !pipe1_resbuf_full_i) ? 32'd1 : 32'd0);
+`endif
+        end
+    end
+
+`ifndef SYNTHESIS
+    always_ff @(posedge clk) begin
+        if (rst_n && ds_shadow_safe_candidate) begin
+            if (!ds_pipe1_simple_alu || ds_pipe1_ctrl || ds_pipe1_mem || ds_pipe1_csr_sys) begin
+                $fatal(1, "dual shadow candidate has pipe1 side effect");
+            end
+            if (ds_pipe0_ctrl || ds_pipe0_mem || ds_pipe0_csr_sys || ds_pipe0_mul) begin
+                $fatal(1, "dual shadow candidate has unsafe pipe0 class");
+            end
+            if (ds_block_raw_pipe0 || ds_block_waw_pipe0 ||
+                ds_block_pending_rs1 || ds_block_pending_rs2) begin
+                $fatal(1, "dual shadow candidate has unresolved register hazard");
+            end
+            if (flush_id_i || stall_id_i) begin
+                $fatal(1, "dual shadow candidate survived flush/stall");
+            end
+        end
+    end
+`endif
+
+    assign operand_a_o          = operand_a_ff;
+    assign operand_b_o          = operand_b_ff;
+    assign operator_o           = operator_ff;
+    assign id_alu_rf_wen_rd_o   = rf_wen_rd_ff;
+    assign id_rf_waddr_rd_o     = rf_waddr_rd_ff;
+    assign id_alu_stable_valid_o = alu_stable_valid_ff;
+    assign id_alu_stable_addr_o  = alu_stable_addr_ff;
+    assign id_alu_stable_data_o  = alu_stable_data_ff;
+    assign operator_lsu_o       = operator_lsu_ff;
+    assign operator_type_o      = operator_type_ff;
+    assign id_lsu_rs2_data_o    = id_lsu_rs2_data_ff; // 直接传递寄存器数据，供LSU使用
+    assign id_lsu_addr_o        = id_lsu_addr_ff;
+    assign id_lsu_addr_is_dtcm_o = id_lsu_addr_is_dtcm_ff;
+    assign id_lsu_store_data_o  = id_lsu_store_data_ff;
+    assign id_lsu_store_mask_o  = id_lsu_store_mask_ff;
+    assign bt_a_operand_o       = bt_a_operand_ff;
+    assign bt_b_operand_o       = bt_b_operand_ff;
+    assign  id_csr_raddr_o = csr_reg_raddr_ff;
+    // assign  id_ex_csr_we_o = csr_ex_we_ff;
+    assign  id_ex_csr_waddr_o = csr_ex_waddr_ff;
+    assign  id_op_csr_info_o = csr_op_info_ff;
+    assign  id_op_sys_info_o = sys_op_info_ff;
+    assign id_instr_addr_o = id_instr_addr_ff;
+    assign id_ex_jalr_o = id_ex_jalr_ff;
+    assign id_fence_i_o = id_fence_i_ff;
+    assign id_ex_pred_hit_o = id_ex_pred_hit_ff;
+    assign id_ex_pred_taken_o = id_ex_pred_taken_ff;
+    assign id_ex_pred_target_o = id_ex_pred_target_ff;
+    assign id_ex_pred_counter_o = id_ex_pred_counter_ff;
+    assign id_ex_pred_bht_index_o = id_ex_pred_bht_index_ff;
+    assign id_ex_pred_l0_taken_o = id_ex_pred_l0_taken_ff;
+    assign id_ex_valid_o = id_ex_valid_ff;
+    assign pipe1_issue_valid_o = pipe1_issue_valid_ff;
+    assign pipe1_operand_a_o = pipe1_operand_a_ff;
+    assign pipe1_operand_b_o = pipe1_operand_b_ff;
+    assign pipe1_operator_o = pipe1_operator_ff;
+    assign pipe1_rf_wen_rd_o = pipe1_rf_wen_rd_ff;
+    assign pipe1_rf_waddr_rd_o = pipe1_rf_waddr_rd_ff;
+    assign pipe1_rn_pdst_o = pipe1_rn_pdst_ff;
+    assign pipe1_pc_o = pipe1_pc_ff;
+    assign pipe1_instr_o = pipe1_instr_ff;
+
+    assign id_ctrl_rs1_addr_o = issue_rf_raddr_rs1_ff;
+    assign id_ctrl_rs2_addr_o = issue_rf_raddr_rs2_ff;
+    assign id_ctrl_rs1_ren_o = issue_valid_ff & issue_rf_ren_rs1_ff;
+    assign id_ctrl_rs2_ren_o = issue_valid_ff &
+        (issue_rf_ren_rs2_ff | issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]);
+    assign id_ctrl_rd_wen_o = issue_valid_ff & (issue_rf_waddr_rd_ff != '0) &
+        (issue_rf_wen_rd_ff | issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD]);
+    assign id_ctrl_rd_addr_o = issue_rf_waddr_rd_ff;
+    assign id_ctrl_lsu_req_o = issue_valid_ff &
+        (issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] |
+         issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]);
+    assign id_ctrl_rs1_psrc_o = issue_rn_rs1_psrc_ff;
+    assign id_ctrl_rs2_psrc_o = issue_rn_rs2_psrc_ff;
+    assign id_ctrl_pdst_o = issue_rn_pdst_valid_ff ? issue_rn_pdst_ff : '0;
+    assign pipe1_ctrl_rs1_ren_o = pipe1_sel_rf_ren_rs1;
+    assign pipe1_ctrl_rs2_ren_o = pipe1_sel_rf_ren_rs2;
+    assign pipe1_ctrl_rs1_psrc_o = pipe1_sel_rs1_psrc;
+    assign pipe1_ctrl_rs2_psrc_o = pipe1_sel_rs2_psrc;
+    assign id_rn_pdst_o = id_rn_pdst_ff;
+    assign rn_if_rd_valid_o = if_id_rn_pdst_valid;
+    assign rn_if_ctrl_valid_o =
+        if_id_valid_i &&
+        if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP];
+    assign rn_alloc_rd_addr_o = if_id_trace_rf_waddr_rd;
+    assign id_ctrl_operator_type_o = issue_valid_ff ? issue_operator_type_ff : '0;
+
+`ifndef SYNTHESIS
+    assign commit_trace_alloc_if_id =
+        if_id_live_accept;
+    assign commit_trace_alloc_valid_o =
+        commit_trace_alloc_if_id &&
+        (if_id_trace_rf_waddr_rd != '0) &&
+        (if_id_trace_rf_wen_rd |
+         if_id_trace_operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD]);
+    assign commit_trace_alloc_pc_o = if_id_pc_i;
+    assign commit_trace_alloc_instr_o = if_id_instr_i;
+`endif
+
+endmodule

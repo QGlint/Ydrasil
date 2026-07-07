@@ -41,9 +41,18 @@ import ydrasil_pkg::*;
 	output wire [31:0] if_id_pred_bht_index_o,
 	output wire        if_id_pred_l0_taken_o,
 	output wire        if_id_valid_o,
+	output wire [31:0] if_id1_pc_o,
+	output wire        if_id1_pred_hit_o,
+	output wire        if_id1_pred_taken_o,
+	output wire [31:0] if_id1_pred_target_o,
+	output wire [1:0]  if_id1_pred_counter_o,
+	output wire [31:0] if_id1_pred_bht_index_o,
+	output wire        if_id1_pred_l0_taken_o,
+	output wire        if_id1_valid_o,
 	output wire        dbg_sync_bp_redirect_o,
 
-	output wire [31:0] if_id_instr_o
+	output wire [31:0] if_id_instr_o,
+	output wire [31:0] if_id1_instr_o
 );
 
 	localparam int FETCH_Q_DEPTH = 4;
@@ -115,6 +124,7 @@ import ydrasil_pkg::*;
 	wire [31:0] pc_plus4;
 	wire [31:0] pc_plus8;
 	wire        fetch_q_valid;
+	wire        fetch_q_slot1_valid;
 	wire        fetch_q_full;
 	wire        pop_fire;
 	wire        enqueue_fire;
@@ -155,6 +165,7 @@ import ydrasil_pkg::*;
 	assign pc_plus4 = pc_ff + 32'd4;
 	assign pc_plus8 = pc_ff + 32'd8;
 	assign fetch_q_valid = fetch_count_ff != '0;
+	assign fetch_q_slot1_valid = fetch_count_ff > FETCH_Q_COUNT_WIDTH'(1);
 	assign fetch_q_full = fetch_count_ff == FETCH_Q_DEPTH[FETCH_Q_COUNT_WIDTH-1:0];
 
 	assign if_id_valid_o = fetch_q_valid;
@@ -170,6 +181,20 @@ import ydrasil_pkg::*;
 	assign if_id_pred_bht_index_o = fetch_pred_bht_index_ff[0];
 	assign if_id_pred_l0_taken_o =
 		fetch_q_valid && !bp_invalidate_i && fetch_pred_l0_taken_ff[0];
+
+	assign if_id1_valid_o = fetch_q_slot1_valid;
+	assign if_id1_pc_o = fetch_q_slot1_valid ? fetch_pc_ff[1] : (ydrasil_pkg::RESET_INS + 32'd4);
+	assign if_id1_instr_o = fetch_q_slot1_valid ? fetch_instr_ff[1] : ydrasil_pkg::RV32I_INS_NOP;
+	assign if_id1_pred_hit_o =
+		fetch_q_slot1_valid && !bp_invalidate_i && fetch_pred_hit_ff[1];
+	assign if_id1_pred_taken_o =
+		fetch_q_slot1_valid && !bp_invalidate_i && fetch_pred_taken_ff[1];
+	assign if_id1_pred_target_o = fetch_pred_target_ff[1];
+	assign if_id1_pred_counter_o =
+		(fetch_q_slot1_valid && !bp_invalidate_i) ? fetch_pred_counter_ff[1] : 2'b01;
+	assign if_id1_pred_bht_index_o = fetch_pred_bht_index_ff[1];
+	assign if_id1_pred_l0_taken_o =
+		fetch_q_slot1_valid && !bp_invalidate_i && fetch_pred_l0_taken_ff[1];
 
 	assign l0_predict_index = pc_ff[L0_INDEX_WIDTH+1:2];
 	assign l0_predict_tag = pc_ff[31:L0_INDEX_WIDTH+2];

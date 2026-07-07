@@ -2,7 +2,8 @@
 
 module ydrasil_core
 import ydrasil_pkg::*;
-	 #(
+import ydrasil_pipeline_pkg::*;
+		 #(
 		parameter int BP_ENTRIES  = 0,
 		parameter int BTB_ENTRIES = (BP_ENTRIES != 0) ? BP_ENTRIES : ydrasil_pkg::BP_BTB_ENTRIES,
 		parameter int BHT_ENTRIES = (BP_ENTRIES != 0) ? BP_ENTRIES : ydrasil_pkg::BP_BHT_ENTRIES,
@@ -54,6 +55,18 @@ import ydrasil_pkg::*;
 	wire [31:0] if_id_pred_bht_index;
 	wire        if_id_pred_l0_taken;
 	wire        if_id_valid;
+	wire [31:0] if_id1_pc;
+	wire [31:0] if_id1_instr;
+	wire        if_id1_pred_hit;
+	wire        if_id1_pred_taken;
+	wire [31:0] if_id1_pred_target;
+	wire [1:0]  if_id1_pred_counter;
+	wire [31:0] if_id1_pred_bht_index;
+	wire        if_id1_pred_l0_taken;
+	wire        if_id1_valid;
+	decode_pair_pkt_t id_decode_pair;
+	rename_pkt_t rn_live_pkt;
+	issue_pair_pkt_t id_issue_pair;
 
 	// CTRL signals
 	wire                        stall_if;
@@ -347,10 +360,24 @@ import ydrasil_pkg::*;
 	wire [ydrasil_pkg::INST_DATA_WIDTH-1:0] commit_trace_alloc_instr;
 `endif
 
-	assign rn_real_rs1_psrc = id_ctrl_rs1_psrc;
-	assign rn_real_rs2_psrc = id_ctrl_rs2_psrc;
+		assign rn_real_rs1_psrc = id_ctrl_rs1_psrc;
+		assign rn_real_rs2_psrc = id_ctrl_rs2_psrc;
+		assign rn_live_pkt.rs1_ready = rn_real_live_rs1_ready;
+		assign rn_live_pkt.rs2_ready = rn_real_live_rs2_ready;
+		assign rn_live_pkt.rs1_psrc = rn_real_live_rs1_psrc;
+		assign rn_live_pkt.rs2_psrc = rn_real_live_rs2_psrc;
+		assign rn_live_pkt.pdst = rn_real_alloc0_pdst;
+		assign rn_live_pkt.pdst_valid = 1'b0;
+		assign id_issue_pair.slot0.dec = id_decode_pair.slot0;
+		assign id_issue_pair.slot0.rn = rn_live_pkt;
+		assign id_issue_pair.slot0.wait_rs1 = 1'b0;
+		assign id_issue_pair.slot0.wait_rs2 = 1'b0;
+		assign id_issue_pair.slot1.dec = id_decode_pair.slot1;
+		assign id_issue_pair.slot1.rn = '0;
+		assign id_issue_pair.slot1.wait_rs1 = 1'b0;
+		assign id_issue_pair.slot1.wait_rs2 = 1'b0;
 
-	ydrasil_rename_ctrl #(
+		ydrasil_rename_ctrl #(
 		.PHYS_REGS(RN_REAL_PHYS_REGS),
 		.ROB_DEPTH(RN_REAL_ROB_DEPTH),
 		.PREG_BITS(RN_REAL_PREG_BITS),
@@ -596,26 +623,49 @@ import ydrasil_pkg::*;
 			.if_id_pred_bht_index_o(if_id_pred_bht_index),
 			.if_id_pred_l0_taken_o(if_id_pred_l0_taken),
 			.if_id_valid_o   (if_id_valid),
+			.if_id1_pc_o     (if_id1_pc),
+			.if_id1_pred_hit_o(if_id1_pred_hit),
+			.if_id1_pred_taken_o(if_id1_pred_taken),
+			.if_id1_pred_target_o(if_id1_pred_target),
+			.if_id1_pred_counter_o(if_id1_pred_counter),
+			.if_id1_pred_bht_index_o(if_id1_pred_bht_index),
+			.if_id1_pred_l0_taken_o(if_id1_pred_l0_taken),
+			.if_id1_valid_o  (if_id1_valid),
 			.dbg_sync_bp_redirect_o(),
-			.if_id_instr_o   (if_id_instr)
+			.if_id_instr_o   (if_id_instr),
+			.if_id1_instr_o  (if_id1_instr)
 		);
 
-	ydrasil_id_stage u_ydrasil_id_stage (
-		.clk                 (clk),
-		.rst_n               (rst_n),
-		.stall_id_i          (stall_id),
-		.bubble_id_i         (bubble_id),
-		.flush_id_i          (flush_id),
-		.if_id_pc_i          (if_id_pc),
-		.if_id_instr_i       (if_id_instr),
-		.if_id_pred_hit_i    (if_id_pred_hit),
-		.if_id_pred_taken_i  (if_id_pred_taken),
-		.if_id_pred_target_i (if_id_pred_target),
-		.if_id_pred_counter_i(if_id_pred_counter),
-		.if_id_pred_bht_index_i(if_id_pred_bht_index),
-		.if_id_pred_l0_taken_i(if_id_pred_l0_taken),
-		.if_id_valid_i       (if_id_valid),
-		.rf_addr_rs1_o       (rf_raddr_rs1),
+		ydrasil_id_stage u_ydrasil_id_stage (
+			.if_id0_pc_i          (if_id_pc),
+			.if_id0_instr_i       (if_id_instr),
+			.if_id0_pred_hit_i    (if_id_pred_hit),
+			.if_id0_pred_taken_i  (if_id_pred_taken),
+			.if_id0_pred_target_i (if_id_pred_target),
+			.if_id0_pred_counter_i(if_id_pred_counter),
+			.if_id0_pred_bht_index_i(if_id_pred_bht_index),
+			.if_id0_pred_l0_taken_i(if_id_pred_l0_taken),
+			.if_id0_valid_i       (if_id_valid),
+			.if_id1_pc_i          (if_id1_pc),
+			.if_id1_instr_i       (if_id1_instr),
+			.if_id1_pred_hit_i    (if_id1_pred_hit),
+			.if_id1_pred_taken_i  (if_id1_pred_taken),
+			.if_id1_pred_target_i (if_id1_pred_target),
+			.if_id1_pred_counter_i(if_id1_pred_counter),
+			.if_id1_pred_bht_index_i(if_id1_pred_bht_index),
+			.if_id1_pred_l0_taken_i(if_id1_pred_l0_taken),
+			.if_id1_valid_i       (if_id1_valid),
+			.id_decode_pair_o     (id_decode_pair)
+		);
+
+		ydrasil_issue_stage u_ydrasil_issue_stage (
+			.clk                 (clk),
+			.rst_n               (rst_n),
+			.stall_id_i          (stall_id),
+			.bubble_id_i         (bubble_id),
+			.flush_id_i          (flush_id),
+			.id_issue_pair_i     (id_issue_pair),
+			.rf_addr_rs1_o       (rf_raddr_rs1),
 		.rf_addr_rs2_o      (rf_raddr_rs2),
 		.rf_rdata_rs1_i     (rf_rdata_rs1),
 		.rf_rdata_rs2_i     (rf_rdata_rs2),
@@ -646,17 +696,12 @@ import ydrasil_pkg::*;
 		.prf_rs2_uncommitted_i(rn_real_rs2_uncommitted),
 		.pipe1_prf_rs1_ready_i(rn_real_pipe1_rs1_ready),
 		.pipe1_prf_rs2_ready_i(rn_real_pipe1_rs2_ready),
-		.pipe1_prf_rs1_data_i(prf_rd2_data),
-		.pipe1_prf_rs2_data_i(prf_rd3_data),
-		.pipe1_prf_rs1_uncommitted_i(rn_real_pipe1_rs1_uncommitted),
-		.pipe1_prf_rs2_uncommitted_i(rn_real_pipe1_rs2_uncommitted),
-		.pipe1_rename_ready_i(rn_real_pipe1_rename_ready),
-		.rn_if_rs1_ready_i(rn_real_live_rs1_ready),
-		.rn_if_rs2_ready_i(rn_real_live_rs2_ready),
-		.rn_if_rs1_psrc_i  (rn_real_live_rs1_psrc),
-		.rn_if_rs2_psrc_i  (rn_real_live_rs2_psrc),
-		.rn_if_pdst_i      (rn_real_alloc0_pdst),
-		.rs1_issue_alu_ready_next_i(rs1_issue_alu_ready_next),
+			.pipe1_prf_rs1_data_i(prf_rd2_data),
+			.pipe1_prf_rs2_data_i(prf_rd3_data),
+			.pipe1_prf_rs1_uncommitted_i(rn_real_pipe1_rs1_uncommitted),
+			.pipe1_prf_rs2_uncommitted_i(rn_real_pipe1_rs2_uncommitted),
+			.pipe1_rename_ready_i(rn_real_pipe1_rename_ready),
+			.rs1_issue_alu_ready_next_i(rs1_issue_alu_ready_next),
 		.rs2_issue_alu_ready_next_i(rs2_issue_alu_ready_next),
 		.rs1_issue_alu_stable_bypass_i(rs1_issue_alu_stable_issue_bypass),
 		.rs2_issue_alu_stable_bypass_i(rs2_issue_alu_stable_issue_bypass),
