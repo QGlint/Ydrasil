@@ -201,6 +201,8 @@ COREMARK_SW_MAKE_ARGS = \
 		ABI=$(ABI)
 COREMARK_RESULT_LOG ?= $(HW_TRACE_OUT_DIR)/coremark/hw.log
 COREMARK_SIM_COMPARE ?= none
+COMPARE_TRACE_DEFINES = $(if $(filter none,$(SIM_COMPARE)),,$(if $(findstring +commit_trace,$(COMPARE_SIM_EXTRA_DEFINES)),,+commit_trace))
+COMPARE_SIM_DEFINES = $(strip $(COMPARE_SIM_EXTRA_DEFINES) $(COMPARE_TRACE_DEFINES))
 
 coremark:
 	@$(MAKE) -C sw coremark $(COREMARK_SW_MAKE_ARGS)
@@ -329,14 +331,14 @@ ifeq ($(SIM_COMPARE),none)
 		LOG_OUTPUT=0 \
 		ITCM_FILE=$(abspath $(COMPARE_ITCM)) \
 		DTCM_FILE=$(abspath $(COMPARE_DTCM)) \
-		SIM_EXTRA_DEFINES="$(COMPARE_SIM_EXTRA_DEFINES)" \
+		SIM_EXTRA_DEFINES="$(COMPARE_SIM_DEFINES)" \
 		> $(COMPARE_HW_LOG) 2>&1
 	@echo "[SIM] HW log: $(COMPARE_HW_LOG)"
 else ifeq ($(SIM_COMPARE),realtime)
 	@$(MAKE) get_spike
 	@echo "[SIM] Realtime compare: $(COMPARE_NAME)"
 	$(PYTHON) $(TRACE_COMPARE) --mode realtime \
-		--hw-cmd "$(MAKE) -C hw/dv sim VERILATOR_TRACE=0 LOG_OUTPUT=0 ITCM_FILE=$(abspath $(COMPARE_ITCM)) DTCM_FILE=$(abspath $(COMPARE_DTCM)) SIM_EXTRA_DEFINES='$(COMPARE_SIM_EXTRA_DEFINES)'" \
+		--hw-cmd "$(MAKE) -C hw/dv sim VERILATOR_TRACE=0 LOG_OUTPUT=0 ITCM_FILE=$(abspath $(COMPARE_ITCM)) DTCM_FILE=$(abspath $(COMPARE_DTCM)) SIM_EXTRA_DEFINES='$(COMPARE_SIM_DEFINES)'" \
 		--spike-cmd "env $(SPIKE_RUN_ENV) $(SPIKE) $(SPIKE_FLAGS) $(spike_stepout) $(spike_extension) $(abspath $(COMPARE_ELF))" \
 		--hw-log $(COMPARE_HW_LOG) \
 		--spike-log $(COMPARE_SPIKE_LOG) \
@@ -356,7 +358,7 @@ else ifeq ($(SIM_COMPARE),csv)
 		LOG_OUTPUT=0 \
 		ITCM_FILE=$(abspath $(COMPARE_ITCM)) \
 		DTCM_FILE=$(abspath $(COMPARE_DTCM)) \
-		SIM_EXTRA_DEFINES="$(COMPARE_SIM_EXTRA_DEFINES)" \
+		SIM_EXTRA_DEFINES="$(COMPARE_SIM_DEFINES)" \
 		> $(COMPARE_HW_LOG) 2>&1
 	@$(PYTHON) $(TRACE_TO_CSV) --log $(COMPARE_HW_LOG) --csv $(COMPARE_HW_CSV) --source ydrasil
 	@echo "[SIM] HW CSV: $(COMPARE_HW_CSV)"
@@ -387,7 +389,7 @@ commit_hw_trace:
 		LOG_OUTPUT=0 \
 		ITCM_FILE=$(SPIKE_MEM_BASE).itcm \
 		DTCM_FILE=$(SPIKE_MEM_BASE).dtcm \
-		SIM_EXTRA_DEFINES="+cpp_timeout=1000000 +sv_timeout=1000000" \
+		SIM_EXTRA_DEFINES="+cpp_timeout=1000000 +sv_timeout=1000000 +commit_trace" \
 		> $(HW_TRACE_LOG) 2>&1
 
 commit_hw_csv: commit_hw_trace
