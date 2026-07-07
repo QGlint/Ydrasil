@@ -448,145 +448,68 @@ end
 	localparam SEG_ADDR  = 32'h8020_0020;  // seg
 	localparam LED_ADDR  = 32'h8020_0040;  // led[31:0]
 	localparam CNT_ADDR  = 32'h8020_0050;  // counter
-	localparam SIM_STDOUT_ADDR = 32'h8020_0060;
-	localparam SIM_DUMP_ADDR   = 32'h8020_0064;
 
-	logic [31:0] LED;
-	logic [31:0] seg_wdata, cnt_rdata, mmio_rdata, dram_rdata;
+	wire [31:0] LED;
+	wire [31:0] seg_wdata;
 	logic sim_done;
-	logic sim_dump_en;
-	logic [39:0] seg_output;
-
-	// we don't care perip_mask in LED, SEG, SW & KEY, only care in DRAM
-	// write process
-	always_ff @(posedge clk) begin
-		if (rst) begin
-			LED <= 32'h0;
-			seg_wdata <= 32'h0;
-			sim_done <= 1'b0;
-			sim_dump_en <= 1'b0;
-		end else if (perip_wen) begin
-			case (perip_addr)
-				LED_ADDR: begin
-					LED <= perip_wdata;
-					sim_done <= (perip_wdata != 32'h0);
-				end
-				SEG_ADDR:   seg_wdata <= perip_wdata;
-				SIM_STDOUT_ADDR: $write("%c", perip_wdata[7:0]);
-				SIM_DUMP_ADDR: sim_dump_en <= perip_wdata[0];
-			endcase
-		end
-	end
+	bit finish_on_led;
+	bit finish_on_tohost;
+	bit perip_debug_en;
 
 	wire [31:0] virtual_led_output;
 	wire [39:0] virtual_seg_output;
 	wire [63:0] virtual_sw_input = 0;
 	wire [7:0]  virtual_key_input = 0;
+	wire        perip_req = u_dut.mmio_req;
 
-    // read process: in one cycle
-    always_comb begin
-        if (~perip_wen) begin
-            case (perip_addr)
-                SW0_ADDR:  mmio_rdata = virtual_sw_input[31:0];
-                SW1_ADDR:  mmio_rdata = virtual_sw_input[63:32];
-                KEY_ADDR:  mmio_rdata = {24'd0, virtual_key_input};
-                SEG_ADDR:  mmio_rdata = seg_wdata;
-                default:   mmio_rdata = 32'hDEAD_BEEF;
-            endcase
-        end else begin
-            mmio_rdata = 32'h0;
-        end
-    end
+	initial begin
+		finish_on_led = !$test$plusargs("no_finish_on_led");
+		finish_on_tohost = !$test$plusargs("no_finish_on_tohost");
+		perip_debug_en = $test$plusargs("perip_debug");
+	end
 
-    // seg driver
-  
-    assign seg_output[7]  = 0;
-    assign seg_output[17] = 0;
-    assign seg_output[27] = 0;
-    assign seg_output[37] = 0;
-    
+	perip_bridge bridge_inst (
+		.clk                (clk),
+		.cnt_clk            (clk),
+		.rst                (rst),
+		.perip_addr         (perip_addr),
+		.perip_wdata        (perip_wdata),
+		.perip_wen          (perip_wen),
+		.perip_mask         (perip_mask),
+		.perip_rdata        (perip_rdata),
+		.virtual_sw_input   (virtual_sw_input),
+		.virtual_key_input  (virtual_key_input),
+		.virtual_seg_output (virtual_seg_output),
+		.virtual_led_output (virtual_led_output)
+	);
 
-    // dram rw
-    // dram_driver dram_driver_inst (
-    //     .clk				(clk),
-    //     .perip_addr			(perip_addr[17:0]),
-    //     .perip_wdata		(perip_wdata),
-    //     .perip_mask			(perip_mask),
-    //     .dram_wen 			(perip_wen & (perip_addr >= DRAM_ADDR_START && perip_addr < DRAM_ADDR_END)),
-    //     .perip_rdata		(dram_rdata)
-    // );
+	assign LED = virtual_led_output;
+	assign seg_wdata = bridge_inst.seg_wdata;
 
-    // counter rw
-    // counter counter_inst (
-    //     .clk				(cnt_clk),
-    //     .rst                (rst),
-    //     .perip_wdata		(perip_wdata),
-    //     .cnt_wen 			(perip_wen & (perip_addr == CNT_ADDR)),
-    //     .perip_rdata		(cnt_rdata)
-    // );
+	always_ff @(posedge clk) begin
+		if (rst) begin
+			sim_done <= 1'b0;
+		end else if (finish_on_led && perip_wen && (perip_addr == LED_ADDR) && (perip_wdata != 32'h0)) begin
+			sim_done <= 1'b1;
+		end
 
-	wire cnt_wen ;
-	assign cnt_wen = perip_wen & (perip_addr == CNT_ADDR);
-
-    reg [31:0] mmio_rdata_reg;
-    reg [31:0] back_rdata;
-    always_ff @(posedge clk) begin
-        mmio_rdata_reg <= back_rdata;
-    end
-    assign perip_rdata = mmio_rdata_reg;
-    assign back_rdata = {32{perip_addr == SW0_ADDR}} & mmio_rdata |
-                        {32{perip_addr == SW1_ADDR}} & mmio_rdata |
-                        {32{perip_addr == KEY_ADDR}} & mmio_rdata |
-                        {32{perip_addr == SEG_ADDR}} & mmio_rdata |
-                        // {32{perip_addr >= DRAM_ADDR_START && perip_addr < DRAM_ADDR_END}} & dram_rdata |
-                        {32{perip_addr == CNT_ADDR}} & cnt_rdata;
-    
-
-
-    assign virtual_led_output = LED;
-    assign virtual_seg_output = seg_output;
-    logic [15:0] cnt_1ms;
-    logic [31:0] cnt_ms;
-    logic start;
-
-
-    always_ff @(posedge clk) begin
-        if (rst) begin
-            start <= 0;
-        end else if (cnt_wen & perip_wdata == 32'h8000_0000) begin
-            start <= 1;
-        end else if (cnt_wen & perip_wdata == 32'hFFFF_FFFF) begin
-            start <= 0;
-        end
-    end
-
-    always_ff @(posedge clk) begin
-        if (rst) begin
-            cnt_1ms <= 0;
-        end else if (start) begin
-            if (cnt_1ms == 49999) begin
-                cnt_1ms <= 0;
-            end else begin
-                cnt_1ms <= cnt_1ms + 1;
-            end
-        end else begin
-            cnt_1ms <= 0;
-        end
-    end
-
-    always_ff @(posedge clk) begin
-        if (rst) begin
-            cnt_ms <= 0;
-        end else if (start && cnt_1ms == 49999) begin
-            cnt_ms <= cnt_ms + 1;
-        end
-    end
-
-    assign cnt_rdata = cnt_ms;
+		if (!rst && perip_debug_en && perip_req) begin
+			if (perip_wen) begin
+				case (perip_addr)
+					LED_ADDR: $display("[PERIP] time=%0t LED write 0x%08h", $time, perip_wdata);
+					SEG_ADDR: $display("[PERIP] time=%0t SEG write 0x%08h", $time, perip_wdata);
+					CNT_ADDR: $display("[PERIP] time=%0t CNT write 0x%08h", $time, perip_wdata);
+					default: ;
+				endcase
+			end else if (perip_addr == CNT_ADDR) begin
+				$display("[PERIP] time=%0t CNT read rdata=0x%08h", $time, perip_rdata);
+			end
+		end
+	end
 
     // 对pc_write_to_host_cnt的变化进行监控
     always @(pc_write_to_host_cnt) begin
-        if (pc_write_to_host_cnt == 32'd8) begin
+        if (finish_on_tohost && (pc_write_to_host_cnt == 32'd8)) begin
             ipc = (instruction_count > 0 && cycle_count > 0) ? (instruction_count * 1.0) / cycle_count : 0.0;
             bp_accuracy = (bp_branch_count > 0) ?
                 ((bp_branch_count - bp_mispredict_count) * 100.0) / bp_branch_count : 0.0;

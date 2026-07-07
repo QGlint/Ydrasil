@@ -50,6 +50,11 @@ import ydrasil_pkg::*;
     reg [FIFO_PTR_WIDTH-1:0] mul_commit_idx_q [0:FIFO_DEPTH-1];
     reg [FIFO_PTR_WIDTH-1:0] mul_rptr_q;
     reg [FIFO_PTR_WIDTH-1:0] mul_wptr_q;
+    bit trace_en;
+
+    initial begin
+        trace_en = $test$plusargs("commit_trace");
+    end
 
     task automatic print_gpr_commit;
         input [INST_ADDR_WIDTH-1:0] pc;
@@ -57,7 +62,7 @@ import ydrasil_pkg::*;
         input [REGS_ADDR_WIDTH-1:0] waddr;
         input [REGS_DATA_WIDTH-1:0] wdata;
         begin
-            if (waddr != '0) begin
+            if (trace_en && (waddr != '0)) begin
                 $display("core   0: 0x%08h (0x%08h) unknown", pc, instr);
                 $display("3 0x%08h (0x%08h) x%0d 0x%08h", pc, instr, waddr, wdata);
             end

@@ -34,6 +34,10 @@ sources:
 
   - target: ip_tb
     files:
+      - ../jyd_fpga/rtl/seg7.sv
+      - ../jyd_fpga/rtl/display_seg.sv
+      - ../jyd_fpga/rtl/counter.sv
+      - ../jyd_fpga/rtl/perip_bridge.sv
       - dv/ydrasil_commit_trace.sv
       - dv/ydrasil_core_tb.sv
       - dv/ydrasil_branch_predictor_tb.sv
