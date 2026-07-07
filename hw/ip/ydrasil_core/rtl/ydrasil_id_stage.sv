@@ -103,61 +103,126 @@ import ydrasil_pipeline_pkg::*;
 #(
     parameter int DATA_WIDTH = 32
 )(
-    input  wire [DATA_WIDTH-1:0] if_id0_pc_i,
-    input  wire [DATA_WIDTH-1:0] if_id0_instr_i,
-    input  wire                  if_id0_pred_hit_i,
-    input  wire                  if_id0_pred_taken_i,
-    input  wire [DATA_WIDTH-1:0] if_id0_pred_target_i,
-    input  wire [1:0]            if_id0_pred_counter_i,
-    input  wire [DATA_WIDTH-1:0] if_id0_pred_bht_index_i,
-    input  wire                  if_id0_pred_l0_taken_i,
-    input  wire                  if_id0_valid_i,
+    input  wire                  clk,
+    input  wire                  rst_n,
+    input  wire                  stall_id_i,
+    input  wire                  bubble_id_i,
+    input  wire                  flush_id_i,
+    input  fetch_pair_pkt_t      if_id_fetch_pair_i,
 
-    input  wire [DATA_WIDTH-1:0] if_id1_pc_i,
-    input  wire [DATA_WIDTH-1:0] if_id1_instr_i,
-    input  wire                  if_id1_pred_hit_i,
-    input  wire                  if_id1_pred_taken_i,
-    input  wire [DATA_WIDTH-1:0] if_id1_pred_target_i,
-    input  wire [1:0]            if_id1_pred_counter_i,
-    input  wire [DATA_WIDTH-1:0] if_id1_pred_bht_index_i,
-    input  wire                  if_id1_pred_l0_taken_i,
-    input  wire                  if_id1_valid_i,
-
-    output decode_pair_pkt_t     id_decode_pair_o
+    output decode_pair_pkt_t     id_decode_pair_o,
+    output wire                  consume_two_o
 );
     decode_pkt_t slot0_dec;
     decode_pkt_t slot1_dec;
+    decode_pair_pkt_t decode_pair_next;
+    decode_pair_pkt_t decode_pair_ff;
+    pair_ctrl_t  decode_pair_ctrl;
+    wire slot0_pair_stop;
+    wire slot1_pair_simple_alu;
+    wire slot1_pair_unsupported;
+    wire slot0_pair_writes_rd;
+    wire slot1_pair_uses_rs2;
+    wire slot_pair_raw;
+    wire slot_pair_waw;
+    wire id_hold;
 
     ydrasil_decode_slot #(
         .DATA_WIDTH(DATA_WIDTH)
     ) u_decode_slot0 (
-        .pc_i            (if_id0_pc_i),
-        .instr_i         (if_id0_instr_i),
-        .pred_hit_i      (if_id0_pred_hit_i),
-        .pred_taken_i    (if_id0_pred_taken_i),
-        .pred_target_i   (if_id0_pred_target_i),
-        .pred_counter_i  (if_id0_pred_counter_i),
-        .pred_bht_index_i(if_id0_pred_bht_index_i),
-        .pred_l0_taken_i (if_id0_pred_l0_taken_i),
-        .valid_i         (if_id0_valid_i),
+        .pc_i            (if_id_fetch_pair_i.slot0.pc),
+        .instr_i         (if_id_fetch_pair_i.slot0.instr),
+        .pred_hit_i      (if_id_fetch_pair_i.slot0.pred.hit),
+        .pred_taken_i    (if_id_fetch_pair_i.slot0.pred.taken),
+        .pred_target_i   (if_id_fetch_pair_i.slot0.pred.target),
+        .pred_counter_i  (if_id_fetch_pair_i.slot0.pred.counter),
+        .pred_bht_index_i(if_id_fetch_pair_i.slot0.pred.bht_index),
+        .pred_l0_taken_i (if_id_fetch_pair_i.slot0.pred.l0_taken),
+        .valid_i         (if_id_fetch_pair_i.slot0.valid),
         .decode_pkt_o    (slot0_dec)
     );
 
     ydrasil_decode_slot #(
         .DATA_WIDTH(DATA_WIDTH)
     ) u_decode_slot1 (
-        .pc_i            (if_id1_pc_i),
-        .instr_i         (if_id1_instr_i),
-        .pred_hit_i      (if_id1_pred_hit_i),
-        .pred_taken_i    (if_id1_pred_taken_i),
-        .pred_target_i   (if_id1_pred_target_i),
-        .pred_counter_i  (if_id1_pred_counter_i),
-        .pred_bht_index_i(if_id1_pred_bht_index_i),
-        .pred_l0_taken_i (if_id1_pred_l0_taken_i),
-        .valid_i         (if_id1_valid_i),
+        .pc_i            (if_id_fetch_pair_i.slot1.pc),
+        .instr_i         (if_id_fetch_pair_i.slot1.instr),
+        .pred_hit_i      (if_id_fetch_pair_i.slot1.pred.hit),
+        .pred_taken_i    (if_id_fetch_pair_i.slot1.pred.taken),
+        .pred_target_i   (if_id_fetch_pair_i.slot1.pred.target),
+        .pred_counter_i  (if_id_fetch_pair_i.slot1.pred.counter),
+        .pred_bht_index_i(if_id_fetch_pair_i.slot1.pred.bht_index),
+        .pred_l0_taken_i (if_id_fetch_pair_i.slot1.pred.l0_taken),
+        .valid_i         (if_id_fetch_pair_i.slot1.valid),
         .decode_pkt_o    (slot1_dec)
     );
 
-    assign id_decode_pair_o.slot0 = slot0_dec;
-    assign id_decode_pair_o.slot1 = slot1_dec;
+    assign decode_pair_next.slot0 = slot0_dec;
+    assign decode_pair_next.slot1 = slot1_dec;
+    assign decode_pair_next.pair_ctrl = decode_pair_ctrl;
+    assign id_decode_pair_o = decode_pair_ff;
+    assign id_hold = stall_id_i | bubble_id_i;
+    assign consume_two_o = !id_hold && !flush_id_i &&
+        decode_pair_ctrl.decode_pair_allow;
+
+    assign slot0_pair_stop =
+        slot0_dec.operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] |
+        slot0_dec.operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE] |
+        slot0_dec.operator_type[ydrasil_pkg::OPERATOR_TYPE_CSR] |
+        slot0_dec.operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS] |
+        slot0_dec.fence_i;
+    assign slot1_pair_simple_alu =
+        slot1_dec.operator_type[ydrasil_pkg::OPERATOR_TYPE_ALU] &&
+        !slot1_dec.operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] &&
+        !slot1_dec.operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
+        !slot1_dec.operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
+        !slot1_dec.operator_type[ydrasil_pkg::OPERATOR_TYPE_CSR] &&
+        !slot1_dec.operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS] &&
+        !slot1_dec.operator_type[ydrasil_pkg::OPERATOR_TYPE_MUL] &&
+        !slot1_dec.operator_type[ydrasil_pkg::OPERATOR_TYPE_BITMANIP] &&
+        !slot1_dec.fence_i;
+    assign slot1_pair_unsupported = slot1_dec.valid && !slot1_pair_simple_alu;
+    assign slot0_pair_writes_rd =
+        slot0_dec.valid &&
+        (slot0_dec.rf_wen_rd || slot0_dec.operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD]) &&
+        (slot0_dec.rf_waddr_rd != '0) &&
+        !slot0_dec.operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS];
+    assign slot1_pair_uses_rs2 =
+        slot1_dec.rf_ren_rs2 || slot1_dec.operand_b_rs_sel ||
+        slot1_dec.operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE];
+    assign slot_pair_raw =
+        slot0_pair_writes_rd && slot1_dec.valid &&
+        ((slot1_dec.rf_ren_rs1 &&
+          (slot1_dec.rf_raddr_rs1 == slot0_dec.rf_waddr_rd)) ||
+         (slot1_pair_uses_rs2 &&
+          (slot1_dec.rf_raddr_rs2 == slot0_dec.rf_waddr_rd)));
+    assign slot_pair_waw =
+        slot0_pair_writes_rd && slot1_dec.valid &&
+        (slot1_dec.rf_wen_rd || slot1_dec.operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD]) &&
+        (slot1_dec.rf_waddr_rd != '0) &&
+        (slot1_dec.rf_waddr_rd == slot0_dec.rf_waddr_rd);
+
+    always_comb begin
+        decode_pair_ctrl = if_id_fetch_pair_i.pair_ctrl;
+        decode_pair_ctrl.decode_pair_allow =
+            if_id_fetch_pair_i.pair_ctrl.slot1_valid &&
+            slot0_dec.valid && slot1_dec.valid &&
+            !slot0_pair_stop && !slot1_pair_unsupported &&
+            !slot_pair_raw && !slot_pair_waw;
+        if (if_id_fetch_pair_i.pair_ctrl.block_reason == PAIR_BLOCK_NONE &&
+            if_id_fetch_pair_i.pair_ctrl.slot1_valid &&
+            !decode_pair_ctrl.decode_pair_allow) begin
+            decode_pair_ctrl.block_reason = PAIR_BLOCK_RULE;
+        end
+    end
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            decode_pair_ff <= '0;
+        end else if (flush_id_i) begin
+            decode_pair_ff <= '0;
+        end else if (!id_hold) begin
+            decode_pair_ff <= decode_pair_next;
+        end
+    end
 endmodule

@@ -30,22 +30,6 @@ import ydrasil_pkg::*;
 
     reg [REGS_DATA_WIDTH-1:0] prf_q [0:PHYS_REGS-1];
 
-    function automatic [REGS_DATA_WIDTH-1:0] read_prf;
-        input rd_en;
-        input [PREG_BITS-1:0] rd_addr;
-        begin
-            if (!rd_en || (rd_addr == '0)) begin
-                read_prf = '0;
-            end else if (wr1_en_i && (wr1_addr_i == rd_addr) && (wr1_addr_i != '0)) begin
-                read_prf = wr1_data_i;
-            end else if (wr0_en_i && (wr0_addr_i == rd_addr) && (wr0_addr_i != '0)) begin
-                read_prf = wr0_data_i;
-            end else begin
-                read_prf = prf_q[rd_addr];
-            end
-        end
-    endfunction
-
     always_ff @(posedge clk or negedge rst_n) begin
         integer i;
         if (!rst_n) begin
@@ -62,9 +46,25 @@ import ydrasil_pkg::*;
         end
     end
 
-    assign rd0_data_o = read_prf(rd0_en_i, rd0_addr_i);
-    assign rd1_data_o = read_prf(rd1_en_i, rd1_addr_i);
-    assign rd2_data_o = read_prf(rd2_en_i, rd2_addr_i);
-    assign rd3_data_o = read_prf(rd3_en_i, rd3_addr_i);
+    assign rd0_data_o =
+        (!rd0_en_i || (rd0_addr_i == '0)) ? '0 :
+        (wr1_en_i && (wr1_addr_i == rd0_addr_i) && (wr1_addr_i != '0)) ? wr1_data_i :
+        (wr0_en_i && (wr0_addr_i == rd0_addr_i) && (wr0_addr_i != '0)) ? wr0_data_i :
+        prf_q[rd0_addr_i];
+    assign rd1_data_o =
+        (!rd1_en_i || (rd1_addr_i == '0)) ? '0 :
+        (wr1_en_i && (wr1_addr_i == rd1_addr_i) && (wr1_addr_i != '0)) ? wr1_data_i :
+        (wr0_en_i && (wr0_addr_i == rd1_addr_i) && (wr0_addr_i != '0)) ? wr0_data_i :
+        prf_q[rd1_addr_i];
+    assign rd2_data_o =
+        (!rd2_en_i || (rd2_addr_i == '0)) ? '0 :
+        (wr1_en_i && (wr1_addr_i == rd2_addr_i) && (wr1_addr_i != '0)) ? wr1_data_i :
+        (wr0_en_i && (wr0_addr_i == rd2_addr_i) && (wr0_addr_i != '0)) ? wr0_data_i :
+        prf_q[rd2_addr_i];
+    assign rd3_data_o =
+        (!rd3_en_i || (rd3_addr_i == '0)) ? '0 :
+        (wr1_en_i && (wr1_addr_i == rd3_addr_i) && (wr1_addr_i != '0)) ? wr1_data_i :
+        (wr0_en_i && (wr0_addr_i == rd3_addr_i) && (wr0_addr_i != '0)) ? wr0_data_i :
+        prf_q[rd3_addr_i];
 
 endmodule

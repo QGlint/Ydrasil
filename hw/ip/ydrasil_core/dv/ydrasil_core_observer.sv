@@ -2,6 +2,7 @@
 
 module ydrasil_core_observer
 import ydrasil_pkg::*;
+import ydrasil_pipeline_pkg::*;
 #(
     parameter int RN_SHADOW_PHYS_REGS = 64,
     parameter int RN_SHADOW_ROB_DEPTH = 16,
@@ -10,126 +11,8 @@ import ydrasil_pkg::*;
 ) (
     input wire clk,
     input wire rst_n,
-    input wire flush_id,
-    input wire flush_ex,
-    input wire interrupt,
-
-    input wire [INST_DATA_WIDTH-1:0] if_id_instr,
-    input wire [INST_ADDR_WIDTH-1:0] bp_predict_pc,
-    input wire bp_predict_hit,
-    input wire bp_predict_taken,
-    input wire [INST_ADDR_WIDTH-1:0] bp_predict_target,
-    input wire [1:0] bp_predict_counter,
-    input wire dbg_bp_resolve_valid,
-    input wire [INST_ADDR_WIDTH-1:0] dbg_bp_resolve_pc,
-    input wire dbg_bp_actual_taken,
-    input wire [INST_ADDR_WIDTH-1:0] dbg_bp_actual_target,
-    input wire [INST_ADDR_WIDTH-1:0] dbg_bp_actual_next_pc,
-    input wire dbg_bp_pred_hit,
-    input wire dbg_bp_pred_taken,
-    input wire [INST_ADDR_WIDTH-1:0] dbg_bp_pred_target,
-    input wire [1:0] dbg_bp_pred_counter,
-    input wire dbg_bp_pred_l0_taken,
-    input wire [INST_ADDR_WIDTH-1:0] dbg_bp_pred_next_pc,
-    input wire dbg_bp_mispredict,
-
-    input wire alu_rf_wen_rd,
-    input wire [REGS_ADDR_WIDTH-1:0] alu_rf_waddr_rd,
-    input wire [REGS_DATA_WIDTH-1:0] alu_result,
-    input wire [5:0] alu_rn_pdst,
-    input wire lsu_rf_wen_rd,
-    input wire [REGS_ADDR_WIDTH-1:0] lsu_rf_waddr_rd,
-    input wire [REGS_DATA_WIDTH-1:0] lsu_wb_result,
-    input wire wb_mul_complete,
-    input wire [REGS_ADDR_WIDTH-1:0] wb_mul_complete_waddr,
-    input wire pipe1_alu_rf_wen_rd_to_wb,
-    input wire [REGS_ADDR_WIDTH-1:0] pipe1_alu_rf_waddr_rd_to_wb,
-    input wire [REGS_DATA_WIDTH-1:0] pipe1_alu_result_to_wb,
-
-    input wire id_ex_valid,
-    input wire id_ex_rd_issue,
-    input wire id_alu_rf_wen_rd,
-    input wire [REGS_ADDR_WIDTH-1:0] id_rf_waddr_rd,
-    input wire [OPERATOR_TYPE_WIDTH-1:0] operator_type,
-    input wire id_ctrl_rs1_ren,
-    input wire id_ctrl_rs2_ren,
-    input wire id_ctrl_rd_wen,
-    input wire [REGS_ADDR_WIDTH-1:0] id_ctrl_rs1_addr,
-    input wire [REGS_ADDR_WIDTH-1:0] id_ctrl_rs2_addr,
-    input wire [REGS_ADDR_WIDTH-1:0] id_ctrl_rd_addr,
-    input wire [INST_ADDR_WIDTH-1:0] id_instr_addr,
-    input wire rn_alloc_valid,
-    input wire [REGS_ADDR_WIDTH-1:0] rn_alloc_rd_addr,
-    input wire commit_trace_alloc_valid,
-    input wire [INST_ADDR_WIDTH-1:0] commit_trace_alloc_pc,
-    input wire [INST_DATA_WIDTH-1:0] commit_trace_alloc_instr,
-
-    input wire pipe1_issue_valid,
-    input wire pipe1_issue_valid_to_ex,
-    input wire pipe1_rf_wen_rd_to_ex,
-    input wire [REGS_ADDR_WIDTH-1:0] pipe1_rf_waddr_rd_to_ex,
-    input wire pipe1_rd_issue,
-    input wire [REGS_ADDR_WIDTH-1:0] pipe1_rf_waddr_rd_issue,
-    input wire [REGS_ADDR_WIDTH-1:0] pipe1_rf_raddr_rs1,
-    input wire [REGS_ADDR_WIDTH-1:0] pipe1_rf_raddr_rs2,
-    input wire [INST_ADDR_WIDTH-1:0] pipe1_pc,
-    input wire pipe1_commit_rf_wen,
-
-    input wire rs1_pending_stall,
-    input wire rs2_pending_stall,
-    input wire rd_waw_stall,
-
-    input wire wb_rf_wen_rd,
-    input wire [REGS_ADDR_WIDTH-1:0] wb_rf_waddr_rd,
-    input wire [REGS_DATA_WIDTH-1:0] wb_rf_wdata_rd,
-    input wire wb_hzd_valid,
-    input wire [REGS_ADDR_WIDTH-1:0] wb_hzd_addr,
-    input wire ex_mul_issue,
-    input wire rf_wen_rd,
-    input wire [REGS_ADDR_WIDTH-1:0] rf_waddr_rd,
-    input wire [REGS_DATA_WIDTH-1:0] rf_wdata_rd,
-
-    input wire prf_rd0_en,
-    input wire prf_rd1_en,
-    input wire prf_rd2_en,
-    input wire prf_rd3_en,
-    input wire [5:0] prf_rd0_addr,
-    input wire [5:0] prf_rd1_addr,
-    input wire [5:0] prf_rd2_addr,
-    input wire [5:0] prf_rd3_addr,
-    input wire prf_wr0_en,
-    input wire prf_wr1_en,
-    input wire [5:0] prf_wr0_addr,
-    input wire [5:0] prf_wr1_addr,
-    input wire [REGS_DATA_WIDTH-1:0] prf_wr0_data,
-    input wire [REGS_DATA_WIDTH-1:0] prf_wr1_data,
-
-    input wire rn_real_wb_pdst_found,
-    input wire [5:0] rn_real_wb_pdst,
-    input wire rn_real_lsu_pdst_found,
-    input wire [5:0] rn_real_lsu_pdst,
-    input wire rn_real_mul_pdst_found,
-    input wire [5:0] rn_real_mul_pdst,
-    input wire rn_real_pipe1_pdst_found,
-    input wire [5:0] rn_real_pipe1_pdst,
-
-    output wire [31:0] dbg_bp_predict_pc_o,
-    output wire dbg_bp_predict_hit_o,
-    output wire dbg_bp_predict_taken_o,
-    output wire [31:0] dbg_bp_predict_target_o,
-    output wire [1:0] dbg_bp_predict_counter_o,
-    output wire dbg_bp_resolve_valid_o,
-    output wire [31:0] dbg_bp_resolve_pc_o,
-    output wire dbg_bp_actual_taken_o,
-    output wire [31:0] dbg_bp_actual_target_o,
-    output wire [31:0] dbg_bp_actual_next_pc_o,
-    output wire dbg_bp_pred_hit_o,
-    output wire dbg_bp_pred_taken_o,
-    output wire [31:0] dbg_bp_pred_target_o,
-    output wire [1:0] dbg_bp_pred_counter_o,
-    output wire dbg_bp_pred_l0_taken_o,
-    output wire [31:0] dbg_bp_pred_next_pc_o,
-    output wire dbg_bp_mispredict_o
+    input observer_pkt_t observer_i,
+    output observer_dbg_pkt_t observer_dbg_o
 );
 
     localparam [4:0] RN_SHADOW_ROB_DEPTH_COUNT = 5'd16;
@@ -192,31 +75,31 @@ import ydrasil_pkg::*;
     logic [31:0] perf_prf_bypass_rd2;
     logic [31:0] perf_prf_bypass_rd3;
 
-    assign dbg_bp_predict_pc_o = bp_predict_pc;
-    assign dbg_bp_predict_hit_o = bp_predict_hit;
-    assign dbg_bp_predict_taken_o = bp_predict_taken;
-    assign dbg_bp_predict_target_o = bp_predict_target;
-    assign dbg_bp_predict_counter_o = bp_predict_counter;
-    assign dbg_bp_resolve_valid_o = dbg_bp_resolve_valid;
-    assign dbg_bp_resolve_pc_o = dbg_bp_resolve_pc;
-    assign dbg_bp_actual_taken_o = dbg_bp_actual_taken;
-    assign dbg_bp_actual_target_o = dbg_bp_actual_target;
-    assign dbg_bp_actual_next_pc_o = dbg_bp_actual_next_pc;
-    assign dbg_bp_pred_hit_o = dbg_bp_pred_hit;
-    assign dbg_bp_pred_taken_o = dbg_bp_pred_taken;
-    assign dbg_bp_pred_target_o = dbg_bp_pred_target;
-    assign dbg_bp_pred_counter_o = dbg_bp_pred_counter;
-    assign dbg_bp_pred_l0_taken_o = dbg_bp_pred_l0_taken;
-    assign dbg_bp_pred_next_pc_o = dbg_bp_pred_next_pc;
-    assign dbg_bp_mispredict_o = dbg_bp_mispredict;
+    assign observer_dbg_o.bp_predict_pc = observer_i.bp_predict_pc;
+    assign observer_dbg_o.bp_predict_hit = observer_i.bp_predict_hit;
+    assign observer_dbg_o.bp_predict_taken = observer_i.bp_predict_taken;
+    assign observer_dbg_o.bp_predict_target = observer_i.bp_predict_target;
+    assign observer_dbg_o.bp_predict_counter = observer_i.bp_predict_counter;
+    assign observer_dbg_o.bp_resolve_valid = observer_i.dbg_bp_resolve_valid;
+    assign observer_dbg_o.bp_resolve_pc = observer_i.dbg_bp_resolve_pc;
+    assign observer_dbg_o.bp_actual_taken = observer_i.dbg_bp_actual_taken;
+    assign observer_dbg_o.bp_actual_target = observer_i.dbg_bp_actual_target;
+    assign observer_dbg_o.bp_actual_next_pc = observer_i.dbg_bp_actual_next_pc;
+    assign observer_dbg_o.bp_pred_hit = observer_i.dbg_bp_pred_hit;
+    assign observer_dbg_o.bp_pred_taken = observer_i.dbg_bp_pred_taken;
+    assign observer_dbg_o.bp_pred_target = observer_i.dbg_bp_pred_target;
+    assign observer_dbg_o.bp_pred_counter = observer_i.dbg_bp_pred_counter;
+    assign observer_dbg_o.bp_pred_l0_taken = observer_i.dbg_bp_pred_l0_taken;
+    assign observer_dbg_o.bp_pred_next_pc = observer_i.dbg_bp_pred_next_pc;
+    assign observer_dbg_o.bp_mispredict = observer_i.dbg_bp_mispredict;
 
     wire [REGS_NUM-1:0] gpr_pending_for_hazard = '0;
     wire [REGS_NUM-1:0] gpr_pending_q = '0;
     wire [REGS_NUM-1:0] gpr_pending_clear_mask =
-        (wb_hzd_valid & (wb_hzd_addr != '0)) ?
-        (REGS_NUM'(1) << wb_hzd_addr) : '0;
+        (observer_i.wb_hzd_valid & (observer_i.wb_hzd_addr != '0)) ?
+        (REGS_NUM'(1) << observer_i.wb_hzd_addr) : '0;
     wire [REGS_NUM-1:0] gpr_pending_issue_mask =
-        id_ex_rd_issue ? (REGS_NUM'(1) << id_rf_waddr_rd) : '0;
+        observer_i.id_ex_rd_issue ? (REGS_NUM'(1) << observer_i.id_rf_waddr_rd) : '0;
 
     logic [RN_SHADOW_PREG_BITS-1:0] rn_shadow_rat_q [0:REGS_NUM-1];
     logic [RN_SHADOW_PREG_BITS-1:0] rn_shadow_amt_q [0:REGS_NUM-1];
@@ -230,14 +113,14 @@ import ydrasil_pkg::*;
     logic [RN_SHADOW_PREG_BITS-1:0] rn_shadow_rob_old_pdst_q [0:RN_SHADOW_ROB_DEPTH-1];
 
     wire rn_shadow_alloc1_valid =
-        rn_alloc_valid & id_ctrl_rd_wen & (id_ctrl_rd_addr != '0) &
-        (rn_alloc_rd_addr != '0);
+        observer_i.rn_alloc_valid & observer_i.id_ctrl_rd_wen & (observer_i.id_ctrl_rd_addr != '0) &
+        (observer_i.rn_alloc_rd_addr != '0);
     wire rn_shadow_same_cycle_raw =
         rn_shadow_alloc1_valid &
-        (((if_id_instr[19:15] != '0) && (if_id_instr[19:15] == id_ctrl_rd_addr)) |
-         ((if_id_instr[24:20] != '0) && (if_id_instr[24:20] == id_ctrl_rd_addr)));
+        (((observer_i.if_id_instr[19:15] != '0) && (observer_i.if_id_instr[19:15] == observer_i.id_ctrl_rd_addr)) |
+         ((observer_i.if_id_instr[24:20] != '0) && (observer_i.if_id_instr[24:20] == observer_i.id_ctrl_rd_addr)));
     wire rn_shadow_same_cycle_waw =
-        rn_shadow_alloc1_valid & (rn_alloc_rd_addr == id_ctrl_rd_addr);
+        rn_shadow_alloc1_valid & (observer_i.rn_alloc_rd_addr == observer_i.id_ctrl_rd_addr);
 
     function automatic [RN_SHADOW_PREG_BITS-1:0] rn_shadow_first_free;
         input [RN_SHADOW_PHYS_REGS-1:0] free_map;
@@ -375,7 +258,7 @@ import ydrasil_pkg::*;
             perf_rob_head_wait_mul = '0;
             perf_rob_head_wait_flush_lost = '0;
         end else begin
-            if (flush_id | flush_ex | interrupt) begin
+            if (observer_i.flush_id | observer_i.flush_ex | observer_i.interrupt) begin
                 rn_shadow_free_q = '1;
                 rn_shadow_free_q[0] = 1'b0;
                 rn_shadow_busy_q = '0;
@@ -401,17 +284,17 @@ import ydrasil_pkg::*;
                 end
                 perf_rn_flush_restore = perf_rn_flush_restore + 32'd1;
             end else begin
-                if (alu_rf_wen_rd && (alu_rf_waddr_rd != '0)) begin
-                    rn_shadow_mark_ready(alu_rf_waddr_rd, RN_PROD_ALU);
+                if (observer_i.alu_rf_wen_rd && (observer_i.alu_rf_waddr_rd != '0)) begin
+                    rn_shadow_mark_ready(observer_i.alu_rf_waddr_rd, RN_PROD_ALU);
                 end
-                if (lsu_rf_wen_rd && (lsu_rf_waddr_rd != '0)) begin
-                    rn_shadow_mark_ready(lsu_rf_waddr_rd, RN_PROD_LSU);
+                if (observer_i.lsu_rf_wen_rd && (observer_i.lsu_rf_waddr_rd != '0)) begin
+                    rn_shadow_mark_ready(observer_i.lsu_rf_waddr_rd, RN_PROD_LSU);
                 end
-                if (wb_mul_complete && (wb_mul_complete_waddr != '0)) begin
-                    rn_shadow_mark_ready(wb_mul_complete_waddr, RN_PROD_MUL);
+                if (observer_i.wb_mul_complete && (observer_i.wb_mul_complete_waddr != '0)) begin
+                    rn_shadow_mark_ready(observer_i.wb_mul_complete_waddr, RN_PROD_MUL);
                 end
-                if (pipe1_alu_rf_wen_rd_to_wb && (pipe1_alu_rf_waddr_rd_to_wb != '0)) begin
-                    rn_shadow_mark_ready(pipe1_alu_rf_waddr_rd_to_wb, RN_PROD_P1);
+                if (observer_i.pipe1_alu_rf_wen_rd_to_wb && (observer_i.pipe1_alu_rf_waddr_rd_to_wb != '0)) begin
+                    rn_shadow_mark_ready(observer_i.pipe1_alu_rf_waddr_rd_to_wb, RN_PROD_P1);
                 end
 
                 if ((rn_shadow_rob_occ_q != '0) &&
@@ -441,7 +324,7 @@ import ydrasil_pkg::*;
                     end
                 end
 
-                if (id_ex_rd_issue &&
+                if (observer_i.id_ex_rd_issue &&
                     ((rn_shadow_free_count_q == 7'd0) ||
                      (rn_shadow_rob_occ_q == RN_SHADOW_ROB_DEPTH_COUNT))) begin
                     perf_rn_full_stall = perf_rn_full_stall + 32'd1;
@@ -451,27 +334,27 @@ import ydrasil_pkg::*;
                         perf_rn_full_stall_rob = perf_rn_full_stall_rob + 32'd1;
                     end
                     perf_rob_full_stall = perf_rob_full_stall + 32'd1;
-                end else if (id_ex_rd_issue) begin
+                end else if (observer_i.id_ex_rd_issue) begin
                     new_pdst = rn_shadow_first_free(rn_shadow_free_q);
-                    old_pdst = rn_shadow_rat_q[id_rf_waddr_rd];
+                    old_pdst = rn_shadow_rat_q[observer_i.id_rf_waddr_rd];
                     rn_shadow_free_q[new_pdst] = 1'b0;
                     rn_shadow_busy_q[new_pdst] = 1'b1;
-                    rn_shadow_rat_q[id_rf_waddr_rd] = new_pdst;
+                    rn_shadow_rat_q[observer_i.id_rf_waddr_rd] = new_pdst;
                     rn_shadow_free_count_q = rn_shadow_free_count_q - 7'd1;
                     rn_shadow_rob_valid_q[rn_shadow_rob_tail_q] = 1'b1;
                     rn_shadow_rob_ready_q[rn_shadow_rob_tail_q] = 1'b0;
-                    rn_shadow_rob_arch_rd_q[rn_shadow_rob_tail_q] = id_rf_waddr_rd;
+                    rn_shadow_rob_arch_rd_q[rn_shadow_rob_tail_q] = observer_i.id_rf_waddr_rd;
                     rn_shadow_rob_new_pdst_q[rn_shadow_rob_tail_q] = new_pdst;
                     rn_shadow_rob_old_pdst_q[rn_shadow_rob_tail_q] = old_pdst;
                     rn_shadow_rob_producer_q[rn_shadow_rob_tail_q] =
-                        operator_type[OPERATOR_TYPE_LOAD] ? RN_PROD_LSU :
-                        (operator_type[OPERATOR_TYPE_MUL] ? RN_PROD_MUL : RN_PROD_ALU);
+                        observer_i.operator_type[OPERATOR_TYPE_LOAD] ? RN_PROD_LSU :
+                        (observer_i.operator_type[OPERATOR_TYPE_MUL] ? RN_PROD_MUL : RN_PROD_ALU);
                     rn_shadow_rob_tail_q = rn_shadow_rob_tail_q + RN_SHADOW_ROB_PTR_BITS'(1);
                     rn_shadow_rob_occ_q = rn_shadow_rob_occ_q + 5'd1;
                     perf_rn_alloc0 = perf_rn_alloc0 + 32'd1;
                 end
 
-                if (pipe1_rd_issue &&
+                if (observer_i.pipe1_rd_issue &&
                     ((rn_shadow_free_count_q == 7'd0) ||
                      (rn_shadow_rob_occ_q == RN_SHADOW_ROB_DEPTH_COUNT))) begin
                     perf_rn_full_stall = perf_rn_full_stall + 32'd1;
@@ -481,16 +364,16 @@ import ydrasil_pkg::*;
                         perf_rn_full_stall_rob = perf_rn_full_stall_rob + 32'd1;
                     end
                     perf_rob_full_stall = perf_rob_full_stall + 32'd1;
-                end else if (pipe1_rd_issue) begin
+                end else if (observer_i.pipe1_rd_issue) begin
                     new_pdst = rn_shadow_first_free(rn_shadow_free_q);
-                    old_pdst = rn_shadow_rat_q[pipe1_rf_waddr_rd_issue];
+                    old_pdst = rn_shadow_rat_q[observer_i.pipe1_rf_waddr_rd_issue];
                     rn_shadow_free_q[new_pdst] = 1'b0;
                     rn_shadow_busy_q[new_pdst] = 1'b1;
-                    rn_shadow_rat_q[pipe1_rf_waddr_rd_issue] = new_pdst;
+                    rn_shadow_rat_q[observer_i.pipe1_rf_waddr_rd_issue] = new_pdst;
                     rn_shadow_free_count_q = rn_shadow_free_count_q - 7'd1;
                     rn_shadow_rob_valid_q[rn_shadow_rob_tail_q] = 1'b1;
                     rn_shadow_rob_ready_q[rn_shadow_rob_tail_q] = 1'b0;
-                    rn_shadow_rob_arch_rd_q[rn_shadow_rob_tail_q] = pipe1_rf_waddr_rd_issue;
+                    rn_shadow_rob_arch_rd_q[rn_shadow_rob_tail_q] = observer_i.pipe1_rf_waddr_rd_issue;
                     rn_shadow_rob_new_pdst_q[rn_shadow_rob_tail_q] = new_pdst;
                     rn_shadow_rob_old_pdst_q[rn_shadow_rob_tail_q] = old_pdst;
                     rn_shadow_rob_producer_q[rn_shadow_rob_tail_q] = RN_PROD_P1;
@@ -502,43 +385,43 @@ import ydrasil_pkg::*;
                     perf_rn_alloc1 = perf_rn_alloc1 + 32'd1;
                 end
 
-                if (id_ex_valid && id_alu_rf_wen_rd && (id_rf_waddr_rd == '0)) begin
+                if (observer_i.id_ex_valid && observer_i.id_alu_rf_wen_rd && (observer_i.id_rf_waddr_rd == '0)) begin
                     perf_rn_x0_no_alloc = perf_rn_x0_no_alloc + 32'd1;
                 end
-                if (pipe1_issue_valid_to_ex && pipe1_rf_wen_rd_to_ex &&
-                    (pipe1_rf_waddr_rd_to_ex == '0)) begin
+                if (observer_i.pipe1_issue_valid_to_ex && observer_i.pipe1_rf_wen_rd_to_ex &&
+                    (observer_i.pipe1_rf_waddr_rd_to_ex == '0)) begin
                     perf_rn_x0_no_alloc = perf_rn_x0_no_alloc + 32'd1;
                 end
-                if (id_ex_rd_issue && pipe1_issue_valid_to_ex &&
-                    (((pipe1_rf_raddr_rs1 != '0) && (pipe1_rf_raddr_rs1 == id_rf_waddr_rd)) ||
-                     ((pipe1_rf_raddr_rs2 != '0) && (pipe1_rf_raddr_rs2 == id_rf_waddr_rd)))) begin
+                if (observer_i.id_ex_rd_issue && observer_i.pipe1_issue_valid_to_ex &&
+                    (((observer_i.pipe1_rf_raddr_rs1 != '0) && (observer_i.pipe1_rf_raddr_rs1 == observer_i.id_rf_waddr_rd)) ||
+                     ((observer_i.pipe1_rf_raddr_rs2 != '0) && (observer_i.pipe1_rf_raddr_rs2 == observer_i.id_rf_waddr_rd)))) begin
                     perf_rn_same_cycle_raw = perf_rn_same_cycle_raw + 32'd1;
                 end
                 if (rn_shadow_same_cycle_raw) begin
                     perf_rn_same_cycle_raw = perf_rn_same_cycle_raw + 32'd1;
                 end
-                if (id_ex_rd_issue && pipe1_rd_issue &&
-                    (pipe1_rf_waddr_rd_issue == id_rf_waddr_rd)) begin
+                if (observer_i.id_ex_rd_issue && observer_i.pipe1_rd_issue &&
+                    (observer_i.pipe1_rf_waddr_rd_issue == observer_i.id_rf_waddr_rd)) begin
                     perf_rn_same_cycle_waw = perf_rn_same_cycle_waw + 32'd1;
                 end
                 if (rn_shadow_same_cycle_waw) begin
                     perf_rn_same_cycle_waw = perf_rn_same_cycle_waw + 32'd1;
                 end
-                if (rs1_pending_stall &&
-                    !rn_shadow_busy_q[rn_shadow_rat_q[id_ctrl_rs1_addr]]) begin
-                    rn_shadow_count_raw_ready(rn_shadow_rat_q[id_ctrl_rs1_addr]);
-                end else if (rs2_pending_stall &&
-                    !rn_shadow_busy_q[rn_shadow_rat_q[id_ctrl_rs2_addr]]) begin
-                    rn_shadow_count_raw_ready(rn_shadow_rat_q[id_ctrl_rs2_addr]);
+                if (observer_i.rs1_pending_stall &&
+                    !rn_shadow_busy_q[rn_shadow_rat_q[observer_i.id_ctrl_rs1_addr]]) begin
+                    rn_shadow_count_raw_ready(rn_shadow_rat_q[observer_i.id_ctrl_rs1_addr]);
+                end else if (observer_i.rs2_pending_stall &&
+                    !rn_shadow_busy_q[rn_shadow_rat_q[observer_i.id_ctrl_rs2_addr]]) begin
+                    rn_shadow_count_raw_ready(rn_shadow_rat_q[observer_i.id_ctrl_rs2_addr]);
                 end
-                if (rd_waw_stall && (rn_shadow_free_count_q != '0) &&
+                if (observer_i.rd_waw_stall && (rn_shadow_free_count_q != '0) &&
                     (rn_shadow_rob_occ_q != RN_SHADOW_ROB_DEPTH_COUNT)) begin
                     perf_rn_shadow_waw_can_remove = perf_rn_shadow_waw_can_remove + 32'd1;
                 end
-                if (pipe1_issue_valid_to_ex && id_ex_valid &&
-                    pipe1_rf_wen_rd_to_ex && (pipe1_rf_waddr_rd_to_ex != '0) &&
-                    (((id_ctrl_rs1_ren && (id_ctrl_rs1_addr == pipe1_rf_waddr_rd_to_ex))) ||
-                     ((id_ctrl_rs2_ren && (id_ctrl_rs2_addr == pipe1_rf_waddr_rd_to_ex))))) begin
+                if (observer_i.pipe1_issue_valid_to_ex && observer_i.id_ex_valid &&
+                    observer_i.pipe1_rf_wen_rd_to_ex && (observer_i.pipe1_rf_waddr_rd_to_ex != '0) &&
+                    (((observer_i.id_ctrl_rs1_ren && (observer_i.id_ctrl_rs1_addr == observer_i.pipe1_rf_waddr_rd_to_ex))) ||
+                     ((observer_i.id_ctrl_rs2_ren && (observer_i.id_ctrl_rs2_addr == observer_i.pipe1_rf_waddr_rd_to_ex))))) begin
                     perf_rn_shadow_war_can_remove = perf_rn_shadow_war_can_remove + 32'd1;
                 end
                 if ((rn_shadow_free_min_q == '0) ||
@@ -570,59 +453,59 @@ import ydrasil_pkg::*;
             perf_prf_bypass_rd2 <= '0;
             perf_prf_bypass_rd3 <= '0;
         end else begin
-            perf_prf_rd0 <= perf_prf_rd0 + (prf_rd0_en ? 32'd1 : 32'd0);
-            perf_prf_rd1 <= perf_prf_rd1 + (prf_rd1_en ? 32'd1 : 32'd0);
-            perf_prf_rd2 <= perf_prf_rd2 + (prf_rd2_en ? 32'd1 : 32'd0);
-            perf_prf_rd3 <= perf_prf_rd3 + (prf_rd3_en ? 32'd1 : 32'd0);
-            perf_prf_wr0 <= perf_prf_wr0 + (prf_wr0_en ? 32'd1 : 32'd0);
-            perf_prf_wr1 <= perf_prf_wr1 + (prf_wr1_en ? 32'd1 : 32'd0);
+            perf_prf_rd0 <= perf_prf_rd0 + (observer_i.prf_rd0_en ? 32'd1 : 32'd0);
+            perf_prf_rd1 <= perf_prf_rd1 + (observer_i.prf_rd1_en ? 32'd1 : 32'd0);
+            perf_prf_rd2 <= perf_prf_rd2 + (observer_i.prf_rd2_en ? 32'd1 : 32'd0);
+            perf_prf_rd3 <= perf_prf_rd3 + (observer_i.prf_rd3_en ? 32'd1 : 32'd0);
+            perf_prf_wr0 <= perf_prf_wr0 + (observer_i.prf_wr0_en ? 32'd1 : 32'd0);
+            perf_prf_wr1 <= perf_prf_wr1 + (observer_i.prf_wr1_en ? 32'd1 : 32'd0);
             perf_prf_bypass_rd0 <= perf_prf_bypass_rd0 +
-                ((prf_rd0_en && ((prf_wr0_en && (prf_wr0_addr == prf_rd0_addr)) ||
-                                  (prf_wr1_en && (prf_wr1_addr == prf_rd0_addr)))) ? 32'd1 : 32'd0);
+                ((observer_i.prf_rd0_en && ((observer_i.prf_wr0_en && (observer_i.prf_wr0_addr == observer_i.prf_rd0_addr)) ||
+                                  (observer_i.prf_wr1_en && (observer_i.prf_wr1_addr == observer_i.prf_rd0_addr)))) ? 32'd1 : 32'd0);
             perf_prf_bypass_rd1 <= perf_prf_bypass_rd1 +
-                ((prf_rd1_en && ((prf_wr0_en && (prf_wr0_addr == prf_rd1_addr)) ||
-                                  (prf_wr1_en && (prf_wr1_addr == prf_rd1_addr)))) ? 32'd1 : 32'd0);
+                ((observer_i.prf_rd1_en && ((observer_i.prf_wr0_en && (observer_i.prf_wr0_addr == observer_i.prf_rd1_addr)) ||
+                                  (observer_i.prf_wr1_en && (observer_i.prf_wr1_addr == observer_i.prf_rd1_addr)))) ? 32'd1 : 32'd0);
             perf_prf_bypass_rd2 <= perf_prf_bypass_rd2 +
-                ((prf_rd2_en && ((prf_wr0_en && (prf_wr0_addr == prf_rd2_addr)) ||
-                                  (prf_wr1_en && (prf_wr1_addr == prf_rd2_addr)))) ? 32'd1 : 32'd0);
+                ((observer_i.prf_rd2_en && ((observer_i.prf_wr0_en && (observer_i.prf_wr0_addr == observer_i.prf_rd2_addr)) ||
+                                  (observer_i.prf_wr1_en && (observer_i.prf_wr1_addr == observer_i.prf_rd2_addr)))) ? 32'd1 : 32'd0);
             perf_prf_bypass_rd3 <= perf_prf_bypass_rd3 +
-                ((prf_rd3_en && ((prf_wr0_en && (prf_wr0_addr == prf_rd3_addr)) ||
-                                  (prf_wr1_en && (prf_wr1_addr == prf_rd3_addr)))) ? 32'd1 : 32'd0);
+                ((observer_i.prf_rd3_en && ((observer_i.prf_wr0_en && (observer_i.prf_wr0_addr == observer_i.prf_rd3_addr)) ||
+                                  (observer_i.prf_wr1_en && (observer_i.prf_wr1_addr == observer_i.prf_rd3_addr)))) ? 32'd1 : 32'd0);
         end
     end
 
     always_ff @(posedge clk) begin
         if (rst_n) begin
 `ifdef YDRASIL_RN_DEBUG_DISPLAY
-            if ((alu_rf_wen_rd && (alu_rf_waddr_rd == 5'd22)) ||
-                (wb_rf_wen_rd && (wb_rf_waddr_rd == 5'd22)) ||
-                (rf_wen_rd && (rf_waddr_rd == 5'd22))) begin
+            if ((observer_i.alu_rf_wen_rd && (observer_i.alu_rf_waddr_rd == 5'd22)) ||
+                (observer_i.wb_rf_wen_rd && (observer_i.wb_rf_waddr_rd == 5'd22)) ||
+                (observer_i.rf_wen_rd && (observer_i.rf_waddr_rd == 5'd22))) begin
                 $display("[X22_WB_DBG] alu_wen=%0b alu_data=0x%08h alu_pdst=%0d wb_wen=%0b wb_data=0x%08h rf_wen=%0b rf_data=0x%08h pipe1_commit=%0b prf_wr0=%0b/%0d/0x%08h prf_wr1=%0b/%0d/0x%08h",
-                         alu_rf_wen_rd,
-                         alu_result,
-                         alu_rn_pdst,
-                         wb_rf_wen_rd,
-                         wb_rf_wdata_rd,
-                         rf_wen_rd,
-                         rf_wdata_rd,
-                         pipe1_commit_rf_wen,
-                         prf_wr0_en,
-                         prf_wr0_addr,
-                         prf_wr0_data,
-                         prf_wr1_en,
-                         prf_wr1_addr,
-                         prf_wr1_data);
+                         observer_i.alu_rf_wen_rd,
+                         observer_i.alu_result,
+                         observer_i.alu_rn_pdst,
+                         observer_i.wb_rf_wen_rd,
+                         observer_i.wb_rf_wdata_rd,
+                         observer_i.rf_wen_rd,
+                         observer_i.rf_wdata_rd,
+                         observer_i.pipe1_commit_rf_wen,
+                         observer_i.prf_wr0_en,
+                         observer_i.prf_wr0_addr,
+                         observer_i.prf_wr0_data,
+                         observer_i.prf_wr1_en,
+                         observer_i.prf_wr1_addr,
+                         observer_i.prf_wr1_data);
             end
 `endif
-            if (({2'b00, rn_real_wb_pdst_found} +
-                 {2'b00, rn_real_lsu_pdst_found} +
-                 {2'b00, rn_real_mul_pdst_found} +
-                 {2'b00, rn_real_pipe1_pdst_found}) > 3'd2) begin
+            if (({2'b00, observer_i.rn_real_wb_pdst_found} +
+                 {2'b00, observer_i.rn_real_lsu_pdst_found} +
+                 {2'b00, observer_i.rn_real_mul_pdst_found} +
+                 {2'b00, observer_i.rn_real_pipe1_pdst_found}) > 3'd2) begin
                 $fatal(1, "[PRF_WR_CONFLICT] alu=%0b/%0d lsu=%0b/%0d mul=%0b/%0d p1=%0b/%0d",
-                         rn_real_wb_pdst_found, rn_real_wb_pdst,
-                         rn_real_lsu_pdst_found, rn_real_lsu_pdst,
-                         rn_real_mul_pdst_found, rn_real_mul_pdst,
-                         rn_real_pipe1_pdst_found, rn_real_pipe1_pdst);
+                         observer_i.rn_real_wb_pdst_found, observer_i.rn_real_wb_pdst,
+                         observer_i.rn_real_lsu_pdst_found, observer_i.rn_real_lsu_pdst,
+                         observer_i.rn_real_mul_pdst_found, observer_i.rn_real_mul_pdst,
+                         observer_i.rn_real_pipe1_pdst_found, observer_i.rn_real_pipe1_pdst);
             end
         end
     end
@@ -630,31 +513,34 @@ import ydrasil_pkg::*;
     ydrasil_commit_trace u_ydrasil_commit_trace (
         .clk(clk),
         .rst_n(rst_n),
-        .flush_i(flush_id | flush_ex | interrupt),
-        .alloc_valid_i(commit_trace_alloc_valid),
-        .alloc_pc_i(commit_trace_alloc_pc),
-        .alloc_instr_i(commit_trace_alloc_instr),
-        .pipe0_issue_valid_i(id_ex_valid & !interrupt & !flush_ex),
-        .pipe0_issue_pc_i(id_instr_addr),
-        .pipe0_issue_load_i(operator_type[OPERATOR_TYPE_LOAD]),
-        .pipe0_issue_waddr_i(id_rf_waddr_rd),
-        .alu_wb_valid_i(alu_rf_wen_rd),
-        .alu_wb_waddr_i(alu_rf_waddr_rd),
-        .alu_wb_wdata_i(alu_result),
-        .lsu_wb_valid_i(lsu_rf_wen_rd),
-        .lsu_wb_waddr_i(lsu_rf_waddr_rd),
-        .lsu_wb_wdata_i(lsu_wb_result),
-        .mul_issue_valid_i(ex_mul_issue),
-        .mul_issue_pc_i(id_instr_addr),
-        .mul_wb_valid_i(wb_mul_complete),
-        .mul_wb_waddr_i(wb_mul_complete_waddr),
-        .mul_wb_wdata_i(wb_rf_wdata_rd),
-        .pipe1_issue_valid_i(pipe1_issue_valid_to_ex & pipe1_rf_wen_rd_to_ex &
-                             (pipe1_rf_waddr_rd_to_ex != '0) & !interrupt & !flush_ex),
-        .pipe1_issue_pc_i(pipe1_pc),
-        .pipe1_wb_valid_i(pipe1_alu_rf_wen_rd_to_wb),
-        .pipe1_wb_waddr_i(pipe1_alu_rf_waddr_rd_to_wb),
-        .pipe1_wb_wdata_i(pipe1_alu_result_to_wb)
+        .flush_i(observer_i.flush_id | observer_i.flush_ex | observer_i.interrupt),
+        .alloc_valid_i(observer_i.commit_trace_alloc_valid),
+        .alloc_pc_i(observer_i.commit_trace_alloc_pc),
+        .alloc_instr_i(observer_i.commit_trace_alloc_instr),
+        .alloc1_valid_i(observer_i.commit_trace_alloc1_valid),
+        .alloc1_pc_i(observer_i.commit_trace_alloc1_pc),
+        .alloc1_instr_i(observer_i.commit_trace_alloc1_instr),
+        .pipe0_issue_valid_i(observer_i.id_ex_valid & !observer_i.interrupt & !observer_i.flush_ex),
+        .pipe0_issue_pc_i(observer_i.id_instr_addr),
+        .pipe0_issue_load_i(observer_i.operator_type[OPERATOR_TYPE_LOAD]),
+        .pipe0_issue_waddr_i(observer_i.id_rf_waddr_rd),
+        .alu_wb_valid_i(observer_i.alu_rf_wen_rd),
+        .alu_wb_waddr_i(observer_i.alu_rf_waddr_rd),
+        .alu_wb_wdata_i(observer_i.alu_result),
+        .lsu_wb_valid_i(observer_i.lsu_rf_wen_rd),
+        .lsu_wb_waddr_i(observer_i.lsu_rf_waddr_rd),
+        .lsu_wb_wdata_i(observer_i.lsu_wb_result),
+        .mul_issue_valid_i(observer_i.ex_mul_issue),
+        .mul_issue_pc_i(observer_i.id_instr_addr),
+        .mul_wb_valid_i(observer_i.wb_mul_complete),
+        .mul_wb_waddr_i(observer_i.wb_mul_complete_waddr),
+        .mul_wb_wdata_i(observer_i.wb_rf_wdata_rd),
+        .pipe1_issue_valid_i(observer_i.pipe1_issue_valid_to_ex & observer_i.pipe1_rf_wen_rd_to_ex &
+                             (observer_i.pipe1_rf_waddr_rd_to_ex != '0) & !observer_i.interrupt & !observer_i.flush_ex),
+        .pipe1_issue_pc_i(observer_i.pipe1_pc),
+        .pipe1_wb_valid_i(observer_i.pipe1_alu_rf_wen_rd_to_wb),
+        .pipe1_wb_waddr_i(observer_i.pipe1_alu_rf_waddr_rd_to_wb),
+        .pipe1_wb_wdata_i(observer_i.pipe1_alu_result_to_wb)
     );
 
 endmodule

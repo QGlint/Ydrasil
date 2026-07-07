@@ -41,18 +41,14 @@ module counter(
     (* ASYNC_REG = "TRUE" *) logic [31:0] cnt_ms_gray_perip_sync;
     logic [31:0] cnt_ms_perip;
 
-    function automatic logic [31:0] gray_to_binary(input logic [31:0] gray_i);
-        integer bit_idx;
-        begin
-            gray_to_binary[31] = gray_i[31];
-            for (bit_idx = 30; bit_idx >= 0; bit_idx = bit_idx - 1) begin
-                gray_to_binary[bit_idx] = gray_to_binary[bit_idx + 1] ^ gray_i[bit_idx];
-            end
-        end
-    endfunction
-
     assign cnt_ms_gray = cnt_ms ^ (cnt_ms >> 1);
-    assign cnt_ms_perip = gray_to_binary(cnt_ms_gray_perip_sync);
+
+    genvar gray_bit;
+    generate
+        for (gray_bit = 0; gray_bit < 32; gray_bit = gray_bit + 1) begin : gen_gray_to_binary
+            assign cnt_ms_perip[gray_bit] = ^cnt_ms_gray_perip_sync[31:gray_bit];
+        end
+    endgenerate
 
     always_ff @(posedge perip_clk or posedge rst) begin
         if (rst) begin

@@ -64,9 +64,15 @@ import ydrasil_pipeline_pkg::*;
 	wire [31:0] if_id1_pred_bht_index;
 	wire        if_id1_pred_l0_taken;
 	wire        if_id1_valid;
+	fetch_pair_pkt_t if_id_fetch_pair;
+	pair_ctrl_t if_id_pair_ctrl;
 	decode_pair_pkt_t id_decode_pair;
+	wire id_if_consume_two;
 	rename_pkt_t rn_live_pkt;
+	rename_pkt_t rn_live1_pkt;
 	issue_pair_pkt_t id_issue_pair;
+	wire rename_frontend_stall;
+	wire issue_frontend_stall;
 
 	// CTRL signals
 	wire                        stall_if;
@@ -76,6 +82,7 @@ import ydrasil_pipeline_pkg::*;
 	wire                        flush_id;
 	wire                        flush_ex;
 	wire                        bubble_id;
+	wire                        bubble_id_no_alloc;
 	wire                        branch_jump;
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] branch_target;
 
@@ -104,9 +111,6 @@ import ydrasil_pipeline_pkg::*;
 	wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] operator_type;
 	wire                           id_alu_rf_wen_rd;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    id_rf_waddr_rd;
-	wire                           id_alu_stable_valid;
-	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    id_alu_stable_addr;
-	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]    id_alu_stable_data;
 	wire                           id_ex_jalr;
 	wire                           pipe1_issue_valid;
 	wire [31:0]                    pipe1_operand_a;
@@ -115,6 +119,8 @@ import ydrasil_pipeline_pkg::*;
 	wire                           pipe1_rf_wen_rd_issue;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] pipe1_rf_waddr_rd_issue;
 	wire [5:0]                     pipe1_rn_pdst_issue;
+	wire                           pipe1_rob_valid_issue;
+	wire [5:0]                     pipe1_rob_idx_issue;
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] pipe1_pc;
 	wire [ydrasil_pkg::INST_DATA_WIDTH-1:0] pipe1_instr;
 
@@ -131,6 +137,8 @@ import ydrasil_pipeline_pkg::*;
 	wire                        pipe1_alu_rf_wen_rd;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] pipe1_alu_rf_waddr_rd;
 	wire [5:0]                  pipe1_alu_rn_pdst;
+	wire                        pipe1_alu_rob_valid;
+	wire [5:0]                  pipe1_alu_rob_idx;
 	wire                        pipe1_instret_inc;
 	wire                        pipe1_wb_fwd_valid;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] pipe1_wb_fwd_addr;
@@ -242,6 +250,8 @@ import ydrasil_pipeline_pkg::*;
 	wire                        pipe1_wb_pdst_valid;
 	wire [5:0]                  pipe1_wb_pdst;
 	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] pipe1_wb_data;
+	wire                        pipe1_wb_rob_valid;
+	wire [5:0]                  pipe1_wb_rob_idx;
 	reg                         wb_hzd_valid_q;
 	reg [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] wb_hzd_addr_q;
 	reg [ydrasil_pkg::REGS_DATA_WIDTH-1:0] wb_hzd_data_q;
@@ -260,6 +270,8 @@ import ydrasil_pipeline_pkg::*;
 	wire [5:0]                      id_ctrl_rs1_psrc;
 	wire [5:0]                      id_ctrl_rs2_psrc;
 	wire [5:0]                      id_ctrl_pdst;
+	wire                            id_ctrl_rob_valid;
+	wire [5:0]                      id_ctrl_rob_idx;
 	wire                            pipe1_ctrl_rs1_ren;
 	wire                            pipe1_ctrl_rs2_ren;
 	wire [5:0]                      pipe1_ctrl_rs1_psrc;
@@ -269,6 +281,9 @@ import ydrasil_pipeline_pkg::*;
 	wire                            rn_if_ctrl_valid;
 	wire                            rn_alloc_valid;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    rn_alloc_rd_addr;
+	wire                            rn_if1_rd_valid;
+	wire                            rn_alloc1_valid;
+	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    rn_alloc1_rd_addr;
 	wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] id_ctrl_operator_type;
 	wire                            scoreboard_stall;
 	wire                            id_frontend_stall;
@@ -288,12 +303,19 @@ import ydrasil_pipeline_pkg::*;
 	wire rn_real_pipe1_rs2_ready;
 	wire rn_real_live_rs1_ready;
 	wire rn_real_live_rs2_ready;
+	wire rn_real_live1_rs1_ready;
+	wire rn_real_live1_rs2_ready;
 	wire rn_real_pipe1_rename_ready;
 	wire [RN_REAL_PREG_BITS-1:0] rn_real_rs1_psrc;
 	wire [RN_REAL_PREG_BITS-1:0] rn_real_rs2_psrc;
 	wire [RN_REAL_PREG_BITS-1:0] rn_real_live_rs1_psrc;
 	wire [RN_REAL_PREG_BITS-1:0] rn_real_live_rs2_psrc;
+	wire [RN_REAL_PREG_BITS-1:0] rn_real_live1_rs1_psrc;
+	wire [RN_REAL_PREG_BITS-1:0] rn_real_live1_rs2_psrc;
 	wire [RN_REAL_PREG_BITS-1:0] rn_real_alloc0_pdst;
+	wire [RN_REAL_PREG_BITS-1:0] rn_real_alloc1_pdst;
+	wire [RN_REAL_ROB_PTR_BITS-1:0] rn_real_alloc0_rob_idx;
+	wire [RN_REAL_ROB_PTR_BITS-1:0] rn_real_alloc1_rob_idx;
 	wire [RN_REAL_PREG_BITS-1:0] rn_real_wb_pdst;
 	wire rn_real_wb_pdst_found;
 	wire [RN_REAL_PREG_BITS-1:0] rn_real_lsu_pdst;
@@ -318,13 +340,11 @@ import ydrasil_pipeline_pkg::*;
 	wire rn_real_ctrl_rs2_block;
 	wire rn_real_ctrl_at_head;
 	wire rn_real_pipe1_branch_order_escape;
+	wire rs1_issue_alu_ready_next = 1'b0;
+	wire rs2_issue_alu_ready_next = 1'b0;
+	wire rs1_branch_ready_next_bypass = 1'b0;
+	wire rs2_branch_ready_next_bypass = 1'b0;
 `endif
-	wire                            rs1_issue_alu_ready_next;
-	wire                            rs2_issue_alu_ready_next;
-	wire                            rs1_issue_alu_stable_issue_bypass;
-	wire                            rs2_issue_alu_stable_issue_bypass;
-	wire                            rs1_branch_ready_next_bypass;
-	wire                            rs2_branch_ready_next_bypass;
 
 	wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0]       id_csr_raddr;
 	wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0]       id_ex_csr_waddr;
@@ -358,6 +378,11 @@ import ydrasil_pipeline_pkg::*;
 	wire commit_trace_alloc_valid;
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] commit_trace_alloc_pc;
 	wire [ydrasil_pkg::INST_DATA_WIDTH-1:0] commit_trace_alloc_instr;
+	wire commit_trace_alloc1_valid;
+	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] commit_trace_alloc1_pc;
+	wire [ydrasil_pkg::INST_DATA_WIDTH-1:0] commit_trace_alloc1_instr;
+	observer_pkt_t observer_pkt;
+	observer_dbg_pkt_t observer_dbg_pkt;
 `endif
 
 		assign rn_real_rs1_psrc = id_ctrl_rs1_psrc;
@@ -365,17 +390,20 @@ import ydrasil_pipeline_pkg::*;
 		assign rn_live_pkt.rs1_ready = rn_real_live_rs1_ready;
 		assign rn_live_pkt.rs2_ready = rn_real_live_rs2_ready;
 		assign rn_live_pkt.rs1_psrc = rn_real_live_rs1_psrc;
-		assign rn_live_pkt.rs2_psrc = rn_real_live_rs2_psrc;
-		assign rn_live_pkt.pdst = rn_real_alloc0_pdst;
-		assign rn_live_pkt.pdst_valid = 1'b0;
-		assign id_issue_pair.slot0.dec = id_decode_pair.slot0;
-		assign id_issue_pair.slot0.rn = rn_live_pkt;
-		assign id_issue_pair.slot0.wait_rs1 = 1'b0;
-		assign id_issue_pair.slot0.wait_rs2 = 1'b0;
-		assign id_issue_pair.slot1.dec = id_decode_pair.slot1;
-		assign id_issue_pair.slot1.rn = '0;
-		assign id_issue_pair.slot1.wait_rs1 = 1'b0;
-		assign id_issue_pair.slot1.wait_rs2 = 1'b0;
+			assign rn_live_pkt.rs2_psrc = rn_real_live_rs2_psrc;
+			assign rn_live_pkt.pdst = rn_real_alloc0_pdst;
+			assign rn_live_pkt.pdst_valid = 1'b0;
+			assign rn_live_pkt.rob_idx = '0;
+			assign rn_live_pkt.rob_valid = 1'b0;
+			assign rn_live1_pkt.rs1_ready = rn_real_live1_rs1_ready;
+			assign rn_live1_pkt.rs2_ready = rn_real_live1_rs2_ready;
+			assign rn_live1_pkt.rs1_psrc = rn_real_live1_rs1_psrc;
+			assign rn_live1_pkt.rs2_psrc = rn_real_live1_rs2_psrc;
+			assign rn_live1_pkt.pdst = rn_real_alloc1_pdst;
+			assign rn_live1_pkt.pdst_valid = 1'b0;
+			assign rn_live1_pkt.rob_idx = '0;
+			assign rn_live1_pkt.rob_valid = 1'b0;
+		assign id_frontend_stall = rename_frontend_stall;
 
 		ydrasil_rename_ctrl #(
 		.PHYS_REGS(RN_REAL_PHYS_REGS),
@@ -388,7 +416,8 @@ import ydrasil_pipeline_pkg::*;
 		.flush_id_i(flush_id),
 		.flush_ex_i(flush_ex),
 		.interrupt_i(interrupt),
-		.if_id_instr_i(if_id_instr),
+		.if_id_instr_i(id_decode_pair.slot0.instr),
+		.if_id1_instr_i(id_decode_pair.slot1.instr),
 		.id_ctrl_rs1_ren_i(id_ctrl_rs1_ren),
 		.id_ctrl_rs2_ren_i(id_ctrl_rs2_ren),
 		.id_ctrl_rd_wen_i(id_ctrl_rd_wen),
@@ -397,8 +426,6 @@ import ydrasil_pipeline_pkg::*;
 		.id_ctrl_rs2_psrc_i(id_ctrl_rs2_psrc),
 		.id_ctrl_pdst_i(id_ctrl_pdst),
 		.id_ctrl_operator_type_i(id_ctrl_operator_type),
-		.ctrl_rs1_ready_next_bypass_i(rs1_branch_ready_next_bypass),
-		.ctrl_rs2_ready_next_bypass_i(rs2_branch_ready_next_bypass),
 		.pipe1_ctrl_rs1_ren_i(pipe1_ctrl_rs1_ren),
 		.pipe1_ctrl_rs2_ren_i(pipe1_ctrl_rs2_ren),
 		.pipe1_ctrl_rs1_psrc_i(pipe1_ctrl_rs1_psrc),
@@ -407,6 +434,9 @@ import ydrasil_pipeline_pkg::*;
 		.rn_if_rd_valid_i(rn_if_rd_valid),
 		.rn_if_ctrl_valid_i(rn_if_ctrl_valid),
 		.rn_alloc_rd_addr_i(rn_alloc_rd_addr),
+		.rn_alloc1_valid_i(rn_alloc1_valid),
+		.rn_if1_rd_valid_i(rn_if1_rd_valid),
+		.rn_alloc1_rd_addr_i(rn_alloc1_rd_addr),
 		.alu_wb_valid_i(alu_rf_wen_rd),
 		.alu_wb_arch_rd_i(alu_rf_waddr_rd),
 		.alu_wb_pdst_i(alu_rn_pdst),
@@ -416,16 +446,25 @@ import ydrasil_pipeline_pkg::*;
 		.mul_wb_valid_i(wb_mul_complete),
 		.mul_wb_arch_rd_i(wb_mul_complete_waddr),
 		.mul_wb_pdst_i(wb_mul_complete_pdst),
-		.pipe1_wb_valid_i(pipe1_wb_pdst_valid),
-		.pipe1_wb_pdst_i(pipe1_wb_pdst),
-		.pipe1_wb_data_i(pipe1_wb_data),
-		.pipe1_issue_valid_i(pipe1_issue_valid),
-		.pipe1_issue_pdst_i(pipe1_rn_pdst_issue),
-		.wb_rf_wen_i(wb_rf_wen_rd),
+			.pipe1_wb_valid_i(pipe1_wb_pdst_valid),
+			.pipe1_wb_pdst_i(pipe1_wb_pdst),
+			.pipe1_wb_data_i(pipe1_wb_data),
+			.pipe1_wb_rob_valid_i(pipe1_wb_rob_valid),
+			.pipe1_wb_rob_idx_i(pipe1_wb_rob_idx),
+			.pipe1_issue_valid_i(pipe1_issue_valid),
+			.pipe1_issue_pdst_i(pipe1_rn_pdst_issue),
+			.ctrl_complete_valid_i(id_ex_valid & operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] & id_ctrl_rob_valid),
+			.ctrl_complete_rob_idx_i(id_ctrl_rob_idx),
+			.wb_rf_wen_i(wb_rf_wen_rd),
 		.live_rs1_psrc_o(rn_real_live_rs1_psrc),
 		.live_rs2_psrc_o(rn_real_live_rs2_psrc),
-		.alloc_pdst_o(rn_real_alloc0_pdst),
-		.preg_ready_o(rn_real_preg_ready),
+		.live1_rs1_psrc_o(rn_real_live1_rs1_psrc),
+		.live1_rs2_psrc_o(rn_real_live1_rs2_psrc),
+			.alloc_pdst_o(rn_real_alloc0_pdst),
+			.alloc1_pdst_o(rn_real_alloc1_pdst),
+			.alloc0_rob_idx_o(rn_real_alloc0_rob_idx),
+			.alloc1_rob_idx_o(rn_real_alloc1_rob_idx),
+			.preg_ready_o(rn_real_preg_ready),
 		.rs1_ready_o(rn_real_rs1_ready),
 		.rs2_ready_o(rn_real_rs2_ready),
 		.rs1_uncommitted_o(rn_real_rs1_uncommitted),
@@ -436,6 +475,8 @@ import ydrasil_pipeline_pkg::*;
 		.pipe1_rs2_uncommitted_o(rn_real_pipe1_rs2_uncommitted),
 		.live_rs1_ready_o(rn_real_live_rs1_ready),
 		.live_rs2_ready_o(rn_real_live_rs2_ready),
+		.live1_rs1_ready_o(rn_real_live1_rs1_ready),
+		.live1_rs2_ready_o(rn_real_live1_rs2_ready),
 		.pipe1_rename_ready_o(rn_real_pipe1_rename_ready),
 		.alloc_stall_o(rn_real_alloc_stall),
 		.ctrl_block_o(rn_real_ctrl_block),
@@ -459,6 +500,39 @@ import ydrasil_pipeline_pkg::*;
 		.pipe1_branch_order_escape_o(rn_real_pipe1_branch_order_escape),
 `endif
 		.unused_o()
+	);
+
+	ydrasil_rename_stage u_ydrasil_rename_stage (
+		.clk(clk),
+		.rst_n(rst_n),
+		.flush_i(flush_id),
+		.stall_i(stall_id),
+		.bubble_i(bubble_id),
+		.id_decode_pair_i(id_decode_pair),
+		.rn_live0_i(rn_live_pkt),
+			.rn_live1_i(rn_live1_pkt),
+			.rn_alloc_stall_i(rn_real_alloc_stall),
+			.issue_stall_i(issue_frontend_stall),
+			.alloc0_rob_idx_i(rn_real_alloc0_rob_idx),
+			.alloc1_rob_idx_i(rn_real_alloc1_rob_idx),
+			.rename_issue_pair_o(id_issue_pair),
+		.rename_frontend_stall_o(rename_frontend_stall),
+		.rn_alloc_valid_o(rn_alloc_valid),
+		.rn_alloc_rd_addr_o(rn_alloc_rd_addr),
+		.rn_if_rd_valid_o(rn_if_rd_valid),
+		.rn_alloc1_valid_o(rn_alloc1_valid),
+		.rn_alloc1_rd_addr_o(rn_alloc1_rd_addr),
+		.rn_if1_rd_valid_o(rn_if1_rd_valid),
+		.rn_if_ctrl_valid_o(rn_if_ctrl_valid)
+`ifndef SYNTHESIS
+		,
+		.commit_trace_alloc_valid_o(commit_trace_alloc_valid),
+		.commit_trace_alloc_pc_o(commit_trace_alloc_pc),
+		.commit_trace_alloc_instr_o(commit_trace_alloc_instr),
+		.commit_trace_alloc1_valid_o(commit_trace_alloc1_valid),
+		.commit_trace_alloc1_pc_o(commit_trace_alloc1_pc),
+		.commit_trace_alloc1_instr_o(commit_trace_alloc1_instr)
+`endif
 	);
 
 `ifndef SYNTHESIS
@@ -513,13 +587,17 @@ import ydrasil_pipeline_pkg::*;
 	wire [31:0] pipe1_operand_a_to_ex = pipe1_operand_a;
 	wire [31:0] pipe1_operand_b_to_ex = pipe1_operand_b;
 	wire [ydrasil_pkg::OPERATOR_WIDTH-1:0] pipe1_operator_to_ex = pipe1_operator;
-	wire pipe1_rf_wen_rd_to_ex = pipe1_rf_wen_rd_issue;
-	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] pipe1_rf_waddr_rd_to_ex = pipe1_rf_waddr_rd_issue;
-	wire [5:0] pipe1_rn_pdst_to_ex = pipe1_rn_pdst_issue;
-	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] pipe1_alu_result_to_wb = pipe1_alu_result;
-	wire pipe1_alu_rf_wen_rd_to_wb = pipe1_alu_rf_wen_rd;
-	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] pipe1_alu_rf_waddr_rd_to_wb = pipe1_alu_rf_waddr_rd;
-	wire [5:0] pipe1_alu_rn_pdst_to_wb = pipe1_alu_rn_pdst;
+		wire pipe1_rf_wen_rd_to_ex = pipe1_rf_wen_rd_issue;
+		wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] pipe1_rf_waddr_rd_to_ex = pipe1_rf_waddr_rd_issue;
+		wire [5:0] pipe1_rn_pdst_to_ex = pipe1_rn_pdst_issue;
+		wire pipe1_rob_valid_to_ex = pipe1_rob_valid_issue;
+		wire [5:0] pipe1_rob_idx_to_ex = pipe1_rob_idx_issue;
+		wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] pipe1_alu_result_to_wb = pipe1_alu_result;
+		wire pipe1_alu_rf_wen_rd_to_wb = pipe1_alu_rf_wen_rd;
+		wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] pipe1_alu_rf_waddr_rd_to_wb = pipe1_alu_rf_waddr_rd;
+		wire [5:0] pipe1_alu_rn_pdst_to_wb = pipe1_alu_rn_pdst;
+		wire pipe1_alu_rob_valid_to_wb = pipe1_alu_rob_valid;
+		wire [5:0] pipe1_alu_rob_idx_to_wb = pipe1_alu_rob_idx;
 	wire pipe1_resbuf_full_to_id = pipe1_resbuf_full;
 
 	wire pipe0_retire_valid = ex_instret_inc | lsu_rf_wen_rd | mul_result_valid;
@@ -599,6 +677,7 @@ import ydrasil_pipeline_pkg::*;
 			.stall_if_i      (stall_if),
 	        .stall_pc_i      (stall_pc),
 			.flush_if_i      (flush_if),
+			.consume_two_i    (id_if_consume_two),
 			.branch_jump_i   (branch_jump),
 			.branch_target_i (branch_target),
 			.bp_predict_hit_i(bp_predict_hit),
@@ -631,31 +710,22 @@ import ydrasil_pipeline_pkg::*;
 			.if_id1_pred_bht_index_o(if_id1_pred_bht_index),
 			.if_id1_pred_l0_taken_o(if_id1_pred_l0_taken),
 			.if_id1_valid_o  (if_id1_valid),
+			.if_id_fetch_pair_o(if_id_fetch_pair),
+			.if_id_pair_ctrl_o(if_id_pair_ctrl),
 			.dbg_sync_bp_redirect_o(),
 			.if_id_instr_o   (if_id_instr),
 			.if_id1_instr_o  (if_id1_instr)
 		);
 
 		ydrasil_id_stage u_ydrasil_id_stage (
-			.if_id0_pc_i          (if_id_pc),
-			.if_id0_instr_i       (if_id_instr),
-			.if_id0_pred_hit_i    (if_id_pred_hit),
-			.if_id0_pred_taken_i  (if_id_pred_taken),
-			.if_id0_pred_target_i (if_id_pred_target),
-			.if_id0_pred_counter_i(if_id_pred_counter),
-			.if_id0_pred_bht_index_i(if_id_pred_bht_index),
-			.if_id0_pred_l0_taken_i(if_id_pred_l0_taken),
-			.if_id0_valid_i       (if_id_valid),
-			.if_id1_pc_i          (if_id1_pc),
-			.if_id1_instr_i       (if_id1_instr),
-			.if_id1_pred_hit_i    (if_id1_pred_hit),
-			.if_id1_pred_taken_i  (if_id1_pred_taken),
-			.if_id1_pred_target_i (if_id1_pred_target),
-			.if_id1_pred_counter_i(if_id1_pred_counter),
-			.if_id1_pred_bht_index_i(if_id1_pred_bht_index),
-			.if_id1_pred_l0_taken_i(if_id1_pred_l0_taken),
-			.if_id1_valid_i       (if_id1_valid),
-			.id_decode_pair_o     (id_decode_pair)
+			.clk                  (clk),
+			.rst_n                (rst_n),
+			.stall_id_i           (stall_id | id_frontend_stall),
+			.bubble_id_i          (bubble_id),
+			.flush_id_i           (flush_id),
+			.if_id_fetch_pair_i   (if_id_fetch_pair),
+			.id_decode_pair_o     (id_decode_pair),
+			.consume_two_o        (id_if_consume_two)
 		);
 
 		ydrasil_issue_stage u_ydrasil_issue_stage (
@@ -663,6 +733,7 @@ import ydrasil_pipeline_pkg::*;
 			.rst_n               (rst_n),
 			.stall_id_i          (stall_id),
 			.bubble_id_i         (bubble_id),
+			.bubble_id_no_alloc_i(bubble_id_no_alloc),
 			.flush_id_i          (flush_id),
 			.id_issue_pair_i     (id_issue_pair),
 			.rf_addr_rs1_o       (rf_raddr_rs1),
@@ -700,16 +771,11 @@ import ydrasil_pipeline_pkg::*;
 			.pipe1_prf_rs2_data_i(prf_rd3_data),
 			.pipe1_prf_rs1_uncommitted_i(rn_real_pipe1_rs1_uncommitted),
 			.pipe1_prf_rs2_uncommitted_i(rn_real_pipe1_rs2_uncommitted),
-			.pipe1_rename_ready_i(rn_real_pipe1_rename_ready),
-			.rs1_issue_alu_ready_next_i(rs1_issue_alu_ready_next),
-		.rs2_issue_alu_ready_next_i(rs2_issue_alu_ready_next),
-		.rs1_issue_alu_stable_bypass_i(rs1_issue_alu_stable_issue_bypass),
-		.rs2_issue_alu_stable_bypass_i(rs2_issue_alu_stable_issue_bypass),
 			.ready_issue_allow_i(ready_issue_allow),
 				.gpr_pending_i('0),
 			.rn_preg_ready_i(rn_real_preg_ready),
 			.pipe1_resbuf_full_i(pipe1_resbuf_full_to_id),
-		.issue_frontend_stall_o(id_frontend_stall),
+		.issue_frontend_stall_o(issue_frontend_stall),
 		.operand_a_o        (operand_a),
 		.operand_b_o        (operand_b),
 		.operator_o         (operator),
@@ -737,10 +803,6 @@ import ydrasil_pipeline_pkg::*;
 		.pipe1_ctrl_rs1_psrc_o(pipe1_ctrl_rs1_psrc),
 		.pipe1_ctrl_rs2_psrc_o(pipe1_ctrl_rs2_psrc),
 		.id_rn_pdst_o       (id_rn_pdst),
-		.rn_alloc_valid_o   (rn_alloc_valid),
-		.rn_alloc_rd_addr_o (rn_alloc_rd_addr),
-		.rn_if_rd_valid_o   (rn_if_rd_valid),
-		.rn_if_ctrl_valid_o (rn_if_ctrl_valid),
 		.id_ctrl_operator_type_o(id_ctrl_operator_type),
 		.id_csr_raddr_o     (id_csr_raddr),
 		.id_ex_csr_waddr_o  (id_ex_csr_waddr),
@@ -758,9 +820,8 @@ import ydrasil_pipeline_pkg::*;
 		.id_ex_valid_o      (id_ex_valid),
 		.id_alu_rf_wen_rd_o (id_alu_rf_wen_rd),
 		.id_rf_waddr_rd_o   (id_rf_waddr_rd),
-		.id_alu_stable_valid_o(id_alu_stable_valid),
-		.id_alu_stable_addr_o (id_alu_stable_addr),
-		.id_alu_stable_data_o (id_alu_stable_data),
+		.id_ctrl_rob_valid_o(id_ctrl_rob_valid),
+		.id_ctrl_rob_idx_o  (id_ctrl_rob_idx),
 		.pipe1_issue_valid_o(pipe1_issue_valid),
 		.pipe1_operand_a_o  (pipe1_operand_a),
 		.pipe1_operand_b_o  (pipe1_operand_b),
@@ -768,13 +829,10 @@ import ydrasil_pipeline_pkg::*;
 		.pipe1_rf_wen_rd_o  (pipe1_rf_wen_rd_issue),
 		.pipe1_rf_waddr_rd_o(pipe1_rf_waddr_rd_issue),
 		.pipe1_rn_pdst_o    (pipe1_rn_pdst_issue),
+		.pipe1_rob_valid_o  (pipe1_rob_valid_issue),
+		.pipe1_rob_idx_o    (pipe1_rob_idx_issue),
 		.pipe1_pc_o         (pipe1_pc),
 		.pipe1_instr_o      (pipe1_instr)
-`ifndef SYNTHESIS
-		,.commit_trace_alloc_valid_o(commit_trace_alloc_valid)
-		,.commit_trace_alloc_pc_o(commit_trace_alloc_pc)
-		,.commit_trace_alloc_instr_o(commit_trace_alloc_instr)
-`endif
 	);
 
 	ydrasil_ex_block u_ydrasil_ex_block (
@@ -804,10 +862,12 @@ import ydrasil_pipeline_pkg::*;
 		.pipe1_operand_a_i  (pipe1_operand_a_to_ex),
 		.pipe1_operand_b_i  (pipe1_operand_b_to_ex),
 		.pipe1_operator_i   (pipe1_operator_to_ex),
-		.pipe1_rf_wen_rd_i  (pipe1_rf_wen_rd_to_ex),
-		.pipe1_rf_waddr_rd_i(pipe1_rf_waddr_rd_to_ex),
-		.pipe1_rn_pdst_i    (pipe1_rn_pdst_to_ex),
-		.id_ex_csr_waddr_i  (id_ex_csr_waddr) ,
+			.pipe1_rf_wen_rd_i  (pipe1_rf_wen_rd_to_ex),
+			.pipe1_rf_waddr_rd_i(pipe1_rf_waddr_rd_to_ex),
+			.pipe1_rn_pdst_i    (pipe1_rn_pdst_to_ex),
+			.pipe1_rob_valid_i  (pipe1_rob_valid_to_ex),
+			.pipe1_rob_idx_i    (pipe1_rob_idx_to_ex),
+			.id_ex_csr_waddr_i  (id_ex_csr_waddr) ,
 		.id_op_csr_info_i   (id_op_csr_info) ,
 		.csr_ex_rdata_i     (csr_ex_rdata) ,
 		.ex_csr_wen_o       (ex_csr_wen),
@@ -831,10 +891,12 @@ import ydrasil_pipeline_pkg::*;
 		.alu_rf_waddr_rd_o  (alu_rf_waddr_rd),
 		.alu_rn_pdst_o      (alu_rn_pdst),
 		.pipe1_alu_result_o (pipe1_alu_result),
-		.pipe1_alu_rf_wen_rd_o(pipe1_alu_rf_wen_rd),
-		.pipe1_alu_rf_waddr_rd_o(pipe1_alu_rf_waddr_rd),
-		.pipe1_alu_rn_pdst_o(pipe1_alu_rn_pdst),
-		.pipe1_instret_inc_o(pipe1_instret_inc),
+			.pipe1_alu_rf_wen_rd_o(pipe1_alu_rf_wen_rd),
+			.pipe1_alu_rf_waddr_rd_o(pipe1_alu_rf_waddr_rd),
+			.pipe1_alu_rn_pdst_o(pipe1_alu_rn_pdst),
+			.pipe1_alu_rob_valid_o(pipe1_alu_rob_valid),
+			.pipe1_alu_rob_idx_o(pipe1_alu_rob_idx),
+			.pipe1_instret_inc_o(pipe1_instret_inc),
 		.mul_issue_o        (ex_mul_issue),
 		.mul_issue_waddr_o  (ex_mul_issue_waddr),
 		.mul_wdata_rd_o     (mul_wb_result),
@@ -884,11 +946,13 @@ import ydrasil_pipeline_pkg::*;
 		.alu_wdata_rd_i   (alu_result),
 		.alu_rf_wen_rd_i  (alu_rf_wen_rd),
 		.alu_rf_waddr_rd_i(alu_rf_waddr_rd),
-		.pipe1_alu_wdata_rd_i(pipe1_alu_result_to_wb),
-		.pipe1_alu_rf_wen_rd_i(pipe1_alu_rf_wen_rd_to_wb),
-		.pipe1_alu_rf_waddr_rd_i(pipe1_alu_rf_waddr_rd_to_wb),
-		.pipe1_alu_rn_pdst_i(pipe1_alu_rn_pdst_to_wb),
-		.lsu_wb_result_i  (lsu_wb_result),
+			.pipe1_alu_wdata_rd_i(pipe1_alu_result_to_wb),
+			.pipe1_alu_rf_wen_rd_i(pipe1_alu_rf_wen_rd_to_wb),
+			.pipe1_alu_rf_waddr_rd_i(pipe1_alu_rf_waddr_rd_to_wb),
+			.pipe1_alu_rn_pdst_i(pipe1_alu_rn_pdst_to_wb),
+			.pipe1_alu_rob_valid_i(pipe1_alu_rob_valid_to_wb),
+			.pipe1_alu_rob_idx_i(pipe1_alu_rob_idx_to_wb),
+			.lsu_wb_result_i  (lsu_wb_result),
 		.lsu_rf_wen_rd_i  (lsu_rf_wen_rd),
 		.lsu_rf_waddr_rd_i(lsu_rf_waddr_rd),
 		.mul_wdata_rd_i   (mul_wb_result),
@@ -902,10 +966,12 @@ import ydrasil_pipeline_pkg::*;
 		.pipe1_resbuf_full_o(pipe1_resbuf_full),
 		.pipe1_wb_dequeue_o(pipe1_wb_dequeue),
 		.pipe1_wb_enqueue_o(pipe1_wb_enqueue),
-		.pipe1_wb_pdst_valid_o(pipe1_wb_pdst_valid),
-		.pipe1_wb_pdst_o(pipe1_wb_pdst),
-		.pipe1_wb_data_o(pipe1_wb_data),
-		.pipe1_fwd_valid_o(pipe1_wb_fwd_valid),
+			.pipe1_wb_pdst_valid_o(pipe1_wb_pdst_valid),
+			.pipe1_wb_pdst_o(pipe1_wb_pdst),
+			.pipe1_wb_data_o(pipe1_wb_data),
+			.pipe1_wb_rob_valid_o(pipe1_wb_rob_valid),
+			.pipe1_wb_rob_idx_o(pipe1_wb_rob_idx),
+			.pipe1_fwd_valid_o(pipe1_wb_fwd_valid),
 		.pipe1_fwd_addr_o(pipe1_wb_fwd_addr),
 		.pipe1_fwd_pdst_o(pipe1_wb_fwd_pdst),
 		.pipe1_fwd_data_o(pipe1_wb_fwd_data),
@@ -972,8 +1038,6 @@ import ydrasil_pipeline_pkg::*;
 			.id_frontend_stall_i(id_frontend_stall),
 			.clint_stall_i     (clint_stall),
 			.ex_mul_stall_i     (ex_mul_stall),
-			.ex_mul_issue_i     (ex_mul_issue),
-			.mul_result_valid_i (mul_result_valid),
 			.wb_backpressure_i  (wb_backpressure),
 				.id_ex_valid_i     (id_ex_valid),
 				.id_alu_rf_wen_rd_i(id_alu_rf_wen_rd),
@@ -983,18 +1047,9 @@ import ydrasil_pipeline_pkg::*;
 					                     operator[ydrasil_pkg::OP_MUL_REM],
 					                     operator[ydrasil_pkg::OP_MUL_REMU]}),
 				.operator_type_i   (operator_type),
-			.id_ctrl_rs1_ren_i (id_ctrl_rs1_ren),
-			.id_ctrl_rs2_ren_i (id_ctrl_rs2_ren),
-			.id_ctrl_rd_wen_i  (id_ctrl_rd_wen),
-			.id_ctrl_rs1_addr_i(id_ctrl_rs1_addr),
-				.id_ctrl_rs2_addr_i(id_ctrl_rs2_addr),
-				.id_ctrl_rd_addr_i (id_ctrl_rd_addr),
-				.id_ctrl_operator_type_i(id_ctrl_operator_type),
 				.pipe1_issue_valid_i(pipe1_issue_valid),
 					.pipe1_rf_wen_rd_issue_i(pipe1_rf_wen_rd_issue),
 					.pipe1_rf_waddr_rd_issue_i(pipe1_rf_waddr_rd_issue),
-					.id_alu_stable_valid_i(id_alu_stable_valid),
-					.id_alu_stable_addr_i(id_alu_stable_addr),
 					.rn_wb_pdst_found_i(rn_real_wb_pdst_found),
 					.rn_wb_pdst_i(rn_real_wb_pdst),
 					.rn_lsu_pdst_found_i(rn_real_lsu_pdst_found),
@@ -1016,18 +1071,11 @@ import ydrasil_pipeline_pkg::*;
 					.lsu_struct_stall_o(lsu_struct_stall),
 					.ready_issue_allow_o(ready_issue_allow),
 					.bubble_id_o       (bubble_id),
+					.bubble_id_no_alloc_o(bubble_id_no_alloc),
 				.ex_accept_valid_o (ex_accept_valid),
 				.id_ex_rd_issue_o  (id_ex_rd_issue),
 				.pipe1_rd_issue_o  (pipe1_rd_issue),
 				.operator_lsu_type_o(operator_lsu_type),
-				.rs1_issue_alu_ready_next_o(rs1_issue_alu_ready_next),
-			.rs2_issue_alu_ready_next_o(rs2_issue_alu_ready_next),
-			.rs1_issue_alu_stable_bypass_o(),
-			.rs2_issue_alu_stable_bypass_o(),
-				.rs1_issue_alu_stable_issue_bypass_o(rs1_issue_alu_stable_issue_bypass),
-				.rs2_issue_alu_stable_issue_bypass_o(rs2_issue_alu_stable_issue_bypass),
-				.rs1_branch_ready_next_bypass_o(rs1_branch_ready_next_bypass),
-				.rs2_branch_ready_next_bypass_o(rs2_branch_ready_next_bypass),
 				.prf_wr0_en_o(prf_wr0_en),
 				.prf_wr1_en_o(prf_wr1_en),
 				.prf_wr0_addr_o(prf_wr0_addr),
@@ -1090,120 +1138,127 @@ import ydrasil_pipeline_pkg::*;
 	);
 
 	`ifndef SYNTHESIS
+		assign observer_pkt.flush_id = flush_id;
+		assign observer_pkt.flush_ex = flush_ex;
+		assign observer_pkt.interrupt = interrupt;
+		assign observer_pkt.if_id_instr = if_id_instr;
+		assign observer_pkt.bp_predict_pc = if_mem_addr;
+		assign observer_pkt.bp_predict_hit = bp_predict_hit;
+		assign observer_pkt.bp_predict_taken = bp_predict_taken;
+		assign observer_pkt.bp_predict_target = bp_predict_target;
+		assign observer_pkt.bp_predict_counter = bp_predict_counter;
+		assign observer_pkt.dbg_bp_resolve_valid = dbg_bp_resolve_valid;
+		assign observer_pkt.dbg_bp_resolve_pc = dbg_bp_resolve_pc;
+		assign observer_pkt.dbg_bp_actual_taken = dbg_bp_actual_taken;
+		assign observer_pkt.dbg_bp_actual_target = dbg_bp_actual_target;
+		assign observer_pkt.dbg_bp_actual_next_pc = dbg_bp_actual_next_pc;
+		assign observer_pkt.dbg_bp_pred_hit = dbg_bp_pred_hit;
+		assign observer_pkt.dbg_bp_pred_taken = dbg_bp_pred_taken;
+		assign observer_pkt.dbg_bp_pred_target = dbg_bp_pred_target;
+		assign observer_pkt.dbg_bp_pred_counter = dbg_bp_pred_counter;
+		assign observer_pkt.dbg_bp_pred_l0_taken = dbg_bp_pred_l0_taken;
+		assign observer_pkt.dbg_bp_pred_next_pc = dbg_bp_pred_next_pc;
+		assign observer_pkt.dbg_bp_mispredict = dbg_bp_mispredict;
+		assign observer_pkt.alu_rf_wen_rd = alu_rf_wen_rd;
+		assign observer_pkt.alu_rf_waddr_rd = alu_rf_waddr_rd;
+		assign observer_pkt.alu_result = alu_result;
+		assign observer_pkt.alu_rn_pdst = alu_rn_pdst;
+		assign observer_pkt.lsu_rf_wen_rd = lsu_rf_wen_rd;
+		assign observer_pkt.lsu_rf_waddr_rd = lsu_rf_waddr_rd;
+		assign observer_pkt.lsu_wb_result = lsu_wb_result;
+		assign observer_pkt.wb_mul_complete = wb_mul_complete;
+		assign observer_pkt.wb_mul_complete_waddr = wb_mul_complete_waddr;
+		assign observer_pkt.pipe1_alu_rf_wen_rd_to_wb = pipe1_alu_rf_wen_rd_to_wb;
+		assign observer_pkt.pipe1_alu_rf_waddr_rd_to_wb = pipe1_alu_rf_waddr_rd_to_wb;
+		assign observer_pkt.pipe1_alu_result_to_wb = pipe1_alu_result_to_wb;
+		assign observer_pkt.id_ex_valid = id_ex_valid;
+		assign observer_pkt.id_ex_rd_issue = id_ex_rd_issue;
+		assign observer_pkt.id_alu_rf_wen_rd = id_alu_rf_wen_rd;
+		assign observer_pkt.id_rf_waddr_rd = id_rf_waddr_rd;
+		assign observer_pkt.operator_type = operator_type;
+		assign observer_pkt.id_ctrl_rs1_ren = id_ctrl_rs1_ren;
+		assign observer_pkt.id_ctrl_rs2_ren = id_ctrl_rs2_ren;
+		assign observer_pkt.id_ctrl_rd_wen = id_ctrl_rd_wen;
+		assign observer_pkt.id_ctrl_rs1_addr = id_ctrl_rs1_addr;
+		assign observer_pkt.id_ctrl_rs2_addr = id_ctrl_rs2_addr;
+		assign observer_pkt.id_ctrl_rd_addr = id_ctrl_rd_addr;
+		assign observer_pkt.id_instr_addr = id_instr_addr;
+		assign observer_pkt.rn_alloc_valid = rn_alloc_valid;
+		assign observer_pkt.rn_alloc_rd_addr = rn_alloc_rd_addr;
+		assign observer_pkt.commit_trace_alloc_valid = commit_trace_alloc_valid;
+		assign observer_pkt.commit_trace_alloc_pc = commit_trace_alloc_pc;
+		assign observer_pkt.commit_trace_alloc_instr = commit_trace_alloc_instr;
+		assign observer_pkt.commit_trace_alloc1_valid = commit_trace_alloc1_valid;
+		assign observer_pkt.commit_trace_alloc1_pc = commit_trace_alloc1_pc;
+		assign observer_pkt.commit_trace_alloc1_instr = commit_trace_alloc1_instr;
+		assign observer_pkt.pipe1_issue_valid = pipe1_issue_valid;
+		assign observer_pkt.pipe1_issue_valid_to_ex = pipe1_issue_valid_to_ex;
+		assign observer_pkt.pipe1_rf_wen_rd_to_ex = pipe1_rf_wen_rd_to_ex;
+		assign observer_pkt.pipe1_rf_waddr_rd_to_ex = pipe1_rf_waddr_rd_to_ex;
+		assign observer_pkt.pipe1_rd_issue = pipe1_rd_issue;
+		assign observer_pkt.pipe1_rf_waddr_rd_issue = pipe1_rf_waddr_rd_issue;
+		assign observer_pkt.pipe1_rf_raddr_rs1 = pipe1_rf_raddr_rs1;
+		assign observer_pkt.pipe1_rf_raddr_rs2 = pipe1_rf_raddr_rs2;
+		assign observer_pkt.pipe1_pc = pipe1_pc;
+		assign observer_pkt.pipe1_commit_rf_wen = pipe1_commit_rf_wen;
+		assign observer_pkt.rs1_pending_stall = 1'b0;
+		assign observer_pkt.rs2_pending_stall = 1'b0;
+		assign observer_pkt.rd_waw_stall = 1'b0;
+		assign observer_pkt.wb_rf_wen_rd = wb_rf_wen_rd;
+		assign observer_pkt.wb_rf_waddr_rd = wb_rf_waddr_rd;
+		assign observer_pkt.wb_rf_wdata_rd = wb_rf_wdata_rd;
+		assign observer_pkt.wb_hzd_valid = wb_hzd_valid_q;
+		assign observer_pkt.wb_hzd_addr = wb_hzd_addr_q;
+		assign observer_pkt.ex_mul_issue = ex_mul_issue;
+		assign observer_pkt.rf_wen_rd = rf_wen_rd;
+		assign observer_pkt.rf_waddr_rd = rf_waddr_rd;
+		assign observer_pkt.rf_wdata_rd = rf_wdata_rd;
+		assign observer_pkt.prf_rd0_en = prf_rd0_en;
+		assign observer_pkt.prf_rd1_en = prf_rd1_en;
+		assign observer_pkt.prf_rd2_en = prf_rd2_en;
+		assign observer_pkt.prf_rd3_en = prf_rd3_en;
+		assign observer_pkt.prf_rd0_addr = prf_rd0_addr;
+		assign observer_pkt.prf_rd1_addr = prf_rd1_addr;
+		assign observer_pkt.prf_rd2_addr = prf_rd2_addr;
+		assign observer_pkt.prf_rd3_addr = prf_rd3_addr;
+		assign observer_pkt.prf_wr0_en = prf_wr0_en;
+		assign observer_pkt.prf_wr1_en = prf_wr1_en;
+		assign observer_pkt.prf_wr0_addr = prf_wr0_addr;
+		assign observer_pkt.prf_wr1_addr = prf_wr1_addr;
+		assign observer_pkt.prf_wr0_data = prf_wr0_data;
+		assign observer_pkt.prf_wr1_data = prf_wr1_data;
+		assign observer_pkt.rn_real_wb_pdst_found = rn_real_wb_pdst_found;
+		assign observer_pkt.rn_real_wb_pdst = rn_real_wb_pdst;
+		assign observer_pkt.rn_real_lsu_pdst_found = rn_real_lsu_pdst_found;
+		assign observer_pkt.rn_real_lsu_pdst = rn_real_lsu_pdst;
+		assign observer_pkt.rn_real_mul_pdst_found = rn_real_mul_pdst_found;
+		assign observer_pkt.rn_real_mul_pdst = rn_real_mul_pdst;
+		assign observer_pkt.rn_real_pipe1_pdst_found = rn_real_pipe1_pdst_found;
+		assign observer_pkt.rn_real_pipe1_pdst = rn_real_pipe1_pdst;
+
+		assign dbg_bp_predict_pc_o = observer_dbg_pkt.bp_predict_pc;
+		assign dbg_bp_predict_hit_o = observer_dbg_pkt.bp_predict_hit;
+		assign dbg_bp_predict_taken_o = observer_dbg_pkt.bp_predict_taken;
+		assign dbg_bp_predict_target_o = observer_dbg_pkt.bp_predict_target;
+		assign dbg_bp_predict_counter_o = observer_dbg_pkt.bp_predict_counter;
+		assign dbg_bp_resolve_valid_o = observer_dbg_pkt.bp_resolve_valid;
+		assign dbg_bp_resolve_pc_o = observer_dbg_pkt.bp_resolve_pc;
+		assign dbg_bp_actual_taken_o = observer_dbg_pkt.bp_actual_taken;
+		assign dbg_bp_actual_target_o = observer_dbg_pkt.bp_actual_target;
+		assign dbg_bp_actual_next_pc_o = observer_dbg_pkt.bp_actual_next_pc;
+		assign dbg_bp_pred_hit_o = observer_dbg_pkt.bp_pred_hit;
+		assign dbg_bp_pred_taken_o = observer_dbg_pkt.bp_pred_taken;
+		assign dbg_bp_pred_target_o = observer_dbg_pkt.bp_pred_target;
+		assign dbg_bp_pred_counter_o = observer_dbg_pkt.bp_pred_counter;
+		assign dbg_bp_pred_l0_taken_o = observer_dbg_pkt.bp_pred_l0_taken;
+		assign dbg_bp_pred_next_pc_o = observer_dbg_pkt.bp_pred_next_pc;
+		assign dbg_bp_mispredict_o = observer_dbg_pkt.bp_mispredict;
+
 		ydrasil_core_observer u_ydrasil_core_observer (
 			.clk(clk),
 			.rst_n(rst_n),
-				.flush_id(flush_id),
-				.flush_ex(flush_ex),
-				.interrupt(interrupt),
-				.if_id_instr(if_id_instr),
-				.bp_predict_pc(if_mem_addr),
-				.bp_predict_hit(bp_predict_hit),
-				.bp_predict_taken(bp_predict_taken),
-				.bp_predict_target(bp_predict_target),
-				.bp_predict_counter(bp_predict_counter),
-				.dbg_bp_resolve_valid(dbg_bp_resolve_valid),
-				.dbg_bp_resolve_pc(dbg_bp_resolve_pc),
-				.dbg_bp_actual_taken(dbg_bp_actual_taken),
-				.dbg_bp_actual_target(dbg_bp_actual_target),
-				.dbg_bp_actual_next_pc(dbg_bp_actual_next_pc),
-				.dbg_bp_pred_hit(dbg_bp_pred_hit),
-				.dbg_bp_pred_taken(dbg_bp_pred_taken),
-				.dbg_bp_pred_target(dbg_bp_pred_target),
-				.dbg_bp_pred_counter(dbg_bp_pred_counter),
-				.dbg_bp_pred_l0_taken(dbg_bp_pred_l0_taken),
-				.dbg_bp_pred_next_pc(dbg_bp_pred_next_pc),
-				.dbg_bp_mispredict(dbg_bp_mispredict),
-				.alu_rf_wen_rd(alu_rf_wen_rd),
-				.alu_rf_waddr_rd(alu_rf_waddr_rd),
-				.alu_result(alu_result),
-				.alu_rn_pdst(alu_rn_pdst),
-				.lsu_rf_wen_rd(lsu_rf_wen_rd),
-				.lsu_rf_waddr_rd(lsu_rf_waddr_rd),
-				.lsu_wb_result(lsu_wb_result),
-				.wb_mul_complete(wb_mul_complete),
-				.wb_mul_complete_waddr(wb_mul_complete_waddr),
-				.pipe1_alu_rf_wen_rd_to_wb(pipe1_alu_rf_wen_rd_to_wb),
-				.pipe1_alu_rf_waddr_rd_to_wb(pipe1_alu_rf_waddr_rd_to_wb),
-				.pipe1_alu_result_to_wb(pipe1_alu_result_to_wb),
-				.id_ex_valid(id_ex_valid),
-				.id_ex_rd_issue(id_ex_rd_issue),
-				.id_alu_rf_wen_rd(id_alu_rf_wen_rd),
-				.id_rf_waddr_rd(id_rf_waddr_rd),
-				.operator_type(operator_type),
-			.id_ctrl_rs1_ren(id_ctrl_rs1_ren),
-			.id_ctrl_rs2_ren(id_ctrl_rs2_ren),
-				.id_ctrl_rd_wen(id_ctrl_rd_wen),
-				.id_ctrl_rs1_addr(id_ctrl_rs1_addr),
-				.id_ctrl_rs2_addr(id_ctrl_rs2_addr),
-				.id_ctrl_rd_addr(id_ctrl_rd_addr),
-				.id_instr_addr(id_instr_addr),
-				.rn_alloc_valid(rn_alloc_valid),
-				.rn_alloc_rd_addr(rn_alloc_rd_addr),
-				.commit_trace_alloc_valid(commit_trace_alloc_valid),
-				.commit_trace_alloc_pc(commit_trace_alloc_pc),
-				.commit_trace_alloc_instr(commit_trace_alloc_instr),
-				.pipe1_issue_valid(pipe1_issue_valid),
-				.pipe1_issue_valid_to_ex(pipe1_issue_valid_to_ex),
-				.pipe1_rf_wen_rd_to_ex(pipe1_rf_wen_rd_to_ex),
-				.pipe1_rf_waddr_rd_to_ex(pipe1_rf_waddr_rd_to_ex),
-				.pipe1_rd_issue(pipe1_rd_issue),
-				.pipe1_rf_waddr_rd_issue(pipe1_rf_waddr_rd_issue),
-				.pipe1_rf_raddr_rs1(pipe1_rf_raddr_rs1),
-				.pipe1_rf_raddr_rs2(pipe1_rf_raddr_rs2),
-				.pipe1_pc(pipe1_pc),
-				.pipe1_commit_rf_wen(pipe1_commit_rf_wen),
-				.rs1_pending_stall(1'b0),
-				.rs2_pending_stall(1'b0),
-				.rd_waw_stall(1'b0),
-				.wb_rf_wen_rd(wb_rf_wen_rd),
-				.wb_rf_waddr_rd(wb_rf_waddr_rd),
-				.wb_rf_wdata_rd(wb_rf_wdata_rd),
-				.wb_hzd_valid(wb_hzd_valid_q),
-				.wb_hzd_addr(wb_hzd_addr_q),
-				.ex_mul_issue(ex_mul_issue),
-				.rf_wen_rd(rf_wen_rd),
-				.rf_waddr_rd(rf_waddr_rd),
-				.rf_wdata_rd(rf_wdata_rd),
-			.prf_rd0_en(prf_rd0_en),
-			.prf_rd1_en(prf_rd1_en),
-			.prf_rd2_en(prf_rd2_en),
-			.prf_rd3_en(prf_rd3_en),
-			.prf_rd0_addr(prf_rd0_addr),
-			.prf_rd1_addr(prf_rd1_addr),
-			.prf_rd2_addr(prf_rd2_addr),
-			.prf_rd3_addr(prf_rd3_addr),
-			.prf_wr0_en(prf_wr0_en),
-			.prf_wr1_en(prf_wr1_en),
-			.prf_wr0_addr(prf_wr0_addr),
-			.prf_wr1_addr(prf_wr1_addr),
-			.prf_wr0_data(prf_wr0_data),
-			.prf_wr1_data(prf_wr1_data),
-			.rn_real_wb_pdst_found(rn_real_wb_pdst_found),
-			.rn_real_wb_pdst(rn_real_wb_pdst),
-			.rn_real_lsu_pdst_found(rn_real_lsu_pdst_found),
-			.rn_real_lsu_pdst(rn_real_lsu_pdst),
-				.rn_real_mul_pdst_found(rn_real_mul_pdst_found),
-				.rn_real_mul_pdst(rn_real_mul_pdst),
-				.rn_real_pipe1_pdst_found(rn_real_pipe1_pdst_found),
-				.rn_real_pipe1_pdst(rn_real_pipe1_pdst),
-				.dbg_bp_predict_pc_o(dbg_bp_predict_pc_o),
-				.dbg_bp_predict_hit_o(dbg_bp_predict_hit_o),
-				.dbg_bp_predict_taken_o(dbg_bp_predict_taken_o),
-				.dbg_bp_predict_target_o(dbg_bp_predict_target_o),
-				.dbg_bp_predict_counter_o(dbg_bp_predict_counter_o),
-				.dbg_bp_resolve_valid_o(dbg_bp_resolve_valid_o),
-				.dbg_bp_resolve_pc_o(dbg_bp_resolve_pc_o),
-				.dbg_bp_actual_taken_o(dbg_bp_actual_taken_o),
-				.dbg_bp_actual_target_o(dbg_bp_actual_target_o),
-				.dbg_bp_actual_next_pc_o(dbg_bp_actual_next_pc_o),
-				.dbg_bp_pred_hit_o(dbg_bp_pred_hit_o),
-				.dbg_bp_pred_taken_o(dbg_bp_pred_taken_o),
-				.dbg_bp_pred_target_o(dbg_bp_pred_target_o),
-				.dbg_bp_pred_counter_o(dbg_bp_pred_counter_o),
-				.dbg_bp_pred_l0_taken_o(dbg_bp_pred_l0_taken_o),
-				.dbg_bp_pred_next_pc_o(dbg_bp_pred_next_pc_o),
-				.dbg_bp_mispredict_o(dbg_bp_mispredict_o)
+			.observer_i(observer_pkt),
+			.observer_dbg_o(observer_dbg_pkt)
 			);
 	`endif
 

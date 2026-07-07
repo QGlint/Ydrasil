@@ -176,7 +176,7 @@ import ydrasil_pkg::*;
         assign mmio_wmask_o = 4'b0000;
         assign mmio_wdata_o = '0;
 
-        assign lsu_ctrl_busy_o = (state_q != S_IDLE) | request_valid | result_valid_q;
+        assign lsu_ctrl_busy_o = (state_q != S_IDLE) | result_valid_q;
 
         assign lsu_wb_result_o = result_q;
         assign lsu_rf_rd_wen_o = result_valid_q;
@@ -461,7 +461,7 @@ import ydrasil_pkg::*;
         load_s1_fast_wb ? load_s1_pdst_q :
         load_s2_valid_q ? load_s2_pdst_q : mmio_wb_pdst_q;
 
-    assign lsu_ctrl_busy_o = mmio_busy | mmio_accept;
+    assign lsu_ctrl_busy_o = mmio_busy;
     assign lsu_wb_result_o = selected_wb_result;
     assign lsu_rf_rd_wen_o = dtcm_wb_valid | mmio_wb_out_valid;
     assign lsu_rf_rd_waddr_o = (dtcm_wb_valid | mmio_wb_out_valid) ? selected_wb_rd_addr : '0;

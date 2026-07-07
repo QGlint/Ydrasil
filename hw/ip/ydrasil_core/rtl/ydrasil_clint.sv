@@ -79,8 +79,9 @@ import ydrasil_pkg::*;
     wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] next_instr_addr;  // 下一个保存的指令地址
     wire [                31:0] next_cause;  // 下一个中断原因代码
 
-    // 暂停信号产生逻辑 - 当中断状态机或CSR写状态机不在空闲状态时暂停流水线
-    assign clint_stall_o = ((int_state != S_INT_IDLE) | (csr_state != S_CSR_IDLE)) ? 1'b1 : 1'b0;
+    // Stall only reflects an already accepted CLINT transaction.  The current
+    // sys_op request must not feed back into same-cycle issue acceptance.
+    assign clint_stall_o = (csr_state != S_CSR_IDLE) ? 1'b1 : 1'b0;
 
     // 中断处理逻辑
     assign int_state = 

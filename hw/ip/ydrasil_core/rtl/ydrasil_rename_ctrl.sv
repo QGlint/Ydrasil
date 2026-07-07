@@ -13,6 +13,7 @@ import ydrasil_pkg::*;
     input  wire interrupt_i,
 
     input  wire [INST_DATA_WIDTH-1:0] if_id_instr_i,
+    input  wire [INST_DATA_WIDTH-1:0] if_id1_instr_i,
 
     input  wire id_ctrl_rs1_ren_i,
     input  wire id_ctrl_rs2_ren_i,
@@ -22,8 +23,6 @@ import ydrasil_pkg::*;
     input  wire [PREG_BITS-1:0] id_ctrl_rs2_psrc_i,
     input  wire [PREG_BITS-1:0] id_ctrl_pdst_i,
     input  wire [OPERATOR_TYPE_WIDTH-1:0] id_ctrl_operator_type_i,
-    input  wire ctrl_rs1_ready_next_bypass_i,
-    input  wire ctrl_rs2_ready_next_bypass_i,
 
     input  wire pipe1_ctrl_rs1_ren_i,
     input  wire pipe1_ctrl_rs2_ren_i,
@@ -34,6 +33,9 @@ import ydrasil_pkg::*;
     input  wire rn_if_rd_valid_i,
     input  wire rn_if_ctrl_valid_i,
     input  wire [REGS_ADDR_WIDTH-1:0] rn_alloc_rd_addr_i,
+    input  wire rn_alloc1_valid_i,
+    input  wire rn_if1_rd_valid_i,
+    input  wire [REGS_ADDR_WIDTH-1:0] rn_alloc1_rd_addr_i,
 
     input  wire alu_wb_valid_i,
     input  wire [REGS_ADDR_WIDTH-1:0] alu_wb_arch_rd_i,
@@ -47,18 +49,27 @@ import ydrasil_pkg::*;
     input  wire [REGS_ADDR_WIDTH-1:0] mul_wb_arch_rd_i,
     input  wire [PREG_BITS-1:0] mul_wb_pdst_i,
 
-    input  wire pipe1_wb_valid_i,
-    input  wire [PREG_BITS-1:0] pipe1_wb_pdst_i,
-    input  wire [REGS_DATA_WIDTH-1:0] pipe1_wb_data_i,
-    input  wire pipe1_issue_valid_i,
-    input  wire [PREG_BITS-1:0] pipe1_issue_pdst_i,
+	    input  wire pipe1_wb_valid_i,
+	    input  wire [PREG_BITS-1:0] pipe1_wb_pdst_i,
+	    input  wire [REGS_DATA_WIDTH-1:0] pipe1_wb_data_i,
+	    input  wire pipe1_wb_rob_valid_i,
+	    input  wire [ROB_PTR_BITS-1:0] pipe1_wb_rob_idx_i,
+	    input  wire pipe1_issue_valid_i,
+	    input  wire [PREG_BITS-1:0] pipe1_issue_pdst_i,
+	    input  wire ctrl_complete_valid_i,
+	    input  wire [ROB_PTR_BITS-1:0] ctrl_complete_rob_idx_i,
 
     input  wire wb_rf_wen_i,
 
     output wire [PREG_BITS-1:0] live_rs1_psrc_o,
     output wire [PREG_BITS-1:0] live_rs2_psrc_o,
-    output wire [PREG_BITS-1:0] alloc_pdst_o,
-    output logic [PHYS_REGS-1:0] preg_ready_o,
+    output wire [PREG_BITS-1:0] live1_rs1_psrc_o,
+	    output wire [PREG_BITS-1:0] live1_rs2_psrc_o,
+	    output wire [PREG_BITS-1:0] alloc_pdst_o,
+	    output wire [PREG_BITS-1:0] alloc1_pdst_o,
+	    output wire [ROB_PTR_BITS-1:0] alloc0_rob_idx_o,
+	    output wire [ROB_PTR_BITS-1:0] alloc1_rob_idx_o,
+	    output logic [PHYS_REGS-1:0] preg_ready_o,
 
     output wire rs1_ready_o,
     output wire rs2_ready_o,
@@ -70,6 +81,8 @@ import ydrasil_pkg::*;
     output wire pipe1_rs2_uncommitted_o,
     output wire live_rs1_ready_o,
     output wire live_rs2_ready_o,
+    output wire live1_rs1_ready_o,
+    output wire live1_rs2_ready_o,
     output wire pipe1_rename_ready_o,
     output wire alloc_stall_o,
     output wire ctrl_block_o,
@@ -124,94 +137,92 @@ import ydrasil_pkg::*;
     reg [ROB_PTR_BITS-1:0] pdst_rob_idx_q [0:PHYS_REGS-1];
     reg pdst_rob_valid_q [0:PHYS_REGS-1];
 
-    function automatic [PREG_BITS-1:0] first_free;
-        input [PHYS_REGS-1:0] free_map;
+    reg [PREG_BITS-1:0] first_free_next_for_alloc;
+    reg [PREG_BITS-1:0] first_free_flush_map;
+    reg [PREG_BITS-1:0] first_free_without_alloc0;
+    reg [6:0] flush_free_count;
+    reg rob_has_pipe1_not_head_comb;
+    reg rob_has_pipe1_after_next_comb;
+
+    always_comb begin
         integer k;
-        begin
-            first_free = '0;
-            for (k = PHYS_REGS-1; k >= 1; k = k - 1) begin
-                if (free_map[k]) begin
-                    first_free = k[PREG_BITS-1:0];
-                end
+        first_free_next_for_alloc = '0;
+        first_free_flush_map = '0;
+        first_free_without_alloc0 = '0;
+        for (k = PHYS_REGS-1; k >= 1; k = k - 1) begin
+            if (free_next_for_alloc[k]) begin
+                first_free_next_for_alloc = k[PREG_BITS-1:0];
+            end
+            if (flush_free_map[k]) begin
+                first_free_flush_map = k[PREG_BITS-1:0];
+            end
+            if (free_q[k] && (k[PREG_BITS-1:0] != alloc_pdst_q)) begin
+                first_free_without_alloc0 = k[PREG_BITS-1:0];
             end
         end
-    endfunction
+    end
 
-    function automatic [PHYS_REGS-1:0] free_from_amt;
+    always_comb begin
         integer f;
-        begin
-            free_from_amt = '1;
-            for (f = 0; f < REGS_NUM; f = f + 1) begin
-                free_from_amt[amt_q[f]] = 1'b0;
-            end
+        flush_free_count = '0;
+        for (f = 0; f < PHYS_REGS; f = f + 1) begin
+            flush_free_count = flush_free_count +
+                (flush_free_map[f] ? 7'd1 : 7'd0);
         end
-    endfunction
+    end
 
-    function automatic [PHYS_REGS-1:0] free_from_amt_with_redirect_wb;
-        input preserve_valid;
-        input [REGS_ADDR_WIDTH-1:0] preserve_arch_rd;
-        input [PREG_BITS-1:0] preserve_pdst;
-        begin
-            free_from_amt_with_redirect_wb = free_from_amt();
-            if (preserve_valid) begin
-                if (amt_q[preserve_arch_rd] != preserve_pdst) begin
-                    free_from_amt_with_redirect_wb[amt_q[preserve_arch_rd]] = 1'b1;
-                end
-                free_from_amt_with_redirect_wb[preserve_pdst] = 1'b0;
-            end
-        end
-    endfunction
-
-    function automatic [6:0] count_free;
-        input [PHYS_REGS-1:0] free_map;
-        integer f;
-        begin
-            count_free = '0;
-            for (f = 0; f < PHYS_REGS; f = f + 1) begin
-                count_free = count_free + (free_map[f] ? 7'd1 : 7'd0);
-            end
-        end
-    endfunction
-
-    function automatic rob_has_pipe1_not_head;
+    always_comb begin
         integer j;
-        reg found;
+        reg found_not_head;
+        reg found_after_next;
         reg [ROB_PTR_BITS-1:0] idx;
-        begin
-            found = 1'b0;
-            rob_has_pipe1_not_head = 1'b0;
-            for (j = 1; j < ROB_DEPTH; j = j + 1) begin
-                idx = rob_head_q + ROB_PTR_BITS'(j);
-                if (!found && rob_valid_q[idx] && rob_pipe1_q[idx]) begin
-                    rob_has_pipe1_not_head = 1'b1;
-                    found = 1'b1;
-                end
+        found_not_head = 1'b0;
+        found_after_next = 1'b0;
+        rob_has_pipe1_not_head_comb = 1'b0;
+        rob_has_pipe1_after_next_comb = 1'b0;
+        for (j = 1; j < ROB_DEPTH; j = j + 1) begin
+            idx = rob_head_q + ROB_PTR_BITS'(j);
+            if (!found_not_head && rob_valid_q[idx] && rob_pipe1_q[idx]) begin
+                rob_has_pipe1_not_head_comb = 1'b1;
+                found_not_head = 1'b1;
+            end
+            if ((j >= 2) && !found_after_next &&
+                rob_valid_q[idx] && rob_pipe1_q[idx]) begin
+                rob_has_pipe1_after_next_comb = 1'b1;
+                found_after_next = 1'b1;
             end
         end
-    endfunction
-
-    function automatic rob_has_pipe1_after_next;
-        integer j;
-        reg found;
-        reg [ROB_PTR_BITS-1:0] idx;
-        begin
-            found = 1'b0;
-            rob_has_pipe1_after_next = 1'b0;
-            for (j = 2; j < ROB_DEPTH; j = j + 1) begin
-                idx = rob_head_q + ROB_PTR_BITS'(j);
-                if (!found && rob_valid_q[idx] && rob_pipe1_q[idx]) begin
-                    rob_has_pipe1_after_next = 1'b1;
-                    found = 1'b1;
-                end
-            end
-        end
-    endfunction
+    end
 
     wire alloc_needs_preg = rn_if_rd_valid_i & (rn_alloc_rd_addr_i != '0);
-    wire can_alloc = (rob_occ_q < ROB_DEPTH_COUNT) &&
-        (!alloc_needs_preg | (free_count_q != '0));
+    wire alloc1_needs_preg = rn_if1_rd_valid_i & (rn_alloc1_rd_addr_i != '0);
+    wire [1:0] alloc_req_count =
+        {1'b0, rn_alloc_valid_i} + {1'b0, rn_alloc1_valid_i};
+    wire [1:0] alloc_preg_req_count =
+        {1'b0, (rn_alloc_valid_i & alloc_needs_preg)} +
+        {1'b0, (rn_alloc1_valid_i & alloc1_needs_preg)};
+    wire can_alloc =
+        ({1'b0, rob_occ_q} + {6'd0, alloc_req_count} <= {1'b0, ROB_DEPTH_COUNT}) &&
+        ({1'b0, free_count_q} >= {6'd0, alloc_preg_req_count});
     wire alloc_valid = rn_alloc_valid_i & can_alloc;
+    wire alloc1_valid = rn_alloc1_valid_i & can_alloc;
     wire alloc_rd_valid = alloc_valid & alloc_needs_preg;
+    wire alloc1_rd_valid = alloc1_valid & alloc1_needs_preg;
+    wire [ROB_PTR_BITS-1:0] alloc0_tail = rob_tail_q;
+    wire [ROB_PTR_BITS-1:0] alloc1_tail = rob_tail_q + ROB_PTR_BITS'(alloc_valid ? 1 : 0);
+    wire [REGS_ADDR_WIDTH-1:0] live1_rs1_addr = if_id1_instr_i[19:15];
+    wire [REGS_ADDR_WIDTH-1:0] live1_rs2_addr = if_id1_instr_i[24:20];
+    wire live1_rs1_dep_alloc0 =
+        alloc_needs_preg &&
+        (live1_rs1_addr == rn_alloc_rd_addr_i);
+    wire live1_rs2_dep_alloc0 =
+        alloc_needs_preg &&
+        (live1_rs2_addr == rn_alloc_rd_addr_i);
+    wire [PREG_BITS-1:0] alloc1_pdst =
+        alloc_needs_preg ? first_free_without_alloc0 : alloc_pdst_q;
+    wire [PREG_BITS-1:0] alloc1_old_pdst =
+        (alloc_needs_preg && (rn_alloc1_rd_addr_i == rn_alloc_rd_addr_i)) ?
+        alloc_pdst_q : rat_q[rn_alloc1_rd_addr_i];
     wire commit0_ready =
         rob_valid_q[rob_head_q] &
         rob_ready_q[rob_head_q];
@@ -223,11 +234,20 @@ import ydrasil_pkg::*;
 
     assign live_rs1_psrc_o = (if_id_instr_i[19:15] == '0) ? '0 : rat_q[if_id_instr_i[19:15]];
     assign live_rs2_psrc_o = (if_id_instr_i[24:20] == '0) ? '0 : rat_q[if_id_instr_i[24:20]];
-    assign alloc_pdst_o = alloc_pdst_q;
-    assign pipe1_rename_ready_o =
+    assign live1_rs1_psrc_o =
+        (live1_rs1_addr == '0) ? '0 :
+        live1_rs1_dep_alloc0 ? alloc_pdst_q : rat_q[live1_rs1_addr];
+    assign live1_rs2_psrc_o =
+        (live1_rs2_addr == '0) ? '0 :
+        live1_rs2_dep_alloc0 ? alloc_pdst_q : rat_q[live1_rs2_addr];
+	    assign alloc_pdst_o = alloc_pdst_q;
+	    assign alloc1_pdst_o = alloc1_pdst;
+	    assign alloc0_rob_idx_o = alloc0_tail;
+	    assign alloc1_rob_idx_o = alloc1_tail;
+	    assign pipe1_rename_ready_o =
         (rob_occ_q < ROB_DEPTH_COUNT) && (free_count_q != '0);
     assign alloc_stall_o =
-        (rn_if_rd_valid_i | rn_if_ctrl_valid_i) & !can_alloc;
+        (rn_alloc_valid_i | rn_alloc1_valid_i) & !can_alloc;
 
     assign wb_pdst_o = alu_wb_pdst_i;
     assign lsu_pdst_o = lsu_wb_pdst_i;
@@ -315,6 +335,12 @@ import ydrasil_pkg::*;
         (live_rs1_psrc_o == '0) | preg_ready_o[live_rs1_psrc_o];
     assign live_rs2_ready_o =
         (live_rs2_psrc_o == '0) | preg_ready_o[live_rs2_psrc_o];
+    assign live1_rs1_ready_o =
+        (live1_rs1_psrc_o == '0) |
+        (!live1_rs1_dep_alloc0 && preg_ready_o[live1_rs1_psrc_o]);
+    assign live1_rs2_ready_o =
+        (live1_rs2_psrc_o == '0) |
+        (!live1_rs2_dep_alloc0 && preg_ready_o[live1_rs2_psrc_o]);
     assign pipe1_rs1_ready_o =
         !pipe1_ctrl_rs1_ren_i | (pipe1_ctrl_rs1_psrc_i == '0) |
         preg_ready_o[pipe1_ctrl_rs1_psrc_i];
@@ -340,8 +366,13 @@ import ydrasil_pkg::*;
         rob_pipe1_q[rob_head_q] &
         (rob_arch_rd_q[rob_head_q] != '0) &
         !wb_rf_wen_i;
-    assign commit0_valid_o = commit0_ready;
-    assign commit0_ready_o = commit0_ready;
+    wire pipe1_head_wait_rf_port =
+        commit0_ready &
+        rob_pipe1_q[rob_head_q] &
+        (rob_arch_rd_q[rob_head_q] != '0) &
+        wb_rf_wen_i;
+    assign commit0_valid_o = commit0_ready & !pipe1_head_wait_rf_port;
+    assign commit0_ready_o = commit0_ready & !pipe1_head_wait_rf_port;
     assign pipe1_commit_arch_rd_o = rob_arch_rd_q[rob_head_q];
     assign pipe1_commit_data_o = rob_data_q[rob_head_q];
     wire commit_frees_preg =
@@ -349,19 +380,17 @@ import ydrasil_pkg::*;
 
     wire ctrl_at_head =
         rob_valid_q[rob_head_q] &
-        id_ctrl_rd_wen_i & (id_ctrl_pdst_i != '0) &
-        (rob_new_pdst_q[rob_head_q] == id_ctrl_pdst_i);
+        rob_ctrl_q[rob_head_q];
     wire pipe1_head_committing =
         rob_pipe1_q[rob_head_q] & pipe1_commit_rf_wen_o;
     wire pipe1_head_rf_block =
         rob_valid_q[rob_head_q] &
         rob_pipe1_q[rob_head_q] &
         rob_ready_q[rob_head_q] &
-        !pipe1_commit_rf_wen_o &
-        wb_rf_wen_i;
+        pipe1_head_wait_rf_port;
     wire pipe1_only_head_rf_block =
         pipe1_head_rf_block &
-        !rob_has_pipe1_not_head() &
+        !rob_has_pipe1_not_head_comb &
         !(pipe1_pdst_found_o & (pipe1_wb_pdst_i != '0)) &
         !(pipe1_issue_valid_i & (pipe1_issue_pdst_i != '0));
     wire [ROB_PTR_BITS-1:0] rob_next_head = rob_head_q + ROB_PTR_BITS'(1);
@@ -371,25 +400,24 @@ import ydrasil_pkg::*;
         rob_valid_q[rob_next_head] &
         rob_pipe1_q[rob_next_head] &
         rob_ready_q[rob_next_head] &
-        !rob_has_pipe1_after_next() &
+        !rob_has_pipe1_after_next_comb &
         !(pipe1_pdst_found_o & (pipe1_wb_pdst_i != '0)) &
         !(pipe1_issue_valid_i & (pipe1_issue_pdst_i != '0));
     wire pipe1_branch_order_escape =
         pipe1_only_head_rf_block | pipe1_only_next_head_after_commit;
     wire pipe1_older_uncommitted =
         (rob_pipe1_q[rob_head_q] & !pipe1_head_committing) |
-        rob_has_pipe1_not_head() |
+        rob_has_pipe1_not_head_comb |
         (pipe1_pdst_found_o & (pipe1_wb_pdst_i != '0)) |
         (pipe1_issue_valid_i & (pipe1_issue_pdst_i != '0));
-    wire ctrl_older_rob_block = 1'b0;
+    wire ctrl_older_rob_block =
+        id_ctrl_operator_type_i[OPERATOR_TYPE_BJP] &
+        (rob_occ_q != '0) &
+        !ctrl_at_head;
     wire ctrl_rs1_ready_for_branch =
-        rs1_ready_o |
-        (id_ctrl_operator_type_i[OPERATOR_TYPE_BJP] &
-         ctrl_rs1_ready_next_bypass_i);
+        rs1_ready_o;
     wire ctrl_rs2_ready_for_branch =
-        rs2_ready_o |
-        (id_ctrl_operator_type_i[OPERATOR_TYPE_BJP] &
-         ctrl_rs2_ready_next_bypass_i);
+        rs2_ready_o;
     wire ctrl_rs1_block =
         id_ctrl_rs1_ren_i & !ctrl_rs1_ready_for_branch;
     wire ctrl_rs2_block =
@@ -415,13 +443,16 @@ import ydrasil_pkg::*;
         if (alloc_rd_valid && (alloc_pdst_q != '0)) begin
             free_next_for_alloc[alloc_pdst_q] = 1'b0;
         end
+        if (alloc1_rd_valid && (alloc1_pdst != '0)) begin
+            free_next_for_alloc[alloc1_pdst] = 1'b0;
+        end
     end
 
-    wire [PREG_BITS-1:0] alloc_pdst_next = first_free(free_next_for_alloc);
+    wire [PREG_BITS-1:0] alloc_pdst_next = first_free_next_for_alloc;
 
     always_ff @(posedge clk or negedge rst_n) begin
         integer i;
-        if (!rst_n) begin
+	        if (!rst_n) begin
             free_q <= 64'hffff_ffff_0000_0000;
             busy_q <= '0;
             free_count_q <= 7'd32;
@@ -448,8 +479,8 @@ import ydrasil_pkg::*;
         end else if (flush_id_i | flush_ex_i | interrupt_i) begin
             free_q <= flush_free_map;
             busy_q <= '0;
-            free_count_q <= count_free(flush_free_map);
-            alloc_pdst_q <= first_free(flush_free_map);
+            free_count_q <= flush_free_count;
+            alloc_pdst_q <= first_free_flush_map;
             rob_head_q <= '0;
             rob_tail_q <= '0;
             rob_occ_q <= '0;
@@ -488,14 +519,29 @@ import ydrasil_pkg::*;
                     rob_ready_q[mul_rob_idx] <= 1'b1;
                 end
             end
-            if (pipe1_pdst_found_o) begin
-                busy_q[pipe1_wb_pdst_i] <= 1'b0;
-                if (rob_valid_q[pipe1_rob_idx] && !rob_ready_q[pipe1_rob_idx]) begin
+	            if (pipe1_wb_valid_i && pipe1_wb_rob_valid_i &&
+	                rob_valid_q[pipe1_wb_rob_idx_i]) begin
+	                if (pipe1_wb_pdst_i != '0) begin
+	                    busy_q[pipe1_wb_pdst_i] <= 1'b0;
+	                end
+	                if (!rob_ready_q[pipe1_wb_rob_idx_i]) begin
+	                    rob_ready_q[pipe1_wb_rob_idx_i] <= 1'b1;
+	                    rob_pipe1_q[pipe1_wb_rob_idx_i] <= 1'b1;
+	                    rob_data_q[pipe1_wb_rob_idx_i] <= pipe1_wb_data_i;
+	                end
+	            end else if (pipe1_pdst_found_o) begin
+	                busy_q[pipe1_wb_pdst_i] <= 1'b0;
+	                if (rob_valid_q[pipe1_rob_idx] && !rob_ready_q[pipe1_rob_idx]) begin
                     rob_ready_q[pipe1_rob_idx] <= 1'b1;
                     rob_pipe1_q[pipe1_rob_idx] <= 1'b1;
                     rob_data_q[pipe1_rob_idx] <= pipe1_wb_data_i;
                 end
             end
+	            if (ctrl_complete_valid_i &&
+	                rob_valid_q[ctrl_complete_rob_idx_i] &&
+	                rob_ctrl_q[ctrl_complete_rob_idx_i]) begin
+	                rob_ready_q[ctrl_complete_rob_idx_i] <= 1'b1;
+	            end
 
             if (commit0_valid_o) begin
                 if (rob_arch_rd_q[rob_head_q] != '0) begin
@@ -519,27 +565,52 @@ import ydrasil_pkg::*;
                     free_q[alloc_pdst_q] <= 1'b0;
                     busy_q[alloc_pdst_q] <= 1'b1;
                     rat_q[rn_alloc_rd_addr_i] <= alloc_pdst_q;
-                    pdst_rob_idx_q[alloc_pdst_q] <= rob_tail_q;
+                    pdst_rob_idx_q[alloc_pdst_q] <= alloc0_tail;
                     pdst_rob_valid_q[alloc_pdst_q] <= 1'b1;
                 end
-                rob_valid_q[rob_tail_q] <= 1'b1;
-                rob_ready_q[rob_tail_q] <= !alloc_rd_valid;
-                rob_arch_rd_q[rob_tail_q] <= alloc_rd_valid ? rn_alloc_rd_addr_i : '0;
-                rob_new_pdst_q[rob_tail_q] <= alloc_rd_valid ? alloc_pdst_q : '0;
-                rob_old_pdst_q[rob_tail_q] <= alloc_rd_valid ? rat_q[rn_alloc_rd_addr_i] : '0;
-                rob_pipe1_q[rob_tail_q] <= 1'b0;
-                rob_ctrl_q[rob_tail_q] <= rn_if_ctrl_valid_i;
-                rob_data_q[rob_tail_q] <= '0;
-                rob_tail_q <= rob_tail_q + ROB_PTR_BITS'(1);
+                rob_valid_q[alloc0_tail] <= 1'b1;
+                rob_ready_q[alloc0_tail] <= !alloc_rd_valid && !rn_if_ctrl_valid_i;
+                rob_arch_rd_q[alloc0_tail] <= alloc_rd_valid ? rn_alloc_rd_addr_i : '0;
+                rob_new_pdst_q[alloc0_tail] <= alloc_rd_valid ? alloc_pdst_q : '0;
+                rob_old_pdst_q[alloc0_tail] <= alloc_rd_valid ? rat_q[rn_alloc_rd_addr_i] : '0;
+                rob_pipe1_q[alloc0_tail] <= 1'b0;
+                rob_ctrl_q[alloc0_tail] <= rn_if_ctrl_valid_i;
+                rob_data_q[alloc0_tail] <= '0;
+            end
+
+            if (alloc1_valid) begin
+                if (alloc1_rd_valid) begin
+                    free_q[alloc1_pdst] <= 1'b0;
+                    busy_q[alloc1_pdst] <= 1'b1;
+                    rat_q[rn_alloc1_rd_addr_i] <= alloc1_pdst;
+                    pdst_rob_idx_q[alloc1_pdst] <= alloc1_tail;
+                    pdst_rob_valid_q[alloc1_pdst] <= 1'b1;
+                end
+                rob_valid_q[alloc1_tail] <= 1'b1;
+                rob_ready_q[alloc1_tail] <= !alloc1_rd_valid;
+                rob_arch_rd_q[alloc1_tail] <= alloc1_rd_valid ? rn_alloc1_rd_addr_i : '0;
+                rob_new_pdst_q[alloc1_tail] <= alloc1_rd_valid ? alloc1_pdst : '0;
+                rob_old_pdst_q[alloc1_tail] <= alloc1_rd_valid ? alloc1_old_pdst : '0;
+                rob_pipe1_q[alloc1_tail] <= 1'b0;
+                rob_ctrl_q[alloc1_tail] <= 1'b0;
+                rob_data_q[alloc1_tail] <= '0;
+            end
+
+            if (alloc_valid | alloc1_valid) begin
+                rob_tail_q <= rob_tail_q +
+                    ROB_PTR_BITS'(alloc_valid ? 1 : 0) +
+                    ROB_PTR_BITS'(alloc1_valid ? 1 : 0);
             end
 
             rob_occ_q <=
                 rob_occ_q +
-                (alloc_valid ? 7'd1 : 7'd0) -
+                (alloc_valid ? 7'd1 : 7'd0) +
+                (alloc1_valid ? 7'd1 : 7'd0) -
                 (commit0_valid_o ? 7'd1 : 7'd0);
             free_count_q <=
                 free_count_q -
-                (alloc_rd_valid ? 7'd1 : 7'd0) +
+                (alloc_rd_valid ? 7'd1 : 7'd0) -
+                (alloc1_rd_valid ? 7'd1 : 7'd0) +
                 (commit_frees_preg ? 7'd1 : 7'd0);
             alloc_pdst_q <= alloc_pdst_next;
         end

@@ -13,6 +13,9 @@ import ydrasil_pkg::*;
     input  wire alloc_valid_i,
     input  wire [INST_ADDR_WIDTH-1:0] alloc_pc_i,
     input  wire [INST_DATA_WIDTH-1:0] alloc_instr_i,
+    input  wire alloc1_valid_i,
+    input  wire [INST_ADDR_WIDTH-1:0] alloc1_pc_i,
+    input  wire [INST_DATA_WIDTH-1:0] alloc1_instr_i,
 
     input  wire pipe0_issue_valid_i,
     input  wire [INST_ADDR_WIDTH-1:0] pipe0_issue_pc_i,
@@ -74,6 +77,11 @@ import ydrasil_pkg::*;
     reg [31:0] perf_commit_shell_retire;
     reg [31:0] perf_commit_shell_head_wait;
     reg [31:0] perf_commit_shell_flush_squash;
+    bit commit_trace_disable;
+
+    initial begin
+        commit_trace_disable = $test$plusargs("commit_trace_disable");
+    end
 
     task automatic print_gpr_commit;
         input [INST_ADDR_WIDTH-1:0] pc;
@@ -81,7 +89,7 @@ import ydrasil_pkg::*;
         input [REGS_ADDR_WIDTH-1:0] waddr;
         input [REGS_DATA_WIDTH-1:0] wdata;
         begin
-            if (waddr != '0) begin
+            if (!commit_trace_disable && (waddr != '0)) begin
                 $display("core   0: 0x%08h (0x%08h) unknown", pc, instr);
                 $display("3 0x%08h (0x%08h) x%0d 0x%08h", pc, instr, waddr, wdata);
             end
@@ -239,6 +247,10 @@ import ydrasil_pkg::*;
         end else begin
             if (alloc_valid_i) begin
                 alloc_commit_entry(alloc_pc_i, alloc_instr_i);
+                perf_commit_shell_alloc = perf_commit_shell_alloc + 32'd1;
+            end
+            if (alloc1_valid_i) begin
+                alloc_commit_entry(alloc1_pc_i, alloc1_instr_i);
                 perf_commit_shell_alloc = perf_commit_shell_alloc + 32'd1;
             end
 

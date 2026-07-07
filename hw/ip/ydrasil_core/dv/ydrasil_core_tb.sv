@@ -207,6 +207,9 @@ end
 `ifndef SYNTHESIS
     bit bp_trace_en;
     bit bp_fetch_trace_en;
+    bit issue_dbg_en;
+    logic [31:0] issue_dbg_start;
+    logic [31:0] issue_dbg_end;
 `endif
     reg [31:0] bp_branch_count;
     reg [31:0] bp_hit_count;
@@ -384,12 +387,12 @@ end
         u_dut.u_ydrasil_issue_stage.issue_valid_ff &&
         ((u_dut.u_ydrasil_issue_stage.issue_wait_rs1_ff &&
           !u_dut.u_ydrasil_issue_stage.issue_wait_rs1_ready) ||
-         u_dut.u_ydrasil_issue_stage.u_ydrasil_id_issue_stage.slot0_rs1_phys_block);
+         u_dut.u_ydrasil_issue_stage.slot0_rs1_phys_block);
     wire wait_src_rs2_active =
         u_dut.u_ydrasil_issue_stage.issue_valid_ff &&
         ((u_dut.u_ydrasil_issue_stage.issue_wait_rs2_ff &&
           !u_dut.u_ydrasil_issue_stage.issue_wait_rs2_ready) ||
-         u_dut.u_ydrasil_issue_stage.u_ydrasil_id_issue_stage.slot0_rs2_phys_block);
+         u_dut.u_ydrasil_issue_stage.slot0_rs2_phys_block);
     wire wait_branch_active =
         u_dut.scoreboard_stall &&
         u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP];
@@ -439,10 +442,15 @@ end
 	);
 
 `ifndef SYNTHESIS
-    initial begin
-        bp_trace_en = $test$plusargs("bp_trace");
-        bp_fetch_trace_en = $test$plusargs("bp_fetch_trace");
-    end
+	    initial begin
+	        bp_trace_en = $test$plusargs("bp_trace");
+	        bp_fetch_trace_en = $test$plusargs("bp_fetch_trace");
+	        issue_dbg_en = $test$plusargs("issue_dbg");
+	        issue_dbg_start = 32'h8000_0180;
+	        issue_dbg_end = 32'h8000_01a0;
+	        void'($value$plusargs("issue_dbg_start=%h", issue_dbg_start));
+	        void'($value$plusargs("issue_dbg_end=%h", issue_dbg_end));
+	    end
 `endif
 
 `ifndef VERILATOR_CC
@@ -486,6 +494,39 @@ end
                      u_dut.u_ydrasil_core_observer.gpr_pending_for_hazard[u_dut.id_ctrl_rd_addr],
                      u_dut.id_ctrl_lsu_req,
                      u_dut.lsu_ctrl_busy);
+            $display("[TB] gpr x10/a0=0x%08h x11/a1=0x%08h x25=0x%08h rf_wen=%0b rf_waddr=%0d rf_wdata=0x%08h",
+                     u_dut.u_ydrasil_registers.registers[10],
+                     u_dut.u_ydrasil_registers.registers[11],
+                     u_dut.u_ydrasil_registers.registers[25],
+                     u_dut.rf_wen_rd,
+                     u_dut.rf_waddr_rd,
+                     u_dut.rf_wdata_rd);
+            $display("[TB] issue0 valid=%0b pc=0x%08h instr=0x%08h fire=%0b op=0x%0h a=0x%08h b=0x%08h rs1p=%0d rs2p=%0d pdst=%0d rdy1=%0b rdy2=%0b",
+                     u_dut.u_ydrasil_issue_stage.slot0_q.dec.valid,
+                     u_dut.u_ydrasil_issue_stage.slot0_q.dec.pc,
+                     u_dut.u_ydrasil_issue_stage.slot0_q.dec.instr,
+                     u_dut.u_ydrasil_issue_stage.slot0_fire,
+                     u_dut.u_ydrasil_issue_stage.slot0_q.dec.operator_type,
+                     u_dut.operand_a,
+                     u_dut.operand_b,
+                     u_dut.u_ydrasil_issue_stage.slot0_q.rn.rs1_psrc,
+                     u_dut.u_ydrasil_issue_stage.slot0_q.rn.rs2_psrc,
+                     u_dut.u_ydrasil_issue_stage.slot0_q.rn.pdst,
+                     u_dut.u_ydrasil_issue_stage.slot0_rs1_ready,
+                     u_dut.u_ydrasil_issue_stage.slot0_rs2_ready);
+            $display("[TB] issue1 valid=%0b pc=0x%08h instr=0x%08h fire=%0b op=0x%0h a=0x%08h b=0x%08h rs1p=%0d rs2p=%0d pdst=%0d rdy1=%0b rdy2=%0b",
+                     u_dut.u_ydrasil_issue_stage.slot1_q.dec.valid,
+                     u_dut.u_ydrasil_issue_stage.slot1_q.dec.pc,
+                     u_dut.u_ydrasil_issue_stage.slot1_q.dec.instr,
+                     u_dut.u_ydrasil_issue_stage.slot1_fire,
+                     u_dut.u_ydrasil_issue_stage.slot1_q.dec.operator_type,
+                     u_dut.pipe1_operand_a,
+                     u_dut.pipe1_operand_b,
+                     u_dut.u_ydrasil_issue_stage.slot1_q.rn.rs1_psrc,
+                     u_dut.u_ydrasil_issue_stage.slot1_q.rn.rs2_psrc,
+                     u_dut.u_ydrasil_issue_stage.slot1_q.rn.pdst,
+                     u_dut.u_ydrasil_issue_stage.slot1_rs1_ready,
+                     u_dut.u_ydrasil_issue_stage.slot1_rs2_ready);
             $display("[TB] pending=0x%08h clear=0x%08h issue=0x%08h ex_accept=%0b id_rd_issue=%0b rf_wen=%0b rf_waddr=%0d alu_wen=%0b alu_waddr=%0d lsu_wen=%0b lsu_waddr=%0d mul_wen=%0b mul_waddr=%0d",
                      u_dut.u_ydrasil_core_observer.gpr_pending_q,
                      u_dut.u_ydrasil_core_observer.gpr_pending_clear_mask,
@@ -521,6 +562,19 @@ end
                      u_dut.rn_alloc_rd_addr,
                      u_dut.rn_real_alloc0_pdst,
                      u_dut.rn_real_free_count_q);
+            $display("[TB] rn_head valid=%0b ready=%0b pipe1=%0b ctrl=%0b arch=%0d new_pdst=%0d old_pdst=%0d data=0x%08h busy_new=%0b pdst_valid=%0b",
+                     u_dut.u_ydrasil_rename_ctrl.rob_valid_q[u_dut.rn_real_rob_head_q],
+                     u_dut.u_ydrasil_rename_ctrl.rob_ready_q[u_dut.rn_real_rob_head_q],
+                     u_dut.u_ydrasil_rename_ctrl.rob_pipe1_q[u_dut.rn_real_rob_head_q],
+                     u_dut.u_ydrasil_rename_ctrl.rob_ctrl_q[u_dut.rn_real_rob_head_q],
+                     u_dut.u_ydrasil_rename_ctrl.rob_arch_rd_q[u_dut.rn_real_rob_head_q],
+                     u_dut.u_ydrasil_rename_ctrl.rob_new_pdst_q[u_dut.rn_real_rob_head_q],
+                     u_dut.u_ydrasil_rename_ctrl.rob_old_pdst_q[u_dut.rn_real_rob_head_q],
+                     u_dut.u_ydrasil_rename_ctrl.rob_data_q[u_dut.rn_real_rob_head_q],
+                     u_dut.u_ydrasil_rename_ctrl.busy_q[
+                         u_dut.u_ydrasil_rename_ctrl.rob_new_pdst_q[u_dut.rn_real_rob_head_q]],
+                     u_dut.u_ydrasil_rename_ctrl.pdst_rob_valid_q[
+                         u_dut.u_ydrasil_rename_ctrl.rob_new_pdst_q[u_dut.rn_real_rob_head_q]]);
             $display("[TB] clint csr_state=0x%02h int_state=0x%01h we=%0b waddr=0x%03h wdata=0x%08h mtvec=0x%08h mepc=0x%08h mcause=0x%08h",
                      u_dut.u_clint.csr_state,
                      u_dut.u_clint.int_state,
@@ -532,6 +586,82 @@ end
                      u_dut.u_ydrasil_registers_csr.mcause);
             $finish;
         end
+`ifndef SYNTHESIS
+	        if (issue_dbg_en && rst_n &&
+	            ((u_dut.u_ydrasil_issue_stage.slot0_q.dec.pc >= issue_dbg_start &&
+	              u_dut.u_ydrasil_issue_stage.slot0_q.dec.pc <= issue_dbg_end) ||
+	             (u_dut.u_ydrasil_issue_stage.slot1_q.dec.pc >= issue_dbg_start &&
+	              u_dut.u_ydrasil_issue_stage.slot1_q.dec.pc <= issue_dbg_end) ||
+	             (u_dut.id_decode_pair.slot0.pc >= issue_dbg_start &&
+	              u_dut.id_decode_pair.slot0.pc <= issue_dbg_end) ||
+	             (u_dut.id_decode_pair.slot1.pc >= issue_dbg_start &&
+	              u_dut.id_decode_pair.slot1.pc <= issue_dbg_end) ||
+	             (u_dut.branch_jump &&
+	              dbg_bp_resolve_pc >= issue_dbg_start &&
+	              dbg_bp_resolve_pc <= issue_dbg_end))) begin
+            $display("ISSUE_DBG cyc=%0d s0_v=%0b pc=0x%08h instr=0x%08h rs1=x%0d/p%0d rdy=%0b rs2=x%0d/p%0d rdy=%0b pdst=%0d fire=%0b op=0x%0h a=0x%08h b=0x%08h allow=%0b bub_no_alloc=%0b ctrl_block=%0b ctrl_rs1=%0b ctrl_rs2=%0b order=%0b rob_occ=%0d head=%0d tail=%0d",
+                     cycle_count,
+                     u_dut.u_ydrasil_issue_stage.slot0_q.dec.valid,
+                     u_dut.u_ydrasil_issue_stage.slot0_q.dec.pc,
+                     u_dut.u_ydrasil_issue_stage.slot0_q.dec.instr,
+                     u_dut.u_ydrasil_issue_stage.slot0_q.dec.rf_raddr_rs1,
+                     u_dut.u_ydrasil_issue_stage.slot0_q.rn.rs1_psrc,
+                     u_dut.u_ydrasil_issue_stage.slot0_rs1_ready,
+                     u_dut.u_ydrasil_issue_stage.slot0_q.dec.rf_raddr_rs2,
+                     u_dut.u_ydrasil_issue_stage.slot0_q.rn.rs2_psrc,
+                     u_dut.u_ydrasil_issue_stage.slot0_rs2_ready,
+                     u_dut.u_ydrasil_issue_stage.slot0_q.rn.pdst,
+                     u_dut.u_ydrasil_issue_stage.slot0_fire,
+                     u_dut.u_ydrasil_issue_stage.slot0_q.dec.operator_type,
+                     u_dut.operand_a,
+                     u_dut.operand_b,
+                     u_dut.u_ydrasil_issue_stage.issue_fire_allow,
+                     u_dut.bubble_id_no_alloc,
+                     u_dut.rn_real_ctrl_block,
+                     u_dut.rn_real_ctrl_rs1_block,
+                     u_dut.rn_real_ctrl_rs2_block,
+                     u_dut.rn_real_ctrl_older_rob_block,
+                     u_dut.rn_real_rob_occ_q,
+                     u_dut.rn_real_rob_head_q,
+                     u_dut.rn_real_rob_tail_q);
+	            $display("ISSUE_DBG cyc=%0d s1_v=%0b pc=0x%08h instr=0x%08h rs1=x%0d/p%0d rdy=%0b rs2=x%0d/p%0d rdy=%0b pdst=%0d fire=%0b p1_wb=%0b p1_pdst=%0d p1_data=0x%08h lsu_wb=%0b lsu_pdst=%0d lsu_data=0x%08h id_lsu_rs2=0x%08h id_store=0x%08h dtcm_we=%0b dtcm_wmask=0x%0h dtcm_wdata=0x%08h id_dec_pc=0x%08h id_dec1_pc=0x%08h consume2=%0b dec_allow=%0b req=%0b acc=%0b alloc0=%0b rd0=x%0d/p%0d alloc1=%0b rd1=x%0d/p%0d",
+                     cycle_count,
+                     u_dut.u_ydrasil_issue_stage.slot1_q.dec.valid,
+                     u_dut.u_ydrasil_issue_stage.slot1_q.dec.pc,
+                     u_dut.u_ydrasil_issue_stage.slot1_q.dec.instr,
+                     u_dut.u_ydrasil_issue_stage.slot1_q.dec.rf_raddr_rs1,
+                     u_dut.u_ydrasil_issue_stage.slot1_q.rn.rs1_psrc,
+                     u_dut.u_ydrasil_issue_stage.slot1_rs1_ready,
+                     u_dut.u_ydrasil_issue_stage.slot1_q.dec.rf_raddr_rs2,
+                     u_dut.u_ydrasil_issue_stage.slot1_q.rn.rs2_psrc,
+                     u_dut.u_ydrasil_issue_stage.slot1_rs2_ready,
+                     u_dut.u_ydrasil_issue_stage.slot1_q.rn.pdst,
+                     u_dut.u_ydrasil_issue_stage.slot1_fire,
+                     u_dut.pipe1_wb_pdst_valid,
+                     u_dut.pipe1_wb_pdst,
+                     u_dut.pipe1_wb_data,
+                     u_dut.lsu_rf_wen_rd,
+                     u_dut.lsu_rn_pdst,
+                     u_dut.lsu_wb_result,
+                     u_dut.id_lsu_rs2_data,
+                     u_dut.id_lsu_store_data,
+                     u_dut.dtcm_we,
+                     u_dut.dtcm_wmask,
+	                     u_dut.dtcm_wdata,
+	                     u_dut.id_decode_pair.slot0.pc,
+	                     u_dut.id_decode_pair.slot1.pc,
+	                     u_dut.id_if_consume_two,
+	                     u_dut.id_decode_pair.pair_ctrl.decode_pair_allow,
+	                     u_dut.u_ydrasil_issue_stage.request_pair,
+                     u_dut.u_ydrasil_issue_stage.accept_pair,
+                     u_dut.rn_alloc_valid,
+                     u_dut.rn_alloc_rd_addr,
+                     u_dut.rn_real_alloc0_pdst,
+                     u_dut.rn_alloc1_valid,
+                     u_dut.rn_alloc1_rd_addr,
+                     u_dut.rn_real_alloc1_pdst);
+        end
+`endif
         if(sim_done) begin
             print_perf_metrics();
             $finish; 
@@ -1774,6 +1904,15 @@ end
                 u_dut.u_ydrasil_if_stage.perf_fetch2_align_block,
                 u_dut.u_ydrasil_if_stage.perf_fetch2_redirect_kill_slot1,
                 u_dut.u_ydrasil_if_stage.perf_fetch2_irom_stall);
+            $display("PERF_PAIR_CTRL: TRY=%-d ALLOW=%-d BLOCK_PREDICTOR=%-d BLOCK_QUEUE=%-d BLOCK_PAIR_RULE=%-d BLOCK_RENAME=%-d BLOCK_ISSUE_READY=%-d SLOT1_KILL=%-d",
+                u_dut.u_ydrasil_if_stage.perf_pair_ctrl_try,
+                u_dut.u_ydrasil_if_stage.perf_pair_ctrl_allow,
+                u_dut.u_ydrasil_if_stage.perf_pair_block_predictor,
+                u_dut.u_ydrasil_if_stage.perf_pair_block_queue,
+                u_dut.u_ydrasil_if_stage.perf_pair_block_rule,
+                u_dut.u_ydrasil_if_stage.perf_pair_block_rename,
+                u_dut.u_ydrasil_issue_stage.perf_ri_slot1_fire_blocked_by_single_issue,
+                u_dut.u_ydrasil_if_stage.perf_pair_slot1_kill);
             $display("PERF_L0: L0_LOOKUP=%-d L0_HIT=%-d L0_TAKEN=%-d L0_CORRECT_TAKEN=%-d L0_WRONG_TAKEN=%-d L0_TRAIN_TAKEN=%-d L0_TRAIN_NOT_TAKEN=%-d L0_COUNTER_INC=%-d L0_COUNTER_DEC=%-d",
                 u_dut.u_ydrasil_if_stage.perf_l0_lookup,
                 u_dut.u_ydrasil_if_stage.perf_l0_hit,

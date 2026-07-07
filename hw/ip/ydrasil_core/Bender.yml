@@ -13,11 +13,11 @@ sources:
     files:
       - rtl/ydrasil_pkg.sv
       - rtl/ydrasil_rename_ctrl.sv
+      - rtl/ydrasil_rename_stage.sv
       - rtl/ydrasil_prf.sv
       - rtl/ydrasil_branch_predictor.sv
       - rtl/ydrasil_alu.sv
       - rtl/ydrasil_if_stage.sv
-      - rtl/ydrasil_id_issue_stage.sv
       - rtl/ydrasil_issue_stage.sv
       - rtl/ydrasil_id_stage.sv
       - rtl/ydrasil_ins_decoder.sv

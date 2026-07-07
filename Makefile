@@ -206,7 +206,7 @@ COREMARK_SW_MAKE_ARGS = \
 COREMARK_RESULT_LOG ?= $(HW_TRACE_OUT_DIR)/coremark/hw.log
 COREMARK_SIM_COMPARE ?= none
 COREMARK_SCORE_HZ ?= 100000000
-COREMARK_SIM_TIMEOUT ?= 30000000
+COREMARK_SIM_TIMEOUT ?= 1000000
 
 coremark:
 	@$(MAKE) -C sw coremark $(COREMARK_SW_MAKE_ARGS)
@@ -214,16 +214,19 @@ coremark:
 coremark-rebuild:
 	@$(MAKE) -C sw coremark-rebuild $(COREMARK_SW_MAKE_ARGS)
 
-coremark_sim: coremark comp
+coremark_sim: coremark
 	@set +e; \
 	rm -f $(COREMARK_RESULT_LOG); \
+	$(MAKE) comp VERILATOR_TRACE=0; \
+	comp_rc=$$?; \
+	if [ $$comp_rc -ne 0 ]; then exit $$comp_rc; fi; \
 	$(MAKE) sim_compare \
 		COMPARE_NAME=coremark \
 		COMPARE_ELF=$(BUILD_DIR)/app/coremark/coremark.elf \
 		COMPARE_ITCM=$(BUILD_DIR)/app/coremark/coremark.itcm \
 		COMPARE_DTCM=$(BUILD_DIR)/app/coremark/coremark.dtcm \
 		SIM_COMPARE=$(COREMARK_SIM_COMPARE) \
-		COMPARE_SIM_EXTRA_DEFINES="+cpp_timeout=$(COREMARK_SIM_TIMEOUT) +sv_timeout=$(COREMARK_SIM_TIMEOUT)"; \
+		COMPARE_SIM_EXTRA_DEFINES="+cpp_timeout=$(COREMARK_SIM_TIMEOUT) +sv_timeout=$(COREMARK_SIM_TIMEOUT) +commit_trace_disable"; \
 	rc=$$?; \
 	$(MAKE) --no-print-directory coremark_result; \
 	result_rc=$$?; \
