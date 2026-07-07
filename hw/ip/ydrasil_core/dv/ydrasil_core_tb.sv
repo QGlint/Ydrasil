@@ -448,6 +448,8 @@ end
 	localparam SEG_ADDR  = 32'h8020_0020;  // seg
 	localparam LED_ADDR  = 32'h8020_0040;  // led[31:0]
 	localparam CNT_ADDR  = 32'h8020_0050;  // counter
+	localparam SIM_STDOUT_ADDR = 32'h8020_0060;  // tb-only stdout
+	localparam SIM_DUMP_ADDR   = 32'h8020_0064;  // tb-only dump control
 
 	wire [31:0] LED;
 	wire [31:0] seg_wdata;
@@ -493,12 +495,17 @@ end
 			sim_done <= 1'b1;
 		end
 
+		if (!rst && perip_req && perip_wen && (perip_addr == SIM_STDOUT_ADDR)) begin
+			$write("%c", perip_wdata[7:0]);
+		end
+
 		if (!rst && perip_debug_en && perip_req) begin
 			if (perip_wen) begin
 				case (perip_addr)
 					LED_ADDR: $display("[PERIP] time=%0t LED write 0x%08h", $time, perip_wdata);
 					SEG_ADDR: $display("[PERIP] time=%0t SEG write 0x%08h", $time, perip_wdata);
 					CNT_ADDR: $display("[PERIP] time=%0t CNT write 0x%08h", $time, perip_wdata);
+					SIM_DUMP_ADDR: $display("[PERIP] time=%0t SIM dump write 0x%08h", $time, perip_wdata);
 					default: ;
 				endcase
 			end else if (perip_addr == CNT_ADDR) begin
