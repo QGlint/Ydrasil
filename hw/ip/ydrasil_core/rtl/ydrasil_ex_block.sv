@@ -160,6 +160,7 @@ import ydrasil_pkg::*;
     reg                       alu_rf_wen_rd_ff;
     reg [REGS_ADDR_WIDTH-1:0] alu_rf_waddr_rd_ff;
     reg [REGS_DATA_WIDTH-1:0] fast_fwd_data_ff;
+    reg                       div_active_q;
 
     wire [31:0] operand_a;
     wire [31:0] operand_b;
@@ -344,9 +345,11 @@ import ydrasil_pkg::*;
     assign mul_issue_o = mul_issue_valid & mul_issue_wen;
     assign mul_issue_waddr_o = id_rf_waddr_rd_i;
 
-    assign div_start = id_ex_valid_i & op_div & !div_busy & !div_done & !interrupt_i & !flush_ex_i;
-    assign div_rf_wen_rd = id_ex_valid_i & op_div & div_done & id_alu_rf_wen_rd_i & !interrupt_i & !flush_ex_i;
-    assign ex_mul_stall_o = id_ex_valid_i & op_div & !div_done & !flush_ex_i;
+    assign div_start = id_ex_valid_i & op_div & !div_busy & !div_active_q & !interrupt_i & !flush_ex_i;
+    assign div_rf_wen_rd =
+        id_ex_valid_i & op_div & div_active_q & div_done &
+        id_alu_rf_wen_rd_i & !interrupt_i & !flush_ex_i;
+    assign ex_mul_stall_o = id_ex_valid_i & op_div & !(div_active_q & div_done) & !flush_ex_i;
 
     assign bitmanip_rf_wen_rd = id_ex_valid_i & op_bitmanip & id_alu_rf_wen_rd_i & !interrupt_i & !flush_ex_i;
     assign normal_alu_rf_wen_rd = id_ex_valid_i & alu_rf_wen_rd & !op_m_unit & !op_bitmanip & !flush_ex_i;
@@ -477,6 +480,7 @@ import ydrasil_pkg::*;
             alu_rf_wen_rd_ff    <= 1'b0;
             alu_rf_waddr_rd_ff  <= '0;
             fast_fwd_data_ff    <= '0;
+            div_active_q        <= 1'b0;
             ex_csr_wdata_o_ff   <= '0;
             ex_csr_wen_o_ff     <= 1'b0;
             ex_csr_waddr_o_ff   <= '0;
@@ -487,6 +491,7 @@ import ydrasil_pkg::*;
             alu_rf_wen_rd_ff    <= 1'b0;
             alu_rf_waddr_rd_ff  <= '0;
             fast_fwd_data_ff    <= '0;
+            div_active_q        <= 1'b0;
             ex_csr_wdata_o_ff   <= '0;
             ex_csr_wen_o_ff     <= 1'b0;
             ex_csr_waddr_o_ff   <= '0;
@@ -497,6 +502,11 @@ import ydrasil_pkg::*;
             alu_rf_wen_rd_ff   <= ex_rf_wen_rd;
             alu_rf_waddr_rd_ff <= div_rf_wen_rd ? id_rf_waddr_rd_i : alu_rf_waddr_rd;
             fast_fwd_data_ff   <= fast_fwd_data;
+            if (div_rf_wen_rd) begin
+                div_active_q <= 1'b0;
+            end else if (div_start) begin
+                div_active_q <= 1'b1;
+            end
             ex_csr_wdata_o_ff  <= csr_wdata;
             ex_csr_wen_o_ff    <= csr_wen;
             ex_csr_waddr_o_ff  <= id_ex_csr_waddr_i;

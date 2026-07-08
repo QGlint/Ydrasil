@@ -325,6 +325,10 @@ import ydrasil_pkg::*;
 	                           is_clmulh | is_clmulr | is_bclr | is_bext |
 	                           is_binv | is_bset | is_pack | is_packh |
 	                           is_xperm4 | is_xperm8;
+	wire is_bitmanip_imm_use = is_clz | is_cpop | is_ctz | is_orc_b |
+	                           is_rev8 | is_rori | is_sext_b | is_sext_h |
+	                           is_bclri | is_bexti | is_binvi | is_bseti |
+	                           is_brev8 | is_zip | is_unzip;
 	wire is_bitmanip_use = is_bitmanip_rs2_use | is_clz | is_cpop | is_ctz |
 	                       is_orc_b | is_rev8 | is_rori | is_sext_b |
 	                       is_sext_h | is_zext_h | is_bclri | is_bexti |
@@ -460,7 +464,7 @@ import ydrasil_pkg::*;
 
 	wire rf_wen_rd = is_lui | is_auipc | is_jal | is_jalr | is_op_imm | is_r_alu_use | is_mul_use | is_bitmanip_use | is_csr ; // 需要写回寄存器的指令类型
 
-	wire is_alu_use = is_op_imm | is_r_alu_use | is_lui | is_auipc;
+	wire is_alu_use = (is_op_imm & !is_bitmanip_use) | is_r_alu_use | is_lui | is_auipc;
 	wire is_bjp_use = is_branch | is_jal | is_jalr;
 
 
@@ -483,12 +487,12 @@ import ydrasil_pkg::*;
 	wire [31:0] imm_shamt_mask ;
 	wire [31:0] imm_csr_mask	;
 
-	assign imm_i_mask 	= ((is_op_imm & ! is_shift) | is_jalr | is_load) ? imm_i : '0;
+	assign imm_i_mask 	= ((is_op_imm & ! is_shift & !is_bitmanip_imm_use) | is_jalr | is_load) ? imm_i : '0;
 	assign imm_s_mask 	= is_store ? imm_s : '0;
 	assign imm_b_mask 	= is_branch ? imm_b : '0;
 	assign imm_u_mask 	= (is_lui | is_auipc) ? imm_u : '0;
 	assign imm_j_mask 	= is_jal ? imm_j : '0;
-	assign imm_shamt_mask = is_shift ? imm_shamt : '0;
+	assign imm_shamt_mask = (is_shift | is_bitmanip_imm_use) ? imm_shamt : '0;
 	assign imm_csr_mask = is_csr ? imm_csr : '0;
 
 	assign imm_i_o = imm_i_mask | imm_s_mask | imm_b_mask | imm_u_mask | imm_j_mask | imm_shamt_mask | imm_csr_mask;

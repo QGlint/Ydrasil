@@ -194,7 +194,10 @@ import ydrasil_pkg::*;
 	wire                            lsu_struct_stall;
 	wire                            ex_accept_valid;
 	reg [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_q;
+	reg [1:0]                       gpr_pending_count_q [0:ydrasil_pkg::REGS_NUM-1];
+	reg                             id_ex_rd_issue_counted_q;
 	wire                            id_ex_rd_issue;
+	integer                         pending_idx;
 
 	wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0]       id_csr_raddr;
 	wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0]       id_ex_csr_waddr;
@@ -316,15 +319,25 @@ import ydrasil_pkg::*;
 		(id_alu_rf_wen_rd | operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD]);
 	wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_clear_mask =
 		wb_hzd_valid_q ? (ydrasil_pkg::REGS_NUM'(1) << wb_hzd_addr_q) : '0;
+	wire id_ex_op_div =
+		id_ex_valid & operator_type[ydrasil_pkg::OPERATOR_TYPE_MUL] &
+		(operator[ydrasil_pkg::OP_MUL_DIV]  |
+		 operator[ydrasil_pkg::OP_MUL_DIVU] |
+		 operator[ydrasil_pkg::OP_MUL_REM]  |
+		 operator[ydrasil_pkg::OP_MUL_REMU]);
+	wire id_ex_rd_issue_count = id_ex_rd_issue & !(id_ex_op_div & id_ex_rd_issue_counted_q);
 	wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_issue_mask =
-		id_ex_rd_issue ? (ydrasil_pkg::REGS_NUM'(1) << id_rf_waddr_rd) : '0;
+		id_ex_rd_issue_count ? (ydrasil_pkg::REGS_NUM'(1) << id_rf_waddr_rd) : '0;
 	wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_flush_kill_mask =
 		id_ex_rd_flush_kill ? (ydrasil_pkg::REGS_NUM'(1) << id_rf_waddr_rd) : '0;
 	wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_for_hazard =
 		(gpr_pending_q & ~gpr_pending_clear_mask & ~gpr_pending_flush_kill_mask) |
 		gpr_pending_issue_mask;
 
-	wire rs1_clear_fwd =
+	wire rs1_single_pending = (gpr_pending_count_q[id_ctrl_rs1_addr] == 2'd1);
+	wire rs2_single_pending = (gpr_pending_count_q[id_ctrl_rs2_addr] == 2'd1);
+	wire rd_single_pending = (gpr_pending_count_q[id_ctrl_rd_addr] == 2'd1);
+	wire rs1_clear_fwd = rs1_single_pending & (
 		(rf_wen_rd & id_ctrl_rs1_ren & (id_ctrl_rs1_addr != '0) &
 		 (id_ctrl_rs1_addr == rf_waddr_rd)) |
 		(wb_hzd_valid_q & id_ctrl_rs1_ren & (id_ctrl_rs1_addr != '0) &
@@ -334,8 +347,8 @@ import ydrasil_pkg::*;
 		(mul_rf_wen_rd & id_ctrl_rs1_ren & (id_ctrl_rs1_addr != '0) &
 		 (id_ctrl_rs1_addr == mul_rf_waddr_rd)) |
 		(alu_rf_wen_rd & id_ctrl_rs1_ren & (id_ctrl_rs1_addr != '0) &
-		 (id_ctrl_rs1_addr == alu_rf_waddr_rd));
-	wire rs2_clear_fwd =
+		 (id_ctrl_rs1_addr == alu_rf_waddr_rd)));
+	wire rs2_clear_fwd = rs2_single_pending & (
 		(rf_wen_rd & id_ctrl_rs2_ren & (id_ctrl_rs2_addr != '0) &
 		 (id_ctrl_rs2_addr == rf_waddr_rd)) |
 		(wb_hzd_valid_q & id_ctrl_rs2_ren & (id_ctrl_rs2_addr != '0) &
@@ -345,8 +358,8 @@ import ydrasil_pkg::*;
 		(mul_rf_wen_rd & id_ctrl_rs2_ren & (id_ctrl_rs2_addr != '0) &
 		 (id_ctrl_rs2_addr == mul_rf_waddr_rd)) |
 		(alu_rf_wen_rd & id_ctrl_rs2_ren & (id_ctrl_rs2_addr != '0) &
-		 (id_ctrl_rs2_addr == alu_rf_waddr_rd));
-	wire rd_clear_fwd =
+		 (id_ctrl_rs2_addr == alu_rf_waddr_rd)));
+	wire rd_clear_fwd = rd_single_pending & (
 		(rf_wen_rd & id_ctrl_rd_wen & (id_ctrl_rd_addr != '0) &
 		 (id_ctrl_rd_addr == rf_waddr_rd)) |
 		(wb_hzd_valid_q & id_ctrl_rd_wen & (id_ctrl_rd_addr != '0) &
@@ -354,7 +367,7 @@ import ydrasil_pkg::*;
 		(lsu_rf_wen_rd & id_ctrl_rd_wen & (id_ctrl_rd_addr != '0) &
 		 (id_ctrl_rd_addr == lsu_rf_waddr_rd)) |
 		(alu_rf_wen_rd & id_ctrl_rd_wen & (id_ctrl_rd_addr != '0) &
-		 (id_ctrl_rd_addr == alu_rf_waddr_rd));
+		 (id_ctrl_rd_addr == alu_rf_waddr_rd)));
 	wire issue_fast_alu_producer =
 		id_ex_rd_issue & id_alu_rf_wen_rd &
 		operator_type[ydrasil_pkg::OPERATOR_TYPE_ALU];
@@ -414,19 +427,45 @@ import ydrasil_pkg::*;
 	always_ff @(posedge clk or negedge rst_n) begin
 		if (!rst_n) begin
 			gpr_pending_q <= '0;
+			id_ex_rd_issue_counted_q <= 1'b0;
+			for (pending_idx = 0; pending_idx < ydrasil_pkg::REGS_NUM; pending_idx = pending_idx + 1) begin
+				gpr_pending_count_q[pending_idx] <= '0;
+			end
 			wb_hzd_valid_q <= 1'b0;
 			wb_hzd_addr_q <= '0;
 			wb_hzd_data_q <= '0;
 		end else if (interrupt) begin
 			gpr_pending_q <= '0;
+			id_ex_rd_issue_counted_q <= 1'b0;
+			for (pending_idx = 0; pending_idx < ydrasil_pkg::REGS_NUM; pending_idx = pending_idx + 1) begin
+				gpr_pending_count_q[pending_idx] <= '0;
+			end
 			wb_hzd_valid_q <= 1'b0;
 			wb_hzd_addr_q <= '0;
 			wb_hzd_data_q <= '0;
 		end else begin
-			gpr_pending_q <= gpr_pending_for_hazard;
+			for (pending_idx = 0; pending_idx < ydrasil_pkg::REGS_NUM; pending_idx = pending_idx + 1) begin
+				reg [1:0] pending_count_next;
+
+				pending_count_next = gpr_pending_count_q[pending_idx];
+				if ((gpr_pending_clear_mask[pending_idx] | gpr_pending_flush_kill_mask[pending_idx]) &&
+				    (pending_count_next != '0)) begin
+					pending_count_next = pending_count_next - 2'd1;
+				end
+				if (gpr_pending_issue_mask[pending_idx] && (pending_count_next != 2'd3)) begin
+					pending_count_next = pending_count_next + 2'd1;
+				end
+				gpr_pending_count_q[pending_idx] <= pending_count_next;
+				gpr_pending_q[pending_idx] <= (pending_count_next != '0);
+			end
 			wb_hzd_valid_q <= rf_wen_rd & (rf_waddr_rd != '0);
 			wb_hzd_addr_q <= rf_waddr_rd;
 			wb_hzd_data_q <= rf_wdata_rd;
+			if (!id_ex_op_div) begin
+				id_ex_rd_issue_counted_q <= 1'b0;
+			end else if (id_ex_rd_issue_count) begin
+				id_ex_rd_issue_counted_q <= 1'b1;
+			end
 		end
 	end
 
