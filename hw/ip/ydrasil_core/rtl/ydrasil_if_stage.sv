@@ -3,6 +3,7 @@
 module ydrasil_if_stage 
 import ydrasil_pkg::*;
 #(
+	parameter int FETCHQ_DEPTH = 4
 )(
 	input  wire        clk,
 	input  wire        rst_n,
@@ -47,137 +48,175 @@ import ydrasil_pkg::*;
 
 	wire [31:0] pc_n;
 	wire [31:0] pc_plus4;
-	wire [31:0] bp_redirect_next_pc;
 	wire [31:0] if_id_instr;
-	wire [31:0] pc_now;
 	reg [31:0] pc_ff;
-	reg [31:0] if_id_pc_ff;
-	reg [31:0] if_id_instr_ff;
-	reg        pred_hold_valid_ff;
-	reg        pred_hold_hit_ff;
-	reg        pred_hold_taken_ff;
-	reg [31:0] pred_hold_target_ff;
-	reg [1:0]  pred_hold_counter_ff;
-	reg [31:0] pred_hold_bht_index_ff;
-	reg        if_id_valid_ff;
-	reg flush_if_ff;
-	reg stall_if_ff;
-	wire       if_id_pred_hit;
-	wire       if_id_pred_taken;
-	wire [31:0] if_id_pred_target;
-	wire [1:0]  if_id_pred_counter;
-	wire [31:0] if_id_pred_bht_index;
+	reg        mem_req_valid_ff;
+	reg [31:0] mem_req_pc_ff;
+	localparam int FETCHQ_PTR_WIDTH = (FETCHQ_DEPTH > 1) ? $clog2(FETCHQ_DEPTH) : 1;
+	localparam int FETCHQ_COUNT_WIDTH = $clog2(FETCHQ_DEPTH + 1);
+	localparam int FETCHQ_RESERVED_WIDTH = $clog2(FETCHQ_DEPTH + 2);
+	localparam logic [FETCHQ_COUNT_WIDTH-1:0] FETCHQ_DEPTH_COUNT = FETCHQ_COUNT_WIDTH'(FETCHQ_DEPTH);
+	localparam logic [FETCHQ_RESERVED_WIDTH-1:0] FETCHQ_DEPTH_RESERVED =
+		FETCHQ_RESERVED_WIDTH'(FETCHQ_DEPTH);
+	reg [FETCHQ_PTR_WIDTH-1:0] fetchq_rd_ptr_ff;
+	reg [FETCHQ_PTR_WIDTH-1:0] fetchq_wr_ptr_ff;
+	reg [FETCHQ_COUNT_WIDTH-1:0] fetchq_count_ff;
+	reg [31:0] fetchq_pc_ff [0:FETCHQ_DEPTH-1];
+	reg [31:0] fetchq_instr_ff [0:FETCHQ_DEPTH-1];
+	reg        fetchq_pred_hit_ff [0:FETCHQ_DEPTH-1];
+	reg        fetchq_pred_taken_ff [0:FETCHQ_DEPTH-1];
+	reg [31:0] fetchq_pred_target_ff [0:FETCHQ_DEPTH-1];
+	reg [1:0]  fetchq_pred_counter_ff [0:FETCHQ_DEPTH-1];
+	reg [31:0] fetchq_pred_bht_index_ff [0:FETCHQ_DEPTH-1];
+	reg        pending_redirect_valid_ff;
+	reg [31:0] pending_redirect_target_ff;
+
+	wire       fetchq_empty;
+	wire       fetchq_full;
+	wire       fetchq_pop;
+	wire       fetchq_push;
+	wire       fetchq_push_allowed;
+	wire [FETCHQ_RESERVED_WIDTH-1:0] fetchq_reserved_count;
+	wire       fetchq_has_capacity;
+	wire       can_issue_fetch;
+	wire       mem_resp_valid;
+	wire       predict_redirect_resp;
 	wire       bp_predict_redirect;
+	wire [31:0] fetch_addr;
+	wire [31:0] fetch_next_pc;
+	wire [31:0] flush_target;
+	wire [31:0] invalidate_target;
+	wire       flush_fetch;
 
 	// 默认顺序取指地址：PC + 4
 	assign pc_plus4   = pc_ff + 32'd4;
-	assign bp_redirect_next_pc = if_id_pred_target + 32'd4;
-	assign if_id_pred_hit = pred_hold_valid_ff ? pred_hold_hit_ff :
-	                        bp_predict_hit_i;
-	assign if_id_pred_taken = pred_hold_valid_ff ? pred_hold_taken_ff :
-	                          bp_predict_taken_i;
-	assign if_id_pred_target = pred_hold_valid_ff ? pred_hold_target_ff :
-	                           bp_predict_target_i;
-	assign if_id_pred_counter = pred_hold_valid_ff ? pred_hold_counter_ff :
-	                            bp_predict_counter_i;
-	assign if_id_pred_bht_index = pred_hold_valid_ff ? pred_hold_bht_index_ff :
-	                              bp_predict_bht_index_i;
+	assign fetchq_empty = (fetchq_count_ff == '0);
+	assign fetchq_full  = (fetchq_count_ff == FETCHQ_DEPTH_COUNT);
+	assign flush_fetch  = flush_if_i | branch_jump_i;
+	assign flush_target = branch_jump_i ? branch_target_i : pc_plus4;
+	assign invalidate_target = fetchq_empty ? pc_ff :
+	                           (fetchq_pc_ff[fetchq_rd_ptr_ff] + 32'd4);
+	assign fetchq_pop   = !flush_fetch && !stall_if_i && !fetchq_empty;
+	assign mem_resp_valid = !flush_fetch && mem_req_valid_ff;
+	assign fetchq_push = mem_resp_valid;
+	assign fetchq_push_allowed = fetchq_push && (!fetchq_full || fetchq_pop);
+	assign fetchq_reserved_count =
+		FETCHQ_RESERVED_WIDTH'(fetchq_count_ff) +
+		FETCHQ_RESERVED_WIDTH'(mem_req_valid_ff);
+	assign fetchq_has_capacity = (fetchq_reserved_count < FETCHQ_DEPTH_RESERVED);
+	assign can_issue_fetch = !flush_fetch && fetchq_has_capacity;
+	assign predict_redirect_resp = mem_resp_valid && bp_predict_taken_i;
 	assign bp_predict_redirect =
-		!branch_jump_i && !stall_if_i && !stall_pc_i && !bp_invalidate_i &&
-		if_id_valid_ff && if_id_pred_taken;
+		can_issue_fetch && !pending_redirect_valid_ff && predict_redirect_resp;
 	// 若发生重定向则跳转到目标 PC，否则顺序执行
 	assign pc_n       = branch_jump_i ? branch_target_i :
-						stall_pc_i ? pc_ff :
-						bp_invalidate_i ? pc_plus4 :
-						bp_predict_redirect ? bp_redirect_next_pc : pc_plus4;
+						!can_issue_fetch ? pc_ff :
+						fetch_next_pc;
 
-	assign if_mem_addr_o = bp_predict_redirect ? if_id_pred_target : pc_ff;
-	assign bp_lookup_pc_o = pc_ff;
+	assign fetch_addr = pending_redirect_valid_ff ? pending_redirect_target_ff :
+	                    bp_predict_redirect ? bp_predict_target_i : pc_ff;
+	assign fetch_next_pc = fetch_addr + 32'd4;
+	assign if_mem_addr_o = fetch_addr;
+	assign bp_lookup_pc_o = fetch_addr;
 
-	assign if_id_pc_o    = if_id_pc_ff;
-	assign if_id_pred_hit_o = if_id_valid_ff && !bp_invalidate_i && if_id_pred_hit;
-	assign if_id_pred_taken_o = if_id_valid_ff && !bp_invalidate_i && if_id_pred_taken;
-	assign if_id_pred_target_o = if_id_pred_target;
-	assign if_id_pred_counter_o = (if_id_valid_ff && !bp_invalidate_i) ?
-	                              if_id_pred_counter : 2'b01;
-	assign if_id_pred_bht_index_o = if_id_pred_bht_index;
-	assign if_id_valid_o = if_id_valid_ff;
-	assign pc_now =  pc_ff;
-	assign if_id_instr_o = if_id_instr;
-	assign if_id_instr = 
-		stall_if_ff? if_id_instr_ff :
-		flush_if_ff ? ydrasil_pkg::RV32I_INS_NOP : if_mem_rdata_i;
-
-
+	assign if_id_pc_o    = fetchq_empty ? ydrasil_pkg::RESET_INS : fetchq_pc_ff[fetchq_rd_ptr_ff];
+	assign if_id_pred_hit_o = !fetchq_empty && fetchq_pred_hit_ff[fetchq_rd_ptr_ff];
+	assign if_id_pred_taken_o = !fetchq_empty && fetchq_pred_taken_ff[fetchq_rd_ptr_ff];
+	assign if_id_pred_target_o = fetchq_empty ? 32'b0 : fetchq_pred_target_ff[fetchq_rd_ptr_ff];
+	assign if_id_pred_counter_o = fetchq_empty ? 2'b01 : fetchq_pred_counter_ff[fetchq_rd_ptr_ff];
+	assign if_id_pred_bht_index_o = fetchq_empty ? 32'b0 : fetchq_pred_bht_index_ff[fetchq_rd_ptr_ff];
+	assign if_id_valid_o = !fetchq_empty;
+	assign if_id_instr_o = fetchq_empty ? ydrasil_pkg::RV32I_INS_NOP : fetchq_instr_ff[fetchq_rd_ptr_ff];
+	assign if_id_instr = if_id_instr_o;
 
 	// IF 级 PC 寄存器：复位置初值，非停顿时更新
 	always_ff @(posedge clk or negedge rst_n) begin
 		if (!rst_n) begin
 			pc_ff <= ydrasil_pkg::RESET_INS;
 		end else begin
-			pc_ff <= pc_n;
+			pc_ff <= flush_fetch ? flush_target :
+			         bp_invalidate_i ? invalidate_target :
+			         pc_n;
 		end
 	end
 
 
 
 
-	// IF/ID 流水寄存器：支持复位、冲刷和停顿
+	// Fetch queue isolates backend stall from the ITCM address path.
 	always_ff @(posedge clk or negedge rst_n) begin
 		if (!rst_n) begin
-			if_id_pc_ff    <= ydrasil_pkg::RESET_INS;
-			pred_hold_valid_ff <= 1'b0;
-			pred_hold_hit_ff <= 1'b0;
-			pred_hold_taken_ff <= 1'b0;
-			pred_hold_target_ff <= '0;
-			pred_hold_counter_ff <= 2'b01;
-			pred_hold_bht_index_ff <= '0;
-			if_id_valid_ff <= 1'b0;
-			flush_if_ff     <= 1'b0;
-			if_id_instr_ff <= ydrasil_pkg::RV32I_INS_NOP;
-			stall_if_ff    <= 1'b0;
+			mem_req_valid_ff <= 1'b0;
+			mem_req_pc_ff <= ydrasil_pkg::RESET_INS;
+			fetchq_rd_ptr_ff <= '0;
+			fetchq_wr_ptr_ff <= '0;
+			fetchq_count_ff <= '0;
+			pending_redirect_valid_ff <= 1'b0;
+			pending_redirect_target_ff <= '0;
 		end 
-		else begin
-			if(flush_if_i) begin
-				if_id_pc_ff    <= pc_now;
-				pred_hold_valid_ff <= 1'b0;
-				pred_hold_hit_ff <= 1'b0;
-				pred_hold_taken_ff <= 1'b0;
-				pred_hold_target_ff <= '0;
-				pred_hold_counter_ff <= 2'b01;
-				pred_hold_bht_index_ff <= '0;
-				if_id_valid_ff <= 1'b0;
-				flush_if_ff     <= 1'b1;
-			end else if (bp_predict_redirect) begin
-				if_id_pc_ff    <= if_id_pred_target;
-				pred_hold_valid_ff <= 1'b1;
-				pred_hold_hit_ff <= 1'b0;
-				pred_hold_taken_ff <= 1'b0;
-				pred_hold_target_ff <= '0;
-				pred_hold_counter_ff <= 2'b01;
-				pred_hold_bht_index_ff <= '0;
-				if_id_valid_ff <= 1'b1;
-				flush_if_ff     <= 1'b0;
-			end else if(stall_if_i) begin
-				pred_hold_valid_ff <= if_id_valid_ff;
-				pred_hold_hit_ff <= if_id_pred_hit;
-				pred_hold_taken_ff <= if_id_pred_taken;
-				pred_hold_target_ff <= if_id_pred_target;
-				pred_hold_counter_ff <= if_id_pred_counter;
-				pred_hold_bht_index_ff <= if_id_pred_bht_index;
-			end else if(!stall_if_i) begin
-				if_id_pc_ff    <= pc_now;
-				pred_hold_valid_ff <= 1'b0;
-				pred_hold_hit_ff <= 1'b0;
-				pred_hold_taken_ff <= 1'b0;
-				pred_hold_target_ff <= '0;
-				pred_hold_counter_ff <= 2'b01;
-				pred_hold_bht_index_ff <= '0;
-				if_id_valid_ff <= 1'b1;
-				flush_if_ff     <= 1'b0;
+		else if (flush_fetch) begin
+			mem_req_valid_ff <= 1'b0;
+			mem_req_pc_ff <= flush_target;
+			fetchq_rd_ptr_ff <= '0;
+			fetchq_wr_ptr_ff <= '0;
+			fetchq_count_ff <= '0;
+			pending_redirect_valid_ff <= 1'b0;
+			pending_redirect_target_ff <= '0;
+		end else if (bp_invalidate_i) begin
+			mem_req_valid_ff <= 1'b0;
+			mem_req_pc_ff <= invalidate_target;
+			fetchq_rd_ptr_ff <= '0;
+			fetchq_wr_ptr_ff <= '0;
+			fetchq_count_ff <= '0;
+			pending_redirect_valid_ff <= 1'b0;
+			pending_redirect_target_ff <= '0;
+		end else begin
+			mem_req_valid_ff <= can_issue_fetch;
+			if (can_issue_fetch) begin
+				mem_req_pc_ff <= fetch_addr;
 			end
-			if_id_instr_ff <= if_id_instr;
-			stall_if_ff    <= stall_if_i & !flush_if_i;
+			if (pending_redirect_valid_ff && can_issue_fetch) begin
+				pending_redirect_valid_ff <= 1'b0;
+			end
+			if (predict_redirect_resp && !can_issue_fetch && !pending_redirect_valid_ff) begin
+				pending_redirect_valid_ff <= 1'b1;
+				pending_redirect_target_ff <= bp_predict_target_i;
+			end
+
+			case ({fetchq_push_allowed, fetchq_pop})
+				2'b10: begin
+					fetchq_pc_ff[fetchq_wr_ptr_ff] <= mem_req_pc_ff;
+					fetchq_instr_ff[fetchq_wr_ptr_ff] <= if_mem_rdata_i;
+					fetchq_pred_hit_ff[fetchq_wr_ptr_ff] <= bp_predict_hit_i;
+					fetchq_pred_taken_ff[fetchq_wr_ptr_ff] <= bp_predict_taken_i;
+					fetchq_pred_target_ff[fetchq_wr_ptr_ff] <= bp_predict_target_i;
+					fetchq_pred_counter_ff[fetchq_wr_ptr_ff] <= bp_predict_counter_i;
+					fetchq_pred_bht_index_ff[fetchq_wr_ptr_ff] <= bp_predict_bht_index_i;
+					fetchq_wr_ptr_ff <= (fetchq_wr_ptr_ff == FETCHQ_PTR_WIDTH'(FETCHQ_DEPTH-1)) ?
+						'0 : fetchq_wr_ptr_ff + 1'b1;
+					fetchq_count_ff <= fetchq_count_ff + 1'b1;
+				end
+				2'b01: begin
+					fetchq_rd_ptr_ff <= (fetchq_rd_ptr_ff == FETCHQ_PTR_WIDTH'(FETCHQ_DEPTH-1)) ?
+						'0 : fetchq_rd_ptr_ff + 1'b1;
+					fetchq_count_ff <= fetchq_count_ff - 1'b1;
+				end
+				2'b11: begin
+					fetchq_pc_ff[fetchq_wr_ptr_ff] <= mem_req_pc_ff;
+					fetchq_instr_ff[fetchq_wr_ptr_ff] <= if_mem_rdata_i;
+					fetchq_pred_hit_ff[fetchq_wr_ptr_ff] <= bp_predict_hit_i;
+					fetchq_pred_taken_ff[fetchq_wr_ptr_ff] <= bp_predict_taken_i;
+					fetchq_pred_target_ff[fetchq_wr_ptr_ff] <= bp_predict_target_i;
+					fetchq_pred_counter_ff[fetchq_wr_ptr_ff] <= bp_predict_counter_i;
+					fetchq_pred_bht_index_ff[fetchq_wr_ptr_ff] <= bp_predict_bht_index_i;
+					fetchq_wr_ptr_ff <= (fetchq_wr_ptr_ff == FETCHQ_PTR_WIDTH'(FETCHQ_DEPTH-1)) ?
+						'0 : fetchq_wr_ptr_ff + 1'b1;
+					fetchq_rd_ptr_ff <= (fetchq_rd_ptr_ff == FETCHQ_PTR_WIDTH'(FETCHQ_DEPTH-1)) ?
+						'0 : fetchq_rd_ptr_ff + 1'b1;
+				end
+				default: begin
+				end
+			endcase
 		end
 	end
 
