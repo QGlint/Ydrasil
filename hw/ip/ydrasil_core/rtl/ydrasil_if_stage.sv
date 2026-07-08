@@ -79,6 +79,7 @@ import ydrasil_pkg::*;
 	wire [FETCHQ_RESERVED_WIDTH-1:0] fetchq_reserved_count;
 	wire       fetchq_has_capacity;
 	wire       can_issue_fetch;
+	wire       fetch_issue;
 	wire       mem_resp_valid;
 	wire       predict_redirect_resp;
 	wire       bp_predict_redirect;
@@ -106,15 +107,15 @@ import ydrasil_pkg::*;
 	assign fetchq_has_capacity = (fetchq_reserved_count < FETCHQ_DEPTH_RESERVED);
 	assign can_issue_fetch = !flush_fetch && fetchq_has_capacity;
 	assign predict_redirect_resp = mem_resp_valid && bp_predict_taken_i;
-	assign bp_predict_redirect =
-		can_issue_fetch && !pending_redirect_valid_ff && predict_redirect_resp;
+	assign fetch_issue = can_issue_fetch && !predict_redirect_resp;
+	assign bp_predict_redirect = predict_redirect_resp;
 	// 若发生重定向则跳转到目标 PC，否则顺序执行
 	assign pc_n       = branch_jump_i ? branch_target_i :
-						!can_issue_fetch ? pc_ff :
+						!fetch_issue ? pc_ff :
 						fetch_next_pc;
 
 	assign fetch_addr = pending_redirect_valid_ff ? pending_redirect_target_ff :
-	                    bp_predict_redirect ? bp_predict_target_i : pc_ff;
+	                    pc_ff;
 	assign fetch_next_pc = fetch_addr + 32'd4;
 	assign if_mem_addr_o = fetch_addr;
 	assign bp_lookup_pc_o = fetch_addr;
@@ -171,14 +172,14 @@ import ydrasil_pkg::*;
 			pending_redirect_valid_ff <= 1'b0;
 			pending_redirect_target_ff <= '0;
 		end else begin
-			mem_req_valid_ff <= can_issue_fetch;
-			if (can_issue_fetch) begin
+			mem_req_valid_ff <= fetch_issue;
+			if (fetch_issue) begin
 				mem_req_pc_ff <= fetch_addr;
 			end
-			if (pending_redirect_valid_ff && can_issue_fetch) begin
+			if (pending_redirect_valid_ff && fetch_issue) begin
 				pending_redirect_valid_ff <= 1'b0;
 			end
-			if (predict_redirect_resp && !can_issue_fetch && !pending_redirect_valid_ff) begin
+			if (predict_redirect_resp) begin
 				pending_redirect_valid_ff <= 1'b1;
 				pending_redirect_target_ff <= bp_predict_target_i;
 			end

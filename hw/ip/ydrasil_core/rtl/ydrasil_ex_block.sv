@@ -159,6 +159,7 @@ import ydrasil_pkg::*;
     wire [31:0] operand_b;
     wire [31:0] bt_a_operand;
     wire [31:0] bt_b_operand;
+    wire [31:0] fast_add_result;
 
     assign bt_a_operand = bt_a_operand_i;
     assign bt_b_operand = bt_b_operand_i;
@@ -330,9 +331,50 @@ import ydrasil_pkg::*;
     assign div_rf_wen_rd = div_complete & div_wen_q;
     assign ex_mul_stall_o = ((id_ex_valid_i & op_div) | div_active_q) & !div_done & !flush_ex_i;
 
-    assign bitmanip_rf_wen_rd = id_ex_valid_i & op_bitmanip & id_alu_rf_wen_rd_i & !interrupt_i & !flush_ex_i;
+    wire [4:0] fast_b_shamt = operand_b[4:0];
+    wire [31:0] fast_b_mask = 32'h1 << fast_b_shamt;
+    wire [31:0] fast_b_shadd_result =
+        ({32{operator_i[OP_B_SH1ADD]}} & ((operand_a << 1) + operand_b)) |
+        ({32{operator_i[OP_B_SH2ADD]}} & ((operand_a << 2) + operand_b)) |
+        ({32{operator_i[OP_B_SH3ADD]}} & ((operand_a << 3) + operand_b));
+    wire [31:0] fast_b_logic_result =
+        ({32{operator_i[OP_B_ANDN]}} & (operand_a & ~operand_b)) |
+        ({32{operator_i[OP_B_ORN]}}  & (operand_a | ~operand_b)) |
+        ({32{operator_i[OP_B_XNOR]}} & ~(operand_a ^ operand_b));
+    wire [31:0] fast_b_bit_result =
+        ({32{operator_i[OP_B_BCLR] | operator_i[OP_B_BCLRI]}} & (operand_a & ~fast_b_mask)) |
+        ({32{operator_i[OP_B_BEXT] | operator_i[OP_B_BEXTI]}} & {31'b0, |(operand_a & fast_b_mask)}) |
+        ({32{operator_i[OP_B_BINV] | operator_i[OP_B_BINVI]}} & (operand_a ^ fast_b_mask)) |
+        ({32{operator_i[OP_B_BSET] | operator_i[OP_B_BSETI]}} & (operand_a | fast_b_mask));
+    wire [31:0] fast_b_pack_result =
+        ({32{operator_i[OP_B_PACK]}}  & {operand_b[15:0], operand_a[15:0]}) |
+        ({32{operator_i[OP_B_PACKH]}} & {16'b0, operand_b[7:0], operand_a[7:0]});
+    wire [31:0] fast_b_extend_result =
+        ({32{operator_i[OP_B_REV8]}}   & {operand_a[7:0], operand_a[15:8], operand_a[23:16], operand_a[31:24]}) |
+        ({32{operator_i[OP_B_SEXT_B]}} & {{24{operand_a[7]}}, operand_a[7:0]}) |
+        ({32{operator_i[OP_B_SEXT_H]}} & {{16{operand_a[15]}}, operand_a[15:0]}) |
+        ({32{operator_i[OP_B_ZEXT_H]}} & {16'b0, operand_a[15:0]});
+    wire fast_bitmanip_op = op_bitmanip &
+        (operator_i[OP_B_SH1ADD] | operator_i[OP_B_SH2ADD] | operator_i[OP_B_SH3ADD] |
+         operator_i[OP_B_ANDN]   | operator_i[OP_B_ORN]    | operator_i[OP_B_XNOR]   |
+         operator_i[OP_B_BCLR]   | operator_i[OP_B_BCLRI]  | operator_i[OP_B_BEXT]   |
+         operator_i[OP_B_BEXTI]  | operator_i[OP_B_BINV]   | operator_i[OP_B_BINVI]  |
+         operator_i[OP_B_BSET]   | operator_i[OP_B_BSETI]  | operator_i[OP_B_PACK]   |
+         operator_i[OP_B_PACKH]  | operator_i[OP_B_REV8]   | operator_i[OP_B_SEXT_B] |
+         operator_i[OP_B_SEXT_H] | operator_i[OP_B_ZEXT_H]);
+    wire [31:0] fast_bitmanip_result =
+        fast_b_shadd_result | fast_b_logic_result | fast_b_bit_result |
+        fast_b_pack_result | fast_b_extend_result;
+    wire fast_bitmanip_rf_wen_rd =
+        id_ex_valid_i & fast_bitmanip_op & id_alu_rf_wen_rd_i & !interrupt_i & !flush_ex_i;
+
+    assign bitmanip_rf_wen_rd =
+        id_ex_valid_i & op_bitmanip & !fast_bitmanip_op & id_alu_rf_wen_rd_i &
+        !interrupt_i & !flush_ex_i;
     assign normal_alu_rf_wen_rd = id_ex_valid_i & alu_rf_wen_rd & !op_m_unit & !op_bitmanip & !flush_ex_i;
-    assign ex_rf_wen_rd = div_rf_wen_rd | bitmanip_rf_wen_rd | normal_alu_rf_wen_rd | csr_wen;
+    assign ex_rf_wen_rd =
+        div_rf_wen_rd | bitmanip_rf_wen_rd | fast_bitmanip_rf_wen_rd |
+        normal_alu_rf_wen_rd | csr_wen;
     assign mul_result_valid_o = mul_result_valid;
     assign ex_instret_inc_o =
         (id_ex_valid_i & !interrupt_i & !flush_ex_i & !op_load & !op_mul & !op_div) |
@@ -349,9 +391,11 @@ import ydrasil_pkg::*;
          operator_i[OP_ALU_AND]  |
          operator_i[OP_ALU_LUI]  |
          operator_i[OP_ALU_AUIPC]);
-    wire fast_result_wen = id_ex_valid_i & !interrupt_i & !flush_ex_i & !op_bitmanip & !op_m_unit &
-        (fast_alu_op | op_load | op_store | op_bjp);
-    wire [31:0] fast_add_result = operand_a + operand_b;
+    wire fast_result_wen =
+        (id_ex_valid_i & !interrupt_i & !flush_ex_i & !op_m_unit &
+         (!op_bitmanip & (fast_alu_op | op_load | op_store | op_bjp))) |
+        fast_bitmanip_rf_wen_rd;
+    assign fast_add_result = operand_a + operand_b;
     wire [32:0] fast_sub_result_ext = {1'b0, operand_a} + {1'b0, ~operand_b} + 33'd1;
     wire        fast_signs_differ = operand_a[31] ^ operand_b[31];
     wire        fast_slt_signed = fast_signs_differ ? operand_a[31] : fast_sub_result_ext[31];
@@ -368,6 +412,7 @@ import ydrasil_pkg::*;
         ({32{operator_i[OP_ALU_LUI]}}  & operand_b) |
         ({32{operator_i[OP_ALU_ADD] | operator_i[OP_ALU_AUIPC]}} & fast_add_result);
     wire [31:0] fast_result =
+        fast_bitmanip_rf_wen_rd ? fast_bitmanip_result :
         fast_alu_op ? fast_alu_result : fast_add_result;
 
     ydrasil_alu #(
@@ -416,10 +461,36 @@ import ydrasil_pkg::*;
         .result_wdata_o  (mul_wdata_rd_o)
     );
 
+    logic [OPERATOR_WIDTH-1:0] slow_bitmanip_operator;
+
+    always_comb begin
+        slow_bitmanip_operator = operator_i;
+        slow_bitmanip_operator[OP_B_SH1ADD] = 1'b0;
+        slow_bitmanip_operator[OP_B_SH2ADD] = 1'b0;
+        slow_bitmanip_operator[OP_B_SH3ADD] = 1'b0;
+        slow_bitmanip_operator[OP_B_ANDN]   = 1'b0;
+        slow_bitmanip_operator[OP_B_ORN]    = 1'b0;
+        slow_bitmanip_operator[OP_B_REV8]   = 1'b0;
+        slow_bitmanip_operator[OP_B_SEXT_B] = 1'b0;
+        slow_bitmanip_operator[OP_B_SEXT_H] = 1'b0;
+        slow_bitmanip_operator[OP_B_XNOR]   = 1'b0;
+        slow_bitmanip_operator[OP_B_ZEXT_H] = 1'b0;
+        slow_bitmanip_operator[OP_B_BCLR]   = 1'b0;
+        slow_bitmanip_operator[OP_B_BCLRI]  = 1'b0;
+        slow_bitmanip_operator[OP_B_BEXT]   = 1'b0;
+        slow_bitmanip_operator[OP_B_BEXTI]  = 1'b0;
+        slow_bitmanip_operator[OP_B_BINV]   = 1'b0;
+        slow_bitmanip_operator[OP_B_BINVI]  = 1'b0;
+        slow_bitmanip_operator[OP_B_BSET]   = 1'b0;
+        slow_bitmanip_operator[OP_B_BSETI]  = 1'b0;
+        slow_bitmanip_operator[OP_B_PACK]   = 1'b0;
+        slow_bitmanip_operator[OP_B_PACKH]  = 1'b0;
+    end
+
     ydrasil_bitmanip u_ydrasil_bitmanip (
         .operand_a_i     (operand_a),
         .operand_b_i     (operand_b),
-        .operator_i      (operator_i),
+        .operator_i      (slow_bitmanip_operator),
         .operator_type_i (operator_type_i),
         .result_o        (bitmanip_result)
     );
