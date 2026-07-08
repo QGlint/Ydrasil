@@ -239,6 +239,8 @@ coremark_result:
 			} else if (match(line, /(core[[:space:]]+0:|3[[:space:]]+0x)/)) { \
 				prefix=substr(line, 1, RSTART - 1); \
 				if (length(prefix) > 0) printf "%s", prefix; \
+			} else if (line !~ /^(make(\\[[0-9]+\\])?:|\\[VERILATOR RUN\\]|cd |C\\+\\+ timeout set to|Trace is |Loading memory from|No itcm_init defined|\\[TB\\]|Simulation finished at|- .*Verilog \\$finish|\\[CLEAN EMPTY LOG\\])/) { \
+				print line; \
 			} else if (line == "") { \
 				printf "\n"; \
 			} \
