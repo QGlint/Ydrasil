@@ -63,6 +63,16 @@ COREMARK_ITCM_BIN := $(COREMARK_OUT)/$(COREMARK_NAME)_itcm.bin
 COREMARK_DTCM_BIN := $(COREMARK_OUT)/$(COREMARK_NAME)_dtcm.bin
 COREMARK_OBJDUMP := $(COREMARK_OUT)/$(COREMARK_NAME).objdump
 COREMARK_MAP := $(COREMARK_OUT)/$(COREMARK_NAME).map
+SORT_APP_OUT ?= $(PROJECT_ROOT)/build/app/sort
+SORT_APP_NAME := sort
+SORT_APP_ELF := $(SORT_APP_OUT)/$(SORT_APP_NAME).elf
+SORT_APP_BIN := $(SORT_APP_OUT)/$(SORT_APP_NAME).bin
+SORT_APP_DUMP := $(SORT_APP_OUT)/$(SORT_APP_NAME).dump
+SORT_APP_ITCM := $(SORT_APP_OUT)/$(SORT_APP_NAME).itcm
+SORT_APP_DTCM := $(SORT_APP_OUT)/$(SORT_APP_NAME).dtcm
+SORT_APP_ITCM_BIN := $(SORT_APP_OUT)/$(SORT_APP_NAME)_itcm.bin
+SORT_APP_DTCM_BIN := $(SORT_APP_OUT)/$(SORT_APP_NAME)_dtcm.bin
+SORT_APP_MAP := $(SORT_APP_OUT)/$(SORT_APP_NAME).map
 
 BSP_DIR := $(PROJECT_ROOT)/sw/bsp
 BSP_INCLUDES := -I$(BSP_DIR)/include
@@ -81,6 +91,7 @@ COREMARK_C_SRCS := \
 	$(COREMARK_DIR)/core_util.c \
 	$(COREMARK_DIR)/$(COREMARK_PORT_DIR)/core_portme.c
 COREMARK_SRCS := $(BSP_ASM_SRCS) $(BSP_C_SRCS) $(COREMARK_C_SRCS)
+SORT_APP_SRCS := $(BSP_ASM_SRCS) $(BSP_C_SRCS) apps/sort/sort.c
 COREMARK_CFLAGS := \
 	-march=rv32im_zicsr_zifencei \
 	-mabi=$(ABI) \
@@ -114,6 +125,32 @@ COREMARK_LDFLAGS := \
 	-T $(BSP_DIR)/link.lds \
 	-Wl,-Map,$(COREMARK_MAP) \
 	-Wl,--gc-sections
+SORT_APP_CFLAGS := \
+	-march=rv32im_zicsr_zifencei \
+	-mabi=$(ABI) \
+	-mcmodel=medany \
+	-O2 \
+	-g \
+	-ffunction-sections \
+	-fdata-sections \
+	-fno-builtin \
+	-fno-common \
+	-nostdlib \
+	-nostartfiles \
+	-static \
+	-DYDRASIL_SIM_CTRL=1 \
+	-DSDK_BANNER=0 \
+	$(BSP_INCLUDES)
+SORT_APP_LDFLAGS := \
+	-march=rv32im_zicsr_zifencei \
+	-mabi=$(ABI) \
+	-mcmodel=medany \
+	-nostartfiles \
+	-nostdlib \
+	-static \
+	-T $(BSP_DIR)/link.lds \
+	-Wl,-Map,$(SORT_APP_MAP) \
+	-Wl,--gc-sections
 
 # ====== derived ======
 SRC ?= 
@@ -133,7 +170,7 @@ ITCM_BIN  := $(OUT_DIR)/bin/$(NAME)_itcm.bin
 DTCM_BIN  := $(OUT_DIR)/bin/$(NAME)_dtcm.bin
 
 .PHONY: rv_all rv_elf rv_dump rv_mem
-.PHONY: coremark coremark-rebuild coremark-clean coremark-clean-all
+.PHONY: coremark coremark-rebuild coremark-clean coremark-clean-all sort_app sort_app-rebuild sort_app-clean
 .PHONY: coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map
 rv_comp_genmem:
 	@if [ "$(REBUILD)" != "1" ] && [ -f "$(ELF)" ] && [ -f "$(DUMP)" ] && [ -f "$(ITCM)" ] && [ -f "$(DTCM)" ]; then \
@@ -237,3 +274,52 @@ coremark-clean-mem:
 
 coremark-clean-map:
 	rm -f $(COREMARK_MAP)
+
+sort_app: $(SORT_APP_ELF) $(SORT_APP_BIN) $(SORT_APP_DUMP) $(SORT_APP_ITCM) $(SORT_APP_DTCM)
+	@echo "[sort_app] ELF  $(SORT_APP_ELF)"
+	@echo "[sort_app] ITCM $(SORT_APP_ITCM)"
+	@echo "[sort_app] DTCM $(SORT_APP_DTCM)"
+
+$(SORT_APP_OUT):
+	@mkdir -p $@
+
+$(SORT_APP_ELF): $(SORT_APP_SRCS) $(BSP_DIR)/link.lds Makefile | $(SORT_APP_OUT)
+	$(CC) $(SORT_APP_CFLAGS) $(SORT_APP_SRCS) $(SORT_APP_LDFLAGS) -lgcc -o $@
+
+$(SORT_APP_BIN): $(SORT_APP_ELF)
+	$(OBJCOPY) -O binary $< $@
+
+$(SORT_APP_DUMP): $(SORT_APP_ELF)
+	$(OBJDUMP) -d $< > $@
+
+$(SORT_APP_ITCM): | $(SORT_APP_ELF) $(SORT_APP_OUT)
+	$(OBJCOPY) -O binary --gap-fill=0x00 \
+		--only-section=.init \
+		--only-section=.text \
+		--only-section=.text.* \
+		--only-section=.preinit_array \
+		--only-section=.init_array \
+		--only-section=.fini_array \
+		--only-section=.ctors \
+		--only-section=.dtors \
+		$(SORT_APP_ELF) $(SORT_APP_ITCM_BIN)
+	od -An -t x4 -w4 -v $(SORT_APP_ITCM_BIN) | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > $@
+
+$(SORT_APP_DTCM): | $(SORT_APP_ELF) $(SORT_APP_OUT)
+	$(OBJCOPY) -O binary --gap-fill=0x00 \
+		--only-section=.data \
+		--only-section=.bss \
+		--only-section=.stack \
+		--set-section-flags .bss=alloc,load,contents \
+		--set-section-flags .stack=alloc,load,contents \
+		$(SORT_APP_ELF) $(SORT_APP_DTCM_BIN) || true
+	@if [ -s $(SORT_APP_DTCM_BIN) ]; then \
+		od -An -t x4 -w4 -v $(SORT_APP_DTCM_BIN) | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > $@; \
+	else \
+		printf "00000000\n" > $@; \
+	fi
+
+sort_app-rebuild: sort_app-clean sort_app
+
+sort_app-clean:
+	rm -rf $(SORT_APP_OUT)

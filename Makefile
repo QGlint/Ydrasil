@@ -7,6 +7,18 @@ RESULT_DIR := $(LOG_DIR)/test_results
 PPA_DIR ?= $(BUILD_DIR)/PPA
 PPA_RVTEST_LOG ?= $(PPA_DIR)/test_all_summary.log
 PPA_COREMARK_LOG ?= $(PPA_DIR)/coremark_summary.log
+SORT_APP_LOG ?= $(HW_TRACE_OUT_DIR)/sort/hw.log
+COE_SIMPLE_NAME ?= coe_loop2
+COE_SIMPLE_ITCM ?= $(BUILD_DIR)/fpga_coe_m3/irom_M3_loop2.itcm
+COE_SIMPLE_DTCM ?= $(BUILD_DIR)/fpga_coe_m3/dram_M_loop2.dtcm
+COE_SIMPLE_LOG ?= $(HW_TRACE_OUT_DIR)/$(COE_SIMPLE_NAME)/hw.log
+COE_SIMPLE_SIM_EXTRA_DEFINES ?= +no_finish_on_led +no_finish_on_tohost +perip_debug +commit_trace +cpp_timeout=2000000 +sv_timeout=2000000
+COE_ISA_SIM_EXTRA_DEFINES ?= +no_finish_on_led +no_finish_on_tohost +perip_debug +commit_trace +cpp_timeout=2000000 +sv_timeout=2000000
+COE_EXPECT_SEG ?= 0x37800000
+COE_EXPECT_CNT_START ?= 0x80000000
+COE_EXPECT_CNT_STOP ?= 0xffffffff
+COE_EXPECT_CNT_READ ?= 0x00000000
+COE_EXPECT_LED ?= 0x078b7323
 
 export PROJECT_ROOT BUILD_DIR WAVE_DIR LOG_DIR SIM_TOOL IP VERILATOR_MOD UVM USE_BENDER BENDER DIV_IMPL LSU_IMPL MEMS_IMPL ARCH ABI RISCV_PREFIX CC OBJCOPY OBJDUMP GDB QEMU TRACE_TO_CSV TRACE_COMPARE
 
@@ -67,8 +79,8 @@ ifeq ($(filter $(SYN_PLL_FREQ_MHZ),$(SYN_PLL_SUPPORTED_FREQS)),)
 $(error Unsupported SYN_PLL_FREQ_MHZ=$(SYN_PLL_FREQ_MHZ); supported values: $(SYN_PLL_SUPPORTED_FREQS))
 endif
 
-.PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests init install-bender get_spike download_and_extract_spike check_spike_prebuilt_abi build_spike_from_source check_deps spike spike_wave_to_csv sim_compare commit_check commit_spike_csv commit_hw_trace commit_hw_csv commit_compare rv_test_comp_genmem ppa_rvtest_report
-.PHONY: coremark coremark_sim coremark_run coremark_result coremark-rebuild coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map
+.PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests init install-bender get_spike download_and_extract_spike check_spike_prebuilt_abi build_spike_from_source check_deps spike spike_wave_to_csv sim_compare commit_check commit_spike_csv commit_hw_trace commit_hw_csv commit_compare rv_test_comp_genmem ppa_rvtest_report coe_simple coe_smoke coe_smoke_led coe_isa_probes
+.PHONY: coremark coremark_sim coremark_run coremark_result coremark-rebuild coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map sort_app sort_app_sim sort_app-rebuild sort_app-clean
 .PHONY: syn synf syn-venv syn-prep syn-stage-xpr syn-vivado syn-analyze syn-clean
 
 .SECONDEXPANSION:
@@ -226,6 +238,29 @@ coremark_sim: coremark comp
 
 coremark_run: coremark_sim
 
+sort_app:
+	@$(MAKE) -C sw sort_app
+
+sort_app-rebuild:
+	@$(MAKE) -C sw sort_app-rebuild
+
+sort_app_sim: sort_app comp
+	@set -e; \
+	rm -f "$(SORT_APP_LOG)"; \
+	$(MAKE) sim_compare \
+		SIM_COMPARE=none \
+		COMPARE_NAME=sort \
+		COMPARE_ITCM=$(BUILD_DIR)/app/sort/sort.itcm \
+		COMPARE_DTCM=$(BUILD_DIR)/app/sort/sort.dtcm \
+		COMPARE_SIM_EXTRA_DEFINES="+perip_debug +cpp_timeout=1000000 +sv_timeout=1000000"; \
+	if ! grep -q "SORT PASS" "$(SORT_APP_LOG)"; then \
+		echo "[SORT_APP] SORT PASS not found in $(SORT_APP_LOG)"; \
+		tail -200 "$(SORT_APP_LOG)"; \
+		exit 1; \
+	fi; \
+	echo "[SORT_APP] PASS"; \
+	grep -E "SORT PASS|LED write|Simulation finished|PERF_METRIC" "$(SORT_APP_LOG)" | tail -40
+
 coremark_result:
 	@mkdir -p "$(PPA_DIR)"; \
 	rm -f "$(PPA_COREMARK_LOG)"; \
@@ -255,8 +290,110 @@ coremark_result:
 		echo "[COREMARK] HW log not found: $(COREMARK_RESULT_LOG)" | tee -a "$(PPA_COREMARK_LOG)"; \
 	fi
 
+coe_simple: comp
+	@set -e; \
+	rm -f "$(COE_SIMPLE_LOG)"; \
+	$(MAKE) sim_compare \
+		SIM_COMPARE=none \
+		COMPARE_NAME="$(COE_SIMPLE_NAME)" \
+		COMPARE_ITCM="$(COE_SIMPLE_ITCM)" \
+		COMPARE_DTCM="$(COE_SIMPLE_DTCM)" \
+		COMPARE_SIM_EXTRA_DEFINES="$(COE_SIMPLE_SIM_EXTRA_DEFINES)"; \
+	log="$(COE_SIMPLE_LOG)"; \
+	ok=1; \
+	if [ ! -f "$$log" ]; then \
+		echo "[COE_SIMPLE] Missing log: $$log"; \
+		exit 1; \
+	fi; \
+	if ! grep -q "SEG write $(COE_EXPECT_SEG)" "$$log"; then \
+		echo "[COE_SIMPLE] Expected SEG write $(COE_EXPECT_SEG) not found"; \
+		ok=0; \
+	fi; \
+	if ! grep -q "CNT write $(COE_EXPECT_CNT_START)" "$$log"; then \
+		echo "[COE_SIMPLE] Expected CNT start/write $(COE_EXPECT_CNT_START) not found"; \
+		ok=0; \
+	fi; \
+	if [ -n "$(COE_EXPECT_CNT_STOP)" ] && ! grep -q "CNT write $(COE_EXPECT_CNT_STOP)" "$$log"; then \
+		echo "[COE_SIMPLE] Expected CNT stop/write $(COE_EXPECT_CNT_STOP) not found"; \
+		ok=0; \
+	fi; \
+	if [ -n "$(COE_EXPECT_CNT_READ)" ] && ! grep -q "CNT read.*$(COE_EXPECT_CNT_READ)" "$$log"; then \
+		echo "[COE_SIMPLE] Expected CNT read $(COE_EXPECT_CNT_READ) not found"; \
+		ok=0; \
+	fi; \
+	if ! grep -q "LED write $(COE_EXPECT_LED)" "$$log"; then \
+		echo "[COE_SIMPLE] Expected LED write $(COE_EXPECT_LED) not found"; \
+		ok=0; \
+	fi; \
+	if [ "$$ok" -ne 1 ]; then \
+		echo "[COE_SIMPLE] Peripheral trace from $$log:"; \
+		grep -E "LED write|SEG write|CNT write|CNT read|\\[PERIP\\]|\\[TB\\]|Simulation finished" "$$log" | tail -200; \
+		echo "[COE_SIMPLE] Last commit/PC trace from $$log:"; \
+		grep -E "^core   0:|^3 0x|timeout pc=|TEST_FAIL|fail testnum|RISCV_TEST|Simulation finished" "$$log" | tail -200; \
+		exit 1; \
+	fi; \
+	echo "[COE_SIMPLE] PASS $(COE_SIMPLE_NAME)"; \
+	grep -E "LED write|SEG write|CNT write|CNT read|\\[PERIP\\]|\\[TB\\]|Simulation finished" "$$log" | tail -80
+
+coe_smoke:
+	@$(MAKE) coe_simple
+	@$(MAKE) coe_isa_probes
+	@$(MAKE) coe_smoke_led
+
+coe_smoke_led:
+	@$(MAKE) coe_simple \
+		COE_SIMPLE_NAME=coe_smoke_led_dbg \
+		COE_SIMPLE_ITCM=$(BUILD_DIR)/fpga_coe_m3/irom_M3_smoke_led.itcm \
+		COE_SIMPLE_DTCM=$(BUILD_DIR)/fpga_coe_m3/dram_M_smoke_led.dtcm \
+		COE_EXPECT_CNT_STOP= \
+		COE_EXPECT_CNT_READ= \
+		COE_EXPECT_LED=0x00020001
+
+coe_isa_probes: comp
+	@set -e; \
+	for probe in isa1 isa2; do \
+		case "$$probe" in \
+			isa1) seg=0x37000000 ;; \
+			isa2) seg=0x00800000 ;; \
+		esac; \
+		name=coe_$${probe}_probe; \
+		rm -f "$(HW_TRACE_OUT_DIR)/$$name/hw.log"; \
+		$(MAKE) sim_compare \
+			SIM_COMPARE=none \
+			COMPARE_NAME="$$name" \
+			COMPARE_ITCM="$(BUILD_DIR)/fpga_coe_m3/irom_M3_$${probe}_probe.itcm" \
+			COMPARE_DTCM="$(BUILD_DIR)/fpga_coe_m3/dram_M_loop2.dtcm" \
+			COMPARE_SIM_EXTRA_DEFINES="$(COE_ISA_SIM_EXTRA_DEFINES)"; \
+		log="$(HW_TRACE_OUT_DIR)/$$name/hw.log"; \
+		ok=1; \
+		if ! grep -q "SEG write $$seg" "$$log"; then \
+			echo "[COE_ISA] $$probe expected SEG write $$seg not found"; \
+			ok=0; \
+		fi; \
+		if ! grep -q "CNT write 0x80000000" "$$log"; then \
+			echo "[COE_ISA] $$probe expected CNT start not found"; \
+			ok=0; \
+		fi; \
+		if ! grep -q "LED write 0x00020000" "$$log"; then \
+			echo "[COE_ISA] $$probe expected LED write 0x00020000 not found"; \
+			ok=0; \
+		fi; \
+		if [ "$$ok" -ne 1 ]; then \
+			echo "[COE_ISA] Peripheral trace from $$log:"; \
+			grep -E "LED write|SEG write|CNT write|CNT read|\\[PERIP\\]|\\[TB\\]|Simulation finished" "$$log" | tail -200; \
+			echo "[COE_ISA] Last commit/PC trace from $$log:"; \
+			grep -E "^core   0:|^3 0x|timeout pc=|TEST_FAIL|fail testnum|RISCV_TEST|Simulation finished" "$$log" | tail -200; \
+			exit 1; \
+		fi; \
+		echo "[COE_ISA] PASS $$probe"; \
+		grep -E "LED write|SEG write|CNT write|CNT read|Simulation finished" "$$log" | tail -20; \
+	done
+
 coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map:
 	@$(MAKE) -C sw $@ $(COREMARK_SW_MAKE_ARGS)
+
+sort_app-clean:
+	@$(MAKE) -C sw sort_app-clean
 
 
 # --- 核心自动化测试逻辑 (支持 ITCM/DTCM 分离加载) ---

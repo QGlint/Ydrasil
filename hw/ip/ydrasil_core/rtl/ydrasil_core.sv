@@ -84,6 +84,13 @@ import ydrasil_pkg::*;
 	wire                           id_alu_rf_wen_rd;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    id_rf_waddr_rd;
 	wire                           id_ex_jalr;
+	wire                           id_ex_alu_bypass_rs1;
+	wire                           id_ex_alu_bypass_rs2;
+	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0]    id_ex_branch_target;
+	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0]    id_ex_branch_next_pc;
+	wire                           id_ex_branch_eq;
+	wire                           id_ex_branch_ge_signed;
+	wire                           id_ex_branch_ge_unsigned;
 
 	// EX outputs
 	wire                        ex_branch_jump;
@@ -176,11 +183,15 @@ import ydrasil_pkg::*;
 	wire                            id_ctrl_rd_wen;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    id_ctrl_rd_addr;
 	wire                            id_ctrl_lsu_req;
+	wire                            id_ctrl_prev_alu_bypass_ok;
 	wire                            scoreboard_stall;
 	wire                            lsu_struct_stall;
 	wire                            ex_accept_valid;
 	reg [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_q;
 	wire                            id_ex_rd_issue;
+	wire                            id_ex_prev_alu_bypassable;
+	wire                            prev_alu_bypass_rs1;
+	wire                            prev_alu_bypass_rs2;
 
 	wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0]       id_csr_raddr;
 	wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0]       id_ex_csr_waddr;
@@ -275,6 +286,25 @@ import ydrasil_pkg::*;
 	assign id_ex_rd_issue =
 		ex_accept_valid & (id_rf_waddr_rd != '0) & !interrupt &
 		(id_alu_rf_wen_rd | operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD]);
+	assign id_ex_prev_alu_bypassable =
+		ex_accept_valid & id_alu_rf_wen_rd & (id_rf_waddr_rd != '0) & !interrupt &
+		operator_type[ydrasil_pkg::OPERATOR_TYPE_ALU] &
+		!operator_type[ydrasil_pkg::OPERATOR_TYPE_BITMANIP] &
+		(operator[ydrasil_pkg::OP_ALU_ADD]  |
+		 operator[ydrasil_pkg::OP_ALU_SUB]  |
+		 operator[ydrasil_pkg::OP_ALU_SLT]  |
+		 operator[ydrasil_pkg::OP_ALU_SLTU] |
+		 operator[ydrasil_pkg::OP_ALU_XOR]  |
+		 operator[ydrasil_pkg::OP_ALU_OR]   |
+		 operator[ydrasil_pkg::OP_ALU_AND]  |
+		 operator[ydrasil_pkg::OP_ALU_LUI]  |
+		 operator[ydrasil_pkg::OP_ALU_AUIPC]);
+	assign prev_alu_bypass_rs1 =
+		id_ex_prev_alu_bypassable & id_ctrl_prev_alu_bypass_ok &
+		id_ctrl_rs1_ren & (id_ctrl_rs1_addr == id_rf_waddr_rd);
+	assign prev_alu_bypass_rs2 =
+		id_ex_prev_alu_bypassable & id_ctrl_prev_alu_bypass_ok &
+		id_ctrl_rs2_ren & (id_ctrl_rs2_addr == id_rf_waddr_rd);
 `ifndef SYNTHESIS
 	assign dbg_bp_predict_pc_o = bp_lookup_pc;
 	assign dbg_bp_predict_hit_o = bp_predict_hit;
@@ -328,9 +358,11 @@ import ydrasil_pkg::*;
 		(alu_rf_wen_rd & id_ctrl_rd_wen & (id_ctrl_rd_addr != '0) &
 		 (id_ctrl_rd_addr == alu_rf_waddr_rd));
 	wire rs1_issue_hzd =
-		id_ex_rd_issue & id_ctrl_rs1_ren & (id_ctrl_rs1_addr == id_rf_waddr_rd);
+		id_ex_rd_issue & id_ctrl_rs1_ren & (id_ctrl_rs1_addr == id_rf_waddr_rd) &
+		!prev_alu_bypass_rs1;
 	wire rs2_issue_hzd =
-		id_ex_rd_issue & id_ctrl_rs2_ren & (id_ctrl_rs2_addr == id_rf_waddr_rd);
+		id_ex_rd_issue & id_ctrl_rs2_ren & (id_ctrl_rs2_addr == id_rf_waddr_rd) &
+		!prev_alu_bypass_rs2;
 	wire rd_issue_hzd =
 		id_ex_rd_issue & id_ctrl_rd_wen & (id_ctrl_rd_addr == id_rf_waddr_rd);
 	wire rs1_pending_stall =
@@ -492,6 +524,8 @@ import ydrasil_pkg::*;
 		.alu_fwd_valid_i    (alu_rf_wen_rd),
 		.alu_fwd_addr_i     (alu_rf_waddr_rd),
 		.alu_fwd_data_i     (alu_result),
+		.prev_alu_bypass_rs1_i(prev_alu_bypass_rs1),
+		.prev_alu_bypass_rs2_i(prev_alu_bypass_rs2),
 		.operand_a_o        (operand_a),
 		.operand_b_o        (operand_b),
 		.operator_o         (operator),
@@ -511,12 +545,20 @@ import ydrasil_pkg::*;
 		.id_ctrl_rd_wen_o   (id_ctrl_rd_wen),
 		.id_ctrl_rd_addr_o  (id_ctrl_rd_addr),
 		.id_ctrl_lsu_req_o  (id_ctrl_lsu_req),
+		.id_ctrl_prev_alu_bypass_ok_o(id_ctrl_prev_alu_bypass_ok),
 		.id_csr_raddr_o     (id_csr_raddr),
 		.id_ex_csr_waddr_o  (id_ex_csr_waddr),
 		.id_op_csr_info_o   (id_op_csr_info),
 		.id_op_sys_info_o   (id_op_sys_info),
 		.id_instr_addr_o    (id_instr_addr),
 		.id_ex_jalr_o       (id_ex_jalr),
+		.id_ex_alu_bypass_rs1_o(id_ex_alu_bypass_rs1),
+		.id_ex_alu_bypass_rs2_o(id_ex_alu_bypass_rs2),
+		.id_ex_branch_target_o(id_ex_branch_target),
+		.id_ex_branch_next_pc_o(id_ex_branch_next_pc),
+		.id_ex_branch_eq_o  (id_ex_branch_eq),
+		.id_ex_branch_ge_signed_o(id_ex_branch_ge_signed),
+		.id_ex_branch_ge_unsigned_o(id_ex_branch_ge_unsigned),
 		.id_fence_i_o       (id_fence_i),
 		.id_ex_pred_hit_o   (id_ex_pred_hit),
 		.id_ex_pred_taken_o (id_ex_pred_taken),
@@ -540,6 +582,13 @@ import ydrasil_pkg::*;
 		.operator_type_i    (operator_type),
 		.id_ex_valid_i      (id_ex_valid),
 		.id_ex_jalr_i       (id_ex_jalr),
+		.id_ex_alu_bypass_rs1_i(id_ex_alu_bypass_rs1),
+		.id_ex_alu_bypass_rs2_i(id_ex_alu_bypass_rs2),
+		.id_ex_branch_target_i(id_ex_branch_target),
+		.id_ex_branch_next_pc_i(id_ex_branch_next_pc),
+		.id_ex_branch_eq_i  (id_ex_branch_eq),
+		.id_ex_branch_ge_signed_i(id_ex_branch_ge_signed),
+		.id_ex_branch_ge_unsigned_i(id_ex_branch_ge_unsigned),
 		.id_ex_pred_hit_i   (id_ex_pred_hit),
 		.id_ex_pred_taken_i (id_ex_pred_taken),
 		.id_ex_pred_target_i(id_ex_pred_target),

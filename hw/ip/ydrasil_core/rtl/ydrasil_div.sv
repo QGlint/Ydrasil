@@ -23,7 +23,8 @@ import ydrasil_pkg::*;
             typedef enum logic [1:0] {
                 DIV_STATE_IDLE,
                 DIV_STATE_SHIFT,
-                DIV_STATE_ITER
+                DIV_STATE_ITER,
+                DIV_STATE_FINISH
             } div_state_e;
 
             div_state_e                    state_q;
@@ -93,19 +94,19 @@ import ydrasil_pkg::*;
                 REGS_DATA_WIDTH'(1) << iter_q[LZC_CNT_WIDTH-1:0];
             wire [REGS_DATA_WIDTH-1:0] quotient_next =
                 quotient_q | (remainder_calc_nonneg ? quotient_bit_mask : '0);
-            wire signed [REGS_DATA_WIDTH:0] remainder_final =
-                remainder_calc[REGS_DATA_WIDTH] ? (remainder_calc + divisor_ext) : remainder_calc;
+            wire signed [REGS_DATA_WIDTH:0] remainder_q_final =
+                remainder_q[REGS_DATA_WIDTH] ? (remainder_q + divisor_ext) : remainder_q;
 
-            wire [REGS_DATA_WIDTH-1:0] quotient_result =
-                quotient_neg_q ? (~quotient_next + REGS_DATA_WIDTH'(1)) : quotient_next;
-            wire [REGS_DATA_WIDTH-1:0] remainder_result =
+            wire [REGS_DATA_WIDTH-1:0] quotient_finish_result =
+                quotient_neg_q ? (~quotient_q + REGS_DATA_WIDTH'(1)) : quotient_q;
+            wire [REGS_DATA_WIDTH-1:0] remainder_finish_result =
                 remainder_neg_q ?
-                (~remainder_final[REGS_DATA_WIDTH-1:0] + REGS_DATA_WIDTH'(1)) :
-                remainder_final[REGS_DATA_WIDTH-1:0];
+                (~remainder_q_final[REGS_DATA_WIDTH-1:0] + REGS_DATA_WIDTH'(1)) :
+                remainder_q_final[REGS_DATA_WIDTH-1:0];
             wire [REGS_DATA_WIDTH-1:0] smaller_remainder_result =
                 remainder_neg_q ? (~dividend_q + REGS_DATA_WIDTH'(1)) : dividend_q;
-            wire [REGS_DATA_WIDTH-1:0] normal_result =
-                rem_result_q ? remainder_result : quotient_result;
+            wire [REGS_DATA_WIDTH-1:0] finish_result =
+                rem_result_q ? remainder_finish_result : quotient_finish_result;
             wire [REGS_DATA_WIDTH-1:0] smaller_result =
                 rem_result_q ? smaller_remainder_result : '0;
 
@@ -218,14 +219,18 @@ import ydrasil_pkg::*;
                             divisor_shift_q <= divisor_shift_q >> 1;
 
                             if (iter_q == '0) begin
-                                busy_q   <= 1'b0;
-                                done_q   <= 1'b1;
-                                state_q  <= DIV_STATE_IDLE;
-                                iter_q   <= '0;
-                                result_q <= normal_result;
+                                state_q <= DIV_STATE_FINISH;
+                                iter_q  <= '0;
                             end else begin
                                 iter_q <= iter_q - {{LZC_CNT_WIDTH{1'b0}}, 1'b1};
                             end
+                        end
+
+                        DIV_STATE_FINISH: begin
+                            busy_q   <= 1'b0;
+                            done_q   <= 1'b1;
+                            state_q  <= DIV_STATE_IDLE;
+                            result_q <= finish_result;
                         end
 
                         default: begin

@@ -363,6 +363,7 @@
         <Verilog_Define Name="TARGET_SYNTHESIS"/>
         <Verilog_Define Name="TARGET_VIVADO"/>
         <Verilog_Define Name="TARGET_XILINX"/>
+        <Verilog_Define Name="SYN_PLL_FREQ_200"/>
       </Config>
     </FileSet>
     <FileSet Name="constrs_1" Type="Constrs" RelSrcDir="$PSRCDIR/constrs_1" RelGenDir="$PGENDIR/constrs_1">
