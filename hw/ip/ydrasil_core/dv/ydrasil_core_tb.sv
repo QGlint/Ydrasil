@@ -1421,6 +1421,9 @@ end
 	logic [31:0] LED;
 	logic [31:0] seg_wdata, cnt_rdata, mmio_rdata, dram_rdata;
 	logic sim_done;
+	logic coe_smoke_mode;
+	logic [31:0] coe_done_led;
+	logic cnt_read_active;
 	logic sim_dump_en;
 	logic [39:0] seg_output;
 	string sim_stdout_line;
@@ -1441,6 +1444,13 @@ end
 		end
 	endtask
 
+	initial begin
+		coe_smoke_mode = $test$plusargs("coe_smoke");
+		if (!$value$plusargs("coe_done_led=%h", coe_done_led)) begin
+			coe_done_led = 32'h00020000;
+		end
+	end
+
 	// we don't care perip_mask in LED, SEG, SW & KEY, only care in DRAM
 	// write process
 	always_ff @(posedge clk) begin
@@ -1454,9 +1464,16 @@ end
 			case (perip_addr)
 				LED_ADDR: begin
 					LED <= perip_wdata;
-					sim_done <= (perip_wdata != 32'h0);
+					sim_done <= coe_smoke_mode ? (perip_wdata == coe_done_led) : (perip_wdata != 32'h0);
+					$display("LED write 0x%08h", perip_wdata);
 				end
-				SEG_ADDR:   seg_wdata <= perip_wdata;
+				SEG_ADDR: begin
+					seg_wdata <= perip_wdata;
+					$display("SEG write 0x%08h", perip_wdata);
+				end
+				CNT_ADDR: begin
+					$display("CNT write 0x%08h", perip_wdata);
+				end
 				SIM_STDOUT_ADDR: begin
 					$write("%c", perip_wdata[7:0]);
 					sim_stdout_putc(perip_wdata[7:0]);
@@ -1485,6 +1502,17 @@ end
             mmio_rdata = 32'h0;
         end
     end
+
+	always_ff @(posedge clk) begin
+		if (rst) begin
+			cnt_read_active <= 1'b0;
+		end else begin
+			cnt_read_active <= !perip_wen && (perip_addr == CNT_ADDR);
+		end
+		if (!rst && !perip_wen && (perip_addr == CNT_ADDR) && !cnt_read_active) begin
+			$display("CNT read rdata=0x%08h", cnt_rdata);
+		end
+	end
 
     // seg driver
   

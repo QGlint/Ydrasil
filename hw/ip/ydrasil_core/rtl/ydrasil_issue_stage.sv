@@ -378,37 +378,38 @@ import ydrasil_pipeline_pkg::*;
     wire pipe0_dequeue = pipe0_fire && !stall_id_i;
     wire slot0_fire = pipe0_fire;
     wire issue_fire_allow = pipe0_issue_allow;
-
-    integer sel_i;
-    integer older_i;
-    reg older_serial;
-    always_comb begin
-        pipe1_sel_valid = 1'b0;
-        pipe1_sel_idx = '0;
-        for (sel_i = 1; sel_i < IQ_DEPTH; sel_i = sel_i + 1) begin
-            older_serial = 1'b0;
-            for (older_i = 0; older_i < IQ_DEPTH; older_i = older_i + 1) begin
-                if ((older_i < sel_i) &&
-                    (older_i < iq_count_q) &&
-                    iq_serial_before_pipe1[older_i]) begin
-                    older_serial = 1'b1;
-                end
-            end
-            if (!pipe1_sel_valid &&
-                (sel_i < iq_count_q) &&
-                iq_q[sel_i].dec.valid &&
-                iq_pipe1_simple_int[sel_i] &&
-                iq_operands_ready[sel_i] &&
-                !older_serial) begin
-                pipe1_sel_valid = 1'b1;
-                pipe1_sel_idx = sel_i[IQ_INDEX_WIDTH-1:0];
-            end
-        end
-    end
-
     wire pipe1_issue_allow =
         ready_issue_allow_i && !stall_id_i && !flush_id_i &&
         !pipe1_resbuf_full_i;
+    wire pipe1_raw_after_pipe0 =
+        iq_writes_rd[0] &&
+        ((iq_q[1].dec.rf_ren_rs1 &&
+          (iq_q[1].dec.rf_raddr_rs1 == iq_q[0].dec.rf_waddr_rd)) ||
+         (iq_uses_rs2[1] &&
+          (iq_q[1].dec.rf_raddr_rs2 == iq_q[0].dec.rf_waddr_rd)));
+    wire pipe1_waw_after_pipe0 =
+        iq_writes_rd[0] &&
+        iq_writes_rd[1] &&
+        (iq_q[1].dec.rf_waddr_rd == iq_q[0].dec.rf_waddr_rd);
+
+    always_comb begin
+        pipe1_sel_valid = 1'b0;
+        pipe1_sel_idx = '0;
+        if (pipe0_fire &&
+            (iq_count_q > IQ_COUNT_WIDTH'(1)) &&
+            iq_q[1].dec.valid &&
+            iq_pipe1_simple_int[0] &&
+            iq_pipe1_simple_int[1] &&
+            iq_operands_ready[1] &&
+            pipe1_issue_allow &&
+            !pipe1_raw_after_pipe0 &&
+            !pipe1_waw_after_pipe0 &&
+            !iq_serial_before_pipe1[0]) begin
+            pipe1_sel_valid = 1'b1;
+            pipe1_sel_idx = IQ_INDEX_WIDTH'(1);
+        end
+    end
+
     wire pipe1_fire = pipe1_sel_valid && pipe1_issue_allow;
     wire slot1_fire = pipe1_fire;
     wire [1:0] dequeue_count =

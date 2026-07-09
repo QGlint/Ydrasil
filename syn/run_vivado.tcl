@@ -444,7 +444,8 @@ if {$force_runs} {
     puts "Resetting synth_1"
     reset_run synth_1
 }
-set_property strategy Flow_AreaOptimized_high [get_runs synth_1]
+set_property strategy Flow_RuntimeOptimized [get_runs synth_1]
+set_property STEPS.SYNTH_DESIGN.ARGS.DIRECTIVE RuntimeOptimized [get_runs synth_1]
 launch_runs synth_1 -jobs $jobs
 wait_on_run synth_1
 assert_run_ok synth_1

@@ -117,7 +117,7 @@ import ydrasil_pkg::*;
     assign next_instr_addr = 
         ({ydrasil_pkg::INST_ADDR_WIDTH{!rst_n}} & '0) |
         ({ydrasil_pkg::INST_ADDR_WIDTH{csr_state == S_CSR_IDLE && int_state == S_INT_SYNC_ASSERT && ex_branch_jump_i}} & (ex_branch_target_i - 32'h4)) |
-        ({ydrasil_pkg::INST_ADDR_WIDTH{csr_state == S_CSR_IDLE && int_state == S_INT_SYNC_ASSERT && ex_branch_jump_i}} & instr_addr_i) |
+        ({ydrasil_pkg::INST_ADDR_WIDTH{csr_state == S_CSR_IDLE && int_state == S_INT_SYNC_ASSERT && !ex_branch_jump_i}} & instr_addr_i) |
         ({ydrasil_pkg::INST_ADDR_WIDTH{!(!rst_n || (csr_state == S_CSR_IDLE && int_state == S_INT_SYNC_ASSERT))}} & instr_addr);
 
     // 写入CSR寄存器的组合逻辑 - 计算下一个写使能信号

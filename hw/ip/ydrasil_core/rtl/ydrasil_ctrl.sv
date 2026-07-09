@@ -94,14 +94,13 @@ import ydrasil_pkg::*;
 	    wire id_ex_is_div;
 	    wire id_ex_div_first_cycle;
 
-    assign scoreboard_stall_o = rn_ctrl_block_i | rn_alloc_stall_i;
+    assign scoreboard_stall_o = rn_ctrl_block_i;
     assign lsu_struct_stall_o = id_ctrl_lsu_req_i & lsu_ctrl_busy_i;
     assign ready_issue_allow_o =
         !lsu_struct_stall_o & !clint_stall_i & !wb_backpressure_i;
     assign bubble_id_no_alloc_o =
         rn_ctrl_block_i | lsu_struct_stall_o | clint_stall_i | wb_backpressure_i;
-    assign bubble_id_o =
-        bubble_id_no_alloc_o | rn_alloc_stall_i;
+    assign bubble_id_o = bubble_id_no_alloc_o;
 
 	    assign decode_bubble_stall =
 	        bubble_id_o | id_frontend_stall_i;
