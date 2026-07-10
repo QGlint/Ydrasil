@@ -21,6 +21,7 @@ sources:
       - rtl/ydrasil_lzc.sv
       - rtl/ydrasil_div.sv
       - rtl/ydrasil_bitmanip.sv
+      - rtl/ydrasil_bru.sv
       - rtl/ydrasil_ex_block.sv
       - rtl/ydrasil_load_store_unit.sv
       - rtl/ydrasil_mems.sv

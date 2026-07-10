@@ -71,6 +71,16 @@ import ydrasil_pkg::*;
 	// ID -> EX
 	wire [31:0]                    operand_a;
 	wire [31:0]                    operand_b;
+	wire [31:0]                    alu_operand_a;
+	wire [31:0]                    alu_operand_b;
+	wire [31:0]                    bru_operand_a;
+	wire [31:0]                    bru_operand_b;
+	wire [31:0]                    lsu_operand_a;
+	wire [31:0]                    lsu_operand_b;
+	wire [31:0]                    mul_operand_a;
+	wire [31:0]                    mul_operand_b;
+	wire [31:0]                    csr_operand_a;
+	wire [31:0]                    csr_operand_b;
 	wire [ydrasil_pkg::OPERATOR_WIDTH-1:0]     operator;
 	wire [31:0]                    bt_a_operand;
 	wire [31:0]                    bt_b_operand;
@@ -423,7 +433,7 @@ import ydrasil_pkg::*;
 		.id_rd_waddr_i      (id_rf_waddr_rd),
 		.operator_lsu_i    (operator_lsu),
 		.operator_lsu_type_i(operator_lsu_type),
-        .ex_lsu_rd_data_i (ex_lsu_result),
+		.ex_lsu_rd_data_i (ex_lsu_result),
 		.id_lsu_rs2_data_i (id_lsu_rs2_data),
 		.id_lsu_rs2_raddr_i('0),
 		.id_lsu_addr_i     (id_lsu_addr),
@@ -528,6 +538,16 @@ import ydrasil_pkg::*;
 		.prev_alu_bypass_rs2_i(prev_alu_bypass_rs2),
 		.operand_a_o        (operand_a),
 		.operand_b_o        (operand_b),
+		.alu_operand_a_o    (alu_operand_a),
+		.alu_operand_b_o    (alu_operand_b),
+		.bru_operand_a_o    (bru_operand_a),
+		.bru_operand_b_o    (bru_operand_b),
+		.lsu_operand_a_o    (lsu_operand_a),
+		.lsu_operand_b_o    (lsu_operand_b),
+		.mul_operand_a_o    (mul_operand_a),
+		.mul_operand_b_o    (mul_operand_b),
+		.csr_operand_a_o    (csr_operand_a),
+		.csr_operand_b_o    (csr_operand_b),
 		.operator_o         (operator),
 		.bt_a_operand_o     (bt_a_operand),
 		.bt_b_operand_o     (bt_b_operand),
@@ -578,6 +598,16 @@ import ydrasil_pkg::*;
 		.bt_b_operand_i     (bt_b_operand),
 		.operand_a_i        (operand_a),
 		.operand_b_i        (operand_b),
+		.alu_operand_a_i    (alu_operand_a),
+		.alu_operand_b_i    (alu_operand_b),
+		.bru_operand_a_i    (bru_operand_a),
+		.bru_operand_b_i    (bru_operand_b),
+		.lsu_operand_a_i    (lsu_operand_a),
+		.lsu_operand_b_i    (lsu_operand_b),
+		.mul_operand_a_i    (mul_operand_a),
+		.mul_operand_b_i    (mul_operand_b),
+		.csr_operand_a_i    (csr_operand_a),
+		.csr_operand_b_i    (csr_operand_b),
 		.operator_i         (operator),
 		.operator_type_i    (operator_type),
 		.id_ex_valid_i      (id_ex_valid),

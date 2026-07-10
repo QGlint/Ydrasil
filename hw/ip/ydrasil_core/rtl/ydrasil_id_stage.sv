@@ -41,6 +41,16 @@ import ydrasil_pkg::*;
     // output wire                            alu_valid_o,
     output wire [DATA_WIDTH-1:0]           operand_a_o,
     output wire [DATA_WIDTH-1:0]           operand_b_o,
+    output wire [DATA_WIDTH-1:0]           alu_operand_a_o,
+    output wire [DATA_WIDTH-1:0]           alu_operand_b_o,
+    output wire [DATA_WIDTH-1:0]           bru_operand_a_o,
+    output wire [DATA_WIDTH-1:0]           bru_operand_b_o,
+    output wire [DATA_WIDTH-1:0]           lsu_operand_a_o,
+    output wire [DATA_WIDTH-1:0]           lsu_operand_b_o,
+    output wire [DATA_WIDTH-1:0]           mul_operand_a_o,
+    output wire [DATA_WIDTH-1:0]           mul_operand_b_o,
+    output wire [DATA_WIDTH-1:0]           csr_operand_a_o,
+    output wire [DATA_WIDTH-1:0]           csr_operand_b_o,
     output wire [ydrasil_pkg::OPERATOR_WIDTH-1:0]      operator_o, // 统一的ALU操作信息信号
 
     output wire [DATA_WIDTH-1:0]           bt_a_operand_o,
@@ -125,6 +135,16 @@ import ydrasil_pkg::*;
 
     reg [DATA_WIDTH-1:0]                operand_a_ff;
     reg [DATA_WIDTH-1:0]                operand_b_ff;
+    reg [DATA_WIDTH-1:0]                alu_operand_a_ff;
+    reg [DATA_WIDTH-1:0]                alu_operand_b_ff;
+    reg [DATA_WIDTH-1:0]                bru_operand_a_ff;
+    reg [DATA_WIDTH-1:0]                bru_operand_b_ff;
+    reg [DATA_WIDTH-1:0]                lsu_operand_a_ff;
+    reg [DATA_WIDTH-1:0]                lsu_operand_b_ff;
+    reg [DATA_WIDTH-1:0]                mul_operand_a_ff;
+    reg [DATA_WIDTH-1:0]                mul_operand_b_ff;
+    reg [DATA_WIDTH-1:0]                csr_operand_a_ff;
+    reg [DATA_WIDTH-1:0]                csr_operand_b_ff;
     reg [ydrasil_pkg::OPERATOR_WIDTH-1:0]           operator_ff;
 
     wire [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0]        operator_lsu;
@@ -419,6 +439,16 @@ import ydrasil_pkg::*;
             issue_early_alu_data_ff <= '0;
             operand_a_ff        <= '0;
             operand_b_ff        <= '0;
+            alu_operand_a_ff    <= '0;
+            alu_operand_b_ff    <= '0;
+            bru_operand_a_ff    <= '0;
+            bru_operand_b_ff    <= '0;
+            lsu_operand_a_ff    <= '0;
+            lsu_operand_b_ff    <= '0;
+            mul_operand_a_ff    <= '0;
+            mul_operand_b_ff    <= '0;
+            csr_operand_a_ff    <= '0;
+            csr_operand_b_ff    <= '0;
             operator_ff         <= '0;
             operator_type_ff    <= '0;
             rf_wen_rd_ff        <= '0;
@@ -486,6 +516,16 @@ import ydrasil_pkg::*;
 
                 operand_a_ff        <= operand_a;
                 operand_b_ff        <= operand_b;
+                alu_operand_a_ff    <= operand_a;
+                alu_operand_b_ff    <= operand_b;
+                bru_operand_a_ff    <= operand_a;
+                bru_operand_b_ff    <= operand_b;
+                lsu_operand_a_ff    <= operand_a;
+                lsu_operand_b_ff    <= operand_b;
+                mul_operand_a_ff    <= operand_a;
+                mul_operand_b_ff    <= operand_b;
+                csr_operand_a_ff    <= operand_a;
+                csr_operand_b_ff    <= operand_b;
                 operator_ff         <= issue_operator_ff;
                 operator_type_ff    <= issue_operator_type_ff;
                 rf_wen_rd_ff        <= issue_rf_wen_rd_ff;
@@ -544,6 +584,16 @@ import ydrasil_pkg::*;
 
     assign operand_a_o          = operand_a_ff;
     assign operand_b_o          = operand_b_ff;
+    assign alu_operand_a_o      = alu_operand_a_ff;
+    assign alu_operand_b_o      = alu_operand_b_ff;
+    assign bru_operand_a_o      = bru_operand_a_ff;
+    assign bru_operand_b_o      = bru_operand_b_ff;
+    assign lsu_operand_a_o      = lsu_operand_a_ff;
+    assign lsu_operand_b_o      = lsu_operand_b_ff;
+    assign mul_operand_a_o      = mul_operand_a_ff;
+    assign mul_operand_b_o      = mul_operand_b_ff;
+    assign csr_operand_a_o      = csr_operand_a_ff;
+    assign csr_operand_b_o      = csr_operand_b_ff;
     assign operator_o           = operator_ff;
     assign id_alu_rf_wen_rd_o   = rf_wen_rd_ff;
     assign id_rf_waddr_rd_o     = rf_waddr_rd_ff;

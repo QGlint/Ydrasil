@@ -13,6 +13,16 @@ import ydrasil_pkg::*;
 
     input  wire [DATA_WIDTH-1:0]           operand_a_i,
     input  wire [DATA_WIDTH-1:0]           operand_b_i,
+    input  wire [DATA_WIDTH-1:0]           alu_operand_a_i,
+    input  wire [DATA_WIDTH-1:0]           alu_operand_b_i,
+    input  wire [DATA_WIDTH-1:0]           bru_operand_a_i,
+    input  wire [DATA_WIDTH-1:0]           bru_operand_b_i,
+    input  wire [DATA_WIDTH-1:0]           lsu_operand_a_i,
+    input  wire [DATA_WIDTH-1:0]           lsu_operand_b_i,
+    input  wire [DATA_WIDTH-1:0]           mul_operand_a_i,
+    input  wire [DATA_WIDTH-1:0]           mul_operand_b_i,
+    input  wire [DATA_WIDTH-1:0]           csr_operand_a_i,
+    input  wire [DATA_WIDTH-1:0]           csr_operand_b_i,
     input  wire [OPERATOR_WIDTH-1:0]       operator_i,
     input  wire [OPERATOR_TYPE_WIDTH-1:0]  operator_type_i,
     input  wire                            id_ex_valid_i,
@@ -85,10 +95,10 @@ import ydrasil_pkg::*;
 `endif
 );
 
-    wire [31:0] bt_alu_result;
     wire [REGS_DATA_WIDTH-1:0] alu_result;
     wire                       alu_rf_wen_rd;
     wire [REGS_ADDR_WIDTH-1:0] alu_rf_waddr_rd;
+    wire                       alu_comp_result;
 
     wire op_m_unit;
     wire op_bitmanip;
@@ -118,47 +128,6 @@ import ydrasil_pkg::*;
     reg                        div_wen_q;
     reg [REGS_ADDR_WIDTH-1:0]  div_waddr_q;
 
-    wire ex_is_branch;
-    wire ex_is_jump;
-    wire ex_branch_taken;
-    wire ex_pred_taken;
-    wire [DATA_WIDTH-1:0] ex_branch_pc;
-    wire [DATA_WIDTH-1:0] ex_branch_next_pc;
-    wire [DATA_WIDTH-1:0] ex_branch_actual_next_pc;
-    wire [DATA_WIDTH-1:0] ex_branch_pred_next_pc;
-    wire [DATA_WIDTH-1:0] ex_jump_target;
-    wire [DATA_WIDTH-1:0] ex_branch_target;
-    wire ex_branch_mispredict;
-    wire ex_branch_jump;
-    wire ex_pc_redirect;
-    wire [DATA_WIDTH-1:0] ex_pc_redirect_target;
-    wire ex_bp_train_valid;
-
-    reg                       ex2_branch_jump_q;
-    reg [DATA_WIDTH-1:0]      ex2_branch_target_q;
-    reg                       ex2_pc_redirect_q;
-    reg [DATA_WIDTH-1:0]      ex2_pc_redirect_target_q;
-    reg                       ex2_bp_train_valid_q;
-    reg [DATA_WIDTH-1:0]      ex2_bp_train_pc_q;
-    reg                       ex2_bp_train_taken_q;
-    reg [DATA_WIDTH-1:0]      ex2_bp_train_target_q;
-    reg [1:0]                 ex2_bp_train_counter_q;
-    reg [DATA_WIDTH-1:0]      ex2_bp_train_bht_index_q;
-    reg                       ex2_branch_mispredict_q;
-`ifndef SYNTHESIS
-    reg                       dbg_bp_resolve_valid_q;
-    reg [DATA_WIDTH-1:0]      dbg_bp_resolve_pc_q;
-    reg                       dbg_bp_actual_taken_q;
-    reg [DATA_WIDTH-1:0]      dbg_bp_actual_target_q;
-    reg [DATA_WIDTH-1:0]      dbg_bp_actual_next_pc_q;
-    reg                       dbg_bp_pred_hit_q;
-    reg                       dbg_bp_pred_taken_q;
-    reg [DATA_WIDTH-1:0]      dbg_bp_pred_target_q;
-    reg [1:0]                 dbg_bp_pred_counter_q;
-    reg [DATA_WIDTH-1:0]      dbg_bp_pred_next_pc_q;
-    reg                       dbg_bp_mispredict_q;
-`endif
-
     reg [REGS_DATA_WIDTH-1:0] alu_result_ff;
     reg                       alu_rf_wen_rd_ff;
     reg [REGS_ADDR_WIDTH-1:0] alu_rf_waddr_rd_ff;
@@ -167,180 +136,90 @@ import ydrasil_pkg::*;
 
     wire [31:0] operand_a;
     wire [31:0] operand_b;
+    wire [31:0] bru_operand_a;
+    wire [31:0] bru_operand_b;
+    wire [31:0] lsu_operand_a;
+    wire [31:0] lsu_operand_b;
+    wire [31:0] mul_operand_a;
+    wire [31:0] mul_operand_b;
+    wire [31:0] csr_operand_a;
     wire [31:0] bt_a_operand;
     wire [31:0] bt_b_operand;
     wire [31:0] fast_add_result;
+    wire [31:0] lsu_fast_add_result;
 
     assign bt_a_operand =
         (id_ex_jalr_i & id_ex_alu_bypass_rs1_i & alu_bypass_valid_q) ?
         alu_bypass_data_q : bt_a_operand_i;
     assign bt_b_operand = bt_b_operand_i;
 
-    assign operand_a = (id_ex_alu_bypass_rs1_i & alu_bypass_valid_q) ? alu_bypass_data_q : operand_a_i;
-    assign operand_b = (id_ex_alu_bypass_rs2_i & alu_bypass_valid_q) ? alu_bypass_data_q : operand_b_i;
+    assign operand_a = (id_ex_alu_bypass_rs1_i & alu_bypass_valid_q) ? alu_bypass_data_q : alu_operand_a_i;
+    assign operand_b = (id_ex_alu_bypass_rs2_i & alu_bypass_valid_q) ? alu_bypass_data_q : alu_operand_b_i;
+    assign bru_operand_a = (id_ex_alu_bypass_rs1_i & alu_bypass_valid_q) ? alu_bypass_data_q : bru_operand_a_i;
+    assign bru_operand_b = (id_ex_alu_bypass_rs2_i & alu_bypass_valid_q) ? alu_bypass_data_q : bru_operand_b_i;
+    assign lsu_operand_a = (id_ex_alu_bypass_rs1_i & alu_bypass_valid_q) ? alu_bypass_data_q : lsu_operand_a_i;
+    assign lsu_operand_b = (id_ex_alu_bypass_rs2_i & alu_bypass_valid_q) ? alu_bypass_data_q : lsu_operand_b_i;
+    assign mul_operand_a = (id_ex_alu_bypass_rs1_i & alu_bypass_valid_q) ? alu_bypass_data_q : mul_operand_a_i;
+    assign mul_operand_b = (id_ex_alu_bypass_rs2_i & alu_bypass_valid_q) ? alu_bypass_data_q : mul_operand_b_i;
+    assign csr_operand_a = (id_ex_alu_bypass_rs1_i & alu_bypass_valid_q) ? alu_bypass_data_q : csr_operand_a_i;
 
-    assign bt_alu_result = bt_a_operand + bt_b_operand;
-    assign ex_lsu_mem_addr_o = fast_add_result;
+    assign lsu_fast_add_result = lsu_operand_a + lsu_operand_b;
+    assign ex_lsu_mem_addr_o = lsu_fast_add_result;
     assign ex_lsu_result_o = alu_result_ff;
 
-    assign ex_jump_target = id_ex_jalr_i ? {bt_alu_result[DATA_WIDTH-1:1], 1'b0} : bt_alu_result;
-    assign ex_branch_target = id_ex_branch_target_i;
-    assign ex_branch_pc = bt_a_operand;
-    assign ex_branch_next_pc = id_ex_branch_next_pc_i;
-
-    wire ex_bjp_op   = operator_type_i[OPERATOR_TYPE_BJP];
-    wire ex_bjp_jump = ex_bjp_op & operator_i[OP_BJP_JUMP];
-    wire ex_bjp_beq  = ex_bjp_op & operator_i[OP_BJP_BEQ];
-    wire ex_bjp_bne  = ex_bjp_op & operator_i[OP_BJP_BNE];
-    wire ex_bjp_blt  = ex_bjp_op & operator_i[OP_BJP_BLT];
-    wire ex_bjp_bge  = ex_bjp_op & operator_i[OP_BJP_BGE];
-    wire ex_bjp_bltu = ex_bjp_op & operator_i[OP_BJP_BLTU];
-    wire ex_bjp_bgeu = ex_bjp_op & operator_i[OP_BJP_BGEU];
-    assign ex_is_jump = id_ex_valid_i & ex_bjp_jump;
-    assign ex_is_branch =
-        id_ex_valid_i &
-        (ex_bjp_beq  |
-         ex_bjp_bne  |
-         ex_bjp_blt  |
-         ex_bjp_bge  |
-         ex_bjp_bltu |
-         ex_bjp_bgeu);
-    wire alu_comp_result;
-    wire ex_branch_cmp_needs_bypass = id_ex_alu_bypass_rs1_i | id_ex_alu_bypass_rs2_i;
-    wire ex_branch_eq =
-        ex_branch_cmp_needs_bypass ? (operand_a == operand_b) : id_ex_branch_eq_i;
-    wire ex_branch_ge_signed =
-        ex_branch_cmp_needs_bypass ? ($signed(operand_a) >= $signed(operand_b)) :
-                                     id_ex_branch_ge_signed_i;
-    wire ex_branch_ge_unsigned =
-        ex_branch_cmp_needs_bypass ? (operand_a >= operand_b) :
-                                     id_ex_branch_ge_unsigned_i;
-    assign ex_branch_jump =
-        ex_bjp_jump |
-        (ex_bjp_beq  &  ex_branch_eq) |
-        (ex_bjp_bne  & !ex_branch_eq) |
-        (ex_bjp_blt  & !ex_branch_ge_signed) |
-        (ex_bjp_bge  &  ex_branch_ge_signed) |
-        (ex_bjp_bltu & !ex_branch_ge_unsigned) |
-        (ex_bjp_bgeu &  ex_branch_ge_unsigned);
-    assign ex_branch_taken = ex_is_branch & ex_branch_jump & !interrupt_i;
-    assign ex_pred_taken = id_ex_pred_hit_i & id_ex_pred_taken_i;
-    assign ex_branch_actual_next_pc = ex_branch_taken ? ex_branch_target : ex_branch_next_pc;
-    assign ex_branch_pred_next_pc = ex_pred_taken ? id_ex_pred_target_i : ex_branch_next_pc;
-    assign ex_branch_mispredict =
-        ex_is_branch & !interrupt_i & (ex_branch_actual_next_pc != ex_branch_pred_next_pc);
-
-    assign ex_pc_redirect =
-        interrupt_i | (ex_is_jump & ex_branch_jump & !interrupt_i) | ex_branch_mispredict;
-    assign ex_pc_redirect_target =
-        interrupt_i ? clint_ex_int_addr_i :
-        (ex_is_jump & ex_branch_jump) ? ex_jump_target :
-                                        ex_branch_actual_next_pc;
-    assign ex_bp_train_valid = ex_is_branch & !interrupt_i;
-
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            ex2_branch_jump_q <= 1'b0;
-            ex2_branch_target_q <= '0;
-            ex2_pc_redirect_q <= 1'b0;
-            ex2_pc_redirect_target_q <= '0;
-            ex2_bp_train_valid_q <= 1'b0;
-            ex2_bp_train_pc_q <= '0;
-            ex2_bp_train_taken_q <= 1'b0;
-            ex2_bp_train_target_q <= '0;
-            ex2_bp_train_counter_q <= 2'b01;
-            ex2_bp_train_bht_index_q <= '0;
-            ex2_branch_mispredict_q <= 1'b0;
+    ydrasil_bru #(
+        .DATA_WIDTH(DATA_WIDTH)
+    ) u_ydrasil_bru (
+        .clk                         (clk),
+        .rst_n                       (rst_n),
+        .flush_i                     (flush_ex_i),
+        .operand_a_i                 (bru_operand_a),
+        .operand_b_i                 (bru_operand_b),
+        .bt_a_operand_i              (bt_a_operand),
+        .bt_b_operand_i              (bt_b_operand),
+        .operator_i                  (operator_i),
+        .operator_type_i             (operator_type_i),
+        .id_ex_valid_i               (id_ex_valid_i),
+        .id_ex_jalr_i                (id_ex_jalr_i),
+        .id_ex_alu_bypass_rs1_i      (id_ex_alu_bypass_rs1_i),
+        .id_ex_alu_bypass_rs2_i      (id_ex_alu_bypass_rs2_i),
+        .id_ex_branch_target_i       (id_ex_branch_target_i),
+        .id_ex_branch_next_pc_i      (id_ex_branch_next_pc_i),
+        .id_ex_branch_eq_i           (id_ex_branch_eq_i),
+        .id_ex_branch_ge_signed_i    (id_ex_branch_ge_signed_i),
+        .id_ex_branch_ge_unsigned_i  (id_ex_branch_ge_unsigned_i),
+        .id_ex_pred_hit_i            (id_ex_pred_hit_i),
+        .id_ex_pred_taken_i          (id_ex_pred_taken_i),
+        .id_ex_pred_target_i         (id_ex_pred_target_i),
+        .id_ex_pred_counter_i        (id_ex_pred_counter_i),
+        .id_ex_pred_bht_index_i      (id_ex_pred_bht_index_i),
+        .interrupt_i                 (interrupt_i),
+        .clint_ex_int_addr_i         (clint_ex_int_addr_i),
+        .ex_branch_jump_o            (ex_branch_jump_o),
+        .ex_branch_target_o          (ex_branch_target_o),
+        .ex_pc_redirect_o            (ex_pc_redirect_o),
+        .ex_pc_redirect_target_o     (ex_pc_redirect_target_o),
+        .ex_bp_train_valid_o         (ex_bp_train_valid_o),
+        .ex_bp_train_pc_o            (ex_bp_train_pc_o),
+        .ex_bp_train_taken_o         (ex_bp_train_taken_o),
+        .ex_bp_train_target_o        (ex_bp_train_target_o),
+        .ex_bp_train_counter_o       (ex_bp_train_counter_o),
+        .ex_bp_train_bht_index_o     (ex_bp_train_bht_index_o),
+        .ex_branch_mispredict_o      (ex_branch_mispredict_o)
 `ifndef SYNTHESIS
-            dbg_bp_resolve_valid_q <= 1'b0;
-            dbg_bp_resolve_pc_q <= '0;
-            dbg_bp_actual_taken_q <= 1'b0;
-            dbg_bp_actual_target_q <= '0;
-            dbg_bp_actual_next_pc_q <= '0;
-            dbg_bp_pred_hit_q <= 1'b0;
-            dbg_bp_pred_taken_q <= 1'b0;
-            dbg_bp_pred_target_q <= '0;
-            dbg_bp_pred_counter_q <= 2'b01;
-            dbg_bp_pred_next_pc_q <= '0;
-            dbg_bp_mispredict_q <= 1'b0;
+        ,.dbg_bp_resolve_valid_o     (dbg_bp_resolve_valid_o)
+        ,.dbg_bp_resolve_pc_o        (dbg_bp_resolve_pc_o)
+        ,.dbg_bp_actual_taken_o      (dbg_bp_actual_taken_o)
+        ,.dbg_bp_actual_target_o     (dbg_bp_actual_target_o)
+        ,.dbg_bp_actual_next_pc_o    (dbg_bp_actual_next_pc_o)
+        ,.dbg_bp_pred_hit_o          (dbg_bp_pred_hit_o)
+        ,.dbg_bp_pred_taken_o        (dbg_bp_pred_taken_o)
+        ,.dbg_bp_pred_target_o       (dbg_bp_pred_target_o)
+        ,.dbg_bp_pred_counter_o      (dbg_bp_pred_counter_o)
+        ,.dbg_bp_pred_next_pc_o      (dbg_bp_pred_next_pc_o)
+        ,.dbg_bp_mispredict_o        (dbg_bp_mispredict_o)
 `endif
-        end else if (flush_ex_i) begin
-            ex2_branch_jump_q <= 1'b0;
-            ex2_branch_target_q <= '0;
-            ex2_pc_redirect_q <= 1'b0;
-            ex2_pc_redirect_target_q <= '0;
-            ex2_bp_train_valid_q <= 1'b0;
-            ex2_bp_train_pc_q <= '0;
-            ex2_bp_train_taken_q <= 1'b0;
-            ex2_bp_train_target_q <= '0;
-            ex2_bp_train_counter_q <= 2'b01;
-            ex2_bp_train_bht_index_q <= '0;
-            ex2_branch_mispredict_q <= 1'b0;
-`ifndef SYNTHESIS
-            dbg_bp_resolve_valid_q <= 1'b0;
-            dbg_bp_resolve_pc_q <= '0;
-            dbg_bp_actual_taken_q <= 1'b0;
-            dbg_bp_actual_target_q <= '0;
-            dbg_bp_actual_next_pc_q <= '0;
-            dbg_bp_pred_hit_q <= 1'b0;
-            dbg_bp_pred_taken_q <= 1'b0;
-            dbg_bp_pred_target_q <= '0;
-            dbg_bp_pred_counter_q <= 2'b01;
-            dbg_bp_pred_next_pc_q <= '0;
-            dbg_bp_mispredict_q <= 1'b0;
-`endif
-        end else begin
-            ex2_branch_jump_q <= ex_branch_jump | interrupt_i;
-            ex2_branch_target_q <= interrupt_i ? clint_ex_int_addr_i : ex_jump_target;
-            ex2_pc_redirect_q <= ex_pc_redirect;
-            ex2_pc_redirect_target_q <= ex_pc_redirect_target;
-            ex2_bp_train_valid_q <= ex_bp_train_valid;
-            ex2_bp_train_pc_q <= ex_branch_pc;
-            ex2_bp_train_taken_q <= ex_branch_taken;
-            ex2_bp_train_target_q <= ex_branch_target;
-            ex2_bp_train_counter_q <= id_ex_pred_counter_i;
-            ex2_bp_train_bht_index_q <= id_ex_pred_bht_index_i;
-            ex2_branch_mispredict_q <= ex_branch_mispredict;
-`ifndef SYNTHESIS
-            dbg_bp_resolve_valid_q <= ex_bp_train_valid;
-            dbg_bp_resolve_pc_q <= ex_branch_pc;
-            dbg_bp_actual_taken_q <= ex_branch_taken;
-            dbg_bp_actual_target_q <= ex_branch_target;
-            dbg_bp_actual_next_pc_q <= ex_branch_actual_next_pc;
-            dbg_bp_pred_hit_q <= id_ex_pred_hit_i;
-            dbg_bp_pred_taken_q <= id_ex_pred_taken_i;
-            dbg_bp_pred_target_q <= id_ex_pred_target_i;
-            dbg_bp_pred_counter_q <= id_ex_pred_counter_i;
-            dbg_bp_pred_next_pc_q <= ex_branch_pred_next_pc;
-            dbg_bp_mispredict_q <= ex_branch_mispredict;
-`endif
-        end
-    end
-
-    assign ex_branch_jump_o = ex2_branch_jump_q;
-    assign ex_branch_target_o = ex2_branch_target_q;
-    assign ex_branch_mispredict_o = ex2_branch_mispredict_q;
-    assign ex_pc_redirect_o = ex2_pc_redirect_q;
-    assign ex_pc_redirect_target_o = ex2_pc_redirect_target_q;
-    assign ex_bp_train_valid_o = ex2_bp_train_valid_q;
-    assign ex_bp_train_pc_o = ex2_bp_train_pc_q;
-    assign ex_bp_train_taken_o = ex2_bp_train_taken_q;
-    assign ex_bp_train_target_o = ex2_bp_train_target_q;
-    assign ex_bp_train_counter_o = ex2_bp_train_counter_q;
-    assign ex_bp_train_bht_index_o = ex2_bp_train_bht_index_q;
-`ifndef SYNTHESIS
-    assign dbg_bp_resolve_valid_o = dbg_bp_resolve_valid_q;
-    assign dbg_bp_resolve_pc_o = dbg_bp_resolve_pc_q;
-    assign dbg_bp_actual_taken_o = dbg_bp_actual_taken_q;
-    assign dbg_bp_actual_target_o = dbg_bp_actual_target_q;
-    assign dbg_bp_actual_next_pc_o = dbg_bp_actual_next_pc_q;
-    assign dbg_bp_pred_hit_o = dbg_bp_pred_hit_q;
-    assign dbg_bp_pred_taken_o = dbg_bp_pred_taken_q;
-    assign dbg_bp_pred_target_o = dbg_bp_pred_target_q;
-    assign dbg_bp_pred_counter_o = dbg_bp_pred_counter_q;
-    assign dbg_bp_pred_next_pc_o = dbg_bp_pred_next_pc_q;
-    assign dbg_bp_mispredict_o = dbg_bp_mispredict_q;
-`endif
+    );
 
     assign op_m_unit = operator_type_i[OPERATOR_TYPE_MUL];
     assign op_bitmanip = operator_type_i[OPERATOR_TYPE_BITMANIP];
@@ -478,8 +357,8 @@ import ydrasil_pkg::*;
         .rst_n           (rst_n),
         .flush_i         (flush_ex_i | interrupt_i),
         .start_i         (div_start),
-        .operand_a_i     (operand_a),
-        .operand_b_i     (operand_b),
+        .operand_a_i     (mul_operand_a),
+        .operand_b_i     (mul_operand_b),
         .operator_i      (operator_i),
         .busy_o          (div_busy),
         .done_o          (div_done),
@@ -492,8 +371,8 @@ import ydrasil_pkg::*;
         .flush_i         (interrupt_i),
         .issue_valid_i   (mul_issue_valid),
         .issue_ready_o   (mul_issue_ready),
-        .operand_a_i     (operand_a),
-        .operand_b_i     (operand_b),
+        .operand_a_i     (mul_operand_a),
+        .operand_b_i     (mul_operand_b),
         .operator_i      (operator_i),
         .issue_wen_i     (mul_issue_wen),
         .issue_waddr_i   (id_rf_waddr_rd_i),
@@ -554,9 +433,9 @@ import ydrasil_pkg::*;
     assign csr_reg_wdata = interrupt_i ? '0 : csr_ex_rdata_i;
     assign csr_wdata =
         interrupt_i ? '0 :
-        ({REGS_DATA_WIDTH{csr_csrrw}} & operand_a) |
-        ({REGS_DATA_WIDTH{csr_csrrs}} & (operand_a | csr_ex_rdata_i)) |
-        ({REGS_DATA_WIDTH{csr_csrrc}} & (csr_ex_rdata_i & (~operand_a)));
+        ({REGS_DATA_WIDTH{csr_csrrw}} & csr_operand_a) |
+        ({REGS_DATA_WIDTH{csr_csrrs}} & (csr_operand_a | csr_ex_rdata_i)) |
+        ({REGS_DATA_WIDTH{csr_csrrc}} & (csr_ex_rdata_i & (~csr_operand_a)));
     assign csr_wen = op_csr;
 
     assign alu_result_o = alu_result_ff;
