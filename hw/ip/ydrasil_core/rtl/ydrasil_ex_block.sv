@@ -124,11 +124,14 @@ import ydrasil_pkg::*;
     wire                       div_rf_wen_rd;
     wire                       div_complete;
     wire                       ex_rf_wen_rd;
+    wire                       csr_wen;
     reg                        div_active_q;
     reg                        div_wen_q;
     reg [REGS_ADDR_WIDTH-1:0]  div_waddr_q;
 
     reg [REGS_DATA_WIDTH-1:0] alu_result_ff;
+    reg [REGS_DATA_WIDTH-1:0] bitmanip_result_ff;
+    reg                       bitmanip_result_valid_ff;
     reg                       alu_rf_wen_rd_ff;
     (* max_fanout = 8 *) reg [REGS_ADDR_WIDTH-1:0] alu_rf_waddr_rd_ff;
     reg                       alu_bypass_valid_q;
@@ -418,7 +421,6 @@ import ydrasil_pkg::*;
 
     wire [31:0] slow_result;
     wire        slow_result_wen;
-    wire csr_wen;
     wire op_csr = id_ex_valid_i & operator_type_i[OPERATOR_TYPE_CSR] & !interrupt_i & !flush_ex_i;
     wire csr_csrrw = op_csr & id_op_csr_info_i[OP_CSR_CSRRW];
     wire csr_csrrs = op_csr & id_op_csr_info_i[OP_CSR_CSRRS];
@@ -438,13 +440,15 @@ import ydrasil_pkg::*;
         ({REGS_DATA_WIDTH{csr_csrrc}} & (csr_ex_rdata_i & (~csr_operand_a)));
     assign csr_wen = op_csr;
 
-    assign alu_result_o = alu_result_ff;
+    assign alu_result_o = bitmanip_result_valid_ff ? bitmanip_result_ff : alu_result_ff;
     assign alu_rf_wen_rd_o = alu_rf_wen_rd_ff;
     assign alu_rf_waddr_rd_o = alu_rf_waddr_rd_ff;
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             alu_result_ff       <= '0;
+            bitmanip_result_ff  <= '0;
+            bitmanip_result_valid_ff <= 1'b0;
             alu_rf_wen_rd_ff    <= 1'b0;
             alu_rf_waddr_rd_ff  <= '0;
             alu_bypass_valid_q  <= 1'b0;
@@ -457,6 +461,8 @@ import ydrasil_pkg::*;
             div_waddr_q         <= '0;
         end else if (flush_ex_i) begin
             alu_result_ff       <= '0;
+            bitmanip_result_ff  <= '0;
+            bitmanip_result_valid_ff <= 1'b0;
             alu_rf_wen_rd_ff    <= 1'b0;
             alu_rf_waddr_rd_ff  <= '0;
             alu_bypass_valid_q  <= 1'b0;
@@ -470,6 +476,8 @@ import ydrasil_pkg::*;
         end else begin
             alu_result_ff      <= fast_result_wen ? fast_result :
                                   slow_result_wen ? slow_result : alu_result;
+            bitmanip_result_ff <= bitmanip_result;
+            bitmanip_result_valid_ff <= bitmanip_rf_wen_rd;
             alu_rf_wen_rd_ff   <= ex_rf_wen_rd;
             alu_rf_waddr_rd_ff <= div_rf_wen_rd ? div_waddr_q : alu_rf_waddr_rd;
             alu_bypass_valid_q <= bypassable_alu_op;
@@ -493,10 +501,9 @@ import ydrasil_pkg::*;
     assign ex_csr_wdata_o = ex_csr_wdata_o_ff;
     assign ex_csr_wen_o = ex_csr_wen_o_ff;
     assign ex_csr_waddr_o = ex_csr_waddr_o_ff;
-    assign slow_result_wen = div_rf_wen_rd | bitmanip_rf_wen_rd | csr_wen;
+    assign slow_result_wen = div_rf_wen_rd | csr_wen;
     assign slow_result =
         ({32{div_rf_wen_rd}}        & div_result) |
-        ({32{bitmanip_rf_wen_rd}}   & bitmanip_result) |
         ({32{csr_wen}}              & csr_reg_wdata);
 
 endmodule

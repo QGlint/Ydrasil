@@ -106,8 +106,12 @@ import ydrasil_pkg::*;
         ex_branch_taken ? ex_branch_target : ex_branch_next_pc;
     wire [DATA_WIDTH-1:0] ex_branch_pred_next_pc =
         ex_pred_taken ? id_ex_pred_target_i : ex_branch_next_pc;
+    wire ex_branch_direction_miss = ex_branch_taken ^ ex_pred_taken;
+    wire ex_branch_target_miss =
+        ex_branch_taken & ex_pred_taken & (ex_branch_target != id_ex_pred_target_i);
     wire ex_branch_mispredict =
-        ex_is_branch & !interrupt_i & (ex_branch_actual_next_pc != ex_branch_pred_next_pc);
+        ex_is_branch & !interrupt_i &
+        (ex_branch_direction_miss | ex_branch_target_miss);
 
     wire ex_pc_redirect =
         interrupt_i | (ex_is_jump & ex_branch_jump & !interrupt_i) | ex_branch_mispredict;

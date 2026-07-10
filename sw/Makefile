@@ -63,16 +63,14 @@ COREMARK_ITCM_BIN := $(COREMARK_OUT)/$(COREMARK_NAME)_itcm.bin
 COREMARK_DTCM_BIN := $(COREMARK_OUT)/$(COREMARK_NAME)_dtcm.bin
 COREMARK_OBJDUMP := $(COREMARK_OUT)/$(COREMARK_NAME).objdump
 COREMARK_MAP := $(COREMARK_OUT)/$(COREMARK_NAME).map
+SORT_APP_DIR := apps/sort
 SORT_APP_OUT ?= $(PROJECT_ROOT)/build/app/sort
-SORT_APP_NAME := sort
-SORT_APP_ELF := $(SORT_APP_OUT)/$(SORT_APP_NAME).elf
-SORT_APP_BIN := $(SORT_APP_OUT)/$(SORT_APP_NAME).bin
-SORT_APP_DUMP := $(SORT_APP_OUT)/$(SORT_APP_NAME).dump
-SORT_APP_ITCM := $(SORT_APP_OUT)/$(SORT_APP_NAME).itcm
-SORT_APP_DTCM := $(SORT_APP_OUT)/$(SORT_APP_NAME).dtcm
-SORT_APP_ITCM_BIN := $(SORT_APP_OUT)/$(SORT_APP_NAME)_itcm.bin
-SORT_APP_DTCM_BIN := $(SORT_APP_OUT)/$(SORT_APP_NAME)_dtcm.bin
-SORT_APP_MAP := $(SORT_APP_OUT)/$(SORT_APP_NAME).map
+SORT_APP_NAMES := $(sort $(basename $(notdir $(wildcard $(SORT_APP_DIR)/*.c))))
+SORT_APP_ELFS := $(addprefix $(SORT_APP_OUT)/,$(addsuffix .elf,$(SORT_APP_NAMES)))
+SORT_APP_BINS := $(addprefix $(SORT_APP_OUT)/,$(addsuffix .bin,$(SORT_APP_NAMES)))
+SORT_APP_DUMPS := $(addprefix $(SORT_APP_OUT)/,$(addsuffix .dump,$(SORT_APP_NAMES)))
+SORT_APP_ITCMS := $(addprefix $(SORT_APP_OUT)/,$(addsuffix .itcm,$(SORT_APP_NAMES)))
+SORT_APP_DTCMS := $(addprefix $(SORT_APP_OUT)/,$(addsuffix .dtcm,$(SORT_APP_NAMES)))
 
 BSP_DIR := $(PROJECT_ROOT)/sw/bsp
 BSP_INCLUDES := -I$(BSP_DIR)/include
@@ -91,7 +89,6 @@ COREMARK_C_SRCS := \
 	$(COREMARK_DIR)/core_util.c \
 	$(COREMARK_DIR)/$(COREMARK_PORT_DIR)/core_portme.c
 COREMARK_SRCS := $(BSP_ASM_SRCS) $(BSP_C_SRCS) $(COREMARK_C_SRCS)
-SORT_APP_SRCS := $(BSP_ASM_SRCS) $(BSP_C_SRCS) apps/sort/sort.c
 COREMARK_CFLAGS := \
 	-march=rv32im_zicsr_zifencei \
 	-mabi=$(ABI) \
@@ -140,6 +137,7 @@ SORT_APP_CFLAGS := \
 	-static \
 	-DYDRASIL_SIM_CTRL=1 \
 	-DSDK_BANNER=0 \
+	-I$(SORT_APP_DIR) \
 	$(BSP_INCLUDES)
 SORT_APP_LDFLAGS := \
 	-march=rv32im_zicsr_zifencei \
@@ -149,7 +147,6 @@ SORT_APP_LDFLAGS := \
 	-nostdlib \
 	-static \
 	-T $(BSP_DIR)/link.lds \
-	-Wl,-Map,$(SORT_APP_MAP) \
 	-Wl,--gc-sections
 
 # ====== derived ======
@@ -275,24 +272,22 @@ coremark-clean-mem:
 coremark-clean-map:
 	rm -f $(COREMARK_MAP)
 
-sort_app: $(SORT_APP_ELF) $(SORT_APP_BIN) $(SORT_APP_DUMP) $(SORT_APP_ITCM) $(SORT_APP_DTCM)
-	@echo "[sort_app] ELF  $(SORT_APP_ELF)"
-	@echo "[sort_app] ITCM $(SORT_APP_ITCM)"
-	@echo "[sort_app] DTCM $(SORT_APP_DTCM)"
+sort_app: $(SORT_APP_ELFS) $(SORT_APP_BINS) $(SORT_APP_DUMPS) $(SORT_APP_ITCMS) $(SORT_APP_DTCMS)
+	@echo "[sort_app] built: $(SORT_APP_NAMES)"
 
 $(SORT_APP_OUT):
 	@mkdir -p $@
 
-$(SORT_APP_ELF): $(SORT_APP_SRCS) $(BSP_DIR)/link.lds Makefile | $(SORT_APP_OUT)
-	$(CC) $(SORT_APP_CFLAGS) $(SORT_APP_SRCS) $(SORT_APP_LDFLAGS) -lgcc -o $@
+$(SORT_APP_OUT)/%.elf: $(SORT_APP_DIR)/%.c $(SORT_APP_DIR)/sort_common.h $(SORT_APP_DIR)/sort_data.h $(BSP_DIR)/link.lds Makefile | $(SORT_APP_OUT)
+	$(CC) $(SORT_APP_CFLAGS) $(BSP_ASM_SRCS) $(BSP_C_SRCS) $< $(SORT_APP_LDFLAGS) -Wl,-Map,$(@:.elf=.map) -lgcc -o $@
 
-$(SORT_APP_BIN): $(SORT_APP_ELF)
+$(SORT_APP_OUT)/%.bin: $(SORT_APP_OUT)/%.elf
 	$(OBJCOPY) -O binary $< $@
 
-$(SORT_APP_DUMP): $(SORT_APP_ELF)
+$(SORT_APP_OUT)/%.dump: $(SORT_APP_OUT)/%.elf
 	$(OBJDUMP) -d $< > $@
 
-$(SORT_APP_ITCM): | $(SORT_APP_ELF) $(SORT_APP_OUT)
+$(SORT_APP_OUT)/%.itcm: $(SORT_APP_OUT)/%.elf | $(SORT_APP_OUT)
 	$(OBJCOPY) -O binary --gap-fill=0x00 \
 		--only-section=.init \
 		--only-section=.text \
@@ -302,19 +297,19 @@ $(SORT_APP_ITCM): | $(SORT_APP_ELF) $(SORT_APP_OUT)
 		--only-section=.fini_array \
 		--only-section=.ctors \
 		--only-section=.dtors \
-		$(SORT_APP_ELF) $(SORT_APP_ITCM_BIN)
-	od -An -t x4 -w4 -v $(SORT_APP_ITCM_BIN) | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > $@
+		$< $(@:.itcm=_itcm.bin)
+	od -An -t x4 -w4 -v $(@:.itcm=_itcm.bin) | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > $@
 
-$(SORT_APP_DTCM): | $(SORT_APP_ELF) $(SORT_APP_OUT)
+$(SORT_APP_OUT)/%.dtcm: $(SORT_APP_OUT)/%.elf | $(SORT_APP_OUT)
 	$(OBJCOPY) -O binary --gap-fill=0x00 \
 		--only-section=.data \
 		--only-section=.bss \
 		--only-section=.stack \
 		--set-section-flags .bss=alloc,load,contents \
 		--set-section-flags .stack=alloc,load,contents \
-		$(SORT_APP_ELF) $(SORT_APP_DTCM_BIN) || true
-	@if [ -s $(SORT_APP_DTCM_BIN) ]; then \
-		od -An -t x4 -w4 -v $(SORT_APP_DTCM_BIN) | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > $@; \
+		$< $(@:.dtcm=_dtcm.bin) || true
+	@if [ -s $(@:.dtcm=_dtcm.bin) ]; then \
+		od -An -t x4 -w4 -v $(@:.dtcm=_dtcm.bin) | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > $@; \
 	else \
 		printf "00000000\n" > $@; \
 	fi

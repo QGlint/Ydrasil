@@ -255,6 +255,7 @@ end
                      u_dut.lsu_rf_waddr_rd,
                      u_dut.mul_rf_wen_rd,
                      u_dut.mul_rf_waddr_rd);
+            print_perf_metrics();
             $finish;
         end
         if(sim_done) begin
@@ -458,6 +459,7 @@ end
 	wire [31:0] LED;
 	wire [31:0] seg_wdata;
 	logic sim_done;
+	logic perf_terminal_printed_q;
 	bit finish_on_led;
 	bit finish_on_tohost;
 	bit perip_debug_en;
@@ -495,8 +497,15 @@ end
 	always_ff @(posedge clk) begin
 		if (rst) begin
 			sim_done <= 1'b0;
+			perf_terminal_printed_q <= 1'b0;
 		end else if (finish_on_led && perip_wen && (perip_addr == LED_ADDR) && (perip_wdata != 32'h0)) begin
 			sim_done <= 1'b1;
+		end
+
+		if (!rst && !perf_terminal_printed_q && perip_wen && (perip_addr == LED_ADDR) &&
+		    ((perip_wdata == 32'h078b7323) || (perip_wdata == 32'h00504f53))) begin
+			perf_terminal_printed_q <= 1'b1;
+			print_perf_metrics();
 		end
 
 		if (!rst && perip_req && perip_wen && (perip_addr == SIM_STDOUT_ADDR)) begin
@@ -625,6 +634,11 @@ end
                 bp_btb_miss_taken_count,
                 bp_correct_taken_count,
                 bp_correct_not_taken_count);
+            $display("PERF_LSU_HOT: LOOKUP=%-d HIT=%-d FILL=%-d STORE_UPDATE=%-d",
+                u_dut.u_ydrasil_load_store_unit.g_legacy.perf_hot_lookup_q,
+                u_dut.u_ydrasil_load_store_unit.g_legacy.perf_hot_hit_q,
+                u_dut.u_ydrasil_load_store_unit.g_legacy.perf_hot_fill_q,
+                u_dut.u_ydrasil_load_store_unit.g_legacy.perf_hot_store_update_q);
         end
     endtask
 

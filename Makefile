@@ -7,7 +7,12 @@ RESULT_DIR := $(LOG_DIR)/test_results
 PPA_DIR ?= $(BUILD_DIR)/PPA
 PPA_RVTEST_LOG ?= $(PPA_DIR)/test_all_summary.log
 PPA_COREMARK_LOG ?= $(PPA_DIR)/coremark_summary.log
-SORT_APP_LOG ?= $(HW_TRACE_OUT_DIR)/sort/hw.log
+SORT_APP_DIR := $(PROJECT_ROOT)/sw/apps/sort
+SORT_APP_NAMES := $(sort $(basename $(notdir $(wildcard $(SORT_APP_DIR)/*.c))))
+SORT_SIM_TARGETS := $(addprefix sort_sim_,$(SORT_APP_NAMES))
+SORT_RESULT_DIR ?= $(RESULT_DIR)/sort
+PPA_SORT_LOG ?= $(PPA_DIR)/sort_summary.log
+PPA_COE_LOG ?= $(PPA_DIR)/$(COE_SIMPLE_NAME)_summary.log
 COE_SIMPLE_NAME ?= coe_loop2
 COE_SIMPLE_ITCM ?= $(BUILD_DIR)/fpga_coe_m3/irom_M3_loop2.itcm
 COE_SIMPLE_DTCM ?= $(BUILD_DIR)/fpga_coe_m3/dram_M_loop2.dtcm
@@ -19,6 +24,10 @@ COE_EXPECT_CNT_START ?= 0x80000000
 COE_EXPECT_CNT_STOP ?= 0xffffffff
 COE_EXPECT_CNT_READ ?= 0x00000000
 COE_EXPECT_LED ?= 0x078b7323
+COE_LOOP5_DIR ?= $(BUILD_DIR)/fpga_coe_m3
+COE_LOOP5_ITCM_BIN ?= $(COE_LOOP5_DIR)/irom_M3_loop5_itcm.bin
+COE_LOOP5_ITCM ?= $(COE_LOOP5_DIR)/irom_M3_loop5.itcm
+COE_LOOP5_DTCM ?= $(COE_LOOP5_DIR)/dram_M_loop5.dtcm
 
 export PROJECT_ROOT BUILD_DIR WAVE_DIR LOG_DIR SIM_TOOL IP VERILATOR_MOD UVM USE_BENDER BENDER DIV_IMPL LSU_IMPL MEMS_IMPL ARCH ABI RISCV_PREFIX CC OBJCOPY OBJDUMP GDB QEMU TRACE_TO_CSV TRACE_COMPARE
 
@@ -80,7 +89,7 @@ $(error Unsupported SYN_PLL_FREQ_MHZ=$(SYN_PLL_FREQ_MHZ); supported values: $(SY
 endif
 
 .PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests init install-bender get_spike download_and_extract_spike check_spike_prebuilt_abi build_spike_from_source check_deps spike spike_wave_to_csv sim_compare commit_check commit_spike_csv commit_hw_trace commit_hw_csv commit_compare rv_test_comp_genmem ppa_rvtest_report coe_simple coe_smoke coe_smoke_led coe_isa_probes
-.PHONY: coremark coremark_sim coremark_run coremark_result coremark-rebuild coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map sort_app sort_app_sim sort_app-rebuild sort_app-clean
+.PHONY: coremark coremark_sim coremark_run coremark_result coremark-rebuild coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map sort_app sort_all sort_sim_all sort_report sort_app_sim sort_app-rebuild sort_app-clean coe_loop5 coe_loop5_gen
 .PHONY: syn synf syn-venv syn-prep syn-stage-xpr syn-vivado syn-analyze syn-clean
 
 .SECONDEXPANSION:
@@ -211,6 +220,11 @@ COREMARK_SW_MAKE_ARGS = \
 		RISCV_PREFIX=$(RISCV_PREFIX) \
 		ARCH=rv32im_zicsr_zifencei \
 		ABI=$(ABI)
+SORT_APP_SW_MAKE_ARGS = \
+		PROJECT_ROOT=$(PROJECT_ROOT) \
+		RISCV_PREFIX=$(RISCV_PREFIX) \
+		ARCH=rv32im_zicsr_zifencei \
+		ABI=$(ABI)
 COREMARK_RESULT_LOG ?= $(HW_TRACE_OUT_DIR)/coremark/hw.log
 COREMARK_SIM_COMPARE ?= none
 COMPARE_TRACE_DEFINES = $(if $(filter none,$(SIM_COMPARE)),,$(if $(findstring +commit_trace,$(COMPARE_SIM_EXTRA_DEFINES)),,+commit_trace))
@@ -239,27 +253,73 @@ coremark_sim: coremark comp
 coremark_run: coremark_sim
 
 sort_app:
-	@$(MAKE) -C sw sort_app
+	@$(MAKE) -C sw sort_app $(SORT_APP_SW_MAKE_ARGS)
 
 sort_app-rebuild:
-	@$(MAKE) -C sw sort_app-rebuild
+	@$(MAKE) -C sw sort_app-rebuild $(SORT_APP_SW_MAKE_ARGS)
 
-sort_app_sim: sort_app comp
-	@set -e; \
-	rm -f "$(SORT_APP_LOG)"; \
-	$(MAKE) sim_compare \
+sort_all:
+	@echo "==========================================================="
+	@echo "   Sort regression: $(SORT_APP_NAMES)"
+	@echo "==========================================================="
+	@$(MAKE) -j sort_app
+	@$(MAKE) comp
+	@rm -rf "$(SORT_RESULT_DIR)"
+	@$(MAKE) -j sort_sim_all
+	@$(MAKE) sort_report
+
+sort_sim_all: $(SORT_SIM_TARGETS)
+
+sort_sim_%:
+	@name=$*; \
+	result_dir="$(SORT_RESULT_DIR)"; \
+	hw_log="$(HW_TRACE_OUT_DIR)/sort/$$name/hw.log"; \
+	run_log="$$result_dir/$$name.log"; \
+	status="$$result_dir/$$name.status"; \
+	mkdir -p "$$result_dir"; \
+	rm -f "$$hw_log" "$$run_log" "$$status"; \
+	if $(MAKE) --no-print-directory sim_compare \
 		SIM_COMPARE=none \
-		COMPARE_NAME=sort \
-		COMPARE_ITCM=$(BUILD_DIR)/app/sort/sort.itcm \
-		COMPARE_DTCM=$(BUILD_DIR)/app/sort/sort.dtcm \
-		COMPARE_SIM_EXTRA_DEFINES="+perip_debug +cpp_timeout=1000000 +sv_timeout=1000000"; \
-	if ! grep -q "SORT PASS" "$(SORT_APP_LOG)"; then \
-		echo "[SORT_APP] SORT PASS not found in $(SORT_APP_LOG)"; \
-		tail -200 "$(SORT_APP_LOG)"; \
-		exit 1; \
+		COMPARE_NAME="sort/$$name" \
+		COMPARE_ELF="$(BUILD_DIR)/app/sort/$$name.elf" \
+		COMPARE_ITCM="$(BUILD_DIR)/app/sort/$$name.itcm" \
+		COMPARE_DTCM="$(BUILD_DIR)/app/sort/$$name.dtcm" \
+		COMPARE_SIM_EXTRA_DEFINES="+perip_debug +cpp_timeout=2000000 +sv_timeout=2000000" \
+		>"$$run_log" 2>&1 && grep -q "SORT PASS name=$$name count=100" "$$hw_log"; then \
+		result=PASS; \
+	else \
+		result=FAIL; \
 	fi; \
-	echo "[SORT_APP] PASS"; \
-	grep -E "SORT PASS|LED write|Simulation finished|PERF_METRIC" "$(SORT_APP_LOG)" | tail -40
+	cycles=$$(grep -o 'CYCLES=[0-9]*' "$$hw_log" 2>/dev/null | tail -1 | cut -d= -f2); \
+	insts=$$(grep -o 'INSTS=[0-9]*' "$$hw_log" 2>/dev/null | tail -1 | cut -d= -f2); \
+	ipc=$$(grep -o 'IPC=[0-9.]*' "$$hw_log" 2>/dev/null | tail -1 | cut -d= -f2); \
+	[ -n "$$cycles" ] || cycles=N/A; \
+	[ -n "$$insts" ] || insts=N/A; \
+	[ -n "$$ipc" ] || ipc=N/A; \
+	echo "[$$name] [Cycles: $$cycles | Insts: $$insts | IPC: $$ipc] [$$result]" > "$$status"
+
+sort_report:
+	@mkdir -p "$(PPA_DIR)"; \
+	rm -f "$(PPA_SORT_LOG)"; \
+	failed=0; \
+	for status in $$(find "$(SORT_RESULT_DIR)" -maxdepth 1 -name '*.status' -type f | sort); do \
+		line=$$(cat "$$status"); \
+		echo "$$line" | tee -a "$(PPA_SORT_LOG)"; \
+		if echo "$$line" | grep -q '\[FAIL\]'; then \
+			failed=1; \
+			name=$$(basename "$$status" .status); \
+			tail -40 "$(SORT_RESULT_DIR)/$$name.log"; \
+		fi; \
+	done; \
+	count=$$(find "$(SORT_RESULT_DIR)" -maxdepth 1 -name '*.status' -type f | wc -l); \
+	if [ "$$count" -ne "$(words $(SORT_APP_NAMES))" ]; then \
+		echo "[SORT] Missing status files: expected $(words $(SORT_APP_NAMES)), got $$count"; \
+		failed=1; \
+	fi; \
+	echo "[PPA] Sort report: $(PPA_SORT_LOG)"; \
+	exit $$failed
+
+sort_app_sim: sort_all
 
 coremark_result:
 	@mkdir -p "$(PPA_DIR)"; \
@@ -269,7 +329,7 @@ coremark_result:
 		tmp=$$(mktemp); \
 		awk '{ \
 			line=$$0; \
-			if (line ~ /^(PERF_METRIC:|PERF_STALL:|PERF_SCOREBOARD_DETAIL:|PERF_FRONTEND:|PERF_BRANCH:|PERF_BP_ACC:|PERF_BP_DETAIL:)/) { \
+			if (line ~ /^(PERF_METRIC:|PERF_STALL:|PERF_SCOREBOARD_DETAIL:|PERF_LSU_HOT:|PERF_FRONTEND:|PERF_BRANCH:|PERF_BP_ACC:|PERF_BP_DETAIL:)/) { \
 				print line; \
 			} else if (match(line, /(core[[:space:]]+0:|3[[:space:]]+0x)/)) { \
 				prefix=substr(line, 1, RSTART - 1); \
@@ -280,8 +340,8 @@ coremark_result:
 				printf "\n"; \
 			} \
 		} END { printf "\n"; }' "$(COREMARK_RESULT_LOG)" > $$tmp; \
-		if grep -Eq '^(CoreMark Size|Total ticks|Total time \(secs\)|Iterations/Sec|Iterations       |Compiler version|Compiler flags|Memory location|seedcrc|Correct operation validated|CoreMark 1\.0 :|Errors detected|ERROR!|COREMARK DONE|PERF_METRIC:|PERF_STALL:|PERF_SCOREBOARD_DETAIL:|PERF_FRONTEND:|PERF_BRANCH:|PERF_BP_ACC:|PERF_BP_DETAIL:|\[[0-9]+\]crc)' "$$tmp"; then \
-			grep -E '^(CoreMark Size|Total ticks|Total time \(secs\)|Iterations/Sec|Iterations       |Compiler version|Compiler flags|Memory location|seedcrc|Correct operation validated|CoreMark 1\.0 :|Errors detected|ERROR!|COREMARK DONE|PERF_METRIC:|PERF_STALL:|PERF_SCOREBOARD_DETAIL:|PERF_FRONTEND:|PERF_BRANCH:|PERF_BP_ACC:|PERF_BP_DETAIL:|\[[0-9]+\]crc)' "$$tmp" | tee -a "$(PPA_COREMARK_LOG)"; \
+		if grep -Eq '^(CoreMark Size|Total ticks|Total time \(secs\)|Iterations/Sec|Iterations       |Compiler version|Compiler flags|Memory location|seedcrc|Correct operation validated|CoreMark 1\.0 :|Errors detected|ERROR!|COREMARK DONE|PERF_METRIC:|PERF_STALL:|PERF_SCOREBOARD_DETAIL:|PERF_LSU_HOT:|PERF_FRONTEND:|PERF_BRANCH:|PERF_BP_ACC:|PERF_BP_DETAIL:|\[[0-9]+\]crc)' "$$tmp"; then \
+			grep -E '^(CoreMark Size|Total ticks|Total time \(secs\)|Iterations/Sec|Iterations       |Compiler version|Compiler flags|Memory location|seedcrc|Correct operation validated|CoreMark 1\.0 :|Errors detected|ERROR!|COREMARK DONE|PERF_METRIC:|PERF_STALL:|PERF_SCOREBOARD_DETAIL:|PERF_LSU_HOT:|PERF_FRONTEND:|PERF_BRANCH:|PERF_BP_ACC:|PERF_BP_DETAIL:|\[[0-9]+\]crc)' "$$tmp" | tee -a "$(PPA_COREMARK_LOG)"; \
 		else \
 			echo "[COREMARK] No CoreMark result lines found in $(COREMARK_RESULT_LOG)" | tee -a "$(PPA_COREMARK_LOG)"; \
 		fi; \
@@ -332,8 +392,28 @@ coe_simple: comp
 		grep -E "^core   0:|^3 0x|timeout pc=|TEST_FAIL|fail testnum|RISCV_TEST|Simulation finished" "$$log" | tail -200; \
 		exit 1; \
 	fi; \
+	mkdir -p "$(PPA_DIR)"; \
+	{ echo "[COE_SIMPLE] PASS $(COE_SIMPLE_NAME)"; \
+	  grep -E "LED write|SEG write|CNT write|CNT read|PERF_" "$$log"; \
+	} > "$(PPA_COE_LOG)"; \
 	echo "[COE_SIMPLE] PASS $(COE_SIMPLE_NAME)"; \
-	grep -E "LED write|SEG write|CNT write|CNT read|\\[PERIP\\]|\\[TB\\]|Simulation finished" "$$log" | tail -80
+	grep -E "LED write|SEG write|CNT write|CNT read|PERF_|\\[PERIP\\]|\\[TB\\]|Simulation finished" "$$log" | tail -100
+
+coe_loop5_gen:
+	@mkdir -p "$(COE_LOOP5_DIR)"
+	perl sw/make_m3_loop_variant.pl \
+		"$(COE_LOOP5_DIR)/irom_M3_loop2_itcm.bin" "$(COE_LOOP5_ITCM_BIN)" 4
+	od -An -t x4 -w4 -v "$(COE_LOOP5_ITCM_BIN)" | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > "$(COE_LOOP5_ITCM)"
+	cp "$(COE_LOOP5_DIR)/dram_M_loop2.dtcm" "$(COE_LOOP5_DTCM)"
+	$(OBJDUMP) -D -b binary -m riscv:rv32 "$(COE_LOOP5_ITCM_BIN)" > "$(COE_LOOP5_DIR)/irom_M3_loop5.dump"
+
+coe_loop5: coe_loop5_gen
+	@$(MAKE) coe_simple \
+		COE_SIMPLE_NAME=coe_loop5 \
+		COE_SIMPLE_ITCM=$(COE_LOOP5_ITCM) \
+		COE_SIMPLE_DTCM=$(COE_LOOP5_DTCM) \
+		COE_EXPECT_CNT_READ=0x00000002 \
+		COE_EXPECT_SEG=0x37800002
 
 coe_smoke:
 	@$(MAKE) coe_simple
@@ -393,7 +473,7 @@ coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark
 	@$(MAKE) -C sw $@ $(COREMARK_SW_MAKE_ARGS)
 
 sort_app-clean:
-	@$(MAKE) -C sw sort_app-clean
+	@$(MAKE) -C sw sort_app-clean $(SORT_APP_SW_MAKE_ARGS)
 
 
 # --- 核心自动化测试逻辑 (支持 ITCM/DTCM 分离加载) ---
