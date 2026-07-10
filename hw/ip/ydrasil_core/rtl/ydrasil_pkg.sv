@@ -289,4 +289,64 @@ package ydrasil_pkg;
 	localparam int BP_BTB_ENTRIES = 512;
 	localparam int BP_BHT_ENTRIES = 512;
 
+	typedef struct packed {
+		logic                                valid;
+		logic [REGS_ADDR_WIDTH-1:0]          addr;
+		logic [REGS_DATA_WIDTH-1:0]          data;
+	} ydrasil_gpr_fwd_pkt_t;
+
+	typedef struct packed {
+		logic [REGS_ADDR_WIDTH-1:0]          rs1_addr;
+		logic [REGS_ADDR_WIDTH-1:0]          rs2_addr;
+		logic [REGS_ADDR_WIDTH-1:0]          rd_addr;
+		logic                                rs1_ren;
+		logic                                rs2_ren;
+		logic                                rd_wen;
+		logic                                lsu_req;
+		logic                                store_req;
+		logic                                prev_alu_bypass_ok;
+	} ydrasil_id_ctrl_pkt_t;
+
+	typedef struct packed {
+		logic                                valid;
+		logic                                interrupt;
+		logic [REGS_ADDR_WIDTH-1:0]          rd_addr;
+		logic                                alu_rf_wen;
+		logic [OPERATOR_TYPE_WIDTH-1:0]      operator_type;
+		logic [OPERATOR_WIDTH-1:0]           operator_info;
+	} ydrasil_ex_hzd_pkt_t;
+
+	typedef struct packed {
+		logic [REGS_DATA_WIDTH-1:0]          rs2_data;
+		logic [REGS_ADDR_WIDTH-1:0]          rs2_raddr;
+		logic [BUS_ADDR_WIDTH-1:0]           addr;
+		logic                                addr_is_dtcm;
+		logic [BUS_DATA_WIDTH-1:0]           store_data;
+		logic [3:0]                          store_mask;
+		logic                                store_data_valid;
+	} ydrasil_id_lsu_pkt_t;
+
+	typedef struct packed {
+		logic                                scoreboard_stall;
+		logic                                lsu_struct_stall;
+		logic                                issue_store_data_ready;
+		logic                                prev_alu_bypass_rs1;
+		logic                                prev_alu_bypass_rs2;
+		logic                                rs1_pending_stall;
+		logic                                rs2_pending_stall;
+		logic                                rd_waw_stall;
+		logic                                rs1_issue_hzd;
+		logic                                rs2_issue_hzd;
+		logic                                rd_issue_hzd;
+		logic                                issue_load_producer;
+		logic                                issue_alu_producer;
+		logic                                issue_mul_div_producer;
+		logic                                issue_src_hzd;
+		logic                                store_data_wait;
+		logic                                id_ex_rd_issue;
+		logic [REGS_NUM-1:0]                 gpr_pending_clear_mask;
+		logic [REGS_NUM-1:0]                 gpr_pending_issue_mask;
+		logic [REGS_NUM-1:0]                 gpr_pending_for_hazard;
+	} ydrasil_hzd_status_pkt_t;
+
 endpackage

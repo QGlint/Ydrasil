@@ -10,13 +10,11 @@ import ydrasil_pkg::*;
     input wire [ 4:0]                      id_rd_waddr_i,
     input wire [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0]    operator_lsu_i,
     input wire [1:0]                       operator_lsu_type_i,
-    input wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]      id_lsu_rs2_data_i, // 存储操作的源寄存器数据
-    input wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]      id_lsu_rs2_raddr_i,
+    input ydrasil_id_lsu_pkt_t             id_lsu_i,
     input wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]      ex_lsu_rd_data_i, // 存储操作的源寄存器数据
-    input wire [ydrasil_pkg::BUS_ADDR_WIDTH-1:0]       id_lsu_addr_i,
-    input wire                            id_lsu_addr_is_dtcm_i,
-    input wire [ydrasil_pkg::BUS_DATA_WIDTH-1:0]       id_lsu_store_data_i,
-    input wire [                3:0]      id_lsu_store_mask_i,
+    input ydrasil_gpr_fwd_pkt_t            alu_fwd_i,
+    input ydrasil_gpr_fwd_pkt_t            mul_fwd_i,
+    input ydrasil_gpr_fwd_pkt_t            wb_fwd_i,
     
     // DTCM fast path
     input wire [ydrasil_pkg::BUS_DATA_WIDTH-1:0]       dtcm_rdata_i,
@@ -72,7 +70,7 @@ import ydrasil_pkg::*;
         wire request_crosses_word;
         wire latched_crosses_word;
 
-        assign lsu_rs2_data = id_lsu_rs2_data_i;
+        assign lsu_rs2_data = id_lsu_i.rs2_data;
         assign is_load = operator_lsu_type_i[OPERATOR_TYPE_LOAD - OPERATOR_TYPE_LSU_BASE];
         assign is_store = operator_lsu_type_i[OPERATOR_TYPE_STORE - OPERATOR_TYPE_LSU_BASE];
         assign mem_addr = ex_lsu_mem_addr_i;
@@ -267,6 +265,14 @@ import ydrasil_pkg::*;
     reg [ydrasil_pkg::REGS_DATA_WIDTH-1:0]     mmio_wb_result_q;
     reg [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     mmio_wb_rd_addr_q;
 
+    (* max_fanout = 8 *) reg pending_store_valid_q;
+    reg        pending_store_is_dtcm_q;
+    reg [ydrasil_pkg::BUS_ADDR_WIDTH-1:0]      pending_store_addr_q;
+    reg [3:0]                                  pending_store_mask_q;
+    reg [1:0]                                  pending_store_addr_index_q;
+    reg [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0]   pending_store_operator_lsu_q;
+    (* max_fanout = 8 *) reg [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] pending_store_rs2_raddr_q;
+
     reg        load_s1_valid_q;
     reg [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     load_s1_rd_addr_q;
     reg [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0]   load_s1_operator_lsu_q;
@@ -279,6 +285,13 @@ import ydrasil_pkg::*;
 
     wire [3:0] store_wmask;
     wire [31:0] store_wdata;
+    wire pending_store_data_valid;
+    wire [31:0] pending_store_raw_data;
+    wire [31:0] pending_store_wdata;
+    wire pending_store_dtcm_fire;
+    wire pending_store_mmio_fire;
+    wire store_pending_capture;
+    wire mmio_fire;
     reg [31:0] dtcm_load_result;
     reg [31:0] mmio_load_result;
     reg [31:0] load_shifted_data;
@@ -288,19 +301,71 @@ import ydrasil_pkg::*;
     wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] selected_wb_result;
     wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] selected_wb_rd_addr;
 
+    function automatic [31:0] align_store_data;
+        input [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0] op_lsu;
+        input [1:0] addr_index;
+        input [31:0] raw_data;
+        begin
+            if (op_lsu[ydrasil_pkg::OP_LSU_SB]) begin
+                unique case (addr_index)
+                    2'b00: align_store_data = {24'b0, raw_data[7:0]};
+                    2'b01: align_store_data = {16'b0, raw_data[7:0], 8'b0};
+                    2'b10: align_store_data = {8'b0, raw_data[7:0], 16'b0};
+                    default: align_store_data = {raw_data[7:0], 24'b0};
+                endcase
+            end else if (op_lsu[ydrasil_pkg::OP_LSU_SH]) begin
+                align_store_data = addr_index[1] ? {raw_data[15:0], 16'b0} :
+                                                   {16'b0, raw_data[15:0]};
+            end else begin
+                align_store_data = raw_data;
+            end
+        end
+    endfunction
+
     assign is_load = operator_lsu_type_i[ydrasil_pkg::OPERATOR_TYPE_LOAD - ydrasil_pkg::OPERATOR_TYPE_LSU_BASE];
     assign is_store = operator_lsu_type_i[ydrasil_pkg::OPERATOR_TYPE_STORE - ydrasil_pkg::OPERATOR_TYPE_LSU_BASE];
     assign request_valid = is_load | is_store;
-    assign mem_addr_index = id_lsu_addr_i[1:0];
-    assign request_is_dtcm = id_lsu_addr_is_dtcm_i;
+    assign mem_addr_index = id_lsu_i.addr[1:0];
+    assign request_is_dtcm = id_lsu_i.addr_is_dtcm;
     assign mmio_busy = mmio_req_valid_q | mmio_wait_q | mmio_wb_valid_q;
-    assign dtcm_accept = request_valid & request_is_dtcm & !mmio_wb_valid_q;
+    assign dtcm_accept = request_valid & request_is_dtcm & !mmio_wb_valid_q & !pending_store_valid_q;
     assign dtcm_load_req = dtcm_accept & is_load;
-    assign dtcm_store_req = dtcm_accept & is_store;
-    assign mmio_accept = request_valid & !request_is_dtcm & !mmio_busy;
+    assign mmio_accept = request_valid & !request_is_dtcm & !mmio_busy & !pending_store_valid_q;
+    assign mmio_fire = mmio_accept & (is_load | id_lsu_i.store_data_valid);
 
-    assign store_wmask = id_lsu_store_mask_i;
-    assign store_wdata = id_lsu_store_data_i;
+    assign store_wmask = id_lsu_i.store_mask;
+    assign store_wdata = id_lsu_i.store_data;
+    assign store_pending_capture =
+        (dtcm_accept | mmio_accept) & is_store & !id_lsu_i.store_data_valid;
+
+    assign pending_store_data_valid =
+        (pending_store_rs2_raddr_q == '0) |
+        (dtcm_wb_valid & (selected_wb_rd_addr == pending_store_rs2_raddr_q)) |
+        (mmio_wb_out_valid & (selected_wb_rd_addr == pending_store_rs2_raddr_q)) |
+        (alu_fwd_i.valid & (alu_fwd_i.addr == pending_store_rs2_raddr_q)) |
+        (mul_fwd_i.valid & (mul_fwd_i.addr == pending_store_rs2_raddr_q)) |
+        (wb_fwd_i.valid & (wb_fwd_i.addr == pending_store_rs2_raddr_q));
+    assign pending_store_raw_data =
+        (pending_store_rs2_raddr_q == '0) ? 32'b0 :
+        (dtcm_wb_valid & (selected_wb_rd_addr == pending_store_rs2_raddr_q)) ? selected_wb_result :
+        (mmio_wb_out_valid & (selected_wb_rd_addr == pending_store_rs2_raddr_q)) ? selected_wb_result :
+        (alu_fwd_i.valid & (alu_fwd_i.addr == pending_store_rs2_raddr_q)) ? alu_fwd_i.data :
+        (mul_fwd_i.valid & (mul_fwd_i.addr == pending_store_rs2_raddr_q)) ? mul_fwd_i.data :
+        (wb_fwd_i.valid & (wb_fwd_i.addr == pending_store_rs2_raddr_q)) ? wb_fwd_i.data :
+        32'b0;
+    assign pending_store_wdata =
+        align_store_data(pending_store_operator_lsu_q,
+                         pending_store_addr_index_q,
+                         pending_store_raw_data);
+    assign pending_store_dtcm_fire =
+        pending_store_valid_q & pending_store_is_dtcm_q & pending_store_data_valid &
+        !mmio_wb_valid_q;
+    assign pending_store_mmio_fire =
+        pending_store_valid_q & !pending_store_is_dtcm_q & pending_store_data_valid &
+        !mmio_busy;
+    assign dtcm_store_req =
+        (dtcm_accept & is_store & id_lsu_i.store_data_valid) |
+        pending_store_dtcm_fire;
 
     always_comb begin
         unique case (load_s1_addr_index_q)
@@ -367,11 +432,15 @@ import ydrasil_pkg::*;
         endcase
     end
 
-    assign dtcm_req_o = dtcm_accept;
+    assign dtcm_req_o = dtcm_load_req | dtcm_store_req;
     assign dtcm_wen_o = dtcm_store_req;
-    assign dtcm_addr_o = id_lsu_addr_i;
-    assign dtcm_wmask_o = dtcm_store_req ? store_wmask : 4'b0000;
-    assign dtcm_wdata_o = dtcm_store_req ? store_wdata : 32'b0;
+    assign dtcm_addr_o = pending_store_dtcm_fire ? pending_store_addr_q : id_lsu_i.addr;
+    assign dtcm_wmask_o =
+        pending_store_dtcm_fire ? pending_store_mask_q :
+        (dtcm_store_req ? store_wmask : 4'b0000);
+    assign dtcm_wdata_o =
+        pending_store_dtcm_fire ? pending_store_wdata :
+        (dtcm_store_req ? store_wdata : 32'b0);
 
     assign mmio_req_o = mmio_req_valid_q;
     assign mmio_wen_o = mmio_req_valid_q & mmio_is_store_q;
@@ -384,7 +453,8 @@ import ydrasil_pkg::*;
     assign selected_wb_result = dtcm_wb_valid ? dtcm_load_result : mmio_wb_result_q;
     assign selected_wb_rd_addr = dtcm_wb_valid ? load_s2_rd_addr_q : mmio_wb_rd_addr_q;
 
-    assign lsu_ctrl_busy_o = mmio_busy | mmio_accept;
+    assign lsu_ctrl_busy_o =
+        mmio_busy | mmio_accept | pending_store_valid_q | store_pending_capture;
     assign lsu_wb_result_o = selected_wb_result;
     assign lsu_rf_rd_wen_o = dtcm_wb_valid | mmio_wb_out_valid;
     assign lsu_rf_rd_waddr_o = (dtcm_wb_valid | mmio_wb_out_valid) ? selected_wb_rd_addr : '0;
@@ -404,6 +474,13 @@ import ydrasil_pkg::*;
             mmio_wb_valid_q        <= 1'b0;
             mmio_wb_result_q       <= '0;
             mmio_wb_rd_addr_q      <= '0;
+            pending_store_valid_q  <= 1'b0;
+            pending_store_is_dtcm_q <= 1'b0;
+            pending_store_addr_q   <= '0;
+            pending_store_mask_q   <= '0;
+            pending_store_addr_index_q <= '0;
+            pending_store_operator_lsu_q <= '0;
+            pending_store_rs2_raddr_q <= '0;
             load_s1_valid_q        <= 1'b0;
             load_s1_rd_addr_q      <= '0;
             load_s1_operator_lsu_q <= '0;
@@ -438,6 +515,20 @@ import ydrasil_pkg::*;
                 mmio_wb_rd_addr_q <= mmio_rd_addr_q;
             end
 
+            if (pending_store_dtcm_fire | pending_store_mmio_fire) begin
+                pending_store_valid_q <= 1'b0;
+            end
+
+            if (store_pending_capture) begin
+                pending_store_valid_q <= 1'b1;
+                pending_store_is_dtcm_q <= request_is_dtcm;
+                pending_store_addr_q <= id_lsu_i.addr;
+                pending_store_mask_q <= id_lsu_i.store_mask;
+                pending_store_addr_index_q <= mem_addr_index;
+                pending_store_operator_lsu_q <= operator_lsu_i;
+                pending_store_rs2_raddr_q <= id_lsu_i.rs2_raddr;
+            end
+
             if (mmio_req_valid_q) begin
                 mmio_req_valid_q <= 1'b0;
                 if (mmio_is_load_q) begin
@@ -445,11 +536,23 @@ import ydrasil_pkg::*;
                 end
             end
 
-            if (mmio_accept) begin
+            if (pending_store_mmio_fire) begin
+                mmio_req_valid_q    <= 1'b1;
+                mmio_is_load_q      <= 1'b0;
+                mmio_is_store_q     <= 1'b1;
+                mmio_addr_q         <= pending_store_addr_q;
+                mmio_wdata_q        <= pending_store_wdata;
+                mmio_wmask_q        <= pending_store_mask_q;
+                mmio_addr_index_q   <= pending_store_addr_index_q;
+                mmio_operator_lsu_q <= pending_store_operator_lsu_q;
+                mmio_rd_addr_q      <= '0;
+            end
+
+            if (mmio_fire) begin
                 mmio_req_valid_q    <= 1'b1;
                 mmio_is_load_q      <= is_load;
                 mmio_is_store_q     <= is_store;
-                mmio_addr_q         <= id_lsu_addr_i;
+                mmio_addr_q         <= id_lsu_i.addr;
                 mmio_wdata_q        <= store_wdata;
                 mmio_wmask_q        <= store_wmask;
                 mmio_addr_index_q   <= mem_addr_index;

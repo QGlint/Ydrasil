@@ -85,11 +85,7 @@ import ydrasil_pkg::*;
 	wire [31:0]                    bt_a_operand;
 	wire [31:0]                    bt_b_operand;
 	wire [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0]  operator_lsu;
-	wire [31:0]                    id_lsu_rs2_data;
-	wire [31:0]                    id_lsu_addr;
-	wire                           id_lsu_addr_is_dtcm;
-	wire [31:0]                    id_lsu_store_data;
-	wire [3:0]                     id_lsu_store_mask;
+	ydrasil_id_lsu_pkt_t          id_lsu_pkt;
 	wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] operator_type;
 	wire                           id_alu_rf_wen_rd;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    id_rf_waddr_rd;
@@ -178,14 +174,21 @@ import ydrasil_pkg::*;
 	wire                        rf_wen_rd;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] rf_waddr_rd;
 	wire                        wb_backpressure;
-	reg                         wb_hzd_valid_q;
-	reg [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] wb_hzd_addr_q;
-	reg [ydrasil_pkg::REGS_DATA_WIDTH-1:0] wb_hzd_data_q;
+	wire                        wb_hzd_valid_q;
+	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] wb_hzd_addr_q;
+	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] wb_hzd_data_q;
 
     //LSU -> CTRL
 	wire                            lsu_ctrl_busy;
 
     //LSU -> ID
+	ydrasil_id_ctrl_pkt_t           id_ctrl_pkt;
+	ydrasil_ex_hzd_pkt_t            ex_hzd_pkt;
+	ydrasil_hzd_status_pkt_t        hzd_status_pkt;
+	ydrasil_gpr_fwd_pkt_t           wb_fwd_pkt;
+	ydrasil_gpr_fwd_pkt_t           lsu_fwd_pkt;
+	ydrasil_gpr_fwd_pkt_t           alu_fwd_pkt;
+	ydrasil_gpr_fwd_pkt_t           mul_fwd_pkt;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    id_ctrl_rs1_addr;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    id_ctrl_rs2_addr;
 	wire                            id_ctrl_rs1_ren;
@@ -193,13 +196,28 @@ import ydrasil_pkg::*;
 	wire                            id_ctrl_rd_wen;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    id_ctrl_rd_addr;
 	wire                            id_ctrl_lsu_req;
+	wire                            id_ctrl_store_req;
 	wire                            id_ctrl_prev_alu_bypass_ok;
 	wire                            scoreboard_stall;
 	wire                            lsu_struct_stall;
 	wire                            ex_accept_valid;
-	reg [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_q;
 	wire                            id_ex_rd_issue;
-	wire                            id_ex_prev_alu_bypassable;
+	wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_clear_mask;
+	wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_issue_mask;
+	wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_for_hazard;
+	wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_q;
+	wire                            rs1_pending_stall;
+	wire                            rs2_pending_stall;
+	wire                            rd_waw_stall;
+	wire                            rs1_issue_hzd;
+	wire                            rs2_issue_hzd;
+	wire                            rd_issue_hzd;
+	wire                            issue_load_producer;
+	wire                            issue_alu_producer;
+	wire                            issue_mul_div_producer;
+	wire                            issue_src_hzd;
+	wire                            store_data_wait;
+	wire                            issue_store_data_ready;
 	wire                            prev_alu_bypass_rs1;
 	wire                            prev_alu_bypass_rs2;
 
@@ -292,29 +310,53 @@ import ydrasil_pkg::*;
 	end
 `endif
 
-	assign ex_accept_valid = id_ex_valid & !flush_ex;
-	assign id_ex_rd_issue =
-		ex_accept_valid & (id_rf_waddr_rd != '0) & !interrupt &
-		(id_alu_rf_wen_rd | operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD]);
-	assign id_ex_prev_alu_bypassable =
-		ex_accept_valid & id_alu_rf_wen_rd & (id_rf_waddr_rd != '0) & !interrupt &
-		operator_type[ydrasil_pkg::OPERATOR_TYPE_ALU] &
-		!operator_type[ydrasil_pkg::OPERATOR_TYPE_BITMANIP] &
-		(operator[ydrasil_pkg::OP_ALU_ADD]  |
-		 operator[ydrasil_pkg::OP_ALU_SUB]  |
-		 operator[ydrasil_pkg::OP_ALU_SLT]  |
-		 operator[ydrasil_pkg::OP_ALU_SLTU] |
-		 operator[ydrasil_pkg::OP_ALU_XOR]  |
-		 operator[ydrasil_pkg::OP_ALU_OR]   |
-		 operator[ydrasil_pkg::OP_ALU_AND]  |
-		 operator[ydrasil_pkg::OP_ALU_LUI]  |
-		 operator[ydrasil_pkg::OP_ALU_AUIPC]);
-	assign prev_alu_bypass_rs1 =
-		id_ex_prev_alu_bypassable & id_ctrl_prev_alu_bypass_ok &
-		id_ctrl_rs1_ren & (id_ctrl_rs1_addr == id_rf_waddr_rd);
-	assign prev_alu_bypass_rs2 =
-		id_ex_prev_alu_bypassable & id_ctrl_prev_alu_bypass_ok &
-		id_ctrl_rs2_ren & (id_ctrl_rs2_addr == id_rf_waddr_rd);
+	assign ex_hzd_pkt.valid = id_ex_valid;
+	assign ex_hzd_pkt.interrupt = interrupt;
+	assign ex_hzd_pkt.rd_addr = id_rf_waddr_rd;
+	assign ex_hzd_pkt.alu_rf_wen = id_alu_rf_wen_rd;
+	assign ex_hzd_pkt.operator_type = operator_type;
+	assign ex_hzd_pkt.operator_info = operator;
+	assign alu_fwd_pkt.valid = alu_rf_wen_rd;
+	assign alu_fwd_pkt.addr = alu_rf_waddr_rd;
+	assign alu_fwd_pkt.data = alu_result;
+	assign lsu_fwd_pkt.valid = lsu_rf_wen_rd;
+	assign lsu_fwd_pkt.addr = lsu_rf_waddr_rd;
+	assign lsu_fwd_pkt.data = lsu_wb_result;
+	assign mul_fwd_pkt.valid = mul_rf_wen_rd;
+	assign mul_fwd_pkt.addr = mul_rf_waddr_rd;
+	assign mul_fwd_pkt.data = mul_wb_result;
+	assign wb_hzd_valid_q = wb_fwd_pkt.valid;
+	assign wb_hzd_addr_q = wb_fwd_pkt.addr;
+	assign wb_hzd_data_q = wb_fwd_pkt.data;
+	assign id_ctrl_rs1_addr = id_ctrl_pkt.rs1_addr;
+	assign id_ctrl_rs2_addr = id_ctrl_pkt.rs2_addr;
+	assign id_ctrl_rs1_ren = id_ctrl_pkt.rs1_ren;
+	assign id_ctrl_rs2_ren = id_ctrl_pkt.rs2_ren;
+	assign id_ctrl_rd_wen = id_ctrl_pkt.rd_wen;
+	assign id_ctrl_rd_addr = id_ctrl_pkt.rd_addr;
+	assign id_ctrl_lsu_req = id_ctrl_pkt.lsu_req;
+	assign id_ctrl_store_req = id_ctrl_pkt.store_req;
+	assign id_ctrl_prev_alu_bypass_ok = id_ctrl_pkt.prev_alu_bypass_ok;
+	assign scoreboard_stall = hzd_status_pkt.scoreboard_stall;
+	assign lsu_struct_stall = hzd_status_pkt.lsu_struct_stall;
+	assign issue_store_data_ready = hzd_status_pkt.issue_store_data_ready;
+	assign prev_alu_bypass_rs1 = hzd_status_pkt.prev_alu_bypass_rs1;
+	assign prev_alu_bypass_rs2 = hzd_status_pkt.prev_alu_bypass_rs2;
+	assign rs1_pending_stall = hzd_status_pkt.rs1_pending_stall;
+	assign rs2_pending_stall = hzd_status_pkt.rs2_pending_stall;
+	assign rd_waw_stall = hzd_status_pkt.rd_waw_stall;
+	assign rs1_issue_hzd = hzd_status_pkt.rs1_issue_hzd;
+	assign rs2_issue_hzd = hzd_status_pkt.rs2_issue_hzd;
+	assign rd_issue_hzd = hzd_status_pkt.rd_issue_hzd;
+	assign issue_load_producer = hzd_status_pkt.issue_load_producer;
+	assign issue_alu_producer = hzd_status_pkt.issue_alu_producer;
+	assign issue_mul_div_producer = hzd_status_pkt.issue_mul_div_producer;
+	assign issue_src_hzd = hzd_status_pkt.issue_src_hzd;
+	assign store_data_wait = hzd_status_pkt.store_data_wait;
+	assign id_ex_rd_issue = hzd_status_pkt.id_ex_rd_issue;
+	assign gpr_pending_clear_mask = hzd_status_pkt.gpr_pending_clear_mask;
+	assign gpr_pending_issue_mask = hzd_status_pkt.gpr_pending_issue_mask;
+	assign gpr_pending_for_hazard = hzd_status_pkt.gpr_pending_for_hazard;
 `ifndef SYNTHESIS
 	assign dbg_bp_predict_pc_o = bp_lookup_pc;
 	assign dbg_bp_predict_hit_o = bp_predict_hit;
@@ -333,90 +375,6 @@ import ydrasil_pkg::*;
 	assign dbg_bp_pred_next_pc_o = dbg_bp_pred_next_pc;
 	assign dbg_bp_mispredict_o = dbg_bp_mispredict;
 `endif
-	wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_clear_mask =
-		wb_hzd_valid_q ? (ydrasil_pkg::REGS_NUM'(1) << wb_hzd_addr_q) : '0;
-	wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_issue_mask =
-		id_ex_rd_issue ? (ydrasil_pkg::REGS_NUM'(1) << id_rf_waddr_rd) : '0;
-	wire id_ex_rd_flush_kill =
-		flush_ex & id_ex_valid & (id_rf_waddr_rd != '0) &
-		(id_alu_rf_wen_rd | operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD]);
-	wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_flush_kill_mask =
-		id_ex_rd_flush_kill ? (ydrasil_pkg::REGS_NUM'(1) << id_rf_waddr_rd) : '0;
-	wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_for_hazard =
-		(gpr_pending_q & ~gpr_pending_clear_mask & ~gpr_pending_flush_kill_mask) |
-		gpr_pending_issue_mask;
-
-	wire rs1_clear_fwd =
-		(wb_hzd_valid_q & id_ctrl_rs1_ren & (id_ctrl_rs1_addr != '0) &
-		 (id_ctrl_rs1_addr == wb_hzd_addr_q)) |
-		(lsu_rf_wen_rd & id_ctrl_rs1_ren & (id_ctrl_rs1_addr != '0) &
-		 (id_ctrl_rs1_addr == lsu_rf_waddr_rd)) |
-		(alu_rf_wen_rd & id_ctrl_rs1_ren & (id_ctrl_rs1_addr != '0) &
-		 (id_ctrl_rs1_addr == alu_rf_waddr_rd));
-	wire rs2_clear_fwd =
-		(wb_hzd_valid_q & id_ctrl_rs2_ren & (id_ctrl_rs2_addr != '0) &
-		 (id_ctrl_rs2_addr == wb_hzd_addr_q)) |
-		(lsu_rf_wen_rd & id_ctrl_rs2_ren & (id_ctrl_rs2_addr != '0) &
-		 (id_ctrl_rs2_addr == lsu_rf_waddr_rd)) |
-		(alu_rf_wen_rd & id_ctrl_rs2_ren & (id_ctrl_rs2_addr != '0) &
-		 (id_ctrl_rs2_addr == alu_rf_waddr_rd));
-	wire rd_clear_fwd =
-		(wb_hzd_valid_q & id_ctrl_rd_wen & (id_ctrl_rd_addr != '0) &
-		 (id_ctrl_rd_addr == wb_hzd_addr_q)) |
-		(lsu_rf_wen_rd & id_ctrl_rd_wen & (id_ctrl_rd_addr != '0) &
-		 (id_ctrl_rd_addr == lsu_rf_waddr_rd)) |
-		(alu_rf_wen_rd & id_ctrl_rd_wen & (id_ctrl_rd_addr != '0) &
-		 (id_ctrl_rd_addr == alu_rf_waddr_rd));
-	wire rs1_issue_hzd =
-		id_ex_rd_issue & id_ctrl_rs1_ren & (id_ctrl_rs1_addr == id_rf_waddr_rd) &
-		!prev_alu_bypass_rs1;
-	wire rs2_issue_hzd =
-		id_ex_rd_issue & id_ctrl_rs2_ren & (id_ctrl_rs2_addr == id_rf_waddr_rd) &
-		!prev_alu_bypass_rs2;
-	wire rd_issue_hzd =
-		id_ex_rd_issue & id_ctrl_rd_wen & (id_ctrl_rd_addr == id_rf_waddr_rd);
-	wire rs1_pending_stall =
-		id_ctrl_rs1_ren && gpr_pending_q[id_ctrl_rs1_addr] && !rs1_clear_fwd;
-	wire rs2_pending_stall =
-		id_ctrl_rs2_ren && gpr_pending_q[id_ctrl_rs2_addr] && !rs2_clear_fwd;
-	wire rd_waw_stall =
-		id_ctrl_rd_wen && gpr_pending_q[id_ctrl_rd_addr] && !rd_clear_fwd;
-	wire issue_load_producer =
-		id_ex_rd_issue & operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD];
-	wire issue_alu_producer =
-		id_ex_rd_issue & id_alu_rf_wen_rd &
-		operator_type[ydrasil_pkg::OPERATOR_TYPE_ALU];
-	wire issue_mul_div_producer =
-		id_ex_rd_issue & operator_type[ydrasil_pkg::OPERATOR_TYPE_MUL];
-	wire issue_src_hzd = rs1_issue_hzd | rs2_issue_hzd;
-
-	assign scoreboard_stall =
-		rs1_issue_hzd | rs2_issue_hzd | rd_issue_hzd |
-		rs1_pending_stall |
-		rs2_pending_stall |
-		rd_waw_stall;
-	assign lsu_struct_stall = id_ctrl_lsu_req & lsu_ctrl_busy;
-	assign bubble_id = scoreboard_stall | lsu_struct_stall | clint_stall | wb_backpressure;
-
-	always_ff @(posedge clk or negedge rst_n) begin
-		if (!rst_n) begin
-			gpr_pending_q <= '0;
-			wb_hzd_valid_q <= 1'b0;
-			wb_hzd_addr_q <= '0;
-			wb_hzd_data_q <= '0;
-		end else if (interrupt) begin
-			gpr_pending_q <= '0;
-			wb_hzd_valid_q <= 1'b0;
-			wb_hzd_addr_q <= '0;
-			wb_hzd_data_q <= '0;
-		end else begin
-			gpr_pending_q <= gpr_pending_for_hazard;
-			wb_hzd_valid_q <= rf_wen_rd & (rf_waddr_rd != '0);
-			wb_hzd_addr_q <= rf_waddr_rd;
-			wb_hzd_data_q <= rf_wdata_rd;
-		end
-	end
-
 	assign operator_lsu_type[0] = ex_accept_valid & operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD];
 	assign operator_lsu_type[1] = ex_accept_valid & operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE];
 
@@ -434,12 +392,10 @@ import ydrasil_pkg::*;
 		.operator_lsu_i    (operator_lsu),
 		.operator_lsu_type_i(operator_lsu_type),
 		.ex_lsu_rd_data_i (ex_lsu_result),
-		.id_lsu_rs2_data_i (id_lsu_rs2_data),
-		.id_lsu_rs2_raddr_i('0),
-		.id_lsu_addr_i     (id_lsu_addr),
-		.id_lsu_addr_is_dtcm_i(id_lsu_addr_is_dtcm),
-		.id_lsu_store_data_i(id_lsu_store_data),
-		.id_lsu_store_mask_i(id_lsu_store_mask),
+		.id_lsu_i          (id_lsu_pkt),
+		.alu_fwd_i         (alu_fwd_pkt),
+		.mul_fwd_i         (mul_fwd_pkt),
+		.wb_fwd_i          (wb_fwd_pkt),
 		.dtcm_rdata_i      (dtcm_rdata),
 		.dtcm_wdata_o      (dtcm_wdata),
 		.dtcm_addr_o       (dtcm_addr),
@@ -525,17 +481,11 @@ import ydrasil_pkg::*;
 		.rf_addr_rs2_o      (rf_raddr_rs2),
 		.rf_rdata_rs1_i     (rf_rdata_rs1),
 		.rf_rdata_rs2_i     (rf_rdata_rs2),
-		.wb_fwd_valid_i     (wb_hzd_valid_q),
-		.wb_fwd_addr_i      (wb_hzd_addr_q),
-		.wb_fwd_data_i      (wb_hzd_data_q),
-		.lsu_fwd_valid_i    (lsu_rf_wen_rd),
-		.lsu_fwd_addr_i     (lsu_rf_waddr_rd),
-		.lsu_fwd_data_i     (lsu_wb_result),
-		.alu_fwd_valid_i    (alu_rf_wen_rd),
-		.alu_fwd_addr_i     (alu_rf_waddr_rd),
-		.alu_fwd_data_i     (alu_result),
-		.prev_alu_bypass_rs1_i(prev_alu_bypass_rs1),
-		.prev_alu_bypass_rs2_i(prev_alu_bypass_rs2),
+		.wb_fwd_i           (wb_fwd_pkt),
+		.lsu_fwd_i          (lsu_fwd_pkt),
+		.alu_fwd_i          (alu_fwd_pkt),
+		.mul_fwd_i          (mul_fwd_pkt),
+		.hzd_status_i       (hzd_status_pkt),
 		.operand_a_o        (operand_a),
 		.operand_b_o        (operand_b),
 		.alu_operand_a_o    (alu_operand_a),
@@ -552,20 +502,9 @@ import ydrasil_pkg::*;
 		.bt_a_operand_o     (bt_a_operand),
 		.bt_b_operand_o     (bt_b_operand),
 		.operator_lsu_o     (operator_lsu),
-		.id_lsu_rs2_data_o  (id_lsu_rs2_data),
-		.id_lsu_addr_o      (id_lsu_addr),
-		.id_lsu_addr_is_dtcm_o(id_lsu_addr_is_dtcm),
-		.id_lsu_store_data_o(id_lsu_store_data),
-		.id_lsu_store_mask_o(id_lsu_store_mask),
+		.id_lsu_o           (id_lsu_pkt),
 		.operator_type_o    (operator_type),
-		.id_ctrl_rs1_addr_o (id_ctrl_rs1_addr),
-		.id_ctrl_rs2_addr_o (id_ctrl_rs2_addr),
-		.id_ctrl_rs1_ren_o  (id_ctrl_rs1_ren),
-		.id_ctrl_rs2_ren_o  (id_ctrl_rs2_ren),
-		.id_ctrl_rd_wen_o   (id_ctrl_rd_wen),
-		.id_ctrl_rd_addr_o  (id_ctrl_rd_addr),
-		.id_ctrl_lsu_req_o  (id_ctrl_lsu_req),
-		.id_ctrl_prev_alu_bypass_ok_o(id_ctrl_prev_alu_bypass_ok),
+		.id_ctrl_o          (id_ctrl_pkt),
 		.id_csr_raddr_o     (id_csr_raddr),
 		.id_ex_csr_waddr_o  (id_ex_csr_waddr),
 		.id_op_csr_info_o   (id_op_csr_info),
@@ -721,17 +660,30 @@ import ydrasil_pkg::*;
 	);
 
 		ydrasil_ctrl u_ctrl (
+			.clk               (clk),
 			.rst_n             (rst_n),
 			.ex_branch_jump_i  (ex_pc_redirect),
 			.ex_branch_target_i(ex_pc_redirect_target),
-			.scoreboard_stall_i (scoreboard_stall),
-			.lsu_struct_stall_i (lsu_struct_stall),
-	        .clint_stall_i        (clint_stall),
+			.ex_hzd_i          (ex_hzd_pkt),
+			.id_ctrl_i         (id_ctrl_pkt),
+			.alu_fwd_i         (alu_fwd_pkt),
+			.lsu_fwd_i         (lsu_fwd_pkt),
+			.mul_fwd_i         (mul_fwd_pkt),
+			.lsu_ctrl_busy_i   (lsu_ctrl_busy),
+			.clint_stall_i     (clint_stall),
 			.ex_mul_stall_i     (ex_mul_stall),
 			.wb_backpressure_i  (wb_backpressure),
+			.rf_wen_rd_i       (rf_wen_rd),
+			.rf_waddr_rd_i     (rf_waddr_rd),
+			.rf_wdata_rd_i     (rf_wdata_rd),
+			.hzd_status_o      (hzd_status_pkt),
+			.wb_fwd_o          (wb_fwd_pkt),
+			.gpr_pending_o     (gpr_pending_q),
+			.ex_accept_valid_o (ex_accept_valid),
 		.stall_if_o        (stall_if),
 		.stall_id_o        (stall_id),
         .stall_pc_o        (stall_pc),
+		.bubble_id_o       (bubble_id),
 		.flush_if_o        (flush_if),
 		.flush_id_o        (flush_id),
 		.flush_ex_o        (flush_ex),

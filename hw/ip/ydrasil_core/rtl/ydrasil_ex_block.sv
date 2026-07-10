@@ -130,7 +130,7 @@ import ydrasil_pkg::*;
 
     reg [REGS_DATA_WIDTH-1:0] alu_result_ff;
     reg                       alu_rf_wen_rd_ff;
-    reg [REGS_ADDR_WIDTH-1:0] alu_rf_waddr_rd_ff;
+    (* max_fanout = 8 *) reg [REGS_ADDR_WIDTH-1:0] alu_rf_waddr_rd_ff;
     reg                       alu_bypass_valid_q;
     reg [REGS_DATA_WIDTH-1:0] alu_bypass_data_q;
 

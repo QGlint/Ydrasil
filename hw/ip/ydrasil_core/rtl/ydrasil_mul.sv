@@ -44,7 +44,7 @@ import ydrasil_pkg::*;
     reg                         s4_valid_q;
     reg [REGS_DATA_WIDTH-1:0]   s4_wdata_q;
     reg                         s4_wen_q;
-    reg [REGS_ADDR_WIDTH-1:0]   s4_waddr_q;
+    (* max_fanout = 8 *) reg [REGS_ADDR_WIDTH-1:0] s4_waddr_q;
 
     wire op_mulh   = operator_i[OP_MUL_MULH];
     wire op_mulhsu = operator_i[OP_MUL_MULHSU];
