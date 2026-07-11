@@ -159,6 +159,15 @@ end
     reg [31:0] sb_branch_src_wait_count;
     reg [31:0] sb_store_addr_wait_count;
     reg [31:0] sb_store_data_wait_count;
+    reg [31:0] sb_load_to_alu_count;
+    reg [31:0] sb_load_to_branch_count;
+    reg [31:0] sb_load_to_load_count;
+    reg [31:0] sb_load_to_store_count;
+    reg [31:0] sb_load_to_mul_count;
+    reg [31:0] sb_load_to_other_count;
+    reg [31:0] sb_load_rs1_count;
+    reg [31:0] sb_load_rs2_count;
+    reg [31:0] sb_pending_tail_count;
     reg [31:0] fe_pred_taken_redirect_count;
     reg [31:0] fe_correct_taken_redirect_count;
     reg [31:0] fe_pred_taken_bubble_count;
@@ -345,6 +354,15 @@ end
             sb_branch_src_wait_count <= 32'b0;
             sb_store_addr_wait_count <= 32'b0;
             sb_store_data_wait_count <= 32'b0;
+            sb_load_to_alu_count <= 32'b0;
+            sb_load_to_branch_count <= 32'b0;
+            sb_load_to_load_count <= 32'b0;
+            sb_load_to_store_count <= 32'b0;
+            sb_load_to_mul_count <= 32'b0;
+            sb_load_to_other_count <= 32'b0;
+            sb_load_rs1_count <= 32'b0;
+            sb_load_rs2_count <= 32'b0;
+            sb_pending_tail_count <= 32'b0;
             fe_pred_taken_redirect_count <= 32'b0;
             fe_correct_taken_redirect_count <= 32'b0;
             fe_pred_taken_bubble_count <= 32'b0;
@@ -436,6 +454,35 @@ end
                 ((u_dut.scoreboard_stall &&
                   u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
                   (u_dut.rs2_pending_stall | u_dut.rs2_issue_hzd)) ? 32'd1 : 32'd0);
+            sb_load_to_alu_count <= sb_load_to_alu_count +
+                ((u_dut.issue_load_producer & u_dut.issue_src_hzd &
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_ALU]) ? 32'd1 : 32'd0);
+            sb_load_to_branch_count <= sb_load_to_branch_count +
+                ((u_dut.issue_load_producer & u_dut.issue_src_hzd &
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP]) ? 32'd1 : 32'd0);
+            sb_load_to_load_count <= sb_load_to_load_count +
+                ((u_dut.issue_load_producer & u_dut.issue_src_hzd &
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD]) ? 32'd1 : 32'd0);
+            sb_load_to_store_count <= sb_load_to_store_count +
+                ((u_dut.issue_load_producer & u_dut.issue_src_hzd &
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) ? 32'd1 : 32'd0);
+            sb_load_to_mul_count <= sb_load_to_mul_count +
+                ((u_dut.issue_load_producer & u_dut.issue_src_hzd &
+                  u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL]) ? 32'd1 : 32'd0);
+            sb_load_to_other_count <= sb_load_to_other_count +
+                ((u_dut.issue_load_producer & u_dut.issue_src_hzd &
+                  !(u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_ALU] |
+                    u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] |
+                    u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] |
+                    u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] |
+                    u_dut.u_ydrasil_id_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL])) ? 32'd1 : 32'd0);
+            sb_load_rs1_count <= sb_load_rs1_count +
+                ((u_dut.issue_load_producer & u_dut.rs1_issue_hzd) ? 32'd1 : 32'd0);
+            sb_load_rs2_count <= sb_load_rs2_count +
+                ((u_dut.issue_load_producer & u_dut.rs2_issue_hzd) ? 32'd1 : 32'd0);
+            sb_pending_tail_count <= sb_pending_tail_count +
+                (((u_dut.rs1_pending_stall | u_dut.rs2_pending_stall) &
+                  !(u_dut.rs1_issue_hzd | u_dut.rs2_issue_hzd)) ? 32'd1 : 32'd0);
             fe_pred_taken_redirect_count <= fe_pred_taken_redirect_count +
                 (u_dut.u_ydrasil_if_stage.bp_predict_redirect ? 32'd1 : 32'd0);
             fe_pred_taken_bubble_count <= fe_pred_taken_bubble_count +
@@ -666,6 +713,16 @@ end
                 sb_branch_src_wait_count,
                 sb_store_addr_wait_count,
                 sb_store_data_wait_count);
+            $display("PERF_LOAD_DETAIL: TO_ALU=%-d TO_BRANCH=%-d TO_LOAD=%-d TO_STORE=%-d TO_MUL=%-d TO_OTHER=%-d RS1=%-d RS2=%-d PENDING_TAIL=%-d",
+                sb_load_to_alu_count,
+                sb_load_to_branch_count,
+                sb_load_to_load_count,
+                sb_load_to_store_count,
+                sb_load_to_mul_count,
+                sb_load_to_other_count,
+                sb_load_rs1_count,
+                sb_load_rs2_count,
+                sb_pending_tail_count);
             $display("PERF_FRONTEND: PRED_TAKEN_REDIRECT=%-d CORRECT_TAKEN_REDIRECT=%-d PRED_TAKEN_BUBBLE=%-d WRONG_DIR_FLUSH=%-d BTB_MISS_TAKEN=%-d",
                 fe_pred_taken_redirect_count,
                 fe_correct_taken_redirect_count,

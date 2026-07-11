@@ -9,14 +9,18 @@ import ydrasil_pkg::*;
     input  wire [REGS_DATA_WIDTH-1:0]   alu_wdata_rd_i,
     input  wire                         alu_rf_wen_rd_i,
     input  wire [REGS_ADDR_WIDTH-1:0]   alu_rf_waddr_rd_i,
+    input  wire                         alu_producer_id_i,
 
     input  wire [REGS_DATA_WIDTH-1:0]   lsu_wb_result_i,
     input  wire                         lsu_rf_wen_rd_i,
     input  wire [REGS_ADDR_WIDTH-1:0]   lsu_rf_waddr_rd_i,
+    input  wire                         lsu_producer_id_i,
+    input  wire                         lsu_producer_tracked_i,
 
     input  wire [REGS_DATA_WIDTH-1:0]   mul_wdata_rd_i,
     input  wire                         mul_rf_wen_rd_i,
     input  wire [REGS_ADDR_WIDTH-1:0]   mul_rf_waddr_rd_i,
+    input  wire                         mul_producer_id_i,
 
     output wire                         wb_mul_complete_o,
     output wire [REGS_ADDR_WIDTH-1:0]   wb_mul_complete_waddr_o,
@@ -25,25 +29,29 @@ import ydrasil_pkg::*;
     output wire [REGS_DATA_WIDTH-1:0]   rf_wdata_rd_o,
     output wire                         rf_wen_rd_o,
     output wire [REGS_ADDR_WIDTH-1:0]   rf_waddr_rd_o
+    ,output wire                        rf_producer_id_o
+    ,output wire                        rf_producer_tracked_o
 );
 
-    localparam int MUL_FIFO_DEPTH = 16;
-    localparam int MUL_FIFO_PTR_WIDTH = 4;
-    localparam int MUL_FIFO_COUNT_WIDTH = 5;
-    localparam int MUL_FIFO_BACKPRESSURE_LEVEL = 10;
-    localparam int ALU_FIFO_DEPTH = 16;
-    localparam int ALU_FIFO_PTR_WIDTH = 4;
-    localparam int ALU_FIFO_COUNT_WIDTH = 5;
-    localparam int ALU_FIFO_BACKPRESSURE_LEVEL = 10;
+    localparam int MUL_FIFO_DEPTH = 4;
+    localparam int MUL_FIFO_PTR_WIDTH = 2;
+    localparam int MUL_FIFO_COUNT_WIDTH = 3;
+    localparam int MUL_FIFO_BACKPRESSURE_LEVEL = 2;
+    localparam int ALU_FIFO_DEPTH = 4;
+    localparam int ALU_FIFO_PTR_WIDTH = 2;
+    localparam int ALU_FIFO_COUNT_WIDTH = 3;
+    localparam int ALU_FIFO_BACKPRESSURE_LEVEL = 2;
 
     reg [REGS_DATA_WIDTH-1:0] mul_fifo_data_q [0:MUL_FIFO_DEPTH-1];
     reg [REGS_ADDR_WIDTH-1:0] mul_fifo_addr_q [0:MUL_FIFO_DEPTH-1];
+    reg mul_fifo_producer_id_q [0:MUL_FIFO_DEPTH-1];
     reg [MUL_FIFO_PTR_WIDTH-1:0] mul_fifo_rptr_q;
     reg [MUL_FIFO_PTR_WIDTH-1:0] mul_fifo_wptr_q;
     reg [MUL_FIFO_COUNT_WIDTH-1:0] mul_fifo_count_q;
 
     reg [REGS_DATA_WIDTH-1:0] alu_fifo_data_q [0:ALU_FIFO_DEPTH-1];
     reg [REGS_ADDR_WIDTH-1:0] alu_fifo_addr_q [0:ALU_FIFO_DEPTH-1];
+    reg alu_fifo_producer_id_q [0:ALU_FIFO_DEPTH-1];
     reg [ALU_FIFO_PTR_WIDTH-1:0] alu_fifo_rptr_q;
     reg [ALU_FIFO_PTR_WIDTH-1:0] alu_fifo_wptr_q;
     reg [ALU_FIFO_COUNT_WIDTH-1:0] alu_fifo_count_q;
@@ -52,10 +60,12 @@ import ydrasil_pkg::*;
     wire mul_fifo_full = (mul_fifo_count_q == MUL_FIFO_COUNT_WIDTH'(MUL_FIFO_DEPTH));
     wire [REGS_DATA_WIDTH-1:0] mul_fifo_head_data = mul_fifo_data_q[mul_fifo_rptr_q];
     wire [REGS_ADDR_WIDTH-1:0] mul_fifo_head_addr = mul_fifo_addr_q[mul_fifo_rptr_q];
+    wire mul_fifo_head_producer_id = mul_fifo_producer_id_q[mul_fifo_rptr_q];
     wire alu_fifo_empty = (alu_fifo_count_q == '0);
     wire alu_fifo_full = (alu_fifo_count_q == ALU_FIFO_COUNT_WIDTH'(ALU_FIFO_DEPTH));
     wire [REGS_DATA_WIDTH-1:0] alu_fifo_head_data = alu_fifo_data_q[alu_fifo_rptr_q];
     wire [REGS_ADDR_WIDTH-1:0] alu_fifo_head_addr = alu_fifo_addr_q[alu_fifo_rptr_q];
+    wire alu_fifo_head_producer_id = alu_fifo_producer_id_q[alu_fifo_rptr_q];
 
     wire sel_lsu = lsu_rf_wen_rd_i;
     wire sel_alu_fifo = !sel_lsu & !alu_fifo_empty;
@@ -102,6 +112,13 @@ import ydrasil_pkg::*;
         ({REGS_DATA_WIDTH{sel_alu_current}} & alu_wdata_rd_i) |
         ({REGS_DATA_WIDTH{sel_mul_fifo}}    & mul_fifo_head_data) |
         ({REGS_DATA_WIDTH{sel_mul_current}} & mul_wdata_rd_i);
+    assign rf_producer_id_o =
+        (sel_lsu & lsu_producer_id_i) |
+        (sel_alu_fifo & alu_fifo_head_producer_id) |
+        (sel_alu_current & alu_producer_id_i) |
+        (sel_mul_fifo & mul_fifo_head_producer_id) |
+        (sel_mul_current & mul_producer_id_i);
+    assign rf_producer_tracked_o = sel_lsu ? lsu_producer_tracked_i : rf_wen_rd_o;
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -115,6 +132,7 @@ import ydrasil_pkg::*;
             if (alu_enqueue_accept) begin
                 alu_fifo_data_q[alu_fifo_wptr_q] <= alu_wdata_rd_i;
                 alu_fifo_addr_q[alu_fifo_wptr_q] <= alu_rf_waddr_rd_i;
+                alu_fifo_producer_id_q[alu_fifo_wptr_q] <= alu_producer_id_i;
                 alu_fifo_wptr_q <= alu_fifo_wptr_q + ALU_FIFO_PTR_WIDTH'(1);
             end
 
@@ -127,6 +145,7 @@ import ydrasil_pkg::*;
             if (mul_enqueue_accept) begin
                 mul_fifo_data_q[mul_fifo_wptr_q] <= mul_wdata_rd_i;
                 mul_fifo_addr_q[mul_fifo_wptr_q] <= mul_rf_waddr_rd_i;
+                mul_fifo_producer_id_q[mul_fifo_wptr_q] <= mul_producer_id_i;
                 mul_fifo_wptr_q <= mul_fifo_wptr_q + MUL_FIFO_PTR_WIDTH'(1);
             end
 

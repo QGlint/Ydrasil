@@ -32,6 +32,8 @@ import ydrasil_pkg::*;
     input  ydrasil_gpr_fwd_pkt_t           alu_fwd_i,
     input  ydrasil_gpr_fwd_pkt_t           mul_fwd_i,
     input  ydrasil_hzd_status_pkt_t        hzd_status_i,
+    input  wire                            producer_alloc_id_i,
+    input  wire                            producer_alloc_tracked_i,
 
     // Dispatch to EX   
     // output wire                            alu_valid_o,
@@ -80,6 +82,8 @@ import ydrasil_pkg::*;
     output wire [1:0]                      id_ex_pred_counter_o,
     output wire [DATA_WIDTH-1:0]           id_ex_pred_bht_index_o,
     output wire                            id_ex_valid_o,
+    output wire                            id_ex_producer_id_o,
+    output wire                            id_ex_producer_tracked_o,
     // Generic writeback information
     output wire                            id_alu_rf_wen_rd_o,
     output wire [4:0]                      id_rf_waddr_rd_o
@@ -97,6 +101,8 @@ import ydrasil_pkg::*;
 
     reg [4:0]                           rf_waddr_rd_ff;
     reg                                 rf_wen_rd_ff;
+    reg                                 producer_id_ff;
+    reg                                 producer_tracked_ff;
 
     wire [DATA_WIDTH-1:0]                imm_i;
     wire                                 operand_b_rs_sel;
@@ -251,11 +257,15 @@ import ydrasil_pkg::*;
         (issue_rf_raddr_rs2_ff == wb_fwd_i.addr);
     wire rs1_lsu_fwd =
         lsu_fwd_i.valid &&
+        (lsu_fwd_i.producer_tracked ||
+         hzd_status_i.gpr_pending_for_hazard[issue_rf_raddr_rs1_ff]) &&
         issue_rf_ren_rs1_ff &&
         (issue_rf_raddr_rs1_ff != '0) &&
         (issue_rf_raddr_rs1_ff == lsu_fwd_i.addr);
     wire rs2_lsu_fwd =
         lsu_fwd_i.valid &&
+        (lsu_fwd_i.producer_tracked ||
+         hzd_status_i.gpr_pending_for_hazard[issue_rf_raddr_rs2_ff]) &&
         (issue_rf_ren_rs2_ff | issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
         (issue_rf_raddr_rs2_ff != '0) &&
         (issue_rf_raddr_rs2_ff == lsu_fwd_i.addr);
@@ -454,6 +464,8 @@ import ydrasil_pkg::*;
             operator_type_ff    <= '0;
             rf_wen_rd_ff        <= '0;
             rf_waddr_rd_ff      <= '0;
+            producer_id_ff      <= 1'b0;
+            producer_tracked_ff <= 1'b0;
             operator_lsu_ff     <= '0;
             id_lsu_rs2_data_ff  <= '0;
             id_lsu_addr_ff      <= '0;
@@ -533,6 +545,8 @@ import ydrasil_pkg::*;
                 operator_type_ff    <= issue_operator_type_ff;
                 rf_wen_rd_ff        <= issue_rf_wen_rd_ff;
                 rf_waddr_rd_ff      <= issue_rf_waddr_rd_ff;
+                producer_id_ff      <= producer_alloc_id_i;
+                producer_tracked_ff <= producer_alloc_tracked_i;
                 operator_lsu_ff     <= issue_operator_lsu_ff;
                 id_lsu_rs2_data_ff  <= issue_rs2_data; // 直接传递寄存器数据，供LSU使用
                 id_lsu_addr_ff      <= issue_lsu_addr;
@@ -636,6 +650,8 @@ import ydrasil_pkg::*;
     assign id_ex_pred_counter_o = id_ex_pred_counter_ff;
     assign id_ex_pred_bht_index_o = id_ex_pred_bht_index_ff;
     assign id_ex_valid_o = id_ex_valid_ff;
+    assign id_ex_producer_id_o = producer_id_ff;
+    assign id_ex_producer_tracked_o = producer_tracked_ff;
 
     assign id_ctrl_o.rs1_addr = issue_rf_raddr_rs1_ff;
     assign id_ctrl_o.rs2_addr = issue_rf_raddr_rs2_ff;
@@ -654,5 +670,6 @@ import ydrasil_pkg::*;
         (issue_plain_alu_op |
          (issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &
           issue_rf_ren_rs1_ff & issue_rf_ren_rs2_ff & !issue_rf_wen_rd_ff));
+    assign id_ctrl_o.short_alu_writer = issue_simple_alu_op;
 
 endmodule

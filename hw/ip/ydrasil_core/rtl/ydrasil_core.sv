@@ -106,12 +106,14 @@ import ydrasil_pkg::*;
 	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] alu_result;
 	wire                        alu_rf_wen_rd;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] alu_rf_waddr_rd;
+	wire                        alu_producer_id;
 	wire                        ex_mul_stall;
 	wire                        ex_mul_issue;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] ex_mul_issue_waddr;
 	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] mul_wb_result;
 	wire                        mul_rf_wen_rd;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] mul_rf_waddr_rd;
+	wire                        mul_producer_id;
 	wire                        mul_result_valid;
 	wire                        ex_instret_inc;
 	wire                        ex_pc_redirect;
@@ -150,6 +152,10 @@ import ydrasil_pkg::*;
 	wire [1:0]                  id_ex_pred_counter;
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] id_ex_pred_bht_index;
 	wire                        id_ex_valid;
+	wire                        id_ex_producer_id;
+	wire                        id_ex_producer_tracked;
+	wire                        producer_alloc_id;
+	wire                        producer_alloc_tracked;
 
 	// LSU request path
 	wire [1:0]                  operator_lsu_type;
@@ -168,11 +174,15 @@ import ydrasil_pkg::*;
 	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] lsu_wb_result;
 	wire                        lsu_rf_wen_rd;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] lsu_rf_waddr_rd;
+	wire                        lsu_producer_id;
+	wire                        lsu_producer_tracked;
 
 	// WB -> RF
 	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] rf_wdata_rd;
 	wire                        rf_wen_rd;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] rf_waddr_rd;
+	wire                        rf_producer_id;
+	wire                        rf_producer_tracked;
 	wire                        wb_backpressure;
 	wire                        wb_hzd_valid_q;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] wb_hzd_addr_q;
@@ -314,17 +324,25 @@ import ydrasil_pkg::*;
 
 	assign ex_hzd_pkt.valid = id_ex_valid;
 	assign ex_hzd_pkt.interrupt = interrupt;
+	assign ex_hzd_pkt.producer_id = id_ex_producer_id;
+	assign ex_hzd_pkt.producer_tracked = id_ex_producer_tracked;
 	assign ex_hzd_pkt.rd_addr = id_rf_waddr_rd;
 	assign ex_hzd_pkt.alu_rf_wen = id_alu_rf_wen_rd;
 	assign ex_hzd_pkt.operator_type = operator_type;
 	assign ex_hzd_pkt.operator_info = operator;
 	assign alu_fwd_pkt.valid = alu_rf_wen_rd;
+	assign alu_fwd_pkt.producer_id = alu_producer_id;
+	assign alu_fwd_pkt.producer_tracked = 1'b1;
 	assign alu_fwd_pkt.addr = alu_rf_waddr_rd;
 	assign alu_fwd_pkt.data = alu_result;
 	assign lsu_fwd_pkt.valid = lsu_rf_wen_rd;
+	assign lsu_fwd_pkt.producer_id = lsu_producer_id;
+	assign lsu_fwd_pkt.producer_tracked = lsu_producer_tracked;
 	assign lsu_fwd_pkt.addr = lsu_rf_waddr_rd;
 	assign lsu_fwd_pkt.data = lsu_wb_result;
 	assign mul_fwd_pkt.valid = mul_rf_wen_rd;
+	assign mul_fwd_pkt.producer_id = mul_producer_id;
+	assign mul_fwd_pkt.producer_tracked = 1'b1;
 	assign mul_fwd_pkt.addr = mul_rf_waddr_rd;
 	assign mul_fwd_pkt.data = mul_wb_result;
 	assign wb_hzd_valid_q = wb_fwd_pkt.valid;
@@ -392,6 +410,8 @@ import ydrasil_pkg::*;
 		.rst_n             (rst_n),
 		.ex_lsu_mem_addr_i (ex_lsu_mem_addr),
 		.id_rd_waddr_i      (id_rf_waddr_rd),
+		.id_producer_id_i   (id_ex_producer_id),
+		.id_producer_tracked_i(id_ex_producer_tracked),
 		.operator_lsu_i    (operator_lsu),
 		.operator_lsu_type_i(operator_lsu_type),
 		.ex_lsu_rd_data_i (ex_lsu_result),
@@ -414,7 +434,9 @@ import ydrasil_pkg::*;
 		.lsu_ctrl_busy_o        (lsu_ctrl_busy),
 		.lsu_wb_result_o   (lsu_wb_result),
 		.lsu_rf_rd_wen_o   (lsu_rf_wen_rd),
-		.lsu_rf_rd_waddr_o (lsu_rf_waddr_rd)
+		.lsu_rf_rd_waddr_o (lsu_rf_waddr_rd),
+		.lsu_producer_id_o (lsu_producer_id)
+		,.lsu_producer_tracked_o(lsu_producer_tracked)
 	);
 
 		ydrasil_branch_predictor #(
@@ -491,6 +513,8 @@ import ydrasil_pkg::*;
 		.alu_fwd_i          (alu_fwd_pkt),
 		.mul_fwd_i          (mul_fwd_pkt),
 		.hzd_status_i       (hzd_status_pkt),
+		.producer_alloc_id_i(producer_alloc_id),
+		.producer_alloc_tracked_i(producer_alloc_tracked),
 		.operand_a_o        (operand_a),
 		.operand_b_o        (operand_b),
 		.alu_operand_a_o    (alu_operand_a),
@@ -530,6 +554,8 @@ import ydrasil_pkg::*;
 		.id_ex_pred_counter_o(id_ex_pred_counter),
 		.id_ex_pred_bht_index_o(id_ex_pred_bht_index),
 		.id_ex_valid_o      (id_ex_valid),
+		.id_ex_producer_id_o(id_ex_producer_id),
+		.id_ex_producer_tracked_o(id_ex_producer_tracked),
 		.id_alu_rf_wen_rd_o (id_alu_rf_wen_rd),
 		.id_rf_waddr_rd_o   (id_rf_waddr_rd)
 	);
@@ -572,6 +598,7 @@ import ydrasil_pkg::*;
 		.clint_ex_int_addr_i(clint_ex_int_addr),
 		.id_rf_waddr_rd_i   (id_rf_waddr_rd),
 		.id_alu_rf_wen_rd_i (id_alu_rf_wen_rd),
+		.id_ex_producer_id_i(id_ex_producer_id),
 		.id_ex_csr_waddr_i  (id_ex_csr_waddr) ,
 		.id_op_csr_info_i   (id_op_csr_info) ,
 		.csr_ex_rdata_i     (csr_ex_rdata) ,
@@ -594,11 +621,13 @@ import ydrasil_pkg::*;
 		.alu_result_o       (alu_result),
 		.alu_rf_wen_rd_o    (alu_rf_wen_rd),
 		.alu_rf_waddr_rd_o  (alu_rf_waddr_rd),
+		.alu_producer_id_o  (alu_producer_id),
 		.mul_issue_o        (ex_mul_issue),
 		.mul_issue_waddr_o  (ex_mul_issue_waddr),
 		.mul_wdata_rd_o     (mul_wb_result),
 		.mul_rf_wen_rd_o    (mul_rf_wen_rd),
 		.mul_rf_waddr_rd_o  (mul_rf_waddr_rd),
+		.mul_producer_id_o  (mul_producer_id),
 		.mul_result_valid_o (mul_result_valid),
 		.ex_instret_inc_o   (ex_instret_inc),
 		.ex_mul_stall_o     (ex_mul_stall)
@@ -638,18 +667,24 @@ import ydrasil_pkg::*;
 		.alu_wdata_rd_i   (alu_result),
 		.alu_rf_wen_rd_i  (alu_rf_wen_rd),
 		.alu_rf_waddr_rd_i(alu_rf_waddr_rd),
+		.alu_producer_id_i(alu_producer_id),
 		.lsu_wb_result_i  (lsu_wb_result),
 		.lsu_rf_wen_rd_i  (lsu_rf_wen_rd),
 		.lsu_rf_waddr_rd_i(lsu_rf_waddr_rd),
+		.lsu_producer_id_i(lsu_producer_id),
+		.lsu_producer_tracked_i(lsu_producer_tracked),
 		.mul_wdata_rd_i   (mul_wb_result),
 		.mul_rf_wen_rd_i  (mul_rf_wen_rd),
 		.mul_rf_waddr_rd_i(mul_rf_waddr_rd),
+		.mul_producer_id_i(mul_producer_id),
 		.wb_mul_complete_o(),
 		.wb_mul_complete_waddr_o(),
 		.wb_backpressure_o(wb_backpressure),
 		.rf_wdata_rd_o    (rf_wdata_rd),
 		.rf_wen_rd_o      (rf_wen_rd),
-		.rf_waddr_rd_o    (rf_waddr_rd)
+		.rf_waddr_rd_o    (rf_waddr_rd),
+		.rf_producer_id_o (rf_producer_id)
+		,.rf_producer_tracked_o(rf_producer_tracked)
 	);
 
 	ydrasil_registers u_ydrasil_registers (
@@ -681,12 +716,16 @@ import ydrasil_pkg::*;
 			.rf_wen_rd_i       (rf_wen_rd),
 			.rf_waddr_rd_i     (rf_waddr_rd),
 			.rf_wdata_rd_i     (rf_wdata_rd),
+			.rf_producer_id_i  (rf_producer_id),
+			.rf_producer_tracked_i(rf_producer_tracked),
 			.hzd_status_o      (hzd_status_pkt),
 			.wb_fwd_o          (wb_fwd_pkt),
 			.producer_rs1_fwd_o(producer_rs1_fwd_pkt),
 			.producer_rs2_fwd_o(producer_rs2_fwd_pkt),
 			.gpr_pending_o     (gpr_pending_q),
 			.ex_accept_valid_o (ex_accept_valid),
+			.producer_alloc_id_o(producer_alloc_id),
+			.producer_alloc_tracked_o(producer_alloc_tracked),
 		.stall_if_o        (stall_if),
 		.stall_id_o        (stall_id),
         .stall_pc_o        (stall_pc),

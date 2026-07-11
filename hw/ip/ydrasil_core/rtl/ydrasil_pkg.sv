@@ -291,6 +291,8 @@ package ydrasil_pkg;
 
 	typedef struct packed {
 		logic                                valid;
+		logic                                producer_id;
+		logic                                producer_tracked;
 		logic [REGS_ADDR_WIDTH-1:0]          addr;
 		logic [REGS_DATA_WIDTH-1:0]          data;
 	} ydrasil_gpr_fwd_pkt_t;
@@ -305,11 +307,14 @@ package ydrasil_pkg;
 		logic                                lsu_req;
 		logic                                store_req;
 		logic                                prev_alu_bypass_ok;
+		logic                                short_alu_writer;
 	} ydrasil_id_ctrl_pkt_t;
 
 	typedef struct packed {
 		logic                                valid;
 		logic                                interrupt;
+		logic                                producer_id;
+		logic                                producer_tracked;
 		logic [REGS_ADDR_WIDTH-1:0]          rd_addr;
 		logic                                alu_rf_wen;
 		logic [OPERATOR_TYPE_WIDTH-1:0]      operator_type;

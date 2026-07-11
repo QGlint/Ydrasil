@@ -41,6 +41,7 @@ import ydrasil_pkg::*;
     input  wire [DATA_WIDTH-1:0]           id_ex_pred_bht_index_i,
     input  wire [REGS_ADDR_WIDTH-1:0]      id_rf_waddr_rd_i,
     input  wire                            id_alu_rf_wen_rd_i,
+    input  wire                            id_ex_producer_id_i,
     input  wire                            interrupt_i,
     input  wire [INST_ADDR_WIDTH-1:0]      clint_ex_int_addr_i,
 
@@ -70,12 +71,14 @@ import ydrasil_pkg::*;
     output wire [REGS_DATA_WIDTH-1:0]      alu_result_o,
     output wire                            alu_rf_wen_rd_o,
     output wire [REGS_ADDR_WIDTH-1:0]      alu_rf_waddr_rd_o,
+    output wire                            alu_producer_id_o,
 
     output wire                            mul_issue_o,
     output wire [REGS_ADDR_WIDTH-1:0]      mul_issue_waddr_o,
     output wire [REGS_DATA_WIDTH-1:0]      mul_wdata_rd_o,
     output wire                            mul_rf_wen_rd_o,
     output wire [REGS_ADDR_WIDTH-1:0]      mul_rf_waddr_rd_o,
+    output wire                            mul_producer_id_o,
     output wire                            mul_result_valid_o,
 
     output wire                            ex_instret_inc_o,
@@ -133,6 +136,7 @@ import ydrasil_pkg::*;
     reg [REGS_DATA_WIDTH-1:0] bitmanip_result_ff;
     reg                       bitmanip_result_valid_ff;
     reg                       alu_rf_wen_rd_ff;
+    reg                       alu_producer_id_ff;
     (* max_fanout = 8 *) reg [REGS_ADDR_WIDTH-1:0] alu_rf_waddr_rd_ff;
     reg                       alu_bypass_valid_q;
     reg [REGS_DATA_WIDTH-1:0] alu_bypass_data_q;
@@ -312,9 +316,12 @@ import ydrasil_pkg::*;
          operator_i[OP_ALU_AND]  |
          operator_i[OP_ALU_LUI]  |
          operator_i[OP_ALU_AUIPC]);
+    wire shift_alu_op =
+        operator_type_i[OPERATOR_TYPE_ALU] & !op_m_unit & !op_bitmanip &
+        (operator_i[OP_ALU_SLL] | operator_i[OP_ALU_SRL] | operator_i[OP_ALU_SRA]);
     wire bypassable_alu_op =
         id_ex_valid_i & id_alu_rf_wen_rd_i & (id_rf_waddr_rd_i != '0) &
-        fast_alu_op & !interrupt_i & !flush_ex_i;
+        (fast_alu_op | shift_alu_op) & !interrupt_i & !flush_ex_i;
     wire fast_result_wen =
         (id_ex_valid_i & !interrupt_i & !flush_ex_i & !op_m_unit &
          (!op_bitmanip & (fast_alu_op | op_load | op_store | op_bjp))) |
@@ -379,9 +386,11 @@ import ydrasil_pkg::*;
         .operator_i      (operator_i),
         .issue_wen_i     (mul_issue_wen),
         .issue_waddr_i   (id_rf_waddr_rd_i),
+        .issue_producer_id_i(id_ex_producer_id_i),
         .result_valid_o  (mul_result_valid),
         .result_wen_o    (mul_rf_wen_rd_o),
         .result_waddr_o  (mul_rf_waddr_rd_o),
+        .result_producer_id_o(mul_producer_id_o),
         .result_wdata_o  (mul_wdata_rd_o)
     );
 
@@ -443,6 +452,7 @@ import ydrasil_pkg::*;
     assign alu_result_o = bitmanip_result_valid_ff ? bitmanip_result_ff : alu_result_ff;
     assign alu_rf_wen_rd_o = alu_rf_wen_rd_ff;
     assign alu_rf_waddr_rd_o = alu_rf_waddr_rd_ff;
+    assign alu_producer_id_o = alu_producer_id_ff;
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -451,6 +461,7 @@ import ydrasil_pkg::*;
             bitmanip_result_valid_ff <= 1'b0;
             alu_rf_wen_rd_ff    <= 1'b0;
             alu_rf_waddr_rd_ff  <= '0;
+            alu_producer_id_ff  <= 1'b0;
             alu_bypass_valid_q  <= 1'b0;
             alu_bypass_data_q   <= '0;
             ex_csr_wdata_o_ff   <= '0;
@@ -465,6 +476,7 @@ import ydrasil_pkg::*;
             bitmanip_result_valid_ff <= 1'b0;
             alu_rf_wen_rd_ff    <= 1'b0;
             alu_rf_waddr_rd_ff  <= '0;
+            alu_producer_id_ff  <= 1'b0;
             alu_bypass_valid_q  <= 1'b0;
             alu_bypass_data_q   <= '0;
             ex_csr_wdata_o_ff   <= '0;
@@ -480,8 +492,10 @@ import ydrasil_pkg::*;
             bitmanip_result_valid_ff <= bitmanip_rf_wen_rd;
             alu_rf_wen_rd_ff   <= ex_rf_wen_rd;
             alu_rf_waddr_rd_ff <= div_rf_wen_rd ? div_waddr_q : alu_rf_waddr_rd;
+            alu_producer_id_ff <= id_ex_producer_id_i;
             alu_bypass_valid_q <= bypassable_alu_op;
-            alu_bypass_data_q  <= bypassable_alu_op ? fast_alu_result : '0;
+            alu_bypass_data_q  <= bypassable_alu_op ?
+                                  (shift_alu_op ? alu_result : fast_alu_result) : '0;
             ex_csr_wdata_o_ff  <= csr_wdata;
             ex_csr_wen_o_ff    <= csr_wen;
             ex_csr_waddr_o_ff  <= id_ex_csr_waddr_i;
