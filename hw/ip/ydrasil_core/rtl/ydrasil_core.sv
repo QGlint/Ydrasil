@@ -92,6 +92,8 @@ import ydrasil_pkg::*;
 	wire                           id_ex_jalr;
 	wire                           id_ex_alu_bypass_rs1;
 	wire                           id_ex_alu_bypass_rs2;
+	wire                           id_ex_load_bypass_rs1;
+	wire                           id_ex_load_bypass_rs2;
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0]    id_ex_branch_target;
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0]    id_ex_branch_next_pc;
 	wire                           id_ex_branch_eq;
@@ -106,14 +108,14 @@ import ydrasil_pkg::*;
 	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] alu_result;
 	wire                        alu_rf_wen_rd;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] alu_rf_waddr_rd;
-	wire                        alu_producer_id;
+	producer_id_t               alu_producer_id;
 	wire                        ex_mul_stall;
 	wire                        ex_mul_issue;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] ex_mul_issue_waddr;
 	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] mul_wb_result;
 	wire                        mul_rf_wen_rd;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] mul_rf_waddr_rd;
-	wire                        mul_producer_id;
+	producer_id_t               mul_producer_id;
 	wire                        mul_result_valid;
 	wire                        ex_instret_inc;
 	wire                        ex_pc_redirect;
@@ -152,9 +154,9 @@ import ydrasil_pkg::*;
 	wire [1:0]                  id_ex_pred_counter;
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] id_ex_pred_bht_index;
 	wire                        id_ex_valid;
-	wire                        id_ex_producer_id;
+	producer_id_t               id_ex_producer_id;
 	wire                        id_ex_producer_tracked;
-	wire                        producer_alloc_id;
+	producer_id_t               producer_alloc_id;
 	wire                        producer_alloc_tracked;
 
 	// LSU request path
@@ -174,15 +176,16 @@ import ydrasil_pkg::*;
 	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] lsu_wb_result;
 	wire                        lsu_rf_wen_rd;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] lsu_rf_waddr_rd;
-	wire                        lsu_producer_id;
+	producer_id_t               lsu_producer_id;
 	wire                        lsu_producer_tracked;
 
 	// WB -> RF
 	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] rf_wdata_rd;
 	wire                        rf_wen_rd;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] rf_waddr_rd;
-	wire                        rf_producer_id;
+	producer_id_t               rf_producer_id;
 	wire                        rf_producer_tracked;
+	wire                        rf_write_commit;
 	wire                        wb_backpressure;
 	wire                        wb_hzd_valid_q;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] wb_hzd_addr_q;
@@ -190,6 +193,7 @@ import ydrasil_pkg::*;
 
     //LSU -> CTRL
 	wire                            lsu_ctrl_busy;
+	wire                            lsu_fast_load;
 
     //LSU -> ID
 	ydrasil_id_ctrl_pkt_t           id_ctrl_pkt;
@@ -432,6 +436,7 @@ import ydrasil_pkg::*;
 		.mmio_req_o        (mmio_req),
 		.mmio_wmask_o      (mmio_wmask),
 		.lsu_ctrl_busy_o        (lsu_ctrl_busy),
+		.lsu_fast_load_o        (lsu_fast_load),
 		.lsu_wb_result_o   (lsu_wb_result),
 		.lsu_rf_rd_wen_o   (lsu_rf_wen_rd),
 		.lsu_rf_rd_waddr_o (lsu_rf_waddr_rd),
@@ -542,6 +547,8 @@ import ydrasil_pkg::*;
 		.id_ex_jalr_o       (id_ex_jalr),
 		.id_ex_alu_bypass_rs1_o(id_ex_alu_bypass_rs1),
 		.id_ex_alu_bypass_rs2_o(id_ex_alu_bypass_rs2),
+		.id_ex_load_bypass_rs1_o(id_ex_load_bypass_rs1),
+		.id_ex_load_bypass_rs2_o(id_ex_load_bypass_rs2),
 		.id_ex_branch_target_o(id_ex_branch_target),
 		.id_ex_branch_next_pc_o(id_ex_branch_next_pc),
 		.id_ex_branch_eq_o  (id_ex_branch_eq),
@@ -584,6 +591,9 @@ import ydrasil_pkg::*;
 		.id_ex_jalr_i       (id_ex_jalr),
 		.id_ex_alu_bypass_rs1_i(id_ex_alu_bypass_rs1),
 		.id_ex_alu_bypass_rs2_i(id_ex_alu_bypass_rs2),
+		.id_ex_load_bypass_rs1_i(id_ex_load_bypass_rs1),
+		.id_ex_load_bypass_rs2_i(id_ex_load_bypass_rs2),
+		.load_bypass_data_i(lsu_wb_result),
 		.id_ex_branch_target_i(id_ex_branch_target),
 		.id_ex_branch_next_pc_i(id_ex_branch_next_pc),
 		.id_ex_branch_eq_i  (id_ex_branch_eq),
@@ -690,7 +700,7 @@ import ydrasil_pkg::*;
 	ydrasil_registers u_ydrasil_registers (
 		.clk          (clk),
 		.rst_n        (rst_n),
-		.rf_wen_rd_i  (rf_wen_rd),
+		.rf_wen_rd_i  (rf_wen_rd & rf_write_commit),
 		.rf_waddr_rd_i(rf_waddr_rd),
 		.rf_wdata_rd_i(rf_wdata_rd),
 		.rf_raddr_rs1_i(rf_raddr_rs1),
@@ -710,6 +720,7 @@ import ydrasil_pkg::*;
 			.lsu_fwd_i         (lsu_fwd_pkt),
 			.mul_fwd_i         (mul_fwd_pkt),
 			.lsu_ctrl_busy_i   (lsu_ctrl_busy),
+			.lsu_fast_load_i   (lsu_fast_load),
 			.clint_stall_i     (clint_stall),
 			.ex_mul_stall_i     (ex_mul_stall),
 			.wb_backpressure_i  (wb_backpressure),
@@ -726,6 +737,7 @@ import ydrasil_pkg::*;
 			.ex_accept_valid_o (ex_accept_valid),
 			.producer_alloc_id_o(producer_alloc_id),
 			.producer_alloc_tracked_o(producer_alloc_tracked),
+			.rf_write_commit_o(rf_write_commit),
 		.stall_if_o        (stall_if),
 		.stall_id_o        (stall_id),
         .stall_pc_o        (stall_pc),

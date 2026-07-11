@@ -8,7 +8,7 @@ import ydrasil_pkg::*;
 
     input wire [ydrasil_pkg::BUS_ADDR_WIDTH-1:0]       ex_lsu_mem_addr_i,
     input wire [ 4:0]                      id_rd_waddr_i,
-    input wire                             id_producer_id_i,
+    input producer_id_t                    id_producer_id_i,
     input wire                             id_producer_tracked_i,
     input wire [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0]    operator_lsu_i,
     input wire [1:0]                       operator_lsu_type_i,
@@ -35,16 +35,18 @@ import ydrasil_pkg::*;
     output wire [                3:0]      mmio_wmask_o,
 
     output wire                            lsu_ctrl_busy_o,
+    output wire                            lsu_fast_load_o,
 
 
     // 寄存器写回接口
     output wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]     lsu_wb_result_o,
     output wire                            lsu_rf_rd_wen_o,
     output wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     lsu_rf_rd_waddr_o
-    ,output wire                            lsu_producer_id_o
+    ,output producer_id_t                   lsu_producer_id_o
     ,output wire                            lsu_producer_tracked_o
 );
     if (LSU_MODE == LSU_MODE_NEW) begin : g_new
+        assign lsu_fast_load_o = 1'b0;
         localparam [1:0] S_IDLE         = 2'd0;
         localparam [1:0] S_LOAD_FIRST   = 2'd1;
         localparam [1:0] S_LOAD_SECOND  = 2'd2;
@@ -56,7 +58,7 @@ import ydrasil_pkg::*;
         reg [REGS_DATA_WIDTH-1:0] first_word_q;
         reg [OP_LSU_INFO_WIDTH-1:0] operator_lsu_q;
         reg [REGS_ADDR_WIDTH-1:0] rd_addr_q;
-        reg producer_id_q;
+        producer_id_t producer_id_q;
         reg producer_tracked_q;
         reg [1:0] addr_index_q;
         reg load_cross_q;
@@ -192,7 +194,7 @@ import ydrasil_pkg::*;
                 first_word_q    <= '0;
                 operator_lsu_q  <= '0;
                 rd_addr_q       <= '0;
-                producer_id_q   <= 1'b0;
+                producer_id_q   <= '0;
                 producer_tracked_q <= 1'b0;
                 addr_index_q    <= '0;
                 load_cross_q    <= 1'b0;
@@ -273,12 +275,12 @@ import ydrasil_pkg::*;
     reg [1:0]                                  mmio_addr_index_q;
     reg [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0]   mmio_operator_lsu_q;
     reg [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     mmio_rd_addr_q;
-    reg                                         mmio_producer_id_q;
+    producer_id_t                               mmio_producer_id_q;
     reg                                         mmio_producer_tracked_q;
     reg        mmio_wb_valid_q;
     reg [ydrasil_pkg::REGS_DATA_WIDTH-1:0]     mmio_wb_result_q;
     reg [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     mmio_wb_rd_addr_q;
-    reg                                         mmio_wb_producer_id_q;
+    producer_id_t                               mmio_wb_producer_id_q;
     reg                                         mmio_wb_producer_tracked_q;
 
     (* max_fanout = 8 *) reg pending_store_valid_q;
@@ -291,7 +293,7 @@ import ydrasil_pkg::*;
 
     reg        load_s1_valid_q;
     reg [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     load_s1_rd_addr_q;
-    reg                                         load_s1_producer_id_q;
+    producer_id_t                               load_s1_producer_id_q;
     reg                                         load_s1_producer_tracked_q;
     reg [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0]   load_s1_operator_lsu_q;
     reg [1:0]                                  load_s1_addr_index_q;
@@ -299,7 +301,7 @@ import ydrasil_pkg::*;
 
     reg        load_s2_valid_q;
     reg [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]     load_s2_rd_addr_q;
-    reg                                         load_s2_producer_id_q;
+    producer_id_t                               load_s2_producer_id_q;
     reg                                         load_s2_producer_tracked_q;
     reg [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0]   load_s2_operator_lsu_q;
     reg [ydrasil_pkg::REGS_DATA_WIDTH-1:0]     load_s2_shifted_q;
@@ -380,6 +382,7 @@ import ydrasil_pkg::*;
     localparam bit HOT_BYPASS_ENABLE = 1'b1;
     assign hot_load_req =
         dtcm_accept & is_load & hot_lookup_hit & HOT_BYPASS_ENABLE & !load_s1_valid_q;
+    assign lsu_fast_load_o = hot_load_req;
     assign dtcm_array_load_req =
         dtcm_accept & is_load & !(hot_lookup_hit & HOT_BYPASS_ENABLE & !load_s1_valid_q);
     assign dtcm_load_req = hot_load_req | dtcm_array_load_req;
@@ -528,12 +531,12 @@ import ydrasil_pkg::*;
             mmio_addr_index_q      <= '0;
             mmio_operator_lsu_q    <= '0;
             mmio_rd_addr_q         <= '0;
-            mmio_producer_id_q     <= 1'b0;
+            mmio_producer_id_q     <= '0;
             mmio_producer_tracked_q <= 1'b0;
             mmio_wb_valid_q        <= 1'b0;
             mmio_wb_result_q       <= '0;
             mmio_wb_rd_addr_q      <= '0;
-            mmio_wb_producer_id_q  <= 1'b0;
+            mmio_wb_producer_id_q  <= '0;
             mmio_wb_producer_tracked_q <= 1'b0;
             pending_store_valid_q  <= 1'b0;
             pending_store_is_dtcm_q <= 1'b0;
@@ -544,14 +547,14 @@ import ydrasil_pkg::*;
             pending_store_rs2_raddr_q <= '0;
             load_s1_valid_q        <= 1'b0;
             load_s1_rd_addr_q      <= '0;
-            load_s1_producer_id_q  <= 1'b0;
+            load_s1_producer_id_q  <= '0;
             load_s1_producer_tracked_q <= 1'b0;
             load_s1_operator_lsu_q <= '0;
             load_s1_addr_index_q   <= '0;
             load_s1_word_addr_q    <= '0;
             load_s2_valid_q        <= 1'b0;
             load_s2_rd_addr_q      <= '0;
-            load_s2_producer_id_q  <= 1'b0;
+            load_s2_producer_id_q  <= '0;
             load_s2_producer_tracked_q <= 1'b0;
             load_s2_operator_lsu_q <= '0;
             load_s2_shifted_q      <= '0;
@@ -659,7 +662,7 @@ import ydrasil_pkg::*;
                 mmio_addr_index_q   <= pending_store_addr_index_q;
                 mmio_operator_lsu_q <= pending_store_operator_lsu_q;
                 mmio_rd_addr_q      <= '0;
-                mmio_producer_id_q  <= 1'b0;
+                mmio_producer_id_q  <= '0;
                 mmio_producer_tracked_q <= 1'b0;
             end
 

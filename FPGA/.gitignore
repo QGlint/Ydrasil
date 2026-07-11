@@ -3,4 +3,15 @@ vivado*
 *log
 !Ydrasil_FPGA.xpr
 !Ydrasil_FPGA.srcs/
-
+.Xil/
+*.jou
+*.str
+*.wdb
+*.wcfg
+*.vcd
+*.csv
+*.dmp
+.cache/
+.hw/
+.ip_user_files/
+.sim/

@@ -29,6 +29,9 @@ import ydrasil_pkg::*;
     input  wire                            id_ex_jalr_i,
     input  wire                            id_ex_alu_bypass_rs1_i,
     input  wire                            id_ex_alu_bypass_rs2_i,
+    input  wire                            id_ex_load_bypass_rs1_i,
+    input  wire                            id_ex_load_bypass_rs2_i,
+    input  wire [DATA_WIDTH-1:0]           load_bypass_data_i,
     input  wire [DATA_WIDTH-1:0]           id_ex_branch_target_i,
     input  wire [DATA_WIDTH-1:0]           id_ex_branch_next_pc_i,
     input  wire                            id_ex_branch_eq_i,
@@ -41,7 +44,7 @@ import ydrasil_pkg::*;
     input  wire [DATA_WIDTH-1:0]           id_ex_pred_bht_index_i,
     input  wire [REGS_ADDR_WIDTH-1:0]      id_rf_waddr_rd_i,
     input  wire                            id_alu_rf_wen_rd_i,
-    input  wire                            id_ex_producer_id_i,
+    input  producer_id_t                   id_ex_producer_id_i,
     input  wire                            interrupt_i,
     input  wire [INST_ADDR_WIDTH-1:0]      clint_ex_int_addr_i,
 
@@ -71,14 +74,14 @@ import ydrasil_pkg::*;
     output wire [REGS_DATA_WIDTH-1:0]      alu_result_o,
     output wire                            alu_rf_wen_rd_o,
     output wire [REGS_ADDR_WIDTH-1:0]      alu_rf_waddr_rd_o,
-    output wire                            alu_producer_id_o,
+    output producer_id_t                   alu_producer_id_o,
 
     output wire                            mul_issue_o,
     output wire [REGS_ADDR_WIDTH-1:0]      mul_issue_waddr_o,
     output wire [REGS_DATA_WIDTH-1:0]      mul_wdata_rd_o,
     output wire                            mul_rf_wen_rd_o,
     output wire [REGS_ADDR_WIDTH-1:0]      mul_rf_waddr_rd_o,
-    output wire                            mul_producer_id_o,
+    output producer_id_t                   mul_producer_id_o,
     output wire                            mul_result_valid_o,
 
     output wire                            ex_instret_inc_o,
@@ -136,7 +139,7 @@ import ydrasil_pkg::*;
     reg [REGS_DATA_WIDTH-1:0] bitmanip_result_ff;
     reg                       bitmanip_result_valid_ff;
     reg                       alu_rf_wen_rd_ff;
-    reg                       alu_producer_id_ff;
+    producer_id_t             alu_producer_id_ff;
     (* max_fanout = 8 *) reg [REGS_ADDR_WIDTH-1:0] alu_rf_waddr_rd_ff;
     reg                       alu_bypass_valid_q;
     reg [REGS_DATA_WIDTH-1:0] alu_bypass_data_q;
@@ -160,8 +163,10 @@ import ydrasil_pkg::*;
         alu_bypass_data_q : bt_a_operand_i;
     assign bt_b_operand = bt_b_operand_i;
 
-    assign operand_a = (id_ex_alu_bypass_rs1_i & alu_bypass_valid_q) ? alu_bypass_data_q : alu_operand_a_i;
-    assign operand_b = (id_ex_alu_bypass_rs2_i & alu_bypass_valid_q) ? alu_bypass_data_q : alu_operand_b_i;
+    assign operand_a = id_ex_load_bypass_rs1_i ? load_bypass_data_i :
+        (id_ex_alu_bypass_rs1_i & alu_bypass_valid_q) ? alu_bypass_data_q : alu_operand_a_i;
+    assign operand_b = id_ex_load_bypass_rs2_i ? load_bypass_data_i :
+        (id_ex_alu_bypass_rs2_i & alu_bypass_valid_q) ? alu_bypass_data_q : alu_operand_b_i;
     assign bru_operand_a = (id_ex_alu_bypass_rs1_i & alu_bypass_valid_q) ? alu_bypass_data_q : bru_operand_a_i;
     assign bru_operand_b = (id_ex_alu_bypass_rs2_i & alu_bypass_valid_q) ? alu_bypass_data_q : bru_operand_b_i;
     assign lsu_operand_a = (id_ex_alu_bypass_rs1_i & alu_bypass_valid_q) ? alu_bypass_data_q : lsu_operand_a_i;
@@ -461,7 +466,7 @@ import ydrasil_pkg::*;
             bitmanip_result_valid_ff <= 1'b0;
             alu_rf_wen_rd_ff    <= 1'b0;
             alu_rf_waddr_rd_ff  <= '0;
-            alu_producer_id_ff  <= 1'b0;
+            alu_producer_id_ff  <= '0;
             alu_bypass_valid_q  <= 1'b0;
             alu_bypass_data_q   <= '0;
             ex_csr_wdata_o_ff   <= '0;
@@ -476,7 +481,7 @@ import ydrasil_pkg::*;
             bitmanip_result_valid_ff <= 1'b0;
             alu_rf_wen_rd_ff    <= 1'b0;
             alu_rf_waddr_rd_ff  <= '0;
-            alu_producer_id_ff  <= 1'b0;
+            alu_producer_id_ff  <= '0;
             alu_bypass_valid_q  <= 1'b0;
             alu_bypass_data_q   <= '0;
             ex_csr_wdata_o_ff   <= '0;

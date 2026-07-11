@@ -75,6 +75,7 @@ SYN_SOURCES_TCL ?= $(SYN_FREQ_BUILD_DIR)/vivado_sources.tcl
 SYN_REPORT_DIR ?= $(SYN_FREQ_BUILD_DIR)/reports
 SYN_LOG_DIR ?= $(SYN_FREQ_BUILD_DIR)/log
 SYN_ARTIFACT_DIR ?= $(SYN_FREQ_BUILD_DIR)/artifacts
+SYN_BIT_DIR ?= $(SYN_FREQ_BUILD_DIR)/bit
 SYN_CHECKPOINT_DIR ?= $(SYN_FREQ_BUILD_DIR)/checkpoints
 SYN_JOBS ?= $(shell nproc)
 ifeq ($(HOSTNAME),servera437)
@@ -156,10 +157,24 @@ syn: syn-vivado
 
 synf: SYN_PLL_FREQ_MHZ := 200
 synf: SYN_RUN_TO := bitstream
-synf: SYN_JOBS := 32
+synf: SYN_JOBS := 40
+synf: SYN_IMPL_RUNS := 5
+synf: SYN_THREADS_PER_RUN := 8
 synf: syn-vivado
+	@src="$(SYN_ARTIFACT_DIR)/jyd_fpga.bit"; \
+	if [ ! -f "$$src" ]; then \
+		echo "Error: best bitstream not found: $$src"; \
+		exit 1; \
+	fi; \
+	mkdir -p "$(SYN_BIT_DIR)"; \
+	timestamp=$$(date '+%Y%m%d_%H%M'); \
+	dst="$(SYN_BIT_DIR)/jyd_fpga$${timestamp}.bit"; \
+	cp "$$src" "$$dst"; \
+	echo "[SYN] Best bitstream: $$dst"
 	@$(MAKE) syn-analyze SYN_PLL_FREQ_MHZ=$(SYN_PLL_FREQ_MHZ)
 
+syn-extreme: SYN_PLL_FREQ_MHZ := 200
+syn-extreme: SYN_RUN_TO := bitstream
 syn-extreme: SYN_IMPL_MODE := extreme
 syn-extreme: SYN_IMPL_RUNS := 1
 syn-extreme: syn-vivado

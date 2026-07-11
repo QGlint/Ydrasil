@@ -194,6 +194,10 @@ end
     reg [31:0] producer_wait_ready_count;
     reg [31:0] producer_both_ready_count;
     reg [31:0] producer_retire_held_count;
+    reg [31:0] lsu_struct_mmio_count;
+    reg [31:0] lsu_struct_pending_store_count;
+    reg [31:0] lsu_struct_store_capture_count;
+    reg [31:0] lsu_struct_other_count;
     integer perf_stat_idx;
     reg [31:0] fe_pred_taken_redirect_count;
     reg [31:0] fe_correct_taken_redirect_count;
@@ -417,6 +421,10 @@ end
             producer_wait_ready_count <= 32'b0;
             producer_both_ready_count <= 32'b0;
             producer_retire_held_count <= 32'b0;
+            lsu_struct_mmio_count <= 32'b0;
+            lsu_struct_pending_store_count <= 32'b0;
+            lsu_struct_store_capture_count <= 32'b0;
+            lsu_struct_other_count <= 32'b0;
             fe_pred_taken_redirect_count <= 32'b0;
             fe_correct_taken_redirect_count <= 32'b0;
             fe_pred_taken_bubble_count <= 32'b0;
@@ -596,21 +604,36 @@ end
                 bubble_cause_hist[{u_dut.clint_stall, u_dut.wb_backpressure,
                     u_dut.u_ctrl.producer_full_stall, u_dut.lsu_struct_stall,
                     u_dut.scoreboard_stall}] + 1'b1;
-            unique case (u_dut.u_ctrl.producer_valid_q &
-                         ~u_dut.u_ctrl.producer_retire_q)
-                2'b00: producer_occ_zero_count <= producer_occ_zero_count + 1'b1;
-                2'b01, 2'b10: producer_occ_one_count <= producer_occ_one_count + 1'b1;
-                2'b11: begin
-                    producer_occ_two_count <= producer_occ_two_count + 1'b1;
-                    unique case (u_dut.u_ctrl.producer_ready_q)
-                        2'b00: producer_both_wait_count <= producer_both_wait_count + 1'b1;
-                        2'b11: producer_both_ready_count <= producer_both_ready_count + 1'b1;
-                        default: producer_wait_ready_count <= producer_wait_ready_count + 1'b1;
-                    endcase
-                end
-            endcase
+            if ($countones(u_dut.u_ctrl.producer_valid_q &
+                           ~u_dut.u_ctrl.producer_retire_q) == 0) begin
+                producer_occ_zero_count <= producer_occ_zero_count + 1'b1;
+            end else if ($countones(u_dut.u_ctrl.producer_valid_q &
+                                    ~u_dut.u_ctrl.producer_retire_q) == 1) begin
+                producer_occ_one_count <= producer_occ_one_count + 1'b1;
+            end else begin
+                producer_occ_two_count <= producer_occ_two_count + 1'b1;
+                if (|(u_dut.u_ctrl.producer_ready_q &
+                      u_dut.u_ctrl.producer_valid_q))
+                    producer_wait_ready_count <= producer_wait_ready_count + 1'b1;
+                else
+                    producer_both_wait_count <= producer_both_wait_count + 1'b1;
+                if ((u_dut.u_ctrl.producer_ready_q &
+                     u_dut.u_ctrl.producer_valid_q) == u_dut.u_ctrl.producer_valid_q)
+                    producer_both_ready_count <= producer_both_ready_count + 1'b1;
+            end
             if (|u_dut.u_ctrl.producer_retire_q)
                 producer_retire_held_count <= producer_retire_held_count + 1'b1;
+            if (u_dut.lsu_struct_stall) begin
+                if (u_dut.u_ydrasil_load_store_unit.g_legacy.mmio_busy |
+                    u_dut.u_ydrasil_load_store_unit.g_legacy.mmio_accept)
+                    lsu_struct_mmio_count <= lsu_struct_mmio_count + 1'b1;
+                else if (u_dut.u_ydrasil_load_store_unit.g_legacy.pending_store_valid_q)
+                    lsu_struct_pending_store_count <= lsu_struct_pending_store_count + 1'b1;
+                else if (u_dut.u_ydrasil_load_store_unit.g_legacy.store_pending_capture)
+                    lsu_struct_store_capture_count <= lsu_struct_store_capture_count + 1'b1;
+                else
+                    lsu_struct_other_count <= lsu_struct_other_count + 1'b1;
+            end
             fe_pred_taken_redirect_count <= fe_pred_taken_redirect_count +
                 (u_dut.u_ydrasil_if_stage.bp_predict_redirect ? 32'd1 : 32'd0);
             fe_pred_taken_bubble_count <= fe_pred_taken_bubble_count +
@@ -901,6 +924,11 @@ end
                 producer_wait_ready_count,
                 producer_both_ready_count,
                 producer_retire_held_count);
+            $display("PERF_LSU_STRUCT_DETAIL: MMIO=%-d PENDING_STORE=%-d STORE_CAPTURE=%-d OTHER=%-d",
+                lsu_struct_mmio_count,
+                lsu_struct_pending_store_count,
+                lsu_struct_store_capture_count,
+                lsu_struct_other_count);
             $display("PERF_FRONTEND: PRED_TAKEN_REDIRECT=%-d CORRECT_TAKEN_REDIRECT=%-d PRED_TAKEN_BUBBLE=%-d WRONG_DIR_FLUSH=%-d BTB_MISS_TAKEN=%-d",
                 fe_pred_taken_redirect_count,
                 fe_correct_taken_redirect_count,

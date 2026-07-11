@@ -288,10 +288,13 @@ package ydrasil_pkg;
 
 	localparam int BP_BTB_ENTRIES = 512;
 	localparam int BP_BHT_ENTRIES = 512;
+	localparam int PRODUCER_NUM = 4;
+	localparam int PRODUCER_ID_WIDTH = $clog2(PRODUCER_NUM);
+	typedef logic [PRODUCER_ID_WIDTH-1:0] producer_id_t;
 
 	typedef struct packed {
 		logic                                valid;
-		logic                                producer_id;
+		producer_id_t                        producer_id;
 		logic                                producer_tracked;
 		logic [REGS_ADDR_WIDTH-1:0]          addr;
 		logic [REGS_DATA_WIDTH-1:0]          data;
@@ -307,13 +310,14 @@ package ydrasil_pkg;
 		logic                                lsu_req;
 		logic                                store_req;
 		logic                                prev_alu_bypass_ok;
+		logic                                load_bypass_ok;
 		logic                                short_alu_writer;
 	} ydrasil_id_ctrl_pkt_t;
 
 	typedef struct packed {
 		logic                                valid;
 		logic                                interrupt;
-		logic                                producer_id;
+		producer_id_t                        producer_id;
 		logic                                producer_tracked;
 		logic [REGS_ADDR_WIDTH-1:0]          rd_addr;
 		logic                                alu_rf_wen;
@@ -337,6 +341,8 @@ package ydrasil_pkg;
 		logic                                issue_store_data_ready;
 		logic                                prev_alu_bypass_rs1;
 		logic                                prev_alu_bypass_rs2;
+		logic                                prev_load_bypass_rs1;
+		logic                                prev_load_bypass_rs2;
 		logic                                rs1_pending_stall;
 		logic                                rs2_pending_stall;
 		logic                                rd_waw_stall;

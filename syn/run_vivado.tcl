@@ -68,7 +68,8 @@ proc prepare_implementation_runs {count mode} {
         Performance_Explore \
         Performance_ExplorePostRoutePhysOpt \
         Performance_ExtraTimingOpt \
-        Performance_RefinePlacement]
+        Performance_Retiming \
+        Performance_NetDelay_high]
     set count [clamp_int $count 1 [llength $strategies]]
     set runs [list]
     for {set idx 0} {$idx < $count} {incr idx} {
