@@ -141,8 +141,12 @@ import ydrasil_pkg::*;
     assign next_data_o = (!rst_n) ? '0 :
                         (csr_state == S_CSR_MEPC) ? instr_addr :                     // 保存当前指令地址到mepc
         (csr_state == S_CSR_MCAUSE) ? cause :  // 写入中断原因到mcause
-        (csr_state == S_CSR_MSTATUS) ? {csr_clint_mstatus[31:4], 1'b0, csr_clint_mstatus[2:0]} :      // 中断发生时修改mstatus，关闭全局中断
-        (csr_state == S_CSR_MSTATUS_MRET) ? {csr_clint_mstatus[31:4], csr_clint_mstatus[7], csr_clint_mstatus[2:0]} : // 中断返回时恢复mstatus
+        (csr_state == S_CSR_MSTATUS) ?
+            {csr_clint_mstatus[31:8], csr_clint_mstatus[3],
+             csr_clint_mstatus[6:4], 1'b0, csr_clint_mstatus[2:0]} :
+        (csr_state == S_CSR_MSTATUS_MRET) ?
+            {csr_clint_mstatus[31:8], 1'b1,
+             csr_clint_mstatus[6:4], csr_clint_mstatus[7], csr_clint_mstatus[2:0]} :
         '0;
 
     // 发送中断信号到ex模块的组合逻辑
