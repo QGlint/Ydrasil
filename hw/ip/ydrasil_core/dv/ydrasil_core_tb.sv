@@ -168,6 +168,33 @@ end
     reg [31:0] sb_load_rs1_count;
     reg [31:0] sb_load_rs2_count;
     reg [31:0] sb_pending_tail_count;
+    reg [31:0] acct_flush_count;
+    reg [31:0] acct_mul_hold_count;
+    reg [31:0] acct_scoreboard_count;
+    reg [31:0] acct_lsu_struct_count;
+    reg [31:0] acct_producer_full_count;
+    reg [31:0] acct_wb_count;
+    reg [31:0] acct_clint_count;
+    reg [31:0] acct_multi_cause_count;
+    reg [31:0] acct_no_if_valid_count;
+    reg [31:0] acct_issue_count;
+    reg [31:0] acct_other_count;
+    reg [31:0] acct_raw_only_count;
+    reg [31:0] acct_waw_only_count;
+    reg [31:0] acct_raw_waw_count;
+    reg [31:0] retire_zero_count;
+    reg [31:0] retire_one_count;
+    reg [31:0] retire_two_count;
+    reg [31:0] retire_three_count;
+    reg [31:0] bubble_cause_hist [0:31];
+    reg [31:0] producer_occ_zero_count;
+    reg [31:0] producer_occ_one_count;
+    reg [31:0] producer_occ_two_count;
+    reg [31:0] producer_both_wait_count;
+    reg [31:0] producer_wait_ready_count;
+    reg [31:0] producer_both_ready_count;
+    reg [31:0] producer_retire_held_count;
+    integer perf_stat_idx;
     reg [31:0] fe_pred_taken_redirect_count;
     reg [31:0] fe_correct_taken_redirect_count;
     reg [31:0] fe_pred_taken_bubble_count;
@@ -363,6 +390,33 @@ end
             sb_load_rs1_count <= 32'b0;
             sb_load_rs2_count <= 32'b0;
             sb_pending_tail_count <= 32'b0;
+            acct_flush_count <= 32'b0;
+            acct_mul_hold_count <= 32'b0;
+            acct_scoreboard_count <= 32'b0;
+            acct_lsu_struct_count <= 32'b0;
+            acct_producer_full_count <= 32'b0;
+            acct_wb_count <= 32'b0;
+            acct_clint_count <= 32'b0;
+            acct_multi_cause_count <= 32'b0;
+            acct_no_if_valid_count <= 32'b0;
+            acct_issue_count <= 32'b0;
+            acct_other_count <= 32'b0;
+            acct_raw_only_count <= 32'b0;
+            acct_waw_only_count <= 32'b0;
+            acct_raw_waw_count <= 32'b0;
+            retire_zero_count <= 32'b0;
+            retire_one_count <= 32'b0;
+            retire_two_count <= 32'b0;
+            retire_three_count <= 32'b0;
+            for (perf_stat_idx = 0; perf_stat_idx < 32; perf_stat_idx = perf_stat_idx + 1)
+                bubble_cause_hist[perf_stat_idx] <= 32'b0;
+            producer_occ_zero_count <= 32'b0;
+            producer_occ_one_count <= 32'b0;
+            producer_occ_two_count <= 32'b0;
+            producer_both_wait_count <= 32'b0;
+            producer_wait_ready_count <= 32'b0;
+            producer_both_ready_count <= 32'b0;
+            producer_retire_held_count <= 32'b0;
             fe_pred_taken_redirect_count <= 32'b0;
             fe_correct_taken_redirect_count <= 32'b0;
             fe_pred_taken_bubble_count <= 32'b0;
@@ -483,6 +537,80 @@ end
             sb_pending_tail_count <= sb_pending_tail_count +
                 (((u_dut.rs1_pending_stall | u_dut.rs2_pending_stall) &
                   !(u_dut.rs1_issue_hzd | u_dut.rs2_issue_hzd)) ? 32'd1 : 32'd0);
+
+            // Mutually exclusive cycle accounting. Keep this TB-only so it cannot affect RTL.
+            if (u_dut.flush_ex) begin
+                acct_flush_count <= acct_flush_count + 1'b1;
+            end else if (u_dut.ex_mul_stall) begin
+                acct_mul_hold_count <= acct_mul_hold_count + 1'b1;
+            end else if ((u_dut.scoreboard_stall &
+                          (u_dut.lsu_struct_stall | u_dut.u_ctrl.producer_full_stall |
+                           u_dut.wb_backpressure | u_dut.clint_stall)) |
+                         (u_dut.lsu_struct_stall &
+                          (u_dut.u_ctrl.producer_full_stall | u_dut.wb_backpressure |
+                           u_dut.clint_stall)) |
+                         (u_dut.u_ctrl.producer_full_stall &
+                          (u_dut.wb_backpressure | u_dut.clint_stall)) |
+                         (u_dut.wb_backpressure & u_dut.clint_stall)) begin
+                acct_multi_cause_count <= acct_multi_cause_count + 1'b1;
+            end else if (u_dut.scoreboard_stall) begin
+                acct_scoreboard_count <= acct_scoreboard_count + 1'b1;
+            end else if (u_dut.lsu_struct_stall) begin
+                acct_lsu_struct_count <= acct_lsu_struct_count + 1'b1;
+            end else if (u_dut.u_ctrl.producer_full_stall) begin
+                acct_producer_full_count <= acct_producer_full_count + 1'b1;
+            end else if (u_dut.wb_backpressure) begin
+                acct_wb_count <= acct_wb_count + 1'b1;
+            end else if (u_dut.clint_stall) begin
+                acct_clint_count <= acct_clint_count + 1'b1;
+            end else if (!u_dut.if_id_valid) begin
+                acct_no_if_valid_count <= acct_no_if_valid_count + 1'b1;
+            end else if (u_dut.u_ydrasil_id_stage.issue_valid_ff &&
+                         u_dut.u_ydrasil_id_stage.id_advance) begin
+                acct_issue_count <= acct_issue_count + 1'b1;
+            end else begin
+                acct_other_count <= acct_other_count + 1'b1;
+            end
+
+            if (u_dut.scoreboard_stall) begin
+                if ((u_dut.rs1_issue_hzd | u_dut.rs2_issue_hzd |
+                     u_dut.rs1_pending_stall | u_dut.rs2_pending_stall) &&
+                    (u_dut.rd_issue_hzd | u_dut.rd_waw_stall))
+                    acct_raw_waw_count <= acct_raw_waw_count + 1'b1;
+                else if (u_dut.rd_issue_hzd | u_dut.rd_waw_stall)
+                    acct_waw_only_count <= acct_waw_only_count + 1'b1;
+                else
+                    acct_raw_only_count <= acct_raw_only_count + 1'b1;
+            end
+
+            unique case (u_dut.instret_inc_count)
+                2'd0: retire_zero_count <= retire_zero_count + 1'b1;
+                2'd1: retire_one_count <= retire_one_count + 1'b1;
+                2'd2: retire_two_count <= retire_two_count + 1'b1;
+                2'd3: retire_three_count <= retire_three_count + 1'b1;
+            endcase
+
+            bubble_cause_hist[{u_dut.clint_stall, u_dut.wb_backpressure,
+                u_dut.u_ctrl.producer_full_stall, u_dut.lsu_struct_stall,
+                u_dut.scoreboard_stall}] <=
+                bubble_cause_hist[{u_dut.clint_stall, u_dut.wb_backpressure,
+                    u_dut.u_ctrl.producer_full_stall, u_dut.lsu_struct_stall,
+                    u_dut.scoreboard_stall}] + 1'b1;
+            unique case (u_dut.u_ctrl.producer_valid_q &
+                         ~u_dut.u_ctrl.producer_retire_q)
+                2'b00: producer_occ_zero_count <= producer_occ_zero_count + 1'b1;
+                2'b01, 2'b10: producer_occ_one_count <= producer_occ_one_count + 1'b1;
+                2'b11: begin
+                    producer_occ_two_count <= producer_occ_two_count + 1'b1;
+                    unique case (u_dut.u_ctrl.producer_ready_q)
+                        2'b00: producer_both_wait_count <= producer_both_wait_count + 1'b1;
+                        2'b11: producer_both_ready_count <= producer_both_ready_count + 1'b1;
+                        default: producer_wait_ready_count <= producer_wait_ready_count + 1'b1;
+                    endcase
+                end
+            endcase
+            if (|u_dut.u_ctrl.producer_retire_q)
+                producer_retire_held_count <= producer_retire_held_count + 1'b1;
             fe_pred_taken_redirect_count <= fe_pred_taken_redirect_count +
                 (u_dut.u_ydrasil_if_stage.bp_predict_redirect ? 32'd1 : 32'd0);
             fe_pred_taken_bubble_count <= fe_pred_taken_bubble_count +
@@ -723,6 +851,56 @@ end
                 sb_load_rs1_count,
                 sb_load_rs2_count,
                 sb_pending_tail_count);
+            $display("PERF_CYCLE_ACCOUNT: FLUSH=%-d MUL_HOLD=%-d SCOREBOARD=%-d LSU_STRUCT=%-d PRODUCER_FULL=%-d WB=%-d CLINT=%-d MULTI=%-d NO_IF_VALID=%-d ISSUE=%-d OTHER=%-d ACCOUNTED=%-d CYCLE_DELTA=%-d",
+                acct_flush_count,
+                acct_mul_hold_count,
+                acct_scoreboard_count,
+                acct_lsu_struct_count,
+                acct_producer_full_count,
+                acct_wb_count,
+                acct_clint_count,
+                acct_multi_cause_count,
+                acct_no_if_valid_count,
+                acct_issue_count,
+                acct_other_count,
+                acct_flush_count + acct_mul_hold_count + acct_scoreboard_count +
+                    acct_lsu_struct_count + acct_producer_full_count + acct_wb_count +
+                    acct_clint_count + acct_multi_cause_count + acct_no_if_valid_count +
+                    acct_issue_count + acct_other_count,
+                cycle_count - (acct_flush_count + acct_mul_hold_count +
+                    acct_scoreboard_count + acct_lsu_struct_count +
+                    acct_producer_full_count + acct_wb_count + acct_clint_count +
+                    acct_multi_cause_count + acct_no_if_valid_count + acct_issue_count +
+                    acct_other_count));
+            $display("PERF_HAZARD_ACCOUNT: RAW_ONLY=%-d WAW_ONLY=%-d RAW_WAW=%-d RETIRE_0=%-d RETIRE_1=%-d RETIRE_2=%-d RETIRE_3=%-d",
+                acct_raw_only_count,
+                acct_waw_only_count,
+                acct_raw_waw_count,
+                retire_zero_count,
+                retire_one_count,
+                retire_two_count,
+                retire_three_count);
+            $display("PERF_CAUSE_HIST: NONE=%-d SB=%-d LSU=%-d LSU_SB=%-d PF=%-d PF_SB=%-d PF_LSU=%-d PF_LSU_SB=%-d WB_ANY=%-d CLINT_ANY=%-d",
+                bubble_cause_hist[0], bubble_cause_hist[1], bubble_cause_hist[2],
+                bubble_cause_hist[3], bubble_cause_hist[4], bubble_cause_hist[5],
+                bubble_cause_hist[6], bubble_cause_hist[7],
+                bubble_cause_hist[8] + bubble_cause_hist[9] + bubble_cause_hist[10] +
+                    bubble_cause_hist[11] + bubble_cause_hist[12] + bubble_cause_hist[13] +
+                    bubble_cause_hist[14] + bubble_cause_hist[15],
+                bubble_cause_hist[16] + bubble_cause_hist[17] + bubble_cause_hist[18] +
+                    bubble_cause_hist[19] + bubble_cause_hist[20] + bubble_cause_hist[21] +
+                    bubble_cause_hist[22] + bubble_cause_hist[23] + bubble_cause_hist[24] +
+                    bubble_cause_hist[25] + bubble_cause_hist[26] + bubble_cause_hist[27] +
+                    bubble_cause_hist[28] + bubble_cause_hist[29] + bubble_cause_hist[30] +
+                    bubble_cause_hist[31]);
+            $display("PERF_PRODUCER_STATE: OCC0=%-d OCC1=%-d OCC2=%-d BOTH_WAIT=%-d WAIT_READY=%-d BOTH_READY=%-d RETIRE_HELD=%-d",
+                producer_occ_zero_count,
+                producer_occ_one_count,
+                producer_occ_two_count,
+                producer_both_wait_count,
+                producer_wait_ready_count,
+                producer_both_ready_count,
+                producer_retire_held_count);
             $display("PERF_FRONTEND: PRED_TAKEN_REDIRECT=%-d CORRECT_TAKEN_REDIRECT=%-d PRED_TAKEN_BUBBLE=%-d WRONG_DIR_FLUSH=%-d BTB_MISS_TAKEN=%-d",
                 fe_pred_taken_redirect_count,
                 fe_correct_taken_redirect_count,
