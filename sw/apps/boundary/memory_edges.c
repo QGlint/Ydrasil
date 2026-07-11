@@ -9,6 +9,7 @@ int main(void)
     volatile uint8_t *bytes = (volatile uint8_t *)&word;
     volatile uint16_t *halves = (volatile uint16_t *)&word;
 
+
     word = 0xa5a5a5a5u;
     bytes[0] = 0x11;
     CHECK_EQ("sb_lane0", word, 0xa5a5a511u);

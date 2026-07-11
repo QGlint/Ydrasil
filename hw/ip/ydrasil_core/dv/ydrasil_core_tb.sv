@@ -194,6 +194,55 @@ end
 	);
 
 `ifndef SYNTHESIS
+    logic interrupt_q;
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            interrupt_q <= 1'b0;
+        end else begin
+            interrupt_q <= u_dut.interrupt;
+
+            assert (u_dut.u_ydrasil_registers.registers[0] == 32'b0)
+                else $fatal(1, "ASSERT_X0_NONZERO value=0x%08h",
+                            u_dut.u_ydrasil_registers.registers[0]);
+            assert (u_dut.u_ydrasil_if_stage.pc_ff[1:0] == 2'b00)
+                else $fatal(1, "ASSERT_PC_MISALIGNED pc=0x%08h",
+                            u_dut.u_ydrasil_if_stage.pc_ff);
+            assert (!u_dut.gpr_pending_q[0])
+                else $fatal(1, "ASSERT_SCOREBOARD_TRACKS_X0 pending=0x%08h",
+                            u_dut.gpr_pending_q);
+            assert (!(u_dut.dtcm_req && u_dut.mmio_req))
+                else $fatal(1, "ASSERT_DUAL_DATA_TARGET addr=0x%08h",
+                            u_dut.ex_lsu_mem_addr);
+            assert (!u_dut.dtcm_we || (u_dut.dtcm_req && (|u_dut.dtcm_wmask)))
+                else $fatal(1, "ASSERT_BAD_DTCM_WRITE req=%0b mask=0x%01h addr=0x%08h",
+                            u_dut.dtcm_req, u_dut.dtcm_wmask, u_dut.dtcm_addr);
+            assert (!u_dut.mmio_we || (u_dut.mmio_req && (|u_dut.mmio_wmask)))
+                else $fatal(1, "ASSERT_BAD_MMIO_WRITE req=%0b mask=0x%01h addr=0x%08h",
+                            u_dut.mmio_req, u_dut.mmio_wmask, u_dut.mmio_addr);
+            assert ((u_dut.flush_if == u_dut.branch_jump) &&
+                    (u_dut.flush_id == u_dut.branch_jump) &&
+                    (u_dut.flush_ex == u_dut.branch_jump))
+                else $fatal(1, "ASSERT_INCOHERENT_FLUSH branch=%0b if=%0b id=%0b ex=%0b",
+                            u_dut.branch_jump, u_dut.flush_if,
+                            u_dut.flush_id, u_dut.flush_ex);
+            if (interrupt_q) begin
+                assert (u_dut.gpr_pending_q == '0)
+                    else $fatal(1, "ASSERT_PENDING_AFTER_INTERRUPT pending=0x%08h",
+                                u_dut.gpr_pending_q);
+            end
+            if (u_dut.clint_csr_we) begin
+                assert ((u_dut.clint_csr_waddr == ydrasil_pkg::CSR_MSTATUS) ||
+                        (u_dut.clint_csr_waddr == ydrasil_pkg::CSR_MEPC) ||
+                        (u_dut.clint_csr_waddr == ydrasil_pkg::CSR_MCAUSE))
+                    else $fatal(1, "ASSERT_BAD_TRAP_CSR_WRITE addr=0x%03h data=0x%08h",
+                                u_dut.clint_csr_waddr, u_dut.clint_csr_wdata);
+            end
+        end
+    end
+`endif
+
+`ifndef SYNTHESIS
     initial begin
         bp_trace_en = $test$plusargs("bp_trace");
         bp_fetch_trace_en = $test$plusargs("bp_fetch_trace");

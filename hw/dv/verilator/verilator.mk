@@ -82,7 +82,7 @@ SIM_FLAGS += +trace
 endif
 
 ifeq ($(VERILATOR_COVERAGE),1)
-VERILATOR_FLAGS += --coverage-line --coverage-toggle
+VERILATOR_FLAGS += --coverage-line --coverage-toggle --coverage-expr --coverage-fsm
 endif
 
 SIM_FLAGS += $(SIM_DEFINES)

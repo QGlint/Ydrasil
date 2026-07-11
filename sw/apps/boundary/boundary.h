@@ -7,6 +7,7 @@
 #include "xprintf.h"
 
 #define LED_REG (*(volatile uint32_t *)0x80200040u)
+#define BOUNDARY_STRESS_ROUNDS 64u
 
 static int boundary_failures;
 

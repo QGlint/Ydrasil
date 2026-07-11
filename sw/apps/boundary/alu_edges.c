@@ -7,6 +7,7 @@ int main(void)
     uint32_t sign = 0x80000000u;
     uint32_t minus_one = 0xffffffffu;
 
+
     asm volatile("addi %0, zero, -2048" : "=r"(r));
     CHECK_EQ("addi_min", r, 0xfffff800u);
     asm volatile("slti %0, %1, -1" : "=r"(r) : "r"(sign));

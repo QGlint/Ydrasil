@@ -8,6 +8,7 @@ int main(void)
     uint32_t min = 0x80000000u;
     uint32_t neg_one = 0xffffffffu;
 
+
     asm volatile("div %0, %1, %2" : "=r"(r) : "r"(0x12345678u), "r"(zero));
     CHECK_EQ("div_zero", r, 0xffffffffu);
     asm volatile("rem %0, %1, %2" : "=r"(r) : "r"(0x12345678u), "r"(zero));

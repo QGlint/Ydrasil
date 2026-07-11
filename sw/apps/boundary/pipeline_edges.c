@@ -8,6 +8,7 @@ int main(void)
     uint32_t r;
     uintptr_t odd_target;
 
+
     asm volatile(
         "li %0, 1\n"
         "beq %0, %0, 1f\n"
