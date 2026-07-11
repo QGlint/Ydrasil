@@ -416,6 +416,57 @@ def write_markdown(
             f.write(f"- {cause}: {count} paths, {note}\n")
 
 
+def analyze_sweep(report_dir: Path) -> None:
+    sweep_csv = report_dir / "implementation_sweep.csv"
+    best_file = report_dir / "best_implementation.txt"
+    if not sweep_csv.is_file():
+        return
+
+    with sweep_csv.open(newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    if not rows:
+        raise ValueError(f"empty implementation sweep: {sweep_csv}")
+
+    completed: list[tuple[float, dict[str, str]]] = []
+    for row in rows:
+        wns = row.get("wns_ns", "").strip()
+        status = row.get("status", "")
+        if re.search(r"fail|error", status, re.IGNORECASE):
+            continue
+        if not wns:
+            raise ValueError(f"successful run {row.get('run')} has no WNS in {sweep_csv}")
+        completed.append((float(wns), row))
+    if not completed:
+        raise ValueError(f"no successful implementation result in {sweep_csv}")
+
+    best_wns, best_row = max(completed, key=lambda item: item[0])
+    selected: dict[str, str] = {}
+    if best_file.is_file():
+        for line in best_file.read_text(encoding="utf-8").splitlines():
+            if "=" in line:
+                key, value = line.split("=", 1)
+                selected[key] = value
+        if selected.get("run") != best_row["run"]:
+            raise ValueError(
+                f"Tcl selected {selected.get('run')}, but parsed best run is {best_row['run']}"
+            )
+
+    out = report_dir / "implementation_sweep.md"
+    with out.open("w", encoding="utf-8") as f:
+        f.write("# Implementation Run Sweep\n\n")
+        f.write(f"Best run: `{best_row['run']}` ({best_wns:.3f} ns WNS)\n\n")
+        f.write("| Run | Strategy | Status | WNS ns |\n")
+        f.write("| --- | --- | --- | ---: |\n")
+        for row in sorted(rows, key=lambda item: item["run"]):
+            marker = " **(best)**" if row["run"] == best_row["run"] else ""
+            f.write(
+                f"| `{row['run']}`{marker} | `{row['strategy']}` | "
+                f"{row['status']} | {row['wns_ns']} |\n"
+            )
+    print(f"best implementation run: {best_row['run']} (WNS {best_wns:.3f} ns)")
+    print(f"wrote {out}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--report-dir", type=Path, default=Path("build/syn/reports"))
@@ -430,6 +481,7 @@ def main() -> int:
     args = parser.parse_args()
 
     report_dir = args.report_dir
+    analyze_sweep(report_dir)
     timing_report = args.timing_report or report_dir / "post_route_timing_paths.rpt"
     violation_report = args.violation_report
     csv_out = args.csv or report_dir / "timing_groups.csv"

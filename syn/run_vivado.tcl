@@ -6,6 +6,9 @@ proc usage {} {
     puts "  -sources_tcl <path>     generated source sync Tcl"
     puts "  -report_dir <path>      report output directory"
     puts "  -jobs <n>               Vivado launch job count"
+    puts "  -threads_per_run <n>    max threads used by each Vivado process"
+    puts "  -impl_runs <n>          parallel implementation run count, default 1"
+    puts "  -impl_mode <sweep|extreme>  implementation tuning mode, default sweep"
     puts "  -run_to <synth|route|bitstream|reports|sync_only>"
     puts "  -sync_sources <0|1>     remove old hw/ip sources and add generated list"
     puts "  -force <0|1>            reset runs before launching"
@@ -44,6 +47,81 @@ proc configure_performance_implementation {run_name} {
     set_property STEPS.ROUTE_DESIGN.ARGS.DIRECTIVE Explore $run
     set_property STEPS.POST_ROUTE_PHYS_OPT_DESIGN.IS_ENABLED true $run
     set_property STEPS.POST_ROUTE_PHYS_OPT_DESIGN.ARGS.DIRECTIVE AggressiveExplore $run
+}
+
+proc configure_sweep_implementation {run_name strategy} {
+    set run [get_runs $run_name]
+    set_property strategy $strategy $run
+    set_property STEPS.PHYS_OPT_DESIGN.IS_ENABLED true $run
+}
+
+proc prepare_implementation_runs {count mode} {
+    if {$mode eq "extreme"} {
+        configure_performance_implementation impl_1
+        return [list impl_1]
+    }
+    if {$mode ne "sweep"} {
+        error "unknown -impl_mode value: $mode"
+    }
+
+    set strategies [list \
+        Performance_Explore \
+        Performance_ExplorePostRoutePhysOpt \
+        Performance_ExtraTimingOpt \
+        Performance_RefinePlacement]
+    set count [clamp_int $count 1 [llength $strategies]]
+    set runs [list]
+    for {set idx 0} {$idx < $count} {incr idx} {
+        set run_name [expr {$idx == 0 ? "impl_1" : "impl_sweep_$idx"}]
+        if {$idx > 0 && [llength [get_runs -quiet $run_name]] == 0} {
+            create_run $run_name -parent_run synth_1 -flow {Vivado Implementation 2024} \
+                -strategy [lindex $strategies $idx]
+        }
+        configure_sweep_implementation $run_name [lindex $strategies $idx]
+        lappend runs $run_name
+        puts "Implementation sweep: $run_name strategy=[lindex $strategies $idx]"
+    }
+    return $runs
+}
+
+proc select_best_implementation {run_names report_dir} {
+    set best_run ""
+    set best_wns -Inf
+    set csv [open [file join $report_dir implementation_sweep.csv] w]
+    puts $csv "run,strategy,status,wns_ns"
+    foreach run_name $run_names {
+        set run [get_runs $run_name]
+        set status [get_property STATUS $run]
+        set strategy [get_property STRATEGY $run]
+        set wns ""
+        if {![regexp -nocase {fail|error} $status]} {
+            open_run $run_name -name $run_name
+            set worst [get_timing_paths -quiet -delay_type max -max_paths 1 -nworst 1]
+            if {[llength $worst] > 0} {
+                set wns [get_property SLACK [lindex $worst 0]]
+                if {$best_run eq "" || double($wns) > double($best_wns)} {
+                    set best_run $run_name
+                    set best_wns $wns
+                }
+            }
+            report_timing_summary -delay_type max -report_unconstrained \
+                -file [file join $report_dir ${run_name}_timing_summary.rpt]
+            close_design
+        }
+        puts $csv "$run_name,$strategy,$status,$wns"
+        puts "Implementation result: $run_name strategy=$strategy status=$status WNS=$wns"
+    }
+    close $csv
+    if {$best_run eq ""} {
+        error "no successful implementation run produced a timing path"
+    }
+    set fp [open [file join $report_dir best_implementation.txt] w]
+    puts $fp "run=$best_run"
+    puts $fp "wns_ns=$best_wns"
+    puts $fp "strategy=[get_property STRATEGY [get_runs $best_run]]"
+    close $fp
+    puts "Best implementation: $best_run WNS=$best_wns"
+    return $best_run
 }
 
 proc clamp_int {value min_value max_value} {
@@ -317,6 +395,9 @@ set report_dir [ensure_dir [arg_value "-report_dir" [file join $repo_root "build
 set checkpoint_dir [ensure_dir [arg_value "-checkpoint_dir" [file join $repo_root "build/syn/checkpoints"]]]
 set artifact_dir [ensure_dir [arg_value "-artifact_dir" [file join $repo_root "build/syn/artifacts"]]]
 set jobs [arg_value "-jobs" "16"]
+set impl_runs [arg_value "-impl_runs" "1"]
+set impl_mode [arg_value "-impl_mode" "sweep"]
+set threads_per_run [arg_value "-threads_per_run" $jobs]
 set run_to [arg_value "-run_to" "route"]
 set sync_sources [arg_value "-sync_sources" "1"]
 set force_runs [arg_value "-force" "1"]
@@ -334,13 +415,15 @@ if {$sync_sources && ![file exists $sources_tcl]} {
 
 puts "Opening project: $xpr"
 puts "Vivado jobs: $jobs"
+puts "Implementation mode: $impl_mode, runs: $impl_runs"
 puts "Run target: $run_to"
 open_project $xpr
 
-set max_threads [clamp_int $jobs 1 32]
-if {$max_threads != $jobs} {
+set max_threads [clamp_int $threads_per_run 1 32]
+if {$max_threads != $threads_per_run} {
     puts "Vivado general.maxThreads is limited to $max_threads; launch_runs still uses -jobs $jobs"
 }
+puts "Vivado threads per process: $max_threads"
 safe_param general.maxThreads $max_threads
 catch {set_property XPM_LIBRARIES {XPM_MEMORY} [current_project]}
 
@@ -416,7 +499,6 @@ if {$force_runs} {
     reset_run synth_1
 }
 set_property strategy Flow_AreaOptimized_high [get_runs synth_1]
-configure_performance_implementation impl_1
 launch_runs synth_1 -jobs $jobs
 wait_on_run synth_1
 assert_run_ok synth_1
@@ -440,29 +522,39 @@ if {$run_to eq "synth"} {
     exit 0
 }
 
+set implementation_runs [prepare_implementation_runs $impl_runs $impl_mode]
 if {$force_runs} {
-    puts "Resetting impl_1"
-    reset_run impl_1
+    foreach run_name $implementation_runs {
+        puts "Resetting $run_name"
+        reset_run $run_name
+    }
 }
 
 if {$run_to eq "bitstream"} {
-    launch_runs impl_1 -to_step write_bitstream -jobs $jobs
+    launch_runs $implementation_runs -to_step write_bitstream -jobs $jobs
 } elseif {$run_to eq "route" || $run_to eq "impl"} {
-    launch_runs impl_1 -to_step route_design -jobs $jobs
+    launch_runs $implementation_runs -to_step route_design -jobs $jobs
 } else {
     error "unknown -run_to value: $run_to"
 }
-wait_on_run impl_1
-assert_run_ok impl_1
+foreach run_name $implementation_runs {
+    wait_on_run $run_name
+    set status [get_property STATUS [get_runs $run_name]]
+    puts "$run_name status: $status"
+    if {[regexp -nocase {fail|error} $status]} {
+        puts "warning: implementation sweep run $run_name failed; remaining runs will still be evaluated"
+    }
+}
+set best_impl_run [select_best_implementation $implementation_runs $report_dir]
 
 set impl_run_dir ""
 set top_name [get_property top [get_filesets sources_1]]
-set impl_run_obj [get_runs -quiet impl_1]
+set impl_run_obj [get_runs -quiet $best_impl_run]
 if {[llength $impl_run_obj] > 0} {
     set impl_run_dir [get_property DIRECTORY $impl_run_obj]
 }
 
-open_impl_design impl_1 $checkpoint_dir
+open_impl_design $best_impl_run $checkpoint_dir
 report_if_possible "post-route timing summary" \
     "report_timing_summary -delay_type max -max_paths $timing_summary_max_paths -report_unconstrained -check_timing_verbose -file [file join $report_dir post_route_timing_summary.rpt]"
 report_if_possible "post-route violating timing paths" \
@@ -489,7 +581,7 @@ report_if_possible "post-route design analysis" \
 report_if_possible "QoR suggestions" \
     "report_qor_suggestions -file [file join $report_dir post_route_qor_suggestions.rpt]"
 write_checkpoint -force [file join $checkpoint_dir impl_1_route.dcp]
-archive_run_artifacts impl_1 $artifact_dir $pll_freq_mhz $run_to $report_dir $checkpoint_dir $impl_run_dir $top_name
+archive_run_artifacts $best_impl_run $artifact_dir $pll_freq_mhz $run_to $report_dir $checkpoint_dir $impl_run_dir $top_name
 
 puts "Reports written to $report_dir"
 close_project

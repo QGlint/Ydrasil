@@ -177,12 +177,10 @@ import ydrasil_pkg::*;
     assign hzd_status_o.gpr_pending_issue_mask = gpr_pending_issue_mask;
     assign hzd_status_o.gpr_pending_for_hazard = gpr_pending_for_hazard;
     assign wb_fwd_o = wb_fwd_q;
-    assign producer_rs1_fwd_o.valid = id_ctrl_i.rs1_ren &
-        (id_ctrl_i.rs1_addr != '0) & producer_ready_q[id_ctrl_i.rs1_addr];
+    assign producer_rs1_fwd_o.valid = 1'b0;
     assign producer_rs1_fwd_o.addr = id_ctrl_i.rs1_addr;
     assign producer_rs1_fwd_o.data = producer_value_q[id_ctrl_i.rs1_addr];
-    assign producer_rs2_fwd_o.valid = id_ctrl_i.rs2_ren &
-        (id_ctrl_i.rs2_addr != '0) & producer_ready_q[id_ctrl_i.rs2_addr];
+    assign producer_rs2_fwd_o.valid = 1'b0;
     assign producer_rs2_fwd_o.addr = id_ctrl_i.rs2_addr;
     assign producer_rs2_fwd_o.data = producer_value_q[id_ctrl_i.rs2_addr];
     assign gpr_pending_o = gpr_pending_q;

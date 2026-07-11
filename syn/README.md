@@ -6,7 +6,11 @@ Run from the repository root:
 make syn
 ```
 
-The Makefile uses `vivado -mode batch`, so no GUI is started. By default it keeps
+The Makefile uses `vivado -mode batch`, so no GUI is started. On `servera437`,
+the default flow synthesizes once and launches four independent implementation
+run processes with different performance strategies. The run with the highest
+WNS supplies the final reports, checkpoint, and artifacts. Other hosts default
+to one implementation run. The flow keeps
 the checked-in `FPGA/Ydrasil_FPGA.xpr` as the 150 MHz baseline, copies it to a
 frequency-specific staged project, generates an ordered source Tcl from Bender,
 and passes a synthesis define such as `SYN_PLL_FREQ_150` or `SYN_PLL_FREQ_200`.
@@ -38,11 +42,18 @@ Useful overrides:
 
 ```sh
 make syn SYN_JOBS=40
+make syn SYN_IMPL_RUNS=2 SYN_THREADS_PER_RUN=8
+make syn-extreme
 make syn-vivado SYN_PLL_FREQ_MHZ=200 SYN_RUN_TO=synth
 make syn-vivado SYN_RUN_TO=synth
 make syn-vivado SYN_RUN_TO=bitstream
 make syn-analyze
 ```
+
+`make syn-extreme` runs only `impl_1` with the aggressive per-step directives
+stored in the checked-in GUI project. Sweep results are recorded in
+`implementation_sweep.csv`, `implementation_sweep.md`, and
+`best_implementation.txt`.
 
 Use `make syn-vivado SYN_SYNC_SOURCES=0` to run the existing project fileset
 without syncing Bender-managed RTL into the xpr.

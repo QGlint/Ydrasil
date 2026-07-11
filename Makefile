@@ -34,7 +34,7 @@ COE_LOOP5_ITCM_BIN ?= $(COE_LOOP5_DIR)/irom_M3_loop5_itcm.bin
 COE_LOOP5_ITCM ?= $(COE_LOOP5_DIR)/irom_M3_loop5.itcm
 COE_LOOP5_DTCM ?= $(COE_LOOP5_DIR)/dram_M_loop5.dtcm
 
-export PROJECT_ROOT BUILD_DIR WAVE_DIR LOG_DIR SIM_TOOL IP VERILATOR_MOD UVM USE_BENDER BENDER DIV_IMPL LSU_IMPL MEMS_IMPL ARCH ABI RISCV_PREFIX CC OBJCOPY OBJDUMP GDB QEMU TRACE_TO_CSV TRACE_COMPARE
+export PROJECT_ROOT BUILD_DIR WAVE_DIR LOG_DIR SIM_TOOL IP VERILATOR_MOD VERILATOR_COVERAGE UVM USE_BENDER BENDER DIV_IMPL LSU_IMPL MEMS_IMPL ARCH ABI RISCV_PREFIX CC OBJCOPY OBJDUMP GDB QEMU TRACE_TO_CSV TRACE_COMPARE
 
 SYN_DIR ?= $(PROJECT_ROOT)/syn
 SYN_BUILD_DIR ?= $(BUILD_DIR)/syn
@@ -77,6 +77,14 @@ SYN_LOG_DIR ?= $(SYN_FREQ_BUILD_DIR)/log
 SYN_ARTIFACT_DIR ?= $(SYN_FREQ_BUILD_DIR)/artifacts
 SYN_CHECKPOINT_DIR ?= $(SYN_FREQ_BUILD_DIR)/checkpoints
 SYN_JOBS ?= $(shell nproc)
+ifeq ($(HOSTNAME),servera437)
+SYN_IMPL_RUNS ?= 4
+SYN_THREADS_PER_RUN ?= 8
+else
+SYN_IMPL_RUNS ?= 1
+SYN_THREADS_PER_RUN ?= $(shell nproc)
+endif
+SYN_IMPL_MODE ?= sweep
 SYN_RUN_TO ?= route
 SYN_FORCE ?= 1
 SYN_SYNC_SOURCES ?= 1
@@ -93,9 +101,9 @@ ifeq ($(filter $(SYN_PLL_FREQ_MHZ),$(SYN_PLL_SUPPORTED_FREQS)),)
 $(error Unsupported SYN_PLL_FREQ_MHZ=$(SYN_PLL_FREQ_MHZ); supported values: $(SYN_PLL_SUPPORTED_FREQS))
 endif
 
-.PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests init install-bender get_spike download_and_extract_spike check_spike_prebuilt_abi build_spike_from_source check_deps spike spike_wave_to_csv sim_compare commit_check commit_spike_csv commit_hw_trace commit_hw_csv commit_compare rv_test_comp_genmem ppa_rvtest_report coe_simple coe_smoke coe_smoke_led coe_isa_probes
+.PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests init install-bender get_spike download_and_extract_spike check_spike_prebuilt_abi build_spike_from_source check_deps spike spike_wave_to_csv sim_compare commit_check commit_spike_csv commit_hw_trace commit_hw_csv commit_compare rv_test_comp_genmem ppa_rvtest_report coe_simple coe_smoke coe_smoke_led coe_isa_probes coverage_all coverage_clean coverage_report
 .PHONY: coremark coremark_sim coremark_run coremark_result coremark-rebuild coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map sort_app sort_all sort_sim_all sort_report sort_app_sim sort_app-rebuild sort_app-clean boundary_app boundary_all boundary_sim_all boundary_report boundary_app-rebuild boundary_app-clean coe_loop5 coe_loop5_gen
-.PHONY: syn synf syn-venv syn-prep syn-stage-xpr syn-vivado syn-analyze syn-clean
+.PHONY: syn synf syn-extreme syn-venv syn-prep syn-stage-xpr syn-vivado syn-analyze syn-clean
 
 .SECONDEXPANSION:
 
@@ -107,6 +115,38 @@ full : comp_and_sim_cpu wave
 
 run_all_tests: init check_deps test_all
 
+coverage_clean:
+	rm -rf "$(COVERAGE_DIR)"
+
+coverage_all: coverage_clean
+	@mkdir -p "$(COVERAGE_DATA_DIR)"
+	@$(MAKE) comp VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
+	-@$(MAKE) boundary_all VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
+	-@$(MAKE) test_all VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
+	-@$(MAKE) sort_all VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
+	-@$(MAKE) coremark_sim VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
+	-@$(MAKE) coe_loop5 VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
+	@$(MAKE) coverage_report
+
+coverage_report:
+	@mkdir -p "$(COVERAGE_DIR)"; \
+	set -- $$(find "$(COVERAGE_DATA_DIR)" -type f -name '*.dat' | sort); \
+	if [ "$$#" -eq 0 ]; then echo "[COVERAGE] No data files found in $(COVERAGE_DATA_DIR)"; exit 1; fi; \
+	echo "[COVERAGE] Merging $$# test databases" | tee "$(COVERAGE_SUMMARY)"; \
+	verilator_coverage --write "$(COVERAGE_MERGED)" "$$@" 2>&1 | tee -a "$(COVERAGE_SUMMARY)"; \
+	verilator_coverage --write-info "$(COVERAGE_INFO)" "$(COVERAGE_MERGED)"; \
+	rm -rf "$(COVERAGE_ANNOTATE_DIR)"; \
+	verilator_coverage --annotate "$(COVERAGE_ANNOTATE_DIR)" "$(COVERAGE_MERGED)" 2>&1 | tee -a "$(COVERAGE_SUMMARY)"; \
+	total=$$(awk -F'[:,]' '/^DA:/{total++} END{print total+0}' "$(COVERAGE_INFO)"); \
+	hit=$$(awk -F'[:,]' '/^DA:/ && $$3>0{hit++} END{print hit+0}' "$(COVERAGE_INFO)"); \
+	percent=$$(awk -v h="$$hit" -v t="$$total" 'BEGIN{if(t) printf "%.2f",100*h/t; else print "0.00"}'); \
+	{ echo "[COVERAGE] LCOV source-line coverage: $$hit/$$total ($$percent%)"; \
+	  echo "[COVERAGE] Merged data: $(COVERAGE_MERGED)"; \
+	  echo "[COVERAGE] LCOV: $(COVERAGE_INFO)"; \
+	  echo "[COVERAGE] Annotated RTL: $(COVERAGE_ANNOTATE_DIR)"; \
+	  echo "[COVERAGE] Summary: $(COVERAGE_SUMMARY)"; \
+	} | tee -a "$(COVERAGE_SUMMARY)"
+
 syn: syn-vivado
 	@$(MAKE) syn-analyze
 
@@ -115,6 +155,11 @@ synf: SYN_RUN_TO := bitstream
 synf: SYN_JOBS := 32
 synf: syn-vivado
 	@$(MAKE) syn-analyze SYN_PLL_FREQ_MHZ=$(SYN_PLL_FREQ_MHZ)
+
+syn-extreme: SYN_IMPL_MODE := extreme
+syn-extreme: SYN_IMPL_RUNS := 1
+syn-extreme: syn-vivado
+	@$(MAKE) syn-analyze SYN_IMPL_MODE=extreme SYN_IMPL_RUNS=1
 
 syn-venv: $(SYN_VENV)/.stamp
 
@@ -161,6 +206,9 @@ syn-vivado: syn-prep syn-stage-xpr
 		-checkpoint_dir $(SYN_CHECKPOINT_DIR) \
 		-artifact_dir $(SYN_ARTIFACT_DIR) \
 		-jobs $(SYN_JOBS) \
+		-threads_per_run $(SYN_THREADS_PER_RUN) \
+		-impl_runs $(SYN_IMPL_RUNS) \
+		-impl_mode $(SYN_IMPL_MODE) \
 		-run_to $(SYN_RUN_TO) \
 		-sync_sources $(SYN_SYNC_SOURCES) \
 		-pll_freq_mhz $(SYN_PLL_FREQ_MHZ) \
@@ -582,7 +630,7 @@ spike_wave_to_csv:
 	$(PYTHON) $(TRACE_TO_CSV) --log $(SPIKE_TRACE_LOG) --csv $(SPIKE_TRACE_CSV) --source spike
 
 sim_compare:
-	@mkdir -p $(COMPARE_OUT_DIR) $(COMPARE_HW_OUT_DIR) $(dir $(COMPARE_HW_LOG)) $(dir $(COMPARE_SPIKE_LOG)) $(dir $(COMPARE_HW_CSV)) $(dir $(COMPARE_SPIKE_CSV))
+	@mkdir -p $(COMPARE_OUT_DIR) $(COMPARE_HW_OUT_DIR) $(dir $(COMPARE_HW_LOG)) $(dir $(COMPARE_SPIKE_LOG)) $(dir $(COMPARE_HW_CSV)) $(dir $(COMPARE_SPIKE_CSV)) $(COVERAGE_DATA_DIR)
 ifeq ($(SIM_COMPARE),none)
 	@echo "[SIM] HW only: $(COMPARE_NAME)"
 	@$(MAKE) -C hw/dv sim \
@@ -590,7 +638,7 @@ ifeq ($(SIM_COMPARE),none)
 		LOG_OUTPUT=0 \
 		ITCM_FILE=$(abspath $(COMPARE_ITCM)) \
 		DTCM_FILE=$(abspath $(COMPARE_DTCM)) \
-		SIM_EXTRA_DEFINES="$(COMPARE_SIM_DEFINES)" \
+		SIM_EXTRA_DEFINES="$(COMPARE_SIM_DEFINES) $(if $(filter 1,$(VERILATOR_COVERAGE)),+coverage_file=$(abspath $(COMPARE_COVERAGE_FILE)),)" \
 		> $(COMPARE_HW_LOG) 2>&1
 	@echo "[SIM] HW log: $(COMPARE_HW_LOG)"
 else ifeq ($(SIM_COMPARE),realtime)
@@ -617,7 +665,7 @@ else ifeq ($(SIM_COMPARE),csv)
 		LOG_OUTPUT=0 \
 		ITCM_FILE=$(abspath $(COMPARE_ITCM)) \
 		DTCM_FILE=$(abspath $(COMPARE_DTCM)) \
-		SIM_EXTRA_DEFINES="$(COMPARE_SIM_DEFINES)" \
+		SIM_EXTRA_DEFINES="$(COMPARE_SIM_DEFINES) $(if $(filter 1,$(VERILATOR_COVERAGE)),+coverage_file=$(abspath $(COMPARE_COVERAGE_FILE)),)" \
 		> $(COMPARE_HW_LOG) 2>&1
 	@$(PYTHON) $(TRACE_TO_CSV) --log $(COMPARE_HW_LOG) --csv $(COMPARE_HW_CSV) --source ydrasil
 	@echo "[SIM] HW CSV: $(COMPARE_HW_CSV)"

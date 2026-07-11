@@ -3,6 +3,9 @@
 #include <cstdio>
 #include <cstring>
 #include <iostream>
+#if VM_COVERAGE
+#include <verilated_cov.h>
+#endif
 #ifndef TB_NAME
 #error "Please define TB_NAME (e.g. -D TB_NAME=gearbox_68_to_80_tb)"
 #endif
@@ -48,6 +51,7 @@ int main(int argc, char **argv) {
     TB_CLASS_NAME *tb = new TB_CLASS_NAME;
     // check if trace is enabled
     int trace_en = 0;
+    const char *coverage_file = "coverage.dat";
     for (int i = 0; i < argc; i++)
     {
         if (strcmp(argv[i], "+trace") == 0)
@@ -56,6 +60,8 @@ int main(int argc, char **argv) {
             trace_en = 1;
         if (sscanf(argv[i], "+cpp_timeout=%lu", &MAX_TIME) == 1)
             printf("C++ timeout set to %lu\n", MAX_TIME);
+        if (strncmp(argv[i], "+coverage_file=", 15) == 0)
+            coverage_file = argv[i] + 15;
     }
 
     if (trace_en)
@@ -124,6 +130,10 @@ int main(int argc, char **argv) {
 
 
     std::cout << "Simulation finished at time " << Verilated::time() << " ticks.\n";
+#if VM_COVERAGE
+    VerilatedCov::write(coverage_file);
+    std::cout << "Coverage data written to " << coverage_file << "\n";
+#endif
     #ifdef VERILATOR_TRACE
         tfp->close();
     delete tfp;
