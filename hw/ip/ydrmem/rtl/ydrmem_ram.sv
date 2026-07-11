@@ -34,6 +34,8 @@ module ydrmem_ram #(
             if (we_mask_i[1]) mem_r[word_addr][15:8] <= data_i[15:8];
             if (we_mask_i[2]) mem_r[word_addr][23:16] <= data_i[23:16];
             if (we_mask_i[3]) mem_r[word_addr][31:24] <= data_i[31:24];
+            if (word_addr >= 16'h1490 && word_addr <= 16'h14a0)
+                $display("[DTCM W] t=%0d addr=%h wmask=%b wdata=%h", $time, word_addr, we_mask_i, data_i);
         end
     end
 
