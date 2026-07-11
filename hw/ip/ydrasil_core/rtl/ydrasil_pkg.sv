@@ -1,7 +1,7 @@
 
 package ydrasil_pkg;
 	// Memory and address configuration
-	localparam int ITCM_ADDR_WIDTH = 12; // 16KB
+	localparam int ITCM_ADDR_WIDTH = 13; // 32KB
 	localparam int DTCM_ADDR_WIDTH = 16; // 256KB
 
 	localparam logic [31:0] ITCM_BASE_ADDR = 32'h8000_0000;

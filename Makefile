@@ -226,7 +226,7 @@ coremark_sim: coremark
 		COMPARE_ITCM=$(BUILD_DIR)/app/coremark/coremark.itcm \
 		COMPARE_DTCM=$(BUILD_DIR)/app/coremark/coremark.dtcm \
 		SIM_COMPARE=$(COREMARK_SIM_COMPARE) \
-		COMPARE_SIM_EXTRA_DEFINES="+cpp_timeout=$(COREMARK_SIM_TIMEOUT) +sv_timeout=$(COREMARK_SIM_TIMEOUT) +commit_trace_disable"; \
+		COMPARE_SIM_EXTRA_DEFINES="+cpp_timeout=$(COREMARK_SIM_TIMEOUT) +sv_timeout=$(COREMARK_SIM_TIMEOUT)$(if $(filter none,$(COREMARK_SIM_COMPARE)), +commit_trace_disable,)"; \
 	rc=$$?; \
 	$(MAKE) --no-print-directory coremark_result; \
 	result_rc=$$?; \
