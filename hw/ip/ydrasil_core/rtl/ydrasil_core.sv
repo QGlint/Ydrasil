@@ -243,7 +243,7 @@ import ydrasil_pkg::*;
 	wire                             interrupt;
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0]      clint_ex_int_addr;
 	wire                             clint_stall;
-	wire                             instret_inc;
+	wire [1:0]                       instret_inc_count;
 
 	wire [ydrasil_pkg::BUS_ADDR_WIDTH-1:0] id_instr_addr;
 
@@ -382,7 +382,8 @@ import ydrasil_pkg::*;
 	assign perip_wen = mmio_req && mmio_we;
 	assign perip_mask = mmio_wmask;
 	assign perip_wdata = mmio_wdata;
-	assign instret_inc = ex_instret_inc | lsu_rf_wen_rd | mul_result_valid;
+	assign instret_inc_count =
+		{1'b0, ex_instret_inc} + {1'b0, lsu_rf_wen_rd} + {1'b0, mul_result_valid};
 
 	ydrasil_load_store_unit u_ydrasil_load_store_unit (
 		.clk               (clk),
@@ -694,7 +695,7 @@ import ydrasil_pkg::*;
 	ydrasil_registers_csr u_ydrasil_registers_csr (
 		.clk               (clk),
 		.rst_n             (rst_n),
-		.instret_inc_i     (instret_inc),
+		.instret_inc_count_i(instret_inc_count),
 		.ex_csr_wen_i      (ex_csr_wen),
 		.id_csr_raddr_i    (id_csr_raddr),
 		.ex_csr_waddr_i    (ex_csr_waddr),
