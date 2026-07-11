@@ -107,7 +107,7 @@ syn: syn-vivado
 
 synf: SYN_PLL_FREQ_MHZ := 200
 synf: SYN_RUN_TO := bitstream
-synf: SYN_JOBS := 40
+synf: SYN_JOBS := 32
 synf: syn-vivado
 	@$(MAKE) syn-analyze SYN_PLL_FREQ_MHZ=$(SYN_PLL_FREQ_MHZ)
 

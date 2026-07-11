@@ -26,6 +26,8 @@ import ydrasil_pkg::*;
     input  wire [DATA_WIDTH-1:0]           rf_rdata_rs1_i,
     input  wire [DATA_WIDTH-1:0]           rf_rdata_rs2_i,
     input  ydrasil_gpr_fwd_pkt_t           wb_fwd_i,
+    input  ydrasil_gpr_fwd_pkt_t           producer_rs1_fwd_i,
+    input  ydrasil_gpr_fwd_pkt_t           producer_rs2_fwd_i,
     input  ydrasil_gpr_fwd_pkt_t           lsu_fwd_i,
     input  ydrasil_gpr_fwd_pkt_t           alu_fwd_i,
     input  ydrasil_gpr_fwd_pkt_t           mul_fwd_i,
@@ -297,12 +299,14 @@ import ydrasil_pkg::*;
         rs1_lsu_fwd ? lsu_fwd_i.data :
         rs1_alu_fwd ? alu_fwd_i.data :
         rs1_mul_fwd ? mul_fwd_i.data :
+        producer_rs1_fwd_i.valid ? producer_rs1_fwd_i.data :
         rs1_wb_fwd  ? wb_fwd_i.data  : rf_rdata_rs1_i;
     wire [DATA_WIDTH-1:0] issue_rs2_data =
         rs2_issue_early_alu_fwd ? issue_early_alu_data_ff :
         rs2_lsu_fwd ? lsu_fwd_i.data :
         rs2_alu_fwd ? alu_fwd_i.data :
         rs2_mul_fwd ? mul_fwd_i.data :
+        producer_rs2_fwd_i.valid ? producer_rs2_fwd_i.data :
         rs2_wb_fwd  ? wb_fwd_i.data  : rf_rdata_rs2_i;
     wire [DATA_WIDTH-1:0] issue_early_rs1_data =
         rs1_issue_early_alu_fwd ? issue_early_alu_data_ff :

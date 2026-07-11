@@ -35,6 +35,17 @@ proc safe_param {name value} {
     }
 }
 
+proc configure_performance_implementation {run_name} {
+    set run [get_runs $run_name]
+    set_property STEPS.OPT_DESIGN.ARGS.DIRECTIVE Explore $run
+    set_property STEPS.PLACE_DESIGN.ARGS.DIRECTIVE Explore $run
+    set_property STEPS.PHYS_OPT_DESIGN.IS_ENABLED true $run
+    set_property STEPS.PHYS_OPT_DESIGN.ARGS.DIRECTIVE ExploreWithHoldFix $run
+    set_property STEPS.ROUTE_DESIGN.ARGS.DIRECTIVE Explore $run
+    set_property STEPS.POST_ROUTE_PHYS_OPT_DESIGN.IS_ENABLED true $run
+    set_property STEPS.POST_ROUTE_PHYS_OPT_DESIGN.ARGS.DIRECTIVE AggressiveExplore $run
+}
+
 proc clamp_int {value min_value max_value} {
     if {$value < $min_value} {
         return $min_value
@@ -405,6 +416,7 @@ if {$force_runs} {
     reset_run synth_1
 }
 set_property strategy Flow_AreaOptimized_high [get_runs synth_1]
+configure_performance_implementation impl_1
 launch_runs synth_1 -jobs $jobs
 wait_on_run synth_1
 assert_run_ok synth_1

@@ -23,6 +23,8 @@ import ydrasil_pkg::*;
 
     output ydrasil_hzd_status_pkt_t     hzd_status_o,
     output ydrasil_gpr_fwd_pkt_t        wb_fwd_o,
+    output ydrasil_gpr_fwd_pkt_t        producer_rs1_fwd_o,
+    output ydrasil_gpr_fwd_pkt_t        producer_rs2_fwd_o,
     output wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_o,
     output wire                         ex_accept_valid_o,
 
@@ -38,7 +40,10 @@ import ydrasil_pkg::*;
 );
 
     reg [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_q;
+    reg [ydrasil_pkg::REGS_NUM-1:0] producer_ready_q;
+    reg [ydrasil_pkg::REGS_DATA_WIDTH-1:0] producer_value_q [0:ydrasil_pkg::REGS_NUM-1];
     ydrasil_gpr_fwd_pkt_t wb_fwd_q;
+    integer producer_idx;
 
     wire ex_is_load =
         ex_hzd_i.operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD];
@@ -93,7 +98,8 @@ import ydrasil_pkg::*;
         (alu_fwd_i.valid & id_ctrl_i.rs1_ren & (id_ctrl_i.rs1_addr != '0) &
          (id_ctrl_i.rs1_addr == alu_fwd_i.addr)) |
         (mul_fwd_i.valid & id_ctrl_i.rs1_ren & (id_ctrl_i.rs1_addr != '0) &
-         (id_ctrl_i.rs1_addr == mul_fwd_i.addr));
+         (id_ctrl_i.rs1_addr == mul_fwd_i.addr)) |
+        producer_rs1_fwd_o.valid;
     wire rs2_clear_fwd =
         (wb_fwd_q.valid & id_ctrl_i.rs2_ren & (id_ctrl_i.rs2_addr != '0) &
          (id_ctrl_i.rs2_addr == wb_fwd_q.addr)) |
@@ -102,7 +108,8 @@ import ydrasil_pkg::*;
         (alu_fwd_i.valid & id_ctrl_i.rs2_ren & (id_ctrl_i.rs2_addr != '0) &
          (id_ctrl_i.rs2_addr == alu_fwd_i.addr)) |
         (mul_fwd_i.valid & id_ctrl_i.rs2_ren & (id_ctrl_i.rs2_addr != '0) &
-         (id_ctrl_i.rs2_addr == mul_fwd_i.addr));
+         (id_ctrl_i.rs2_addr == mul_fwd_i.addr)) |
+        producer_rs2_fwd_o.valid;
     wire rd_clear_fwd =
         (wb_fwd_q.valid & id_ctrl_i.rd_wen & (id_ctrl_i.rd_addr != '0) &
          (id_ctrl_i.rd_addr == wb_fwd_q.addr)) |
@@ -170,20 +177,50 @@ import ydrasil_pkg::*;
     assign hzd_status_o.gpr_pending_issue_mask = gpr_pending_issue_mask;
     assign hzd_status_o.gpr_pending_for_hazard = gpr_pending_for_hazard;
     assign wb_fwd_o = wb_fwd_q;
+    assign producer_rs1_fwd_o.valid = id_ctrl_i.rs1_ren &
+        (id_ctrl_i.rs1_addr != '0) & producer_ready_q[id_ctrl_i.rs1_addr];
+    assign producer_rs1_fwd_o.addr = id_ctrl_i.rs1_addr;
+    assign producer_rs1_fwd_o.data = producer_value_q[id_ctrl_i.rs1_addr];
+    assign producer_rs2_fwd_o.valid = id_ctrl_i.rs2_ren &
+        (id_ctrl_i.rs2_addr != '0) & producer_ready_q[id_ctrl_i.rs2_addr];
+    assign producer_rs2_fwd_o.addr = id_ctrl_i.rs2_addr;
+    assign producer_rs2_fwd_o.data = producer_value_q[id_ctrl_i.rs2_addr];
     assign gpr_pending_o = gpr_pending_q;
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             gpr_pending_q <= '0;
+            producer_ready_q <= '0;
             wb_fwd_q <= '0;
+            for (producer_idx = 0; producer_idx < ydrasil_pkg::REGS_NUM;
+                 producer_idx = producer_idx + 1) begin
+                producer_value_q[producer_idx] <= '0;
+            end
         end else if (ex_hzd_i.interrupt) begin
             gpr_pending_q <= '0;
+            producer_ready_q <= '0;
             wb_fwd_q <= '0;
         end else begin
             gpr_pending_q <= gpr_pending_for_hazard;
             wb_fwd_q.valid <= rf_wen_rd_i & (rf_waddr_rd_i != '0);
             wb_fwd_q.addr <= rf_waddr_rd_i;
             wb_fwd_q.data <= rf_wdata_rd_i;
+
+            if (alu_fwd_i.valid && !ex_branch_jump_i && (alu_fwd_i.addr != '0)) begin
+                producer_ready_q[alu_fwd_i.addr] <= 1'b1;
+                producer_value_q[alu_fwd_i.addr] <= alu_fwd_i.data;
+            end
+            if (lsu_fwd_i.valid && (lsu_fwd_i.addr != '0)) begin
+                producer_ready_q[lsu_fwd_i.addr] <= 1'b1;
+                producer_value_q[lsu_fwd_i.addr] <= lsu_fwd_i.data;
+            end
+            if (mul_fwd_i.valid && (mul_fwd_i.addr != '0)) begin
+                producer_ready_q[mul_fwd_i.addr] <= 1'b1;
+                producer_value_q[mul_fwd_i.addr] <= mul_fwd_i.data;
+            end
+            if (rf_wen_rd_i && (rf_waddr_rd_i != '0)) begin
+                producer_ready_q[rf_waddr_rd_i] <= 1'b0;
+            end
         end
     end
 

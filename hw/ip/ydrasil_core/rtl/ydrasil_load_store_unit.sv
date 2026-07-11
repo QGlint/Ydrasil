@@ -297,12 +297,13 @@ import ydrasil_pkg::*;
     reg [31:0] mmio_load_result;
     reg [31:0] load_shifted_data;
 
-    localparam int HOT_ENTRIES = 4;
+    localparam int HOT_ENTRIES = 8;
+    localparam int HOT_INDEX_WIDTH = $clog2(HOT_ENTRIES);
     reg [HOT_ENTRIES-1:0] hot_valid_q;
     reg [ydrasil_pkg::BUS_ADDR_WIDTH-1:2] hot_addr_q [0:HOT_ENTRIES-1];
     reg [31:0] hot_data_q [0:HOT_ENTRIES-1];
     reg hot_lookup_hit;
-    reg [1:0] hot_lookup_idx;
+    reg [HOT_INDEX_WIDTH-1:0] hot_lookup_idx;
     reg [31:0] hot_lookup_data;
     wire hot_load_req;
     wire dtcm_array_load_req;
@@ -350,7 +351,7 @@ import ydrasil_pkg::*;
     assign mmio_busy = mmio_req_valid_q | mmio_wait_q | mmio_wb_valid_q;
     assign dtcm_accept = request_valid & request_is_dtcm & !mmio_wb_valid_q & !pending_store_valid_q;
     always_comb begin
-        hot_lookup_idx = id_lsu_i.addr[3:2];
+        hot_lookup_idx = id_lsu_i.addr[HOT_INDEX_WIDTH+1:2];
         hot_lookup_hit = hot_valid_q[hot_lookup_idx] &&
             (hot_addr_q[hot_lookup_idx] == id_lsu_i.addr[BUS_ADDR_WIDTH-1:2]);
         hot_lookup_data = hot_data_q[hot_lookup_idx];
@@ -557,23 +558,23 @@ import ydrasil_pkg::*;
             if (load_s1_valid_q &&
                 !(dtcm_store_req &&
                   (dtcm_addr_o[BUS_ADDR_WIDTH-1:2] == load_s1_word_addr_q))) begin
-                hot_valid_q[load_s1_word_addr_q[3:2]] <= 1'b1;
-                hot_addr_q[load_s1_word_addr_q[3:2]] <= load_s1_word_addr_q;
-                hot_data_q[load_s1_word_addr_q[3:2]] <= dtcm_rdata_i;
+                hot_valid_q[load_s1_word_addr_q[HOT_INDEX_WIDTH+1:2]] <= 1'b1;
+                hot_addr_q[load_s1_word_addr_q[HOT_INDEX_WIDTH+1:2]] <= load_s1_word_addr_q;
+                hot_data_q[load_s1_word_addr_q[HOT_INDEX_WIDTH+1:2]] <= dtcm_rdata_i;
             end
 
             if (dtcm_store_req) begin
-                if (hot_valid_q[dtcm_addr_o[3:2]] &&
-                    (hot_addr_q[dtcm_addr_o[3:2]] == dtcm_addr_o[BUS_ADDR_WIDTH-1:2])) begin
-                    hot_valid_q[dtcm_addr_o[3:2]] <= 1'b0;
+                if (hot_valid_q[dtcm_addr_o[HOT_INDEX_WIDTH+1:2]] &&
+                    (hot_addr_q[dtcm_addr_o[HOT_INDEX_WIDTH+1:2]] == dtcm_addr_o[BUS_ADDR_WIDTH-1:2])) begin
+                    hot_valid_q[dtcm_addr_o[HOT_INDEX_WIDTH+1:2]] <= 1'b0;
                 end
             end
 `ifndef SYNTHESIS
             if (dtcm_accept & is_load) perf_hot_lookup_q <= perf_hot_lookup_q + 1'b1;
             if (hot_load_req) perf_hot_hit_q <= perf_hot_hit_q + 1'b1;
             if (load_s1_valid_q) perf_hot_fill_q <= perf_hot_fill_q + 1'b1;
-            if (dtcm_store_req && hot_valid_q[dtcm_addr_o[3:2]] &&
-                (hot_addr_q[dtcm_addr_o[3:2]] == dtcm_addr_o[BUS_ADDR_WIDTH-1:2]))
+            if (dtcm_store_req && hot_valid_q[dtcm_addr_o[HOT_INDEX_WIDTH+1:2]] &&
+                (hot_addr_q[dtcm_addr_o[HOT_INDEX_WIDTH+1:2]] == dtcm_addr_o[BUS_ADDR_WIDTH-1:2]))
                 perf_hot_store_update_q <= perf_hot_store_update_q + 1'b1;
 `endif
 

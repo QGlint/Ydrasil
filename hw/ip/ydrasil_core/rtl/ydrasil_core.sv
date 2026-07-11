@@ -186,6 +186,8 @@ import ydrasil_pkg::*;
 	ydrasil_ex_hzd_pkt_t            ex_hzd_pkt;
 	ydrasil_hzd_status_pkt_t        hzd_status_pkt;
 	ydrasil_gpr_fwd_pkt_t           wb_fwd_pkt;
+	ydrasil_gpr_fwd_pkt_t           producer_rs1_fwd_pkt;
+	ydrasil_gpr_fwd_pkt_t           producer_rs2_fwd_pkt;
 	ydrasil_gpr_fwd_pkt_t           lsu_fwd_pkt;
 	ydrasil_gpr_fwd_pkt_t           alu_fwd_pkt;
 	ydrasil_gpr_fwd_pkt_t           mul_fwd_pkt;
@@ -483,6 +485,8 @@ import ydrasil_pkg::*;
 		.rf_rdata_rs1_i     (rf_rdata_rs1),
 		.rf_rdata_rs2_i     (rf_rdata_rs2),
 		.wb_fwd_i           (wb_fwd_pkt),
+		.producer_rs1_fwd_i (producer_rs1_fwd_pkt),
+		.producer_rs2_fwd_i (producer_rs2_fwd_pkt),
 		.lsu_fwd_i          (lsu_fwd_pkt),
 		.alu_fwd_i          (alu_fwd_pkt),
 		.mul_fwd_i          (mul_fwd_pkt),
@@ -679,6 +683,8 @@ import ydrasil_pkg::*;
 			.rf_wdata_rd_i     (rf_wdata_rd),
 			.hzd_status_o      (hzd_status_pkt),
 			.wb_fwd_o          (wb_fwd_pkt),
+			.producer_rs1_fwd_o(producer_rs1_fwd_pkt),
+			.producer_rs2_fwd_o(producer_rs2_fwd_pkt),
 			.gpr_pending_o     (gpr_pending_q),
 			.ex_accept_valid_o (ex_accept_valid),
 		.stall_if_o        (stall_if),
