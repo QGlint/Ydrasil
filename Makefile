@@ -11,6 +11,11 @@ SORT_APP_DIR := $(PROJECT_ROOT)/sw/apps/sort
 SORT_APP_NAMES := $(sort $(basename $(notdir $(wildcard $(SORT_APP_DIR)/*.c))))
 SORT_SIM_TARGETS := $(addprefix sort_sim_,$(SORT_APP_NAMES))
 SORT_RESULT_DIR ?= $(RESULT_DIR)/sort
+BOUNDARY_APP_DIR := $(PROJECT_ROOT)/sw/apps/boundary
+BOUNDARY_APP_NAMES := $(sort $(basename $(notdir $(wildcard $(BOUNDARY_APP_DIR)/*.c))))
+BOUNDARY_SIM_TARGETS := $(addprefix boundary_sim_,$(BOUNDARY_APP_NAMES))
+BOUNDARY_RESULT_DIR ?= $(RESULT_DIR)/boundary
+PPA_BOUNDARY_LOG ?= $(PPA_DIR)/boundary_summary.log
 PPA_SORT_LOG ?= $(PPA_DIR)/sort_summary.log
 PPA_COE_LOG ?= $(PPA_DIR)/$(COE_SIMPLE_NAME)_summary.log
 COE_SIMPLE_NAME ?= coe_loop2
@@ -89,7 +94,7 @@ $(error Unsupported SYN_PLL_FREQ_MHZ=$(SYN_PLL_FREQ_MHZ); supported values: $(SY
 endif
 
 .PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests init install-bender get_spike download_and_extract_spike check_spike_prebuilt_abi build_spike_from_source check_deps spike spike_wave_to_csv sim_compare commit_check commit_spike_csv commit_hw_trace commit_hw_csv commit_compare rv_test_comp_genmem ppa_rvtest_report coe_simple coe_smoke coe_smoke_led coe_isa_probes
-.PHONY: coremark coremark_sim coremark_run coremark_result coremark-rebuild coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map sort_app sort_all sort_sim_all sort_report sort_app_sim sort_app-rebuild sort_app-clean coe_loop5 coe_loop5_gen
+.PHONY: coremark coremark_sim coremark_run coremark_result coremark-rebuild coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map sort_app sort_all sort_sim_all sort_report sort_app_sim sort_app-rebuild sort_app-clean boundary_app boundary_all boundary_sim_all boundary_report boundary_app-rebuild boundary_app-clean coe_loop5 coe_loop5_gen
 .PHONY: syn synf syn-venv syn-prep syn-stage-xpr syn-vivado syn-analyze syn-clean
 
 .SECONDEXPANSION:
@@ -218,13 +223,14 @@ comp_and_sim_cpu: comp
 COREMARK_SW_MAKE_ARGS = \
 		PROJECT_ROOT=$(PROJECT_ROOT) \
 		RISCV_PREFIX=$(RISCV_PREFIX) \
-		ARCH=rv32im_zicsr_zifencei \
+		ARCH=rv32im_zicsr_zifencei_zba_zbb_zbc_zbkb_zbkx_zbs \
 		ABI=$(ABI)
 SORT_APP_SW_MAKE_ARGS = \
 		PROJECT_ROOT=$(PROJECT_ROOT) \
 		RISCV_PREFIX=$(RISCV_PREFIX) \
 		ARCH=rv32im_zicsr_zifencei \
 		ABI=$(ABI)
+BOUNDARY_APP_SW_MAKE_ARGS = $(SORT_APP_SW_MAKE_ARGS)
 COREMARK_RESULT_LOG ?= $(HW_TRACE_OUT_DIR)/coremark/hw.log
 COREMARK_SIM_COMPARE ?= none
 COMPARE_TRACE_DEFINES = $(if $(filter none,$(SIM_COMPARE)),,$(if $(findstring +commit_trace,$(COMPARE_SIM_EXTRA_DEFINES)),,+commit_trace))
@@ -320,6 +326,37 @@ sort_report:
 	exit $$failed
 
 sort_app_sim: sort_all
+
+boundary_app:
+	@$(MAKE) -C sw boundary_app $(BOUNDARY_APP_SW_MAKE_ARGS)
+
+boundary_app-rebuild:
+	@$(MAKE) -C sw boundary_app-rebuild $(BOUNDARY_APP_SW_MAKE_ARGS)
+
+boundary_all:
+	@echo "==========================================================="
+	@echo "   Boundary regression: $(BOUNDARY_APP_NAMES)"
+	@echo "==========================================================="
+	@$(MAKE) -j boundary_app
+	@$(MAKE) comp
+	@rm -rf "$(BOUNDARY_RESULT_DIR)"
+	@$(MAKE) -j boundary_sim_all
+	@$(MAKE) boundary_report
+
+boundary_sim_all: $(BOUNDARY_SIM_TARGETS)
+
+boundary_sim_%:
+	@name=$*; result_dir="$(BOUNDARY_RESULT_DIR)"; hw_log="$(HW_TRACE_OUT_DIR)/boundary/$$name/hw.log"; run_log="$$result_dir/$$name.log"; status="$$result_dir/$$name.status"; \
+	mkdir -p "$$result_dir"; rm -f "$$hw_log" "$$run_log" "$$status"; \
+	if $(MAKE) --no-print-directory sim_compare SIM_COMPARE=none COMPARE_NAME="boundary/$$name" COMPARE_ELF="$(BUILD_DIR)/app/boundary/$$name.elf" COMPARE_ITCM="$(BUILD_DIR)/app/boundary/$$name.itcm" COMPARE_DTCM="$(BUILD_DIR)/app/boundary/$$name.dtcm" COMPARE_SIM_EXTRA_DEFINES="+perip_debug +cpp_timeout=2000000 +sv_timeout=2000000" >"$$run_log" 2>&1 && grep -q "BOUNDARY PASS name=$$name" "$$hw_log"; then result=PASS; else result=FAIL; fi; \
+	echo "[$$name] [$$result]" > "$$status"
+
+boundary_report:
+	@mkdir -p "$(PPA_DIR)"; rm -f "$(PPA_BOUNDARY_LOG)"; failed=0; \
+	for status in $$(find "$(BOUNDARY_RESULT_DIR)" -maxdepth 1 -name '*.status' -type f | sort); do line=$$(cat "$$status"); echo "$$line" | tee -a "$(PPA_BOUNDARY_LOG)"; if echo "$$line" | grep -q '\[FAIL\]'; then failed=1; name=$$(basename "$$status" .status); tail -40 "$(BOUNDARY_RESULT_DIR)/$$name.log"; fi; done; \
+	count=$$(find "$(BOUNDARY_RESULT_DIR)" -maxdepth 1 -name '*.status' -type f | wc -l); \
+	if [ "$$count" -ne "$(words $(BOUNDARY_APP_NAMES))" ]; then echo "[BOUNDARY] Missing status files: expected $(words $(BOUNDARY_APP_NAMES)), got $$count"; failed=1; fi; \
+	echo "[PPA] Boundary report: $(PPA_BOUNDARY_LOG)"; exit $$failed
 
 coremark_result:
 	@mkdir -p "$(PPA_DIR)"; \
@@ -474,6 +511,9 @@ coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark
 
 sort_app-clean:
 	@$(MAKE) -C sw sort_app-clean $(SORT_APP_SW_MAKE_ARGS)
+
+boundary_app-clean:
+	@$(MAKE) -C sw boundary_app-clean $(BOUNDARY_APP_SW_MAKE_ARGS)
 
 
 # --- 核心自动化测试逻辑 (支持 ITCM/DTCM 分离加载) ---

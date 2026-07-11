@@ -5,8 +5,9 @@ TESTS += coremark
 
 RVTESTS_EXCLUDE ?= rv32ui/ma_data
 
-RVTESTS_DISCOVERED := $(foreach t,$(RVTESTS_TYPE), \
+RVTESTS_DISCOVERED := $(foreach t,$(filter-out rv32mi,$(RVTESTS_TYPE)), \
                $(addprefix $(t)/,$(basename $(notdir $(wildcard $(RVTESTSISA_DIR)/$(t)/*.S)))) )
+RVTESTS_DISCOVERED += $(addprefix rv32mi/,$(RV32MI_TESTS))
 
 RVTESTS_ALL := $(filter-out $(RVTESTS_EXCLUDE),$(RVTESTS_DISCOVERED))
 

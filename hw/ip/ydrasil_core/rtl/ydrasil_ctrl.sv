@@ -206,7 +206,13 @@ import ydrasil_pkg::*;
             wb_fwd_q.addr <= rf_waddr_rd_i;
             wb_fwd_q.data <= rf_wdata_rd_i;
 
-            if (alu_fwd_i.valid && !ex_branch_jump_i && (alu_fwd_i.addr != '0)) begin
+            // RF writeback belongs to an older producer.  If a newer result for
+            // the same rd completes in this cycle, the completion capture below
+            // must win and keep that value available for forwarding.
+            if (rf_wen_rd_i && (rf_waddr_rd_i != '0)) begin
+                producer_ready_q[rf_waddr_rd_i] <= 1'b0;
+            end
+            if (alu_fwd_i.valid && (alu_fwd_i.addr != '0)) begin
                 producer_ready_q[alu_fwd_i.addr] <= 1'b1;
                 producer_value_q[alu_fwd_i.addr] <= alu_fwd_i.data;
             end
@@ -217,9 +223,6 @@ import ydrasil_pkg::*;
             if (mul_fwd_i.valid && (mul_fwd_i.addr != '0)) begin
                 producer_ready_q[mul_fwd_i.addr] <= 1'b1;
                 producer_value_q[mul_fwd_i.addr] <= mul_fwd_i.data;
-            end
-            if (rf_wen_rd_i && (rf_waddr_rd_i != '0)) begin
-                producer_ready_q[rf_waddr_rd_i] <= 1'b0;
             end
         end
     end

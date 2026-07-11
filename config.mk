@@ -187,7 +187,8 @@ RISCV_CFLAGS := \
     -static \
     -mcmodel=medany
 
-RVTESTS_TYPE := rv32ui rv32um rv32uzba rv32uzbb rv32uzbc rv32uzbkb rv32uzbkx rv32uzbs
+RVTESTS_TYPE := rv32ui rv32um rv32uzba rv32uzbb rv32uzbc rv32uzbkb rv32uzbkx rv32uzbs rv32mi
+RV32MI_TESTS ?= csr mcsr
 RVTESTS_EXCLUDE ?= rv32ui/ma_data
 
 RVTESTS_OUT_ROOT := $(BUILD_DIR)/riscv_tests

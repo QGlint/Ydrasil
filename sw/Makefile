@@ -71,6 +71,14 @@ SORT_APP_BINS := $(addprefix $(SORT_APP_OUT)/,$(addsuffix .bin,$(SORT_APP_NAMES)
 SORT_APP_DUMPS := $(addprefix $(SORT_APP_OUT)/,$(addsuffix .dump,$(SORT_APP_NAMES)))
 SORT_APP_ITCMS := $(addprefix $(SORT_APP_OUT)/,$(addsuffix .itcm,$(SORT_APP_NAMES)))
 SORT_APP_DTCMS := $(addprefix $(SORT_APP_OUT)/,$(addsuffix .dtcm,$(SORT_APP_NAMES)))
+BOUNDARY_APP_DIR := apps/boundary
+BOUNDARY_APP_OUT ?= $(PROJECT_ROOT)/build/app/boundary
+BOUNDARY_APP_NAMES := $(sort $(basename $(notdir $(wildcard $(BOUNDARY_APP_DIR)/*.c))))
+BOUNDARY_APP_ELFS := $(addprefix $(BOUNDARY_APP_OUT)/,$(addsuffix .elf,$(BOUNDARY_APP_NAMES)))
+BOUNDARY_APP_BINS := $(addprefix $(BOUNDARY_APP_OUT)/,$(addsuffix .bin,$(BOUNDARY_APP_NAMES)))
+BOUNDARY_APP_DUMPS := $(addprefix $(BOUNDARY_APP_OUT)/,$(addsuffix .dump,$(BOUNDARY_APP_NAMES)))
+BOUNDARY_APP_ITCMS := $(addprefix $(BOUNDARY_APP_OUT)/,$(addsuffix .itcm,$(BOUNDARY_APP_NAMES)))
+BOUNDARY_APP_DTCMS := $(addprefix $(BOUNDARY_APP_OUT)/,$(addsuffix .dtcm,$(BOUNDARY_APP_NAMES)))
 
 BSP_DIR := $(PROJECT_ROOT)/sw/bsp
 BSP_INCLUDES := -I$(BSP_DIR)/include
@@ -90,7 +98,7 @@ COREMARK_C_SRCS := \
 	$(COREMARK_DIR)/$(COREMARK_PORT_DIR)/core_portme.c
 COREMARK_SRCS := $(BSP_ASM_SRCS) $(BSP_C_SRCS) $(COREMARK_C_SRCS)
 COREMARK_CFLAGS := \
-	-march=rv32im_zicsr_zifencei \
+	-march=$(ARCH) \
 	-mabi=$(ABI) \
 	-mcmodel=medany \
 	-O2 \
@@ -108,12 +116,12 @@ COREMARK_CFLAGS := \
 	-DYDRASIL_SIM_CTRL=1 \
 	-DSDK_BANNER=0 \
 	-DPERFORMANCE_RUN=1 \
-	-DFLAGS_STR=\"rv32im_zicsr_zifencei-ilp32-O2\" \
+	-DFLAGS_STR=\"$(ARCH)-$(ABI)-O2\" \
 	-I$(COREMARK_DIR) \
 	-I$(COREMARK_DIR)/$(COREMARK_PORT_DIR) \
 	$(BSP_INCLUDES)
 COREMARK_LDFLAGS := \
-	-march=rv32im_zicsr_zifencei \
+	-march=$(ARCH) \
 	-mabi=$(ABI) \
 	-mcmodel=medany \
 	-nostartfiles \
@@ -123,7 +131,7 @@ COREMARK_LDFLAGS := \
 	-Wl,-Map,$(COREMARK_MAP) \
 	-Wl,--gc-sections
 SORT_APP_CFLAGS := \
-	-march=rv32im_zicsr_zifencei \
+	-march=$(ARCH) \
 	-mabi=$(ABI) \
 	-mcmodel=medany \
 	-O2 \
@@ -140,7 +148,7 @@ SORT_APP_CFLAGS := \
 	-I$(SORT_APP_DIR) \
 	$(BSP_INCLUDES)
 SORT_APP_LDFLAGS := \
-	-march=rv32im_zicsr_zifencei \
+	-march=$(ARCH) \
 	-mabi=$(ABI) \
 	-mcmodel=medany \
 	-nostartfiles \
@@ -168,6 +176,7 @@ DTCM_BIN  := $(OUT_DIR)/bin/$(NAME)_dtcm.bin
 
 .PHONY: rv_all rv_elf rv_dump rv_mem
 .PHONY: coremark coremark-rebuild coremark-clean coremark-clean-all sort_app sort_app-rebuild sort_app-clean
+.PHONY: boundary_app boundary_app-rebuild boundary_app-clean
 .PHONY: coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map
 rv_comp_genmem:
 	@if [ "$(REBUILD)" != "1" ] && [ -f "$(ELF)" ] && [ -f "$(DUMP)" ] && [ -f "$(ITCM)" ] && [ -f "$(DTCM)" ]; then \
@@ -318,3 +327,32 @@ sort_app-rebuild: sort_app-clean sort_app
 
 sort_app-clean:
 	rm -rf $(SORT_APP_OUT)
+
+boundary_app: $(BOUNDARY_APP_ELFS) $(BOUNDARY_APP_BINS) $(BOUNDARY_APP_DUMPS) $(BOUNDARY_APP_ITCMS) $(BOUNDARY_APP_DTCMS)
+	@echo "[boundary_app] built: $(BOUNDARY_APP_NAMES)"
+
+$(BOUNDARY_APP_OUT):
+	@mkdir -p $@
+
+$(BOUNDARY_APP_OUT)/%.elf: $(BOUNDARY_APP_DIR)/%.c $(BOUNDARY_APP_DIR)/boundary.h $(BSP_DIR)/link.lds Makefile | $(BOUNDARY_APP_OUT)
+	$(CC) $(SORT_APP_CFLAGS) -I$(BOUNDARY_APP_DIR) $(BSP_ASM_SRCS) $(BSP_C_SRCS) $< $(SORT_APP_LDFLAGS) -Wl,-Map,$(@:.elf=.map) -lgcc -o $@
+
+$(BOUNDARY_APP_OUT)/%.bin: $(BOUNDARY_APP_OUT)/%.elf
+	$(OBJCOPY) -O binary $< $@
+
+$(BOUNDARY_APP_OUT)/%.dump: $(BOUNDARY_APP_OUT)/%.elf
+	$(OBJDUMP) -d $< > $@
+
+$(BOUNDARY_APP_OUT)/%.itcm: $(BOUNDARY_APP_OUT)/%.elf | $(BOUNDARY_APP_OUT)
+	$(OBJCOPY) -O binary --gap-fill=0x00 --only-section=.init --only-section=.text --only-section=.text.* --only-section=.text.vector $< $(@:.itcm=_itcm.bin)
+	od -An -t x4 -w4 -v $(@:.itcm=_itcm.bin) | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > $@
+
+$(BOUNDARY_APP_OUT)/%.dtcm: $(BOUNDARY_APP_OUT)/%.elf | $(BOUNDARY_APP_OUT)
+	$(OBJCOPY) -O binary --gap-fill=0x00 --only-section=.data --only-section=.bss --only-section=.stack --set-section-flags .bss=alloc,load,contents --set-section-flags .stack=alloc,load,contents $< $(@:.dtcm=_dtcm.bin) || true
+	@if [ -s $(@:.dtcm=_dtcm.bin) ]; then od -An -t x4 -w4 -v $(@:.dtcm=_dtcm.bin) | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > $@; else printf "00000000\n" > $@; fi
+
+boundary_app-rebuild: boundary_app-clean
+	@$(MAKE) boundary_app
+
+boundary_app-clean:
+	rm -rf $(BOUNDARY_APP_OUT)
