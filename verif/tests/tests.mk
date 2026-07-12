@@ -39,7 +39,8 @@ SW_ALIGNED_TESTS := \
     sw_fence_stall \
     sw_subword_readback_matrix \
     sw_div_fence_independent \
-    sw_forwarding_bitmanip
+    sw_forwarding_bitmanip \
+    sw_bitmanip_address_data
 SW_NEW_ONLY_TESTS := \
     sw_misaligned_boundary \
     sw_misaligned_negative \
