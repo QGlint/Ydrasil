@@ -1,14 +1,19 @@
 # SW 边界测试逐轮记录
 
-本文档记录项目自有 SW 定向测试的逐轮新增项、适用 LSU、验证结果和覆盖率变化。
+本文档记录项目自有 SW 定向测试的逐轮新增项、运行模式、验证结果和覆盖率变化。
+
+> 重要说明：当前 RTL 只有一个 `ydrasil_load_store_unit` 实例。文中的 `legacy/new`
+> 是 Makefile 为两次独立构建/仿真使用的模式标签，不代表两个同时存在的 LSU，
+> 也不代表当前源码中存在两套可切换 LSU 实现。`aligned` 测试会在同一个 RTL
+> 的两次模型运行中执行，`new-only` 只是测试清单上的模式范围标签。
 
 ## 失败清单
 
-### F-001：legacy LSU 中相关 mul/div 与 fence.i 交织导致除法结果丢失
+### F-001：legacy 模式运行中相关 mul/div 与 fence.i 交织导致除法结果丢失
 
 - 复现测试：[sw_fence_div_repro.S](verif/tests/ydrasil-tests/rv32ui/sw_fence_div_repro.S)。
 - 首次发现：第 4 轮；测试源保留在仓库中，但没有加入 `SW_ALIGNED_TESTS`，不参与正式覆盖率数据库。
-- 运行配置：legacy LSU、HW-only 仿真；new LSU 未将该失败作为正式失败结论。
+- 运行配置：`LSU_IMPL=legacy` 模式标签、HW-only 仿真；这不是第二个 LSU 实例。
 - 最小指令序列：
 
   ```asm
@@ -29,9 +34,9 @@
 
 ## 记录约定
 
-- `aligned`：legacy/new LSU 均运行，并进入默认 `test_all`。
-- `new-only`：只在 new LSU 运行，不验证 legacy 非对齐行为。
-- 覆盖率数据库数量包含 legacy/new 各自运行的官方 `rv32ui_sw`。
+- `aligned`：同一个 RTL 分别以 legacy/new 模式标签构建运行，并进入默认 `test_all`。
+- `new-only`：只在 new 模式标签运行，不在 legacy 模式标签的测试矩阵中执行。
+- 覆盖率数据库数量包含两个模式标签各自运行的官方 `rv32ui_sw`，不是两个 LSU 的联合实例。
 - `通过`：所有加入正式测试清单的新增测试均通过。
 - `部分通过`：正式测试通过，但本轮另保留了未加入清单的硬件失败最小复现。
 - 第 1、2 轮的提交标题沿用当时格式；从第 3 轮开始采用
