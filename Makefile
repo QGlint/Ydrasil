@@ -229,7 +229,7 @@ sw_coverage:
 
 sw_coverage_report:
 	@mkdir -p "$(SW_COVERAGE_DIR)"; \
-	for mode_spec in legacy:6 new:7; do \
+	for mode_spec in legacy:$(SW_LEGACY_DB_COUNT) new:$(SW_NEW_DB_COUNT); do \
 		mode=$${mode_spec%%:*}; expected=$${mode_spec##*:}; mode_dir="$(SW_COVERAGE_DIR)/$$mode"; \
 		mkdir -p "$$mode_dir"; \
 		set -- $$(find "$(SW_COVERAGE_DATA_DIR)/$$mode" -type f -name '*.dat' | sort); \
@@ -244,14 +244,14 @@ sw_coverage_report:
 			--summary "$$mode_dir/summary.log" --uncovered "$$mode_dir/uncovered_sw_path.log" > "$$mode_dir/report.log"; \
 	done; \
 	set -- $$(find "$(SW_COVERAGE_DATA_DIR)" -type f -name '*.dat' | sort); \
-	if [ "$$#" -ne 13 ]; then echo "[COVERAGE] Expected 13 SW databases, found $$#"; exit 1; fi; \
+	if [ "$$#" -ne $(SW_TOTAL_DB_COUNT) ]; then echo "[COVERAGE] Expected $(SW_TOTAL_DB_COUNT) SW databases, found $$#"; exit 1; fi; \
 	verilator_coverage --write "$(SW_COVERAGE_MERGED)" "$$@" > "$(SW_COVERAGE_DIR)/merge.log"; \
 	verilator_coverage --write-info "$(SW_COVERAGE_INFO)" "$(SW_COVERAGE_MERGED)"; \
 	rm -rf "$(SW_COVERAGE_ANNOTATE_DIR)"; \
 	verilator_coverage --annotate "$(SW_COVERAGE_ANNOTATE_DIR)" "$(SW_COVERAGE_MERGED)" > "$(SW_COVERAGE_DIR)/annotate.log"; \
 	$(PYTHON) "$(PROJECT_ROOT)/verif/coverage/coverage_summary.py" \
 		--data "$(SW_COVERAGE_MERGED)" --info "$(SW_COVERAGE_INFO)" \
-		--annotated "$(SW_COVERAGE_ANNOTATE_DIR)" --databases 13 \
+		--annotated "$(SW_COVERAGE_ANNOTATE_DIR)" --databases $(SW_TOTAL_DB_COUNT) \
 		--summary "$(SW_COVERAGE_SUMMARY)" --uncovered "$(SW_COVERAGE_UNCOVERED)"
 
 syn: syn-vivado
