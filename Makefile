@@ -34,7 +34,7 @@ COE_LOOP5_ITCM_BIN ?= $(COE_LOOP5_DIR)/irom_M3_loop5_itcm.bin
 COE_LOOP5_ITCM ?= $(COE_LOOP5_DIR)/irom_M3_loop5.itcm
 COE_LOOP5_DTCM ?= $(COE_LOOP5_DIR)/dram_M_loop5.dtcm
 
-export PROJECT_ROOT BUILD_DIR WAVE_DIR LOG_DIR SIM_TOOL IP VERILATOR_MOD VERILATOR_COVERAGE UVM USE_BENDER BENDER DIV_IMPL LSU_IMPL MEMS_IMPL ARCH ABI RISCV_PREFIX CC OBJCOPY OBJDUMP GDB QEMU TRACE_TO_CSV TRACE_COMPARE
+export PROJECT_ROOT BUILD_DIR WAVE_DIR LOG_DIR SIM_TOOL IP VERILATOR_MOD COVERAGE VERILATOR_COVERAGE UVM USE_BENDER BENDER DIV_IMPL LSU_IMPL MEMS_IMPL ARCH ABI RISCV_PREFIX CC OBJCOPY OBJDUMP GDB QEMU TRACE_TO_CSV TRACE_COMPARE
 
 SYN_DIR ?= $(PROJECT_ROOT)/syn
 SYN_BUILD_DIR ?= $(BUILD_DIR)/syn
@@ -102,7 +102,7 @@ ifeq ($(filter $(SYN_PLL_FREQ_MHZ),$(SYN_PLL_SUPPORTED_FREQS)),)
 $(error Unsupported SYN_PLL_FREQ_MHZ=$(SYN_PLL_FREQ_MHZ); supported values: $(SYN_PLL_SUPPORTED_FREQS))
 endif
 
-.PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests init install-bender get_spike download_and_extract_spike check_spike_prebuilt_abi build_spike_from_source check_deps spike spike_wave_to_csv sim_compare commit_check commit_spike_csv commit_hw_trace commit_hw_csv commit_compare rv_test_comp_genmem ppa_rvtest_report ppa_perf_report coe_simple coe_smoke coe_smoke_led coe_isa_probes coverage_all coverage_clean coverage_report
+.PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests init install-bender get_spike download_and_extract_spike check_spike_prebuilt_abi build_spike_from_source check_deps spike spike_wave_to_csv sim_compare commit_check commit_spike_csv commit_hw_trace commit_hw_csv commit_compare rv_test_comp_genmem ppa_rvtest_report ppa_perf_report coe_simple coe_smoke coe_smoke_led coe_isa_probes coverage_all coverage_clean coverage_report sw_boundary_test sw_coverage sw_coverage_clean sw_run_mode sw_coverage_report
 .PHONY: coremark coremark_sim coremark_run coremark_result coremark-rebuild coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map sort_app sort_all sort_sim_all sort_report sort_app_sim sort_app-rebuild sort_app-clean boundary_app boundary_all boundary_sim_all boundary_report boundary_app-rebuild boundary_app-clean coe_loop5 coe_loop5_gen
 .PHONY: syn synf syn-extreme syn-venv syn-prep syn-stage-xpr syn-vivado syn-analyze syn-clean
 
@@ -151,6 +151,108 @@ coverage_report:
 	  echo "[COVERAGE] Annotated RTL: $(COVERAGE_ANNOTATE_DIR)"; \
 	  echo "[COVERAGE] Summary: $(COVERAGE_SUMMARY)"; \
 	} | tee -a "$(COVERAGE_SUMMARY)"
+
+sw_coverage_clean:
+	rm -rf "$(SW_COVERAGE_DIR)" "$(SW_BOUNDARY_DIR)/coverage-models" "$(SW_BOUNDARY_DIR)/coverage-results"
+
+sw_run_mode:
+	@set -eu; \
+	mode="$(SW_MODE)"; \
+	obj_dir="$(SW_OBJ_DIR)"; \
+	result_root="$(SW_RESULT_ROOT)"; \
+	if [ -z "$$mode" ] || [ -z "$$obj_dir" ] || [ -z "$$result_root" ]; then \
+		echo "[SW] SW_MODE, SW_OBJ_DIR and SW_RESULT_ROOT are required"; exit 2; \
+	fi; \
+	mkdir -p "$$result_root/$$mode"; \
+	if [ "$(SW_COVERAGE)" = "1" ]; then mkdir -p "$(SW_COVERAGE_DATA_DIR)/$$mode"; fi; \
+	tests="$(SW_TEST_LIST)"; \
+	if [ "$(SW_INCLUDE_OFFICIAL)" = "1" ]; then tests="rv32ui_sw $$tests"; fi; \
+	for test in $$tests; do \
+		if [ "$$test" = "rv32ui_sw" ]; then \
+			base="$(RVTESTS_OUT_ROOT)/rv32ui"; \
+		else \
+			base="$(SW_TEST_OUT_ROOT)"; \
+		fi; \
+		elf="$$base/elf/$$test.elf"; itcm="$$base/mem/$$test.itcm"; dtcm="$$base/mem/$$test.dtcm"; \
+		for input in "$$elf" "$$itcm" "$$dtcm"; do \
+			if [ ! -s "$$input" ]; then echo "[SW][$$mode][$$test] missing or empty: $$input"; exit 1; fi; \
+		done; \
+		log_dir="$$result_root/$$mode/$$test"; mkdir -p "$$log_dir"; \
+		cov_file="$(SW_COVERAGE_DATA_DIR)/$$mode/$$test.dat"; \
+		if [ "$(SW_COVERAGE)" = "1" ]; then rm -f "$$cov_file"; fi; \
+		echo "[SW][$$mode] Running $$test"; \
+		$(MAKE) --no-print-directory sim_compare \
+			SIM_COMPARE=none LSU_IMPL="$$mode" OBJ_DIR="$$obj_dir" \
+			VERILATOR_COVERAGE="$(SW_COVERAGE)" VERILATOR_TRACE=0 \
+			COMPARE_NAME="sw/$$mode/$$test" COMPARE_ELF="$$elf" \
+			COMPARE_ITCM="$$itcm" COMPARE_DTCM="$$dtcm" \
+			COMPARE_HW_OUT_DIR="$$log_dir" COMPARE_HW_LOG="$$log_dir/hw.log" \
+			COMPARE_COVERAGE_FILE="$$cov_file"; \
+		if ! grep -q "TEST_PASS" "$$log_dir/hw.log"; then \
+			echo "[SW][$$mode][$$test] FAIL: TEST_PASS not found"; tail -80 "$$log_dir/hw.log"; exit 1; \
+		fi; \
+		if grep -Eq '\$readmem file not found|timeout reached' "$$log_dir/hw.log"; then \
+			echo "[SW][$$mode][$$test] FAIL: invalid memory load or timeout"; exit 1; \
+		fi; \
+		if [ "$(SW_COVERAGE)" = "1" ] && [ ! -s "$$cov_file" ]; then \
+			echo "[SW][$$mode][$$test] FAIL: coverage database missing"; exit 1; \
+		fi; \
+		echo "[SW][$$mode][$$test] PASS"; \
+	done
+
+sw_boundary_test: rv_comp_rv32ui_sw
+	@$(MAKE) sw_test_comp_all REBUILD=1
+	@rm -rf "$(SW_BOUNDARY_DIR)/functional-models" "$(SW_BOUNDARY_DIR)/functional-results"
+	@$(MAKE) comp LSU_IMPL=legacy VERILATOR_COVERAGE=0 VERILATOR_TRACE=0 OBJ_DIR="$(SW_BOUNDARY_DIR)/functional-models/legacy"
+	@$(MAKE) sw_run_mode SW_MODE=legacy SW_OBJ_DIR="$(SW_BOUNDARY_DIR)/functional-models/legacy" \
+		SW_RESULT_ROOT="$(SW_BOUNDARY_DIR)/functional-results" SW_COVERAGE=0 SW_INCLUDE_OFFICIAL=1 \
+		SW_TEST_LIST="$(SW_ALIGNED_TESTS)"
+	@$(MAKE) comp LSU_IMPL=new VERILATOR_COVERAGE=0 VERILATOR_TRACE=0 OBJ_DIR="$(SW_BOUNDARY_DIR)/functional-models/new"
+	@$(MAKE) sw_run_mode SW_MODE=new SW_OBJ_DIR="$(SW_BOUNDARY_DIR)/functional-models/new" \
+		SW_RESULT_ROOT="$(SW_BOUNDARY_DIR)/functional-results" SW_COVERAGE=0 SW_INCLUDE_OFFICIAL=1 \
+		SW_TEST_LIST="$(SW_ALL_TESTS)"
+
+sw_coverage:
+	@$(MAKE) sw_coverage_clean
+	@$(MAKE) rv_comp_rv32ui_sw
+	@$(MAKE) sw_test_comp_all REBUILD=1
+	@mkdir -p "$(SW_COVERAGE_DATA_DIR)"
+	@$(MAKE) comp LSU_IMPL=legacy VERILATOR_COVERAGE=1 VERILATOR_TRACE=0 OBJ_DIR="$(SW_BOUNDARY_DIR)/coverage-models/legacy"
+	@$(MAKE) sw_run_mode SW_MODE=legacy SW_OBJ_DIR="$(SW_BOUNDARY_DIR)/coverage-models/legacy" \
+		SW_RESULT_ROOT="$(SW_BOUNDARY_DIR)/coverage-results" SW_COVERAGE=1 SW_INCLUDE_OFFICIAL=1 \
+		SW_TEST_LIST="$(SW_ALIGNED_TESTS)"
+	@$(MAKE) comp LSU_IMPL=new VERILATOR_COVERAGE=1 VERILATOR_TRACE=0 OBJ_DIR="$(SW_BOUNDARY_DIR)/coverage-models/new"
+	@$(MAKE) sw_run_mode SW_MODE=new SW_OBJ_DIR="$(SW_BOUNDARY_DIR)/coverage-models/new" \
+		SW_RESULT_ROOT="$(SW_BOUNDARY_DIR)/coverage-results" SW_COVERAGE=1 SW_INCLUDE_OFFICIAL=1 \
+		SW_TEST_LIST="$(SW_ALL_TESTS)"
+	@$(MAKE) sw_coverage_report
+
+sw_coverage_report:
+	@mkdir -p "$(SW_COVERAGE_DIR)"; \
+	for mode_spec in legacy:6 new:7; do \
+		mode=$${mode_spec%%:*}; expected=$${mode_spec##*:}; mode_dir="$(SW_COVERAGE_DIR)/$$mode"; \
+		mkdir -p "$$mode_dir"; \
+		set -- $$(find "$(SW_COVERAGE_DATA_DIR)/$$mode" -type f -name '*.dat' | sort); \
+		if [ "$$#" -ne "$$expected" ]; then echo "[COVERAGE] $$mode expected $$expected databases, found $$#"; exit 1; fi; \
+		verilator_coverage --write "$$mode_dir/merged.dat" "$$@" > "$$mode_dir/merge.log"; \
+		verilator_coverage --write-info "$$mode_dir/coverage.info" "$$mode_dir/merged.dat"; \
+		rm -rf "$$mode_dir/annotated"; \
+		verilator_coverage --annotate "$$mode_dir/annotated" "$$mode_dir/merged.dat" > "$$mode_dir/annotate.log"; \
+		$(PYTHON) "$(PROJECT_ROOT)/verif/coverage/coverage_summary.py" \
+			--data "$$mode_dir/merged.dat" --info "$$mode_dir/coverage.info" \
+			--annotated "$$mode_dir/annotated" --databases "$$expected" \
+			--summary "$$mode_dir/summary.log" --uncovered "$$mode_dir/uncovered_sw_path.log" > "$$mode_dir/report.log"; \
+	done; \
+	set -- $$(find "$(SW_COVERAGE_DATA_DIR)" -type f -name '*.dat' | sort); \
+	if [ "$$#" -ne 13 ]; then echo "[COVERAGE] Expected 13 SW databases, found $$#"; exit 1; fi; \
+	verilator_coverage --write "$(SW_COVERAGE_MERGED)" "$$@" > "$(SW_COVERAGE_DIR)/merge.log"; \
+	verilator_coverage --write-info "$(SW_COVERAGE_INFO)" "$(SW_COVERAGE_MERGED)"; \
+	rm -rf "$(SW_COVERAGE_ANNOTATE_DIR)"; \
+	verilator_coverage --annotate "$(SW_COVERAGE_ANNOTATE_DIR)" "$(SW_COVERAGE_MERGED)" > "$(SW_COVERAGE_DIR)/annotate.log"; \
+	$(PYTHON) "$(PROJECT_ROOT)/verif/coverage/coverage_summary.py" \
+		--data "$(SW_COVERAGE_MERGED)" --info "$(SW_COVERAGE_INFO)" \
+		--annotated "$(SW_COVERAGE_ANNOTATE_DIR)" --databases 13 \
+		--summary "$(SW_COVERAGE_SUMMARY)" --uncovered "$(SW_COVERAGE_UNCOVERED)"
 
 syn: syn-vivado
 	@$(MAKE) syn-analyze
@@ -594,6 +696,10 @@ test_all:
 	@$(MAKE) comp
 	@rm -rf $(RVTESTS_RESULT_DIR)
 	@$(MAKE) -j rv_test_sim_all
+	@$(MAKE) sw_test_comp_aligned REBUILD=1
+	@$(MAKE) sw_run_mode SW_MODE=legacy SW_OBJ_DIR="$(BUILD_DIR)/ydrasil_core_tb" \
+		SW_RESULT_ROOT="$(BUILD_DIR)/sw_boundary/test_all-results" SW_COVERAGE=$(VERILATOR_COVERAGE) \
+		SW_INCLUDE_OFFICIAL=0 SW_TEST_LIST="$(SW_ALIGNED_TESTS)"
 	@$(MAKE) rv_test_report_all
 	@$(MAKE) ppa_rvtest_report
 	@$(MAKE) rv_test_summary_all

@@ -624,6 +624,7 @@ end
             if (|u_dut.u_ctrl.producer_retire_q)
                 producer_retire_held_count <= producer_retire_held_count + 1'b1;
             if (u_dut.lsu_struct_stall) begin
+`ifndef YDRASIL_LSU_IMPL_NEW
                 if (u_dut.u_ydrasil_load_store_unit.g_legacy.mmio_busy |
                     u_dut.u_ydrasil_load_store_unit.g_legacy.mmio_accept)
                     lsu_struct_mmio_count <= lsu_struct_mmio_count + 1'b1;
@@ -633,6 +634,9 @@ end
                     lsu_struct_store_capture_count <= lsu_struct_store_capture_count + 1'b1;
                 else
                     lsu_struct_other_count <= lsu_struct_other_count + 1'b1;
+`else
+                lsu_struct_other_count <= lsu_struct_other_count + 1'b1;
+`endif
             end
             fe_pred_taken_redirect_count <= fe_pred_taken_redirect_count +
                 (u_dut.u_ydrasil_if_stage.bp_predict_redirect ? 32'd1 : 32'd0);
@@ -946,11 +950,15 @@ end
                 bp_btb_miss_taken_count,
                 bp_correct_taken_count,
                 bp_correct_not_taken_count);
+`ifndef YDRASIL_LSU_IMPL_NEW
             $display("PERF_LSU_HOT: LOOKUP=%-d HIT=%-d FILL=%-d STORE_UPDATE=%-d",
                 u_dut.u_ydrasil_load_store_unit.g_legacy.perf_hot_lookup_q,
                 u_dut.u_ydrasil_load_store_unit.g_legacy.perf_hot_hit_q,
                 u_dut.u_ydrasil_load_store_unit.g_legacy.perf_hot_fill_q,
                 u_dut.u_ydrasil_load_store_unit.g_legacy.perf_hot_store_update_q);
+`else
+            $display("PERF_LSU_HOT: N/A (LSU_IMPL=new)");
+`endif
         end
     endtask
 
