@@ -55,12 +55,12 @@ SW_NEW_ONLY_TESTS := \
     sw_misaligned_loadback \
     sw_misaligned_half_readback \
     sw_misaligned_forwarding_mix
-SW_ALL_TESTS := $(SW_ALIGNED_TESTS) $(SW_NEW_ONLY_TESTS)
-SW_TEST_TARGETS := $(addprefix sw_comp_,$(SW_ALL_TESTS))
+SW_FORMAL_TESTS := $(SW_ALIGNED_TESTS) $(SW_NEW_ONLY_TESTS)
+# Compatibility alias for callers that used the old combined-list name.
+SW_ALL_TESTS := $(SW_FORMAL_TESTS)
+SW_TEST_TARGETS := $(addprefix sw_comp_,$(SW_FORMAL_TESTS))
 SW_TEST_INCLUDES := $(RVTESTS_INCLUDES) -I$(YDRASIL_TESTS_DIR)
-SW_LEGACY_DB_COUNT := $(shell expr 1 + $(words $(SW_ALIGNED_TESTS)))
-SW_NEW_DB_COUNT := $(shell expr 1 + $(words $(SW_ALL_TESTS)))
-SW_TOTAL_DB_COUNT := $(shell expr $(SW_LEGACY_DB_COUNT) + $(SW_NEW_DB_COUNT))
+SW_SINGLE_DB_COUNT := $(shell expr 1 + $(words $(SW_FORMAL_TESTS)))
 
 RVBENCH_DIR := $(PROJECT_ROOT)/verif/tests/riscv-tests/benchmarks
 RVBENCH_COMMON := $(RVBENCH_DIR)/common
