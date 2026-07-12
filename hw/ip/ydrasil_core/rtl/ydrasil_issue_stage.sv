@@ -572,19 +572,6 @@ import ydrasil_pipeline_pkg::*;
     assign id_lsu_addr_is_dtcm_o = 1'b0;
     assign id_lsu_store_data_o = pipe0_rs2_data;
     assign id_lsu_store_mask_o = 4'b0000;
-`ifndef SYNTHESIS
-    always @(posedge clk) begin
-        if (pipe0_pkt.dec.operator_type[OPERATOR_TYPE_STORE] && pipe0_pkt.dec.valid)
-            $display("[RS2] t=%0d pc=%h rs2_psrc=%d uses_prf=%d uses_wb=%d uses_rf=%d lsu_fwd=%d alu_fwd=%d p1_fwd=%d prf=%h rf=%h rs2=%h",
-                $time, pipe0_pkt.dec.pc,
-                pipe0_pkt.rn.rs2_psrc,
-                pipe0_src2_prf_use && prf_rs2_ready_i,
-                pipe0_src2_wb_fwd,
-                !pipe0_src2_prf_use && !iq_src2_lsu_fwd[0] && !iq_src2_alu_fwd[0] && !iq_src2_p1_fwd[0] && !pipe0_src2_wb_fwd,
-                iq_src2_lsu_fwd[0], iq_src2_alu_fwd[0], iq_src2_p1_fwd[0],
-                prf_rs2_data_i, rf_rdata_rs2_i, pipe0_rs2_data);
-    end
-`endif
 
     assign id_ex_jalr_o =
         pipe0_pkt.dec.valid && (pipe0_pkt.dec.instr[6:0] == RV32I_INS_JALR);

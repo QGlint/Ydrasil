@@ -83,7 +83,11 @@ import ydrasil_pkg::*;
     output wire                            mul_result_valid_o,
 
     output wire                            ex_instret_inc_o,
-    output wire                            ex_mul_stall_o
+    output wire                            ex_mul_stall_o,
+
+    output wire                            ex_prf_wr_en_o,
+    output wire [5:0]                      ex_prf_wr_addr_o,
+    output wire [REGS_DATA_WIDTH-1:0]      ex_prf_wr_data_o
 `ifndef SYNTHESIS
     ,output wire                           dbg_bp_resolve_valid_o
     ,output wire [DATA_WIDTH-1:0]          dbg_bp_resolve_pc_o
@@ -553,7 +557,8 @@ import ydrasil_pkg::*;
             ex_csr_waddr_o_ff   <= '0;
         end else begin
             alu_result_ff      <= fast_result_wen ? fast_result :
-                                  slow_result_wen ? slow_result : alu_result;
+                                  slow_result_wen ? slow_result :
+                                  ex_is_jump ? fast_add_result : alu_result;
             alu_rf_wen_rd_ff   <= ex_rf_wen_rd;
             alu_rf_waddr_rd_ff <= div_rf_wen_rd ? id_rf_waddr_rd_i : alu_rf_waddr_rd;
             alu_rn_pdst_ff     <= id_rn_pdst_i;
@@ -582,5 +587,9 @@ import ydrasil_pkg::*;
         ({32{div_rf_wen_rd}}        & div_result) |
         ({32{bitmanip_rf_wen_rd}}   & bitmanip_result) |
         ({32{csr_wen}}              & csr_reg_wdata);
+
+    assign ex_prf_wr_en_o = 1'b0; // TEMP DISABLED: normal_alu_rf_wen_rd & id_alu_rf_wen_rd_i;
+    assign ex_prf_wr_addr_o = id_rn_pdst_i;
+    assign ex_prf_wr_data_o = ex_is_jump ? fast_add_result : alu_result;
 
 endmodule

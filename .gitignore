@@ -4,4 +4,6 @@ hw/ip/alioth/
 tools/
 spec/
 spec
-verif/sim/__pycache__/
+verif/sim/__pycache__/.qoder/
+__pycache__/
+.qoder/

@@ -250,6 +250,9 @@ import ydrasil_pipeline_pkg::*;
 	wire [5:0]                  prf_wr1_addr;
 	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] prf_wr0_data;
 	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] prf_wr1_data;
+	wire                        prf_wr2_en;
+	wire [5:0]                  prf_wr2_addr;
+	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] prf_wr2_data;
 	wire                        wb_backpressure;
 	wire                        pipe1_resbuf_full;
 	wire                        pipe1_wb_dequeue;
@@ -265,6 +268,8 @@ import ydrasil_pipeline_pkg::*;
 
     //LSU -> CTRL
 	wire                            lsu_ctrl_busy;
+	wire                            lsu_store_complete;
+	wire [5:0]                      lsu_store_rob_idx;
 
     //LSU -> ID
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    id_ctrl_rs1_addr;
@@ -453,6 +458,8 @@ import ydrasil_pipeline_pkg::*;
 		.lsu_wb_valid_i(lsu_rf_wen_rd),
 		.lsu_wb_arch_rd_i(lsu_rf_waddr_rd),
 		.lsu_wb_pdst_i(lsu_rn_pdst),
+		.lsu_store_complete_i(lsu_store_complete),
+		.lsu_store_rob_idx_i(lsu_store_rob_idx),
 		.mul_wb_valid_i(wb_mul_complete),
 		.mul_wb_arch_rd_i(wb_mul_complete_waddr),
 		.mul_wb_pdst_i(wb_mul_complete_pdst),
@@ -655,6 +662,9 @@ import ydrasil_pipeline_pkg::*;
 		.mmio_req_o        (mmio_req),
 		.mmio_wmask_o      (mmio_wmask),
 		.lsu_ctrl_busy_o        (lsu_ctrl_busy),
+		.id_store_rob_idx_i     (id_ctrl_rob_idx),
+		.lsu_store_complete_o   (lsu_store_complete),
+		.lsu_store_rob_idx_o    (lsu_store_rob_idx),
 		.lsu_wb_result_o   (lsu_wb_result),
 		.lsu_rf_rd_wen_o   (lsu_rf_wen_rd),
 		.lsu_rf_rd_waddr_o (lsu_rf_waddr_rd),
@@ -921,7 +931,10 @@ import ydrasil_pipeline_pkg::*;
 		.mul_rn_pdst_o      (mul_rn_pdst),
 		.mul_result_valid_o (mul_result_valid),
 		.ex_instret_inc_o   (ex_instret_inc),
-		.ex_mul_stall_o     (ex_mul_stall)
+		.ex_mul_stall_o     (ex_mul_stall),
+		.ex_prf_wr_en_o     (prf_wr2_en),
+		.ex_prf_wr_addr_o   (prf_wr2_addr),
+		.ex_prf_wr_data_o   (prf_wr2_data)
 `ifndef SYNTHESIS
 		,.dbg_bp_resolve_valid_o(dbg_bp_resolve_valid)
 		,.dbg_bp_resolve_pc_o(dbg_bp_resolve_pc)
@@ -996,7 +1009,11 @@ import ydrasil_pipeline_pkg::*;
 		.wb_buf_fwd_data_o(wb_buf_fwd_data),
 		.rf_wdata_rd_o    (wb_rf_wdata_rd),
 		.rf_wen_rd_o      (wb_rf_wen_rd),
-		.rf_waddr_rd_o    (wb_rf_waddr_rd)
+		.rf_waddr_rd_o    (wb_rf_waddr_rd),
+		.alu_pdst_found_i (rn_real_wb_pdst_found),
+		.lsu_pdst_found_i (rn_real_lsu_pdst_found),
+		.mul_pdst_found_i (rn_real_mul_pdst_found),
+		.alu_rn_pdst_i     (alu_rn_pdst)
 	);
 
 	ydrasil_prf #(
@@ -1022,7 +1039,10 @@ import ydrasil_pipeline_pkg::*;
 		.wr0_data_i(prf_wr0_data),
 		.wr1_en_i  (prf_wr1_en),
 		.wr1_addr_i(prf_wr1_addr),
-		.wr1_data_i(prf_wr1_data)
+		.wr1_data_i(prf_wr1_data),
+		.wr2_en_i  (prf_wr2_en),
+		.wr2_addr_i(prf_wr2_addr),
+		.wr2_data_i(prf_wr2_data)
 	);
 
 	ydrasil_registers u_ydrasil_registers (

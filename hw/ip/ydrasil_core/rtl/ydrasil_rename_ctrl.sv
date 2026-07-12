@@ -45,6 +45,9 @@ import ydrasil_pkg::*;
     input  wire [REGS_ADDR_WIDTH-1:0] lsu_wb_arch_rd_i,
     input  wire [PREG_BITS-1:0] lsu_wb_pdst_i,
 
+    input  wire lsu_store_complete_i,
+    input  wire [ROB_PTR_BITS-1:0] lsu_store_rob_idx_i,
+
     input  wire mul_wb_valid_i,
     input  wire [REGS_ADDR_WIDTH-1:0] mul_wb_arch_rd_i,
     input  wire [PREG_BITS-1:0] mul_wb_pdst_i,
@@ -250,16 +253,15 @@ import ydrasil_pkg::*;
 
     assign wb_pdst_found_o =
         alu_wb_valid_i & (alu_wb_arch_rd_i != '0) &
-        (alu_wb_pdst_i != '0) & pdst_rob_valid_q[alu_wb_pdst_i];
+        (alu_wb_pdst_i != '0);
     assign lsu_pdst_found_o =
         lsu_wb_valid_i & (lsu_wb_arch_rd_i != '0) &
-        (lsu_wb_pdst_i != '0) & pdst_rob_valid_q[lsu_wb_pdst_i];
+        (lsu_wb_pdst_i != '0);
     assign mul_pdst_found_o =
         mul_wb_valid_i & (mul_wb_arch_rd_i != '0) &
-        (mul_wb_pdst_i != '0) & pdst_rob_valid_q[mul_wb_pdst_i];
+        (mul_wb_pdst_i != '0);
     assign pipe1_pdst_found_o =
-        pipe1_wb_valid_i & (pipe1_wb_pdst_i != '0) &
-        pdst_rob_valid_q[pipe1_wb_pdst_i];
+        pipe1_wb_valid_i & (pipe1_wb_pdst_i != '0);
 
     wire [ROB_PTR_BITS-1:0] wb_rob_idx = pdst_rob_idx_q[alu_wb_pdst_i];
     wire [ROB_PTR_BITS-1:0] lsu_rob_idx = pdst_rob_idx_q[lsu_wb_pdst_i];
@@ -486,21 +488,21 @@ import ydrasil_pkg::*;
                 pdst_rob_valid_q[i] <= 1'b0;
             end
         end else begin
-            if (wb_pdst_found_o) begin
+            if (alu_wb_valid_i && (alu_wb_arch_rd_i != '0) && (alu_wb_pdst_i != '0)) begin
                 busy_q[alu_wb_pdst_i] <= 1'b0;
-                if (rob_valid_q[wb_rob_idx] && !rob_ready_q[wb_rob_idx]) begin
+                if (wb_pdst_found_o && rob_valid_q[wb_rob_idx] && !rob_ready_q[wb_rob_idx]) begin
                     rob_ready_q[wb_rob_idx] <= 1'b1;
                 end
             end
-            if (lsu_pdst_found_o) begin
+            if (lsu_wb_valid_i && (lsu_wb_arch_rd_i != '0) && (lsu_wb_pdst_i != '0)) begin
                 busy_q[lsu_wb_pdst_i] <= 1'b0;
-                if (rob_valid_q[lsu_rob_idx] && !rob_ready_q[lsu_rob_idx]) begin
+                if (lsu_pdst_found_o && rob_valid_q[lsu_rob_idx] && !rob_ready_q[lsu_rob_idx]) begin
                     rob_ready_q[lsu_rob_idx] <= 1'b1;
                 end
             end
-            if (mul_pdst_found_o) begin
+            if (mul_wb_valid_i && (mul_wb_arch_rd_i != '0) && (mul_wb_pdst_i != '0)) begin
                 busy_q[mul_wb_pdst_i] <= 1'b0;
-                if (rob_valid_q[mul_rob_idx] && !rob_ready_q[mul_rob_idx]) begin
+                if (mul_pdst_found_o && rob_valid_q[mul_rob_idx] && !rob_ready_q[mul_rob_idx]) begin
                     rob_ready_q[mul_rob_idx] <= 1'b1;
                 end
             end
@@ -526,6 +528,11 @@ import ydrasil_pkg::*;
 	                rob_valid_q[ctrl_complete_rob_idx_i] &&
 	                rob_ctrl_q[ctrl_complete_rob_idx_i]) begin
 	                rob_ready_q[ctrl_complete_rob_idx_i] <= 1'b1;
+	            end
+
+	            if (lsu_store_complete_i &&
+	                rob_valid_q[lsu_store_rob_idx_i]) begin
+	                rob_ready_q[lsu_store_rob_idx_i] <= 1'b1;
 	            end
 
             if (commit0_valid_o) begin

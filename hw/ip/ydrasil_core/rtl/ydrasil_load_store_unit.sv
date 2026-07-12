@@ -37,6 +37,9 @@ import ydrasil_pkg::*;
 
     output wire                            lsu_ctrl_busy_o,
 
+    input  wire [5:0]                      id_store_rob_idx_i,
+    output wire                            lsu_store_complete_o,
+    output wire [5:0]                      lsu_store_rob_idx_o,
 
     // 寄存器写回接口
     output wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]     lsu_wb_result_o,
@@ -184,6 +187,13 @@ import ydrasil_pkg::*;
         assign lsu_rn_pdst_o = result_valid_q ? rd_pdst_q : '0;
         assign lsu_fast_fwd_valid_o = result_valid_q;
 
+        reg [5:0] store_rob_idx_q;
+        wire new_store_complete = ((state_q == S_IDLE) & is_store & !request_crosses_word) |
+                                  (state_q == S_STORE_SECOND);
+        assign lsu_store_complete_o = new_store_complete;
+        assign lsu_store_rob_idx_o  = ((state_q == S_IDLE) & is_store & !request_crosses_word) ?
+                                      id_store_rob_idx_i : store_rob_idx_q;
+
         always_ff @(posedge clk or negedge rst_n) begin
             if (!rst_n) begin
                 state_q         <= S_IDLE;
@@ -198,6 +208,7 @@ import ydrasil_pkg::*;
                 result_q        <= '0;
                 result_valid_q  <= 1'b0;
                 rd_pdst_q       <= '0;
+                store_rob_idx_q <= '0;
             end else begin
                 result_valid_q <= 1'b0;
 
@@ -212,6 +223,8 @@ import ydrasil_pkg::*;
                             addr_index_q   <= mem_addr_index;
                             load_cross_q   <= request_crosses_word & is_load;
                             store_cross_q  <= request_crosses_word & is_store;
+                            if (is_store && request_crosses_word)
+                                store_rob_idx_q <= id_store_rob_idx_i;
 
                             if (is_load) begin
                                 state_q <= S_LOAD_FIRST;
@@ -468,6 +481,13 @@ import ydrasil_pkg::*;
     assign lsu_rn_pdst_o = (dtcm_wb_valid | mmio_wb_out_valid) ? selected_wb_pdst : '0;
     assign lsu_fast_fwd_valid_o = dtcm_wb_valid;
 
+    reg [5:0] store_rob_idx_q;
+    wire mmio_store_fire = mmio_req_valid_q & mmio_is_store_q;
+    wire store_complete  = dtcm_store_req | mmio_store_fire;
+
+    assign lsu_store_complete_o = store_complete;
+    assign lsu_store_rob_idx_o  = dtcm_store_req ? id_store_rob_idx_i : store_rob_idx_q;
+
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             mmio_req_valid_q       <= 1'b0;
@@ -481,6 +501,7 @@ import ydrasil_pkg::*;
             mmio_operator_lsu_q    <= '0;
             mmio_rd_addr_q         <= '0;
             mmio_pdst_q            <= '0;
+            store_rob_idx_q        <= '0;
             mmio_wb_valid_q        <= 1'b0;
             mmio_wb_result_q       <= '0;
             mmio_wb_rd_addr_q      <= '0;
@@ -544,6 +565,8 @@ import ydrasil_pkg::*;
                 mmio_operator_lsu_q <= operator_lsu_i;
                 mmio_rd_addr_q      <= id_rd_waddr_i;
                 mmio_pdst_q         <= id_rn_pdst_i;
+                if (is_store)
+                    store_rob_idx_q <= id_store_rob_idx_i;
             end
         end
     end

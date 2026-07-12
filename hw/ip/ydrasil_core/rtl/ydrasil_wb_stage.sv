@@ -49,7 +49,17 @@ import ydrasil_pkg::*;
 
     output wire [REGS_DATA_WIDTH-1:0]   rf_wdata_rd_o,
     output wire                         rf_wen_rd_o,
-    output wire [REGS_ADDR_WIDTH-1:0]   rf_waddr_rd_o
+    output wire [REGS_ADDR_WIDTH-1:0]   rf_waddr_rd_o,
+
+    input  wire                         alu_pdst_found_i,
+    input  wire                         lsu_pdst_found_i,
+    input  wire                         mul_pdst_found_i,
+
+    input  wire [5:0]                   alu_rn_pdst_i,
+
+    output wire                         prf_eq_wr_en_o,
+    output wire [5:0]                   prf_eq_wr_addr_o,
+    output wire [REGS_DATA_WIDTH-1:0]   prf_eq_wr_data_o
 );
 
     localparam int MUL_FIFO_DEPTH = 16;
@@ -214,7 +224,14 @@ import ydrasil_pkg::*;
 `endif
 
     assign rf_wen_rd_o =
-        sel_lsu | sel_alu_fifo | sel_alu_current | sel_mul_fifo | sel_mul_current;
+        (sel_lsu & lsu_pdst_found_i) |
+        ((sel_alu_fifo | sel_alu_current) & alu_pdst_found_i) |
+        ((sel_mul_fifo | sel_mul_current) & mul_pdst_found_i);
+
+    assign prf_eq_wr_en_o = alu_rf_wen_rd_i & (alu_rn_pdst_i != '0);
+    assign prf_eq_wr_addr_o = alu_rn_pdst_i;
+    assign prf_eq_wr_data_o = alu_wdata_rd_i;
+
     assign rf_waddr_rd_o =
         ({REGS_ADDR_WIDTH{sel_lsu}}         & lsu_rf_waddr_rd_i) |
         ({REGS_ADDR_WIDTH{sel_alu_fifo}}    & alu_fifo_head_addr) |

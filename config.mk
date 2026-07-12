@@ -78,7 +78,7 @@ SIM_OUT_DIR ?= $(BUILD_DIR)/sim
 SPIKE_OUT_DIR ?= $(SIM_OUT_DIR)/spike
 SPIKE_LOG ?= rv32ui_lh
 SPIKE_MAXSTEPS ?= 1000000
-SPIKE_LIMIT_ARG ?= --instructions=$(SPIKE_MAXSTEPS)
+SPIKE_LIMIT_ARG ?= --steps=$(SPIKE_MAXSTEPS)
 SPIKE_TRACE_LOG ?= $(SPIKE_OUT_DIR)/$(SPIKE_LOG).log
 SPIKE_TRACE_CSV ?= $(SPIKE_OUT_DIR)/$(SPIKE_LOG).csv
 SPIKE_MEM_BASE ?= $(patsubst %/elf/,%/mem/,$(dir $(SPIKE_ELF)))$(basename $(notdir $(SPIKE_ELF)))
