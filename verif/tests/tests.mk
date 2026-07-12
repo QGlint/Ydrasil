@@ -36,13 +36,15 @@ SW_ALIGNED_TESTS := \
     sw_producer_window \
     sw_load_interlock \
     sw_load_bypass_operands \
-    sw_fence_stall
+    sw_fence_stall \
+    sw_subword_readback_matrix
 SW_NEW_ONLY_TESTS := \
     sw_misaligned_boundary \
     sw_misaligned_negative \
     sw_misaligned_overlap \
     sw_misaligned_boundaries \
-    sw_misaligned_loadback
+    sw_misaligned_loadback \
+    sw_misaligned_half_readback
 SW_ALL_TESTS := $(SW_ALIGNED_TESTS) $(SW_NEW_ONLY_TESTS)
 SW_TEST_TARGETS := $(addprefix sw_comp_,$(SW_ALL_TESTS))
 SW_TEST_INCLUDES := $(RVTESTS_INCLUDES) -I$(YDRASIL_TESTS_DIR)
