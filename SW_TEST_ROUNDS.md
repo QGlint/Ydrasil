@@ -2,6 +2,31 @@
 
 本文档记录项目自有 SW 定向测试的逐轮新增项、适用 LSU、验证结果和覆盖率变化。
 
+## 失败清单
+
+### F-001：legacy LSU 中相关 mul/div 与 fence.i 交织导致除法结果丢失
+
+- 复现测试：[sw_fence_div_repro.S](verif/tests/ydrasil-tests/rv32ui/sw_fence_div_repro.S)。
+- 首次发现：第 4 轮；测试源保留在仓库中，但没有加入 `SW_ALIGNED_TESTS`，不参与正式覆盖率数据库。
+- 运行配置：legacy LSU、HW-only 仿真；new LSU 未将该失败作为正式失败结论。
+- 最小指令序列：
+
+  ```asm
+  li    t0, 0x1111
+  li    t1, 3
+  mul   t2, t0, t1       # 期望 t2 = 0x00003333
+  fence.i
+  sw    t2, 0(s0)
+  divu  t3, t2, t1       # 期望 t3 = 0x00001111
+  fence.i
+  sw    t3, 4(s0)
+  ```
+
+- 失败证据：`testnum = 7`；第一次 SW 的 `t2` 结果正确，第二次除法结果实际为 `t3 = 0x00000000`，而不是 `0x00001111`。
+- 日志：[hw.log](build/sw_boundary/iter4-failures/sw_fence_div_repro/hw.log)；反汇编和复现源保存在同目录。
+- 影响：若加入正式清单，`make sw_boundary_test`、`make sw_coverage` 会出现 `TEST_FAIL`，不再满足正式矩阵全部 PASS 的验收条件。
+- 处理：仅保留失败日志、`testnum`、反汇编和最小复现；不修改 RTL、testbench，也不通过修改测试期望值规避问题。
+
 ## 记录约定
 
 - `aligned`：legacy/new LSU 均运行，并进入默认 `test_all`。
