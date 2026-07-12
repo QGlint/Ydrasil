@@ -192,8 +192,8 @@ import ydrasil_pkg::*;
     reg [DATA_WIDTH-1:0]            issue_pred_target_ff;
     reg [1:0]                       issue_pred_counter_ff;
     reg [DATA_WIDTH-1:0]            issue_pred_bht_index_ff;
-    reg [4:0]                       issue_rf_raddr_rs1_ff;
-    reg [4:0]                       issue_rf_raddr_rs2_ff;
+    (* max_fanout = 8 *) reg [4:0]  issue_rf_raddr_rs1_ff;
+    (* max_fanout = 8 *) reg [4:0]  issue_rf_raddr_rs2_ff;
     reg                             issue_rf_ren_rs1_ff;
     reg                             issue_rf_ren_rs2_ff;
     reg [4:0]                       issue_rf_waddr_rd_ff;
@@ -382,24 +382,16 @@ import ydrasil_pkg::*;
         ({4{issue_lsu_is_sb}} & issue_lsu_sb_mask) |
         ({4{issue_lsu_is_sh}} & issue_lsu_sh_mask) |
         ({4{issue_lsu_is_sw}} & 4'b1111);
-    wire [DATA_WIDTH-1:0] issue_lsu_sb_data =
-        ({DATA_WIDTH{issue_lsu_addr_index == 2'b00}} & {24'b0, issue_rs2_data[7:0]}) |
-        ({DATA_WIDTH{issue_lsu_addr_index == 2'b01}} & {16'b0, issue_rs2_data[7:0], 8'b0}) |
-        ({DATA_WIDTH{issue_lsu_addr_index == 2'b10}} & {8'b0, issue_rs2_data[7:0], 16'b0}) |
-        ({DATA_WIDTH{issue_lsu_addr_index == 2'b11}} & {issue_rs2_data[7:0], 24'b0});
-    wire [DATA_WIDTH-1:0] issue_lsu_sh_data =
-        issue_lsu_addr_index[1] ? {issue_rs2_data[15:0], 16'b0} :
-                                  {16'b0, issue_rs2_data[15:0]};
-    wire [DATA_WIDTH-1:0] issue_lsu_store_data =
-        ({DATA_WIDTH{issue_lsu_is_sb}} & issue_lsu_sb_data) |
-        ({DATA_WIDTH{issue_lsu_is_sh}} & issue_lsu_sh_data) |
-        ({DATA_WIDTH{issue_lsu_is_sw}} & issue_rs2_data);
     wire [DATA_WIDTH-1:0] issue_branch_target = bt_a_operand + bt_b_operand;
     wire [DATA_WIDTH-1:0] issue_branch_next_pc = issue_pc_ff + 32'd4;
     wire issue_branch_eq = (issue_rs1_data == issue_rs2_data);
     wire issue_branch_ge_signed = ($signed(issue_rs1_data) >= $signed(issue_rs2_data));
     wire issue_branch_ge_unsigned = (issue_rs1_data >= issue_rs2_data);
-    wire issue_uses_late_fwd = rs1_lsu_fwd | rs2_lsu_fwd | rs1_mul_fwd | rs2_mul_fwd;
+    wire issue_uses_late_fwd = rs1_lsu_fwd | rs2_lsu_fwd |
+        rs1_mul_fwd | rs2_mul_fwd |
+        (issue_rf_ren_rs1_ff & producer_rs1_fwd_i.valid) |
+        ((issue_rf_ren_rs2_ff | issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) &
+         producer_rs2_fwd_i.valid);
     wire issue_simple_alu_op =
         issue_valid_ff & issue_rf_wen_rd_ff & (issue_rf_waddr_rd_ff != '0) &
         issue_plain_alu_op & !issue_uses_late_fwd &
@@ -572,7 +564,10 @@ import ydrasil_pkg::*;
                 id_lsu_rs2_data_ff  <= issue_rs2_data; // 直接传递寄存器数据，供LSU使用
                 id_lsu_addr_ff      <= issue_lsu_addr;
                 id_lsu_addr_is_dtcm_ff <= issue_lsu_addr_is_dtcm;
-                id_lsu_store_data_ff <= issue_lsu_store_data;
+                // Register raw store data here; lane alignment belongs after the
+                // ID/LSU boundary so the RF read path does not also include the
+                // LSU address adder and byte-lane mux.
+                id_lsu_store_data_ff <= issue_rs2_data;
                 id_lsu_store_mask_ff <= issue_lsu_store_mask;
                 id_lsu_store_data_valid_ff <=
                     !issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] |

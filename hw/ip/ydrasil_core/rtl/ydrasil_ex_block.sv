@@ -146,6 +146,8 @@ import ydrasil_pkg::*;
 
     wire [31:0] operand_a;
     wire [31:0] operand_b;
+    wire [31:0] bitmanip_operand_a;
+    wire [31:0] bitmanip_operand_b;
     wire [31:0] bru_operand_a;
     wire [31:0] bru_operand_b;
     wire [31:0] lsu_operand_a;
@@ -167,6 +169,8 @@ import ydrasil_pkg::*;
         (id_ex_alu_bypass_rs1_i & alu_bypass_valid_q) ? alu_bypass_data_q : alu_operand_a_i;
     assign operand_b = id_ex_load_bypass_rs2_i ? load_bypass_data_i :
         (id_ex_alu_bypass_rs2_i & alu_bypass_valid_q) ? alu_bypass_data_q : alu_operand_b_i;
+    assign bitmanip_operand_a = alu_operand_a_i;
+    assign bitmanip_operand_b = alu_operand_b_i;
     assign bru_operand_a = (id_ex_alu_bypass_rs1_i & alu_bypass_valid_q) ? alu_bypass_data_q : bru_operand_a_i;
     assign bru_operand_b = (id_ex_alu_bypass_rs2_i & alu_bypass_valid_q) ? alu_bypass_data_q : bru_operand_b_i;
     assign lsu_operand_a = (id_ex_alu_bypass_rs1_i & alu_bypass_valid_q) ? alu_bypass_data_q : lsu_operand_a_i;
@@ -426,8 +430,8 @@ import ydrasil_pkg::*;
     end
 
     ydrasil_bitmanip u_ydrasil_bitmanip (
-        .operand_a_i     (operand_a),
-        .operand_b_i     (operand_b),
+        .operand_a_i     (bitmanip_operand_a),
+        .operand_b_i     (bitmanip_operand_b),
         .operator_i      (slow_bitmanip_operator),
         .operator_type_i (operator_type_i),
         .result_o        (bitmanip_result)

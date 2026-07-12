@@ -34,7 +34,7 @@ COE_LOOP5_ITCM_BIN ?= $(COE_LOOP5_DIR)/irom_M3_loop5_itcm.bin
 COE_LOOP5_ITCM ?= $(COE_LOOP5_DIR)/irom_M3_loop5.itcm
 COE_LOOP5_DTCM ?= $(COE_LOOP5_DIR)/dram_M_loop5.dtcm
 
-export PROJECT_ROOT BUILD_DIR WAVE_DIR LOG_DIR SIM_TOOL IP VERILATOR_MOD VERILATOR_COVERAGE UVM USE_BENDER BENDER DIV_IMPL LSU_IMPL MEMS_IMPL ARCH ABI RISCV_PREFIX CC OBJCOPY OBJDUMP GDB QEMU TRACE_TO_CSV TRACE_COMPARE
+export PROJECT_ROOT BUILD_DIR WAVE_DIR LOG_DIR SIM_TOOL IP VERILATOR_MOD VERILATOR_COVERAGE UVM USE_BENDER BENDER DIV_IMPL ARCH ABI RISCV_PREFIX CC OBJCOPY OBJDUMP GDB QEMU TRACE_TO_CSV TRACE_COMPARE
 
 SYN_DIR ?= $(PROJECT_ROOT)/syn
 SYN_BUILD_DIR ?= $(BUILD_DIR)/syn
@@ -50,20 +50,6 @@ ifeq ($(DIV_IMPL),lzc)
 SYN_RTL_DEFINES += YDRASIL_DIV_IMPL_LZC
 else
 $(error Unsupported DIV_IMPL '$(DIV_IMPL)'. Use DIV_IMPL=lzc)
-endif
-ifeq ($(LSU_IMPL),new)
-SYN_RTL_DEFINES += YDRASIL_LSU_IMPL_NEW
-else ifeq ($(LSU_IMPL),legacy)
-SYN_RTL_DEFINES += YDRASIL_LSU_IMPL_LEGACY
-else
-$(error Unsupported LSU_IMPL '$(LSU_IMPL)'. Use LSU_IMPL=new or LSU_IMPL=legacy)
-endif
-ifeq ($(MEMS_IMPL),new)
-SYN_RTL_DEFINES += YDRASIL_MEMS_IMPL_NEW
-else ifeq ($(MEMS_IMPL),legacy)
-SYN_RTL_DEFINES += YDRASIL_MEMS_IMPL_LEGACY
-else
-$(error Unsupported MEMS_IMPL '$(MEMS_IMPL)'. Use MEMS_IMPL=new or MEMS_IMPL=legacy)
 endif
 SYN_DEFINE_ARGS = $(foreach define,$(SYN_RTL_DEFINES),--define $(define))
 SYN_FREQ_BUILD_DIR ?= $(SYN_BUILD_DIR)/$(SYN_PLL_FREQ_TAG)
@@ -433,7 +419,7 @@ coremark_result:
 		tmp=$$(mktemp); \
 		awk '{ \
 			line=$$0; \
-			if (line ~ /^(PERF_METRIC:|PERF_STALL:|PERF_SCOREBOARD_DETAIL:|PERF_LSU_HOT:|PERF_FRONTEND:|PERF_BRANCH:|PERF_BP_ACC:|PERF_BP_DETAIL:)/) { \
+			if (line ~ /^(PERF_METRIC:|PERF_STALL:|PERF_SCOREBOARD_DETAIL:|PERF_LOAD_DETAIL:|PERF_ALU_DETAIL:|PERF_PENDING_DETAIL:|PERF_LSU_HOT:|PERF_FRONTEND:|PERF_BRANCH:|PERF_BP_ACC:|PERF_BP_DETAIL:)/) { \
 				print line; \
 			} else if (match(line, /(core[[:space:]]+0:|3[[:space:]]+0x)/)) { \
 				prefix=substr(line, 1, RSTART - 1); \
@@ -444,8 +430,8 @@ coremark_result:
 				printf "\n"; \
 			} \
 		} END { printf "\n"; }' "$(COREMARK_RESULT_LOG)" > $$tmp; \
-		if grep -Eq '^(CoreMark Size|Total ticks|Total time \(secs\)|Iterations/Sec|Iterations       |Compiler version|Compiler flags|Memory location|seedcrc|Correct operation validated|CoreMark 1\.0 :|Errors detected|ERROR!|COREMARK DONE|PERF_METRIC:|PERF_STALL:|PERF_SCOREBOARD_DETAIL:|PERF_LSU_HOT:|PERF_FRONTEND:|PERF_BRANCH:|PERF_BP_ACC:|PERF_BP_DETAIL:|\[[0-9]+\]crc)' "$$tmp"; then \
-			grep -E '^(CoreMark Size|Total ticks|Total time \(secs\)|Iterations/Sec|Iterations       |Compiler version|Compiler flags|Memory location|seedcrc|Correct operation validated|CoreMark 1\.0 :|Errors detected|ERROR!|COREMARK DONE|PERF_METRIC:|PERF_STALL:|PERF_SCOREBOARD_DETAIL:|PERF_LSU_HOT:|PERF_FRONTEND:|PERF_BRANCH:|PERF_BP_ACC:|PERF_BP_DETAIL:|\[[0-9]+\]crc)' "$$tmp" | tee -a "$(PPA_COREMARK_LOG)"; \
+		if grep -Eq '^(CoreMark Size|Total ticks|Total time \(secs\)|Iterations/Sec|Iterations       |Compiler version|Compiler flags|Memory location|seedcrc|Correct operation validated|CoreMark 1\.0 :|Errors detected|ERROR!|COREMARK DONE|PERF_METRIC:|PERF_STALL:|PERF_SCOREBOARD_DETAIL:|PERF_LOAD_DETAIL:|PERF_ALU_DETAIL:|PERF_PENDING_DETAIL:|PERF_LSU_HOT:|PERF_FRONTEND:|PERF_BRANCH:|PERF_BP_ACC:|PERF_BP_DETAIL:|\[[0-9]+\]crc)' "$$tmp"; then \
+			grep -E '^(CoreMark Size|Total ticks|Total time \(secs\)|Iterations/Sec|Iterations       |Compiler version|Compiler flags|Memory location|seedcrc|Correct operation validated|CoreMark 1\.0 :|Errors detected|ERROR!|COREMARK DONE|PERF_METRIC:|PERF_STALL:|PERF_SCOREBOARD_DETAIL:|PERF_LOAD_DETAIL:|PERF_ALU_DETAIL:|PERF_PENDING_DETAIL:|PERF_LSU_HOT:|PERF_FRONTEND:|PERF_BRANCH:|PERF_BP_ACC:|PERF_BP_DETAIL:|\[[0-9]+\]crc)' "$$tmp" | tee -a "$(PPA_COREMARK_LOG)"; \
 		else \
 			echo "[COREMARK] No CoreMark result lines found in $(COREMARK_RESULT_LOG)" | tee -a "$(PPA_COREMARK_LOG)"; \
 		fi; \

@@ -45,214 +45,6 @@ import ydrasil_pkg::*;
     ,output producer_id_t                   lsu_producer_id_o
     ,output wire                            lsu_producer_tracked_o
 );
-    if (LSU_MODE == LSU_MODE_NEW) begin : g_new
-        assign lsu_fast_load_o = 1'b0;
-        localparam [1:0] S_IDLE         = 2'd0;
-        localparam [1:0] S_LOAD_FIRST   = 2'd1;
-        localparam [1:0] S_LOAD_SECOND  = 2'd2;
-        localparam [1:0] S_STORE_SECOND = 2'd3;
-
-        reg [1:0] state_q;
-        reg [BUS_ADDR_WIDTH-1:0] addr_q;
-        reg [REGS_DATA_WIDTH-1:0] store_data_q;
-        reg [REGS_DATA_WIDTH-1:0] first_word_q;
-        reg [OP_LSU_INFO_WIDTH-1:0] operator_lsu_q;
-        reg [REGS_ADDR_WIDTH-1:0] rd_addr_q;
-        producer_id_t producer_id_q;
-        reg producer_tracked_q;
-        reg [1:0] addr_index_q;
-        reg load_cross_q;
-        reg store_cross_q;
-        reg [REGS_DATA_WIDTH-1:0] result_q;
-        reg result_valid_q;
-
-        wire [REGS_DATA_WIDTH-1:0] lsu_rs2_data;
-        wire is_load;
-        wire is_store;
-        wire [1:0] mem_addr_index;
-        wire [BUS_ADDR_WIDTH-1:0] mem_addr;
-        wire [REGS_DATA_WIDTH-1:0] mem_rs2_data;
-        wire request_valid;
-        wire [2:0] request_access_size;
-        wire [2:0] latched_access_size;
-        wire request_crosses_word;
-        wire latched_crosses_word;
-
-        assign lsu_rs2_data = id_lsu_i.rs2_data;
-        assign is_load = operator_lsu_type_i[OPERATOR_TYPE_LOAD - OPERATOR_TYPE_LSU_BASE];
-        assign is_store = operator_lsu_type_i[OPERATOR_TYPE_STORE - OPERATOR_TYPE_LSU_BASE];
-        assign mem_addr = ex_lsu_mem_addr_i;
-        assign mem_addr_index = mem_addr[1:0];
-        assign mem_rs2_data = lsu_rs2_data;
-        assign request_valid = is_load | is_store;
-
-        wire first_access_req = (state_q == S_IDLE) & request_valid;
-        wire second_load_req = (state_q == S_LOAD_FIRST) & load_cross_q;
-        wire second_store_req = (state_q == S_STORE_SECOND);
-        wire second_access = second_load_req | second_store_req;
-        wire [BUS_ADDR_WIDTH-1:0] latched_next_addr = {addr_q[BUS_ADDR_WIDTH-1:2] + 1'b1, 2'b00};
-        wire [OP_LSU_INFO_WIDTH-1:0] active_store_op =
-            second_store_req ? operator_lsu_q : operator_lsu_i;
-        wire [1:0] active_store_index = second_store_req ? addr_index_q : mem_addr_index;
-        wire [31:0] active_store_data = second_store_req ? store_data_q : mem_rs2_data;
-        wire [2:0] active_store_size = second_store_req ? latched_access_size : request_access_size;
-        wire [2:0] active_store_low_room = 3'd4 - {1'b0, active_store_index};
-        wire [2:0] active_store_low_bytes =
-            (active_store_size < active_store_low_room) ? active_store_size : active_store_low_room;
-        wire [2:0] active_store_high_bytes = active_store_size - active_store_low_bytes;
-        wire [63:0] single_load_data = {32'b0, dtcm_rdata_i};
-        wire [63:0] cross_load_data = {dtcm_rdata_i, first_word_q};
-        wire [63:0] single_load_shifted = single_load_data >> ({3'b000, addr_index_q} << 3);
-        wire [63:0] cross_load_shifted = cross_load_data >> ({3'b000, addr_index_q} << 3);
-        reg [3:0] store_mask_word;
-        reg [31:0] store_data_word;
-        reg [31:0] single_load_result;
-        reg [31:0] cross_load_result;
-        integer store_lane;
-        integer store_src_byte;
-
-        assign request_access_size =
-            (operator_lsu_i[OP_LSU_LW] | operator_lsu_i[OP_LSU_SW]) ? 3'd4 :
-            (operator_lsu_i[OP_LSU_LH] | operator_lsu_i[OP_LSU_LHU] | operator_lsu_i[OP_LSU_SH]) ? 3'd2 :
-                                                                                                    3'd1;
-        assign latched_access_size =
-            (operator_lsu_q[OP_LSU_LW] | operator_lsu_q[OP_LSU_SW]) ? 3'd4 :
-            (operator_lsu_q[OP_LSU_LH] | operator_lsu_q[OP_LSU_LHU] | operator_lsu_q[OP_LSU_SH]) ? 3'd2 :
-                                                                                                    3'd1;
-        assign request_crosses_word =
-            ({1'b0, mem_addr_index} + request_access_size) > 3'd4;
-        assign latched_crosses_word =
-            ({1'b0, addr_index_q} + latched_access_size) > 3'd4;
-
-        always_comb begin
-            store_mask_word = 4'b0000;
-            store_data_word = 32'b0;
-            for (store_lane = 0; store_lane < 4; store_lane = store_lane + 1) begin
-                if (second_store_req) begin
-                    store_src_byte = active_store_low_bytes + store_lane;
-                    if ({1'b0, store_lane[1:0]} < active_store_high_bytes) begin
-                        store_mask_word[store_lane] = 1'b1;
-                        store_data_word[(store_lane * 8) +: 8] =
-                            active_store_data[(store_src_byte * 8) +: 8];
-                    end
-                end else begin
-                    store_src_byte = store_lane - active_store_index;
-                    if ((store_lane >= active_store_index) &&
-                        ({1'b0, store_src_byte[1:0]} < active_store_low_bytes)) begin
-                        store_mask_word[store_lane] = 1'b1;
-                        store_data_word[(store_lane * 8) +: 8] =
-                            active_store_data[(store_src_byte * 8) +: 8];
-                    end
-                end
-            end
-        end
-
-        always_comb begin
-            if (operator_lsu_q[OP_LSU_LB]) begin
-                single_load_result = {{24{single_load_shifted[7]}}, single_load_shifted[7:0]};
-                cross_load_result = {{24{cross_load_shifted[7]}}, cross_load_shifted[7:0]};
-            end else if (operator_lsu_q[OP_LSU_LBU]) begin
-                single_load_result = {24'b0, single_load_shifted[7:0]};
-                cross_load_result = {24'b0, cross_load_shifted[7:0]};
-            end else if (operator_lsu_q[OP_LSU_LH]) begin
-                single_load_result = {{16{single_load_shifted[15]}}, single_load_shifted[15:0]};
-                cross_load_result = {{16{cross_load_shifted[15]}}, cross_load_shifted[15:0]};
-            end else if (operator_lsu_q[OP_LSU_LHU]) begin
-                single_load_result = {16'b0, single_load_shifted[15:0]};
-                cross_load_result = {16'b0, cross_load_shifted[15:0]};
-            end else begin
-                single_load_result = single_load_shifted[31:0];
-                cross_load_result = cross_load_shifted[31:0];
-            end
-        end
-
-        assign dtcm_req_o = first_access_req | second_access;
-        assign dtcm_wen_o = ((state_q == S_IDLE) & is_store) | second_store_req;
-        assign dtcm_addr_o = second_access ? latched_next_addr : mem_addr;
-        assign dtcm_wmask_o = dtcm_wen_o ? store_mask_word : 4'b0000;
-        assign dtcm_wdata_o = dtcm_wen_o ? store_data_word : 32'b0;
-
-        assign mmio_req_o = 1'b0;
-        assign mmio_wen_o = 1'b0;
-        assign mmio_addr_o = '0;
-        assign mmio_wmask_o = 4'b0000;
-        assign mmio_wdata_o = '0;
-
-        assign lsu_ctrl_busy_o = (state_q != S_IDLE) | request_valid | result_valid_q;
-
-        assign lsu_wb_result_o = result_q;
-        assign lsu_rf_rd_wen_o = result_valid_q;
-        assign lsu_rf_rd_waddr_o = result_valid_q ? rd_addr_q : '0;
-        assign lsu_producer_id_o = producer_id_q;
-        assign lsu_producer_tracked_o = producer_tracked_q;
-
-        always_ff @(posedge clk or negedge rst_n) begin
-            if (!rst_n) begin
-                state_q         <= S_IDLE;
-                addr_q          <= '0;
-                store_data_q    <= '0;
-                first_word_q    <= '0;
-                operator_lsu_q  <= '0;
-                rd_addr_q       <= '0;
-                producer_id_q   <= '0;
-                producer_tracked_q <= 1'b0;
-                addr_index_q    <= '0;
-                load_cross_q    <= 1'b0;
-                store_cross_q   <= 1'b0;
-                result_q        <= '0;
-                result_valid_q  <= 1'b0;
-            end else begin
-                result_valid_q <= 1'b0;
-
-                case (state_q)
-                    S_IDLE: begin
-                        if (request_valid) begin
-                            addr_q         <= mem_addr;
-                            store_data_q   <= mem_rs2_data;
-                            operator_lsu_q <= operator_lsu_i;
-                            rd_addr_q      <= id_rd_waddr_i;
-                            producer_id_q  <= id_producer_id_i;
-                            producer_tracked_q <= id_producer_tracked_i;
-                            addr_index_q   <= mem_addr_index;
-                            load_cross_q   <= request_crosses_word & is_load;
-                            store_cross_q  <= request_crosses_word & is_store;
-
-                            if (is_load) begin
-                                state_q <= S_LOAD_FIRST;
-                            end else if (request_crosses_word) begin
-                                state_q <= S_STORE_SECOND;
-                            end
-                        end
-                    end
-
-                    S_LOAD_FIRST: begin
-                        if (load_cross_q) begin
-                            first_word_q <= dtcm_rdata_i;
-                            state_q      <= S_LOAD_SECOND;
-                        end else begin
-                            result_q       <= single_load_result;
-                            result_valid_q <= 1'b1;
-                            state_q        <= S_IDLE;
-                        end
-                    end
-
-                    S_LOAD_SECOND: begin
-                        result_q       <= cross_load_result;
-                        result_valid_q <= 1'b1;
-                        state_q        <= S_IDLE;
-                    end
-
-                    S_STORE_SECOND: begin
-                        state_q <= S_IDLE;
-                    end
-
-                    default: begin
-                        state_q <= S_IDLE;
-                    end
-                endcase
-            end
-        end
-    end else begin : g_legacy
     wire is_load;
     wire is_store;
     wire request_valid;
@@ -371,7 +163,8 @@ import ydrasil_pkg::*;
     assign mem_addr_index = id_lsu_i.addr[1:0];
     assign request_is_dtcm = id_lsu_i.addr_is_dtcm;
     assign mmio_busy = mmio_req_valid_q | mmio_wait_q | mmio_wb_valid_q;
-    assign dtcm_accept = request_valid & request_is_dtcm & !mmio_wb_valid_q & !pending_store_valid_q;
+    assign dtcm_accept = request_valid & request_is_dtcm &
+        !mmio_wb_valid_q & !pending_store_valid_q;
     always_comb begin
         hot_lookup_idx = id_lsu_i.addr[HOT_INDEX_WIDTH+1:2];
         hot_lookup_hit = hot_valid_q[hot_lookup_idx] &&
@@ -381,7 +174,8 @@ import ydrasil_pkg::*;
 
     localparam bit HOT_BYPASS_ENABLE = 1'b1;
     assign hot_load_req =
-        dtcm_accept & is_load & hot_lookup_hit & HOT_BYPASS_ENABLE & !load_s1_valid_q;
+        dtcm_accept & is_load & hot_lookup_hit & HOT_BYPASS_ENABLE &
+        !load_s1_valid_q;
     assign lsu_fast_load_o = hot_load_req;
     assign dtcm_array_load_req =
         dtcm_accept & is_load & !(hot_lookup_hit & HOT_BYPASS_ENABLE & !load_s1_valid_q);
@@ -391,7 +185,9 @@ import ydrasil_pkg::*;
     assign mmio_fire = mmio_accept & (is_load | id_lsu_i.store_data_valid);
 
     assign store_wmask = id_lsu_i.store_mask;
-    assign store_wdata = id_lsu_i.store_data;
+    assign store_wdata = align_store_data(operator_lsu_i,
+                                          mem_addr_index,
+                                          id_lsu_i.store_data);
     assign store_pending_capture =
         (dtcm_accept | mmio_accept) & is_store & !id_lsu_i.store_data_valid;
 
@@ -605,9 +401,8 @@ import ydrasil_pkg::*;
 
             if (dtcm_store_req) begin
                 if (hot_valid_q[dtcm_addr_o[HOT_INDEX_WIDTH+1:2]] &&
-                    (hot_addr_q[dtcm_addr_o[HOT_INDEX_WIDTH+1:2]] == dtcm_addr_o[BUS_ADDR_WIDTH-1:2])) begin
+                    (hot_addr_q[dtcm_addr_o[HOT_INDEX_WIDTH+1:2]] == dtcm_addr_o[BUS_ADDR_WIDTH-1:2]))
                     hot_valid_q[dtcm_addr_o[HOT_INDEX_WIDTH+1:2]] <= 1'b0;
-                end
             end
 `ifndef SYNTHESIS
             if (dtcm_accept & is_load) perf_hot_lookup_q <= perf_hot_lookup_q + 1'b1;
@@ -680,8 +475,6 @@ import ydrasil_pkg::*;
                 mmio_producer_tracked_q <= id_producer_tracked_i;
             end
         end
-    end
-
     end
 
 endmodule

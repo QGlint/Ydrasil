@@ -59,19 +59,11 @@ import ydrasil_pkg::*;
     assign dtcm_wdata = lsu_mem_data_i;
     assign dtcm_wmask = (lsu_mem_req_i & lsu_mem_we_i) ? lsu_mem_wmask_i : 4'b0000;
 
-    if (MEMS_MODE == MEMS_MODE_NEW) begin : g_new
-        assign dtcm_addr = lsu_mem_req_i ? lsu_dtcm_addr : if_dtcm_addr;
-        assign if_mem_rdata_o = if_dtcm_access ? dtcm_rdata : itcm_rdata;
-        assign lsu_mem_data_o = dtcm_rdata;
-        assign dtcm_en = 1'b1;
-        assign dtcm_wen = lsu_mem_req_i & lsu_mem_we_i;
-    end else begin : g_legacy
-        assign dtcm_addr = lsu_dtcm_addr;
-        assign if_mem_rdata_o = itcm_rdata;
-        assign lsu_mem_data_o = dtcm_rdata;
-        assign dtcm_en = 1'b1;
-        assign dtcm_wen = lsu_mem_we_i;
-    end
+    assign dtcm_addr = lsu_mem_req_i ? lsu_dtcm_addr : if_dtcm_addr;
+    assign if_mem_rdata_o = if_dtcm_access ? dtcm_rdata : itcm_rdata;
+    assign lsu_mem_data_o = dtcm_rdata;
+    assign dtcm_en = 1'b1;
+    assign dtcm_wen = lsu_mem_req_i & lsu_mem_we_i;
 
     itcm #(
         .ITCM_ADDR_WIDTH(ITCM_ADDR_WIDTH),

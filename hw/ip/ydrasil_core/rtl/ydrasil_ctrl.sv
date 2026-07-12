@@ -44,10 +44,18 @@ import ydrasil_pkg::*;
     reg [PRODUCER_NUM-1:0] producer_valid_q;
     reg [PRODUCER_NUM-1:0] producer_ready_q;
     reg [REGS_ADDR_WIDTH-1:0] producer_rd_q [0:PRODUCER_NUM-1];
-    reg [REGS_DATA_WIDTH-1:0] producer_value_q [0:PRODUCER_NUM-1];
+    (* max_fanout = 8 *) reg [REGS_DATA_WIDTH-1:0] producer_value_q [0:PRODUCER_NUM-1];
     reg [REGS_NUM-1:0] latest_valid_q;
-    producer_id_t latest_id_q [0:REGS_NUM-1];
+    (* max_fanout = 8 *) producer_id_t latest_id_q [0:REGS_NUM-1];
     ydrasil_gpr_fwd_pkt_t wb_fwd_q;
+
+`ifndef SYNTHESIS
+    localparam logic [2:0] DBG_PRODUCER_ALU = 3'd1;
+    localparam logic [2:0] DBG_PRODUCER_LOAD = 3'd2;
+    localparam logic [2:0] DBG_PRODUCER_MUL = 3'd3;
+    localparam logic [2:0] DBG_PRODUCER_OTHER = 3'd4;
+    logic [2:0] dbg_producer_kind_q [0:PRODUCER_NUM-1];
+`endif
 
     wire ex_is_load = ex_hzd_i.operator_type[OPERATOR_TYPE_LOAD];
     wire ex_is_alu = ex_hzd_i.operator_type[OPERATOR_TYPE_ALU];
@@ -141,6 +149,12 @@ import ydrasil_pkg::*;
     producer_id_t rs2_producer_id;
     assign rs1_producer_id = latest_id_q[id_ctrl_i.rs1_addr];
     assign rs2_producer_id = latest_id_q[id_ctrl_i.rs2_addr];
+`ifndef SYNTHESIS
+    wire [2:0] dbg_rs1_producer_kind = rs1_has_producer ?
+        dbg_producer_kind_q[rs1_producer_id] : 3'd0;
+    wire [2:0] dbg_rs2_producer_kind = rs2_has_producer ?
+        dbg_producer_kind_q[rs2_producer_id] : 3'd0;
+`endif
     wire rs1_producer_ready = rs1_has_producer &&
         (producer_ready_q[rs1_producer_id] |
          producer_complete_mask[rs1_producer_id]);
@@ -240,6 +254,9 @@ import ydrasil_pkg::*;
             for (slot_idx = 0; slot_idx < PRODUCER_NUM; slot_idx++) begin
                 producer_rd_q[slot_idx] <= '0;
                 producer_value_q[slot_idx] <= '0;
+`ifndef SYNTHESIS
+                dbg_producer_kind_q[slot_idx] <= '0;
+`endif
             end
             for (reg_idx = 0; reg_idx < REGS_NUM; reg_idx++)
                 latest_id_q[reg_idx] <= '0;
@@ -274,6 +291,16 @@ import ydrasil_pkg::*;
                 producer_ready_q[ex_hzd_i.producer_id] <=
                     producer_complete_mask[ex_hzd_i.producer_id];
                 producer_rd_q[ex_hzd_i.producer_id] <= ex_hzd_i.rd_addr;
+`ifndef SYNTHESIS
+                if (ex_is_load)
+                    dbg_producer_kind_q[ex_hzd_i.producer_id] <= DBG_PRODUCER_LOAD;
+                else if (ex_hzd_i.operator_type[OPERATOR_TYPE_MUL])
+                    dbg_producer_kind_q[ex_hzd_i.producer_id] <= DBG_PRODUCER_MUL;
+                else if (ex_is_alu)
+                    dbg_producer_kind_q[ex_hzd_i.producer_id] <= DBG_PRODUCER_ALU;
+                else
+                    dbg_producer_kind_q[ex_hzd_i.producer_id] <= DBG_PRODUCER_OTHER;
+`endif
                 if (producer_complete_mask[ex_hzd_i.producer_id])
                     producer_value_q[ex_hzd_i.producer_id] <=
                         completion_data(ex_hzd_i.producer_id);
