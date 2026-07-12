@@ -116,15 +116,24 @@
 
 ## 第 11 轮
 
-- 提交标题：`新增测试_11，通过，（1/33）`
+- 提交：`7c8c3a7 新增测试_11，通过，（1/33）`
 - 结果：通过；60 个覆盖率数据库。
 - 覆盖率：line 64.1%（211/329），toggle 65.4%（37273/56996），branch 86.8%（565/651），expr 79.3%（352/444），LCOV 88.8%（3581/4033）。
 - 新增测试：
   - `sw_unsigned_branch_jalr.S`（aligned）：BLTU/BGEU taken/not-taken、ALU→JALR 紧邻依赖、目标和返回路径 SW。
 
+## 第 12 轮
+
+- 提交标题：`新增测试_12，通过，（2/35）`
+- 结果：通过；64 个覆盖率数据库。
+- 覆盖率：line 64.4%（212/329），toggle 65.7%（37431/56996），branch 86.9%（566/651），expr 79.3%（352/444），LCOV 89.0%（3589/4033）。
+- 新增测试：
+  - `sw_jalr_lui_bypass.S`（aligned）：SW 生成 DTCM 指令，LUI 紧邻 JALR 后执行并检查返回值和 guard。
+  - `sw_forwarding_csr.S`（aligned）：mscratch 的 csrrc/csrrsi/csrrci/csrrwi 旧值紧邻作为 SW 数据源，结束时恢复 CSR。
+
 ## 当前汇总
 
-- 项目自有 SW 测试源：33 个，其中 32 个进入正式清单，1 个为独立已知失败复现。
-- 正式矩阵：legacy 27 个数据库，new 33 个数据库，共 60 个数据库。
-- 默认 `test_all`：26 个 aligned 项目测试。
+- 项目自有 SW 测试源：35 个，其中 34 个进入正式清单，1 个为独立已知失败复现。
+- 正式矩阵：legacy 29 个数据库，new 35 个数据库，共 64 个数据库。
+- 默认 `test_all`：28 个 aligned 项目测试。
 - 当前已知失败：仅 `sw_fence_div_repro.S`；不进入正式清单，不修改硬件规避。

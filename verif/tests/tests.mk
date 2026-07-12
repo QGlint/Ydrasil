@@ -43,7 +43,9 @@ SW_ALIGNED_TESTS := \
     sw_bitmanip_address_data \
     sw_bitmanip_immediate \
     sw_forwarding_alu_extended \
-    sw_unsigned_branch_jalr
+    sw_unsigned_branch_jalr \
+    sw_jalr_lui_bypass \
+    sw_forwarding_csr
 SW_NEW_ONLY_TESTS := \
     sw_misaligned_boundary \
     sw_misaligned_negative \
