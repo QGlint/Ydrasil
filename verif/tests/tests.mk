@@ -31,7 +31,10 @@ SW_ALIGNED_TESTS := \
     sw_endian_readback \
     sw_address_alias \
     sw_control_sequence \
-    sw_dense_stress
+    sw_dense_stress \
+    sw_self_modify_exec \
+    sw_producer_window \
+    sw_load_interlock
 SW_NEW_ONLY_TESTS := \
     sw_misaligned_boundary \
     sw_misaligned_negative \
