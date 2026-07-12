@@ -37,7 +37,8 @@ SW_ALIGNED_TESTS := \
     sw_load_interlock \
     sw_load_bypass_operands \
     sw_fence_stall \
-    sw_subword_readback_matrix
+    sw_subword_readback_matrix \
+    sw_div_fence_independent
 SW_NEW_ONLY_TESTS := \
     sw_misaligned_boundary \
     sw_misaligned_negative \
