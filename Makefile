@@ -16,14 +16,48 @@ BOUNDARY_APP_NAMES := $(sort $(basename $(notdir $(wildcard $(BOUNDARY_APP_DIR)/
 BOUNDARY_SIM_TARGETS := $(addprefix boundary_sim_,$(BOUNDARY_APP_NAMES))
 BOUNDARY_RESULT_DIR ?= $(RESULT_DIR)/boundary
 PPA_BOUNDARY_LOG ?= $(PPA_DIR)/boundary_summary.log
+BOUNDARY_OPT_PROFILES ?= O0 O1 O2 O3 Os Og O2_noinline O3_app_unroll
+BOUNDARY_OPT_JOBS ?= $(shell nproc)
+BOUNDARY_OPT_APP_ROOT ?= $(BUILD_DIR)/app/boundary-opt
+BOUNDARY_OPT_RESULT_DIR ?= $(RESULT_DIR)/boundary-opt
+BOUNDARY_OPT_RUN_DIR ?= $(BUILD_DIR)/boundary-opt-run
+PPA_BOUNDARY_OPT_LOG ?= $(PPA_DIR)/boundary_opt_summary.log
+COVERAGE_QUICK_TARGETS ?= boundary_all test_all coremark_sim coe_loop5
+COVERAGE_QUICK_SUMMARY ?= $(PPA_DIR)/coverage_quick_summary.log
+BOUNDARY_OPT_CFLAGS_O0 ?= -O0
+BOUNDARY_OPT_CFLAGS_O1 ?= -O1
+BOUNDARY_OPT_CFLAGS_O2 ?= -O2
+BOUNDARY_OPT_CFLAGS_O3 ?= -O3
+BOUNDARY_OPT_CFLAGS_Os ?= -Os
+BOUNDARY_OPT_CFLAGS_Og ?= -Og
+BOUNDARY_OPT_CFLAGS_O2_noinline ?= -O2 -fno-inline -fno-inline-functions
+BOUNDARY_OPT_CFLAGS_O3_app_unroll ?= -Os
+BOUNDARY_OPT_APP_CFLAGS_O3_app_unroll ?= -O3 -funroll-loops
+BOUNDARY_OPT_SPIKE_MAXSTEPS ?= 100000
+BOUNDARY_OPT_SPIKE_MAXSTEPS_exception_stress ?= 1000000
+BOUNDARY_OPT_SPIKE_SKIP_APPS ?= csr_counter_edges
+BOUNDARY_SIM_TIMEOUT ?= 2000000
+COVERAGE_QUICK_TIMEOUT ?= 750000
+COVERAGE_QUICK_MARGIN_PERCENT ?= 50
+COVERAGE_QUICK_TIMEOUT_PAD ?= 10000
+COVERAGE_QUICK_TICKS_PER_CYCLE ?= 2
+COVERAGE_QUICK_BOUNDARY_MIN ?= 200000
+COVERAGE_QUICK_ISA_MIN ?= 50000
+COVERAGE_QUICK_COREMARK_MIN ?= 550000
+COVERAGE_QUICK_COE_MIN ?= 300000
+COREMARK_SIM_TIMEOUT ?= 10000000
+COE_SIM_TIMEOUT ?= 2000000
+BOUNDARY_OPT_BUILD_TARGETS := $(addprefix boundary_opt_build_,$(BOUNDARY_OPT_PROFILES))
+BOUNDARY_OPT_SIM_TARGETS := $(foreach profile,$(BOUNDARY_OPT_PROFILES),$(foreach app,$(BOUNDARY_APP_NAMES),boundary_opt_sim_$(profile)_$(app)))
+BOUNDARY_OPT_SW_DEPS := $(wildcard $(BOUNDARY_APP_DIR)/*.c $(BOUNDARY_APP_DIR)/*.h $(PROJECT_ROOT)/sw/bsp/*.S $(PROJECT_ROOT)/sw/bsp/lib/*.c $(PROJECT_ROOT)/sw/bsp/include/*.h) $(PROJECT_ROOT)/sw/Makefile
 PPA_SORT_LOG ?= $(PPA_DIR)/sort_summary.log
 PPA_COE_LOG ?= $(PPA_DIR)/$(COE_SIMPLE_NAME)_summary.log
 COE_SIMPLE_NAME ?= coe_loop2
 COE_SIMPLE_ITCM ?= $(BUILD_DIR)/fpga_coe_m3/irom_M3_loop2.itcm
 COE_SIMPLE_DTCM ?= $(BUILD_DIR)/fpga_coe_m3/dram_M_loop2.dtcm
 COE_SIMPLE_LOG ?= $(HW_TRACE_OUT_DIR)/$(COE_SIMPLE_NAME)/hw.log
-COE_SIMPLE_SIM_EXTRA_DEFINES ?= +no_finish_on_led +no_finish_on_tohost +perip_debug +commit_trace +cpp_timeout=2000000 +sv_timeout=2000000
-COE_ISA_SIM_EXTRA_DEFINES ?= +no_finish_on_led +no_finish_on_tohost +perip_debug +commit_trace +cpp_timeout=2000000 +sv_timeout=2000000
+COE_SIMPLE_SIM_EXTRA_DEFINES ?= +no_finish_on_led +no_finish_on_tohost +perip_debug +commit_trace +cpp_timeout=$(COE_SIM_TIMEOUT) +sv_timeout=$(COE_SIM_TIMEOUT)
+COE_ISA_SIM_EXTRA_DEFINES ?= +no_finish_on_led +no_finish_on_tohost +perip_debug +commit_trace +cpp_timeout=$(COE_SIM_TIMEOUT) +sv_timeout=$(COE_SIM_TIMEOUT)
 COE_EXPECT_SEG ?= 0x37800000
 COE_EXPECT_CNT_START ?= 0x80000000
 COE_EXPECT_CNT_STOP ?= 0xffffffff
@@ -88,8 +122,8 @@ ifeq ($(filter $(SYN_PLL_FREQ_MHZ),$(SYN_PLL_SUPPORTED_FREQS)),)
 $(error Unsupported SYN_PLL_FREQ_MHZ=$(SYN_PLL_FREQ_MHZ); supported values: $(SYN_PLL_SUPPORTED_FREQS))
 endif
 
-.PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests init install-bender get_spike download_and_extract_spike check_spike_prebuilt_abi build_spike_from_source check_deps spike spike_wave_to_csv sim_compare commit_check commit_spike_csv commit_hw_trace commit_hw_csv commit_compare rv_test_comp_genmem ppa_rvtest_report ppa_perf_report coe_simple coe_smoke coe_smoke_led coe_isa_probes coverage_all coverage_clean coverage_report sw_boundary_test sw_coverage sw_coverage_clean sw_run_mode sw_coverage_report
-.PHONY: coremark coremark_sim coremark_run coremark_result coremark-rebuild coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map sort_app sort_all sort_sim_all sort_report sort_app_sim sort_app-rebuild sort_app-clean boundary_app boundary_all boundary_sim_all boundary_report boundary_app-rebuild boundary_app-clean coe_loop5 coe_loop5_gen
+.PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests init install-bender get_spike download_and_extract_spike check_spike_prebuilt_abi build_spike_from_source check_deps spike spike_wave_to_csv sim_compare commit_check commit_spike_csv commit_hw_trace commit_hw_csv commit_compare rv_test_comp_genmem ppa_rvtest_report ppa_perf_report coe_simple coe_smoke coe_smoke_led coe_isa_probes coverage_all coverage_quick coverage_clean coverage_report sw_boundary_test sw_coverage sw_coverage_clean sw_run_mode sw_coverage_report
+.PHONY: coremark coremark_sim coremark_run coremark_result coremark-rebuild coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map sort_app sort_all sort_sim_all sort_report sort_app_sim sort_app-rebuild sort_app-clean boundary_app boundary_all boundary_sim_all boundary_report boundary_app-rebuild boundary_app-clean boundary_opt_all boundary_opt_build_all boundary_opt_sim_all boundary_opt_report boundary_opt_clean $(BOUNDARY_OPT_BUILD_TARGETS) $(BOUNDARY_OPT_SIM_TARGETS) coe_loop5 coe_loop5_gen
 .PHONY: syn synf syn-extreme syn-venv syn-prep syn-stage-xpr syn-vivado syn-analyze syn-clean
 
 .SECONDEXPANSION:
@@ -109,12 +143,62 @@ coverage_all: coverage_clean
 	@mkdir -p "$(COVERAGE_DATA_DIR)"
 	@$(MAKE) comp VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
 	-@$(MAKE) boundary_all VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
+	-@$(MAKE) boundary_opt_all VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
 	-@$(MAKE) test_all VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
 	-@$(MAKE) sort_all VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
 	-@$(MAKE) coremark_sim VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
 	-@$(MAKE) coe_loop5 VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
 	@$(MAKE) coverage_report
 	@$(MAKE) ppa_perf_report
+
+coverage_quick: coverage_clean
+	@mkdir -p "$(COVERAGE_DATA_DIR)" "$(PPA_DIR)"
+	@$(MAKE) comp VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
+	@set +e; failed=0; rm -f "$(COVERAGE_QUICK_SUMMARY)"; \
+	echo "[COVERAGE QUICK] Targets: $(COVERAGE_QUICK_TARGETS)" | tee "$(COVERAGE_QUICK_SUMMARY)"; \
+	for target in $(COVERAGE_QUICK_TARGETS); do \
+		measured=0; minimum=$(COVERAGE_QUICK_TIMEOUT); \
+		if [ -s "$(PPA_DIR)/perf_stats.csv" ]; then \
+			case "$$target" in \
+				boundary_all) pattern='^boundary(-opt)?/'; minimum=$(COVERAGE_QUICK_BOUNDARY_MIN) ;; \
+				test_all) pattern='^rv32'; minimum=$(COVERAGE_QUICK_ISA_MIN) ;; \
+				coremark_sim) pattern='^coremark$$'; minimum=$(COVERAGE_QUICK_COREMARK_MIN) ;; \
+				coe_loop5) pattern='^coe_loop5$$'; minimum=$(COVERAGE_QUICK_COE_MIN) ;; \
+				*) pattern='a^' ;; \
+			esac; \
+			measured=$$(awk -F, -v p="$$pattern" 'NR>1 && $$1 ~ p && $$2 ~ /^[0-9]+$$/ && $$2>m {m=$$2} END{print m+0}' "$(PPA_DIR)/perf_stats.csv"); \
+		else \
+			case "$$target" in \
+				boundary_all) minimum=$(COVERAGE_QUICK_BOUNDARY_MIN) ;; \
+				test_all) minimum=$(COVERAGE_QUICK_ISA_MIN) ;; \
+				coremark_sim) minimum=$(COVERAGE_QUICK_COREMARK_MIN) ;; \
+				coe_loop5) minimum=$(COVERAGE_QUICK_COE_MIN) ;; \
+			esac; \
+		fi; \
+		budget=$$(( (measured * $(COVERAGE_QUICK_TICKS_PER_CYCLE) * (100 + $(COVERAGE_QUICK_MARGIN_PERCENT)) + 99) / 100 + $(COVERAGE_QUICK_TIMEOUT_PAD) )); \
+		if [ "$$budget" -lt "$$minimum" ]; then budget=$$minimum; fi; \
+		echo "[COVERAGE QUICK] RUN  $$target timeout=$$budget measured_cycles=$$measured" | tee -a "$(COVERAGE_QUICK_SUMMARY)"; \
+		if $(MAKE) --no-print-directory "$$target" VERILATOR_COVERAGE=1 VERILATOR_TRACE=0 \
+			SIM_COMPARE_TIMEOUT="$$budget" \
+			BOUNDARY_SIM_TIMEOUT="$$budget" \
+			COREMARK_SIM_TIMEOUT="$$budget" \
+			COE_SIM_TIMEOUT="$$budget"; then \
+			echo "[COVERAGE QUICK] PASS $$target" | tee -a "$(COVERAGE_QUICK_SUMMARY)"; \
+		else \
+			echo "[COVERAGE QUICK] FAIL $$target" | tee -a "$(COVERAGE_QUICK_SUMMARY)"; failed=1; \
+		fi; \
+	done; \
+	if $(MAKE) --no-print-directory coverage_report; then \
+		echo "[COVERAGE QUICK] PASS coverage_report" | tee -a "$(COVERAGE_QUICK_SUMMARY)"; \
+		grep '^\[COVERAGE\] LCOV source-line coverage:' "$(COVERAGE_SUMMARY)" | tail -1 | tee -a "$(COVERAGE_QUICK_SUMMARY)"; \
+	else \
+		echo "[COVERAGE QUICK] FAIL coverage_report" | tee -a "$(COVERAGE_QUICK_SUMMARY)"; failed=1; \
+	fi; \
+	dat_count=$$(find "$(COVERAGE_DATA_DIR)" -type f -name '*.dat' | wc -l); \
+	overall=PASS; if [ "$$failed" -ne 0 ]; then overall=FAIL; fi; \
+	echo "[COVERAGE QUICK] CORRECTNESS=$$overall coverage_databases=$$dat_count" | tee -a "$(COVERAGE_QUICK_SUMMARY)"; \
+	echo "[COVERAGE QUICK] Summary: $(COVERAGE_QUICK_SUMMARY)"; \
+	exit "$$failed"
 
 ppa_perf_report:
 	@bash sw/scripts/collect_perf_stats.sh "$(HW_TRACE_OUT_DIR)" "$(PPA_DIR)"
@@ -407,7 +491,7 @@ coremark_sim: coremark comp
 		COMPARE_ITCM=$(BUILD_DIR)/app/coremark/coremark.itcm \
 		COMPARE_DTCM=$(BUILD_DIR)/app/coremark/coremark.dtcm \
 		SIM_COMPARE=$(COREMARK_SIM_COMPARE) \
-		COMPARE_SIM_EXTRA_DEFINES="+cpp_timeout=10000000 +sv_timeout=10000000"; \
+		COMPARE_SIM_EXTRA_DEFINES="+cpp_timeout=$(COREMARK_SIM_TIMEOUT) +sv_timeout=$(COREMARK_SIM_TIMEOUT)"; \
 	rc=$$?; \
 	$(MAKE) --no-print-directory coremark_result; \
 	exit $$rc
@@ -504,7 +588,7 @@ boundary_sim_all: $(BOUNDARY_SIM_TARGETS)
 boundary_sim_%:
 	@name=$*; result_dir="$(BOUNDARY_RESULT_DIR)"; hw_log="$(HW_TRACE_OUT_DIR)/boundary/$$name/hw.log"; run_log="$$result_dir/$$name.log"; status="$$result_dir/$$name.status"; \
 	mkdir -p "$$result_dir"; rm -f "$$hw_log" "$$run_log" "$$status"; \
-	if $(MAKE) --no-print-directory sim_compare SIM_COMPARE=none COMPARE_NAME="boundary/$$name" COMPARE_ELF="$(BUILD_DIR)/app/boundary/$$name.elf" COMPARE_ITCM="$(BUILD_DIR)/app/boundary/$$name.itcm" COMPARE_DTCM="$(BUILD_DIR)/app/boundary/$$name.dtcm" COMPARE_SIM_EXTRA_DEFINES="+perip_debug +cpp_timeout=2000000 +sv_timeout=2000000" >"$$run_log" 2>&1 && grep -q "BOUNDARY PASS name=$$name" "$$hw_log"; then result=PASS; else result=FAIL; fi; \
+	if $(MAKE) --no-print-directory sim_compare SIM_COMPARE=none COMPARE_NAME="boundary/$$name" COMPARE_ELF="$(BUILD_DIR)/app/boundary/$$name.elf" COMPARE_ITCM="$(BUILD_DIR)/app/boundary/$$name.itcm" COMPARE_DTCM="$(BUILD_DIR)/app/boundary/$$name.dtcm" COMPARE_SIM_EXTRA_DEFINES="+perip_debug +cpp_timeout=$(BOUNDARY_SIM_TIMEOUT) +sv_timeout=$(BOUNDARY_SIM_TIMEOUT)" >"$$run_log" 2>&1 && grep -q "BOUNDARY PASS name=$$name" "$$hw_log"; then result=PASS; else result=FAIL; fi; \
 	echo "[$$name] [$$result]" > "$$status"
 
 boundary_report:
@@ -513,6 +597,113 @@ boundary_report:
 	count=$$(find "$(BOUNDARY_RESULT_DIR)" -maxdepth 1 -name '*.status' -type f | wc -l); \
 	if [ "$$count" -ne "$(words $(BOUNDARY_APP_NAMES))" ]; then echo "[BOUNDARY] Missing status files: expected $(words $(BOUNDARY_APP_NAMES)), got $$count"; failed=1; fi; \
 	echo "[PPA] Boundary report: $(PPA_BOUNDARY_LOG)"; exit $$failed
+
+boundary_opt_all: boundary_opt_clean
+	@echo "==========================================================="
+	@echo "   Boundary compiler optimization regression"
+	@echo "   Profiles: $(BOUNDARY_OPT_PROFILES)"
+	@echo "   Matrix: $(words $(BOUNDARY_OPT_PROFILES)) x $(words $(BOUNDARY_APP_NAMES)) = $(words $(BOUNDARY_OPT_SIM_TARGETS)) runs"
+	@echo "==========================================================="
+	@$(MAKE) -j$(BOUNDARY_OPT_JOBS) boundary_opt_build_all
+	@$(MAKE) comp
+	@$(MAKE) -j$(BOUNDARY_OPT_JOBS) boundary_opt_sim_all
+	@$(MAKE) boundary_opt_report
+
+boundary_opt_build_all: $(BOUNDARY_OPT_BUILD_TARGETS)
+
+boundary_opt_sim_all: $(BOUNDARY_OPT_SIM_TARGETS)
+
+define BOUNDARY_OPT_BUILD_template
+boundary_opt_build_$(1): $(BOUNDARY_OPT_APP_ROOT)/$(1)/.built
+
+$(BOUNDARY_OPT_APP_ROOT)/$(1)/.built: $(BOUNDARY_OPT_SW_DEPS)
+	@echo "[BOUNDARY OPT][$(1)] BSP: $(BOUNDARY_OPT_CFLAGS_$(1)) $(BOUNDARY_EXTRA_CFLAGS) APP: $(BOUNDARY_OPT_APP_CFLAGS_$(1))"
+	+@$(MAKE) -C sw boundary_app $(BOUNDARY_APP_SW_MAKE_ARGS) \
+		BOUNDARY_APP_OUT="$(BOUNDARY_OPT_APP_ROOT)/$(1)" \
+		BOUNDARY_EXTRA_CFLAGS="$(BOUNDARY_OPT_CFLAGS_$(1)) $(BOUNDARY_EXTRA_CFLAGS)" \
+		BOUNDARY_APP_ONLY_CFLAGS="$(BOUNDARY_OPT_APP_CFLAGS_$(1))"
+	@printf 'BSP_CFLAGS=%s\nAPP_CFLAGS=%s\n' \
+		"$(BOUNDARY_OPT_CFLAGS_$(1)) $(BOUNDARY_EXTRA_CFLAGS)" \
+		"$(BOUNDARY_OPT_APP_CFLAGS_$(1))" > "$(BOUNDARY_OPT_APP_ROOT)/$(1)/flags.txt"
+	@touch "$$@"
+endef
+$(foreach profile,$(BOUNDARY_OPT_PROFILES),$(eval $(call BOUNDARY_OPT_BUILD_template,$(profile))))
+
+define BOUNDARY_OPT_SIM_template
+boundary_opt_sim_$(1)_$(2): $(BOUNDARY_OPT_APP_ROOT)/$(1)/.built
+	+@profile="$(1)"; name="$(2)"; \
+	result_dir="$(BOUNDARY_OPT_RESULT_DIR)/$$$$profile"; \
+	tmp_dir="$(BOUNDARY_OPT_RUN_DIR)/$$$$profile"; \
+	hw_dir="$(HW_TRACE_OUT_DIR)/boundary-opt/$$$$profile/$$$$name"; \
+	hw_log="$$$$hw_dir/hw.log"; run_log="$$$$result_dir/$$$$name.log"; \
+	status="$$$$result_dir/$$$$name.status"; tmp_log="$$$$tmp_dir/$$$$name.log.tmp"; \
+	tmp_status="$$$$tmp_dir/$$$$name.status.tmp"; app_dir="$(BOUNDARY_OPT_APP_ROOT)/$$$$profile"; \
+	mkdir -p "$$$$result_dir" "$$$$tmp_dir" "$$$$hw_dir"; \
+	rm -f "$$$$hw_log" "$$$$run_log" "$$$$status" "$$$$tmp_log" "$$$$tmp_status"; \
+	compare_mode=csv; if [[ " $(BOUNDARY_OPT_SPIKE_SKIP_APPS) " == *" $$$$name "* ]]; then compare_mode=none; fi; \
+	set +e; \
+	$(MAKE) --no-print-directory sim_compare SIM_COMPARE="$$$$compare_mode" \
+		COMPARE_NAME="boundary-opt/$$$$profile/$$$$name" \
+		COMPARE_ELF="$$$$app_dir/$$$$name.elf" \
+		COMPARE_ITCM="$$$$app_dir/$$$$name.itcm" \
+		COMPARE_DTCM="$$$$app_dir/$$$$name.dtcm" \
+		COMPARE_HW_OUT_DIR="$$$$hw_dir" COMPARE_HW_LOG="$$$$hw_log" \
+		COMPARE_COMPLETE_PROGRAM=1 COMPARE_ALLOW_SPIKE_TAIL=1 COMPARE_MAX_SPIKE_TAIL=16 \
+		COMPARE_GPR_IGNORE_MASK=0x1800 \
+		SPIKE_MAXSTEPS=$(if $(BOUNDARY_OPT_SPIKE_MAXSTEPS_$(2)),$(BOUNDARY_OPT_SPIKE_MAXSTEPS_$(2)),$(BOUNDARY_OPT_SPIKE_MAXSTEPS)) \
+		COMPARE_SIM_EXTRA_DEFINES="+perip_debug +cpp_timeout=$(BOUNDARY_SIM_TIMEOUT) +sv_timeout=$(BOUNDARY_SIM_TIMEOUT)" \
+		>"$$$$tmp_log" 2>&1; run_rc=$$$$?; set -e; \
+	self_check=FAIL; assertions=FAIL; spike_diff=FAIL; result=FAIL; \
+	if grep -Eq "BOUNDARY PASS name=$$$$name|LED write 0x00504f53" "$$$$hw_log"; then self_check=PASS; fi; \
+	if grep -q "Simulation finished" "$$$$hw_log" && \
+	   ! grep -Eq '(%Error|Assertion failed|ASSERT_[A-Z_]+)' "$$$$hw_log"; then assertions=PASS; fi; \
+	if [ "$$$$compare_mode" = none ]; then spike_diff=SKIP; \
+	elif grep -q '^MATCH: YES' "$$$$tmp_log"; then spike_diff=PASS; fi; \
+	if [ "$$$$run_rc" -eq 0 ] && [ "$$$$self_check" = PASS ] && \
+	   [ "$$$$assertions" = PASS ] && [ "$$$$spike_diff" = PASS ]; then result=PASS; fi; \
+	if [ "$$$$run_rc" -eq 0 ] && [ "$$$$self_check" = PASS ] && \
+	   [ "$$$$assertions" = PASS ] && [ "$$$$spike_diff" = SKIP ]; then result=PARTIAL; fi; \
+	mv "$$$$tmp_log" "$$$$run_log"; \
+	echo "[$$$$profile/$$$$name] [$$$$result] SELF_CHECK=$$$$self_check ASSERTIONS=$$$$assertions SPIKE_DIFF=$$$$spike_diff" > "$$$$tmp_status"; \
+	mv "$$$$tmp_status" "$$$$status"
+endef
+$(foreach profile,$(BOUNDARY_OPT_PROFILES),$(foreach app,$(BOUNDARY_APP_NAMES),$(eval $(call BOUNDARY_OPT_SIM_template,$(profile),$(app)))))
+
+boundary_opt_report:
+	@mkdir -p "$(PPA_DIR)"; rm -f "$(PPA_BOUNDARY_OPT_LOG)"; failed=0; total_pass=0; total_partial=0; \
+	echo "[BOUNDARY OPT] Correctness matrix: $(words $(BOUNDARY_OPT_PROFILES)) profiles x $(words $(BOUNDARY_APP_NAMES)) apps" | tee -a "$(PPA_BOUNDARY_OPT_LOG)"; \
+	echo "[BOUNDARY OPT] Correctness method: program self-check + testbench assertions + complete-program Spike commit differential" | tee -a "$(PPA_BOUNDARY_OPT_LOG)"; \
+	for profile in $(BOUNDARY_OPT_PROFILES); do \
+		for status in $$(find "$(BOUNDARY_OPT_RESULT_DIR)/$$profile" -maxdepth 1 -name '*.status' -type f 2>/dev/null | sort); do \
+			line=$$(cat "$$status"); echo "$$line" | tee -a "$(PPA_BOUNDARY_OPT_LOG)"; \
+			if echo "$$line" | grep -q '\[FAIL\]'; then \
+				failed=1; name=$$(basename "$$status" .status); \
+				tail -40 "$(BOUNDARY_OPT_RESULT_DIR)/$$profile/$$name.log"; \
+			fi; \
+		done; \
+	done; \
+	count=0; for profile in $(BOUNDARY_OPT_PROFILES); do \
+		profile_count=$$(find "$(BOUNDARY_OPT_RESULT_DIR)/$$profile" -maxdepth 1 -name '*.status' -type f 2>/dev/null | wc -l); \
+		count=$$((count + profile_count)); \
+	done; \
+	if [ "$$count" -ne "$(words $(BOUNDARY_OPT_SIM_TARGETS))" ]; then \
+		echo "[BOUNDARY OPT] Missing status files: expected $(words $(BOUNDARY_OPT_SIM_TARGETS)), got $$count"; failed=1; \
+	fi; \
+	for profile in $(BOUNDARY_OPT_PROFILES); do \
+		pass=$$(grep -rl '\[PASS\]' "$(BOUNDARY_OPT_RESULT_DIR)/$$profile" --include='*.status' 2>/dev/null | wc -l); \
+		partial=$$(grep -rl '\[PARTIAL\]' "$(BOUNDARY_OPT_RESULT_DIR)/$$profile" --include='*.status' 2>/dev/null | wc -l); \
+		fail=$$(grep -rl '\[FAIL\]' "$(BOUNDARY_OPT_RESULT_DIR)/$$profile" --include='*.status' 2>/dev/null | wc -l); \
+		total_pass=$$((total_pass + pass)); total_partial=$$((total_partial + partial)); result=PASS; \
+		if [ "$$fail" -ne 0 ]; then result=FAIL; failed=1; elif [ "$$partial" -ne 0 ]; then result=PARTIAL; fi; \
+		flags=$$(tr '\n' ' ' < "$(BOUNDARY_OPT_APP_ROOT)/$$profile/flags.txt"); \
+		echo "[BOUNDARY OPT][$$profile] CORRECTNESS=$$result passed=$$pass partial=$$partial failed=$$fail total=$(words $(BOUNDARY_APP_NAMES)) $$flags" | tee -a "$(PPA_BOUNDARY_OPT_LOG)"; \
+	done; \
+	overall=PASS; if [ "$$failed" -ne 0 ]; then overall=FAIL; elif [ "$$total_partial" -ne 0 ]; then overall=PARTIAL; fi; \
+	echo "[BOUNDARY OPT] CORRECTNESS=$$overall passed=$$total_pass partial=$$total_partial total=$(words $(BOUNDARY_OPT_SIM_TARGETS))" | tee -a "$(PPA_BOUNDARY_OPT_LOG)"; \
+	echo "[PPA] Boundary optimization report: $(PPA_BOUNDARY_OPT_LOG)"; exit $$failed
+
+boundary_opt_clean:
+	@rm -rf "$(BOUNDARY_OPT_APP_ROOT)" "$(BOUNDARY_OPT_RESULT_DIR)" "$(BOUNDARY_OPT_RUN_DIR)" "$(HW_TRACE_OUT_DIR)/boundary-opt"
 
 coremark_result:
 	@mkdir -p "$(PPA_DIR)"; \
@@ -768,9 +959,9 @@ else ifeq ($(SIM_COMPARE),realtime)
 else ifeq ($(SIM_COMPARE),csv)
 	@$(MAKE) get_spike
 	@echo "[SIM] CSV compare: $(COMPARE_NAME)"
-	@env $(SPIKE_RUN_ENV) $(SPIKE) $(SPIKE_FLAGS) $(spike_stepout) $(spike_extension) $(abspath $(COMPARE_ELF)) \
-		> $(COMPARE_SPIKE_LOG) 2>&1
-	@$(PYTHON) $(TRACE_TO_CSV) --log $(COMPARE_SPIKE_LOG) --csv $(COMPARE_SPIKE_CSV) --source spike
+	@set +e; env $(SPIKE_RUN_ENV) $(SPIKE) $(SPIKE_FLAGS) $(spike_stepout) $(spike_extension) $(abspath $(COMPARE_ELF)) \
+		> $(COMPARE_SPIKE_LOG) 2>&1; rc=$$?; echo "SPIKE_EXIT_CODE=$$rc" >> $(COMPARE_SPIKE_LOG); exit 0
+	@$(PYTHON) $(TRACE_TO_CSV) --log $(COMPARE_SPIKE_LOG) --csv $(COMPARE_SPIKE_CSV) --source spike $(if $(filter 1,$(COMPARE_COMPLETE_PROGRAM)),--complete-program,)
 	@echo "[SIM] Spike CSV: $(COMPARE_SPIKE_CSV)"
 	@$(MAKE) -C hw/dv sim \
 		VERILATOR_TRACE=0 \
@@ -779,18 +970,22 @@ else ifeq ($(SIM_COMPARE),csv)
 		DTCM_FILE=$(abspath $(COMPARE_DTCM)) \
 		SIM_EXTRA_DEFINES="$(COMPARE_SIM_DEFINES) $(if $(filter 1,$(VERILATOR_COVERAGE)),+coverage_file=$(abspath $(COMPARE_COVERAGE_FILE)),)" \
 		> $(COMPARE_HW_LOG) 2>&1
-	@$(PYTHON) $(TRACE_TO_CSV) --log $(COMPARE_HW_LOG) --csv $(COMPARE_HW_CSV) --source ydrasil
+	@$(PYTHON) $(TRACE_TO_CSV) --log $(COMPARE_HW_LOG) --csv $(COMPARE_HW_CSV) --source ydrasil $(if $(filter 1,$(COMPARE_COMPLETE_PROGRAM)),--complete-program,)
 	@echo "[SIM] HW CSV: $(COMPARE_HW_CSV)"
 	@set +e; \
 	$(PYTHON) $(TRACE_COMPARE) --mode csv \
 		--hw-csv $(COMPARE_HW_CSV) \
 		--spike-csv $(COMPARE_SPIKE_CSV) \
 		--compare-csv-fields $(TRACE_COMPARE_FIELDS) \
+		$(if $(filter 1,$(COMPARE_ALLOW_HW_TAIL)),--allow-hw-tail,) \
+		$(if $(filter 1,$(COMPARE_ALLOW_SPIKE_TAIL)),--allow-spike-tail --max-spike-tail $(COMPARE_MAX_SPIKE_TAIL),) \
+		--gpr-ignore-mask $(COMPARE_GPR_IGNORE_MASK) \
 		--max-mismatches $(SIM_COMPARE_MAX_MISMATCHES) \
 		--context-lines 10 \
 		> $(COMPARE_LOG) 2>&1; \
-	rc=$$?; \
+	rc=$$?; spike_rc=$$(sed -n 's/^SPIKE_EXIT_CODE=//p' $(COMPARE_SPIKE_LOG) | tail -1); \
 	cat $(COMPARE_LOG); \
+	if [ "$${spike_rc:-1}" -ne 0 ]; then echo "[SIM] Spike exited with code $$spike_rc"; rc=1; fi; \
 	exit $$rc
 else
 	$(error Unsupported SIM_COMPARE=$(SIM_COMPARE). Use csv, realtime, or none)

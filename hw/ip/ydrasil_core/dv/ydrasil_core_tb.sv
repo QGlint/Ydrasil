@@ -207,6 +207,7 @@ end
     reg [31:0] acct_mul_hold_count;
     reg [31:0] acct_scoreboard_count;
     reg [31:0] acct_lsu_struct_count;
+    reg [31:0] acct_lsu_serialize_count;
     reg [31:0] acct_producer_full_count;
     reg [31:0] acct_wb_count;
     reg [31:0] acct_clint_count;
@@ -214,6 +215,25 @@ end
     reg [31:0] acct_no_if_valid_count;
     reg [31:0] acct_issue_count;
     reg [31:0] acct_other_count;
+    reg [31:0] perf_sample_cycle_count;
+    reg [31:0] noif_control_redirect_count;
+    reg [31:0] noif_predict_redirect_count;
+    reg [31:0] noif_fence_refill_count;
+    reg [31:0] noif_mem_response_count;
+    reg [31:0] noif_fetch_launch_count;
+    reg [31:0] noif_pending_redirect_count;
+    reg [31:0] noif_other_count;
+    reg [31:0] other_issue_refill_count;
+    reg [31:0] other_decode_refill_count;
+    reg [31:0] decode_refill_after_control_count;
+    reg [31:0] decode_refill_after_predict_count;
+    reg [31:0] decode_refill_after_fence_count;
+    reg [31:0] decode_refill_after_supply_count;
+    reg [31:0] other_issue_blocked_count;
+    reg [31:0] other_unclassified_count;
+    reg        control_refill_active_q;
+    reg        predict_refill_active_q;
+    reg        fence_refill_active_q;
     reg [31:0] acct_raw_only_count;
     reg [31:0] acct_waw_only_count;
     reg [31:0] acct_raw_waw_count;
@@ -562,6 +582,7 @@ end
             acct_mul_hold_count <= 32'b0;
             acct_scoreboard_count <= 32'b0;
             acct_lsu_struct_count <= 32'b0;
+            acct_lsu_serialize_count <= 32'b0;
             acct_producer_full_count <= 32'b0;
             acct_wb_count <= 32'b0;
             acct_clint_count <= 32'b0;
@@ -569,6 +590,25 @@ end
             acct_no_if_valid_count <= 32'b0;
             acct_issue_count <= 32'b0;
             acct_other_count <= 32'b0;
+            perf_sample_cycle_count <= 32'b0;
+            noif_control_redirect_count <= 32'b0;
+            noif_predict_redirect_count <= 32'b0;
+            noif_fence_refill_count <= 32'b0;
+            noif_mem_response_count <= 32'b0;
+            noif_fetch_launch_count <= 32'b0;
+            noif_pending_redirect_count <= 32'b0;
+            noif_other_count <= 32'b0;
+            other_issue_refill_count <= 32'b0;
+            other_decode_refill_count <= 32'b0;
+            decode_refill_after_control_count <= 32'b0;
+            decode_refill_after_predict_count <= 32'b0;
+            decode_refill_after_fence_count <= 32'b0;
+            decode_refill_after_supply_count <= 32'b0;
+            other_issue_blocked_count <= 32'b0;
+            other_unclassified_count <= 32'b0;
+            control_refill_active_q <= 1'b0;
+            predict_refill_active_q <= 1'b0;
+            fence_refill_active_q <= 1'b0;
             acct_raw_only_count <= 32'b0;
             acct_waw_only_count <= 32'b0;
             acct_raw_waw_count <= 32'b0;
@@ -621,7 +661,20 @@ end
             fe_wrong_dir_flush_count <= 32'b0;
             bp_predict_redirect_q <= 1'b0;
         end else begin
+            perf_sample_cycle_count <= perf_sample_cycle_count + 1'b1;
             bp_predict_redirect_q <= u_dut.u_ydrasil_if_stage.bp_predict_redirect;
+            if (u_dut.branch_jump)
+                control_refill_active_q <= 1'b1;
+            else if (u_dut.if_id_valid)
+                control_refill_active_q <= 1'b0;
+            if (u_dut.u_ydrasil_if_stage.bp_predict_redirect)
+                predict_refill_active_q <= 1'b1;
+            else if (u_dut.if_id_valid)
+                predict_refill_active_q <= 1'b0;
+            if (u_dut.id_fence_i)
+                fence_refill_active_q <= 1'b1;
+            else if (u_dut.if_id_valid)
+                fence_refill_active_q <= 1'b0;
             last_pc     <= pc;
             if (bp_branch_valid) begin
                 bp_branch_count <= bp_branch_count + 1;
@@ -881,13 +934,48 @@ end
                 acct_wb_count <= acct_wb_count + 1'b1;
             end else if (u_dut.clint_stall) begin
                 acct_clint_count <= acct_clint_count + 1'b1;
+            end else if (u_dut.u_ctrl.lsu_serialize_stall) begin
+                acct_lsu_serialize_count <= acct_lsu_serialize_count + 1'b1;
             end else if (!u_dut.if_id_valid) begin
                 acct_no_if_valid_count <= acct_no_if_valid_count + 1'b1;
+                if (control_refill_active_q)
+                    noif_control_redirect_count <= noif_control_redirect_count + 1'b1;
+                else if (predict_refill_active_q)
+                    noif_predict_redirect_count <= noif_predict_redirect_count + 1'b1;
+                else if (fence_refill_active_q)
+                    noif_fence_refill_count <= noif_fence_refill_count + 1'b1;
+                else if (u_dut.u_ydrasil_if_stage.mem_req_valid_ff)
+                    noif_mem_response_count <= noif_mem_response_count + 1'b1;
+                else if (u_dut.u_ydrasil_if_stage.fetch_issue)
+                    noif_fetch_launch_count <= noif_fetch_launch_count + 1'b1;
+                else if (u_dut.u_ydrasil_if_stage.pending_redirect_valid_ff)
+                    noif_pending_redirect_count <= noif_pending_redirect_count + 1'b1;
+                else
+                    noif_other_count <= noif_other_count + 1'b1;
             end else if (u_dut.u_ydrasil_issue_stage.issue_valid_ff &&
                          u_dut.u_ydrasil_issue_stage.id_advance) begin
                 acct_issue_count <= acct_issue_count + 1'b1;
             end else begin
                 acct_other_count <= acct_other_count + 1'b1;
+                if (!u_dut.u_ydrasil_issue_stage.issue_valid_ff && u_dut.decode_valid)
+                    other_issue_refill_count <= other_issue_refill_count + 1'b1;
+                else if (!u_dut.u_ydrasil_issue_stage.issue_valid_ff &&
+                         !u_dut.decode_valid && u_dut.decode_if_ready) begin
+                    other_decode_refill_count <= other_decode_refill_count + 1'b1;
+                    if (control_refill_active_q)
+                        decode_refill_after_control_count <= decode_refill_after_control_count + 1'b1;
+                    else if (predict_refill_active_q)
+                        decode_refill_after_predict_count <= decode_refill_after_predict_count + 1'b1;
+                    else if (fence_refill_active_q)
+                        decode_refill_after_fence_count <= decode_refill_after_fence_count + 1'b1;
+                    else
+                        decode_refill_after_supply_count <= decode_refill_after_supply_count + 1'b1;
+                end
+                else if (u_dut.u_ydrasil_issue_stage.issue_valid_ff &&
+                         !u_dut.u_ydrasil_issue_stage.id_advance)
+                    other_issue_blocked_count <= other_issue_blocked_count + 1'b1;
+                else
+                    other_unclassified_count <= other_unclassified_count + 1'b1;
             end
 
             if (u_dut.scoreboard_stall) begin
@@ -1268,11 +1356,12 @@ end
                 sb_ready_but_stall_count,
                 sb_complete_visible_count,
                 sb_registered_visible_count);
-            $display("PERF_CYCLE_ACCOUNT: FLUSH=%-d MUL_HOLD=%-d SCOREBOARD=%-d LSU_STRUCT=%-d PRODUCER_FULL=%-d WB=%-d CLINT=%-d MULTI=%-d NO_IF_VALID=%-d ISSUE=%-d OTHER=%-d ACCOUNTED=%-d CYCLE_DELTA=%-d",
+            $display("PERF_CYCLE_ACCOUNT: FLUSH=%-d MUL_HOLD=%-d SCOREBOARD=%-d LSU_STRUCT=%-d LSU_SERIALIZE=%-d PRODUCER_FULL=%-d WB=%-d CLINT=%-d MULTI=%-d NO_IF_VALID=%-d ISSUE=%-d OTHER=%-d ACCOUNTED=%-d SAMPLE_CYCLES=%-d ARCH_CYCLE_DELTA=%-d",
                 acct_flush_count,
                 acct_mul_hold_count,
                 acct_scoreboard_count,
                 acct_lsu_struct_count,
+                acct_lsu_serialize_count,
                 acct_producer_full_count,
                 acct_wb_count,
                 acct_clint_count,
@@ -1281,14 +1370,30 @@ end
                 acct_issue_count,
                 acct_other_count,
                 acct_flush_count + acct_mul_hold_count + acct_scoreboard_count +
-                    acct_lsu_struct_count + acct_producer_full_count + acct_wb_count +
+                    acct_lsu_struct_count + acct_lsu_serialize_count +
+                    acct_producer_full_count + acct_wb_count +
                     acct_clint_count + acct_multi_cause_count + acct_no_if_valid_count +
                     acct_issue_count + acct_other_count,
-                cycle_count - (acct_flush_count + acct_mul_hold_count +
-                    acct_scoreboard_count + acct_lsu_struct_count +
-                    acct_producer_full_count + acct_wb_count + acct_clint_count +
-                    acct_multi_cause_count + acct_no_if_valid_count + acct_issue_count +
-                    acct_other_count));
+                perf_sample_cycle_count,
+                cycle_count - perf_sample_cycle_count);
+            $display("PERF_NOIF_DETAIL: CONTROL_REDIRECT=%-d PREDICT_REDIRECT=%-d FENCE_REFILL=%-d MEM_RESPONSE=%-d FETCH_LAUNCH=%-d PENDING_REDIRECT=%-d OTHER=%-d",
+                noif_control_redirect_count,
+                noif_predict_redirect_count,
+                noif_fence_refill_count,
+                noif_mem_response_count,
+                noif_fetch_launch_count,
+                noif_pending_redirect_count,
+                noif_other_count);
+            $display("PERF_OTHER_DETAIL: ISSUE_REFILL=%-d DECODE_REFILL=%-d ISSUE_BLOCKED=%-d OTHER=%-d",
+                other_issue_refill_count,
+                other_decode_refill_count,
+                other_issue_blocked_count,
+                other_unclassified_count);
+            $display("PERF_DECODE_REFILL_DETAIL: AFTER_CONTROL=%-d AFTER_PREDICT=%-d AFTER_FENCE=%-d AFTER_SUPPLY=%-d",
+                decode_refill_after_control_count,
+                decode_refill_after_predict_count,
+                decode_refill_after_fence_count,
+                decode_refill_after_supply_count);
             $display("PERF_HAZARD_ACCOUNT: RAW_ONLY=%-d WAW_ONLY=%-d RAW_WAW=%-d RETIRE_0=%-d RETIRE_1=%-d RETIRE_2=%-d RETIRE_3=%-d",
                 acct_raw_only_count,
                 acct_waw_only_count,
@@ -1310,6 +1415,23 @@ end
                     bubble_cause_hist[25] + bubble_cause_hist[26] + bubble_cause_hist[27] +
                     bubble_cause_hist[28] + bubble_cause_hist[29] + bubble_cause_hist[30] +
                     bubble_cause_hist[31]);
+            $display("PERF_CAUSE_HIST_FULL: H00=%-d H01=%-d H02=%-d H03=%-d H04=%-d H05=%-d H06=%-d H07=%-d H08=%-d H09=%-d H10=%-d H11=%-d H12=%-d H13=%-d H14=%-d H15=%-d H16=%-d H17=%-d H18=%-d H19=%-d H20=%-d H21=%-d H22=%-d H23=%-d H24=%-d H25=%-d H26=%-d H27=%-d H28=%-d H29=%-d H30=%-d H31=%-d",
+                bubble_cause_hist[0], bubble_cause_hist[1],
+                bubble_cause_hist[2], bubble_cause_hist[3],
+                bubble_cause_hist[4], bubble_cause_hist[5],
+                bubble_cause_hist[6], bubble_cause_hist[7],
+                bubble_cause_hist[8], bubble_cause_hist[9],
+                bubble_cause_hist[10], bubble_cause_hist[11],
+                bubble_cause_hist[12], bubble_cause_hist[13],
+                bubble_cause_hist[14], bubble_cause_hist[15],
+                bubble_cause_hist[16], bubble_cause_hist[17],
+                bubble_cause_hist[18], bubble_cause_hist[19],
+                bubble_cause_hist[20], bubble_cause_hist[21],
+                bubble_cause_hist[22], bubble_cause_hist[23],
+                bubble_cause_hist[24], bubble_cause_hist[25],
+                bubble_cause_hist[26], bubble_cause_hist[27],
+                bubble_cause_hist[28], bubble_cause_hist[29],
+                bubble_cause_hist[30], bubble_cause_hist[31]);
             $display("PERF_PRODUCER_STATE: OCC0=%-d OCC1=%-d OCC2=%-d BOTH_WAIT=%-d WAIT_READY=%-d BOTH_READY=%-d RETIRE_HELD=%-d",
                 producer_occ_zero_count,
                 producer_occ_one_count,

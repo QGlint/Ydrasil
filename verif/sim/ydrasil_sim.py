@@ -152,7 +152,9 @@ def _normalize_hex(text: str) -> str:
 	return text
 
 
-def _normalize_gpr(text: str) -> str:
+def _normalize_gpr(
+	text: str, value_mask: Optional[int] = None, ignore_mask: int = 0
+) -> str:
 	items = []
 	for item in (text or "").split(";"):
 		item = item.strip()
@@ -162,7 +164,18 @@ def _normalize_gpr(text: str) -> str:
 			items.append(item)
 			continue
 		reg, value = item.split(":", 1)
-		items.append(f"{reg.strip()}:{_normalize_hex(value)}")
+		normalized = _normalize_hex(value)
+		if value_mask is not None:
+			try:
+				normalized = format(int(normalized, 16) & value_mask & ~ignore_mask, "x")
+			except ValueError:
+				pass
+		elif ignore_mask:
+			try:
+				normalized = format(int(normalized, 16) & ~ignore_mask, "x")
+			except ValueError:
+				pass
+		items.append(f"{reg.strip()}:{normalized}")
 	return ";".join(items)
 
 
@@ -193,15 +206,34 @@ def _is_counter_csr_instr(binary: str) -> bool:
 	return False
 
 
-def _csv_key(row: dict[str, str], fields: list[str]) -> tuple[str, ...]:
+def _csr_addr(binary: str) -> Optional[int]:
+	try:
+		instr = int(binary, 16)
+	except (TypeError, ValueError):
+		return None
+	if (instr & 0x7f) != 0x73 or ((instr >> 12) & 0x7) == 0:
+		return None
+	return (instr >> 20) & 0xfff
+
+
+def _csv_key(
+	row: dict[str, str], fields: list[str], gpr_ignore_mask: int = 0
+) -> tuple[str, ...]:
 	values = []
 	is_counter_csr = _is_counter_csr_instr(row.get("binary", ""))
+	csr_addr = _csr_addr(row.get("binary", ""))
 	for field in fields:
 		value = row.get(field, "")
 		if field in ("pc", "binary"):
 			value = _normalize_hex(value)
 		elif field == "gpr":
-			value = "<counter-csr>" if is_counter_csr else _normalize_gpr(value)
+			if is_counter_csr:
+				value = "<counter-csr>"
+			else:
+				# The competition contract only exposes MIE/MPIE in mstatus.
+				value = _normalize_gpr(
+					value, 0x88 if csr_addr == 0x300 else None, gpr_ignore_mask
+				)
 		else:
 			value = value.strip()
 		values.append(value)
@@ -241,10 +273,27 @@ def _compare_csv(args: argparse.Namespace) -> int:
 	fields = [field.strip() for field in args.compare_csv_fields.split(",") if field.strip()]
 	hw_rows = _read_csv_rows(args.hw_csv)
 	spike_rows = _read_csv_rows(args.spike_csv)
+	if args.allow_hw_tail and not spike_rows:
+		print("MATCH: NO\nSpike trace is empty; cannot validate a hardware prefix")
+		return 1
+	if args.allow_spike_tail and not hw_rows:
+		print("MATCH: NO\nHardware trace is empty; cannot validate it against Spike")
+		return 1
 
 	mismatches = 0
 	for idx, pair in enumerate(zip_longest(hw_rows, spike_rows), start=1):
 		hw_row, spike_row = pair
+		if args.allow_hw_tail and hw_row is not None and spike_row is None:
+			break
+		if args.allow_spike_tail and hw_row is None and spike_row is not None:
+			spike_tail = len(spike_rows) - len(hw_rows)
+			if args.max_spike_tail and spike_tail > args.max_spike_tail:
+				print(
+					f"MATCH: NO\nSpike tail has {spike_tail} rows; "
+					f"maximum allowed is {args.max_spike_tail}"
+				)
+				return 1
+			break
 		if hw_row is None or spike_row is None:
 			mismatches += 1
 			print(f"Mismatch at trace row {idx}")
@@ -256,8 +305,8 @@ def _compare_csv(args: argparse.Namespace) -> int:
 				return 1
 			continue
 
-		hw_key = _csv_key(hw_row, fields)
-		spike_key = _csv_key(spike_row, fields)
+		hw_key = _csv_key(hw_row, fields, args.gpr_ignore_mask)
+		spike_key = _csv_key(spike_row, fields, args.gpr_ignore_mask)
 		if hw_key != spike_key:
 			mismatches += 1
 			print(f"Mismatch at trace row {idx}")
@@ -270,7 +319,10 @@ def _compare_csv(args: argparse.Namespace) -> int:
 
 	if mismatches == 0:
 		print("MATCH: YES")
-		print(f"CSV compare PASS: {len(hw_rows)} HW rows, {len(spike_rows)} Spike rows")
+		print(
+			f"CSV compare PASS: {len(hw_rows)} HW rows, {len(spike_rows)} Spike rows, "
+			f"Spike tail={max(0, len(spike_rows) - len(hw_rows))}"
+		)
 		return 0
 	print("MATCH: NO")
 	print(f"CSV compare FAIL: {mismatches} mismatch(es)")
@@ -357,6 +409,10 @@ def parse_args() -> argparse.Namespace:
 	parser.add_argument("--delay-ms", type=int, default=0, help="Delay between line reads")
 	parser.add_argument("--max-mismatches", type=int, default=1, help="Stop after N mismatches")
 	parser.add_argument("--context-lines", type=int, default=10, help="CSV rows before and after each mismatch")
+	parser.add_argument("--allow-hw-tail", action="store_true", help="Allow extra HW rows after the complete Spike trace matches")
+	parser.add_argument("--allow-spike-tail", action="store_true", help="Allow extra Spike rows after the complete HW trace matches")
+	parser.add_argument("--max-spike-tail", type=int, default=0, help="Maximum allowed Spike-only tail rows (0 is unlimited)")
+	parser.add_argument("--gpr-ignore-mask", type=lambda value: int(value, 0), default=0, help="GPR bits ignored by CSV comparison")
 	parser.add_argument("--full-trace", dest="full_trace", action="store_true", help="Use full trace parsing")
 	parser.add_argument(
 		"--compare-csv-fields",

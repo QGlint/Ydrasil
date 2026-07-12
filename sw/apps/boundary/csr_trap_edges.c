@@ -37,11 +37,11 @@ int main(void)
     CHECK_EQ("mtvec_rw", r, handler);
     asm volatile("csrw mcause, zero\ncsrrsi %0, mcause, 0" : "=r"(r));
     CHECK_EQ("csrrsi_zero", r, 0);
-    asm volatile("csrrwi %0, mepc, 3" : "=r"(r));
-    asm volatile("csrrci %0, mepc, 1" : "=r"(r));
-    CHECK_EQ("csrrci_old", r, 3);
+    asm volatile("csrrwi %0, mepc, 12" : "=r"(r));
+    asm volatile("csrrci %0, mepc, 4" : "=r"(r));
+    CHECK_EQ("csrrci_old", r, 12);
     asm volatile("csrr %0, mepc" : "=r"(r));
-    CHECK_EQ("csrrci_new", r, 2);
+    CHECK_EQ("csrrci_new", r, 8);
 
     r = 1u << 7;
     asm volatile("csrsi mstatus, 8\ncsrc mstatus, %0" :: "r"(r));

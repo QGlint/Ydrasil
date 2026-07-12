@@ -79,6 +79,7 @@ BOUNDARY_APP_BINS := $(addprefix $(BOUNDARY_APP_OUT)/,$(addsuffix .bin,$(BOUNDAR
 BOUNDARY_APP_DUMPS := $(addprefix $(BOUNDARY_APP_OUT)/,$(addsuffix .dump,$(BOUNDARY_APP_NAMES)))
 BOUNDARY_APP_ITCMS := $(addprefix $(BOUNDARY_APP_OUT)/,$(addsuffix .itcm,$(BOUNDARY_APP_NAMES)))
 BOUNDARY_APP_DTCMS := $(addprefix $(BOUNDARY_APP_OUT)/,$(addsuffix .dtcm,$(BOUNDARY_APP_NAMES)))
+BOUNDARY_APP_ONLY_CFLAGS ?=
 
 BSP_DIR := $(PROJECT_ROOT)/sw/bsp
 BSP_INCLUDES := -I$(BSP_DIR)/include
@@ -334,8 +335,22 @@ boundary_app: $(BOUNDARY_APP_ELFS) $(BOUNDARY_APP_BINS) $(BOUNDARY_APP_DUMPS) $(
 $(BOUNDARY_APP_OUT):
 	@mkdir -p $@
 
-$(BOUNDARY_APP_OUT)/%.elf: $(BOUNDARY_APP_DIR)/%.c $(BOUNDARY_APP_DIR)/boundary.h $(BSP_DIR)/link.lds Makefile | $(BOUNDARY_APP_OUT)
+ifneq ($(strip $(BOUNDARY_APP_ONLY_CFLAGS)),)
+$(BOUNDARY_APP_OUT)/%.elf: $(BOUNDARY_APP_DIR)/%.c $(BOUNDARY_APP_DIR)/boundary.h $(BSP_ASM_SRCS) $(BSP_C_SRCS) $(BSP_DIR)/link.lds Makefile | $(BOUNDARY_APP_OUT)
+	@set -eu; \
+	obj_dir="$(BOUNDARY_APP_OUT)/obj/$*"; rm -rf "$$obj_dir"; mkdir -p "$$obj_dir"; objects=""; \
+	for src in $(BSP_ASM_SRCS) $(BSP_C_SRCS); do \
+		base=$${src##*/}; base=$${base%.*}; obj="$$obj_dir/$$base.o"; \
+		$(CC) $(SORT_APP_CFLAGS) $(BOUNDARY_EXTRA_CFLAGS) -I$(BOUNDARY_APP_DIR) -c "$$src" -o "$$obj"; \
+		objects="$$objects $$obj"; \
+	done; \
+	app_obj="$$obj_dir/$*.o"; \
+	$(CC) $(SORT_APP_CFLAGS) $(BOUNDARY_EXTRA_CFLAGS) $(BOUNDARY_APP_ONLY_CFLAGS) -I$(BOUNDARY_APP_DIR) -c "$<" -o "$$app_obj"; \
+	$(CC) $(SORT_APP_LDFLAGS) $$objects "$$app_obj" -Wl,-Map,$(@:.elf=.map) -lgcc -o "$@"
+else
+$(BOUNDARY_APP_OUT)/%.elf: $(BOUNDARY_APP_DIR)/%.c $(BOUNDARY_APP_DIR)/boundary.h $(BSP_ASM_SRCS) $(BSP_C_SRCS) $(BSP_DIR)/link.lds Makefile | $(BOUNDARY_APP_OUT)
 	$(CC) $(SORT_APP_CFLAGS) $(BOUNDARY_EXTRA_CFLAGS) -I$(BOUNDARY_APP_DIR) $(BSP_ASM_SRCS) $(BSP_C_SRCS) $< $(SORT_APP_LDFLAGS) -Wl,-Map,$(@:.elf=.map) -lgcc -o $@
+endif
 
 $(BOUNDARY_APP_OUT)/%.bin: $(BOUNDARY_APP_OUT)/%.elf
 	$(OBJCOPY) -O binary $< $@
@@ -348,7 +363,7 @@ $(BOUNDARY_APP_OUT)/%.itcm: $(BOUNDARY_APP_OUT)/%.elf | $(BOUNDARY_APP_OUT)
 	od -An -t x4 -w4 -v $(@:.itcm=_itcm.bin) | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > $@
 
 $(BOUNDARY_APP_OUT)/%.dtcm: $(BOUNDARY_APP_OUT)/%.elf | $(BOUNDARY_APP_OUT)
-	$(OBJCOPY) -O binary --gap-fill=0x00 --only-section=.data --only-section=.bss --only-section=.stack --set-section-flags .bss=alloc,load,contents --set-section-flags .stack=alloc,load,contents $< $(@:.dtcm=_dtcm.bin) || true
+	$(OBJCOPY) -O binary --gap-fill=0x00 --only-section=.tohost --only-section=.data --only-section=.bss --only-section=.stack --set-section-flags .bss=alloc,load,contents --set-section-flags .stack=alloc,load,contents $< $(@:.dtcm=_dtcm.bin) || true
 	@if [ -s $(@:.dtcm=_dtcm.bin) ]; then od -An -t x4 -w4 -v $(@:.dtcm=_dtcm.bin) | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > $@; else printf "00000000\n" > $@; fi
 
 boundary_app-rebuild: boundary_app-clean

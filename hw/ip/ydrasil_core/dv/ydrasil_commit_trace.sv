@@ -33,6 +33,7 @@ import ydrasil_pkg::*;
     localparam [1:0] COMMIT_ALU = 2'd0;
     localparam [1:0] COMMIT_LSU = 2'd1;
     localparam [1:0] COMMIT_MUL = 2'd2;
+    localparam [1:0] COMMIT_DIV = 2'd3;
 
     reg [1:0]                 commit_kind_q  [0:FIFO_DEPTH-1];
     reg [INST_ADDR_WIDTH-1:0] commit_pc_q    [0:FIFO_DEPTH-1];
@@ -50,7 +51,25 @@ import ydrasil_pkg::*;
     reg [FIFO_PTR_WIDTH-1:0] mul_commit_idx_q [0:FIFO_DEPTH-1];
     reg [FIFO_PTR_WIDTH-1:0] mul_rptr_q;
     reg [FIFO_PTR_WIDTH-1:0] mul_wptr_q;
+    reg [FIFO_PTR_WIDTH-1:0] div_commit_idx_q;
+    reg                      div_pending_q;
+    reg                      div_active_seen_q;
     bit trace_en;
+
+    // DIV is completed through the ALU writeback path and has no public trace
+    // issue port. Observe it here so the verification-only commit FIFO still
+    // represents architectural order.
+    wire div_active = $root.ydrasil_core_tb.u_dut.u_ydrasil_ex_block.div_active_q;
+    wire div_result_valid =
+        $root.ydrasil_core_tb.u_dut.u_ydrasil_ex_block.alu_rf_wen_rd_ff;
+    wire [REGS_ADDR_WIDTH-1:0] div_waddr =
+        $root.ydrasil_core_tb.u_dut.u_ydrasil_ex_block.alu_rf_waddr_rd_ff;
+    wire [REGS_DATA_WIDTH-1:0] div_wdata =
+        $root.ydrasil_core_tb.u_dut.u_ydrasil_ex_block.alu_result_ff;
+    wire [INST_ADDR_WIDTH-1:0] div_issue_pc =
+        $root.ydrasil_core_tb.u_dut.id_instr_addr;
+    wire [INST_DATA_WIDTH-1:0] div_issue_instr =
+        $root.ydrasil_core_tb.u_dut.commit_mul_instr;
 
     initial begin
         trace_en = $test$plusargs("commit_trace");
@@ -78,6 +97,9 @@ import ydrasil_pkg::*;
             lsu_wptr_q = '0;
             mul_rptr_q = '0;
             mul_wptr_q = '0;
+            div_commit_idx_q = '0;
+            div_pending_q = 1'b0;
+            div_active_seen_q = 1'b0;
             for (i = 0; i < FIFO_DEPTH; i = i + 1) begin
                 commit_kind_q[i] = '0;
                 commit_pc_q[i] = '0;
@@ -89,7 +111,8 @@ import ydrasil_pkg::*;
                 mul_commit_idx_q[i] = '0;
             end
         end else begin
-            if (alu_valid_i) begin
+            if (alu_valid_i &&
+                !(div_pending_q && div_active_seen_q && !div_active && div_result_valid)) begin
                 commit_kind_q[commit_wptr_q] = COMMIT_ALU;
                 commit_pc_q[commit_wptr_q] = alu_pc_i;
                 commit_instr_q[commit_wptr_q] = alu_instr_i;
@@ -123,6 +146,18 @@ import ydrasil_pkg::*;
                 commit_wptr_q = commit_wptr_q + FIFO_PTR_WIDTH'(1);
             end
 
+            if (div_active && !div_active_seen_q) begin
+                commit_kind_q[commit_wptr_q] = COMMIT_DIV;
+                commit_pc_q[commit_wptr_q] = div_issue_pc;
+                commit_instr_q[commit_wptr_q] = div_issue_instr;
+                commit_waddr_q[commit_wptr_q] = '0;
+                commit_wdata_q[commit_wptr_q] = '0;
+                commit_ready_q[commit_wptr_q] = 1'b0;
+                div_commit_idx_q = commit_wptr_q;
+                div_pending_q = 1'b1;
+                commit_wptr_q = commit_wptr_q + FIFO_PTR_WIDTH'(1);
+            end
+
             if (mul_valid_i) begin
                 commit_waddr_q[mul_commit_idx_q[mul_rptr_q]] = mul_waddr_i;
                 commit_wdata_q[mul_commit_idx_q[mul_rptr_q]] = mul_wdata_i;
@@ -136,6 +171,15 @@ import ydrasil_pkg::*;
                 commit_ready_q[lsu_commit_idx_q[lsu_rptr_q]] = 1'b1;
                 lsu_rptr_q = lsu_rptr_q + FIFO_PTR_WIDTH'(1);
             end
+
+            if (div_pending_q && div_active_seen_q && !div_active) begin
+                commit_waddr_q[div_commit_idx_q] = div_result_valid ? div_waddr : '0;
+                commit_wdata_q[div_commit_idx_q] = div_wdata;
+                commit_ready_q[div_commit_idx_q] = 1'b1;
+                div_pending_q = 1'b0;
+            end
+
+            div_active_seen_q = div_active;
 
             for (i = 0; i < FIFO_DEPTH; i = i + 1) begin
                 if ((commit_rptr_q != commit_wptr_q) && commit_ready_q[commit_rptr_q]) begin

@@ -183,7 +183,7 @@ def _should_skip_entry(entry, source, full_trace):
     return False
 
 
-def _iter_trace_entries(lines, source, full_trace):
+def _iter_trace_entries(lines, source, full_trace, complete_program=False):
     if source == "spike":
         instr_re = SPIKE_INSTR_RE
         commit_re = SPIKE_COMMIT_RE
@@ -244,6 +244,7 @@ def _iter_trace_entries(lines, source, full_trace):
             if (
                 source == "ydrasil"
                 and not full_trace
+                and not complete_program
                 and pc is not None
                 and ydrasil_seen_test_body
                 and pc < YDRASIL_TRAP_ADDR_LIMIT
@@ -251,7 +252,7 @@ def _iter_trace_entries(lines, source, full_trace):
                 break
             if source == "ydrasil" and pc is not None and pc >= YDRASIL_TRAP_ADDR_LIMIT:
                 ydrasil_seen_test_body = True
-            if current.instr_str == "ecall" or _is_ecall_entry(current):
+            if not complete_program and (current.instr_str == "ecall" or _is_ecall_entry(current)):
                 break
             continue
 
@@ -275,7 +276,7 @@ def _iter_trace_entries(lines, source, full_trace):
             yield current, False
 
 
-def process_sim_log(log_path, csv_path, full_trace=False, source="spike"):
+def process_sim_log(log_path, csv_path, full_trace=False, source="spike", complete_program=False):
     logging.info("Processing %s log: %s", source, log_path)
     total = 0
     kept = 0
@@ -285,7 +286,7 @@ def process_sim_log(log_path, csv_path, full_trace=False, source="spike"):
         writer.start_new_trace()
 
         with open(log_path, "r") as handle:
-            for entry, illegal in _iter_trace_entries(handle, source, full_trace):
+            for entry, illegal in _iter_trace_entries(handle, source, full_trace, complete_program):
                 total += 1
                 if illegal and full_trace:
                     logging.debug("Illegal instruction: %s", entry.instr_str)
@@ -313,13 +314,18 @@ def main():
         help="Log source format",
     )
     parser.add_argument("-f", "--full_trace", dest="full_trace", action="store_true")
+    parser.add_argument(
+        "--complete-program",
+        action="store_true",
+        help="Do not stop at ecall or a return into the low application text region",
+    )
     parser.add_argument("-v", "--verbose", dest="verbose", action="store_true")
     parser.set_defaults(full_trace=False)
     parser.set_defaults(verbose=False)
     args = parser.parse_args()
 
     setup_logging(args.verbose)
-    process_sim_log(args.log, args.csv, args.full_trace, args.source)
+    process_sim_log(args.log, args.csv, args.full_trace, args.source, args.complete_program)
 
 
 if __name__ == "__main__":

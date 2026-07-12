@@ -18,6 +18,7 @@ echo "$header" > "$csv"
 mapfile -t logs < <(find "$root" -type f -name hw.log \( \
     -path '*/coe_loop5/hw.log' -o -path '*/coremark/hw.log' -o \
     -path '*/sort/*/hw.log' -o -path '*/boundary/*/hw.log' -o \
+    -path '*/boundary-opt/*/*/hw.log' -o \
     -path '*/rv32ui/*/hw.log' -o -path '*/rv32um/*/hw.log' -o \
     -path '*/rv32uz*/*/hw.log' -o -path '*/rv32mi/*/hw.log' \) | sort)
 
@@ -60,3 +61,4 @@ done
 
 echo "[PPA] Performance CSV: $csv"
 echo "[PPA] Performance summary: $summary"
+python3 "$(dirname "$0")/analyze_bubbles.py" "$root" "$out_dir"
