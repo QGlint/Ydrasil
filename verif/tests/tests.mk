@@ -53,7 +53,8 @@ SW_NEW_ONLY_TESTS := \
     sw_misaligned_overlap \
     sw_misaligned_boundaries \
     sw_misaligned_loadback \
-    sw_misaligned_half_readback
+    sw_misaligned_half_readback \
+    sw_misaligned_forwarding_mix
 SW_ALL_TESTS := $(SW_ALIGNED_TESTS) $(SW_NEW_ONLY_TESTS)
 SW_TEST_TARGETS := $(addprefix sw_comp_,$(SW_ALL_TESTS))
 SW_TEST_INCLUDES := $(RVTESTS_INCLUDES) -I$(YDRASIL_TESTS_DIR)
