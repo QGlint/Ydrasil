@@ -16,6 +16,34 @@ RVTESTS_TARGETS := $(addprefix rv_comp_,$(subst /,_,$(RVTESTS_ALL)))
 
 RVTESTS_INCLUDES := -I$(PROJECT_ROOT)/sw/include -I$(RVTESTS_DIR)/env -I$(RVTESTS_DIR)/isa/macros/scalar
 
+YDRASIL_TESTS_DIR := $(PROJECT_ROOT)/verif/tests/ydrasil-tests/rv32ui
+SW_ALIGNED_TESTS := \
+    sw_data_boundary \
+    sw_immediate_boundary \
+    sw_address_boundary \
+    sw_dependency_boundary \
+    sw_stress \
+    sw_register_matrix \
+    sw_forwarding_alu \
+    sw_forwarding_load \
+    sw_forwarding_mul_div \
+    sw_immediate_matrix \
+    sw_endian_readback \
+    sw_address_alias \
+    sw_control_sequence \
+    sw_dense_stress
+SW_NEW_ONLY_TESTS := \
+    sw_misaligned_boundary \
+    sw_misaligned_negative \
+    sw_misaligned_overlap \
+    sw_misaligned_boundaries
+SW_ALL_TESTS := $(SW_ALIGNED_TESTS) $(SW_NEW_ONLY_TESTS)
+SW_TEST_TARGETS := $(addprefix sw_comp_,$(SW_ALL_TESTS))
+SW_TEST_INCLUDES := $(RVTESTS_INCLUDES) -I$(YDRASIL_TESTS_DIR)
+SW_LEGACY_DB_COUNT := $(shell expr 1 + $(words $(SW_ALIGNED_TESTS)))
+SW_NEW_DB_COUNT := $(shell expr 1 + $(words $(SW_ALL_TESTS)))
+SW_TOTAL_DB_COUNT := $(shell expr $(SW_LEGACY_DB_COUNT) + $(SW_NEW_DB_COUNT))
+
 RVBENCH_DIR := $(PROJECT_ROOT)/verif/tests/riscv-tests/benchmarks
 RVBENCH_COMMON := $(RVBENCH_DIR)/common
 
@@ -52,6 +80,21 @@ rv_test_comp_genmem: $(RVTESTS_TARGETS)
 
 rv_test_comp_genmem_rebuild:
 	@$(MAKE) rv_test_comp_genmem REBUILD=1
+
+sw_test_comp_aligned: $(addprefix sw_comp_,$(SW_ALIGNED_TESTS))
+
+sw_test_comp_all: $(SW_TEST_TARGETS)
+
+sw_comp_%:
+	@echo ">>> Building Ydrasil SW test $*"
+	@$(MAKE) -C sw rv_comp_genmem \
+		ARCH=$(ARCH) \
+		ABI=$(ABI) \
+		NAME=$* \
+		SRC=$(YDRASIL_TESTS_DIR)/$*.S \
+		OUT_DIR=$(SW_TEST_OUT_ROOT) \
+		COMP_MODE=rvtest \
+		INCLUDES="$(SW_TEST_INCLUDES)"
 
 rv_bench_comp_genmem: $(RVBENCH_TARGETS)
 

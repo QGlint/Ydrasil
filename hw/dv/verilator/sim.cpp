@@ -128,7 +128,7 @@ int main(int argc, char **argv) {
 
     // ---------------- Finish ----------------
 
-
+    tb->final();
     std::cout << "Simulation finished at time " << Verilated::time() << " ticks.\n";
 #if VM_COVERAGE
     VerilatedCov::write(coverage_file);
