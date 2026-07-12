@@ -269,12 +269,47 @@ package ydrasil_pkg;
 	localparam int BP_BTB_ENTRIES = 512;
 	localparam int BP_BHT_ENTRIES = 512;
 	localparam int PRODUCER_NUM = 4;
-	localparam int PRODUCER_ID_WIDTH = $clog2(PRODUCER_NUM);
+	localparam int PRODUCER_SLOT_WIDTH = $clog2(PRODUCER_NUM);
+	localparam int PRODUCER_ID_WIDTH = PRODUCER_SLOT_WIDTH + 1;
+	typedef logic [PRODUCER_SLOT_WIDTH-1:0] producer_slot_t;
 	typedef logic [PRODUCER_ID_WIDTH-1:0] producer_id_t;
+	function automatic producer_slot_t producer_slot(input producer_id_t id);
+		producer_slot = id[PRODUCER_SLOT_WIDTH-1:0];
+	endfunction
 	localparam int COMPLETION_LANES = 3;
 	localparam int COMPLETION_ALU = 0;
 	localparam int COMPLETION_LSU = 1;
 	localparam int COMPLETION_MUL = 2;
+
+	typedef struct packed {
+		logic [INST_ADDR_WIDTH-1:0]          pc;
+		logic [INST_DATA_WIDTH-1:0]          instr;
+		logic                                pred_hit;
+		logic                                pred_taken;
+		logic [INST_ADDR_WIDTH-1:0]          pred_target;
+		logic [1:0]                          pred_counter;
+		logic [INST_ADDR_WIDTH-1:0]          pred_bht_index;
+		logic [REGS_ADDR_WIDTH-1:0]          rs1_addr;
+		logic [REGS_ADDR_WIDTH-1:0]          rs2_addr;
+		logic [REGS_ADDR_WIDTH-1:0]          rd_addr;
+		logic                                rs1_ren;
+		logic                                rs2_ren;
+		logic                                rd_wen;
+		logic [REGS_DATA_WIDTH-1:0]          imm;
+		logic                                operand_b_rs_sel;
+		logic                                operand_a_pc_sel;
+		logic                                operand_a_imm_sel;
+		logic                                bt_a_rs_sel;
+		logic                                operand_b_jump_sel;
+		logic [OPERATOR_WIDTH-1:0]           operator_info;
+		logic [OP_LSU_INFO_WIDTH-1:0]        operator_lsu;
+		logic [OPERATOR_TYPE_WIDTH-1:0]      operator_type;
+		logic [CSR_ADDR_WIDTH-1:0]           csr_raddr;
+		logic [CSR_ADDR_WIDTH-1:0]           csr_waddr;
+		logic [OP_CSR_INFO_WIDTH-1:0]        csr_op_info;
+		logic [OP_SYS_INFO_WIDTH-1:0]        sys_op_info;
+		logic                                fence_i;
+	} ydrasil_decode_pkt_t;
 
 	typedef struct packed {
 		logic                                valid;

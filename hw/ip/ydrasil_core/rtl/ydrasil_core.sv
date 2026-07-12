@@ -208,6 +208,10 @@ import ydrasil_pkg::*;
 	ydrasil_gpr_fwd_pkt_t           alu_fwd_pkt;
 	ydrasil_gpr_fwd_pkt_t           mul_fwd_pkt;
 	ydrasil_completion_bus_t        completion_bus;
+	ydrasil_decode_pkt_t            decode_pkt;
+	wire                            decode_valid;
+	wire                            decode_if_ready;
+	wire                            issue_ready;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    id_ctrl_rs1_addr;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    id_ctrl_rs2_addr;
 	wire                            id_ctrl_rs1_ren;
@@ -339,12 +343,12 @@ import ydrasil_pkg::*;
 	assign ex_hzd_pkt.operator_info = operator;
 	assign alu_fwd_pkt.valid = alu_rf_wen_rd;
 	assign alu_fwd_pkt.producer_id = alu_producer_id;
-	assign alu_fwd_pkt.producer_tracked = 1'b1;
+	assign alu_fwd_pkt.producer_tracked = alu_fwd_pkt.valid && (alu_fwd_pkt.addr != '0);
 	assign alu_fwd_pkt.addr = alu_rf_waddr_rd;
 	assign alu_fwd_pkt.data = alu_result;
 	assign mul_fwd_pkt.valid = mul_rf_wen_rd;
 	assign mul_fwd_pkt.producer_id = mul_producer_id;
-	assign mul_fwd_pkt.producer_tracked = 1'b1;
+	assign mul_fwd_pkt.producer_tracked = mul_fwd_pkt.valid && (mul_fwd_pkt.addr != '0);
 	assign mul_fwd_pkt.addr = mul_rf_waddr_rd;
 	assign mul_fwd_pkt.data = mul_wb_result;
 	assign completion_bus[ydrasil_pkg::COMPLETION_ALU] = alu_fwd_pkt;
@@ -467,7 +471,7 @@ import ydrasil_pkg::*;
 		ydrasil_if_stage u_ydrasil_if_stage (
 			.clk           (clk),
 			.rst_n         (rst_n),
-			.stall_if_i      (stall_if),
+			.stall_if_i      (!decode_if_ready),
 	        .stall_pc_i      (stall_pc),
 			.flush_if_i      (flush_if),
 			.branch_jump_i   (branch_jump),
@@ -494,9 +498,8 @@ import ydrasil_pkg::*;
 	ydrasil_id_stage u_ydrasil_id_stage (
 		.clk                 (clk),
 		.rst_n               (rst_n),
-		.stall_id_i          (stall_id),
-		.bubble_id_i         (bubble_id),
-		.flush_id_i          (flush_id),
+		.flush_i             (flush_id),
+		.issue_ready_i       (issue_ready),
 		.if_id_pc_i          (if_id_pc),
 		.if_id_instr_i       (if_id_instr),
 		.if_id_pred_hit_i    (if_id_pred_hit),
@@ -505,6 +508,20 @@ import ydrasil_pkg::*;
 		.if_id_pred_counter_i(if_id_pred_counter),
 		.if_id_pred_bht_index_i(if_id_pred_bht_index),
 		.if_id_valid_i       (if_id_valid),
+		.if_id_ready_o       (decode_if_ready),
+		.decode_valid_o      (decode_valid),
+		.decode_pkt_o        (decode_pkt)
+	);
+
+	ydrasil_issue_stage u_ydrasil_issue_stage (
+		.clk                 (clk),
+		.rst_n               (rst_n),
+		.stall_id_i          (stall_id),
+		.bubble_id_i         (bubble_id),
+		.flush_id_i          (flush_id),
+		.decode_valid_i      (decode_valid),
+		.decode_pkt_i        (decode_pkt),
+		.issue_ready_o       (issue_ready),
 		.rf_addr_rs1_o       (rf_raddr_rs1),
 		.rf_addr_rs2_o      (rf_raddr_rs2),
 		.rf_rdata_rs1_i     (rf_rdata_rs1),

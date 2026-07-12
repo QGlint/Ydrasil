@@ -16,6 +16,7 @@ sources:
       - rtl/ydrasil_alu.sv
       - rtl/ydrasil_if_stage.sv
       - rtl/ydrasil_id_stage.sv
+      - rtl/ydrasil_issue_stage.sv
       - rtl/ydrasil_ins_decoder.sv
       - rtl/ydrasil_mul.sv
       - rtl/ydrasil_lzc.sv

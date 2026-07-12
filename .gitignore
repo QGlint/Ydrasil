@@ -5,3 +5,4 @@ hw/ip/alkaid/
 tools/
 spec/
 spec
+__pycache__/

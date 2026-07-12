@@ -118,7 +118,8 @@ import ydrasil_pkg::*;
         sel_alu_fifo ? alu_fifo_head_producer_id :
         sel_alu_current ? alu_producer_id_i :
         sel_mul_fifo ? mul_fifo_head_producer_id : mul_producer_id_i;
-    assign rf_producer_tracked_o = sel_lsu ? lsu_producer_tracked_i : rf_wen_rd_o;
+    assign rf_producer_tracked_o = sel_lsu ? lsu_producer_tracked_i :
+                                           (rf_wen_rd_o && (rf_waddr_rd_o != '0));
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin

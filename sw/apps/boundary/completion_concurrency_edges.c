@@ -6,6 +6,10 @@ static volatile uint32_t source[8] = {
 };
 static volatile uint32_t sink[4];
 
+#ifndef COMPLETION_CONCURRENCY_ROUNDS
+#define COMPLETION_CONCURRENCY_ROUNDS 256u
+#endif
+
 #define RUN_ALU_LSU_THEN_MUL(PADDING) asm volatile(                         \
     "lw a1, 0(%3)\naddi a2, %4, 0x31\n" PADDING                         \
     "mul a3, %4, %5\n"                                                     \
@@ -63,7 +67,7 @@ static void run_consecutive_arbitration(uint32_t round)
 
 int main(void)
 {
-    for (uint32_t round = 0; round < 256; round++) {
+    for (uint32_t round = 0; round < COMPLETION_CONCURRENCY_ROUNDS; round++) {
         sink[0] = sink[1] = sink[2] = 0;
         switch (round & 3u) {
         case 0: RUN_MIXED_SEQUENCE(""); break;

@@ -335,7 +335,7 @@ $(BOUNDARY_APP_OUT):
 	@mkdir -p $@
 
 $(BOUNDARY_APP_OUT)/%.elf: $(BOUNDARY_APP_DIR)/%.c $(BOUNDARY_APP_DIR)/boundary.h $(BSP_DIR)/link.lds Makefile | $(BOUNDARY_APP_OUT)
-	$(CC) $(SORT_APP_CFLAGS) -I$(BOUNDARY_APP_DIR) $(BSP_ASM_SRCS) $(BSP_C_SRCS) $< $(SORT_APP_LDFLAGS) -Wl,-Map,$(@:.elf=.map) -lgcc -o $@
+	$(CC) $(SORT_APP_CFLAGS) $(BOUNDARY_EXTRA_CFLAGS) -I$(BOUNDARY_APP_DIR) $(BSP_ASM_SRCS) $(BSP_C_SRCS) $< $(SORT_APP_LDFLAGS) -Wl,-Map,$(@:.elf=.map) -lgcc -o $@
 
 $(BOUNDARY_APP_OUT)/%.bin: $(BOUNDARY_APP_OUT)/%.elf
 	$(OBJCOPY) -O binary $< $@

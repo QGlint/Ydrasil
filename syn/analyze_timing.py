@@ -431,7 +431,10 @@ def analyze_sweep(report_dir: Path) -> None:
     for row in rows:
         wns = row.get("wns_ns", "").strip()
         status = row.get("status", "")
-        if re.search(r"fail|error", status, re.IGNORECASE):
+        completed_with_timing_failure = re.search(
+            r"complete.*failed timing", status, re.IGNORECASE
+        )
+        if re.search(r"fail|error", status, re.IGNORECASE) and not completed_with_timing_failure:
             continue
         if not wns:
             raise ValueError(f"successful run {row.get('run')} has no WNS in {sweep_csv}")

@@ -68,8 +68,7 @@ proc prepare_implementation_runs {count mode} {
         Performance_Explore \
         Performance_ExplorePostRoutePhysOpt \
         Performance_ExtraTimingOpt \
-        Performance_Retiming \
-        Performance_NetDelay_high]
+        Performance_Retiming]
     set count [clamp_int $count 1 [llength $strategies]]
     set runs [list]
     for {set idx 0} {$idx < $count} {incr idx} {
@@ -95,7 +94,10 @@ proc select_best_implementation {run_names report_dir} {
         set status [get_property STATUS $run]
         set strategy [get_property STRATEGY $run]
         set wns ""
-        if {![regexp -nocase {fail|error} $status]} {
+        set completed_with_timing_failure \
+            [regexp -nocase {complete.*failed timing} $status]
+        if {![regexp -nocase {fail|error} $status] ||
+            $completed_with_timing_failure} {
             open_run $run_name -name $run_name
             set worst [get_timing_paths -quiet -delay_type max -max_paths 1 -nworst 1]
             if {[llength $worst] > 0} {
@@ -109,7 +111,8 @@ proc select_best_implementation {run_names report_dir} {
                 -file [file join $report_dir ${run_name}_timing_summary.rpt]
             close_design
         }
-        puts $csv "$run_name,$strategy,$status,$wns"
+        set csv_status [string map [list "," ";"] $status]
+        puts $csv "$run_name,$strategy,$csv_status,$wns"
         puts "Implementation result: $run_name strategy=$strategy status=$status WNS=$wns"
     }
     close $csv
@@ -500,8 +503,13 @@ if {$force_runs} {
     reset_run synth_1
 }
 set_property strategy Flow_AreaOptimized_high [get_runs synth_1]
-launch_runs synth_1 -jobs $jobs
-wait_on_run synth_1
+set synth_status [get_property STATUS [get_runs synth_1]]
+if {!$force_runs && [regexp -nocase {complete} $synth_status]} {
+    puts "Reusing completed synth_1: $synth_status"
+} else {
+    launch_runs synth_1 -jobs $jobs
+    wait_on_run synth_1
+}
 assert_run_ok synth_1
 
 open_run synth_1 -name synth_1
@@ -531,19 +539,36 @@ if {$force_runs} {
     }
 }
 
-if {$run_to eq "bitstream"} {
-    launch_runs $implementation_runs -to_step write_bitstream -jobs $jobs
-} elseif {$run_to eq "route" || $run_to eq "impl"} {
-    launch_runs $implementation_runs -to_step route_design -jobs $jobs
-} else {
+set pending_implementation_runs [list]
+foreach run_name $implementation_runs {
+    set status [get_property STATUS [get_runs $run_name]]
+    if {!$force_runs && [regexp -nocase {complete} $status]} {
+        puts "Reusing completed $run_name: $status"
+    } else {
+        lappend pending_implementation_runs $run_name
+    }
+}
+if {$run_to ne "bitstream" && $run_to ne "route" && $run_to ne "impl"} {
     error "unknown -run_to value: $run_to"
 }
+if {[llength $pending_implementation_runs] > 0} {
+    if {$run_to eq "bitstream"} {
+        launch_runs $pending_implementation_runs -to_step write_bitstream -jobs $jobs
+    } else {
+        launch_runs $pending_implementation_runs -to_step route_design -jobs $jobs
+    }
+}
 foreach run_name $implementation_runs {
-    wait_on_run $run_name
+    if {[lsearch -exact $pending_implementation_runs $run_name] >= 0} {
+        wait_on_run $run_name
+    }
     set status [get_property STATUS [get_runs $run_name]]
     puts "$run_name status: $status"
-    if {[regexp -nocase {fail|error} $status]} {
+    if {[regexp -nocase {fail|error} $status] &&
+        ![regexp -nocase {complete.*failed timing} $status]} {
         puts "warning: implementation sweep run $run_name failed; remaining runs will still be evaluated"
+    } elseif {[regexp -nocase {failed timing} $status]} {
+        puts "warning: implementation sweep run $run_name completed with timing violations"
     }
 }
 set best_impl_run [select_best_implementation $implementation_runs $report_dir]
