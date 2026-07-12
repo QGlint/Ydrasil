@@ -84,8 +84,8 @@ import ydrasil_pkg::*;
 	wire [ydrasil_pkg::OPERATOR_WIDTH-1:0]     operator;
 	wire [31:0]                    bt_a_operand;
 	wire [31:0]                    bt_b_operand;
-	wire [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0]  operator_lsu;
-	ydrasil_id_lsu_pkt_t          id_lsu_pkt;
+	ydrasil_lsu_req_pkt_t         id_lsu_req_pkt;
+	ydrasil_lsu_req_pkt_t         lsu_req_pkt;
 	wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] operator_type;
 	wire                           id_alu_rf_wen_rd;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    id_rf_waddr_rd;
@@ -160,7 +160,9 @@ import ydrasil_pkg::*;
 	wire                        producer_alloc_tracked;
 
 	// LSU request path
-	wire [1:0]                  operator_lsu_type;
+	ydrasil_mem_req_pkt_t       dtcm_req_pkt;
+	ydrasil_mem_req_pkt_t       mmio_req_pkt;
+	ydrasil_lsu_status_pkt_t    lsu_status_pkt;
 	wire [ydrasil_pkg::BUS_DATA_WIDTH-1:0]  dtcm_wdata;
 	wire [ydrasil_pkg::BUS_ADDR_WIDTH-1:0]  dtcm_addr;
 	wire                        dtcm_we;
@@ -205,6 +207,7 @@ import ydrasil_pkg::*;
 	ydrasil_gpr_fwd_pkt_t           lsu_fwd_pkt;
 	ydrasil_gpr_fwd_pkt_t           alu_fwd_pkt;
 	ydrasil_gpr_fwd_pkt_t           mul_fwd_pkt;
+	ydrasil_completion_bus_t        completion_bus;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    id_ctrl_rs1_addr;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    id_ctrl_rs2_addr;
 	wire                            id_ctrl_rs1_ren;
@@ -339,16 +342,14 @@ import ydrasil_pkg::*;
 	assign alu_fwd_pkt.producer_tracked = 1'b1;
 	assign alu_fwd_pkt.addr = alu_rf_waddr_rd;
 	assign alu_fwd_pkt.data = alu_result;
-	assign lsu_fwd_pkt.valid = lsu_rf_wen_rd;
-	assign lsu_fwd_pkt.producer_id = lsu_producer_id;
-	assign lsu_fwd_pkt.producer_tracked = lsu_producer_tracked;
-	assign lsu_fwd_pkt.addr = lsu_rf_waddr_rd;
-	assign lsu_fwd_pkt.data = lsu_wb_result;
 	assign mul_fwd_pkt.valid = mul_rf_wen_rd;
 	assign mul_fwd_pkt.producer_id = mul_producer_id;
 	assign mul_fwd_pkt.producer_tracked = 1'b1;
 	assign mul_fwd_pkt.addr = mul_rf_waddr_rd;
 	assign mul_fwd_pkt.data = mul_wb_result;
+	assign completion_bus[ydrasil_pkg::COMPLETION_ALU] = alu_fwd_pkt;
+	assign completion_bus[ydrasil_pkg::COMPLETION_LSU] = lsu_fwd_pkt;
+	assign completion_bus[ydrasil_pkg::COMPLETION_MUL] = mul_fwd_pkt;
 	assign wb_hzd_valid_q = wb_fwd_pkt.valid;
 	assign wb_hzd_addr_q = wb_fwd_pkt.addr;
 	assign wb_hzd_data_q = wb_fwd_pkt.data;
@@ -361,6 +362,10 @@ import ydrasil_pkg::*;
 	assign id_ctrl_lsu_req = id_ctrl_pkt.lsu_req;
 	assign id_ctrl_store_req = id_ctrl_pkt.store_req;
 	assign id_ctrl_prev_alu_bypass_ok = id_ctrl_pkt.prev_alu_bypass_ok;
+	always_comb begin
+		lsu_req_pkt = id_lsu_req_pkt;
+		lsu_req_pkt.valid = id_lsu_req_pkt.valid & ex_accept_valid;
+	end
 	assign scoreboard_stall = hzd_status_pkt.scoreboard_stall;
 	assign lsu_struct_stall = hzd_status_pkt.lsu_struct_stall;
 	assign issue_store_data_ready = hzd_status_pkt.issue_store_data_ready;
@@ -399,49 +404,42 @@ import ydrasil_pkg::*;
 	assign dbg_bp_pred_next_pc_o = dbg_bp_pred_next_pc;
 	assign dbg_bp_mispredict_o = dbg_bp_mispredict;
 `endif
-	assign operator_lsu_type[0] = ex_accept_valid & operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD];
-	assign operator_lsu_type[1] = ex_accept_valid & operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE];
+	assign dtcm_wdata = dtcm_req_pkt.wdata;
+	assign dtcm_addr = dtcm_req_pkt.addr;
+	assign dtcm_we = dtcm_req_pkt.write;
+	assign dtcm_req = dtcm_req_pkt.valid;
+	assign dtcm_wmask = dtcm_req_pkt.wmask;
+	assign mmio_wdata = mmio_req_pkt.wdata;
+	assign mmio_addr = mmio_req_pkt.addr;
+	assign mmio_we = mmio_req_pkt.write;
+	assign mmio_req = mmio_req_pkt.valid;
+	assign mmio_wmask = mmio_req_pkt.wmask;
+	assign lsu_wb_result = lsu_fwd_pkt.data;
+	assign lsu_rf_wen_rd = lsu_fwd_pkt.valid;
+	assign lsu_rf_waddr_rd = lsu_fwd_pkt.addr;
+	assign lsu_producer_id = lsu_fwd_pkt.producer_id;
+	assign lsu_producer_tracked = lsu_fwd_pkt.producer_tracked;
+	assign lsu_ctrl_busy = lsu_status_pkt.busy;
+	assign lsu_fast_load = lsu_status_pkt.fast_load;
 
-	assign perip_addr = mmio_addr;
-	assign perip_wen = mmio_req && mmio_we;
-	assign perip_mask = mmio_wmask;
-	assign perip_wdata = mmio_wdata;
+	assign perip_addr = mmio_req_pkt.addr;
+	assign perip_wen = mmio_req_pkt.valid && mmio_req_pkt.write;
+	assign perip_mask = mmio_req_pkt.wmask;
+	assign perip_wdata = mmio_req_pkt.wdata;
 	assign instret_inc_count =
 		{1'b0, ex_instret_inc} + {1'b0, lsu_rf_wen_rd} + {1'b0, mul_result_valid};
 
 	ydrasil_load_store_unit u_ydrasil_load_store_unit (
 		.clk               (clk),
 		.rst_n             (rst_n),
-		.ex_lsu_mem_addr_i (ex_lsu_mem_addr),
-		.id_rd_waddr_i      (id_rf_waddr_rd),
-		.id_producer_id_i   (id_ex_producer_id),
-		.id_producer_tracked_i(id_ex_producer_tracked),
-		.operator_lsu_i    (operator_lsu),
-		.operator_lsu_type_i(operator_lsu_type),
-		.ex_lsu_rd_data_i (ex_lsu_result),
-		.id_lsu_i          (id_lsu_pkt),
-		.alu_fwd_i         (alu_fwd_pkt),
-		.mul_fwd_i         (mul_fwd_pkt),
-		.wb_fwd_i          (wb_fwd_pkt),
+		.req_i             (lsu_req_pkt),
+		.completion_bus_i  (completion_bus),
 		.dtcm_rdata_i      (dtcm_rdata),
-		.dtcm_wdata_o      (dtcm_wdata),
-		.dtcm_addr_o       (dtcm_addr),
-		.dtcm_wen_o        (dtcm_we),
-		.dtcm_req_o        (dtcm_req),
-		.dtcm_wmask_o      (dtcm_wmask),
+		.dtcm_req_o        (dtcm_req_pkt),
 		.mmio_rdata_i      (perip_rdata),
-		.mmio_wdata_o      (mmio_wdata),
-		.mmio_addr_o       (mmio_addr),
-		.mmio_wen_o        (mmio_we),
-		.mmio_req_o        (mmio_req),
-		.mmio_wmask_o      (mmio_wmask),
-		.lsu_ctrl_busy_o        (lsu_ctrl_busy),
-		.lsu_fast_load_o        (lsu_fast_load),
-		.lsu_wb_result_o   (lsu_wb_result),
-		.lsu_rf_rd_wen_o   (lsu_rf_wen_rd),
-		.lsu_rf_rd_waddr_o (lsu_rf_waddr_rd),
-		.lsu_producer_id_o (lsu_producer_id)
-		,.lsu_producer_tracked_o(lsu_producer_tracked)
+		.mmio_req_o        (mmio_req_pkt),
+		.status_o          (lsu_status_pkt),
+		.completion_o      (lsu_fwd_pkt)
 	);
 
 		ydrasil_branch_predictor #(
@@ -514,9 +512,7 @@ import ydrasil_pkg::*;
 		.wb_fwd_i           (wb_fwd_pkt),
 		.producer_rs1_fwd_i (producer_rs1_fwd_pkt),
 		.producer_rs2_fwd_i (producer_rs2_fwd_pkt),
-		.lsu_fwd_i          (lsu_fwd_pkt),
-		.alu_fwd_i          (alu_fwd_pkt),
-		.mul_fwd_i          (mul_fwd_pkt),
+		.completion_bus_i   (completion_bus),
 		.hzd_status_i       (hzd_status_pkt),
 		.producer_alloc_id_i(producer_alloc_id),
 		.producer_alloc_tracked_i(producer_alloc_tracked),
@@ -535,8 +531,7 @@ import ydrasil_pkg::*;
 		.operator_o         (operator),
 		.bt_a_operand_o     (bt_a_operand),
 		.bt_b_operand_o     (bt_b_operand),
-		.operator_lsu_o     (operator_lsu),
-		.id_lsu_o           (id_lsu_pkt),
+		.lsu_req_o          (id_lsu_req_pkt),
 		.operator_type_o    (operator_type),
 		.id_ctrl_o          (id_ctrl_pkt),
 		.id_csr_raddr_o     (id_csr_raddr),
@@ -661,12 +656,8 @@ import ydrasil_pkg::*;
 		.rst_n         (rst_n),
 		.if_mem_addr_i (if_mem_addr),
 		.if_mem_rdata_o(if_mem_rdata),
-		.lsu_mem_addr_i(dtcm_addr),
-		.lsu_mem_data_i(dtcm_wdata),
+		.lsu_mem_req_i (dtcm_req_pkt),
 		.lsu_mem_data_o(dtcm_rdata),
-		.lsu_mem_we_i  (dtcm_we),
-		.lsu_mem_req_i (dtcm_req),
-		.lsu_mem_wmask_i(dtcm_wmask),
         .dram_sel_i     (1'b1)
 		// .hold_flag_o   (hold_flag)
 	);
@@ -716,11 +707,8 @@ import ydrasil_pkg::*;
 			.ex_branch_target_i(ex_pc_redirect_target),
 			.ex_hzd_i          (ex_hzd_pkt),
 			.id_ctrl_i         (id_ctrl_pkt),
-			.alu_fwd_i         (alu_fwd_pkt),
-			.lsu_fwd_i         (lsu_fwd_pkt),
-			.mul_fwd_i         (mul_fwd_pkt),
-			.lsu_ctrl_busy_i   (lsu_ctrl_busy),
-			.lsu_fast_load_i   (lsu_fast_load),
+			.completion_bus_i  (completion_bus),
+			.lsu_status_i      (lsu_status_pkt),
 			.clint_stall_i     (clint_stall),
 			.ex_mul_stall_i     (ex_mul_stall),
 			.wb_backpressure_i  (wb_backpressure),

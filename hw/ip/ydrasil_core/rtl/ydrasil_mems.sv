@@ -9,13 +9,9 @@ import ydrasil_pkg::*;
     input  wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] if_mem_addr_i,   // PC地址
     output wire [ydrasil_pkg::INST_DATA_WIDTH-1:0] if_mem_rdata_o, // 指令输出
 
-    // EX访问接口
-    input  wire [ydrasil_pkg::BUS_ADDR_WIDTH-1:0] lsu_mem_addr_i,  
-    input  wire [ydrasil_pkg::BUS_DATA_WIDTH-1:0] lsu_mem_data_i,  
+    // LSU data-memory request
+    input  ydrasil_mem_req_pkt_t lsu_mem_req_i,
     output wire [ydrasil_pkg::BUS_DATA_WIDTH-1:0] lsu_mem_data_o,  
-    input  wire                       lsu_mem_we_i,    
-    input  wire                       lsu_mem_req_i, 
-    input  wire [                3:0] lsu_mem_wmask_i, 
 
     input  wire                         dram_sel_i       // 来自EXU的DRAM访问选择信号
     // 暂停信号
@@ -53,17 +49,18 @@ import ydrasil_pkg::*;
                          (if_mem_addr_i < (DTCM_BASE_ADDR + DTCM_BYTE_SIZE));
     assign if_dtcm_access = IF_DTCM_FETCH_ENABLE & if_dtcm_sel;
     assign if_dtcm_addr = if_mem_addr_i[DTCM_ADDR_WIDTH+1:2];
-    assign lsu_dtcm_addr = lsu_mem_addr_i[DTCM_ADDR_WIDTH+1:2];
+    assign lsu_dtcm_addr = lsu_mem_req_i.addr[DTCM_ADDR_WIDTH+1:2];
 
     assign itcm_addr = if_mem_addr_i[ITCM_ADDR_WIDTH+1:2]; // 地址对齐到4字节
-    assign dtcm_wdata = lsu_mem_data_i;
-    assign dtcm_wmask = (lsu_mem_req_i & lsu_mem_we_i) ? lsu_mem_wmask_i : 4'b0000;
+    assign dtcm_wdata = lsu_mem_req_i.wdata;
+    assign dtcm_wmask = (lsu_mem_req_i.valid & lsu_mem_req_i.write) ?
+        lsu_mem_req_i.wmask : 4'b0000;
 
-    assign dtcm_addr = lsu_mem_req_i ? lsu_dtcm_addr : if_dtcm_addr;
+    assign dtcm_addr = lsu_mem_req_i.valid ? lsu_dtcm_addr : if_dtcm_addr;
     assign if_mem_rdata_o = if_dtcm_access ? dtcm_rdata : itcm_rdata;
     assign lsu_mem_data_o = dtcm_rdata;
     assign dtcm_en = 1'b1;
-    assign dtcm_wen = lsu_mem_req_i & lsu_mem_we_i;
+    assign dtcm_wen = lsu_mem_req_i.valid & lsu_mem_req_i.write;
 
     itcm #(
         .ITCM_ADDR_WIDTH(ITCM_ADDR_WIDTH),

@@ -1,7 +1,7 @@
 include config.mk
 
 SHELL := /bin/bash
-
+# 硬件verilator编译 VERILATOR_IGNORE_ALL=0 不忽略所有语法检查
 # --- 自动化测试相关定义 ---
 RESULT_DIR := $(LOG_DIR)/test_results
 PPA_DIR ?= $(BUILD_DIR)/PPA
@@ -502,8 +502,8 @@ coe_loop5: coe_loop5_gen
 		COE_SIMPLE_NAME=coe_loop5 \
 		COE_SIMPLE_ITCM=$(COE_LOOP5_ITCM) \
 		COE_SIMPLE_DTCM=$(COE_LOOP5_DTCM) \
-		COE_EXPECT_CNT_READ=0x00000002 \
-		COE_EXPECT_SEG=0x37800002
+		COE_EXPECT_CNT_READ=0x00000001 \
+		COE_EXPECT_SEG=0x37800001
 
 coe_smoke:
 	@$(MAKE) coe_simple

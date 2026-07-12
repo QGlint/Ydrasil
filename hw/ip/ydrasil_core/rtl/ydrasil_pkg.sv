@@ -271,6 +271,10 @@ package ydrasil_pkg;
 	localparam int PRODUCER_NUM = 4;
 	localparam int PRODUCER_ID_WIDTH = $clog2(PRODUCER_NUM);
 	typedef logic [PRODUCER_ID_WIDTH-1:0] producer_id_t;
+	localparam int COMPLETION_LANES = 3;
+	localparam int COMPLETION_ALU = 0;
+	localparam int COMPLETION_LSU = 1;
+	localparam int COMPLETION_MUL = 2;
 
 	typedef struct packed {
 		logic                                valid;
@@ -279,6 +283,8 @@ package ydrasil_pkg;
 		logic [REGS_ADDR_WIDTH-1:0]          addr;
 		logic [REGS_DATA_WIDTH-1:0]          data;
 	} ydrasil_gpr_fwd_pkt_t;
+
+	typedef ydrasil_gpr_fwd_pkt_t ydrasil_completion_bus_t [COMPLETION_LANES];
 
 	typedef struct packed {
 		logic [REGS_ADDR_WIDTH-1:0]          rs1_addr;
@@ -291,7 +297,7 @@ package ydrasil_pkg;
 		logic                                store_req;
 		logic                                prev_alu_bypass_ok;
 		logic                                load_bypass_ok;
-		logic                                short_alu_writer;
+		logic                                serialize_before;
 	} ydrasil_id_ctrl_pkt_t;
 
 	typedef struct packed {
@@ -306,19 +312,42 @@ package ydrasil_pkg;
 	} ydrasil_ex_hzd_pkt_t;
 
 	typedef struct packed {
-		logic [REGS_DATA_WIDTH-1:0]          rs2_data;
-		logic [REGS_ADDR_WIDTH-1:0]          rs2_raddr;
+		logic                                valid;
+		logic                                is_load;
+		logic                                is_store;
+		logic [OP_LSU_INFO_WIDTH-1:0]        op;
 		logic [BUS_ADDR_WIDTH-1:0]           addr;
 		logic                                addr_is_dtcm;
+		logic [REGS_ADDR_WIDTH-1:0]          rd_addr;
+		producer_id_t                        producer_id;
+		logic                                producer_tracked;
 		logic [BUS_DATA_WIDTH-1:0]           store_data;
 		logic [3:0]                          store_mask;
 		logic                                store_data_valid;
-	} ydrasil_id_lsu_pkt_t;
+		producer_id_t                        store_data_producer_id;
+		logic                                store_data_producer_tracked;
+	} ydrasil_lsu_req_pkt_t;
+
+	typedef struct packed {
+		logic                                valid;
+		logic                                write;
+		logic [BUS_ADDR_WIDTH-1:0]           addr;
+		logic [BUS_DATA_WIDTH-1:0]           wdata;
+		logic [3:0]                          wmask;
+	} ydrasil_mem_req_pkt_t;
+
+	typedef struct packed {
+		logic                                busy;
+		logic                                idle;
+		logic                                fast_load;
+	} ydrasil_lsu_status_pkt_t;
 
 	typedef struct packed {
 		logic                                scoreboard_stall;
 		logic                                lsu_struct_stall;
 		logic                                issue_store_data_ready;
+		producer_id_t                        store_data_producer_id;
+		logic                                store_data_producer_tracked;
 		logic                                prev_alu_bypass_rs1;
 		logic                                prev_alu_bypass_rs2;
 		logic                                prev_load_bypass_rs1;

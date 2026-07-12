@@ -19,6 +19,13 @@ int main(void)
     CHECK_EQ("alu_raw_rs1_rs2", r, 5);
 
     asm volatile(
+        "li t4, 0x1234\naddi t0, t4, 7\n"
+        "add t1, t0, t4\nsub t2, t0, t4\nxor t3, t0, t4\n"
+        "add %0, t1, t2\nadd %0, %0, t3"
+        : "=&r"(r) :: "t0", "t1", "t2", "t3", "t4");
+    CHECK_EQ("one_producer_three_consumers", r, 0x2485u);
+
+    asm volatile(
         "lw t0, 0(%1)\n"
         "add %0, t0, t0"
         : "=r"(r) : "r"(&source) : "t0", "memory");
@@ -103,6 +110,30 @@ int main(void)
         "2: li %0, 1"
         : "=&r"(r) :: "t0");
     CHECK_EQ("back_to_back_taken_branches", r, 1);
+
+    /* All wrong-path producer classes must be killed without leaking tokens. */
+    uint32_t flushed_load = 0x11111111u;
+    uint32_t flushed_csr = 0x22222222u;
+    uint32_t flushed_mul = 0x33333333u;
+    uint32_t flushed_div = 0x44444444u;
+    wrong_path = 0;
+    asm volatile(
+        "li t0, 1\nbeq t0, t0, 1f\n"
+        "lw %0, 0(%5)\n"
+        "csrr %1, mscratch\n"
+        "mul %2, t0, t0\n"
+        "div %3, t0, t0\n"
+        "sw t0, 0(%4)\n"
+        "1:"
+        : "+r"(flushed_load), "+r"(flushed_csr), "+r"(flushed_mul),
+          "+r"(flushed_div)
+        : "r"(&wrong_path), "r"(&source)
+        : "t0", "memory");
+    CHECK_EQ("flush_load_producer", flushed_load, 0x11111111u);
+    CHECK_EQ("flush_csr_producer", flushed_csr, 0x22222222u);
+    CHECK_EQ("flush_mul_producer", flushed_mul, 0x33333333u);
+    CHECK_EQ("flush_div_producer", flushed_div, 0x44444444u);
+    CHECK_EQ("flush_all_store", wrong_path, 0);
 
     boundary_finish();
 }

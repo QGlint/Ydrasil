@@ -7,11 +7,8 @@ import ydrasil_pkg::*;
     input wire [INST_ADDR_WIDTH-1:0] ex_branch_target_i,
     input ydrasil_ex_hzd_pkt_t ex_hzd_i,
     input ydrasil_id_ctrl_pkt_t id_ctrl_i,
-    input ydrasil_gpr_fwd_pkt_t alu_fwd_i,
-    input ydrasil_gpr_fwd_pkt_t lsu_fwd_i,
-    input ydrasil_gpr_fwd_pkt_t mul_fwd_i,
-    input wire lsu_ctrl_busy_i,
-    input wire lsu_fast_load_i,
+    input ydrasil_completion_bus_t completion_bus_i,
+    input ydrasil_lsu_status_pkt_t lsu_status_i,
     input wire clint_stall_i,
     input wire ex_mul_stall_i,
     input wire wb_backpressure_i,
@@ -78,31 +75,47 @@ import ydrasil_pkg::*;
          ex_hzd_i.operator_info[OP_ALU_SRA]  |
          ex_hzd_i.operator_info[OP_ALU_LUI]  |
          ex_hzd_i.operator_info[OP_ALU_AUIPC]);
-    wire prev_alu_bypass_rs1 = id_ex_prev_alu_bypassable &&
+    wire id_ex_prev_alu_lsu_bypassable = id_ex_prev_alu_bypassable &&
+        (ex_hzd_i.operator_info[OP_ALU_ADD]  |
+         ex_hzd_i.operator_info[OP_ALU_SUB]  |
+         ex_hzd_i.operator_info[OP_ALU_SLT]  |
+         ex_hzd_i.operator_info[OP_ALU_SLTU] |
+         ex_hzd_i.operator_info[OP_ALU_XOR]  |
+         ex_hzd_i.operator_info[OP_ALU_OR]   |
+         ex_hzd_i.operator_info[OP_ALU_AND]  |
+         ex_hzd_i.operator_info[OP_ALU_LUI]  |
+         ex_hzd_i.operator_info[OP_ALU_AUIPC]);
+    wire id_ex_prev_alu_consumer_bypassable = id_ctrl_i.lsu_req ?
+        id_ex_prev_alu_lsu_bypassable : id_ex_prev_alu_bypassable;
+    wire prev_alu_bypass_rs1 = id_ex_prev_alu_consumer_bypassable &&
         id_ctrl_i.prev_alu_bypass_ok && id_ctrl_i.rs1_ren &&
         (id_ctrl_i.rs1_addr == ex_hzd_i.rd_addr);
-    wire prev_alu_bypass_rs2 = id_ex_prev_alu_bypassable &&
+    wire prev_alu_bypass_rs2 = id_ex_prev_alu_consumer_bypassable &&
         id_ctrl_i.prev_alu_bypass_ok && id_ctrl_i.rs2_ren &&
         (id_ctrl_i.rs2_addr == ex_hzd_i.rd_addr);
     wire prev_load_bypass_rs1 = id_ex_rd_issue && ex_is_load &&
-        lsu_fast_load_i && id_ctrl_i.load_bypass_ok && id_ctrl_i.rs1_ren &&
+        lsu_status_i.fast_load && id_ctrl_i.load_bypass_ok && id_ctrl_i.rs1_ren &&
         (id_ctrl_i.rs1_addr == ex_hzd_i.rd_addr);
     wire prev_load_bypass_rs2 = id_ex_rd_issue && ex_is_load &&
-        lsu_fast_load_i && id_ctrl_i.load_bypass_ok && id_ctrl_i.rs2_ren &&
+        lsu_status_i.fast_load && id_ctrl_i.load_bypass_ok && id_ctrl_i.rs2_ren &&
         (id_ctrl_i.rs2_addr == ex_hzd_i.rd_addr);
 
-    wire [PRODUCER_NUM-1:0] producer_complete_mask;
+    reg [PRODUCER_NUM-1:0] producer_complete_mask;
     wire [PRODUCER_NUM-1:0] producer_wb_retire_mask;
+    integer complete_lane;
+    always_comb begin
+        producer_complete_mask = '0;
+        for (complete_lane = 0; complete_lane < COMPLETION_LANES;
+             complete_lane = complete_lane + 1) begin
+            if (completion_bus_i[complete_lane].valid &&
+                completion_bus_i[complete_lane].producer_tracked)
+                producer_complete_mask[completion_bus_i[complete_lane].producer_id] = 1'b1;
+        end
+    end
+
     genvar complete_idx;
     generate
-        for (complete_idx = 0; complete_idx < PRODUCER_NUM; complete_idx++) begin : g_complete
-            assign producer_complete_mask[complete_idx] =
-                (alu_fwd_i.valid && alu_fwd_i.producer_tracked &&
-                 (alu_fwd_i.producer_id == producer_id_t'(complete_idx))) |
-                (lsu_fwd_i.valid && lsu_fwd_i.producer_tracked &&
-                 (lsu_fwd_i.producer_id == producer_id_t'(complete_idx))) |
-                (mul_fwd_i.valid && mul_fwd_i.producer_tracked &&
-                 (mul_fwd_i.producer_id == producer_id_t'(complete_idx)));
+        for (complete_idx = 0; complete_idx < PRODUCER_NUM; complete_idx++) begin : g_retire
             assign producer_wb_retire_mask[complete_idx] = rf_wen_rd_i &&
                 rf_producer_tracked_i &&
                 (rf_producer_id_i == producer_id_t'(complete_idx));
@@ -129,15 +142,14 @@ import ydrasil_pkg::*;
 
     function automatic [REGS_DATA_WIDTH-1:0] completion_data;
         input producer_id_t id;
+        integer lane;
         begin
-            if (alu_fwd_i.valid && alu_fwd_i.producer_tracked &&
-                (alu_fwd_i.producer_id == id))
-                completion_data = alu_fwd_i.data;
-            else if (lsu_fwd_i.valid && lsu_fwd_i.producer_tracked &&
-                     (lsu_fwd_i.producer_id == id))
-                completion_data = lsu_fwd_i.data;
-            else
-                completion_data = mul_fwd_i.data;
+            completion_data = '0;
+            for (lane = COMPLETION_LANES-1; lane >= 0; lane = lane - 1)
+                if (completion_bus_i[lane].valid &&
+                    completion_bus_i[lane].producer_tracked &&
+                    (completion_bus_i[lane].producer_id == id))
+                    completion_data = completion_bus_i[lane].data;
         end
     endfunction
 
@@ -174,10 +186,19 @@ import ydrasil_pkg::*;
     wire rd_waw_stall = 1'b0;
     wire store_data_wait = id_ctrl_i.store_req &&
         (rs2_issue_hzd | rs2_pending_stall);
-    wire scoreboard_stall = rs1_issue_hzd | rs2_issue_hzd |
-        rs1_pending_stall | rs2_pending_stall;
-    wire lsu_struct_stall = id_ctrl_i.lsu_req && lsu_ctrl_busy_i;
+    producer_id_t store_data_producer_id;
+    assign store_data_producer_id = rs2_issue_hzd ? ex_hzd_i.producer_id :
+        rs2_producer_id;
+    wire store_data_producer_tracked = id_ctrl_i.store_req &&
+        (rs2_issue_hzd | rs2_has_producer);
+    wire rs2_blocking_hzd = !id_ctrl_i.store_req &&
+        (rs2_issue_hzd | rs2_pending_stall);
+    wire scoreboard_stall = rs1_issue_hzd | rs1_pending_stall |
+        rs2_blocking_hzd;
+    wire lsu_struct_stall = id_ctrl_i.lsu_req && lsu_status_i.busy;
+    wire lsu_serialize_stall = id_ctrl_i.serialize_before && !lsu_status_i.idle;
     wire decode_bubble_stall = scoreboard_stall | lsu_struct_stall |
+        lsu_serialize_stall |
         producer_full_stall | clint_stall_i | wb_backpressure_i;
 
     assign rf_write_commit_o = !rf_wen_rd_i || !rf_producer_tracked_i ||
@@ -220,6 +241,8 @@ import ydrasil_pkg::*;
     assign hzd_status_o.scoreboard_stall = scoreboard_stall;
     assign hzd_status_o.lsu_struct_stall = lsu_struct_stall;
     assign hzd_status_o.issue_store_data_ready = !id_ctrl_i.store_req | !store_data_wait;
+    assign hzd_status_o.store_data_producer_id = store_data_producer_id;
+    assign hzd_status_o.store_data_producer_tracked = store_data_producer_tracked;
     assign hzd_status_o.prev_alu_bypass_rs1 = prev_alu_bypass_rs1;
     assign hzd_status_o.prev_alu_bypass_rs2 = prev_alu_bypass_rs2;
     assign hzd_status_o.prev_load_bypass_rs1 = prev_load_bypass_rs1;

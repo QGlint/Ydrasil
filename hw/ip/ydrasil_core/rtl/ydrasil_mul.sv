@@ -46,12 +46,6 @@ import ydrasil_pkg::*;
     reg [REGS_ADDR_WIDTH-1:0]   s3_waddr_q;
     producer_id_t               s3_producer_id_q;
 
-    reg                         s4_valid_q;
-    reg [REGS_DATA_WIDTH-1:0]   s4_wdata_q;
-    reg                         s4_wen_q;
-    (* max_fanout = 8 *) reg [REGS_ADDR_WIDTH-1:0] s4_waddr_q;
-    producer_id_t               s4_producer_id_q;
-
     wire op_mulh   = operator_i[OP_MUL_MULH];
     wire op_mulhsu = operator_i[OP_MUL_MULHSU];
     wire op_mulhu  = operator_i[OP_MUL_MULHU];
@@ -84,11 +78,12 @@ import ydrasil_pkg::*;
     wire signed [65:0] product = s2_sum_a_q + s2_sum_b_q;
 
     assign issue_ready_o  = 1'b1;
-    assign result_valid_o = s4_valid_q;
-    assign result_wen_o   = s4_valid_q & s4_wen_q;
-    assign result_waddr_o = s4_waddr_q;
-    assign result_producer_id_o = s4_producer_id_q;
-    assign result_wdata_o = s4_wdata_q;
+    assign result_valid_o = s3_valid_q;
+    assign result_wen_o   = s3_valid_q & s3_wen_q;
+    assign result_waddr_o = s3_waddr_q;
+    assign result_producer_id_o = s3_producer_id_q;
+    assign result_wdata_o = s3_high_q ? s3_product_q[63:32] :
+                                        s3_product_q[31:0];
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -114,20 +109,13 @@ import ydrasil_pkg::*;
             s3_wen_q    <= 1'b0;
             s3_waddr_q  <= '0;
             s3_producer_id_q <= '0;
-            s4_valid_q  <= 1'b0;
-            s4_wdata_q  <= '0;
-            s4_wen_q    <= 1'b0;
-            s4_waddr_q  <= '0;
-            s4_producer_id_q <= '0;
         end else if (flush_i) begin
             s1_valid_q  <= 1'b0;
             s2_valid_q  <= 1'b0;
             s3_valid_q  <= 1'b0;
-            s4_valid_q  <= 1'b0;
             s1_wen_q    <= 1'b0;
             s2_wen_q    <= 1'b0;
             s3_wen_q    <= 1'b0;
-            s4_wen_q    <= 1'b0;
         end else begin
             s1_valid_q <= issue_valid_i & issue_ready_o;
             s1_p00_q   <= p00;
@@ -154,11 +142,6 @@ import ydrasil_pkg::*;
             s3_waddr_q   <= s2_waddr_q;
             s3_producer_id_q <= s2_producer_id_q;
 
-            s4_valid_q <= s3_valid_q;
-            s4_wdata_q <= s3_high_q ? s3_product_q[63:32] : s3_product_q[31:0];
-            s4_wen_q   <= s3_wen_q;
-            s4_waddr_q <= s3_waddr_q;
-            s4_producer_id_q <= s3_producer_id_q;
         end
     end
 

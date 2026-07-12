@@ -28,9 +28,7 @@ import ydrasil_pkg::*;
     input  ydrasil_gpr_fwd_pkt_t           wb_fwd_i,
     input  ydrasil_gpr_fwd_pkt_t           producer_rs1_fwd_i,
     input  ydrasil_gpr_fwd_pkt_t           producer_rs2_fwd_i,
-    input  ydrasil_gpr_fwd_pkt_t           lsu_fwd_i,
-    input  ydrasil_gpr_fwd_pkt_t           alu_fwd_i,
-    input  ydrasil_gpr_fwd_pkt_t           mul_fwd_i,
+    input  ydrasil_completion_bus_t        completion_bus_i,
     input  ydrasil_hzd_status_pkt_t        hzd_status_i,
     input  producer_id_t                   producer_alloc_id_i,
     input  wire                            producer_alloc_tracked_i,
@@ -54,8 +52,7 @@ import ydrasil_pkg::*;
     output wire [DATA_WIDTH-1:0]           bt_a_operand_o,
     output wire [DATA_WIDTH-1:0]           bt_b_operand_o,
 
-    output wire [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0]   operator_lsu_o,
-    output ydrasil_id_lsu_pkt_t            id_lsu_o,
+    output ydrasil_lsu_req_pkt_t           lsu_req_o,
 
     output wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] operator_type_o, // 操作类型信号
 
@@ -112,13 +109,13 @@ import ydrasil_pkg::*;
     wire                                 operand_a_imm_sel;
     wire                                 bt_a_rs_sel;
 
-    reg [DATA_WIDTH-1:0]                id_lsu_rs2_data_ff;
     reg [DATA_WIDTH-1:0]                id_lsu_addr_ff;
     reg                                 id_lsu_addr_is_dtcm_ff;
     reg [DATA_WIDTH-1:0]                id_lsu_store_data_ff;
     reg [3:0]                           id_lsu_store_mask_ff;
     reg                                 id_lsu_store_data_valid_ff;
-    reg [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] id_lsu_rs2_raddr_ff;
+    producer_id_t                       id_lsu_store_data_producer_id_ff;
+    reg                                 id_lsu_store_data_producer_tracked_ff;
 
     wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0]      operator_type;
     reg [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0]       operator_type_ff;
@@ -259,88 +256,74 @@ import ydrasil_pkg::*;
         (issue_rf_ren_rs2_ff | issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
         (issue_rf_raddr_rs2_ff != '0) &&
         (issue_rf_raddr_rs2_ff == wb_fwd_i.addr);
-    wire rs1_lsu_fwd =
-        lsu_fwd_i.valid &&
-        (lsu_fwd_i.producer_tracked ||
-         hzd_status_i.gpr_pending_for_hazard[issue_rf_raddr_rs1_ff]) &&
-        issue_rf_ren_rs1_ff &&
-        (issue_rf_raddr_rs1_ff != '0) &&
-        (issue_rf_raddr_rs1_ff == lsu_fwd_i.addr);
-    wire rs2_lsu_fwd =
-        lsu_fwd_i.valid &&
-        (lsu_fwd_i.producer_tracked ||
-         hzd_status_i.gpr_pending_for_hazard[issue_rf_raddr_rs2_ff]) &&
-        (issue_rf_ren_rs2_ff | issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
-        (issue_rf_raddr_rs2_ff != '0) &&
-        (issue_rf_raddr_rs2_ff == lsu_fwd_i.addr);
+    reg rs1_completion_fwd;
+    reg rs2_completion_fwd;
+    reg [DATA_WIDTH-1:0] rs1_completion_data;
+    reg [DATA_WIDTH-1:0] rs2_completion_data;
+    integer completion_lane;
+    always_comb begin
+        rs1_completion_fwd = 1'b0;
+        rs2_completion_fwd = 1'b0;
+        rs1_completion_data = '0;
+        rs2_completion_data = '0;
+        for (completion_lane = 0; completion_lane < COMPLETION_LANES;
+             completion_lane = completion_lane + 1) begin
+            if (completion_bus_i[completion_lane].valid &&
+                issue_rf_ren_rs1_ff && (issue_rf_raddr_rs1_ff != '0) &&
+                (producer_rs1_fwd_i.producer_tracked ?
+                 (completion_bus_i[completion_lane].producer_tracked &&
+                  (completion_bus_i[completion_lane].producer_id ==
+                   producer_rs1_fwd_i.producer_id)) :
+                 (completion_bus_i[completion_lane].addr == issue_rf_raddr_rs1_ff))) begin
+                rs1_completion_fwd = 1'b1;
+                rs1_completion_data = completion_bus_i[completion_lane].data;
+            end
+            if (completion_bus_i[completion_lane].valid &&
+                (issue_rf_ren_rs2_ff |
+                 issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
+                (issue_rf_raddr_rs2_ff != '0) &&
+                (producer_rs2_fwd_i.producer_tracked ?
+                 (completion_bus_i[completion_lane].producer_tracked &&
+                  (completion_bus_i[completion_lane].producer_id ==
+                   producer_rs2_fwd_i.producer_id)) :
+                 (completion_bus_i[completion_lane].addr == issue_rf_raddr_rs2_ff))) begin
+                rs2_completion_fwd = 1'b1;
+                rs2_completion_data = completion_bus_i[completion_lane].data;
+            end
+        end
+    end
     wire issue_plain_alu_op =
         issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_ALU] &&
         !issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BITMANIP];
-    wire rs1_alu_fwd =
-        alu_fwd_i.valid &&
-        issue_rf_ren_rs1_ff &&
-        (issue_rf_raddr_rs1_ff != '0) &&
-        (issue_rf_raddr_rs1_ff == alu_fwd_i.addr);
-    wire rs2_alu_fwd =
-        alu_fwd_i.valid &&
-        (issue_rf_ren_rs2_ff | issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
-        (issue_rf_raddr_rs2_ff != '0) &&
-        (issue_rf_raddr_rs2_ff == alu_fwd_i.addr);
-    wire rs1_mul_fwd =
-        mul_fwd_i.valid &&
-        issue_rf_ren_rs1_ff &&
-        (issue_rf_raddr_rs1_ff != '0) &&
-        (issue_rf_raddr_rs1_ff == mul_fwd_i.addr);
-    wire rs2_mul_fwd =
-        mul_fwd_i.valid &&
-        (issue_rf_ren_rs2_ff | issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
-        (issue_rf_raddr_rs2_ff != '0) &&
-        (issue_rf_raddr_rs2_ff == mul_fwd_i.addr);
+    wire issue_early_alu_consumer = issue_plain_alu_op |
+        issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] |
+        issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE];
     wire rs1_issue_early_alu_fwd =
         issue_early_alu_valid_ff &&
-        issue_plain_alu_op &&
+        issue_early_alu_consumer &&
         issue_rf_ren_rs1_ff &&
         (issue_rf_raddr_rs1_ff != '0) &&
         (issue_rf_raddr_rs1_ff == issue_early_alu_addr_ff);
     wire rs2_issue_early_alu_fwd =
         issue_early_alu_valid_ff &&
-        issue_plain_alu_op &&
+        issue_early_alu_consumer &&
         (issue_rf_ren_rs2_ff | issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
         (issue_rf_raddr_rs2_ff != '0) &&
         (issue_rf_raddr_rs2_ff == issue_early_alu_addr_ff);
     wire [DATA_WIDTH-1:0] issue_rs1_data =
         rs1_issue_early_alu_fwd ? issue_early_alu_data_ff :
-        rs1_lsu_fwd ? lsu_fwd_i.data :
-        rs1_alu_fwd ? alu_fwd_i.data :
-        rs1_mul_fwd ? mul_fwd_i.data :
+        rs1_completion_fwd ? rs1_completion_data :
         producer_rs1_fwd_i.valid ? producer_rs1_fwd_i.data :
         rs1_wb_fwd  ? wb_fwd_i.data  : rf_rdata_rs1_i;
     wire [DATA_WIDTH-1:0] issue_rs2_data =
         rs2_issue_early_alu_fwd ? issue_early_alu_data_ff :
-        rs2_lsu_fwd ? lsu_fwd_i.data :
-        rs2_alu_fwd ? alu_fwd_i.data :
-        rs2_mul_fwd ? mul_fwd_i.data :
+        rs2_completion_fwd ? rs2_completion_data :
         producer_rs2_fwd_i.valid ? producer_rs2_fwd_i.data :
         rs2_wb_fwd  ? wb_fwd_i.data  : rf_rdata_rs2_i;
-    wire [DATA_WIDTH-1:0] issue_early_rs1_data =
-        rs1_issue_early_alu_fwd ? issue_early_alu_data_ff :
-        rs1_alu_fwd ? alu_fwd_i.data :
-        rs1_wb_fwd  ? wb_fwd_i.data  : rf_rdata_rs1_i;
-    wire [DATA_WIDTH-1:0] issue_early_rs2_data =
-        rs2_issue_early_alu_fwd ? issue_early_alu_data_ff :
-        rs2_alu_fwd ? alu_fwd_i.data :
-        rs2_wb_fwd  ? wb_fwd_i.data  : rf_rdata_rs2_i;
-
     assign operand_a     =  issue_operand_a_pc_sel_ff ? issue_pc_ff :
                             issue_operand_a_imm_sel_ff ? issue_imm_ff : issue_rs1_data;
     assign operand_b     = issue_operand_b_jump_sel_ff ? 32'h4 :
                             issue_operand_b_rs_sel_ff ? issue_rs2_data : issue_imm_ff;
-    wire [DATA_WIDTH-1:0] issue_early_operand_a =
-        issue_operand_a_pc_sel_ff ? issue_pc_ff :
-        issue_operand_a_imm_sel_ff ? issue_imm_ff : issue_early_rs1_data;
-    wire [DATA_WIDTH-1:0] issue_early_operand_b =
-        issue_operand_b_jump_sel_ff ? 32'h4 :
-        issue_operand_b_rs_sel_ff ? issue_early_rs2_data : issue_imm_ff;
 
 
     assign bt_a_operand = issue_bt_a_rs_sel_ff ? issue_rs1_data : issue_pc_ff;
@@ -387,14 +370,13 @@ import ydrasil_pkg::*;
     wire issue_branch_eq = (issue_rs1_data == issue_rs2_data);
     wire issue_branch_ge_signed = ($signed(issue_rs1_data) >= $signed(issue_rs2_data));
     wire issue_branch_ge_unsigned = (issue_rs1_data >= issue_rs2_data);
-    wire issue_uses_late_fwd = rs1_lsu_fwd | rs2_lsu_fwd |
-        rs1_mul_fwd | rs2_mul_fwd |
-        (issue_rf_ren_rs1_ff & producer_rs1_fwd_i.valid) |
-        ((issue_rf_ren_rs2_ff | issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) &
-         producer_rs2_fwd_i.valid);
     wire issue_simple_alu_op =
         issue_valid_ff & issue_rf_wen_rd_ff & (issue_rf_waddr_rd_ff != '0) &
-        issue_plain_alu_op & !issue_uses_late_fwd &
+        !(hzd_status_i.prev_alu_bypass_rs1 & !rs1_issue_early_alu_fwd) &
+        !(hzd_status_i.prev_alu_bypass_rs2 & !rs2_issue_early_alu_fwd) &
+        !hzd_status_i.prev_load_bypass_rs1 &
+        !hzd_status_i.prev_load_bypass_rs2 &
+        issue_plain_alu_op &
         (issue_operator_ff[ydrasil_pkg::OP_ALU_ADD]  |
          issue_operator_ff[ydrasil_pkg::OP_ALU_SUB]  |
          issue_operator_ff[ydrasil_pkg::OP_ALU_SLT]  |
@@ -405,17 +387,17 @@ import ydrasil_pkg::*;
          issue_operator_ff[ydrasil_pkg::OP_ALU_LUI]  |
          issue_operator_ff[ydrasil_pkg::OP_ALU_AUIPC]);
     wire [DATA_WIDTH:0] issue_simple_alu_sub_ext =
-        {1'b0, issue_early_operand_a} + {1'b0, ~issue_early_operand_b} + {{DATA_WIDTH{1'b0}}, 1'b1};
+        {1'b0, operand_a} + {1'b0, ~operand_b} + {{DATA_WIDTH{1'b0}}, 1'b1};
     wire issue_simple_alu_signs_differ =
-        issue_early_operand_a[DATA_WIDTH-1] ^ issue_early_operand_b[DATA_WIDTH-1];
+        operand_a[DATA_WIDTH-1] ^ operand_b[DATA_WIDTH-1];
     wire issue_simple_alu_slt_signed =
-        issue_simple_alu_signs_differ ? issue_early_operand_a[DATA_WIDTH-1] :
+        issue_simple_alu_signs_differ ? operand_a[DATA_WIDTH-1] :
                                         issue_simple_alu_sub_ext[DATA_WIDTH-1];
     wire issue_simple_alu_slt_unsigned = ~issue_simple_alu_sub_ext[DATA_WIDTH];
     wire [DATA_WIDTH-1:0] issue_simple_alu_logic =
-        ({DATA_WIDTH{issue_operator_ff[ydrasil_pkg::OP_ALU_XOR]}} & (issue_early_operand_a ^ issue_early_operand_b)) |
-        ({DATA_WIDTH{issue_operator_ff[ydrasil_pkg::OP_ALU_OR]}}  & (issue_early_operand_a | issue_early_operand_b)) |
-        ({DATA_WIDTH{issue_operator_ff[ydrasil_pkg::OP_ALU_AND]}} & (issue_early_operand_a & issue_early_operand_b));
+        ({DATA_WIDTH{issue_operator_ff[ydrasil_pkg::OP_ALU_XOR]}} & (operand_a ^ operand_b)) |
+        ({DATA_WIDTH{issue_operator_ff[ydrasil_pkg::OP_ALU_OR]}}  & (operand_a | operand_b)) |
+        ({DATA_WIDTH{issue_operator_ff[ydrasil_pkg::OP_ALU_AND]}} & (operand_a & operand_b));
     wire [DATA_WIDTH-1:0] issue_simple_alu_result =
         ({DATA_WIDTH{issue_operator_ff[ydrasil_pkg::OP_ALU_SUB]}}  & issue_simple_alu_sub_ext[DATA_WIDTH-1:0]) |
         ({DATA_WIDTH{issue_operator_ff[ydrasil_pkg::OP_ALU_SLT]}}  & {{(DATA_WIDTH-1){1'b0}}, issue_simple_alu_slt_signed}) |
@@ -423,9 +405,9 @@ import ydrasil_pkg::*;
         ({DATA_WIDTH{issue_operator_ff[ydrasil_pkg::OP_ALU_XOR] |
                      issue_operator_ff[ydrasil_pkg::OP_ALU_OR] |
                      issue_operator_ff[ydrasil_pkg::OP_ALU_AND]}} & issue_simple_alu_logic) |
-        ({DATA_WIDTH{issue_operator_ff[ydrasil_pkg::OP_ALU_LUI]}} & issue_early_operand_b) |
+        ({DATA_WIDTH{issue_operator_ff[ydrasil_pkg::OP_ALU_LUI]}} & operand_b) |
         ({DATA_WIDTH{issue_operator_ff[ydrasil_pkg::OP_ALU_ADD] |
-                     issue_operator_ff[ydrasil_pkg::OP_ALU_AUIPC]}} & (issue_early_operand_a + issue_early_operand_b));
+                     issue_operator_ff[ydrasil_pkg::OP_ALU_AUIPC]}} & (operand_a + operand_b));
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -478,13 +460,13 @@ import ydrasil_pkg::*;
             producer_id_ff      <= '0;
             producer_tracked_ff <= 1'b0;
             operator_lsu_ff     <= '0;
-            id_lsu_rs2_data_ff  <= '0;
             id_lsu_addr_ff      <= '0;
             id_lsu_addr_is_dtcm_ff <= 1'b0;
             id_lsu_store_data_ff <= '0;
             id_lsu_store_mask_ff <= 4'b0000;
             id_lsu_store_data_valid_ff <= 1'b0;
-            id_lsu_rs2_raddr_ff <= '0;
+            id_lsu_store_data_producer_id_ff <= '0;
+            id_lsu_store_data_producer_tracked_ff <= 1'b0;
             bt_a_operand_ff     <= '0;
             bt_b_operand_ff     <= '0;
             csr_reg_raddr_ff <= '0;
@@ -561,7 +543,6 @@ import ydrasil_pkg::*;
                 producer_id_ff      <= producer_alloc_id_i;
                 producer_tracked_ff <= producer_alloc_tracked_i;
                 operator_lsu_ff     <= issue_operator_lsu_ff;
-                id_lsu_rs2_data_ff  <= issue_rs2_data; // 直接传递寄存器数据，供LSU使用
                 id_lsu_addr_ff      <= issue_lsu_addr;
                 id_lsu_addr_is_dtcm_ff <= issue_lsu_addr_is_dtcm;
                 // Register raw store data here; lane alignment belongs after the
@@ -572,7 +553,10 @@ import ydrasil_pkg::*;
                 id_lsu_store_data_valid_ff <=
                     !issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] |
                     hzd_status_i.issue_store_data_ready;
-                id_lsu_rs2_raddr_ff <= issue_rf_raddr_rs2_ff;
+                id_lsu_store_data_producer_id_ff <=
+                    hzd_status_i.store_data_producer_id;
+                id_lsu_store_data_producer_tracked_ff <=
+                    hzd_status_i.store_data_producer_tracked;
                 bt_a_operand_ff     <= bt_a_operand;
                 bt_b_operand_ff     <= bt_b_operand;
                 csr_reg_raddr_ff <= issue_csr_reg_raddr_ff;
@@ -640,15 +624,24 @@ import ydrasil_pkg::*;
     assign operator_o           = operator_ff;
     assign id_alu_rf_wen_rd_o   = rf_wen_rd_ff;
     assign id_rf_waddr_rd_o     = rf_waddr_rd_ff;
-    assign operator_lsu_o       = operator_lsu_ff;
     assign operator_type_o      = operator_type_ff;
-    assign id_lsu_o.rs2_data = id_lsu_rs2_data_ff;
-    assign id_lsu_o.rs2_raddr = id_lsu_rs2_raddr_ff;
-    assign id_lsu_o.addr = id_lsu_addr_ff;
-    assign id_lsu_o.addr_is_dtcm = id_lsu_addr_is_dtcm_ff;
-    assign id_lsu_o.store_data = id_lsu_store_data_ff;
-    assign id_lsu_o.store_mask = id_lsu_store_mask_ff;
-    assign id_lsu_o.store_data_valid = id_lsu_store_data_valid_ff;
+    assign lsu_req_o.valid = id_ex_valid_ff &
+        (operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] |
+         operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]);
+    assign lsu_req_o.is_load = operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD];
+    assign lsu_req_o.is_store = operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE];
+    assign lsu_req_o.op = operator_lsu_ff;
+    assign lsu_req_o.addr = id_lsu_addr_ff;
+    assign lsu_req_o.addr_is_dtcm = id_lsu_addr_is_dtcm_ff;
+    assign lsu_req_o.rd_addr = rf_waddr_rd_ff;
+    assign lsu_req_o.producer_id = producer_id_ff;
+    assign lsu_req_o.producer_tracked = producer_tracked_ff;
+    assign lsu_req_o.store_data = id_lsu_store_data_ff;
+    assign lsu_req_o.store_mask = id_lsu_store_mask_ff;
+    assign lsu_req_o.store_data_valid = id_lsu_store_data_valid_ff;
+    assign lsu_req_o.store_data_producer_id = id_lsu_store_data_producer_id_ff;
+    assign lsu_req_o.store_data_producer_tracked =
+        id_lsu_store_data_producer_tracked_ff;
     assign bt_a_operand_o       = bt_a_operand_ff;
     assign bt_b_operand_o       = bt_b_operand_ff;
     assign  id_csr_raddr_o = csr_reg_raddr_ff;
@@ -692,9 +685,15 @@ import ydrasil_pkg::*;
         issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE];
     assign id_ctrl_o.prev_alu_bypass_ok = issue_valid_ff &
         (issue_plain_alu_op |
+         ((issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] |
+           issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) &
+          issue_early_alu_valid_ff) |
          (issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] &
           issue_rf_ren_rs1_ff & issue_rf_ren_rs2_ff & !issue_rf_wen_rd_ff));
     assign id_ctrl_o.load_bypass_ok = issue_valid_ff & issue_plain_alu_op;
-    assign id_ctrl_o.short_alu_writer = issue_simple_alu_op;
+    assign id_ctrl_o.serialize_before = issue_valid_ff &
+        (issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_CSR] |
+         issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_SYS] |
+         issue_fence_i_ff);
 
 endmodule
