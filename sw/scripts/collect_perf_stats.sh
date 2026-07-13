@@ -22,6 +22,7 @@ mapfile -t logs < <(find "$root" -type f -name hw.log \( \
     -path '*/coremark-opt/*/hw.log' -o \
     -path '*/sort/*/hw.log' -o -path '*/sort-opt/*/*/hw.log' -o -path '*/boundary/*/hw.log' -o \
     -path '*/boundary-opt/*/*/hw.log' -o \
+    -path '*/ydrasil-tests/*/hw.log' -o \
     -path '*/rv32ui/*/hw.log' -o -path '*/rv32um/*/hw.log' -o \
     -path '*/rv32uz*/*/hw.log' -o -path '*/rv32mi/*/hw.log' \) | sort)
 

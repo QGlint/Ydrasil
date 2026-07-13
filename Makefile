@@ -1128,13 +1128,10 @@ test_all:
 	@$(MAKE) comp
 	@rm -rf $(RVTESTS_RESULT_DIR)
 	@$(MAKE) -j rv_test_sim_all
-	@$(MAKE) sw_test_comp_aligned REBUILD=1
-	@$(MAKE) sw_run_mode SW_MODE=legacy SW_OBJ_DIR="$(BUILD_DIR)/ydrasil_core_tb" \
-		SW_RESULT_ROOT="$(BUILD_DIR)/sw_boundary/test_all-results" SW_COVERAGE=$(VERILATOR_COVERAGE) \
-		SW_INCLUDE_OFFICIAL=0 SW_TEST_LIST="$(SW_ALIGNED_TESTS)"
 	@$(MAKE) rv_test_report_all
 	@$(MAKE) ppa_rvtest_report
 	@$(MAKE) rv_test_summary_all
+	@$(MAKE) ydrasil_test_all YDRASIL_TEST_REUSE_MODEL=1
 	@echo "==========================================================="
 	@echo "   测试结束！"
 	@echo "==========================================================="

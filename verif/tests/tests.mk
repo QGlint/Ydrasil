@@ -37,6 +37,7 @@ SW_ALIGNED_TESTS := \
     sw_load_interlock \
     sw_load_bypass_operands \
     sw_fence_stall \
+    sw_fence_div_repro \
     sw_subword_readback_matrix \
     sw_div_fence_independent \
     sw_forwarding_bitmanip \
@@ -58,6 +59,14 @@ SW_NEW_ONLY_TESTS := \
 SW_FORMAL_TESTS := $(SW_ALIGNED_TESTS) $(SW_NEW_ONLY_TESTS)
 # Compatibility alias for callers that used the old combined-list name.
 SW_ALL_TESTS := $(SW_FORMAL_TESTS)
+YDRASIL_TESTS := $(sort $(basename $(notdir $(wildcard $(YDRASIL_TESTS_DIR)/*.S))))
+YDRASIL_TEST_SPIKE_SKIP_TESTS := $(SW_NEW_ONLY_TESTS)
+YDRASIL_TEST_SIM_TARGETS := $(addprefix ydrasil_test_sim_,$(YDRASIL_TESTS))
+YDRASIL_TEST_RESULT_DIR ?= $(RESULT_DIR)/ydrasil-tests
+YDRASIL_TEST_TIMEOUT ?= 100000
+YDRASIL_TEST_JOBS ?= $(shell nproc)
+YDRASIL_TEST_REUSE_MODEL ?= 0
+PPA_YDRASIL_TEST_LOG ?= $(PPA_DIR)/ydrasil_tests_summary.log
 SW_TEST_TARGETS := $(addprefix sw_comp_,$(SW_FORMAL_TESTS))
 SW_TEST_INCLUDES := $(RVTESTS_INCLUDES) -I$(YDRASIL_TESTS_DIR)
 SW_SINGLE_DB_COUNT := $(shell expr 1 + $(words $(SW_FORMAL_TESTS)))
@@ -102,6 +111,69 @@ rv_test_comp_genmem_rebuild:
 sw_test_comp_aligned: $(addprefix sw_comp_,$(SW_ALIGNED_TESTS))
 
 sw_test_comp_all: $(SW_TEST_TARGETS)
+
+.PHONY: ydrasil_test_all ydrasil_test_build_all ydrasil_test_sim_all ydrasil_test_report ydrasil_test_clean
+
+ydrasil_test_all:
+	@$(MAKE) ydrasil_test_clean
+	@$(MAKE) -j$(YDRASIL_TEST_JOBS) ydrasil_test_build_all REBUILD=1
+	@if [ "$(YDRASIL_TEST_REUSE_MODEL)" != "1" ]; then \
+		$(MAKE) comp VERILATOR_COVERAGE=$(VERILATOR_COVERAGE) VERILATOR_TRACE=0; \
+	fi
+	@$(MAKE) -j$(YDRASIL_TEST_JOBS) ydrasil_test_sim_all
+	@$(MAKE) ydrasil_test_report
+
+ydrasil_test_build_all: $(addprefix sw_comp_,$(YDRASIL_TESTS))
+
+ydrasil_test_sim_all: $(YDRASIL_TEST_SIM_TARGETS)
+
+ydrasil_test_sim_%:
+	@name=$*; result_dir="$(YDRASIL_TEST_RESULT_DIR)"; mkdir -p "$$result_dir"; \
+	status="$$result_dir/$$name.status"; run_log="$$result_dir/$$name.log"; \
+	elf="$(SW_TEST_OUT_ROOT)/elf/$$name.elf"; itcm="$(SW_TEST_OUT_ROOT)/mem/$$name.itcm"; dtcm="$(SW_TEST_OUT_ROOT)/mem/$$name.dtcm"; \
+	compare_mode=csv; spike_status=MISMATCH; trace_rows=N/A; \
+	case " $(YDRASIL_TEST_SPIKE_SKIP_TESTS) " in *" $$name "*) compare_mode=none; spike_status=POLICY_SKIP;; esac; \
+	set +e; $(MAKE) --no-print-directory sim_compare SIM_COMPARE="$$compare_mode" \
+		COMPARE_NAME="ydrasil-tests/$$name" COMPARE_ELF="$$elf" \
+		COMPARE_ITCM="$$itcm" COMPARE_DTCM="$$dtcm" \
+		COMPARE_SIM_EXTRA_DEFINES="+cpp_timeout=$(YDRASIL_TEST_TIMEOUT) +sv_timeout=$(YDRASIL_TEST_TIMEOUT)" \
+		SIM_COMPARE_MAX_MISMATCHES=3 >"$$run_log" 2>&1; rc=$$?; set -e; \
+	hw_log="$(HW_TRACE_OUT_DIR)/ydrasil-tests/$$name/hw.log"; compare_log="$(SIM_COMPARE_DIR)/ydrasil-tests/$$name/compare.log"; \
+	if [ "$$compare_mode" = csv ] && [ "$$rc" -eq 0 ] && grep -q '^MATCH: YES' "$$compare_log"; then \
+		spike_status=MATCH; \
+		trace_rows=$$(sed -n 's/^CSV compare PASS: \([0-9]*\) HW rows, \([0-9]*\) Spike rows.*/\1\/\2/p' "$$compare_log" | tail -1); \
+	fi; \
+	self_status=FAIL; if grep -q 'TEST_PASS' "$$hw_log" 2>/dev/null && \
+		! grep -Eq 'TEST_FAIL|timeout reached|\$$readmem file not found' "$$hw_log"; then self_status=PASS; fi; \
+	cycles=$$(sed -n 's/^PERF_METRIC:.*CYCLES= *\([0-9]*\).*/\1/p' "$$hw_log" 2>/dev/null | tail -1); \
+	insts=$$(sed -n 's/^PERF_METRIC:.*INSTS= *\([0-9]*\).*/\1/p' "$$hw_log" 2>/dev/null | tail -1); \
+	ipc=$$(sed -n 's/^PERF_METRIC:.*IPC= *\([0-9.]*\).*/\1/p' "$$hw_log" 2>/dev/null | tail -1); \
+	result=FAIL; if [ "$$self_status" = PASS ] && { [ "$$spike_status" = MATCH ] || [ "$$spike_status" = POLICY_SKIP ]; }; then result=PASS; fi; \
+	echo "[ydrasil-tests/$$name] [SPIKE=$$spike_status] [SELF=$$self_status] [cycles=$${cycles:-N/A} insts=$${insts:-N/A} ipc=$${ipc:-N/A}] [trace_rows=$$trace_rows] [$$result]" > "$$status"
+
+ydrasil_test_report:
+	@mkdir -p "$(PPA_DIR)"; rm -f "$(PPA_YDRASIL_TEST_LOG)"; \
+	failed=0; passed=0; matched=0; policy_skip=0; self_pass=0; total=$(words $(YDRASIL_TESTS)); \
+	echo "[YDRASIL TESTS] SPIKE POLICY_SKIP=$(YDRASIL_TEST_SPIKE_SKIP_TESTS) reason=Spike traps on misaligned accesses while RTL uses a hardware convention" | tee "$(PPA_YDRASIL_TEST_LOG)"; \
+	for name in $(YDRASIL_TESTS); do status="$(YDRASIL_TEST_RESULT_DIR)/$$name.status"; \
+		if [ ! -s "$$status" ]; then line="[ydrasil-tests/$$name] [FAIL missing status]"; failed=1; \
+		else line=$$(cat "$$status"); fi; \
+		echo "$$line" | tee -a "$(PPA_YDRASIL_TEST_LOG)"; \
+		if echo "$$line" | grep -q '\[SPIKE=MATCH\]'; then matched=$$((matched+1)); fi; \
+		if echo "$$line" | grep -q '\[SPIKE=POLICY_SKIP\]'; then policy_skip=$$((policy_skip+1)); fi; \
+		if echo "$$line" | grep -q '\[SELF=PASS\]'; then self_pass=$$((self_pass+1)); fi; \
+		if echo "$$line" | grep -q '\[PASS\]$$'; then passed=$$((passed+1)); else \
+			failed=1; echo "[YDRASIL TESTS] Failure detail: $(YDRASIL_TEST_RESULT_DIR)/$$name.log"; \
+			tail -40 "$(YDRASIL_TEST_RESULT_DIR)/$$name.log" 2>/dev/null || \
+				tail -40 "$(SIM_COMPARE_DIR)/ydrasil-tests/$$name/compare.log" 2>/dev/null || true; \
+		fi; \
+	done; overall=PASS; if [ "$$failed" -ne 0 ]; then overall=FAIL; fi; \
+	echo "[YDRASIL TESTS] CORRECTNESS=$$overall passed=$$passed spike_match=$$matched spike_policy_skip=$$policy_skip self_pass=$$self_pass total=$$total" | tee -a "$(PPA_YDRASIL_TEST_LOG)"; \
+	echo "[PPA] Ydrasil tests report: $(PPA_YDRASIL_TEST_LOG)"; exit $$failed
+
+ydrasil_test_clean:
+	@rm -rf "$(YDRASIL_TEST_RESULT_DIR)" "$(HW_TRACE_OUT_DIR)/ydrasil-tests" \
+		"$(SIM_COMPARE_DIR)/ydrasil-tests" "$(SPIKE_OUT_DIR)/ydrasil-tests"
 
 sw_comp_%:
 	@echo ">>> Building Ydrasil SW test $*"
