@@ -31,18 +31,36 @@ SW_ALIGNED_TESTS := \
     sw_endian_readback \
     sw_address_alias \
     sw_control_sequence \
-    sw_dense_stress
+    sw_dense_stress \
+    sw_self_modify_exec \
+    sw_producer_window \
+    sw_load_interlock \
+    sw_load_bypass_operands \
+    sw_fence_stall \
+    sw_subword_readback_matrix \
+    sw_div_fence_independent \
+    sw_forwarding_bitmanip \
+    sw_bitmanip_address_data \
+    sw_bitmanip_immediate \
+    sw_forwarding_alu_extended \
+    sw_unsigned_branch_jalr \
+    sw_jalr_lui_bypass \
+    sw_forwarding_csr \
+    sw_mul_div_edge_results
 SW_NEW_ONLY_TESTS := \
     sw_misaligned_boundary \
     sw_misaligned_negative \
     sw_misaligned_overlap \
-    sw_misaligned_boundaries
-SW_ALL_TESTS := $(SW_ALIGNED_TESTS) $(SW_NEW_ONLY_TESTS)
-SW_TEST_TARGETS := $(addprefix sw_comp_,$(SW_ALL_TESTS))
+    sw_misaligned_boundaries \
+    sw_misaligned_loadback \
+    sw_misaligned_half_readback \
+    sw_misaligned_forwarding_mix
+SW_FORMAL_TESTS := $(SW_ALIGNED_TESTS) $(SW_NEW_ONLY_TESTS)
+# Compatibility alias for callers that used the old combined-list name.
+SW_ALL_TESTS := $(SW_FORMAL_TESTS)
+SW_TEST_TARGETS := $(addprefix sw_comp_,$(SW_FORMAL_TESTS))
 SW_TEST_INCLUDES := $(RVTESTS_INCLUDES) -I$(YDRASIL_TESTS_DIR)
-SW_LEGACY_DB_COUNT := $(shell expr 1 + $(words $(SW_ALIGNED_TESTS)))
-SW_NEW_DB_COUNT := $(shell expr 1 + $(words $(SW_ALL_TESTS)))
-SW_TOTAL_DB_COUNT := $(shell expr $(SW_LEGACY_DB_COUNT) + $(SW_NEW_DB_COUNT))
+SW_SINGLE_DB_COUNT := $(shell expr 1 + $(words $(SW_FORMAL_TESTS)))
 
 RVBENCH_DIR := $(PROJECT_ROOT)/verif/tests/riscv-tests/benchmarks
 RVBENCH_COMMON := $(RVBENCH_DIR)/common
