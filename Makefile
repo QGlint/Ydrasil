@@ -25,6 +25,12 @@ PPA_BOUNDARY_OPT_LOG ?= $(PPA_DIR)/boundary_opt_summary.log
 APP_OPT_PROFILES ?= O0 O1 O2 O3 Os Og O2_noinline O3_app_unroll
 APP_OPT_JOBS ?= $(shell nproc)
 APP_OPT_ITCM_BYTES ?= 16384
+APP_OPT_EXPANDED_ITCM_BYTES ?= 32768
+APP_OPT_EXPANDED_ITCM_KIB ?= 32
+APP_OPT_EXPANDED_ITCM_ADDR_WIDTH ?= 13
+APP_OPT_EXPANDED_OBJ_DIR ?= $(BUILD_DIR)/ydrasil_core_tb-itcm-expanded
+APP_OPT_EXPANDED_LOG_DIR ?= $(BUILD_DIR)/log/itcm-expanded
+APP_OPT_EXPANDED_LINKER ?= $(BUILD_DIR)/app/opt-link/itcm-$(APP_OPT_EXPANDED_ITCM_KIB)K.lds
 APP_OPT_CFLAGS_O0 ?= -O0
 APP_OPT_CFLAGS_O1 ?= -O1
 APP_OPT_CFLAGS_O2 ?= -O2
@@ -43,6 +49,7 @@ COREMARK_OPT_ROOT ?= $(BUILD_DIR)/app/coremark-opt
 COREMARK_OPT_RESULT_DIR ?= $(RESULT_DIR)/coremark-opt
 PPA_COREMARK_OPT_LOG ?= $(PPA_DIR)/coremark_opt_summary.log
 COREMARK_OPT_TIMEOUT ?= 2000000
+COREMARK_OPT_TIMEOUT_O0 ?= 5000000
 SORT_OPT_ROOT ?= $(BUILD_DIR)/app/sort-opt
 SORT_OPT_RESULT_DIR ?= $(RESULT_DIR)/sort-opt
 PPA_SORT_OPT_LOG ?= $(PPA_DIR)/sort_opt_summary.log
@@ -110,13 +117,18 @@ SYN_PLL_FREQ_TAG = pll$(subst .,p,$(SYN_PLL_FREQ_MHZ))m
 SYN_PLL_DEFINE = SYN_PLL_FREQ_$(subst .,P,$(SYN_PLL_FREQ_MHZ))
 SYN_RTL_DEFINES = $(SYN_PLL_DEFINE)
 SYN_RTL_DEFINES += SYNTHESIS
+SYN_PROFILE ?= official
+SYN_PROFILE_SUFFIX = $(if $(filter official,$(SYN_PROFILE)),,-$(SYN_PROFILE))
+SYN_ENABLE_ILA ?= 0
+SYN_BOARD_XDC ?=
+SYN_RTL_DEFINES += $(if $(filter 1,$(SYN_ENABLE_ILA)),SYN_BOARD_ILA)
 ifeq ($(DIV_IMPL),lzc)
 SYN_RTL_DEFINES += YDRASIL_DIV_IMPL_LZC
 else
 $(error Unsupported DIV_IMPL '$(DIV_IMPL)'. Use DIV_IMPL=lzc)
 endif
 SYN_DEFINE_ARGS = $(foreach define,$(SYN_RTL_DEFINES),--define $(define))
-SYN_FREQ_BUILD_DIR ?= $(SYN_BUILD_DIR)/$(SYN_PLL_FREQ_TAG)
+SYN_FREQ_BUILD_DIR ?= $(SYN_BUILD_DIR)/$(SYN_PLL_FREQ_TAG)$(SYN_PROFILE_SUFFIX)
 SYN_STAGE_ROOT ?= $(SYN_FREQ_BUILD_DIR)/project
 SYN_ORIG_FPGA_DIR ?= $(PROJECT_ROOT)/FPGA
 SYN_STAGE_FPGA_DIR ?= $(SYN_STAGE_ROOT)/FPGA
@@ -127,6 +139,11 @@ SYN_LOG_DIR ?= $(SYN_FREQ_BUILD_DIR)/log
 SYN_ARTIFACT_DIR ?= $(SYN_FREQ_BUILD_DIR)/artifacts
 SYN_BIT_DIR ?= $(SYN_FREQ_BUILD_DIR)/bit
 SYN_CHECKPOINT_DIR ?= $(SYN_FREQ_BUILD_DIR)/checkpoints
+IROM_COE ?= $(PROJECT_ROOT)/FPGA/coe/irom_M3.coe
+DRAM_COE ?= $(PROJECT_ROOT)/FPGA/coe/dram_M.coe
+SYN_MEMORY_DIR ?= $(SYN_FREQ_BUILD_DIR)/memory
+SYN_STAGED_IROM_COE ?= $(SYN_MEMORY_DIR)/irom.coe
+SYN_STAGED_DRAM_COE ?= $(SYN_MEMORY_DIR)/dram.coe
 SYN_JOBS ?= $(shell nproc)
 ifeq ($(HOSTNAME),servera437)
 SYN_IMPL_RUNS ?= 4
@@ -153,8 +170,8 @@ $(error Unsupported SYN_PLL_FREQ_MHZ=$(SYN_PLL_FREQ_MHZ); supported values: $(SY
 endif
 
 .PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests init install-bender get_spike download_and_extract_spike check_spike_prebuilt_abi build_spike_from_source check_deps spike spike_wave_to_csv sim_compare commit_check commit_spike_csv commit_hw_trace commit_hw_csv commit_compare rv_test_comp_genmem ppa_rvtest_report ppa_perf_report coe_simple coe_smoke coe_smoke_led coe_isa_probes coverage_all coverage_quick coverage_clean coverage_report sw_boundary_test sw_coverage sw_coverage_clean sw_run_mode sw_coverage_report
-.PHONY: coremark coremark_sim coremark_run coremark_result coremark-rebuild coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map coremark_opt_all coremark_opt_build_all coremark_opt_sim_all coremark_opt_report coremark_opt_clean $(COREMARK_OPT_BUILD_TARGETS) $(COREMARK_OPT_SIM_TARGETS) sort_app sort_all sort_sim_all sort_report sort_app_sim sort_app-rebuild sort_app-clean sort_opt_all sort_opt_build_all sort_opt_sim_all sort_opt_report sort_opt_clean $(SORT_OPT_BUILD_TARGETS) $(SORT_OPT_SIM_TARGETS) boundary_app boundary_all boundary_sim_all boundary_report boundary_app-rebuild boundary_app-clean boundary_opt_all boundary_opt_build_all boundary_opt_sim_all boundary_opt_report boundary_opt_clean $(BOUNDARY_OPT_BUILD_TARGETS) $(BOUNDARY_OPT_SIM_TARGETS) coe_loop5 coe_loop5_gen
-.PHONY: syn synf syn-extreme syn-venv syn-prep syn-stage-xpr syn-vivado syn-analyze syn-clean
+.PHONY: coremark coremark_sim coremark_run coremark_result coremark-rebuild coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map coremark_opt_all coremark_opt_build_all coremark_opt_sim_all coremark_opt_report coremark_opt_clean app_opt_comp_expanded_if_needed $(COREMARK_OPT_BUILD_TARGETS) $(COREMARK_OPT_SIM_TARGETS) sort_app sort_all sort_sim_all sort_report sort_app_sim sort_app-rebuild sort_app-clean sort_opt_all sort_opt_build_all sort_opt_sim_all sort_opt_report sort_opt_clean $(SORT_OPT_BUILD_TARGETS) $(SORT_OPT_SIM_TARGETS) boundary_app boundary_all boundary_sim_all boundary_report boundary_app-rebuild boundary_app-clean boundary_opt_all boundary_opt_build_all boundary_opt_sim_all boundary_opt_report boundary_opt_clean $(BOUNDARY_OPT_BUILD_TARGETS) $(BOUNDARY_OPT_SIM_TARGETS) coe_loop5 coe_loop5_gen
+.PHONY: syn synf synf-board syn-extreme syn-venv syn-prep syn-stage-xpr syn-stage-memory syn-vivado syn-analyze syn-clean
 
 .SECONDEXPANSION:
 
@@ -374,8 +391,18 @@ synf: syn-vivado
 	timestamp=$$(date '+%Y%m%d_%H%M'); \
 	dst="$(SYN_BIT_DIR)/jyd_fpga$${timestamp}.bit"; \
 	cp "$$src" "$$dst"; \
+	ltx_src="$(SYN_ARTIFACT_DIR)/jyd_fpga.ltx"; \
+	if [ -f "$$ltx_src" ]; then \
+		ltx_dst="$${dst%.bit}.ltx"; cp "$$ltx_src" "$$ltx_dst"; \
+		echo "[SYN] ILA probes: $$ltx_dst"; \
+	fi; \
 	echo "[SYN] Best bitstream: $$dst"
-	@$(MAKE) syn-analyze SYN_PLL_FREQ_MHZ=$(SYN_PLL_FREQ_MHZ)
+	@$(MAKE) syn-analyze SYN_PLL_FREQ_MHZ=$(SYN_PLL_FREQ_MHZ) SYN_PROFILE=$(SYN_PROFILE)
+
+synf-board: SYN_PROFILE := board-ag10-ah10
+synf-board: SYN_ENABLE_ILA := 1
+synf-board: SYN_BOARD_XDC = $(SYN_STAGE_FPGA_DIR)/Ydrasil_FPGA.srcs/constrs_1/new/board_ag10_ah10.xdc
+synf-board: synf
 
 syn-extreme: SYN_PLL_FREQ_MHZ := 200
 syn-extreme: SYN_RUN_TO := bitstream
@@ -418,7 +445,15 @@ syn-stage-xpr:
 		--exclude 'vivado*' \
 		$(SYN_ORIG_FPGA_DIR)/ $(SYN_STAGE_FPGA_DIR)/
 
-syn-vivado: syn-prep syn-stage-xpr
+syn-stage-memory:
+	@test -f "$(IROM_COE)" || { echo "Error: IROM COE not found: $(IROM_COE)"; exit 1; }
+	@test -f "$(DRAM_COE)" || { echo "Error: DRAM COE not found: $(DRAM_COE)"; exit 1; }
+	@mkdir -p "$(SYN_MEMORY_DIR)"
+	cp "$(IROM_COE)" "$(SYN_STAGED_IROM_COE)"
+	cp "$(DRAM_COE)" "$(SYN_STAGED_DRAM_COE)"
+	@printf 'IROM_COE=%s\nDRAM_COE=%s\n' "$(abspath $(IROM_COE))" "$(abspath $(DRAM_COE))" > "$(SYN_MEMORY_DIR)/sources.txt"
+
+syn-vivado: syn-prep syn-stage-xpr syn-stage-memory
 	@mkdir -p $(SYN_REPORT_DIR) $(SYN_LOG_DIR) $(SYN_ARTIFACT_DIR)
 	. $(VIVADO_SETTINGS) && $(VIVADO) -mode batch -nojournal -log $(SYN_LOG_DIR)/vivado.log \
 		-source $(SYN_DIR)/run_vivado.tcl \
@@ -435,6 +470,10 @@ syn-vivado: syn-prep syn-stage-xpr
 		-run_to $(SYN_RUN_TO) \
 		-sync_sources $(SYN_SYNC_SOURCES) \
 		-pll_freq_mhz $(SYN_PLL_FREQ_MHZ) \
+		-board_xdc "$(SYN_BOARD_XDC)" \
+		-enable_ila $(SYN_ENABLE_ILA) \
+		-irom_coe "$(SYN_STAGED_IROM_COE)" \
+		-dram_coe "$(SYN_STAGED_DRAM_COE)" \
 		-force $(SYN_FORCE)
 
 syn-analyze: syn-venv
@@ -530,10 +569,35 @@ coremark_sim: coremark comp
 
 coremark_run: coremark_sim
 
+$(APP_OPT_EXPANDED_LINKER): $(PROJECT_ROOT)/sw/bsp/link.lds
+	@mkdir -p "$(dir $@)"
+	@actual=$$((1 << ($(APP_OPT_EXPANDED_ITCM_ADDR_WIDTH) + 2))); \
+	requested=$(APP_OPT_EXPANDED_ITCM_BYTES); kib=$$(( $(APP_OPT_EXPANDED_ITCM_KIB) * 1024 )); \
+	if [ "$$actual" -ne "$$requested" ] || [ "$$kib" -ne "$$requested" ]; then \
+		echo "Expanded ITCM settings disagree: bytes=$$requested KiB=$(APP_OPT_EXPANDED_ITCM_KIB) addr_width=$(APP_OPT_EXPANDED_ITCM_ADDR_WIDTH)"; exit 2; \
+	fi
+	@sed 's/LENGTH = 16K/LENGTH = $(APP_OPT_EXPANDED_ITCM_KIB)K/' "$<" > "$@"
+	@grep -q 'LENGTH = $(APP_OPT_EXPANDED_ITCM_KIB)K' "$@" || \
+		{ echo "Failed to generate expanded ITCM linker script: $@"; rm -f "$@"; exit 2; }
+
+app_opt_comp_expanded_if_needed:
+	@needed=0; for root in $(APP_OPT_STATUS_ROOTS); do \
+		if [ -d "$$root" ] && grep -Rql '^STATE=READY_EXPANDED ' "$$root"; then needed=1; break; fi; \
+	done; \
+	if [ "$$needed" -eq 1 ]; then \
+		echo "[APP OPT] Compiling dedicated expanded ITCM model: $(APP_OPT_EXPANDED_ITCM_BYTES) bytes"; \
+		$(MAKE) comp VERILATOR_COVERAGE=$(VERILATOR_COVERAGE) VERILATOR_TRACE=0 \
+			OBJ_DIR="$(APP_OPT_EXPANDED_OBJ_DIR)" LOG_DIR="$(APP_OPT_EXPANDED_LOG_DIR)" \
+			ITCM_ADDR_WIDTH_OVERRIDE=$(APP_OPT_EXPANDED_ITCM_ADDR_WIDTH); \
+	else \
+		echo "[APP OPT] No oversized image; expanded ITCM model is not used"; \
+	fi
+
 coremark_opt_all: coremark_opt_clean
 	@echo "[COREMARK OPT] Profiles: $(APP_OPT_PROFILES)"
 	@$(MAKE) -j$(APP_OPT_JOBS) coremark_opt_build_all
 	@$(MAKE) comp VERILATOR_COVERAGE=$(VERILATOR_COVERAGE) VERILATOR_TRACE=0
+	@$(MAKE) app_opt_comp_expanded_if_needed APP_OPT_STATUS_ROOTS="$(COREMARK_OPT_ROOT)"
 	@$(MAKE) -j$(APP_OPT_JOBS) coremark_opt_sim_all
 	@$(MAKE) coremark_opt_report
 
@@ -541,32 +605,49 @@ coremark_opt_build_all: $(COREMARK_OPT_BUILD_TARGETS)
 coremark_opt_sim_all: $(COREMARK_OPT_SIM_TARGETS)
 
 define COREMARK_OPT_template
-coremark_opt_build_$(1):
-	+@profile="$(1)"; out="$(COREMARK_OPT_ROOT)/$(1)"; log="$$$$out/build.log"; \
+coremark_opt_build_$(1): $(APP_OPT_EXPANDED_LINKER)
+	+@profile="$(1)"; out="$(COREMARK_OPT_ROOT)/$(1)"; log="$$$$out/build.log"; expanded_log="$$$$out/build-expanded.log"; \
 	rm -rf "$$$$out"; mkdir -p "$$$$out"; set +e; \
 	$(MAKE) -C sw coremark $(COREMARK_SW_MAKE_ARGS) COREMARK_OUT="$$$$out" \
 		COREMARK_EXTRA_CFLAGS="$(if $(COREMARK_OPT_BSP_CFLAGS_$(1)),$(COREMARK_OPT_BSP_CFLAGS_$(1)),$(APP_OPT_CFLAGS_$(1)))" \
 		COREMARK_APP_ONLY_CFLAGS="$(COREMARK_OPT_APP_CFLAGS_$(1))" COREMARK_FLAGS_STR="$(1)" \
-		>"$$$$log" 2>&1; rc=$$$$?; set -e; state=READY; bytes=0; \
+		>"$$$$log" 2>&1; rc=$$$$?; set -e; state=BUILD_FAIL; bytes=0; capacity=$(APP_OPT_ITCM_BYTES); expanded=NO; \
 	if [ "$$$$rc" -eq 0 ] && [ -s "$$$$out/coremark_itcm.bin" ]; then \
 		bytes=$$$$(wc -c < "$$$$out/coremark_itcm.bin"); \
-		if [ "$$$$bytes" -gt "$(APP_OPT_ITCM_BYTES)" ]; then state=SKIP_SIZE; fi; \
-	elif grep -Eq 'region .itcm. overflowed|will not fit in region .itcm' "$$$$log"; then state=SKIP_SIZE; \
-	else state=BUILD_FAIL; fi; \
-	echo "STATE=$$$$state ITCM_BYTES=$$$$bytes FLAGS=$(APP_OPT_CFLAGS_$(1))" | tee "$$$$out/build.status"
+		if [ "$$$$bytes" -le "$(APP_OPT_ITCM_BYTES)" ]; then state=READY; else rc=1; fi; \
+	fi; \
+	if { [ "$$$$rc" -ne 0 ] && grep -Eq 'region .itcm. overflowed|will not fit in region .itcm' "$$$$log"; } || [ "$$$$bytes" -gt "$(APP_OPT_ITCM_BYTES)" ]; then \
+		echo "[COREMARK OPT][$$$$profile] 16 KiB ITCM exceeded; rebuilding for $(APP_OPT_EXPANDED_ITCM_KIB) KiB simulation only"; set +e; \
+		$(MAKE) -C sw coremark $(COREMARK_SW_MAKE_ARGS) COREMARK_OUT="$$$$out" \
+			BSP_LINKER_SCRIPT="$(APP_OPT_EXPANDED_LINKER)" \
+			COREMARK_EXTRA_CFLAGS="$(if $(COREMARK_OPT_BSP_CFLAGS_$(1)),$(COREMARK_OPT_BSP_CFLAGS_$(1)),$(APP_OPT_CFLAGS_$(1)))" \
+			COREMARK_APP_ONLY_CFLAGS="$(COREMARK_OPT_APP_CFLAGS_$(1))" COREMARK_FLAGS_STR="$(1)" \
+			>"$$$$expanded_log" 2>&1; expanded_rc=$$$$?; set -e; \
+		if [ "$$$$expanded_rc" -eq 0 ] && [ -s "$$$$out/coremark_itcm.bin" ]; then \
+			bytes=$$$$(wc -c < "$$$$out/coremark_itcm.bin"); capacity=$(APP_OPT_EXPANDED_ITCM_BYTES); expanded=YES; \
+			if [ "$$$$bytes" -le "$(APP_OPT_EXPANDED_ITCM_BYTES)" ]; then state=READY_EXPANDED; else state=SKIP_SIZE; fi; \
+		elif grep -Eq 'region .itcm. overflowed|will not fit in region .itcm' "$$$$expanded_log"; then state=SKIP_SIZE; \
+		else state=BUILD_FAIL; fi; \
+	fi; \
+	echo "STATE=$$$$state ITCM_BYTES=$$$$bytes ITCM_CAPACITY_BYTES=$$$$capacity EXPANDED_ITCM=$$$$expanded FLAGS=$(APP_OPT_CFLAGS_$(1))" | tee "$$$$out/build.status"
 
 coremark_opt_sim_$(1):
 	+@profile="$(1)"; out="$(COREMARK_OPT_ROOT)/$(1)"; result_dir="$(COREMARK_OPT_RESULT_DIR)"; \
 	status="$$$$result_dir/$$$$profile.status"; run_log="$$$$result_dir/$$$$profile.log"; \
 	mkdir -p "$$$$result_dir"; build_state=$$$$(sed -n 's/^STATE=\([^ ]*\).*/\1/p' "$$$$out/build.status"); \
 	bytes=$$$$(sed -n 's/.*ITCM_BYTES=\([0-9]*\).*/\1/p' "$$$$out/build.status"); \
-	if [ "$$$$build_state" != READY ]; then \
-		echo "[$$$$profile] [SKIP] reason=$$$$build_state itcm_bytes=$$$$bytes score=N/A" > "$$$$status"; exit 0; \
+	capacity=$$$$(sed -n 's/.*ITCM_CAPACITY_BYTES=\([0-9]*\).*/\1/p' "$$$$out/build.status"); expanded=$$$$(sed -n 's/.*EXPANDED_ITCM=\([^ ]*\).*/\1/p' "$$$$out/build.status"); \
+	if [ "$$$$build_state" != READY ] && [ "$$$$build_state" != READY_EXPANDED ]; then \
+		echo "[$$$$profile] [SKIP] reason=$$$$build_state itcm_bytes=$$$$bytes itcm_capacity=$$$$capacity expanded_itcm=$$$$expanded score=N/A" > "$$$$status"; exit 0; \
+	fi; \
+	model_args=""; if [ "$$$$build_state" = READY_EXPANDED ]; then \
+		model_args="OBJ_DIR=$(APP_OPT_EXPANDED_OBJ_DIR) LOG_DIR=$(APP_OPT_EXPANDED_LOG_DIR) ITCM_ADDR_WIDTH_OVERRIDE=$(APP_OPT_EXPANDED_ITCM_ADDR_WIDTH)"; \
 	fi; \
 	set +e; $(MAKE) --no-print-directory sim_compare SIM_COMPARE=none \
 		COMPARE_NAME="coremark-opt/$$$$profile" COMPARE_ELF="$$$$out/coremark.elf" \
 		COMPARE_ITCM="$$$$out/coremark.itcm" COMPARE_DTCM="$$$$out/coremark.dtcm" \
-		COMPARE_SIM_EXTRA_DEFINES="+cpp_timeout=$(COREMARK_OPT_TIMEOUT) +sv_timeout=$(COREMARK_OPT_TIMEOUT)" \
+		COMPARE_SIM_EXTRA_DEFINES="+cpp_timeout=$(if $(COREMARK_OPT_TIMEOUT_$(1)),$(COREMARK_OPT_TIMEOUT_$(1)),$(COREMARK_OPT_TIMEOUT)) +sv_timeout=$(if $(COREMARK_OPT_TIMEOUT_$(1)),$(COREMARK_OPT_TIMEOUT_$(1)),$(COREMARK_OPT_TIMEOUT))" \
+		$$$$model_args \
 		>"$$$$run_log" 2>&1; rc=$$$$?; set -e; hw_log="$(HW_TRACE_OUT_DIR)/coremark-opt/$$$$profile/hw.log"; \
 	result=FAIL; if [ "$$$$rc" -eq 0 ] && grep -q 'Correct operation validated' "$$$$hw_log" && \
 		grep -q 'COREMARK DONE' "$$$$hw_log"; then result=PASS; fi; \
@@ -574,20 +655,22 @@ coremark_opt_sim_$(1):
 	insts=$$$$(grep -o 'INSTS=[0-9]*' "$$$$hw_log" 2>/dev/null | tail -1 | cut -d= -f2); \
 	ipc=$$$$(grep -o 'IPC=[0-9.]*' "$$$$hw_log" 2>/dev/null | tail -1 | cut -d= -f2); \
 	score=$$$$(sed -n 's/^CoreMark 1\.0 : *\([0-9.]*\).*/\1/p' "$$$$hw_log" 2>/dev/null | tail -1); \
-	echo "[$$$$profile] [$$$$result] itcm_bytes=$$$$bytes cycles=$$$${cycles:-N/A} insts=$$$${insts:-N/A} ipc=$$$${ipc:-N/A} score=$$$${score:-N/A}" > "$$$$status"
+	echo "[$$$$profile] [$$$$result] itcm_bytes=$$$$bytes itcm_capacity=$$$$capacity expanded_itcm=$$$$expanded cycles=$$$${cycles:-N/A} insts=$$$${insts:-N/A} ipc=$$$${ipc:-N/A} score=$$$${score:-N/A}" > "$$$$status"
 endef
 $(foreach profile,$(APP_OPT_PROFILES),$(eval $(call COREMARK_OPT_template,$(profile))))
 
 coremark_opt_report:
-	@mkdir -p "$(PPA_DIR)"; rm -f "$(PPA_COREMARK_OPT_LOG)"; failed=0; pass=0; skip=0; \
+	@mkdir -p "$(PPA_DIR)"; rm -f "$(PPA_COREMARK_OPT_LOG)"; failed=0; pass=0; skip=0; expanded_count=0; \
 	for profile in $(APP_OPT_PROFILES); do status="$(COREMARK_OPT_RESULT_DIR)/$$profile.status"; \
 		if [ ! -f "$$status" ]; then echo "[$$profile] [FAIL] missing status" | tee -a "$(PPA_COREMARK_OPT_LOG)"; failed=1; continue; fi; \
 		line=$$(cat "$$status"); if ! echo "$$line" | grep -q ' score='; then \
 			score=$$(sed -n 's/^CoreMark 1\.0 : *\([0-9.]*\).*/\1/p' "$(HW_TRACE_OUT_DIR)/coremark-opt/$$profile/hw.log" 2>/dev/null | tail -1); \
 			line="$$line score=$${score:-N/A}"; \
 		fi; echo "$$line" | tee -a "$(PPA_COREMARK_OPT_LOG)"; \
+		if echo "$$line" | grep -q 'expanded_itcm=YES'; then expanded_count=$$((expanded_count+1)); fi; \
 		if echo "$$line" | grep -q '\[PASS\]'; then pass=$$((pass+1)); elif echo "$$line" | grep -q '\[SKIP\]'; then skip=$$((skip+1)); else failed=1; fi; \
 	done; overall=PASS; if [ "$$failed" -ne 0 ]; then overall=FAIL; fi; \
+	echo "[COREMARK OPT] ITCM original=$(APP_OPT_ITCM_BYTES) expanded=$(APP_OPT_EXPANDED_ITCM_BYTES) expanded_runs=$$expanded_count" | tee -a "$(PPA_COREMARK_OPT_LOG)"; \
 	echo "[COREMARK OPT] CORRECTNESS=$$overall passed=$$pass skipped=$$skip total=$(words $(APP_OPT_PROFILES))" | tee -a "$(PPA_COREMARK_OPT_LOG)"; exit $$failed
 
 coremark_opt_clean:
@@ -666,6 +749,7 @@ sort_opt_all: sort_opt_clean
 	@echo "[SORT OPT] Profiles: $(APP_OPT_PROFILES), apps: $(SORT_APP_NAMES)"
 	@$(MAKE) -j$(APP_OPT_JOBS) sort_opt_build_all
 	@$(MAKE) comp VERILATOR_COVERAGE=$(VERILATOR_COVERAGE) VERILATOR_TRACE=0
+	@$(MAKE) app_opt_comp_expanded_if_needed APP_OPT_STATUS_ROOTS="$(SORT_OPT_ROOT)"
 	@$(MAKE) -j$(APP_OPT_JOBS) sort_opt_sim_all
 	@$(MAKE) sort_opt_report
 
@@ -673,45 +757,65 @@ sort_opt_build_all: $(SORT_OPT_BUILD_TARGETS)
 sort_opt_sim_all: $(SORT_OPT_SIM_TARGETS)
 
 define SORT_OPT_template
-sort_opt_build_$(1)_$(2):
+sort_opt_build_$(1)_$(2): $(APP_OPT_EXPANDED_LINKER)
 	+@profile="$(1)"; name="$(2)"; out="$(SORT_OPT_ROOT)/$(1)"; meta="$$$$out/meta"; \
-	mkdir -p "$$$$out" "$$$$meta"; log="$$$$meta/$$$$name.build.log"; set +e; \
+	mkdir -p "$$$$out" "$$$$meta"; log="$$$$meta/$$$$name.build.log"; expanded_log="$$$$meta/$$$$name.build-expanded.log"; set +e; \
 	$(MAKE) -C sw sort_app $(SORT_APP_SW_MAKE_ARGS) SORT_APP_OUT="$$$$out" SORT_APP_NAMES="$$$$name" \
 		SORT_APP_EXTRA_CFLAGS="$(if $(SORT_OPT_BSP_CFLAGS_$(1)),$(SORT_OPT_BSP_CFLAGS_$(1)),$(APP_OPT_CFLAGS_$(1)))" \
-		SORT_APP_ONLY_CFLAGS="$(SORT_OPT_APP_CFLAGS_$(1))" >"$$$$log" 2>&1; rc=$$$$?; set -e; state=READY; bytes=0; \
+		SORT_APP_ONLY_CFLAGS="$(SORT_OPT_APP_CFLAGS_$(1))" >"$$$$log" 2>&1; rc=$$$$?; set -e; state=BUILD_FAIL; bytes=0; capacity=$(APP_OPT_ITCM_BYTES); expanded=NO; \
 	if [ "$$$$rc" -eq 0 ] && [ -s "$$$$out/$$$${name}_itcm.bin" ]; then \
 		bytes=$$$$(wc -c < "$$$$out/$$$${name}_itcm.bin"); \
-		if [ "$$$$bytes" -gt "$(APP_OPT_ITCM_BYTES)" ]; then state=SKIP_SIZE; fi; \
-	elif grep -Eq 'region .itcm. overflowed|will not fit in region .itcm' "$$$$log"; then state=SKIP_SIZE; \
-	else state=BUILD_FAIL; fi; \
-	echo "STATE=$$$$state ITCM_BYTES=$$$$bytes FLAGS=$(APP_OPT_CFLAGS_$(1))" > "$$$$meta/$$$$name.build.status"
+		if [ "$$$$bytes" -le "$(APP_OPT_ITCM_BYTES)" ]; then state=READY; else rc=1; fi; \
+	fi; \
+	if { [ "$$$$rc" -ne 0 ] && grep -Eq 'region .itcm. overflowed|will not fit in region .itcm' "$$$$log"; } || [ "$$$$bytes" -gt "$(APP_OPT_ITCM_BYTES)" ]; then \
+		echo "[SORT OPT][$$$$profile/$$$$name] 16 KiB ITCM exceeded; rebuilding for $(APP_OPT_EXPANDED_ITCM_KIB) KiB simulation only"; set +e; \
+		$(MAKE) -C sw sort_app $(SORT_APP_SW_MAKE_ARGS) SORT_APP_OUT="$$$$out" SORT_APP_NAMES="$$$$name" \
+			BSP_LINKER_SCRIPT="$(APP_OPT_EXPANDED_LINKER)" \
+			SORT_APP_EXTRA_CFLAGS="$(if $(SORT_OPT_BSP_CFLAGS_$(1)),$(SORT_OPT_BSP_CFLAGS_$(1)),$(APP_OPT_CFLAGS_$(1)))" \
+			SORT_APP_ONLY_CFLAGS="$(SORT_OPT_APP_CFLAGS_$(1))" >"$$$$expanded_log" 2>&1; expanded_rc=$$$$?; set -e; \
+		if [ "$$$$expanded_rc" -eq 0 ] && [ -s "$$$$out/$$$${name}_itcm.bin" ]; then \
+			bytes=$$$$(wc -c < "$$$$out/$$$${name}_itcm.bin"); capacity=$(APP_OPT_EXPANDED_ITCM_BYTES); expanded=YES; \
+			if [ "$$$$bytes" -le "$(APP_OPT_EXPANDED_ITCM_BYTES)" ]; then state=READY_EXPANDED; else state=SKIP_SIZE; fi; \
+		elif grep -Eq 'region .itcm. overflowed|will not fit in region .itcm' "$$$$expanded_log"; then state=SKIP_SIZE; \
+		else state=BUILD_FAIL; fi; \
+	fi; \
+	echo "STATE=$$$$state ITCM_BYTES=$$$$bytes ITCM_CAPACITY_BYTES=$$$$capacity EXPANDED_ITCM=$$$$expanded FLAGS=$(APP_OPT_CFLAGS_$(1))" > "$$$$meta/$$$$name.build.status"
 
 sort_opt_sim_$(1)_$(2):
 	+@profile="$(1)"; name="$(2)"; out="$(SORT_OPT_ROOT)/$(1)"; meta="$$$$out/meta"; \
 	result_dir="$(SORT_OPT_RESULT_DIR)/$$$$profile"; mkdir -p "$$$$result_dir"; status="$$$$result_dir/$$$$name.status"; \
 	build_state=$$$$(sed -n 's/^STATE=\([^ ]*\).*/\1/p' "$$$$meta/$$$$name.build.status"); \
 	bytes=$$$$(sed -n 's/.*ITCM_BYTES=\([0-9]*\).*/\1/p' "$$$$meta/$$$$name.build.status"); \
-	if [ "$$$$build_state" != READY ]; then echo "[$$$$profile/$$$$name] [SKIP] reason=$$$$build_state itcm_bytes=$$$$bytes" > "$$$$status"; exit 0; fi; \
+	capacity=$$$$(sed -n 's/.*ITCM_CAPACITY_BYTES=\([0-9]*\).*/\1/p' "$$$$meta/$$$$name.build.status"); expanded=$$$$(sed -n 's/.*EXPANDED_ITCM=\([^ ]*\).*/\1/p' "$$$$meta/$$$$name.build.status"); \
+	if [ "$$$$build_state" != READY ] && [ "$$$$build_state" != READY_EXPANDED ]; then \
+		echo "[$$$$profile/$$$$name] [SKIP] reason=$$$$build_state itcm_bytes=$$$$bytes itcm_capacity=$$$$capacity expanded_itcm=$$$$expanded" > "$$$$status"; exit 0; \
+	fi; \
+	model_args=""; if [ "$$$$build_state" = READY_EXPANDED ]; then \
+		model_args="OBJ_DIR=$(APP_OPT_EXPANDED_OBJ_DIR) LOG_DIR=$(APP_OPT_EXPANDED_LOG_DIR) ITCM_ADDR_WIDTH_OVERRIDE=$(APP_OPT_EXPANDED_ITCM_ADDR_WIDTH)"; \
+	fi; \
 	run_log="$$$$result_dir/$$$$name.log"; set +e; $(MAKE) --no-print-directory sim_compare SIM_COMPARE=none \
 		COMPARE_NAME="sort-opt/$$$$profile/$$$$name" COMPARE_ELF="$$$$out/$$$$name.elf" \
 		COMPARE_ITCM="$$$$out/$$$$name.itcm" COMPARE_DTCM="$$$$out/$$$$name.dtcm" \
 		COMPARE_SIM_EXTRA_DEFINES="+perip_debug +cpp_timeout=$(if $(SORT_OPT_TIMEOUT_$(1)),$(SORT_OPT_TIMEOUT_$(1)),$(SORT_OPT_TIMEOUT)) +sv_timeout=$(if $(SORT_OPT_TIMEOUT_$(1)),$(SORT_OPT_TIMEOUT_$(1)),$(SORT_OPT_TIMEOUT))" \
+		$$$$model_args \
 		>"$$$$run_log" 2>&1; rc=$$$$?; set -e; hw_log="$(HW_TRACE_OUT_DIR)/sort-opt/$$$$profile/$$$$name/hw.log"; \
 	result=FAIL; if [ "$$$$rc" -eq 0 ] && grep -q "SORT PASS name=$$$$name count=100" "$$$$hw_log"; then result=PASS; fi; \
 	cycles=$$$$(grep -o 'CYCLES=[0-9]*' "$$$$hw_log" 2>/dev/null | tail -1 | cut -d= -f2); \
 	insts=$$$$(grep -o 'INSTS=[0-9]*' "$$$$hw_log" 2>/dev/null | tail -1 | cut -d= -f2); \
 	ipc=$$$$(grep -o 'IPC=[0-9.]*' "$$$$hw_log" 2>/dev/null | tail -1 | cut -d= -f2); \
-	echo "[$$$$profile/$$$$name] [$$$$result] itcm_bytes=$$$$bytes cycles=$$$${cycles:-N/A} insts=$$$${insts:-N/A} ipc=$$$${ipc:-N/A}" > "$$$$status"
+	echo "[$$$$profile/$$$$name] [$$$$result] itcm_bytes=$$$$bytes itcm_capacity=$$$$capacity expanded_itcm=$$$$expanded cycles=$$$${cycles:-N/A} insts=$$$${insts:-N/A} ipc=$$$${ipc:-N/A}" > "$$$$status"
 endef
 $(foreach profile,$(APP_OPT_PROFILES),$(foreach app,$(SORT_APP_NAMES),$(eval $(call SORT_OPT_template,$(profile),$(app)))))
 
 sort_opt_report:
-	@mkdir -p "$(PPA_DIR)"; rm -f "$(PPA_SORT_OPT_LOG)"; failed=0; pass=0; skip=0; total=$(words $(SORT_OPT_SIM_TARGETS)); \
+	@mkdir -p "$(PPA_DIR)"; rm -f "$(PPA_SORT_OPT_LOG)"; failed=0; pass=0; skip=0; expanded_count=0; total=$(words $(SORT_OPT_SIM_TARGETS)); \
 	for profile in $(APP_OPT_PROFILES); do for name in $(SORT_APP_NAMES); do status="$(SORT_OPT_RESULT_DIR)/$$profile/$$name.status"; \
 		if [ ! -f "$$status" ]; then echo "[$$profile/$$name] [FAIL] missing status" | tee -a "$(PPA_SORT_OPT_LOG)"; failed=1; continue; fi; \
 		line=$$(cat "$$status"); echo "$$line" | tee -a "$(PPA_SORT_OPT_LOG)"; \
+		if echo "$$line" | grep -q 'expanded_itcm=YES'; then expanded_count=$$((expanded_count+1)); fi; \
 		if echo "$$line" | grep -q '\[PASS\]'; then pass=$$((pass+1)); elif echo "$$line" | grep -q '\[SKIP\]'; then skip=$$((skip+1)); else failed=1; fi; \
 	done; done; overall=PASS; if [ "$$failed" -ne 0 ]; then overall=FAIL; fi; \
+	echo "[SORT OPT] ITCM original=$(APP_OPT_ITCM_BYTES) expanded=$(APP_OPT_EXPANDED_ITCM_BYTES) expanded_runs=$$expanded_count" | tee -a "$(PPA_SORT_OPT_LOG)"; \
 	echo "[SORT OPT] CORRECTNESS=$$overall passed=$$pass skipped=$$skip total=$$total" | tee -a "$(PPA_SORT_OPT_LOG)"; exit $$failed
 
 sort_opt_clean:

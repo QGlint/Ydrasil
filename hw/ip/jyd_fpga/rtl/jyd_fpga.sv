@@ -43,6 +43,15 @@ module jyd_fpga(
     wire tx_busy;
 
 `ifdef SYNTHESIS
+`ifdef SYN_PLL_FREQ_200
+    pll pll_inst(
+        .clk_in1_p(i_sys_clk_p),
+        .clk_in1_n(i_sys_clk_n),
+        .clk_out1(w_clk_50Mhz),
+        .clk_out2(cpu_clk),
+        .locked(w_clk_rst)
+    );
+`else
     ydrasil_clocking clocking_inst(
         .clk_in1_p(i_sys_clk_p),
         .clk_in1_n(i_sys_clk_n),
@@ -50,7 +59,17 @@ module jyd_fpga(
         .cpu_clk(cpu_clk),
         .locked(w_clk_rst)
     );
+`endif
 `elsif __XILINX_SIMULATOR__
+`ifdef SYN_PLL_FREQ_200
+    pll pll_inst(
+        .clk_in1_p(i_sys_clk_p),
+        .clk_in1_n(i_sys_clk_n),
+        .clk_out1(w_clk_50Mhz),
+        .clk_out2(cpu_clk),
+        .locked(w_clk_rst)
+    );
+`else
     ydrasil_clocking clocking_inst(
         .clk_in1_p(i_sys_clk_p),
         .clk_in1_n(i_sys_clk_n),
@@ -58,6 +77,7 @@ module jyd_fpga(
         .cpu_clk(cpu_clk),
         .locked(w_clk_rst)
     );
+`endif
 `else
 //else
     logic [2:0]cnt = 0;

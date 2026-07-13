@@ -108,6 +108,16 @@ ifeq ($(USE_BENDER),1)
 		echo "ERROR: USE_BENDER=1 but Bender.yml/Bender.yaml not found at $(IP_DIR)"; \
 		exit 1; \
 	fi
+	@if [ -n "$(ITCM_ADDR_WIDTH_OVERRIDE)" ]; then \
+		case "$(ITCM_ADDR_WIDTH_OVERRIDE)" in *[!0-9]*|'') echo "Invalid ITCM_ADDR_WIDTH_OVERRIDE=$(ITCM_ADDR_WIDTH_OVERRIDE)"; exit 2;; esac; \
+		mkdir -p "$(RTL_OVERRIDE_DIR)"; \
+		sed -E 's/(localparam int ITCM_ADDR_WIDTH = )[0-9]+;/\1$(ITCM_ADDR_WIDTH_OVERRIDE);/' \
+			"$(YDRASIL_PKG_SOURCE)" > "$(YDRASIL_PKG_OVERRIDE)"; \
+		grep -q "ITCM_ADDR_WIDTH = $(ITCM_ADDR_WIDTH_OVERRIDE);" "$(YDRASIL_PKG_OVERRIDE)" || \
+			{ echo "Failed to generate ITCM override package"; exit 2; }; \
+		sed -i '\|/ydrasil_pkg.sv$$|c$(YDRASIL_PKG_OVERRIDE)' "$(FLIST_FILE)"; \
+		echo "[DV ITCM OVERRIDE] addr_width=$(ITCM_ADDR_WIDTH_OVERRIDE) package=$(YDRASIL_PKG_OVERRIDE)"; \
+	fi
 endif
 
 	@echo "[VERILATOR COMPILE]"

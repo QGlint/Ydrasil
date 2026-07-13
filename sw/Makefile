@@ -87,6 +87,7 @@ BOUNDARY_APP_DTCMS := $(addprefix $(BOUNDARY_APP_OUT)/,$(addsuffix .dtcm,$(BOUND
 BOUNDARY_APP_ONLY_CFLAGS ?=
 
 BSP_DIR := $(PROJECT_ROOT)/sw/bsp
+BSP_LINKER_SCRIPT ?= $(BSP_DIR)/link.lds
 BSP_INCLUDES := -I$(BSP_DIR)/include
 BSP_ASM_SRCS := $(wildcard $(BSP_DIR)/*.S)
 BSP_C_SRCS := \
@@ -135,7 +136,7 @@ COREMARK_LDFLAGS := \
 	-nostartfiles \
 	-nostdlib \
 	-static \
-	-T $(BSP_DIR)/link.lds \
+	-T $(BSP_LINKER_SCRIPT) \
 	-Wl,-Map,$(COREMARK_MAP) \
 	-Wl,--gc-sections
 SORT_APP_CFLAGS := \
@@ -163,7 +164,7 @@ SORT_APP_LDFLAGS := \
 	-nostartfiles \
 	-nostdlib \
 	-static \
-	-T $(BSP_DIR)/link.lds \
+	-T $(BSP_LINKER_SCRIPT) \
 	-Wl,--gc-sections
 
 # ====== derived ======
@@ -229,7 +230,7 @@ $(COREMARK_OUT):
 	@mkdir -p $@
 
 ifneq ($(strip $(COREMARK_APP_ONLY_CFLAGS)),)
-$(COREMARK_ELF): $(COREMARK_SRCS) $(BSP_DIR)/link.lds Makefile | $(COREMARK_OUT)
+$(COREMARK_ELF): $(COREMARK_SRCS) $(BSP_LINKER_SCRIPT) Makefile | $(COREMARK_OUT)
 	@set -eu; obj_dir="$(COREMARK_OUT)/obj"; rm -rf "$$obj_dir"; mkdir -p "$$obj_dir"; objects=""; \
 	for src in $(BSP_ASM_SRCS) $(BSP_C_SRCS); do base=$${src##*/}; base=$${base%.*}; obj="$$obj_dir/bsp_$$base.o"; \
 		$(CC) $(COREMARK_CFLAGS) -c "$$src" -o "$$obj"; objects="$$objects $$obj"; done; \
@@ -237,7 +238,7 @@ $(COREMARK_ELF): $(COREMARK_SRCS) $(BSP_DIR)/link.lds Makefile | $(COREMARK_OUT)
 		$(CC) $(COREMARK_CFLAGS) $(COREMARK_APP_ONLY_CFLAGS) -c "$$src" -o "$$obj"; objects="$$objects $$obj"; done; \
 	$(CC) $(COREMARK_LDFLAGS) $$objects -lgcc -o "$@"
 else
-$(COREMARK_ELF): $(COREMARK_SRCS) $(BSP_DIR)/link.lds Makefile | $(COREMARK_OUT)
+$(COREMARK_ELF): $(COREMARK_SRCS) $(BSP_LINKER_SCRIPT) Makefile | $(COREMARK_OUT)
 	$(CC) $(COREMARK_CFLAGS) $(COREMARK_SRCS) $(COREMARK_LDFLAGS) -lgcc -o $@
 endif
 
@@ -307,14 +308,14 @@ $(SORT_APP_OUT):
 	@mkdir -p $@
 
 ifneq ($(strip $(SORT_APP_ONLY_CFLAGS)),)
-$(SORT_APP_OUT)/%.elf: $(SORT_APP_DIR)/%.c $(SORT_APP_DIR)/sort_common.h $(SORT_APP_DIR)/sort_data.h $(BSP_DIR)/link.lds Makefile | $(SORT_APP_OUT)
+$(SORT_APP_OUT)/%.elf: $(SORT_APP_DIR)/%.c $(SORT_APP_DIR)/sort_common.h $(SORT_APP_DIR)/sort_data.h $(BSP_LINKER_SCRIPT) Makefile | $(SORT_APP_OUT)
 	@set -eu; obj_dir="$(SORT_APP_OUT)/obj/$*"; rm -rf "$$obj_dir"; mkdir -p "$$obj_dir"; objects=""; \
 	for src in $(BSP_ASM_SRCS) $(BSP_C_SRCS); do base=$${src##*/}; base=$${base%.*}; obj="$$obj_dir/bsp_$$base.o"; \
 		$(CC) $(SORT_APP_CFLAGS) -c "$$src" -o "$$obj"; objects="$$objects $$obj"; done; \
 	app_obj="$$obj_dir/app_$*.o"; $(CC) $(SORT_APP_CFLAGS) $(SORT_APP_ONLY_CFLAGS) -c "$<" -o "$$app_obj"; \
 	$(CC) $(SORT_APP_LDFLAGS) $$objects "$$app_obj" -Wl,-Map,$(@:.elf=.map) -lgcc -o "$@"
 else
-$(SORT_APP_OUT)/%.elf: $(SORT_APP_DIR)/%.c $(SORT_APP_DIR)/sort_common.h $(SORT_APP_DIR)/sort_data.h $(BSP_DIR)/link.lds Makefile | $(SORT_APP_OUT)
+$(SORT_APP_OUT)/%.elf: $(SORT_APP_DIR)/%.c $(SORT_APP_DIR)/sort_common.h $(SORT_APP_DIR)/sort_data.h $(BSP_LINKER_SCRIPT) Makefile | $(SORT_APP_OUT)
 	$(CC) $(SORT_APP_CFLAGS) $(BSP_ASM_SRCS) $(BSP_C_SRCS) $< $(SORT_APP_LDFLAGS) -Wl,-Map,$(@:.elf=.map) -lgcc -o $@
 endif
 

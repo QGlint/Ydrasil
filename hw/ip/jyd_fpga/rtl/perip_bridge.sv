@@ -52,6 +52,14 @@ module perip_bridge(
     // wire [31:0] dram_rdata;
     wire [39:0] seg_output;
 
+`ifdef SYN_BOARD_ILA
+    ila_board board_status_ila (
+        .clk    (clk),
+        .probe0 (LED),
+        .probe1 (seg_wdata)
+    );
+`endif
+
     reg [31:0] perip_rdata_ff;
     wire [31:0] perip_rdata_comb;
     reg         cnt_cmd_valid_q;

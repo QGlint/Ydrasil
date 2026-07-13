@@ -12,7 +12,11 @@ proc usage {} {
     puts "  -run_to <synth|route|bitstream|reports|sync_only>"
     puts "  -sync_sources <0|1>     remove old hw/ip sources and add generated list"
     puts "  -force <0|1>            reset runs before launching"
-    puts "  -pll_freq_mhz <mhz>     RTL MMCM CPU clock frequency selected by synthesis define, default 150"
+    puts "  -pll_freq_mhz <mhz>     200 selects pll IP; other supported frequencies select RTL MMCM"
+    puts "  -board_xdc <path>       overlay board-specific constraints after platform constraints"
+    puts "  -enable_ila <0|1>       create ila_board for the conditional board probes"
+    puts "  -irom_coe <path>        IROM initialization file for this build"
+    puts "  -dram_coe <path>        DRAM initialization file for this build"
     puts "  -artifact_dir <path>    copied bitstream/artifact output directory"
     puts "  -timing_summary_max_paths <n>  timing summary path limit, default 1000"
     puts "  -timing_path_max_paths <n>     violating report_timing path limit, default 500"
@@ -84,7 +88,7 @@ proc prepare_implementation_runs {count mode} {
     return $runs
 }
 
-proc select_best_implementation {run_names report_dir} {
+proc select_best_implementation {run_names report_dir checkpoint_dir} {
     set best_run ""
     set best_wns -Inf
     set csv [open [file join $report_dir implementation_sweep.csv] w]
@@ -98,18 +102,21 @@ proc select_best_implementation {run_names report_dir} {
             [regexp -nocase {complete.*failed timing} $status]
         if {![regexp -nocase {fail|error} $status] ||
             $completed_with_timing_failure} {
-            open_run $run_name -name $run_name
-            set worst [get_timing_paths -quiet -delay_type max -max_paths 1 -nworst 1]
-            if {[llength $worst] > 0} {
-                set wns [get_property SLACK [lindex $worst 0]]
-                if {$best_run eq "" || double($wns) > double($best_wns)} {
-                    set best_run $run_name
-                    set best_wns $wns
+            if {[catch {open_impl_design $run_name $checkpoint_dir} open_msg]} {
+                puts "warning: could not evaluate implementation run $run_name: $open_msg"
+            } else {
+                set worst [get_timing_paths -quiet -delay_type max -max_paths 1 -nworst 1]
+                if {[llength $worst] > 0} {
+                    set wns [get_property SLACK [lindex $worst 0]]
+                    if {$best_run eq "" || double($wns) > double($best_wns)} {
+                        set best_run $run_name
+                        set best_wns $wns
+                    }
                 }
+                report_timing_summary -delay_type max -report_unconstrained \
+                    -file [file join $report_dir ${run_name}_timing_summary.rpt]
+                close_design
             }
-            report_timing_summary -delay_type max -report_unconstrained \
-                -file [file join $report_dir ${run_name}_timing_summary.rpt]
-            close_design
         }
         set csv_status [string map [list "," ";"] $status]
         puts $csv "$run_name,$strategy,$csv_status,$wns"
@@ -173,12 +180,52 @@ proc remove_missing_sources {} {
     }
 }
 
-proc remove_legacy_pll_ip {} {
-    set pll_files [get_files -quiet -all */pll.xci]
-    if {[llength $pll_files] > 0} {
-        puts "Removing legacy clk_wiz pll IP from staged project; RTL MMCM clocking is used instead"
-        remove_files $pll_files
+proc configure_board_constraints {board_xdc} {
+    if {$board_xdc eq ""} {
+        puts "Using platform constraints from the project"
+        return
     }
+    set board_xdc [file normalize $board_xdc]
+    if {![file exists $board_xdc]} {
+        error "board constraint file not found: $board_xdc"
+    }
+
+    set fs [get_filesets constrs_1]
+    puts "Adding board clock override while retaining platform pin constraints: $board_xdc"
+    add_files -norecurse -fileset $fs $board_xdc
+    set_property PROCESSING_ORDER LATE [get_files -of_objects $fs $board_xdc]
+}
+
+proc configure_board_ila {enable_ila} {
+    if {!$enable_ila} {
+        return
+    }
+    if {[llength [get_ips -quiet ila_board]] == 0} {
+        puts "Creating ila_board with LED and seg_wdata probes"
+        create_ip -name ila -vendor xilinx.com -library ip -module_name ila_board
+    }
+    set_property -dict [list \
+        CONFIG.C_NUM_OF_PROBES {2} \
+        CONFIG.C_PROBE0_WIDTH {32} \
+        CONFIG.C_PROBE1_WIDTH {32} \
+        CONFIG.C_DATA_DEPTH {1024} \
+        CONFIG.C_ADV_TRIGGER {false} \
+        CONFIG.C_INPUT_PIPE_STAGES {0}] [get_ips ila_board]
+}
+
+proc configure_memory_coe {ip_name coe_file} {
+    set ip [get_ips -quiet $ip_name]
+    if {[llength $ip] == 0} {
+        error "memory IP not found: $ip_name"
+    }
+    set coe_file [file normalize $coe_file]
+    if {![file exists $coe_file]} {
+        error "$ip_name COE file not found: $coe_file"
+    }
+    puts "Configuring $ip_name initialization: $coe_file"
+    set_property -dict [list \
+        CONFIG.Load_Init_File {true} \
+        CONFIG.Coe_File $coe_file] $ip
 }
 
 proc assert_run_ok {run_name} {
@@ -288,13 +335,19 @@ proc validate_clocking_frequency {freq_mhz} {
         error "invalid -pll_freq_mhz value: $freq_mhz"
     }
 
-    set pll_ip [get_ips -quiet pll]
-    if {[llength $pll_ip] == 0} {
+    if {double($freq_mhz) != 200.0} {
         puts "Using RTL MMCM clocking configured by synthesis define for ${freq_mhz} MHz CPU clock"
         return
     }
 
-    puts "Leaving existing pll clk_wiz IP unchanged; RTL MMCM clocking is selected by synthesis defines"
+    set pll_ip [get_ips -quiet pll]
+    if {[llength $pll_ip] == 0} {
+        error "200 MHz build requires the pll clk_wiz IP"
+    }
+    set_property -dict [list \
+        CONFIG.CLKOUT1_REQUESTED_OUT_FREQ {50.000} \
+        CONFIG.CLKOUT2_REQUESTED_OUT_FREQ {200.000}] $pll_ip
+    puts "Using pll clk_wiz IP with 50 MHz peripheral and 200 MHz CPU outputs"
     report_property $pll_ip -file [file join $::report_dir pll_properties.rpt]
 }
 
@@ -313,6 +366,7 @@ proc copy_existing_files {patterns dest_dir} {
 }
 
 proc archive_run_artifacts {run_name artifact_dir pll_freq_mhz run_to report_dir checkpoint_dir run_dir top_name} {
+    global board_xdc dram_coe enable_ila irom_coe
     set artifact_dir [ensure_dir $artifact_dir]
     if {$run_dir eq ""} {
         set run_obj [get_runs -quiet $run_name]
@@ -332,6 +386,7 @@ proc archive_run_artifacts {run_name artifact_dir pll_freq_mhz run_to report_dir
         [file join $run_dir "${top_name}*.bit"] \
         [file join $run_dir "${top_name}*.ltx"] \
         [file join $run_dir "${top_name}_routed.dcp"] \
+        [file join $checkpoint_dir "best_impl_route.dcp"] \
         [file join $checkpoint_dir "impl_1_route.dcp"] \
         [file join $checkpoint_dir "synth_1.dcp"]]
     set copied [copy_existing_files $patterns $artifact_dir]
@@ -341,6 +396,10 @@ proc archive_run_artifacts {run_name artifact_dir pll_freq_mhz run_to report_dir
 
     set fp [open [file join $artifact_dir "manifest.txt"] w]
     puts $fp "pll_freq_mhz=$pll_freq_mhz"
+    puts $fp "board_xdc=$board_xdc"
+    puts $fp "enable_ila=$enable_ila"
+    puts $fp "irom_coe=$irom_coe"
+    puts $fp "dram_coe=$dram_coe"
     puts $fp "run_to=$run_to"
     puts $fp "xpr=[current_project]"
     puts $fp "run_dir=$run_dir"
@@ -354,35 +413,47 @@ proc archive_run_artifacts {run_name artifact_dir pll_freq_mhz run_to report_dir
     puts "Artifacts written to $artifact_dir"
 }
 
+proc discover_routed_implementation_runs {} {
+    set result [list]
+    set top_name [get_property top [get_filesets sources_1]]
+    foreach run_obj [get_runs -quiet] {
+        set run_name [get_property NAME $run_obj]
+        if {![regexp {^impl_(1|sweep_[0-9]+)$} $run_name]} {
+            continue
+        }
+        set routed_dcp [file join [get_property DIRECTORY $run_obj] "${top_name}_routed.dcp"]
+        if {[file exists $routed_dcp]} {
+            lappend result $run_name
+        }
+    }
+    return [lsort -dictionary $result]
+}
+
 proc open_impl_design {run_name checkpoint_dir} {
-    set opened 0
-    if {![catch {open_run $run_name -name $run_name} msg]} {
-        set opened 1
-    } else {
-        puts "warning: open_run $run_name failed: $msg"
+    set run_obj [get_runs -quiet $run_name]
+    if {[llength $run_obj] == 0} {
+        error "implementation run not found: $run_name"
     }
-
-    if {$opened} {
-        return
-    }
-
-    set run_obj [get_runs $run_name]
     set run_dir [get_property DIRECTORY $run_obj]
     set top_name [get_property top [get_filesets sources_1]]
-    set candidates [list \
-        [file join $run_dir "${top_name}_routed.dcp"] \
-        [file join $run_dir "${top_name}.dcp"] \
-        [file join $checkpoint_dir "impl_1_route.dcp"]]
+    set candidates [list [file join $run_dir "${top_name}_routed.dcp"]]
+    if {$run_name eq "impl_1" && $checkpoint_dir ne ""} {
+        lappend candidates [file join $checkpoint_dir "impl_1_route.dcp"]
+    }
 
     foreach dcp $candidates {
         if {[file exists $dcp]} {
-            puts "Opening routed checkpoint: $dcp"
+            puts "Opening $run_name routed checkpoint: $dcp"
             open_checkpoint $dcp
             return
         }
     }
 
-    error "could not open $run_name and no routed checkpoint found in: $candidates"
+    if {![catch {open_run $run_obj -name $run_name} msg]} {
+        return
+    }
+
+    error "could not open $run_name ($msg) and no routed checkpoint found in: $candidates"
 }
 
 if {[lsearch -exact $argv "-help"] >= 0 || [lsearch -exact $argv "--help"] >= 0} {
@@ -406,6 +477,10 @@ set run_to [arg_value "-run_to" "route"]
 set sync_sources [arg_value "-sync_sources" "1"]
 set force_runs [arg_value "-force" "1"]
 set pll_freq_mhz [arg_value "-pll_freq_mhz" "150"]
+set board_xdc [arg_value "-board_xdc" ""]
+set enable_ila [arg_value "-enable_ila" "0"]
+set irom_coe [file normalize [arg_value "-irom_coe" [file join $repo_root "FPGA/coe/irom_M3.coe"]]]
+set dram_coe [file normalize [arg_value "-dram_coe" [file join $repo_root "FPGA/coe/dram_M.coe"]]]
 set timing_summary_max_paths [arg_value "-timing_summary_max_paths" "1000"]
 set timing_path_max_paths [arg_value "-timing_path_max_paths" "500"]
 set timing_nworst [arg_value "-timing_nworst" "100"]
@@ -432,7 +507,7 @@ safe_param general.maxThreads $max_threads
 catch {set_property XPM_LIBRARIES {XPM_MEMORY} [current_project]}
 
 remove_missing_sources
-remove_legacy_pll_ip
+configure_board_constraints $board_xdc
 
 if {$sync_sources} {
     remove_hw_ip_sources
@@ -441,10 +516,13 @@ if {$sync_sources} {
 }
 
 set_property top jyd_fpga [get_filesets sources_1]
+configure_memory_coe IROM $irom_coe
+configure_memory_coe DRAM $dram_coe
+validate_clocking_frequency $pll_freq_mhz
+configure_board_ila $enable_ila
 update_compile_order -fileset sources_1
 
 if {$run_to eq "sync_only"} {
-    validate_clocking_frequency $pll_freq_mhz
     puts "Source synchronization complete."
     close_project
     exit 0
@@ -454,12 +532,17 @@ if {[llength [get_ips -quiet]] > 0} {
     puts "Refreshing IP output products"
     report_ip_status -file [file join $report_dir "ip_status.rpt"]
     catch {upgrade_ip [get_ips]}
-    validate_clocking_frequency $pll_freq_mhz
     generate_target all [get_ips]
 }
 
 if {$run_to eq "reports"} {
-    open_impl_design impl_1 $checkpoint_dir
+    set report_runs [discover_routed_implementation_runs]
+    if {[llength $report_runs] == 0} {
+        error "no implementation run has a routed checkpoint"
+    }
+    puts "Routed implementation runs available for reports: $report_runs"
+    set report_impl_run [select_best_implementation $report_runs $report_dir $checkpoint_dir]
+    open_impl_design $report_impl_run $checkpoint_dir
     report_if_possible "post-route timing summary" \
         "report_timing_summary -delay_type max -max_paths $timing_summary_max_paths -report_unconstrained -check_timing_verbose -file [file join $report_dir post_route_timing_summary.rpt]"
     report_if_possible "post-route violating timing paths" \
@@ -485,7 +568,7 @@ if {$run_to eq "reports"} {
         "report_design_analysis -timing -logic_level_distribution -file [file join $report_dir post_route_design_analysis.rpt]"
     report_if_possible "QoR suggestions" \
         "report_qor_suggestions -file [file join $report_dir post_route_qor_suggestions.rpt]"
-    write_checkpoint -force [file join $checkpoint_dir impl_1_route.dcp]
+    write_checkpoint -force [file join $checkpoint_dir best_impl_route.dcp]
 
     puts "Reports written to $report_dir"
     close_project
@@ -571,7 +654,7 @@ foreach run_name $implementation_runs {
         puts "warning: implementation sweep run $run_name completed with timing violations"
     }
 }
-set best_impl_run [select_best_implementation $implementation_runs $report_dir]
+set best_impl_run [select_best_implementation $implementation_runs $report_dir $checkpoint_dir]
 
 set impl_run_dir ""
 set top_name [get_property top [get_filesets sources_1]]
@@ -606,7 +689,10 @@ report_if_possible "post-route design analysis" \
     "report_design_analysis -timing -logic_level_distribution -file [file join $report_dir post_route_design_analysis.rpt]"
 report_if_possible "QoR suggestions" \
     "report_qor_suggestions -file [file join $report_dir post_route_qor_suggestions.rpt]"
-write_checkpoint -force [file join $checkpoint_dir impl_1_route.dcp]
+write_checkpoint -force [file join $checkpoint_dir best_impl_route.dcp]
+if {$enable_ila} {
+    write_debug_probes -force [file join $impl_run_dir "${top_name}.ltx"]
+}
 archive_run_artifacts $best_impl_run $artifact_dir $pll_freq_mhz $run_to $report_dir $checkpoint_dir $impl_run_dir $top_name
 
 puts "Reports written to $report_dir"

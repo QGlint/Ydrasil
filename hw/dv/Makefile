@@ -16,6 +16,7 @@ BENDER ?= bender
 BENDER_INCLUDE_TB ?= 1
 BENDER_TB_TARGET ?= ip_tb
 DIV_IMPL ?= lzc
+ITCM_ADDR_WIDTH_OVERRIDE ?=
 
 BENDER_TARGET_ARGS := -t $(SIM_TOOL)
 ifeq ($(BENDER_INCLUDE_TB),1)
@@ -32,7 +33,13 @@ endif
 # Paths
 ##################################
 
-OBJ_DIR ?= $(BUILD_DIR)/$(TOP)
+DEFAULT_OBJ_DIR := $(BUILD_DIR)/$(TOP)
+OBJ_DIR ?= $(DEFAULT_OBJ_DIR)
+ifneq ($(strip $(ITCM_ADDR_WIDTH_OVERRIDE)),)
+ifeq ($(abspath $(OBJ_DIR)),$(abspath $(DEFAULT_OBJ_DIR)))
+$(error ITCM_ADDR_WIDTH_OVERRIDE requires a dedicated OBJ_DIR; refusing to overwrite the normal simulation model)
+endif
+endif
 TB_SRCS ?= $(wildcard $(IP_DIR)/dv/*.sv)
 INC_DIRS += $(PROJECT_ROOT)/hw/include
 INC_DIRS += $(IP_DIR)/rtl
@@ -51,6 +58,9 @@ INC_DIRS := $(sort $(INC_DIRS))
 ifeq ($(USE_BENDER),1)
 FLIST_DIR := $(OBJ_DIR)/flist
 FLIST_FILE := $(FLIST_DIR)/$(IP)_$(SIM_TOOL).f
+RTL_OVERRIDE_DIR := $(OBJ_DIR)/rtl_override
+YDRASIL_PKG_SOURCE := $(PROJECT_ROOT)/hw/ip/ydrasil_core/rtl/ydrasil_pkg.sv
+YDRASIL_PKG_OVERRIDE := $(RTL_OVERRIDE_DIR)/ydrasil_pkg.sv
 endif
 
 ##################################
