@@ -75,7 +75,7 @@ import ydrasil_pkg::*;
     assign if_id_ready_o =
         (decode_count_q != DECODE_FIFO_COUNT_WIDTH'(DECODE_FIFO_DEPTH));
     assign decode_valid_o = (decode_count_q != '0);
-    assign decode_pkt_o = decode_fifo_q[decode_head_q];
+    assign decode_pkt_o = decode_head_q ? decode_fifo_q[1] : decode_fifo_q[0];
 
     always_comb begin
         decoded_pkt = '0;
@@ -122,12 +122,15 @@ import ydrasil_pkg::*;
             decode_head_q <= 1'b0;
             decode_tail_q <= 1'b0;
         end else begin
-            if (decode_pop)
-                decode_head_q <= ~decode_head_q;
             if (decode_push) begin
-                decode_fifo_q[decode_tail_q] <= decoded_pkt;
+                if (decode_tail_q)
+                    decode_fifo_q[1] <= decoded_pkt;
+                else
+                    decode_fifo_q[0] <= decoded_pkt;
                 decode_tail_q <= ~decode_tail_q;
             end
+            if (decode_pop)
+                decode_head_q <= ~decode_head_q;
 
             case ({decode_push, decode_pop})
                 2'b10: decode_count_q <= decode_count_q + 1'b1;
@@ -136,5 +139,20 @@ import ydrasil_pkg::*;
             endcase
         end
     end
+
+`ifndef SYNTHESIS
+    // The two-slot ring is empty/full when the pointers match and contains
+    // one entry when they differ. Keep this invariant close to the state.
+    always_ff @(posedge clk) begin
+        if (rst_n && !flush_i) begin
+            assert (decode_count_q <= DECODE_FIFO_COUNT_WIDTH'(DECODE_FIFO_DEPTH))
+                else $fatal(1, "decode FIFO count overflow: %0d", decode_count_q);
+            assert ((decode_head_q == decode_tail_q) ==
+                    ((decode_count_q == '0) ||
+                     (decode_count_q == DECODE_FIFO_COUNT_WIDTH'(DECODE_FIFO_DEPTH))))
+                else $fatal(1, "decode FIFO pointer/count invariant failed");
+        end
+    end
+`endif
 
 endmodule

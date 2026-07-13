@@ -24,6 +24,7 @@ import ydrasil_pkg::*;
 
     wire [DTCM_ADDR_WIDTH-1:0] dtcm_addr;
     wire [BUS_DATA_WIDTH-1:0] dtcm_rdata;
+    reg  [BUS_DATA_WIDTH-1:0] lsu_dtcm_rdata_q;
     wire [BUS_DATA_WIDTH-1:0] dtcm_wdata;
     wire        dtcm_wen;
     wire        dtcm_en;
@@ -56,11 +57,24 @@ import ydrasil_pkg::*;
     assign dtcm_wmask = (lsu_mem_req_i.valid & lsu_mem_req_i.write) ?
         lsu_mem_req_i.wmask : 4'b0000;
 
-    assign dtcm_addr = lsu_mem_req_i.valid ? lsu_dtcm_addr : if_dtcm_addr;
+    // FPGA/synthesis builds never fetch instructions from DTCM. Express that
+    // constant here so LSU request valid is not part of every BRAM address bit.
+    assign dtcm_addr = IF_DTCM_FETCH_ENABLE ?
+        (lsu_mem_req_i.valid ? lsu_dtcm_addr : if_dtcm_addr) : lsu_dtcm_addr;
     assign if_mem_rdata_o = if_dtcm_access ? dtcm_rdata : itcm_rdata;
-    assign lsu_mem_data_o = dtcm_rdata;
+    assign lsu_mem_data_o = lsu_dtcm_rdata_q;
     assign dtcm_en = 1'b1;
     assign dtcm_wen = lsu_mem_req_i.valid & lsu_mem_req_i.write;
+
+    // This register replaces the LSU's former post-shift S2 data register.
+    // Keeping it at the memory boundary removes the long BRAM-output route
+    // without changing the architectural load latency.
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n)
+            lsu_dtcm_rdata_q <= '0;
+        else
+            lsu_dtcm_rdata_q <= dtcm_rdata;
+    end
 
     itcm #(
         .ITCM_ADDR_WIDTH(ITCM_ADDR_WIDTH),

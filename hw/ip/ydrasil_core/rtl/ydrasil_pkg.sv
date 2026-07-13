@@ -273,9 +273,6 @@ package ydrasil_pkg;
 	localparam int PRODUCER_ID_WIDTH = PRODUCER_SLOT_WIDTH + 1;
 	typedef logic [PRODUCER_SLOT_WIDTH-1:0] producer_slot_t;
 	typedef logic [PRODUCER_ID_WIDTH-1:0] producer_id_t;
-	function automatic producer_slot_t producer_slot(input producer_id_t id);
-		producer_slot = id[PRODUCER_SLOT_WIDTH-1:0];
-	endfunction
 	localparam int COMPLETION_LANES = 3;
 	localparam int COMPLETION_ALU = 0;
 	localparam int COMPLETION_LSU = 1;
@@ -387,6 +384,7 @@ package ydrasil_pkg;
 		logic                                prev_alu_bypass_rs2;
 		logic                                prev_load_bypass_rs1;
 		logic                                prev_load_bypass_rs2;
+		producer_id_t                        prev_load_producer_id;
 		logic                                rs1_pending_stall;
 		logic                                rs2_pending_stall;
 		logic                                rd_waw_stall;

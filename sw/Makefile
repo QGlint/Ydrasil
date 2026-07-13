@@ -54,6 +54,9 @@ COREMARK_OUT ?= $(PROJECT_ROOT)/build/app/coremark
 COREMARK_NAME := coremark
 COREMARK_ITERATIONS ?= 1
 COREMARK_HAS_FLOAT ?= 1
+COREMARK_EXTRA_CFLAGS ?=
+COREMARK_APP_ONLY_CFLAGS ?=
+COREMARK_FLAGS_STR ?= $(ARCH)-$(ABI)-O2
 COREMARK_ELF := $(COREMARK_OUT)/$(COREMARK_NAME).elf
 COREMARK_BIN := $(COREMARK_OUT)/$(COREMARK_NAME).bin
 COREMARK_DUMP := $(COREMARK_OUT)/$(COREMARK_NAME).dump
@@ -71,6 +74,8 @@ SORT_APP_BINS := $(addprefix $(SORT_APP_OUT)/,$(addsuffix .bin,$(SORT_APP_NAMES)
 SORT_APP_DUMPS := $(addprefix $(SORT_APP_OUT)/,$(addsuffix .dump,$(SORT_APP_NAMES)))
 SORT_APP_ITCMS := $(addprefix $(SORT_APP_OUT)/,$(addsuffix .itcm,$(SORT_APP_NAMES)))
 SORT_APP_DTCMS := $(addprefix $(SORT_APP_OUT)/,$(addsuffix .dtcm,$(SORT_APP_NAMES)))
+SORT_APP_EXTRA_CFLAGS ?=
+SORT_APP_ONLY_CFLAGS ?=
 BOUNDARY_APP_DIR := apps/boundary
 BOUNDARY_APP_OUT ?= $(PROJECT_ROOT)/build/app/boundary
 BOUNDARY_APP_NAMES := $(sort $(basename $(notdir $(wildcard $(BOUNDARY_APP_DIR)/*.c))))
@@ -87,6 +92,7 @@ BSP_ASM_SRCS := $(wildcard $(BSP_DIR)/*.S)
 BSP_C_SRCS := \
 	$(BSP_DIR)/lib/platform.c \
 	$(BSP_DIR)/lib/int_handler.c \
+	$(BSP_DIR)/lib/memory.c \
 	$(BSP_DIR)/lib/sim_ctrl.c \
 	$(BSP_DIR)/lib/syscalls.c \
 	$(BSP_DIR)/lib/xprintf.c
@@ -117,10 +123,11 @@ COREMARK_CFLAGS := \
 	-DYDRASIL_SIM_CTRL=1 \
 	-DSDK_BANNER=0 \
 	-DPERFORMANCE_RUN=1 \
-	-DFLAGS_STR=\"$(ARCH)-$(ABI)-O2\" \
+	-DFLAGS_STR=\"$(COREMARK_FLAGS_STR)\" \
 	-I$(COREMARK_DIR) \
 	-I$(COREMARK_DIR)/$(COREMARK_PORT_DIR) \
-	$(BSP_INCLUDES)
+	$(BSP_INCLUDES) \
+	$(COREMARK_EXTRA_CFLAGS)
 COREMARK_LDFLAGS := \
 	-march=$(ARCH) \
 	-mabi=$(ABI) \
@@ -147,7 +154,8 @@ SORT_APP_CFLAGS := \
 	-DYDRASIL_SIM_CTRL=1 \
 	-DSDK_BANNER=0 \
 	-I$(SORT_APP_DIR) \
-	$(BSP_INCLUDES)
+	$(BSP_INCLUDES) \
+	$(SORT_APP_EXTRA_CFLAGS)
 SORT_APP_LDFLAGS := \
 	-march=$(ARCH) \
 	-mabi=$(ABI) \
@@ -220,8 +228,18 @@ coremark: $(COREMARK_ELF) $(COREMARK_BIN) $(COREMARK_DUMP) $(COREMARK_ITCM) $(CO
 $(COREMARK_OUT):
 	@mkdir -p $@
 
+ifneq ($(strip $(COREMARK_APP_ONLY_CFLAGS)),)
+$(COREMARK_ELF): $(COREMARK_SRCS) $(BSP_DIR)/link.lds Makefile | $(COREMARK_OUT)
+	@set -eu; obj_dir="$(COREMARK_OUT)/obj"; rm -rf "$$obj_dir"; mkdir -p "$$obj_dir"; objects=""; \
+	for src in $(BSP_ASM_SRCS) $(BSP_C_SRCS); do base=$${src##*/}; base=$${base%.*}; obj="$$obj_dir/bsp_$$base.o"; \
+		$(CC) $(COREMARK_CFLAGS) -c "$$src" -o "$$obj"; objects="$$objects $$obj"; done; \
+	for src in $(COREMARK_C_SRCS); do base=$${src##*/}; base=$${base%.*}; obj="$$obj_dir/app_$$base.o"; \
+		$(CC) $(COREMARK_CFLAGS) $(COREMARK_APP_ONLY_CFLAGS) -c "$$src" -o "$$obj"; objects="$$objects $$obj"; done; \
+	$(CC) $(COREMARK_LDFLAGS) $$objects -lgcc -o "$@"
+else
 $(COREMARK_ELF): $(COREMARK_SRCS) $(BSP_DIR)/link.lds Makefile | $(COREMARK_OUT)
 	$(CC) $(COREMARK_CFLAGS) $(COREMARK_SRCS) $(COREMARK_LDFLAGS) -lgcc -o $@
+endif
 
 $(COREMARK_BIN): $(COREMARK_ELF)
 	$(OBJCOPY) -O binary $< $@
@@ -288,8 +306,17 @@ sort_app: $(SORT_APP_ELFS) $(SORT_APP_BINS) $(SORT_APP_DUMPS) $(SORT_APP_ITCMS) 
 $(SORT_APP_OUT):
 	@mkdir -p $@
 
+ifneq ($(strip $(SORT_APP_ONLY_CFLAGS)),)
+$(SORT_APP_OUT)/%.elf: $(SORT_APP_DIR)/%.c $(SORT_APP_DIR)/sort_common.h $(SORT_APP_DIR)/sort_data.h $(BSP_DIR)/link.lds Makefile | $(SORT_APP_OUT)
+	@set -eu; obj_dir="$(SORT_APP_OUT)/obj/$*"; rm -rf "$$obj_dir"; mkdir -p "$$obj_dir"; objects=""; \
+	for src in $(BSP_ASM_SRCS) $(BSP_C_SRCS); do base=$${src##*/}; base=$${base%.*}; obj="$$obj_dir/bsp_$$base.o"; \
+		$(CC) $(SORT_APP_CFLAGS) -c "$$src" -o "$$obj"; objects="$$objects $$obj"; done; \
+	app_obj="$$obj_dir/app_$*.o"; $(CC) $(SORT_APP_CFLAGS) $(SORT_APP_ONLY_CFLAGS) -c "$<" -o "$$app_obj"; \
+	$(CC) $(SORT_APP_LDFLAGS) $$objects "$$app_obj" -Wl,-Map,$(@:.elf=.map) -lgcc -o "$@"
+else
 $(SORT_APP_OUT)/%.elf: $(SORT_APP_DIR)/%.c $(SORT_APP_DIR)/sort_common.h $(SORT_APP_DIR)/sort_data.h $(BSP_DIR)/link.lds Makefile | $(SORT_APP_OUT)
 	$(CC) $(SORT_APP_CFLAGS) $(BSP_ASM_SRCS) $(BSP_C_SRCS) $< $(SORT_APP_LDFLAGS) -Wl,-Map,$(@:.elf=.map) -lgcc -o $@
+endif
 
 $(SORT_APP_OUT)/%.bin: $(SORT_APP_OUT)/%.elf
 	$(OBJCOPY) -O binary $< $@

@@ -94,6 +94,7 @@ import ydrasil_pkg::*;
 	wire                           id_ex_alu_bypass_rs2;
 	wire                           id_ex_load_bypass_rs1;
 	wire                           id_ex_load_bypass_rs2;
+	producer_id_t                  id_ex_load_bypass_producer_id;
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0]    id_ex_branch_target;
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0]    id_ex_branch_next_pc;
 	wire                           id_ex_branch_eq;
@@ -185,6 +186,7 @@ import ydrasil_pkg::*;
 	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] rf_wdata_rd;
 	wire                        rf_wen_rd;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] rf_waddr_rd;
+	wire [ydrasil_pkg::REGS_NUM-1:0] rf_write_wen;
 	producer_id_t               rf_producer_id;
 	wire                        rf_producer_tracked;
 	wire                        rf_write_commit;
@@ -212,6 +214,10 @@ import ydrasil_pkg::*;
 	wire                            decode_valid;
 	wire                            decode_if_ready;
 	wire                            issue_ready;
+	wire                            load_bypass_completion_ready;
+	wire                            load_replay_stall;
+	wire                            id_ex_execute_valid;
+	wire                            ex_backend_stall;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    id_ctrl_rs1_addr;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    id_ctrl_rs2_addr;
 	wire                            id_ctrl_rs1_ren;
@@ -286,27 +292,23 @@ import ydrasil_pkg::*;
 	reg [ydrasil_pkg::INST_ADDR_WIDTH-1:0] commit_mul_issue_pc_q;
 	reg [ydrasil_pkg::INST_DATA_WIDTH-1:0] commit_mul_issue_instr_q;
 
-	function automatic [ydrasil_pkg::INST_DATA_WIDTH-1:0] commit_read_instr;
-		input [ydrasil_pkg::INST_ADDR_WIDTH-1:0] pc;
-		begin
-			if ((pc >= ydrasil_pkg::DTCM_BASE_ADDR) &&
-			    (pc < (ydrasil_pkg::DTCM_BASE_ADDR + ((32'd1 << ydrasil_pkg::DTCM_ADDR_WIDTH) << 2)))) begin
-				commit_read_instr =
-					u_ydrasil_mems.u_dtcm.u_dram.mem_r[
-						pc[ydrasil_pkg::DTCM_ADDR_WIDTH+1:2]
-					];
-			end else begin
-				commit_read_instr =
-					u_ydrasil_mems.u_itcm.u_irom.mem_r[
-						pc[ydrasil_pkg::ITCM_ADDR_WIDTH+1:2]
-					];
-			end
+	reg [ydrasil_pkg::INST_DATA_WIDTH-1:0] commit_instr;
+	always_comb begin
+		if ((id_instr_addr >= ydrasil_pkg::DTCM_BASE_ADDR) &&
+		    (id_instr_addr < (ydrasil_pkg::DTCM_BASE_ADDR +
+		     ((32'd1 << ydrasil_pkg::DTCM_ADDR_WIDTH) << 2)))) begin
+			commit_instr = u_ydrasil_mems.u_dtcm.u_dram.mem_r[
+				id_instr_addr[ydrasil_pkg::DTCM_ADDR_WIDTH+1:2]
+			];
+		end else begin
+			commit_instr = u_ydrasil_mems.u_itcm.u_irom.mem_r[
+				id_instr_addr[ydrasil_pkg::ITCM_ADDR_WIDTH+1:2]
+			];
 		end
-	endfunction
-
-	assign commit_alu_instr = commit_read_instr(id_instr_addr);
-	assign commit_lsu_instr = commit_read_instr(id_instr_addr);
-	assign commit_mul_instr = commit_read_instr(id_instr_addr);
+	end
+	assign commit_alu_instr = commit_instr;
+	assign commit_lsu_instr = commit_instr;
+	assign commit_mul_instr = commit_instr;
 
 	always_ff @(posedge clk or negedge rst_n) begin
 		if (!rst_n) begin
@@ -320,7 +322,7 @@ import ydrasil_pkg::*;
 			commit_mul_issue_pc_q <= '0;
 			commit_mul_issue_instr_q <= '0;
 		end else begin
-			commit_ex_valid_q <= id_ex_valid & !interrupt & !flush_ex;
+			commit_ex_valid_q <= id_ex_execute_valid & !interrupt & !flush_ex;
 			commit_ex_pc_q <= id_instr_addr;
 			commit_ex_instr_q <= commit_alu_instr;
 			commit_lsu_issue_valid_q <= ex_accept_valid & operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD];
@@ -333,7 +335,16 @@ import ydrasil_pkg::*;
 	end
 `endif
 
-	assign ex_hzd_pkt.valid = id_ex_valid;
+	assign load_bypass_completion_ready = lsu_fwd_pkt.valid &&
+		lsu_fwd_pkt.producer_tracked &&
+		(lsu_fwd_pkt.producer_id == id_ex_load_bypass_producer_id);
+	assign load_replay_stall = id_ex_valid &&
+		(id_ex_load_bypass_rs1 || id_ex_load_bypass_rs2) &&
+		!load_bypass_completion_ready;
+	assign id_ex_execute_valid = id_ex_valid && !load_replay_stall;
+	assign ex_backend_stall = ex_mul_stall | load_replay_stall;
+
+	assign ex_hzd_pkt.valid = id_ex_execute_valid;
 	assign ex_hzd_pkt.interrupt = interrupt;
 	assign ex_hzd_pkt.producer_id = id_ex_producer_id;
 	assign ex_hzd_pkt.producer_tracked = id_ex_producer_tracked;
@@ -369,6 +380,23 @@ import ydrasil_pkg::*;
 	always_comb begin
 		lsu_req_pkt = id_lsu_req_pkt;
 		lsu_req_pkt.valid = id_lsu_req_pkt.valid & ex_accept_valid;
+		lsu_req_pkt.addr = ex_lsu_mem_addr;
+		lsu_req_pkt.store_data = ex_lsu_result;
+		if (id_ex_load_bypass_rs2 && load_bypass_completion_ready) begin
+			lsu_req_pkt.store_data_valid = 1'b1;
+			lsu_req_pkt.store_data_producer_tracked = 1'b0;
+		end
+		lsu_req_pkt.addr_is_dtcm =
+			(ex_lsu_mem_addr[31:ydrasil_pkg::DTCM_ADDR_WIDTH+2] ==
+			 ydrasil_pkg::DTCM_BASE_ADDR[31:ydrasil_pkg::DTCM_ADDR_WIDTH+2]);
+		if (id_lsu_req_pkt.op[ydrasil_pkg::OP_LSU_SB])
+			lsu_req_pkt.store_mask = 4'b0001 << ex_lsu_mem_addr[1:0];
+		else if (id_lsu_req_pkt.op[ydrasil_pkg::OP_LSU_SH])
+			lsu_req_pkt.store_mask = ex_lsu_mem_addr[1] ? 4'b1100 : 4'b0011;
+		else if (id_lsu_req_pkt.op[ydrasil_pkg::OP_LSU_SW])
+			lsu_req_pkt.store_mask = 4'b1111;
+		else
+			lsu_req_pkt.store_mask = 4'b0000;
 	end
 	assign scoreboard_stall = hzd_status_pkt.scoreboard_stall;
 	assign lsu_struct_stall = hzd_status_pkt.lsu_struct_stall;
@@ -561,6 +589,7 @@ import ydrasil_pkg::*;
 		.id_ex_alu_bypass_rs2_o(id_ex_alu_bypass_rs2),
 		.id_ex_load_bypass_rs1_o(id_ex_load_bypass_rs1),
 		.id_ex_load_bypass_rs2_o(id_ex_load_bypass_rs2),
+		.id_ex_load_bypass_producer_id_o(id_ex_load_bypass_producer_id),
 		.id_ex_branch_target_o(id_ex_branch_target),
 		.id_ex_branch_next_pc_o(id_ex_branch_next_pc),
 		.id_ex_branch_eq_o  (id_ex_branch_eq),
@@ -593,13 +622,14 @@ import ydrasil_pkg::*;
 		.bru_operand_b_i    (bru_operand_b),
 		.lsu_operand_a_i    (lsu_operand_a),
 		.lsu_operand_b_i    (lsu_operand_b),
+		.lsu_store_data_i   (id_lsu_req_pkt.store_data),
 		.mul_operand_a_i    (mul_operand_a),
 		.mul_operand_b_i    (mul_operand_b),
 		.csr_operand_a_i    (csr_operand_a),
 		.csr_operand_b_i    (csr_operand_b),
 		.operator_i         (operator),
 		.operator_type_i    (operator_type),
-		.id_ex_valid_i      (id_ex_valid),
+		.id_ex_valid_i      (id_ex_execute_valid),
 		.id_ex_jalr_i       (id_ex_jalr),
 		.id_ex_alu_bypass_rs1_i(id_ex_alu_bypass_rs1),
 		.id_ex_alu_bypass_rs2_i(id_ex_alu_bypass_rs2),
@@ -708,8 +738,7 @@ import ydrasil_pkg::*;
 	ydrasil_registers u_ydrasil_registers (
 		.clk          (clk),
 		.rst_n        (rst_n),
-		.rf_wen_rd_i  (rf_wen_rd & rf_write_commit),
-		.rf_waddr_rd_i(rf_waddr_rd),
+		.rf_write_wen_i(rf_write_wen),
 		.rf_wdata_rd_i(rf_wdata_rd),
 		.rf_raddr_rs1_i(rf_raddr_rs1),
 		.rf_rdata_rs1_o(rf_rdata_rs1),
@@ -727,7 +756,7 @@ import ydrasil_pkg::*;
 			.completion_bus_i  (completion_bus),
 			.lsu_status_i      (lsu_status_pkt),
 			.clint_stall_i     (clint_stall),
-			.ex_mul_stall_i     (ex_mul_stall),
+			.ex_mul_stall_i     (ex_backend_stall),
 			.wb_backpressure_i  (wb_backpressure),
 			.rf_wen_rd_i       (rf_wen_rd),
 			.rf_waddr_rd_i     (rf_waddr_rd),
@@ -743,6 +772,7 @@ import ydrasil_pkg::*;
 			.producer_alloc_id_o(producer_alloc_id),
 			.producer_alloc_tracked_o(producer_alloc_tracked),
 			.rf_write_commit_o(rf_write_commit),
+			.rf_write_wen_o   (rf_write_wen),
 		.stall_if_o        (stall_if),
 		.stall_id_o        (stall_id),
         .stall_pc_o        (stall_pc),

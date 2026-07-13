@@ -773,32 +773,32 @@ end
                 ((|(u_dut.u_ctrl.producer_complete_mask &
                     ~u_dut.u_ctrl.producer_retire_q &
                     ~(u_dut.u_ctrl.producer_alloc_ex ?
-                      (ydrasil_pkg::PRODUCER_NUM'(1) << ydrasil_pkg::producer_slot(u_dut.ex_hzd_pkt.producer_id)) : '0))) ? 1'b1 : 1'b0);
+                      (ydrasil_pkg::PRODUCER_NUM'(1) << u_dut.ex_hzd_pkt.producer_id[ydrasil_pkg::PRODUCER_SLOT_WIDTH-1:0]) : '0))) ? 1'b1 : 1'b0);
             same_slot_retire_only_count <= same_slot_retire_only_count +
                 ((|(u_dut.u_ctrl.producer_retire_q &
                     ~u_dut.u_ctrl.producer_complete_mask &
                     ~(u_dut.u_ctrl.producer_alloc_ex ?
-                      (ydrasil_pkg::PRODUCER_NUM'(1) << ydrasil_pkg::producer_slot(u_dut.ex_hzd_pkt.producer_id)) : '0))) ? 1'b1 : 1'b0);
+                      (ydrasil_pkg::PRODUCER_NUM'(1) << u_dut.ex_hzd_pkt.producer_id[ydrasil_pkg::PRODUCER_SLOT_WIDTH-1:0]) : '0))) ? 1'b1 : 1'b0);
             same_slot_allocate_only_count <= same_slot_allocate_only_count +
                 ((u_dut.u_ctrl.producer_alloc_ex &&
-                  !u_dut.u_ctrl.producer_complete_mask[ydrasil_pkg::producer_slot(u_dut.ex_hzd_pkt.producer_id)] &&
+                  !u_dut.u_ctrl.producer_complete_mask[u_dut.ex_hzd_pkt.producer_id[ydrasil_pkg::PRODUCER_SLOT_WIDTH-1:0]] &&
                   !u_dut.u_ctrl.producer_retire_q[u_dut.ex_hzd_pkt.producer_id]) ? 1'b1 : 1'b0);
             same_slot_complete_retire_count <= same_slot_complete_retire_count +
                 ((|(u_dut.u_ctrl.producer_complete_mask &
                     u_dut.u_ctrl.producer_retire_q &
                     ~(u_dut.u_ctrl.producer_alloc_ex ?
-                      (ydrasil_pkg::PRODUCER_NUM'(1) << ydrasil_pkg::producer_slot(u_dut.ex_hzd_pkt.producer_id)) : '0))) ? 1'b1 : 1'b0);
+                      (ydrasil_pkg::PRODUCER_NUM'(1) << u_dut.ex_hzd_pkt.producer_id[ydrasil_pkg::PRODUCER_SLOT_WIDTH-1:0]) : '0))) ? 1'b1 : 1'b0);
             same_slot_retire_allocate_count <= same_slot_retire_allocate_count +
                 ((u_dut.u_ctrl.producer_alloc_ex &&
                   u_dut.u_ctrl.producer_retire_q[u_dut.ex_hzd_pkt.producer_id] &&
-                  !u_dut.u_ctrl.producer_complete_mask[ydrasil_pkg::producer_slot(u_dut.ex_hzd_pkt.producer_id)]) ? 1'b1 : 1'b0);
+                  !u_dut.u_ctrl.producer_complete_mask[u_dut.ex_hzd_pkt.producer_id[ydrasil_pkg::PRODUCER_SLOT_WIDTH-1:0]]) ? 1'b1 : 1'b0);
             same_slot_complete_allocate_count <= same_slot_complete_allocate_count +
                 ((u_dut.u_ctrl.producer_alloc_ex &&
-                  u_dut.u_ctrl.producer_complete_mask[ydrasil_pkg::producer_slot(u_dut.ex_hzd_pkt.producer_id)] &&
+                  u_dut.u_ctrl.producer_complete_mask[u_dut.ex_hzd_pkt.producer_id[ydrasil_pkg::PRODUCER_SLOT_WIDTH-1:0]] &&
                   !u_dut.u_ctrl.producer_retire_q[u_dut.ex_hzd_pkt.producer_id]) ? 1'b1 : 1'b0);
             same_slot_all_count <= same_slot_all_count +
                 ((u_dut.u_ctrl.producer_alloc_ex &&
-                  u_dut.u_ctrl.producer_complete_mask[ydrasil_pkg::producer_slot(u_dut.ex_hzd_pkt.producer_id)] &&
+                  u_dut.u_ctrl.producer_complete_mask[u_dut.ex_hzd_pkt.producer_id[ydrasil_pkg::PRODUCER_SLOT_WIDTH-1:0]] &&
                   u_dut.u_ctrl.producer_retire_q[u_dut.ex_hzd_pkt.producer_id]) ? 1'b1 : 1'b0);
             sb_rs1_pending_count <= sb_rs1_pending_count +
                 (u_dut.rs1_pending_stall ? 32'd1 : 32'd0);

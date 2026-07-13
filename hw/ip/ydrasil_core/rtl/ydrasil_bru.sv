@@ -82,15 +82,11 @@ import ydrasil_pkg::*;
          ex_bjp_bltu |
          ex_bjp_bgeu);
 
-    wire ex_branch_cmp_needs_bypass = id_ex_alu_bypass_rs1_i | id_ex_alu_bypass_rs2_i;
-    wire ex_branch_eq =
-        ex_branch_cmp_needs_bypass ? (operand_a_i == operand_b_i) : id_ex_branch_eq_i;
-    wire ex_branch_ge_signed =
-        ex_branch_cmp_needs_bypass ? ($signed(operand_a_i) >= $signed(operand_b_i)) :
-                                     id_ex_branch_ge_signed_i;
-    wire ex_branch_ge_unsigned =
-        ex_branch_cmp_needs_bypass ? (operand_a_i >= operand_b_i) :
-                                     id_ex_branch_ge_unsigned_i;
+    // Compare the registered EX operands locally. This preserves the existing
+    // previous-ALU bypass without pulling the compare into the decode/issue path.
+    wire ex_branch_eq = (operand_a_i == operand_b_i);
+    wire ex_branch_ge_signed = ($signed(operand_a_i) >= $signed(operand_b_i));
+    wire ex_branch_ge_unsigned = (operand_a_i >= operand_b_i);
 
     wire ex_branch_jump =
         ex_bjp_jump |
@@ -115,16 +111,14 @@ import ydrasil_pkg::*;
 
     wire ex_pc_redirect =
         interrupt_i | (ex_is_jump & ex_branch_jump & !interrupt_i) | ex_branch_mispredict;
-    wire [DATA_WIDTH-1:0] ex_pc_redirect_target =
-        interrupt_i ? clint_ex_int_addr_i :
-        (ex_is_jump & ex_branch_jump) ? ex_jump_target :
-                                        ex_branch_actual_next_pc;
+    wire ex_direct_redirect = interrupt_i | ex_is_jump;
     wire ex_bp_train_valid = ex_is_branch & !interrupt_i;
 
     reg                       ex2_branch_jump_q;
     reg [DATA_WIDTH-1:0]      ex2_branch_target_q;
     reg                       ex2_pc_redirect_q;
-    reg [DATA_WIDTH-1:0]      ex2_pc_redirect_target_q;
+    reg                       ex2_direct_redirect_q;
+    reg [DATA_WIDTH-1:0]      ex2_branch_next_pc_q;
     reg                       ex2_bp_train_valid_q;
     reg [DATA_WIDTH-1:0]      ex2_bp_train_pc_q;
     reg                       ex2_bp_train_taken_q;
@@ -151,7 +145,8 @@ import ydrasil_pkg::*;
             ex2_branch_jump_q <= 1'b0;
             ex2_branch_target_q <= '0;
             ex2_pc_redirect_q <= 1'b0;
-            ex2_pc_redirect_target_q <= '0;
+            ex2_direct_redirect_q <= 1'b0;
+            ex2_branch_next_pc_q <= '0;
             ex2_bp_train_valid_q <= 1'b0;
             ex2_bp_train_pc_q <= '0;
             ex2_bp_train_taken_q <= 1'b0;
@@ -176,7 +171,8 @@ import ydrasil_pkg::*;
             ex2_branch_jump_q <= 1'b0;
             ex2_branch_target_q <= '0;
             ex2_pc_redirect_q <= 1'b0;
-            ex2_pc_redirect_target_q <= '0;
+            ex2_direct_redirect_q <= 1'b0;
+            ex2_branch_next_pc_q <= '0;
             ex2_bp_train_valid_q <= 1'b0;
             ex2_bp_train_pc_q <= '0;
             ex2_bp_train_taken_q <= 1'b0;
@@ -201,7 +197,8 @@ import ydrasil_pkg::*;
             ex2_branch_jump_q <= ex_branch_jump | interrupt_i;
             ex2_branch_target_q <= interrupt_i ? clint_ex_int_addr_i : ex_jump_target;
             ex2_pc_redirect_q <= ex_pc_redirect;
-            ex2_pc_redirect_target_q <= ex_pc_redirect_target;
+            ex2_direct_redirect_q <= ex_direct_redirect;
+            ex2_branch_next_pc_q <= ex_branch_next_pc;
             ex2_bp_train_valid_q <= ex_bp_train_valid;
             ex2_bp_train_pc_q <= ex_branch_pc;
             ex2_bp_train_taken_q <= ex_branch_taken;
@@ -229,7 +226,9 @@ import ydrasil_pkg::*;
     assign ex_branch_target_o = ex2_branch_target_q;
     assign ex_branch_mispredict_o = ex2_branch_mispredict_q;
     assign ex_pc_redirect_o = ex2_pc_redirect_q;
-    assign ex_pc_redirect_target_o = ex2_pc_redirect_target_q;
+    assign ex_pc_redirect_target_o = ex2_direct_redirect_q ?
+        ex2_branch_target_q :
+        (ex2_bp_train_taken_q ? ex2_bp_train_target_q : ex2_branch_next_pc_q);
     assign ex_bp_train_valid_o = ex2_bp_train_valid_q;
     assign ex_bp_train_pc_o = ex2_bp_train_pc_q;
     assign ex_bp_train_taken_o = ex2_bp_train_taken_q;

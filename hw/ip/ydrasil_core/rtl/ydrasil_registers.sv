@@ -8,8 +8,7 @@ import ydrasil_pkg::*;
     input wire rst_n,
 
     // from ex
-    input wire                         rf_wen_rd_i,     // 写寄存器标志
-    input wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]  rf_waddr_rd_i,  // 写寄存器地址
+    input wire [ydrasil_pkg::REGS_NUM-1:0] rf_write_wen_i,
     input wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]  rf_wdata_rd_i,  // 写寄存器数据
 
     // from id
@@ -28,17 +27,6 @@ import ydrasil_pkg::*;
 
     reg [ydrasil_pkg::REGS_DATA_WIDTH-1:0] registers[0:ydrasil_pkg::REGS_NUM - 1];
 
-    wire [ydrasil_pkg::REGS_NUM-1:0] registers_wen;  // 每个寄存器的写使能信号
-
-    assign registers_wen[0] = 1'b0;  
-
-    genvar i;
-    generate
-        for (i = 1; i < ydrasil_pkg::REGS_NUM; i = i + 1) begin : gen_regs_we
-            assign registers_wen[i] = (rf_wen_rd_i ) && (rf_waddr_rd_i == i) && (rst_n);
-        end
-    endgenerate
-
     genvar j;
     generate
         for (j = 0; j < ydrasil_pkg::REGS_NUM; j = j + 1) begin : gen_regs
@@ -46,7 +34,7 @@ import ydrasil_pkg::*;
                 if (!rst_n) begin
                     registers[j] <= '0;
                 end else begin
-                    if (registers_wen[j]) begin
+                    if (rf_write_wen_i[j]) begin
                         registers[j] <= rf_wdata_rd_i;
                     end
                 end
