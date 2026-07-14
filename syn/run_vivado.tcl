@@ -69,9 +69,9 @@ proc prepare_implementation_runs {count mode} {
     }
 
     set strategies [list \
+        Performance_ExtraTimingOpt \
         Performance_Explore \
         Performance_ExplorePostRoutePhysOpt \
-        Performance_ExtraTimingOpt \
         Performance_Retiming]
     set count [clamp_int $count 1 [llength $strategies]]
     set runs [list]

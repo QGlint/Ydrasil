@@ -65,6 +65,15 @@ make regression
 make regression_clean
 ```
 
+从原始 M3 COE 生成并运行保持 `80:10` 循环比例的快速性能指标：
+
+```sh
+make coe_loop_lina
+```
+
+`loop_lina` 默认把12个80轮维度缩为16轮、最外层10轮缩为2轮；
+生成物位于 `build/fpga_coe_m3/`，结果会被 `make ppa_perf_report` 收集。
+
 长期回归目标由 `REGRESSION_TARGETS` 控制，默认包含完整 sort 与优化矩阵，
 可继续追加随机指令测试目标。完整 sort 不再属于 `coverage_all`，
 `coverage_quick` 也保持原有快速套件。

@@ -1175,6 +1175,7 @@ end
 	logic sim_done;
 	logic perf_terminal_printed_q;
 	bit finish_on_led;
+	bit finish_on_terminal_led;
 	bit finish_on_tohost;
 	bit perip_debug_en;
 
@@ -1186,6 +1187,7 @@ end
 
 	initial begin
 		finish_on_led = !$test$plusargs("no_finish_on_led");
+		finish_on_terminal_led = $test$plusargs("finish_on_terminal_led");
 		finish_on_tohost = !$test$plusargs("no_finish_on_tohost");
 		perip_debug_en = $test$plusargs("perip_debug");
 	end
@@ -1212,7 +1214,11 @@ end
 		if (rst) begin
 			sim_done <= 1'b0;
 			perf_terminal_printed_q <= 1'b0;
-		end else if (finish_on_led && perip_wen && (perip_addr == LED_ADDR) && (perip_wdata != 32'h0)) begin
+		end else if (perip_wen && (perip_addr == LED_ADDR) &&
+		             ((finish_on_led && (perip_wdata != 32'h0)) ||
+		              (finish_on_terminal_led &&
+		               ((perip_wdata == 32'h078b7323) ||
+		                (perip_wdata == 32'h00504f53))))) begin
 			sim_done <= 1'b1;
 		end
 
