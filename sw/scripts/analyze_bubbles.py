@@ -39,7 +39,7 @@ def signed_counter(value_: float, bits: int = 32) -> int:
 
 
 def selected_logs(root: Path) -> list[Path]:
-    suites = ("coe_loop5", "coremark", "sort", "boundary", "rv32ui", "rv32um", "rv32uz", "rv32mi")
+    suites = ("coe_loop5", "coe_loop_lina", "coremark", "sort", "boundary", "rv32ui", "rv32um", "rv32uz", "rv32mi")
     return sorted(path for path in root.rglob("hw.log") if any(part.startswith(suites) for part in path.parts))
 
 
@@ -107,7 +107,8 @@ def main() -> None:
         for program, records in programs:
             writer.writerow([program, *[value(records, record, field) for _, record, field in columns]])
 
-    focus = [(name, records) for name, records in programs if name in {"coe_loop5", "coremark"}]
+    focus = [(name, records) for name, records in programs
+             if name in {"coe_loop5", "coe_loop_lina", "coremark"}]
     report = args.out_dir / "perf_bubble_analysis.md"
     with report.open("w") as stream:
         stream.write("# Pipeline bubble analysis\n\n")

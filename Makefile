@@ -101,6 +101,7 @@ PPA_COE_LOG ?= $(PPA_DIR)/$(COE_SIMPLE_NAME)_summary.log
 COE_M3_DIR ?= $(BUILD_DIR)/fpga_coe_m3
 COE_TO_MEM ?= $(PROJECT_ROOT)/sw/coe_to_mem.pl
 COE_LOOP_PATCH ?= $(PROJECT_ROOT)/sw/make_m3_loop_variant.pl
+COE_LOOP_LINA_PATCH ?= $(PROJECT_ROOT)/sw/make_m3_loop_lina.pl
 COE_M3_ITCM ?= $(COE_M3_DIR)/irom_M3.itcm
 COE_M3_ITCM_BIN ?= $(COE_M3_DIR)/irom_M3_itcm.bin
 COE_M3_DTCM ?= $(COE_M3_DIR)/dram_M.dtcm
@@ -114,15 +115,26 @@ COE_SIMPLE_LOG ?= $(HW_TRACE_OUT_DIR)/$(COE_SIMPLE_NAME)/hw.log
 COE_SIMPLE_SIM_EXTRA_DEFINES ?= +no_finish_on_led +no_finish_on_tohost +perip_debug +commit_trace +cpp_timeout=$(COE_SIM_TIMEOUT) +sv_timeout=$(COE_SIM_TIMEOUT)
 COE_ISA_SIM_EXTRA_DEFINES ?= +no_finish_on_led +no_finish_on_tohost +perip_debug +commit_trace +cpp_timeout=$(COE_SIM_TIMEOUT) +sv_timeout=$(COE_SIM_TIMEOUT)
 COE_EXPECT_SEG ?= 0x37800000
+COE_EXPECT_SEG_REGEX ?=
 COE_EXPECT_CNT_START ?= 0x80000000
 COE_EXPECT_CNT_STOP ?= 0xffffffff
 COE_EXPECT_CNT_READ ?= 0x00000000
+COE_REQUIRE_CNT_READ ?= 0
 COE_EXPECT_LED ?= 0x078b7323
 COE_LOOP5_DIR ?= $(COE_M3_DIR)
 COE_LOOP5_ITCM_BIN ?= $(COE_LOOP5_DIR)/irom_M3_loop5_itcm.bin
 COE_LOOP5_ITCM ?= $(COE_LOOP5_DIR)/irom_M3_loop5.itcm
 COE_LOOP5_DTCM ?= $(COE_LOOP5_DIR)/dram_M_loop5.dtcm
 COE_LOOP5_DUMP ?= $(COE_LOOP5_DIR)/irom_M3_loop5.dump
+COE_LOOP_LINA_DIR ?= $(COE_M3_DIR)
+COE_LOOP_LINA_SCALE ?= 5
+COE_LOOP_LINA_SIM_TIMEOUT ?= 5000000
+COE_LOOP_LINA_SIM_EXTRA_DEFINES ?= +no_finish_on_led +no_finish_on_tohost +finish_on_terminal_led +perip_debug +cpp_timeout=$(COE_LOOP_LINA_SIM_TIMEOUT) +sv_timeout=$(COE_LOOP_LINA_SIM_TIMEOUT)
+COE_LOOP_LINA_ITCM_BIN ?= $(COE_LOOP_LINA_DIR)/irom_M3_loop_lina_itcm.bin
+COE_LOOP_LINA_ITCM ?= $(COE_LOOP_LINA_DIR)/irom_M3_loop_lina.itcm
+COE_LOOP_LINA_DTCM ?= $(COE_LOOP_LINA_DIR)/dram_M_loop_lina.dtcm
+COE_LOOP_LINA_DUMP ?= $(COE_LOOP_LINA_DIR)/irom_M3_loop_lina.dump
+
 
 export PROJECT_ROOT BUILD_DIR WAVE_DIR LOG_DIR SIM_TOOL IP VERILATOR_MOD COVERAGE VERILATOR_COVERAGE UVM USE_BENDER BENDER DIV_IMPL LSU_IMPL MEMS_IMPL ARCH ABI RISCV_PREFIX CC OBJCOPY OBJDUMP GDB QEMU TRACE_TO_CSV TRACE_COMPARE
 
@@ -189,7 +201,7 @@ $(error Unsupported SYN_PLL_FREQ_MHZ=$(SYN_PLL_FREQ_MHZ); supported values: $(SY
 endif
 
 .PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests regression regression_all regression_clean init install-bender get_spike download_and_extract_spike check_spike_prebuilt_abi build_spike_from_source check_deps spike spike_wave_to_csv sim_compare commit_check commit_spike_csv commit_hw_trace commit_hw_csv commit_compare rv_test_comp_genmem ppa_rvtest_report ppa_perf_report coe_simple coe_smoke coe_smoke_led coe_isa_probes coverage_all coverage_quick coverage_clean coverage_report sw_boundary_test sw_coverage sw_coverage_clean sw_run_mode sw_coverage_report
-.PHONY: coremark coremark_sim coremark_run coremark_result coremark-rebuild coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map coremark_opt_all coremark_opt_build_all coremark_opt_sim_all coremark_opt_report coremark_opt_clean app_opt_comp_expanded_if_needed $(COREMARK_OPT_BUILD_TARGETS) $(COREMARK_OPT_SIM_TARGETS) sort_app sort_all sort_sim_all sort_report sort_app_sim sort_app-rebuild sort_app-clean sort_opt_all sort_opt_build_all sort_opt_sim_all sort_opt_report sort_opt_clean $(SORT_OPT_BUILD_TARGETS) $(SORT_OPT_SIM_TARGETS) boundary_app boundary_all boundary_sim_all boundary_report boundary_app-rebuild boundary_app-clean boundary_opt_all boundary_opt_build_all boundary_opt_sim_all boundary_opt_report boundary_opt_clean $(BOUNDARY_OPT_BUILD_TARGETS) $(BOUNDARY_OPT_SIM_TARGETS) coe_loop2_gen coe_loop5 coe_loop5_gen
+.PHONY: coremark coremark_sim coremark_run coremark_result coremark-rebuild coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map coremark_opt_all coremark_opt_build_all coremark_opt_sim_all coremark_opt_report coremark_opt_clean app_opt_comp_expanded_if_needed $(COREMARK_OPT_BUILD_TARGETS) $(COREMARK_OPT_SIM_TARGETS) sort_app sort_all sort_sim_all sort_report sort_app_sim sort_app-rebuild sort_app-clean sort_opt_all sort_opt_build_all sort_opt_sim_all sort_opt_report sort_opt_clean $(SORT_OPT_BUILD_TARGETS) $(SORT_OPT_SIM_TARGETS) boundary_app boundary_all boundary_sim_all boundary_report boundary_app-rebuild boundary_app-clean boundary_opt_all boundary_opt_build_all boundary_opt_sim_all boundary_opt_report boundary_opt_clean $(BOUNDARY_OPT_BUILD_TARGETS) $(BOUNDARY_OPT_SIM_TARGETS) coe_loop2_gen coe_loop5 coe_loop5_gen coe_loop_lina coe_loop_lina_gen loop_lina
 .PHONY: syn synf synf-board syn-extreme syn-venv syn-prep syn-stage-xpr syn-stage-memory syn-vivado syn-analyze syn-clean
 
 .SECONDEXPANSION:
@@ -274,6 +286,7 @@ coverage_all: coverage_clean
 	-@$(MAKE) test_all VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
 	-@$(MAKE) coremark_sim VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
 	-@$(MAKE) coe_loop5 VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
+	-@$(MAKE) coe_loop_lina VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
 	@$(MAKE) coverage_report
 	@$(MAKE) ppa_perf_report
 
@@ -1077,7 +1090,9 @@ $(COE_M3_ITCM_BIN): $(IROM_COE) $(COE_TO_MEM)
 	@mkdir -p "$(@D)"
 	perl "$(COE_TO_MEM)" --binary "$<" "$@"
 
-$(COE_M3_DTCM) $(COE_LOOP2_DTCM) $(COE_LOOP5_DTCM): $(DRAM_COE) $(COE_TO_MEM)
+
+$(COE_M3_DTCM) $(COE_LOOP2_DTCM) $(COE_LOOP5_DTCM) $(COE_LOOP_LINA_DTCM): $(DRAM_COE) $(COE_TO_MEM)
+
 	@mkdir -p "$(@D)"
 	perl "$(COE_TO_MEM)" "$<" "$@"
 
@@ -1095,6 +1110,17 @@ $(COE_LOOP5_ITCM): $(COE_LOOP5_ITCM_BIN)
 
 $(COE_LOOP5_DUMP): $(COE_LOOP5_ITCM_BIN)
 	$(OBJDUMP) -D -b binary -m riscv:rv32 "$<" > "$@"
+
+
+$(COE_LOOP_LINA_ITCM_BIN): $(COE_M3_ITCM_BIN) $(COE_LOOP_LINA_PATCH)
+	perl "$(COE_LOOP_LINA_PATCH)" "$<" "$@" "$(COE_LOOP_LINA_SCALE)"
+
+$(COE_LOOP_LINA_ITCM): $(COE_LOOP_LINA_ITCM_BIN)
+	od -An -t x4 -w4 -v "$<" | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > "$@"
+
+$(COE_LOOP_LINA_DUMP): $(COE_LOOP_LINA_ITCM_BIN)
+	$(OBJDUMP) -D -b binary -m riscv:rv32 "$<" > "$@"
+
 
 coe_loop2_gen: $(COE_M3_ITCM) $(COE_M3_ITCM_BIN) $(COE_M3_DTCM) \
 		$(COE_LOOP2_ITCM_BIN) $(COE_LOOP2_ITCM) $(COE_LOOP2_DTCM)
@@ -1114,8 +1140,12 @@ coe_simple: comp $(COE_SIMPLE_ITCM) $(COE_SIMPLE_DTCM)
 		echo "[COE_SIMPLE] Missing log: $$log"; \
 		exit 1; \
 	fi; \
-	if ! grep -q "SEG write $(COE_EXPECT_SEG)" "$$log"; then \
+	if [ -n "$(COE_EXPECT_SEG)" ] && ! grep -q "SEG write $(COE_EXPECT_SEG)" "$$log"; then \
 		echo "[COE_SIMPLE] Expected SEG write $(COE_EXPECT_SEG) not found"; \
+		ok=0; \
+	fi; \
+	if [ -n "$(COE_EXPECT_SEG_REGEX)" ] && ! grep -Eq "SEG write $(COE_EXPECT_SEG_REGEX)" "$$log"; then \
+		echo "[COE_SIMPLE] Expected SEG pattern $(COE_EXPECT_SEG_REGEX) not found"; \
 		ok=0; \
 	fi; \
 	if ! grep -q "CNT write $(COE_EXPECT_CNT_START)" "$$log"; then \
@@ -1128,6 +1158,10 @@ coe_simple: comp $(COE_SIMPLE_ITCM) $(COE_SIMPLE_DTCM)
 	fi; \
 	if [ -n "$(COE_EXPECT_CNT_READ)" ] && ! grep -q "CNT read.*$(COE_EXPECT_CNT_READ)" "$$log"; then \
 		echo "[COE_SIMPLE] Expected CNT read $(COE_EXPECT_CNT_READ) not found"; \
+		ok=0; \
+	fi; \
+	if [ "$(COE_REQUIRE_CNT_READ)" = "1" ] && ! grep -q "CNT read" "$$log"; then \
+		echo "[COE_SIMPLE] Expected CNT read not found"; \
 		ok=0; \
 	fi; \
 	if ! grep -q "LED write $(COE_EXPECT_LED)" "$$log"; then \
@@ -1157,6 +1191,23 @@ coe_loop5: coe_loop5_gen
 		COE_SIMPLE_DTCM=$(COE_LOOP5_DTCM) \
 		COE_EXPECT_CNT_READ=0x00000001 \
 		COE_EXPECT_SEG=0x37800001
+
+coe_loop_lina_gen: $(COE_LOOP_LINA_ITCM_BIN) $(COE_LOOP_LINA_ITCM) \
+		$(COE_LOOP_LINA_DTCM) $(COE_LOOP_LINA_DUMP)
+
+coe_loop_lina: coe_loop_lina_gen
+	@$(MAKE) coe_simple \
+		COE_SIMPLE_NAME=coe_loop_lina \
+		COE_SIMPLE_ITCM=$(COE_LOOP_LINA_ITCM) \
+		COE_SIMPLE_DTCM=$(COE_LOOP_LINA_DTCM) \
+		COE_SIM_TIMEOUT=$(COE_LOOP_LINA_SIM_TIMEOUT) \
+		COE_SIMPLE_SIM_EXTRA_DEFINES="$(COE_LOOP_LINA_SIM_EXTRA_DEFINES)" \
+		COE_EXPECT_CNT_READ= \
+		COE_REQUIRE_CNT_READ=1 \
+		COE_EXPECT_SEG= \
+		COE_EXPECT_SEG_REGEX='0x3780[0-9a-fA-F]{4}'
+
+loop_lina: coe_loop_lina
 
 coe_smoke:
 	@$(MAKE) coe_simple
