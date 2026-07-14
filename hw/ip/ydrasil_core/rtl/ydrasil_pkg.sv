@@ -328,7 +328,6 @@ package ydrasil_pkg;
 		logic                                lsu_req;
 		logic                                store_req;
 		logic                                prev_alu_bypass_ok;
-		logic                                load_bypass_ok;
 		logic                                serialize_before;
 	} ydrasil_id_ctrl_pkt_t;
 
@@ -372,6 +371,7 @@ package ydrasil_pkg;
 		logic                                busy;
 		logic                                idle;
 		logic                                fast_load;
+		logic                                fast_completion;
 	} ydrasil_lsu_status_pkt_t;
 
 	typedef struct packed {
@@ -382,9 +382,12 @@ package ydrasil_pkg;
 		logic                                store_data_producer_tracked;
 		logic                                prev_alu_bypass_rs1;
 		logic                                prev_alu_bypass_rs2;
-		logic                                prev_load_bypass_rs1;
-		logic                                prev_load_bypass_rs2;
-		producer_id_t                        prev_load_producer_id;
+		logic                                issue_rs1_wait;
+		producer_id_t                        issue_rs1_producer_id;
+		logic                                issue_rs1_producer_tracked;
+		logic                                issue_rs2_wait;
+		producer_id_t                        issue_rs2_producer_id;
+		logic                                issue_rs2_producer_tracked;
 		logic                                rs1_pending_stall;
 		logic                                rs2_pending_stall;
 		logic                                rd_waw_stall;

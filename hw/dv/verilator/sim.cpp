@@ -51,6 +51,8 @@ int main(int argc, char **argv) {
     TB_CLASS_NAME *tb = new TB_CLASS_NAME;
     // check if trace is enabled
     int trace_en = 0;
+    vluint64_t trace_start = 0;
+    vluint64_t trace_stop = ~vluint64_t{0};
     const char *coverage_file = "coverage.dat";
     for (int i = 0; i < argc; i++)
     {
@@ -60,6 +62,10 @@ int main(int argc, char **argv) {
             trace_en = 1;
         if (sscanf(argv[i], "+cpp_timeout=%lu", &MAX_TIME) == 1)
             printf("C++ timeout set to %lu\n", MAX_TIME);
+        if (sscanf(argv[i], "+trace_start=%lu", &trace_start) == 1)
+            printf("Trace start set to %lu\n", trace_start);
+        if (sscanf(argv[i], "+trace_stop=%lu", &trace_stop) == 1)
+            printf("Trace stop set to %lu\n", trace_stop);
         if (strncmp(argv[i], "+coverage_file=", 15) == 0)
             coverage_file = argv[i] + 15;
     }
@@ -92,14 +98,18 @@ int main(int argc, char **argv) {
         tb->eval();
 
 #ifdef VERILATOR_TRACE
-        tfp->dump(Verilated::time());
+        if (trace_en && Verilated::time() > trace_start &&
+            Verilated::time() < trace_stop)
+            tfp->dump(Verilated::time());
 #endif     
         Verilated::timeInc(1);
 
 #ifdef DOUBLE_TICK
 
 #ifdef VERILATOR_TRACE
-            tfp->dump(Verilated::time());
+            if (trace_en && Verilated::time() > trace_start &&
+                Verilated::time() < trace_stop)
+                tfp->dump(Verilated::time());
 #endif
         Verilated::timeInc(1);
 #endif
@@ -112,7 +122,9 @@ int main(int argc, char **argv) {
         tb->clk = !tb->clk;   
         tb->eval();
 #ifdef VERILATOR_TRACE
-            tfp->dump(Verilated::time());
+            if (trace_en && Verilated::time() > trace_start &&
+                Verilated::time() < trace_stop)
+                tfp->dump(Verilated::time());
 #endif
         Verilated::timeInc(1);
 
@@ -120,7 +132,9 @@ int main(int argc, char **argv) {
         tb->eval();
 
 #ifdef VERILATOR_TRACE
-            tfp->dump(Verilated::time());
+            if (trace_en && Verilated::time() > trace_start &&
+                Verilated::time() < trace_stop)
+                tfp->dump(Verilated::time());
 #endif
         Verilated::timeInc(1);
 #endif

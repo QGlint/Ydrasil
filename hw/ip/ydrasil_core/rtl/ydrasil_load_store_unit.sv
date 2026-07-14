@@ -21,13 +21,14 @@ import ydrasil_pkg::*;
 
     ydrasil_lsu_req_pkt_t queue_q [0:QUEUE_DEPTH-1];
     reg [QUEUE_COUNT_WIDTH-1:0] queue_count_q;
+    (* max_fanout = 8 *) reg queue_nonempty_q;
 
     wire input_is_load = req_i.is_load;
     wire input_is_store = req_i.is_store;
     wire input_valid = req_i.valid;
-    wire queue_empty = (queue_count_q == '0);
+    wire queue_empty = !queue_nonempty_q;
     wire queue_full = (queue_count_q == QUEUE_COUNT_WIDTH'(QUEUE_DEPTH));
-    wire active_from_queue = !queue_empty;
+    wire active_from_queue = queue_nonempty_q;
 
     reg input_wake_valid;
     reg [REGS_DATA_WIDTH-1:0] input_wake_data;
@@ -209,6 +210,9 @@ import ydrasil_pkg::*;
         ({3'b000, active_addr_index} << 3);
 
     assign status_o.fast_load = hot_load_req & !active_from_queue;
+    // Hot data was aligned into load_s2_hot_shifted_q at the previous edge.
+    // Array/MMIO completions are deliberately excluded from the fast class.
+    assign status_o.fast_completion = load_s2_valid_q & load_s2_hot_q;
     assign status_o.busy = queue_count_q >= QUEUE_COUNT_WIDTH'(QUEUE_DEPTH-1);
     assign status_o.idle = queue_empty & !input_valid & !mmio_busy &
         !load_s1_valid_q & !load_s2_valid_q;
@@ -295,14 +299,19 @@ import ydrasil_pkg::*;
         dtcm_load_result : mmio_wb_result_q;
     wire [REGS_ADDR_WIDTH-1:0] selected_wb_rd_addr = dtcm_wb_valid ?
         load_s2_rd_addr_q : mmio_wb_rd_addr_q;
-
+    producer_id_t selected_wb_producer_id;
+    assign selected_wb_producer_id = dtcm_wb_valid ?
+        load_s2_producer_id_q : mmio_wb_producer_id_q;
+    wire selected_wb_producer_tracked = dtcm_wb_valid ?
+        load_s2_producer_tracked_q : mmio_wb_producer_tracked_q;
+    // Completion may update local retained state in this cycle, but issue/EX
+    // are not allowed to consume this data combinationally. They observe the
+    // producer table on the following cycle.
     assign completion_o.valid = dtcm_wb_valid | mmio_wb_out_valid;
     assign completion_o.data = selected_wb_result;
     assign completion_o.addr = completion_o.valid ? selected_wb_rd_addr : '0;
-    assign completion_o.producer_id = dtcm_wb_valid ?
-        load_s2_producer_id_q : mmio_wb_producer_id_q;
-    assign completion_o.producer_tracked = dtcm_wb_valid ?
-        load_s2_producer_tracked_q : mmio_wb_producer_tracked_q;
+    assign completion_o.producer_id = selected_wb_producer_id;
+    assign completion_o.producer_tracked = selected_wb_producer_tracked;
 
 `ifndef SYNTHESIS
     reg [31:0] perf_hot_lookup_q;
@@ -315,6 +324,7 @@ import ydrasil_pkg::*;
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             queue_count_q <= '0;
+            queue_nonempty_q <= 1'b0;
             for (queue_idx = 0; queue_idx < QUEUE_DEPTH; queue_idx = queue_idx + 1)
                 queue_q[queue_idx] <= '0;
 
@@ -398,8 +408,14 @@ import ydrasil_pkg::*;
             end
 
             unique case ({queue_enqueue, queue_dequeue})
-                2'b10: queue_count_q <= queue_count_q + 1'b1;
-                2'b01: queue_count_q <= queue_count_q - 1'b1;
+                2'b10: begin
+                    queue_count_q <= queue_count_q + 1'b1;
+                    queue_nonempty_q <= 1'b1;
+                end
+                2'b01: begin
+                    queue_count_q <= queue_count_q - 1'b1;
+                    queue_nonempty_q <= (queue_count_q != QUEUE_COUNT_WIDTH'(1));
+                end
                 default: queue_count_q <= queue_count_q;
             endcase
 

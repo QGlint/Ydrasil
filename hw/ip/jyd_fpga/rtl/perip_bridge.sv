@@ -54,7 +54,7 @@ module perip_bridge(
 
 `ifdef SYN_BOARD_ILA
     ila_board board_status_ila (
-        .clk    (clk),
+        .clk    (cnt_clk),
         .probe0 (LED),
         .probe1 (seg_wdata)
     );

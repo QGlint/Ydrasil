@@ -171,9 +171,9 @@ import ydrasil_pkg::*;
 			pending_redirect_target_ff <= '0;
 		end else begin
 			mem_req_valid_ff <= fetch_issue;
-			if (fetch_issue) begin
-				mem_req_pc_ff <= fetch_addr;
-			end
+			// Payload is don't-care when valid is low.  Updating it every cycle
+			// keeps prediction response logic off the register clock-enable path.
+			mem_req_pc_ff <= fetch_addr;
 			if (pending_redirect_valid_ff && fetch_issue) begin
 				pending_redirect_valid_ff <= 1'b0;
 			end

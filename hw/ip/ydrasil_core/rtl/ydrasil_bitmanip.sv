@@ -20,7 +20,33 @@ import ydrasil_pkg::*;
     wire [REGS_DATA_WIDTH-1:0] bit_index_mask = {{(REGS_DATA_WIDTH-1){1'b0}}, 1'b1} << shamt;
     reg [REGS_DATA_WIDTH-1:0] clz_result;
     reg [REGS_DATA_WIDTH-1:0] ctz_result;
-    reg [REGS_DATA_WIDTH-1:0] cpop_result;
+    wire [1:0] cpop_l1 [0:15];
+    wire [2:0] cpop_l2 [0:7];
+    wire [3:0] cpop_l3 [0:3];
+    wire [4:0] cpop_l4 [0:1];
+    wire [5:0] cpop_count;
+    genvar cpop_idx;
+    generate
+        for (cpop_idx = 0; cpop_idx < 16; cpop_idx = cpop_idx + 1) begin : gen_cpop_l1
+            assign cpop_l1[cpop_idx] = {1'b0, operand_a_i[2 * cpop_idx]} +
+                {1'b0, operand_a_i[2 * cpop_idx + 1]};
+        end
+        for (cpop_idx = 0; cpop_idx < 8; cpop_idx = cpop_idx + 1) begin : gen_cpop_l2
+            assign cpop_l2[cpop_idx] = {1'b0, cpop_l1[2 * cpop_idx]} +
+                {1'b0, cpop_l1[2 * cpop_idx + 1]};
+        end
+        for (cpop_idx = 0; cpop_idx < 4; cpop_idx = cpop_idx + 1) begin : gen_cpop_l3
+            assign cpop_l3[cpop_idx] = {1'b0, cpop_l2[2 * cpop_idx]} +
+                {1'b0, cpop_l2[2 * cpop_idx + 1]};
+        end
+        for (cpop_idx = 0; cpop_idx < 2; cpop_idx = cpop_idx + 1) begin : gen_cpop_l4
+            assign cpop_l4[cpop_idx] = {1'b0, cpop_l3[2 * cpop_idx]} +
+                {1'b0, cpop_l3[2 * cpop_idx + 1]};
+        end
+    endgenerate
+    assign cpop_count = {1'b0, cpop_l4[0]} + {1'b0, cpop_l4[1]};
+    wire [REGS_DATA_WIDTH-1:0] cpop_result =
+        {{(REGS_DATA_WIDTH-6){1'b0}}, cpop_count};
     reg [REGS_DATA_WIDTH-1:0] orc_b_result;
     reg [REGS_DATA_WIDTH-1:0] brev8_result;
     reg [REGS_DATA_WIDTH-1:0] rol_result;
@@ -39,7 +65,6 @@ import ydrasil_pkg::*;
     always_comb begin
         clz_result = REGS_DATA_WIDTH'(REGS_DATA_WIDTH);
         ctz_result = REGS_DATA_WIDTH'(REGS_DATA_WIDTH);
-        cpop_result = '0;
         orc_b_result = '0;
         brev8_result = '0;
         rol_result = (shamt == 5'd0) ?
@@ -66,7 +91,6 @@ import ydrasil_pkg::*;
             if (operand_a_i[bit_idx] && (ctz_result == REGS_DATA_WIDTH'(REGS_DATA_WIDTH))) begin
                 ctz_result = REGS_DATA_WIDTH'(bit_idx);
             end
-            cpop_result = cpop_result + {{(REGS_DATA_WIDTH-1){1'b0}}, operand_a_i[bit_idx]};
             if (operand_b_i[bit_idx]) begin
                 clmul_full = clmul_full ^ ({32'b0, operand_a_i} << bit_idx);
             end

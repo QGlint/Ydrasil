@@ -69,6 +69,9 @@ import ydrasil_pkg::*;
     producer_id_t alu_fifo_head_producer_id;
     assign alu_fifo_head_producer_id = alu_fifo_producer_id_q[alu_fifo_rptr_q];
 
+    ydrasil_gpr_fwd_pkt_t commit_d;
+    ydrasil_gpr_fwd_pkt_t commit_q;
+
     wire sel_lsu = lsu_rf_wen_rd_i;
     wire sel_alu_fifo = !sel_lsu & !alu_fifo_empty;
     wire sel_alu_current = !sel_lsu & alu_fifo_empty & alu_rf_wen_rd_i;
@@ -100,29 +103,39 @@ import ydrasil_pkg::*;
         (alu_fifo_count_q >= ALU_FIFO_COUNT_WIDTH'(ALU_FIFO_BACKPRESSURE_LEVEL)) |
         (mul_fifo_count_q >= MUL_FIFO_COUNT_WIDTH'(MUL_FIFO_BACKPRESSURE_LEVEL));
 
-    assign rf_wen_rd_o =
-        sel_lsu | sel_alu_fifo | sel_alu_current | sel_mul_fifo | sel_mul_current;
-    assign rf_waddr_rd_o =
+    always_comb begin
+        commit_d = '0;
+        commit_d.valid =
+            sel_lsu | sel_alu_fifo | sel_alu_current | sel_mul_fifo | sel_mul_current;
+        commit_d.addr =
         ({REGS_ADDR_WIDTH{sel_lsu}}         & lsu_rf_waddr_rd_i) |
         ({REGS_ADDR_WIDTH{sel_alu_fifo}}    & alu_fifo_head_addr) |
         ({REGS_ADDR_WIDTH{sel_alu_current}} & alu_rf_waddr_rd_i) |
         ({REGS_ADDR_WIDTH{sel_mul_fifo}}    & mul_fifo_head_addr) |
         ({REGS_ADDR_WIDTH{sel_mul_current}} & mul_rf_waddr_rd_i);
-    assign rf_wdata_rd_o =
+        commit_d.data =
         ({REGS_DATA_WIDTH{sel_lsu}}         & lsu_wb_result_i) |
         ({REGS_DATA_WIDTH{sel_alu_fifo}}    & alu_fifo_head_data) |
         ({REGS_DATA_WIDTH{sel_alu_current}} & alu_wdata_rd_i) |
         ({REGS_DATA_WIDTH{sel_mul_fifo}}    & mul_fifo_head_data) |
         ({REGS_DATA_WIDTH{sel_mul_current}} & mul_wdata_rd_i);
-    assign rf_producer_id_o = sel_lsu ? lsu_producer_id_i :
+        commit_d.producer_id = sel_lsu ? lsu_producer_id_i :
         sel_alu_fifo ? alu_fifo_head_producer_id :
         sel_alu_current ? alu_producer_id_i :
         sel_mul_fifo ? mul_fifo_head_producer_id : mul_producer_id_i;
-    assign rf_producer_tracked_o = sel_lsu ? lsu_producer_tracked_i :
-                                           (rf_wen_rd_o && (rf_waddr_rd_o != '0));
+        commit_d.producer_tracked = sel_lsu ? lsu_producer_tracked_i :
+            (commit_d.valid && (commit_d.addr != '0));
+    end
+
+    assign rf_wen_rd_o = commit_q.valid;
+    assign rf_waddr_rd_o = commit_q.addr;
+    assign rf_wdata_rd_o = commit_q.data;
+    assign rf_producer_id_o = commit_q.producer_id;
+    assign rf_producer_tracked_o = commit_q.producer_tracked;
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
+            commit_q            <= '0;
             alu_fifo_rptr_q     <= '0;
             alu_fifo_wptr_q     <= '0;
             alu_fifo_count_q    <= '0;
@@ -130,6 +143,10 @@ import ydrasil_pkg::*;
             mul_fifo_wptr_q     <= '0;
             mul_fifo_count_q    <= '0;
         end else begin
+            // Completion first updates the retained producer table.  RF retire
+            // follows one cycle later from this registered commit boundary.
+            commit_q <= commit_d;
+
             if (alu_enqueue_accept) begin
                 alu_fifo_data_q[alu_fifo_wptr_q] <= alu_wdata_rd_i;
                 alu_fifo_addr_q[alu_fifo_wptr_q] <= alu_rf_waddr_rd_i;

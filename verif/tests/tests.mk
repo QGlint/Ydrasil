@@ -59,8 +59,12 @@ SW_NEW_ONLY_TESTS := \
 SW_FORMAL_TESTS := $(SW_ALIGNED_TESTS) $(SW_NEW_ONLY_TESTS)
 # Compatibility alias for callers that used the old combined-list name.
 SW_ALL_TESTS := $(SW_FORMAL_TESTS)
-YDRASIL_TESTS := $(sort $(basename $(notdir $(wildcard $(YDRASIL_TESTS_DIR)/*.S))))
-YDRASIL_TEST_SPIKE_SKIP_TESTS := $(SW_NEW_ONLY_TESTS)
+YDRASIL_TESTS_ALL := $(sort $(basename $(notdir $(wildcard $(YDRASIL_TESTS_DIR)/*.S))))
+# Misaligned accesses are outside the Ydrasil implementation contract. Keep
+# their sources available for directed experiments, but exclude them from the
+# correctness and coverage gates.
+YDRASIL_TESTS := $(filter-out $(SW_NEW_ONLY_TESTS),$(YDRASIL_TESTS_ALL))
+YDRASIL_TEST_SPIKE_SKIP_TESTS :=
 YDRASIL_TEST_SIM_TARGETS := $(addprefix ydrasil_test_sim_,$(YDRASIL_TESTS))
 YDRASIL_TEST_RESULT_DIR ?= $(RESULT_DIR)/ydrasil-tests
 YDRASIL_TEST_TIMEOUT ?= 100000

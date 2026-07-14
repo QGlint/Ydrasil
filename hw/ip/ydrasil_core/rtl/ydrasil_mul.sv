@@ -21,6 +21,14 @@ import ydrasil_pkg::*;
     output wire [REGS_DATA_WIDTH-1:0]   result_wdata_o
 );
 
+    reg                         s0_valid_q;
+    reg signed [32:0]           s0_operand_a_q;
+    reg signed [32:0]           s0_operand_b_q;
+    reg                         s0_high_q;
+    reg                         s0_wen_q;
+    reg [REGS_ADDR_WIDTH-1:0]   s0_waddr_q;
+    producer_id_t               s0_producer_id_q;
+
     reg                         s1_valid_q;
     reg signed [33:0]           s1_p00_q;
     reg signed [33:0]           s1_p01_q;
@@ -54,17 +62,17 @@ import ydrasil_pkg::*;
     wire operand_b_signed = op_mulh;
     wire select_high = op_mulh | op_mulhsu | op_mulhu;
 
-    wire signed [32:0] operand_a_ext =
+    wire signed [32:0] issue_operand_a_ext =
         operand_a_signed ? $signed({operand_a_i[31], operand_a_i}) :
                            $signed({1'b0, operand_a_i});
-    wire signed [32:0] operand_b_ext =
+    wire signed [32:0] issue_operand_b_ext =
         operand_b_signed ? $signed({operand_b_i[31], operand_b_i}) :
                            $signed({1'b0, operand_b_i});
 
-    wire signed [16:0] operand_a_lo = $signed({1'b0, operand_a_ext[15:0]});
-    wire signed [16:0] operand_b_lo = $signed({1'b0, operand_b_ext[15:0]});
-    wire signed [16:0] operand_a_hi = operand_a_ext[32:16];
-    wire signed [16:0] operand_b_hi = operand_b_ext[32:16];
+    wire signed [16:0] operand_a_lo = $signed({1'b0, s0_operand_a_q[15:0]});
+    wire signed [16:0] operand_b_lo = $signed({1'b0, s0_operand_b_q[15:0]});
+    wire signed [16:0] operand_a_hi = s0_operand_a_q[32:16];
+    wire signed [16:0] operand_b_hi = s0_operand_b_q[32:16];
 
     wire signed [33:0] p00 = operand_a_lo * operand_b_lo;
     wire signed [33:0] p01 = operand_a_lo * operand_b_hi;
@@ -87,6 +95,13 @@ import ydrasil_pkg::*;
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
+            s0_valid_q  <= 1'b0;
+            s0_operand_a_q <= '0;
+            s0_operand_b_q <= '0;
+            s0_high_q   <= 1'b0;
+            s0_wen_q    <= 1'b0;
+            s0_waddr_q  <= '0;
+            s0_producer_id_q <= '0;
             s1_valid_q  <= 1'b0;
             s1_p00_q    <= '0;
             s1_p01_q    <= '0;
@@ -110,22 +125,32 @@ import ydrasil_pkg::*;
             s3_waddr_q  <= '0;
             s3_producer_id_q <= '0;
         end else if (flush_i) begin
+            s0_valid_q  <= 1'b0;
             s1_valid_q  <= 1'b0;
             s2_valid_q  <= 1'b0;
             s3_valid_q  <= 1'b0;
+            s0_wen_q    <= 1'b0;
             s1_wen_q    <= 1'b0;
             s2_wen_q    <= 1'b0;
             s3_wen_q    <= 1'b0;
         end else begin
-            s1_valid_q <= issue_valid_i & issue_ready_o;
+            s0_valid_q <= issue_valid_i & issue_ready_o;
+            s0_operand_a_q <= issue_operand_a_ext;
+            s0_operand_b_q <= issue_operand_b_ext;
+            s0_high_q <= select_high;
+            s0_wen_q <= issue_wen_i;
+            s0_waddr_q <= issue_waddr_i;
+            s0_producer_id_q <= issue_producer_id_i;
+
+            s1_valid_q <= s0_valid_q;
             s1_p00_q   <= p00;
             s1_p01_q   <= p01;
             s1_p10_q   <= p10;
             s1_p11_q   <= p11;
-            s1_high_q  <= select_high;
-            s1_wen_q   <= issue_wen_i;
-            s1_waddr_q <= issue_waddr_i;
-            s1_producer_id_q <= issue_producer_id_i;
+            s1_high_q  <= s0_high_q;
+            s1_wen_q   <= s0_wen_q;
+            s1_waddr_q <= s0_waddr_q;
+            s1_producer_id_q <= s0_producer_id_q;
 
             s2_valid_q <= s1_valid_q;
             s2_sum_a_q <= p00_ext + p01_ext;
