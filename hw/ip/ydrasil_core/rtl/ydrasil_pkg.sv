@@ -319,6 +319,13 @@ package ydrasil_pkg;
 	typedef ydrasil_gpr_fwd_pkt_t ydrasil_completion_bus_t [COMPLETION_LANES];
 
 	typedef struct packed {
+		producer_id_t                        rs1_producer_id;
+		logic                                rs1_producer_tracked;
+		producer_id_t                        rs2_producer_id;
+		logic                                rs2_producer_tracked;
+	} ydrasil_issue_dep_pkt_t;
+
+	typedef struct packed {
 		logic [REGS_ADDR_WIDTH-1:0]          rs1_addr;
 		logic [REGS_ADDR_WIDTH-1:0]          rs2_addr;
 		logic [REGS_ADDR_WIDTH-1:0]          rd_addr;
@@ -329,6 +336,10 @@ package ydrasil_pkg;
 		logic                                store_req;
 		logic                                prev_alu_bypass_ok;
 		logic                                serialize_before;
+		producer_id_t                        rs1_producer_id;
+		logic                                rs1_producer_tracked;
+		producer_id_t                        rs2_producer_id;
+		logic                                rs2_producer_tracked;
 	} ydrasil_id_ctrl_pkt_t;
 
 	typedef struct packed {

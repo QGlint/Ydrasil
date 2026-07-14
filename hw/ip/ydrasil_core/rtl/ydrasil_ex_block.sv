@@ -15,6 +15,7 @@ import ydrasil_pkg::*;
     input  wire [DATA_WIDTH-1:0]           operand_b_i,
     input  wire [DATA_WIDTH-1:0]           alu_operand_a_i,
     input  wire [DATA_WIDTH-1:0]           alu_operand_b_i,
+    input  wire [DATA_WIDTH-1:0]           alu_sub_operand_b_i,
     input  wire [DATA_WIDTH-1:0]           bru_operand_a_i,
     input  wire [DATA_WIDTH-1:0]           bru_operand_b_i,
     input  wire [DATA_WIDTH-1:0]           lsu_operand_a_i,
@@ -381,9 +382,9 @@ import ydrasil_pkg::*;
         (alu_bypass_rs2 ? fast_add_both : fast_add_rs1) :
         (alu_bypass_rs2 ? fast_add_rs2 : fast_add_base);
     (* keep = "true" *) wire [32:0] fast_sub_base =
-        {1'b0, alu_operand_a_i} + {1'b0, ~alu_operand_b_i} + 33'd1;
+        {1'b0, alu_operand_a_i} + {1'b0, ~alu_sub_operand_b_i} + 33'd1;
     (* keep = "true" *) wire [32:0] fast_sub_rs1 =
-        {1'b0, alu_bypass_data_q} + {1'b0, ~alu_operand_b_i} + 33'd1;
+        {1'b0, alu_bypass_data_q} + {1'b0, ~alu_sub_operand_b_i} + 33'd1;
     (* keep = "true" *) wire [32:0] fast_sub_rs2 =
         {1'b0, alu_operand_a_i} + {1'b0, ~alu_bypass_data_q} + 33'd1;
     (* keep = "true" *) wire [32:0] fast_sub_both =

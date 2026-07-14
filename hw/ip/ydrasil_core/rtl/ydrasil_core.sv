@@ -73,6 +73,7 @@ import ydrasil_pkg::*;
 	wire [31:0]                    operand_b;
 	wire [31:0]                    alu_operand_a;
 	wire [31:0]                    alu_operand_b;
+	wire [31:0]                    alu_sub_operand_b;
 	wire [31:0]                    bru_operand_a;
 	wire [31:0]                    bru_operand_b;
 	wire [31:0]                    lsu_operand_a;
@@ -206,6 +207,8 @@ import ydrasil_pkg::*;
 
     //LSU -> ID
 	ydrasil_id_ctrl_pkt_t           id_ctrl_pkt;
+	ydrasil_id_ctrl_pkt_t           decode_ctrl_pkt;
+	ydrasil_issue_dep_pkt_t         decode_dep_pkt;
 	ydrasil_ex_hzd_pkt_t            ex_hzd_pkt;
 	ydrasil_hzd_status_pkt_t        hzd_status_pkt;
 	ydrasil_gpr_fwd_pkt_t           wb_fwd_pkt;
@@ -635,7 +638,9 @@ import ydrasil_pkg::*;
 		.flush_id_i          (flush_id),
 		.decode_valid_i      (decode_valid),
 		.decode_pkt_i        (decode_pkt),
+		.decode_dep_i        (decode_dep_pkt),
 		.issue_ready_o       (issue_ready),
+		.decode_ctrl_o       (decode_ctrl_pkt),
 		.rf_addr_rs1_o       (rf_raddr_rs1),
 		.rf_addr_rs2_o      (rf_raddr_rs2),
 		.rf_rdata_rs1_i     (rf_rdata_rs1),
@@ -651,6 +656,7 @@ import ydrasil_pkg::*;
 		.operand_b_o        (operand_b),
 		.alu_operand_a_o    (alu_operand_a),
 		.alu_operand_b_o    (alu_operand_b),
+		.alu_sub_operand_b_o(alu_sub_operand_b),
 		.bru_operand_a_o    (bru_operand_a),
 		.bru_operand_b_o    (bru_operand_b),
 		.lsu_operand_a_o    (lsu_operand_a),
@@ -702,6 +708,7 @@ import ydrasil_pkg::*;
 		.operand_b_i        (operand_b),
 		.alu_operand_a_i    (alu_operand_a),
 		.alu_operand_b_i    (alu_operand_b),
+		.alu_sub_operand_b_i(alu_sub_operand_b),
 		.bru_operand_a_i    (bru_operand_a),
 		.bru_operand_b_i    (bru_operand_b),
 		.lsu_operand_a_i    (lsu_operand_a),
@@ -834,6 +841,7 @@ import ydrasil_pkg::*;
 			.ex_branch_target_i(ex_pc_redirect_target),
 			.ex_hzd_i          (ex_hzd_pkt),
 			.id_ctrl_i         (id_ctrl_pkt),
+			.decode_ctrl_i     (decode_ctrl_pkt),
 			.completion_bus_i  (completion_bus),
 			.lsu_status_i      (lsu_status_pkt),
 			.clint_stall_i     (clint_stall),
@@ -848,6 +856,7 @@ import ydrasil_pkg::*;
 			.wb_fwd_o          (wb_fwd_pkt),
 			.producer_rs1_fwd_o(producer_rs1_fwd_pkt),
 			.producer_rs2_fwd_o(producer_rs2_fwd_pkt),
+			.decode_dep_o      (decode_dep_pkt),
 			.gpr_pending_o     (gpr_pending_q),
 			.ex_accept_valid_o (ex_accept_valid),
 			.producer_alloc_id_o(producer_alloc_id),

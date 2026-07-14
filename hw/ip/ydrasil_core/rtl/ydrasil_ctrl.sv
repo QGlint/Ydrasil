@@ -7,6 +7,7 @@ import ydrasil_pkg::*;
     input wire [INST_ADDR_WIDTH-1:0] ex_branch_target_i,
     input ydrasil_ex_hzd_pkt_t ex_hzd_i,
     input ydrasil_id_ctrl_pkt_t id_ctrl_i,
+    input ydrasil_id_ctrl_pkt_t decode_ctrl_i,
     input ydrasil_completion_bus_t completion_bus_i,
     input ydrasil_lsu_status_pkt_t lsu_status_i,
     input wire clint_stall_i,
@@ -22,6 +23,7 @@ import ydrasil_pkg::*;
     output ydrasil_gpr_fwd_pkt_t wb_fwd_o,
     output ydrasil_gpr_fwd_pkt_t producer_rs1_fwd_o,
     output ydrasil_gpr_fwd_pkt_t producer_rs2_fwd_o,
+    output ydrasil_issue_dep_pkt_t decode_dep_o,
     output wire [REGS_NUM-1:0] gpr_pending_o,
     output wire ex_accept_valid_o,
     output producer_id_t producer_alloc_id_o,
@@ -48,9 +50,6 @@ import ydrasil_pkg::*;
     (* max_fanout = 8, extract_enable = "no" *) reg [REGS_NUM-1:0] latest_valid_rs1_q;
     (* max_fanout = 8, extract_enable = "no" *) reg [REGS_NUM-1:0] latest_valid_rs2_q;
     (* max_fanout = 8 *) producer_id_t latest_id_q [0:REGS_NUM-1];
-    (* extract_enable = "no" *) reg [REGS_NUM-1:0] latest_ready_q;
-    (* extract_enable = "no" *) reg [REGS_NUM-1:0] latest_ready_rs1_q;
-    (* extract_enable = "no" *) reg [REGS_NUM-1:0] latest_ready_rs2_q;
     (* max_fanout = 8 *) producer_id_t latest_id_rs1_q [0:REGS_NUM-1];
     (* max_fanout = 8 *) producer_id_t latest_id_rs2_q [0:REGS_NUM-1];
     ydrasil_gpr_fwd_pkt_t wb_fwd_q;
@@ -164,28 +163,77 @@ import ydrasil_pkg::*;
                     producer_slot_t'(alloc_idx)};
     end
 
-    (* max_fanout = 4 *) wire rs1_has_producer = id_ctrl_i.rs1_ren &&
-        latest_valid_rs1_q[id_ctrl_i.rs1_addr];
-    (* max_fanout = 4 *) wire rs2_has_producer = id_ctrl_i.rs2_ren &&
-        latest_valid_rs2_q[id_ctrl_i.rs2_addr];
     producer_id_t rs1_producer_id;
     producer_id_t rs2_producer_id;
     producer_slot_t rs1_producer_slot;
     producer_slot_t rs2_producer_slot;
-    assign rs1_producer_id = latest_id_rs1_q[id_ctrl_i.rs1_addr];
-    assign rs2_producer_id = latest_id_rs2_q[id_ctrl_i.rs2_addr];
+    assign rs1_producer_id = id_ctrl_i.rs1_producer_id;
+    assign rs2_producer_id = id_ctrl_i.rs2_producer_id;
     assign rs1_producer_slot = rs1_producer_id[PRODUCER_SLOT_WIDTH-1:0];
     assign rs2_producer_slot = rs2_producer_id[PRODUCER_SLOT_WIDTH-1:0];
+    (* max_fanout = 4 *) wire rs1_has_producer = id_ctrl_i.rs1_ren &&
+        id_ctrl_i.rs1_producer_tracked && producer_valid_q[rs1_producer_slot] &&
+        (producer_tag_q[rs1_producer_slot] == rs1_producer_id);
+    (* max_fanout = 4 *) wire rs2_has_producer = id_ctrl_i.rs2_ren &&
+        id_ctrl_i.rs2_producer_tracked && producer_valid_q[rs2_producer_slot] &&
+        (producer_tag_q[rs2_producer_slot] == rs2_producer_id);
 `ifndef SYNTHESIS
     wire [2:0] dbg_rs1_producer_kind = rs1_has_producer ?
         dbg_producer_kind_q[rs1_producer_slot] : 3'd0;
     wire [2:0] dbg_rs2_producer_kind = rs2_has_producer ?
         dbg_producer_kind_q[rs2_producer_slot] : 3'd0;
 `endif
+    // The complete generation tag remains in latest_id, so an older WAW
+    // producer cannot wake a newer mapping that reuses the same slot.
     wire rs1_producer_ready = rs1_has_producer &&
-        latest_ready_rs1_q[id_ctrl_i.rs1_addr];
+        producer_ready_q[rs1_producer_slot];
     wire rs2_producer_ready = rs2_has_producer &&
-        latest_ready_rs2_q[id_ctrl_i.rs2_addr];
+        producer_ready_q[rs2_producer_slot];
+
+    wire decode_rs1_ex_match = id_ex_rd_issue && ex_hzd_i.producer_tracked &&
+        decode_ctrl_i.rs1_ren &&
+        (decode_ctrl_i.rs1_addr == ex_hzd_i.rd_addr);
+    wire decode_rs2_ex_match = id_ex_rd_issue && ex_hzd_i.producer_tracked &&
+        decode_ctrl_i.rs2_ren &&
+        (decode_ctrl_i.rs2_addr == ex_hzd_i.rd_addr);
+    wire decode_rs1_issue_match = id_ctrl_i.rd_wen &&
+        decode_ctrl_i.rs1_ren &&
+        (decode_ctrl_i.rs1_addr == id_ctrl_i.rd_addr);
+    wire decode_rs2_issue_match = id_ctrl_i.rd_wen &&
+        decode_ctrl_i.rs2_ren &&
+        (decode_ctrl_i.rs2_addr == id_ctrl_i.rd_addr);
+
+    always_comb begin
+        decode_dep_o = '0;
+        if (decode_ctrl_i.rs1_ren &&
+            latest_valid_rs1_q[decode_ctrl_i.rs1_addr]) begin
+            decode_dep_o.rs1_producer_id =
+                latest_id_rs1_q[decode_ctrl_i.rs1_addr];
+            decode_dep_o.rs1_producer_tracked = 1'b1;
+        end
+        if (decode_ctrl_i.rs2_ren &&
+            latest_valid_rs2_q[decode_ctrl_i.rs2_addr]) begin
+            decode_dep_o.rs2_producer_id =
+                latest_id_rs2_q[decode_ctrl_i.rs2_addr];
+            decode_dep_o.rs2_producer_tracked = 1'b1;
+        end
+        if (decode_rs1_ex_match) begin
+            decode_dep_o.rs1_producer_id = ex_hzd_i.producer_id;
+            decode_dep_o.rs1_producer_tracked = 1'b1;
+        end
+        if (decode_rs2_ex_match) begin
+            decode_dep_o.rs2_producer_id = ex_hzd_i.producer_id;
+            decode_dep_o.rs2_producer_tracked = 1'b1;
+        end
+        if (decode_rs1_issue_match) begin
+            decode_dep_o.rs1_producer_id = producer_alloc_id;
+            decode_dep_o.rs1_producer_tracked = 1'b1;
+        end
+        if (decode_rs2_issue_match) begin
+            decode_dep_o.rs2_producer_id = producer_alloc_id;
+            decode_dep_o.rs2_producer_tracked = 1'b1;
+        end
+    end
 
     wire rs1_ex_match = id_ex_rd_issue && id_ctrl_i.rs1_ren &&
         (id_ctrl_i.rs1_addr == ex_hzd_i.rd_addr);
@@ -252,14 +300,12 @@ import ydrasil_pkg::*;
     assign bubble_id_o = decode_bubble_stall;
 
     // Only retained producer-table values may cross into issue operands.
-    assign producer_rs1_fwd_o.valid = rs1_has_producer &&
-        latest_ready_rs1_q[id_ctrl_i.rs1_addr];
+    assign producer_rs1_fwd_o.valid = rs1_producer_ready;
     assign producer_rs1_fwd_o.producer_id = rs1_producer_id;
     assign producer_rs1_fwd_o.producer_tracked = rs1_has_producer;
     assign producer_rs1_fwd_o.addr = id_ctrl_i.rs1_addr;
     assign producer_rs1_fwd_o.data = producer_value_q[rs1_producer_slot];
-    assign producer_rs2_fwd_o.valid = rs2_has_producer &&
-        latest_ready_rs2_q[id_ctrl_i.rs2_addr];
+    assign producer_rs2_fwd_o.valid = rs2_producer_ready;
     assign producer_rs2_fwd_o.producer_id = rs2_producer_id;
     assign producer_rs2_fwd_o.producer_tracked = rs2_has_producer;
     assign producer_rs2_fwd_o.addr = id_ctrl_i.rs2_addr;
@@ -311,7 +357,6 @@ import ydrasil_pkg::*;
 
     integer slot_idx;
     integer reg_idx;
-    integer cache_lane;
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             producer_valid_q <= '0;
@@ -319,9 +364,6 @@ import ydrasil_pkg::*;
             latest_valid_q <= '0;
             latest_valid_rs1_q <= '0;
             latest_valid_rs2_q <= '0;
-            latest_ready_q <= '0;
-            latest_ready_rs1_q <= '0;
-            latest_ready_rs2_q <= '0;
             wb_fwd_q <= '0;
             for (slot_idx = 0; slot_idx < PRODUCER_NUM; slot_idx++) begin
                 producer_rd_q[slot_idx] <= '0;
@@ -342,9 +384,6 @@ import ydrasil_pkg::*;
             latest_valid_q <= '0;
             latest_valid_rs1_q <= '0;
             latest_valid_rs2_q <= '0;
-            latest_ready_q <= '0;
-            latest_ready_rs1_q <= '0;
-            latest_ready_rs2_q <= '0;
             wb_fwd_q <= '0;
         end else begin
             wb_fwd_q.valid <= rf_wen_rd_i && rf_write_commit_o;
@@ -379,23 +418,6 @@ import ydrasil_pkg::*;
                 latest_valid_q[rf_waddr_rd_i] <= 1'b0;
                 latest_valid_rs1_q[rf_waddr_rd_i] <= 1'b0;
                 latest_valid_rs2_q[rf_waddr_rd_i] <= 1'b0;
-                latest_ready_q[rf_waddr_rd_i] <= 1'b0;
-                latest_ready_rs1_q[rf_waddr_rd_i] <= 1'b0;
-                latest_ready_rs2_q[rf_waddr_rd_i] <= 1'b0;
-            end
-
-            for (cache_lane = 0; cache_lane < COMPLETION_LANES;
-                 cache_lane = cache_lane + 1) begin
-                if (completion_bus_i[cache_lane].valid &&
-                    completion_bus_i[cache_lane].producer_tracked &&
-                    (completion_bus_i[cache_lane].addr != '0) &&
-                    latest_valid_q[completion_bus_i[cache_lane].addr] &&
-                    (latest_id_q[completion_bus_i[cache_lane].addr] ==
-                     completion_bus_i[cache_lane].producer_id)) begin
-                    latest_ready_q[completion_bus_i[cache_lane].addr] <= 1'b1;
-                    latest_ready_rs1_q[completion_bus_i[cache_lane].addr] <= 1'b1;
-                    latest_ready_rs2_q[completion_bus_i[cache_lane].addr] <= 1'b1;
-                end
             end
 
             if (producer_alloc_ex) begin
@@ -419,9 +441,6 @@ import ydrasil_pkg::*;
                 latest_id_q[ex_hzd_i.rd_addr] <= ex_hzd_i.producer_id;
                 latest_id_rs1_q[ex_hzd_i.rd_addr] <= ex_hzd_i.producer_id;
                 latest_id_rs2_q[ex_hzd_i.rd_addr] <= ex_hzd_i.producer_id;
-                latest_ready_q[ex_hzd_i.rd_addr] <= 1'b0;
-                latest_ready_rs1_q[ex_hzd_i.rd_addr] <= 1'b0;
-                latest_ready_rs2_q[ex_hzd_i.rd_addr] <= 1'b0;
             end
         end
     end

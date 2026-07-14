@@ -12,7 +12,9 @@ import ydrasil_pkg::*;
 
     input  wire                            decode_valid_i,
     input  ydrasil_decode_pkt_t            decode_pkt_i,
+    input  ydrasil_issue_dep_pkt_t         decode_dep_i,
     output wire                            issue_ready_o,
+    output ydrasil_id_ctrl_pkt_t           decode_ctrl_o,
 
     // Register file read ports 
     output wire [4:0]                      rf_addr_rs1_o,
@@ -33,6 +35,7 @@ import ydrasil_pkg::*;
     output wire [DATA_WIDTH-1:0]           operand_b_o,
     output wire [DATA_WIDTH-1:0]           alu_operand_a_o,
     output wire [DATA_WIDTH-1:0]           alu_operand_b_o,
+    output wire [DATA_WIDTH-1:0]           alu_sub_operand_b_o,
     output wire [DATA_WIDTH-1:0]           bru_operand_a_o,
     output wire [DATA_WIDTH-1:0]           bru_operand_b_o,
     output wire [DATA_WIDTH-1:0]           lsu_operand_a_o,
@@ -110,6 +113,7 @@ import ydrasil_pkg::*;
     reg [DATA_WIDTH-1:0]                operand_b_ff;
     reg [DATA_WIDTH-1:0]                alu_operand_a_ff;
     reg [DATA_WIDTH-1:0]                alu_operand_b_ff;
+    (* dont_touch = "true" *) reg [DATA_WIDTH-1:0] alu_sub_operand_b_ff;
     reg [DATA_WIDTH-1:0]                bru_operand_a_ff;
     reg [DATA_WIDTH-1:0]                bru_operand_b_ff;
     reg [DATA_WIDTH-1:0]                lsu_operand_a_ff;
@@ -152,6 +156,7 @@ import ydrasil_pkg::*;
     // the distributed producer scoreboard and its retained operand muxes.
     (* keep = "true", max_fanout = 8 *) ydrasil_id_ctrl_pkt_t issue_hzd_key_q;
     ydrasil_id_ctrl_pkt_t decode_hzd_key;
+    ydrasil_id_ctrl_pkt_t issue_hzd_key_d;
     wire                            id_advance;
     wire                            issue_valid_ff = issue_uop_valid_q;
     wire [DATA_WIDTH-1:0]           issue_pc_ff = issue_uop_q.pc;
@@ -211,6 +216,16 @@ import ydrasil_pkg::*;
             decode_pkt_i.operator_type[ydrasil_pkg::OPERATOR_TYPE_CSR] |
             decode_pkt_i.operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS] |
             decode_pkt_i.fence_i;
+        decode_hzd_key.rs1_producer_id = '0;
+        decode_hzd_key.rs1_producer_tracked = 1'b0;
+        decode_hzd_key.rs2_producer_id = '0;
+        decode_hzd_key.rs2_producer_tracked = 1'b0;
+
+        issue_hzd_key_d = decode_hzd_key;
+        issue_hzd_key_d.rs1_producer_id = decode_dep_i.rs1_producer_id;
+        issue_hzd_key_d.rs1_producer_tracked = decode_dep_i.rs1_producer_tracked;
+        issue_hzd_key_d.rs2_producer_id = decode_dep_i.rs2_producer_id;
+        issue_hzd_key_d.rs2_producer_tracked = decode_dep_i.rs2_producer_tracked;
     end
 `ifndef SYNTHESIS
     // Retain zero-valued observability points used by the coverage testbench.
@@ -239,7 +254,7 @@ import ydrasil_pkg::*;
             if (decode_valid_i)
                 issue_uop_q <= decode_pkt_i;
             if (decode_valid_i)
-                issue_hzd_key_q <= decode_hzd_key;
+                issue_hzd_key_q <= issue_hzd_key_d;
         end
     end
 
@@ -390,6 +405,7 @@ import ydrasil_pkg::*;
             operand_b_ff        <= '0;
             alu_operand_a_ff    <= '0;
             alu_operand_b_ff    <= '0;
+            alu_sub_operand_b_ff <= '0;
             bru_operand_a_ff    <= '0;
             bru_operand_b_ff    <= '0;
             lsu_operand_a_ff    <= '0;
@@ -444,6 +460,7 @@ import ydrasil_pkg::*;
                 operand_b_ff        <= operand_b;
                 alu_operand_a_ff    <= operand_a;
                 alu_operand_b_ff    <= operand_b;
+                alu_sub_operand_b_ff <= operand_b;
                 bru_operand_a_ff    <= operand_a;
                 bru_operand_b_ff    <= operand_b;
                 lsu_operand_a_ff    <= operand_a;
@@ -555,6 +572,7 @@ import ydrasil_pkg::*;
                     if (id_ex_operand_b_uses_rs2_ff) begin
                         operand_b_ff <= held_rs2_wake_data;
                         alu_operand_b_ff <= held_rs2_wake_data;
+                        alu_sub_operand_b_ff <= held_rs2_wake_data;
                         bru_operand_b_ff <= held_rs2_wake_data;
                         lsu_operand_b_ff <= held_rs2_wake_data;
                         mul_operand_b_ff <= held_rs2_wake_data;
@@ -603,6 +621,7 @@ import ydrasil_pkg::*;
     assign operand_b_o = operand_b_ff;
     assign alu_operand_a_o = alu_operand_a_ff;
     assign alu_operand_b_o = alu_operand_b_ff;
+    assign alu_sub_operand_b_o = alu_sub_operand_b_ff;
     assign bru_operand_a_o = bru_operand_a_ff;
     assign bru_operand_b_o = bru_operand_b_ff;
     assign lsu_operand_a_o = lsu_operand_a_ff;
@@ -675,5 +694,12 @@ import ydrasil_pkg::*;
         issue_hzd_key_q.prev_alu_bypass_ok;
     assign id_ctrl_o.serialize_before = issue_valid_ff &
         issue_hzd_key_q.serialize_before;
+    assign id_ctrl_o.rs1_producer_id = issue_hzd_key_q.rs1_producer_id;
+    assign id_ctrl_o.rs1_producer_tracked = issue_valid_ff &
+        issue_hzd_key_q.rs1_producer_tracked;
+    assign id_ctrl_o.rs2_producer_id = issue_hzd_key_q.rs2_producer_id;
+    assign id_ctrl_o.rs2_producer_tracked = issue_valid_ff &
+        issue_hzd_key_q.rs2_producer_tracked;
+    assign decode_ctrl_o = decode_hzd_key;
 
 endmodule

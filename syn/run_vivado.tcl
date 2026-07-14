@@ -12,6 +12,7 @@ proc usage {} {
     puts "  -run_to <synth|route|bitstream|reports|sync_only>"
     puts "  -sync_sources <0|1>     remove old hw/ip sources and add generated list"
     puts "  -force <0|1>            reset runs before launching"
+    puts "  -recover_running <0|1>  reset stale implementation runs left in Running state"
     puts "  -pll_freq_mhz <mhz>     200 selects pll IP; other supported frequencies select RTL MMCM"
     puts "  -board_xdc <path>       overlay board-specific constraints after platform constraints"
     puts "  -enable_ila <0|1>       create ila_board for the conditional board probes"
@@ -476,6 +477,7 @@ set threads_per_run [arg_value "-threads_per_run" $jobs]
 set run_to [arg_value "-run_to" "route"]
 set sync_sources [arg_value "-sync_sources" "1"]
 set force_runs [arg_value "-force" "1"]
+set recover_running [arg_value "-recover_running" "0"]
 set pll_freq_mhz [arg_value "-pll_freq_mhz" "150"]
 set board_xdc [arg_value "-board_xdc" ""]
 set enable_ila [arg_value "-enable_ila" "0"]
@@ -628,6 +630,16 @@ foreach run_name $implementation_runs {
     if {!$force_runs && [regexp -nocase {complete} $status]} {
         puts "Reusing completed $run_name: $status"
     } else {
+        if {!$force_runs && $recover_running &&
+            [regexp -nocase {running|queued|launching} $status]} {
+            puts "Resetting stale implementation run $run_name before retry: $status"
+            reset_run $run_name
+            set status [get_property STATUS [get_runs $run_name]]
+        }
+        if {!$force_runs && [regexp -nocase {fail|error} $status]} {
+            puts "Resetting failed implementation run $run_name before retry: $status"
+            reset_run $run_name
+        }
         lappend pending_implementation_runs $run_name
     }
 }
@@ -643,7 +655,9 @@ if {[llength $pending_implementation_runs] > 0} {
 }
 foreach run_name $implementation_runs {
     if {[lsearch -exact $pending_implementation_runs $run_name] >= 0} {
-        wait_on_run $run_name
+        if {[catch {wait_on_run $run_name} wait_msg]} {
+            puts "warning: wait_on_run $run_name failed: $wait_msg"
+        }
     }
     set status [get_property STATUS [get_runs $run_name]]
     puts "$run_name status: $status"
