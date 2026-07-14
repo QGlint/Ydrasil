@@ -62,11 +62,65 @@ SORT_OPT_BUILD_TARGETS := $(foreach profile,$(APP_OPT_PROFILES),$(foreach app,$(
 SORT_OPT_SIM_TARGETS := $(foreach profile,$(APP_OPT_PROFILES),$(foreach app,$(SORT_APP_NAMES),sort_opt_sim_$(profile)_$(app)))
 COVERAGE_QUICK_TARGETS ?= boundary_all test_all coremark_sim coe_loop5
 COVERAGE_QUICK_SUMMARY ?= $(PPA_DIR)/coverage_quick_summary.log
-REGRESSION_TARGETS ?= sort_all sort_opt_all
+REGRESSION_TARGETS ?= sort_all sort_opt_all riscv_dv_regression
 REGRESSION_SUMMARY ?= $(PPA_DIR)/regression_summary.log
 REGRESSION_LOG_DIR ?= $(BUILD_DIR)/log/regression
 REGRESSION_RUN_ID ?=
 REGRESSION_CONTEXT_LINES ?= 12
+RISCV_DV_ROOT ?= $(PROJECT_ROOT)/verif/riscv-dv
+RISCV_DV_DRIVER ?= $(RISCV_DV_ROOT)/ydrasil_regression.py
+RISCV_DV_WORK_ROOT ?= $(BUILD_DIR)/riscv-dv
+RISCV_DV_VENV ?= $(RISCV_DV_WORK_ROOT)/venv
+RISCV_DV_PYTHON ?= $(RISCV_DV_VENV)/bin/python
+RISCV_DV_VENV_STAMP ?= $(RISCV_DV_VENV)/.generator-ready
+RISCV_DV_MODEL_DIR ?= $(RISCV_DV_WORK_ROOT)/model
+RISCV_DV_MODEL_BIN ?= $(RISCV_DV_MODEL_DIR)/ydrasil_core_tb
+RISCV_DV_LINKER ?= $(RISCV_DV_ROOT)/ydrasil/link.ld
+RISCV_DV_START_SEED ?= 1
+RISCV_DV_COUNT ?= 2000
+RISCV_DV_JOBS ?= 20
+RISCV_DV_INSTR_COUNT ?= 400
+RISCV_DV_SUBPROGRAMS ?= 0
+RISCV_DV_SIM_TIMEOUT ?= 500000
+RISCV_DV_CASE_TIMEOUT ?= 600
+RISCV_DV_SPIKE_MAXSTEPS ?= 200000
+RISCV_DV_KEEP_FAILURES ?= 20
+RISCV_DV_KEEP_RUNS ?= 5
+RISCV_DV_COVERAGE_BATCH ?= 20
+RISCV_DV_RERUN ?= 0
+RISCV_DV_MAX_CACHE_GB ?= 4
+RISCV_DV_SUMMARY ?= $(PPA_DIR)/riscv_dv_summary.log
+RISCV_DV_ARCH ?= rv32im_zicsr_zifencei
+RISCV_DV_ABI ?= ilp32
+RISCV_DV_GCC ?= $(RISCV_PREFIX)-gcc
+RISCV_DV_OBJCOPY ?= $(RISCV_PREFIX)-objcopy
+RISCV_DV_COMMON_ARGS = \
+	--project-root "$(PROJECT_ROOT)" \
+	--dv-root "$(RISCV_DV_ROOT)" \
+	--work-root "$(RISCV_DV_WORK_ROOT)" \
+	--python "$(RISCV_DV_PYTHON)" \
+	--gcc "$(shell command -v $(RISCV_DV_GCC) 2>/dev/null)" \
+	--objcopy "$(shell command -v $(RISCV_DV_OBJCOPY) 2>/dev/null)" \
+	--make "$(shell command -v $(MAKE) 2>/dev/null)" \
+	--spike "$(abspath $(SPIKE))" \
+	--model-dir "$(RISCV_DV_MODEL_DIR)" \
+	--linker "$(RISCV_DV_LINKER)" \
+	--arch "$(RISCV_DV_ARCH)" \
+	--abi "$(RISCV_DV_ABI)" \
+	--start-seed "$(RISCV_DV_START_SEED)" \
+	--count "$(RISCV_DV_COUNT)" \
+	--jobs "$(RISCV_DV_JOBS)" \
+	--instr-count "$(RISCV_DV_INSTR_COUNT)" \
+	--subprograms "$(RISCV_DV_SUBPROGRAMS)" \
+	--sim-timeout "$(RISCV_DV_SIM_TIMEOUT)" \
+	--case-timeout "$(RISCV_DV_CASE_TIMEOUT)" \
+	--spike-maxsteps "$(RISCV_DV_SPIKE_MAXSTEPS)" \
+	--keep-failures "$(RISCV_DV_KEEP_FAILURES)" \
+	--keep-runs "$(RISCV_DV_KEEP_RUNS)" \
+	--max-cache-gb "$(RISCV_DV_MAX_CACHE_GB)" \
+	--coverage-batch "$(RISCV_DV_COVERAGE_BATCH)" \
+	--verilator-coverage "$(shell command -v verilator_coverage 2>/dev/null)" \
+	$(if $(filter 1,$(RISCV_DV_RERUN)),--rerun,)
 BOUNDARY_OPT_CFLAGS_O0 ?= -O0
 BOUNDARY_OPT_CFLAGS_O1 ?= -O1
 BOUNDARY_OPT_CFLAGS_O2 ?= -O2
@@ -201,6 +255,7 @@ endif
 
 .PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests regression regression_all regression_clean init install-bender get_spike download_and_extract_spike check_spike_prebuilt_abi build_spike_from_source check_deps spike spike_wave_to_csv sim_compare commit_check commit_spike_csv commit_hw_trace commit_hw_csv commit_compare rv_test_comp_genmem ppa_rvtest_report ppa_perf_report coe_simple coe_smoke coe_smoke_led coe_isa_probes coverage_all coverage_quick coverage_clean coverage_report sw_boundary_test sw_coverage sw_coverage_clean sw_run_mode sw_coverage_report
 .PHONY: coremark coremark_sim coremark_run coremark_result coremark-rebuild coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map coremark_opt_all coremark_opt_build_all coremark_opt_sim_all coremark_opt_report coremark_opt_clean app_opt_comp_expanded_if_needed $(COREMARK_OPT_BUILD_TARGETS) $(COREMARK_OPT_SIM_TARGETS) sort_app sort_all sort_sim_all sort_report sort_app_sim sort_app-rebuild sort_app-clean sort_opt_all sort_opt_build_all sort_opt_sim_all sort_opt_report sort_opt_clean $(SORT_OPT_BUILD_TARGETS) $(SORT_OPT_SIM_TARGETS) boundary_app boundary_all boundary_sim_all boundary_report boundary_app-rebuild boundary_app-clean boundary_opt_all boundary_opt_build_all boundary_opt_sim_all boundary_opt_report boundary_opt_clean $(BOUNDARY_OPT_BUILD_TARGETS) $(BOUNDARY_OPT_SIM_TARGETS) coe_loop2_gen coe_loop5 coe_loop5_gen coe_loop_lina coe_loop_lina_gen loop_lina
+.PHONY: riscv_dv_venv riscv_dv_model riscv_dv_prepare riscv_dv_run riscv_dv_regression riscv_dv_count riscv_dv_repro riscv_dv_estimate riscv_dv_stop riscv_dv_coverage_report riscv_dv_cleanup riscv_dv_distclean
 .PHONY: syn synf synf-board syn-extreme syn-venv syn-prep syn-stage-xpr syn-stage-memory syn-vivado syn-analyze syn-clean
 
 .SECONDEXPANSION:
@@ -212,6 +267,90 @@ all: comp_and_sim_cpu
 full : comp_and_sim_cpu wave
 
 run_all_tests: init check_deps test_all
+
+$(RISCV_DV_VENV_STAMP): $(RISCV_DV_ROOT)/requirements-generator.txt
+	@mkdir -p "$(RISCV_DV_WORK_ROOT)"
+	@if [ ! -x "$(RISCV_DV_PYTHON)" ]; then python3 -m venv "$(RISCV_DV_VENV)"; fi
+	@"$(RISCV_DV_PYTHON)" -m pip install --disable-pip-version-check -r "$<"
+	@"$(RISCV_DV_PYTHON)" -c 'import bitstring, pandas, tabulate, vsc, yaml'
+	@touch "$@"
+
+riscv_dv_venv: $(RISCV_DV_VENV_STAMP)
+
+riscv_dv_model:
+	@set -e; rebuild=0; \
+	if [ ! -x "$(RISCV_DV_MODEL_BIN)" ]; then rebuild=1; \
+	elif find "$(PROJECT_ROOT)/hw/ip" "$(PROJECT_ROOT)/hw/dv" -type f \
+		\( -name '*.sv' -o -name '*.v' -o -name '*.cpp' -o -name '*.h' -o -name 'Bender.yml' \) \
+		-newer "$(RISCV_DV_MODEL_BIN)" -print -quit | grep -q .; then rebuild=1; fi; \
+	if [ "$$rebuild" -eq 1 ]; then \
+		echo "[RISCV-DV] Compiling shared Verilator model once"; \
+		$(MAKE) --no-print-directory comp OBJ_DIR="$(RISCV_DV_MODEL_DIR)" \
+			VERILATOR_COVERAGE=1 VERILATOR_TRACE=0 Compile_optimization=1; \
+	else echo "[RISCV-DV] Reusing model: $(RISCV_DV_MODEL_BIN)"; fi
+
+riscv_dv_prepare: riscv_dv_venv get_spike
+	@"$(RISCV_DV_PYTHON)" "$(RISCV_DV_DRIVER)" prepare $(RISCV_DV_COMMON_ARGS)
+
+# Deliberately has no prepare dependency: execution never regenerates cached programs.
+riscv_dv_run: riscv_dv_venv riscv_dv_model get_spike
+	@mkdir -p "$(PPA_DIR)"
+	@"$(RISCV_DV_PYTHON)" "$(RISCV_DV_DRIVER)" run $(RISCV_DV_COMMON_ARGS); rc=$$?; \
+	summary=$$(find "$(RISCV_DV_WORK_ROOT)/runs" -mindepth 2 -maxdepth 2 -name summary.log -type f -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2-); \
+	if [ -n "$$summary" ]; then cp "$$summary" "$(RISCV_DV_SUMMARY)"; echo "[RISCV-DV] Summary: $$summary"; fi; \
+	exit $$rc
+
+riscv_dv_regression: riscv_dv_venv
+	@set +e; rc=0; \
+	$(MAKE) --no-print-directory riscv_dv_model || rc=$$?; \
+	if [ "$$rc" -eq 0 ]; then $(MAKE) --no-print-directory riscv_dv_prepare || rc=$$?; fi; \
+	if [ "$$rc" -eq 0 ]; then $(MAKE) --no-print-directory riscv_dv_run || rc=$$?; fi; \
+	$(MAKE) --no-print-directory riscv_dv_cleanup; cleanup_rc=$$?; \
+	if [ "$$rc" -eq 0 ] && [ "$$cleanup_rc" -ne 0 ]; then rc=$$cleanup_rc; fi; \
+	exit "$$rc"
+
+riscv_dv_count:
+	@if [ -z "$(RISCV_DV_NUM)" ]; then echo "Usage: make riscv_dv_count RISCV_DV_NUM=<number>"; exit 2; fi
+	@$(MAKE) --no-print-directory riscv_dv_regression RISCV_DV_COUNT="$(RISCV_DV_NUM)"
+
+riscv_dv_repro: riscv_dv_venv riscv_dv_model get_spike
+	@if [ -z "$(RISCV_DV_SEED)" ]; then echo "Usage: make riscv_dv_repro RISCV_DV_SEED=<seed>"; exit 2; fi
+	@"$(RISCV_DV_PYTHON)" "$(RISCV_DV_DRIVER)" reproduce $(RISCV_DV_COMMON_ARGS) --seed "$(RISCV_DV_SEED)"
+
+riscv_dv_estimate: riscv_dv_venv
+	@"$(RISCV_DV_PYTHON)" "$(RISCV_DV_DRIVER)" estimate $(RISCV_DV_COMMON_ARGS)
+
+riscv_dv_stop:
+	@mkdir -p "$(RISCV_DV_WORK_ROOT)"; touch "$(RISCV_DV_WORK_ROOT)/STOP"
+	@echo "[RISCV-DV] Graceful stop requested; no new seeds will start."
+	@runner="$(RISCV_DV_WORK_ROOT)/runner.json"; \
+	if [ -f "$$runner" ]; then \
+		pid=$$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' "$$runner"); \
+		echo "[RISCV-DV] Waiting for runner PID $$pid to merge active coverage..."; \
+		while kill -0 "$$pid" 2>/dev/null; do sleep 2; done; \
+	else echo "[RISCV-DV] No active runner found."; fi
+	@$(MAKE) --no-print-directory riscv_dv_coverage_report
+
+riscv_dv_coverage_report:
+	@mkdir -p "$(PPA_DIR)"; \
+	data=$$(find "$(RISCV_DV_WORK_ROOT)/runs" -path '*/coverage/merged.dat' -type f -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2-); \
+	if [ -z "$$data" ]; then echo "[RISCV-DV] No merged coverage database found"; exit 2; fi; \
+	cov_dir="$${data%/*}"; info="$$cov_dir/coverage.info"; annotated="$$cov_dir/annotated"; \
+	summary="$(PPA_DIR)/riscv_dv_coverage_summary.log"; uncovered="$(PPA_DIR)/riscv_dv_uncovered.log"; \
+	verilator_coverage --write-info "$$info" "$$data"; \
+	rm -rf "$$annotated"; verilator_coverage --annotate "$$annotated" "$$data" >/dev/null; \
+	databases=$$(find "$$cov_dir" -maxdepth 1 -name 'merged.dat' -type f | wc -l); \
+	$(PYTHON) "$(PROJECT_ROOT)/verif/coverage/coverage_summary.py" \
+		--data "$$data" --info "$$info" --annotated "$$annotated" \
+		--databases "$$databases" --summary "$$summary" --uncovered "$$uncovered"; \
+	echo "[RISCV-DV] Coverage data: $$data"; echo "[RISCV-DV] Coverage info: $$info"
+
+riscv_dv_cleanup: riscv_dv_venv
+	@"$(RISCV_DV_PYTHON)" "$(RISCV_DV_DRIVER)" cleanup $(RISCV_DV_COMMON_ARGS)
+
+riscv_dv_distclean: riscv_dv_venv
+	@"$(RISCV_DV_PYTHON)" "$(RISCV_DV_DRIVER)" cleanup $(RISCV_DV_COMMON_ARGS) --all
+	@rm -rf "$(RISCV_DV_MODEL_DIR)" "$(RISCV_DV_VENV)"
 
 regression:
 	@set +e; failed=0; run_id="$(REGRESSION_RUN_ID)"; \

@@ -1110,7 +1110,7 @@ end
 
     // PC监控逻辑
     always @(pc) begin
-        if (pc == `PC_WRITE_TOHOST && pc != last_pc) begin
+        if (pc == finish_pc && pc != last_pc) begin
             pc_write_to_host_cnt = pc_write_to_host_cnt + 1'b1;
             if (pc_write_to_host_flag == 1'b0) begin
                 pc_write_to_host_cycle = cycle_count;
@@ -1178,6 +1178,7 @@ end
 	bit finish_on_terminal_led;
 	bit finish_on_tohost;
 	bit perip_debug_en;
+	logic [31:0] finish_pc;
 
 	wire [31:0] virtual_led_output;
 	wire [39:0] virtual_seg_output;
@@ -1190,6 +1191,8 @@ end
 		finish_on_terminal_led = $test$plusargs("finish_on_terminal_led");
 		finish_on_tohost = !$test$plusargs("no_finish_on_tohost");
 		perip_debug_en = $test$plusargs("perip_debug");
+		finish_pc = `PC_WRITE_TOHOST;
+		void'($value$plusargs("finish_pc=%h", finish_pc));
 	end
 
 	perip_bridge bridge_inst (

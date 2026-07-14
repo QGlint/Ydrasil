@@ -59,8 +59,10 @@ SW_NEW_ONLY_TESTS := \
 SW_FORMAL_TESTS := $(SW_ALIGNED_TESTS) $(SW_NEW_ONLY_TESTS)
 # Compatibility alias for callers that used the old combined-list name.
 SW_ALL_TESTS := $(SW_FORMAL_TESTS)
-YDRASIL_TESTS := $(sort $(basename $(notdir $(wildcard $(YDRASIL_TESTS_DIR)/*.S))))
-YDRASIL_TEST_SPIKE_SKIP_TESTS := $(SW_NEW_ONLY_TESTS)
+YDRASIL_TEST_EXCLUDE ?= $(SW_NEW_ONLY_TESTS)
+YDRASIL_TESTS := $(filter-out $(YDRASIL_TEST_EXCLUDE),\
+    $(sort $(basename $(notdir $(wildcard $(YDRASIL_TESTS_DIR)/*.S)))))
+YDRASIL_TEST_SPIKE_SKIP_TESTS := $(filter $(SW_NEW_ONLY_TESTS),$(YDRASIL_TESTS))
 YDRASIL_TEST_SIM_TARGETS := $(addprefix ydrasil_test_sim_,$(YDRASIL_TESTS))
 YDRASIL_TEST_RESULT_DIR ?= $(RESULT_DIR)/ydrasil-tests
 YDRASIL_TEST_TIMEOUT ?= 100000
@@ -154,7 +156,7 @@ ydrasil_test_sim_%:
 ydrasil_test_report:
 	@mkdir -p "$(PPA_DIR)"; rm -f "$(PPA_YDRASIL_TEST_LOG)"; \
 	failed=0; passed=0; matched=0; policy_skip=0; self_pass=0; total=$(words $(YDRASIL_TESTS)); \
-	echo "[YDRASIL TESTS] SPIKE POLICY_SKIP=$(YDRASIL_TEST_SPIKE_SKIP_TESTS) reason=Spike traps on misaligned accesses while RTL uses a hardware convention" | tee "$(PPA_YDRASIL_TEST_LOG)"; \
+	echo "[YDRASIL TESTS] EXCLUDED=$(YDRASIL_TEST_EXCLUDE) reason=unsupported misaligned accesses" | tee "$(PPA_YDRASIL_TEST_LOG)"; \
 	for name in $(YDRASIL_TESTS); do status="$(YDRASIL_TEST_RESULT_DIR)/$$name.status"; \
 		if [ ! -s "$$status" ]; then line="[ydrasil-tests/$$name] [FAIL missing status]"; failed=1; \
 		else line=$$(cat "$$status"); fi; \
