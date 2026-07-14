@@ -53,6 +53,22 @@ make sim
 make run_all_tests
 ```
 
+在当前 RTL 上持续累积 coverage 的长期回归：
+
+```sh
+make regression
+```
+
+修改 RTL 后清空旧 coverage，再运行长期回归：
+
+```sh
+make regression_clean
+```
+
+长期回归目标由 `REGRESSION_TARGETS` 控制，默认包含完整 sort 与优化矩阵，
+可继续追加随机指令测试目标。完整 sort 不再属于 `coverage_all`，
+`coverage_quick` 也保持原有快速套件。
+
 无 GUI 跑 Vivado 综合、实现到 route，并生成时序分析：
 
 ```sh
