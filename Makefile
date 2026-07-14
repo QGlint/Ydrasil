@@ -53,14 +53,20 @@ COREMARK_OPT_TIMEOUT_O0 ?= 5000000
 SORT_OPT_ROOT ?= $(BUILD_DIR)/app/sort-opt
 SORT_OPT_RESULT_DIR ?= $(RESULT_DIR)/sort-opt
 PPA_SORT_OPT_LOG ?= $(PPA_DIR)/sort_opt_summary.log
-SORT_OPT_TIMEOUT ?= 300000
-SORT_OPT_TIMEOUT_O0 ?= 600000
+SORT_SIM_TIMEOUT ?= 20000000
+SORT_OPT_TIMEOUT ?= 20000000
+SORT_OPT_TIMEOUT_O0 ?= 50000000
 COREMARK_OPT_BUILD_TARGETS := $(addprefix coremark_opt_build_,$(APP_OPT_PROFILES))
 COREMARK_OPT_SIM_TARGETS := $(addprefix coremark_opt_sim_,$(APP_OPT_PROFILES))
 SORT_OPT_BUILD_TARGETS := $(foreach profile,$(APP_OPT_PROFILES),$(foreach app,$(SORT_APP_NAMES),sort_opt_build_$(profile)_$(app)))
 SORT_OPT_SIM_TARGETS := $(foreach profile,$(APP_OPT_PROFILES),$(foreach app,$(SORT_APP_NAMES),sort_opt_sim_$(profile)_$(app)))
 COVERAGE_QUICK_TARGETS ?= boundary_all test_all coremark_sim coe_loop5
 COVERAGE_QUICK_SUMMARY ?= $(PPA_DIR)/coverage_quick_summary.log
+REGRESSION_TARGETS ?= sort_all sort_opt_all
+REGRESSION_SUMMARY ?= $(PPA_DIR)/regression_summary.log
+REGRESSION_LOG_DIR ?= $(BUILD_DIR)/log/regression
+REGRESSION_RUN_ID ?=
+REGRESSION_CONTEXT_LINES ?= 12
 BOUNDARY_OPT_CFLAGS_O0 ?= -O0
 BOUNDARY_OPT_CFLAGS_O1 ?= -O1
 BOUNDARY_OPT_CFLAGS_O2 ?= -O2
@@ -88,10 +94,22 @@ BOUNDARY_OPT_BUILD_TARGETS := $(addprefix boundary_opt_build_,$(BOUNDARY_OPT_PRO
 BOUNDARY_OPT_SIM_TARGETS := $(foreach profile,$(BOUNDARY_OPT_PROFILES),$(foreach app,$(BOUNDARY_APP_NAMES),boundary_opt_sim_$(profile)_$(app)))
 BOUNDARY_OPT_SW_DEPS := $(wildcard $(BOUNDARY_APP_DIR)/*.c $(BOUNDARY_APP_DIR)/*.h $(PROJECT_ROOT)/sw/bsp/*.S $(PROJECT_ROOT)/sw/bsp/lib/*.c $(PROJECT_ROOT)/sw/bsp/include/*.h) $(PROJECT_ROOT)/sw/Makefile
 PPA_SORT_LOG ?= $(PPA_DIR)/sort_summary.log
+SORT_EXPECT_CASES ?= 91
+SORT_EXPECT_CHECKS ?= 455
+SORT_EXPECT_SIGNATURE ?= c02bdfa9
 PPA_COE_LOG ?= $(PPA_DIR)/$(COE_SIMPLE_NAME)_summary.log
+COE_M3_DIR ?= $(BUILD_DIR)/fpga_coe_m3
+COE_TO_MEM ?= $(PROJECT_ROOT)/sw/coe_to_mem.pl
+COE_LOOP_PATCH ?= $(PROJECT_ROOT)/sw/make_m3_loop_variant.pl
+COE_M3_ITCM ?= $(COE_M3_DIR)/irom_M3.itcm
+COE_M3_ITCM_BIN ?= $(COE_M3_DIR)/irom_M3_itcm.bin
+COE_M3_DTCM ?= $(COE_M3_DIR)/dram_M.dtcm
+COE_LOOP2_ITCM_BIN ?= $(COE_M3_DIR)/irom_M3_loop2_itcm.bin
+COE_LOOP2_ITCM ?= $(COE_M3_DIR)/irom_M3_loop2.itcm
+COE_LOOP2_DTCM ?= $(COE_M3_DIR)/dram_M_loop2.dtcm
 COE_SIMPLE_NAME ?= coe_loop2
-COE_SIMPLE_ITCM ?= $(BUILD_DIR)/fpga_coe_m3/irom_M3_loop2.itcm
-COE_SIMPLE_DTCM ?= $(BUILD_DIR)/fpga_coe_m3/dram_M_loop2.dtcm
+COE_SIMPLE_ITCM ?= $(COE_LOOP2_ITCM)
+COE_SIMPLE_DTCM ?= $(COE_LOOP2_DTCM)
 COE_SIMPLE_LOG ?= $(HW_TRACE_OUT_DIR)/$(COE_SIMPLE_NAME)/hw.log
 COE_SIMPLE_SIM_EXTRA_DEFINES ?= +no_finish_on_led +no_finish_on_tohost +perip_debug +commit_trace +cpp_timeout=$(COE_SIM_TIMEOUT) +sv_timeout=$(COE_SIM_TIMEOUT)
 COE_ISA_SIM_EXTRA_DEFINES ?= +no_finish_on_led +no_finish_on_tohost +perip_debug +commit_trace +cpp_timeout=$(COE_SIM_TIMEOUT) +sv_timeout=$(COE_SIM_TIMEOUT)
@@ -100,10 +118,11 @@ COE_EXPECT_CNT_START ?= 0x80000000
 COE_EXPECT_CNT_STOP ?= 0xffffffff
 COE_EXPECT_CNT_READ ?= 0x00000000
 COE_EXPECT_LED ?= 0x078b7323
-COE_LOOP5_DIR ?= $(BUILD_DIR)/fpga_coe_m3
+COE_LOOP5_DIR ?= $(COE_M3_DIR)
 COE_LOOP5_ITCM_BIN ?= $(COE_LOOP5_DIR)/irom_M3_loop5_itcm.bin
 COE_LOOP5_ITCM ?= $(COE_LOOP5_DIR)/irom_M3_loop5.itcm
 COE_LOOP5_DTCM ?= $(COE_LOOP5_DIR)/dram_M_loop5.dtcm
+COE_LOOP5_DUMP ?= $(COE_LOOP5_DIR)/irom_M3_loop5.dump
 
 export PROJECT_ROOT BUILD_DIR WAVE_DIR LOG_DIR SIM_TOOL IP VERILATOR_MOD COVERAGE VERILATOR_COVERAGE UVM USE_BENDER BENDER DIV_IMPL LSU_IMPL MEMS_IMPL ARCH ABI RISCV_PREFIX CC OBJCOPY OBJDUMP GDB QEMU TRACE_TO_CSV TRACE_COMPARE
 
@@ -169,8 +188,8 @@ ifeq ($(filter $(SYN_PLL_FREQ_MHZ),$(SYN_PLL_SUPPORTED_FREQS)),)
 $(error Unsupported SYN_PLL_FREQ_MHZ=$(SYN_PLL_FREQ_MHZ); supported values: $(SYN_PLL_SUPPORTED_FREQS))
 endif
 
-.PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests init install-bender get_spike download_and_extract_spike check_spike_prebuilt_abi build_spike_from_source check_deps spike spike_wave_to_csv sim_compare commit_check commit_spike_csv commit_hw_trace commit_hw_csv commit_compare rv_test_comp_genmem ppa_rvtest_report ppa_perf_report coe_simple coe_smoke coe_smoke_led coe_isa_probes coverage_all coverage_quick coverage_clean coverage_report sw_boundary_test sw_coverage sw_coverage_clean sw_run_mode sw_coverage_report
-.PHONY: coremark coremark_sim coremark_run coremark_result coremark-rebuild coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map coremark_opt_all coremark_opt_build_all coremark_opt_sim_all coremark_opt_report coremark_opt_clean app_opt_comp_expanded_if_needed $(COREMARK_OPT_BUILD_TARGETS) $(COREMARK_OPT_SIM_TARGETS) sort_app sort_all sort_sim_all sort_report sort_app_sim sort_app-rebuild sort_app-clean sort_opt_all sort_opt_build_all sort_opt_sim_all sort_opt_report sort_opt_clean $(SORT_OPT_BUILD_TARGETS) $(SORT_OPT_SIM_TARGETS) boundary_app boundary_all boundary_sim_all boundary_report boundary_app-rebuild boundary_app-clean boundary_opt_all boundary_opt_build_all boundary_opt_sim_all boundary_opt_report boundary_opt_clean $(BOUNDARY_OPT_BUILD_TARGETS) $(BOUNDARY_OPT_SIM_TARGETS) coe_loop5 coe_loop5_gen
+.PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests regression regression_all regression_clean init install-bender get_spike download_and_extract_spike check_spike_prebuilt_abi build_spike_from_source check_deps spike spike_wave_to_csv sim_compare commit_check commit_spike_csv commit_hw_trace commit_hw_csv commit_compare rv_test_comp_genmem ppa_rvtest_report ppa_perf_report coe_simple coe_smoke coe_smoke_led coe_isa_probes coverage_all coverage_quick coverage_clean coverage_report sw_boundary_test sw_coverage sw_coverage_clean sw_run_mode sw_coverage_report
+.PHONY: coremark coremark_sim coremark_run coremark_result coremark-rebuild coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map coremark_opt_all coremark_opt_build_all coremark_opt_sim_all coremark_opt_report coremark_opt_clean app_opt_comp_expanded_if_needed $(COREMARK_OPT_BUILD_TARGETS) $(COREMARK_OPT_SIM_TARGETS) sort_app sort_all sort_sim_all sort_report sort_app_sim sort_app-rebuild sort_app-clean sort_opt_all sort_opt_build_all sort_opt_sim_all sort_opt_report sort_opt_clean $(SORT_OPT_BUILD_TARGETS) $(SORT_OPT_SIM_TARGETS) boundary_app boundary_all boundary_sim_all boundary_report boundary_app-rebuild boundary_app-clean boundary_opt_all boundary_opt_build_all boundary_opt_sim_all boundary_opt_report boundary_opt_clean $(BOUNDARY_OPT_BUILD_TARGETS) $(BOUNDARY_OPT_SIM_TARGETS) coe_loop2_gen coe_loop5 coe_loop5_gen
 .PHONY: syn synf synf-board syn-extreme syn-venv syn-prep syn-stage-xpr syn-stage-memory syn-vivado syn-analyze syn-clean
 
 .SECONDEXPANSION:
@@ -183,6 +202,66 @@ full : comp_and_sim_cpu wave
 
 run_all_tests: init check_deps test_all
 
+regression:
+	@set +e; failed=0; run_id="$(REGRESSION_RUN_ID)"; \
+	if [ -z "$$run_id" ]; then run_id="$$(date '+%Y%m%d_%H%M%S')_$$$$"; fi; \
+	run_dir="$(REGRESSION_LOG_DIR)/$$run_id"; coverage_dir="$(COVERAGE_DATA_DIR)/regression/$$run_id"; \
+	mkdir -p "$$run_dir" "$$coverage_dir" "$(PPA_DIR)"; summary="$$run_dir/summary.log"; \
+	echo "[REGRESSION] Run: $$run_id" | tee "$$summary"; \
+	echo "[REGRESSION] Coverage mode: accumulate" | tee -a "$$summary"; \
+	echo "[REGRESSION] Coverage data: $$coverage_dir" | tee -a "$$summary"; \
+	echo "[REGRESSION] Targets: $(REGRESSION_TARGETS)" | tee -a "$$summary"; \
+	for target in $(REGRESSION_TARGETS); do \
+		safe_target=$$(printf '%s' "$$target" | tr '/:' '__'); run_log="$$run_dir/$$safe_target.log"; \
+		marker="$$run_dir/.$$safe_target.start"; : > "$$marker"; \
+		echo "[REGRESSION] RUN  $$target" | tee -a "$$summary"; \
+		if $(MAKE) --no-print-directory "$$target" VERILATOR_COVERAGE=1 VERILATOR_TRACE=0 \
+			COVERAGE_DATA_DIR="$$coverage_dir" >"$$run_log" 2>&1; then \
+			echo "[REGRESSION] PASS $$target log=$$run_log" | tee -a "$$summary"; \
+		else \
+			diagnostic="$$run_dir/$$safe_target.failure.log"; \
+			{ \
+				echo "TARGET=$$target"; echo "RUN_LOG=$$run_log"; \
+				echo "--- command error context ---"; \
+				grep -n -C "$(REGRESSION_CONTEXT_LINES)" -Ei 'SORT FAIL|TEST_FAIL|(^|[^[:alpha:]])(FAIL|ERROR|FATAL|timeout)' "$$run_log" | tail -800; \
+				echo "--- new status/hardware-log context ---"; \
+				find "$(RESULT_DIR)" "$(HW_TRACE_OUT_DIR)" -type f \
+					\( -name '*.status' -o -name 'hw.log' \) -newer "$$marker" -print 2>/dev/null | sort | \
+				while IFS= read -r artifact; do \
+					if grep -Eiq 'SORT FAIL|TEST_FAIL|(^|[^[:alpha:]])(FAIL|ERROR|FATAL|timeout)' "$$artifact"; then \
+						echo "FILE=$$artifact"; \
+						grep -n -C "$(REGRESSION_CONTEXT_LINES)" -Ei 'SORT FAIL|TEST_FAIL|(^|[^[:alpha:]])(FAIL|ERROR|FATAL|timeout)' "$$artifact" | tail -300; \
+					fi; \
+				done; \
+				echo "--- command tail ---"; tail -120 "$$run_log"; \
+			} > "$$diagnostic" 2>&1; \
+			echo "[REGRESSION] FAIL $$target log=$$run_log diagnostic=$$diagnostic" | tee -a "$$summary"; failed=1; \
+		fi; \
+		rm -f "$$marker"; \
+	done; \
+	dat_count=$$(find "$(COVERAGE_DATA_DIR)" -type f -name '*.dat' | wc -l); \
+	run_dat_count=$$(find "$$coverage_dir" -type f -name '*.dat' | wc -l); \
+	if [ "$$dat_count" -gt 0 ]; then \
+		if $(MAKE) --no-print-directory coverage_report; then \
+			echo "[REGRESSION] PASS coverage_report" | tee -a "$$summary"; \
+		else \
+			echo "[REGRESSION] FAIL coverage_report" | tee -a "$$summary"; failed=1; \
+		fi; \
+	else \
+		echo "[REGRESSION] FAIL no coverage databases generated" | tee -a "$$summary"; failed=1; \
+	fi; \
+	overall=PASS; if [ "$$failed" -ne 0 ]; then overall=FAIL; fi; \
+	echo "[REGRESSION] CORRECTNESS=$$overall run_databases=$$run_dat_count total_databases=$$dat_count" | tee -a "$$summary"; \
+	cp "$$summary" "$(REGRESSION_SUMMARY)"; \
+	echo "[REGRESSION] Summary: $$summary"; \
+	exit "$$failed"
+
+regression_all: regression
+
+regression_clean: coverage_clean
+	@rm -rf "$(REGRESSION_LOG_DIR)"; rm -f "$(REGRESSION_SUMMARY)"
+	@$(MAKE) --no-print-directory regression
+
 coverage_clean:
 	rm -rf "$(COVERAGE_DIR)"
 
@@ -192,9 +271,7 @@ coverage_all: coverage_clean
 	-@$(MAKE) boundary_all VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
 	-@$(MAKE) boundary_opt_all VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
 	-@$(MAKE) coremark_opt_all VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
-	-@$(MAKE) sort_opt_all VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
 	-@$(MAKE) test_all VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
-	-@$(MAKE) sort_all VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
 	-@$(MAKE) coremark_sim VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
 	-@$(MAKE) coe_loop5 VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
 	@$(MAKE) coverage_report
@@ -708,8 +785,10 @@ sort_sim_%:
 		COMPARE_ELF="$(BUILD_DIR)/app/sort/$$name.elf" \
 		COMPARE_ITCM="$(BUILD_DIR)/app/sort/$$name.itcm" \
 		COMPARE_DTCM="$(BUILD_DIR)/app/sort/$$name.dtcm" \
-		COMPARE_SIM_EXTRA_DEFINES="+perip_debug +cpp_timeout=2000000 +sv_timeout=2000000" \
-		>"$$run_log" 2>&1 && grep -q "SORT PASS name=$$name count=100" "$$hw_log"; then \
+		COMPARE_SIM_EXTRA_DEFINES="+perip_debug +cpp_timeout=$(SORT_SIM_TIMEOUT) +sv_timeout=$(SORT_SIM_TIMEOUT)" \
+		>"$$run_log" 2>&1 \
+			&& [ "$$(grep -Ec "^SORT SUITE PASS name=$$name cases=$(SORT_EXPECT_CASES) checks=$(SORT_EXPECT_CHECKS) signature=0x$(SORT_EXPECT_SIGNATURE)$$" "$$hw_log")" -eq 1 ] \
+			&& ! grep -q "^SORT FAIL name=$$name " "$$hw_log"; then \
 		result=PASS; \
 	else \
 		result=FAIL; \
@@ -799,7 +878,9 @@ sort_opt_sim_$(1)_$(2):
 		COMPARE_SIM_EXTRA_DEFINES="+perip_debug +cpp_timeout=$(if $(SORT_OPT_TIMEOUT_$(1)),$(SORT_OPT_TIMEOUT_$(1)),$(SORT_OPT_TIMEOUT)) +sv_timeout=$(if $(SORT_OPT_TIMEOUT_$(1)),$(SORT_OPT_TIMEOUT_$(1)),$(SORT_OPT_TIMEOUT))" \
 		$$$$model_args \
 		>"$$$$run_log" 2>&1; rc=$$$$?; set -e; hw_log="$(HW_TRACE_OUT_DIR)/sort-opt/$$$$profile/$$$$name/hw.log"; \
-	result=FAIL; if [ "$$$$rc" -eq 0 ] && grep -q "SORT PASS name=$$$$name count=100" "$$$$hw_log"; then result=PASS; fi; \
+	result=FAIL; if [ "$$$$rc" -eq 0 ] \
+		&& [ "$$$$(grep -Ec "^SORT SUITE PASS name=$$$$name cases=$(SORT_EXPECT_CASES) checks=$(SORT_EXPECT_CHECKS) signature=0x$(SORT_EXPECT_SIGNATURE)$$$$" "$$$$hw_log")" -eq 1 ] \
+		&& ! grep -q "^SORT FAIL name=$$$$name " "$$$$hw_log"; then result=PASS; fi; \
 	cycles=$$$$(grep -o 'CYCLES=[0-9]*' "$$$$hw_log" 2>/dev/null | tail -1 | cut -d= -f2); \
 	insts=$$$$(grep -o 'INSTS=[0-9]*' "$$$$hw_log" 2>/dev/null | tail -1 | cut -d= -f2); \
 	ipc=$$$$(grep -o 'IPC=[0-9.]*' "$$$$hw_log" 2>/dev/null | tail -1 | cut -d= -f2); \
@@ -988,7 +1069,37 @@ coremark_result:
 		echo "[COREMARK] HW log not found: $(COREMARK_RESULT_LOG)" | tee -a "$(PPA_COREMARK_LOG)"; \
 	fi
 
-coe_simple: comp
+$(COE_M3_ITCM): $(IROM_COE) $(COE_TO_MEM)
+	@mkdir -p "$(@D)"
+	perl "$(COE_TO_MEM)" "$<" "$@"
+
+$(COE_M3_ITCM_BIN): $(IROM_COE) $(COE_TO_MEM)
+	@mkdir -p "$(@D)"
+	perl "$(COE_TO_MEM)" --binary "$<" "$@"
+
+$(COE_M3_DTCM) $(COE_LOOP2_DTCM) $(COE_LOOP5_DTCM): $(DRAM_COE) $(COE_TO_MEM)
+	@mkdir -p "$(@D)"
+	perl "$(COE_TO_MEM)" "$<" "$@"
+
+$(COE_LOOP2_ITCM_BIN): $(COE_M3_ITCM_BIN) $(COE_LOOP_PATCH)
+	perl "$(COE_LOOP_PATCH)" "$<" "$@" 1
+
+$(COE_LOOP2_ITCM): $(COE_LOOP2_ITCM_BIN)
+	od -An -t x4 -w4 -v "$<" | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > "$@"
+
+$(COE_LOOP5_ITCM_BIN): $(COE_M3_ITCM_BIN) $(COE_LOOP_PATCH)
+	perl "$(COE_LOOP_PATCH)" "$<" "$@" 4
+
+$(COE_LOOP5_ITCM): $(COE_LOOP5_ITCM_BIN)
+	od -An -t x4 -w4 -v "$<" | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > "$@"
+
+$(COE_LOOP5_DUMP): $(COE_LOOP5_ITCM_BIN)
+	$(OBJDUMP) -D -b binary -m riscv:rv32 "$<" > "$@"
+
+coe_loop2_gen: $(COE_M3_ITCM) $(COE_M3_ITCM_BIN) $(COE_M3_DTCM) \
+		$(COE_LOOP2_ITCM_BIN) $(COE_LOOP2_ITCM) $(COE_LOOP2_DTCM)
+
+coe_simple: comp $(COE_SIMPLE_ITCM) $(COE_SIMPLE_DTCM)
 	@set -e; \
 	rm -f "$(COE_SIMPLE_LOG)"; \
 	$(MAKE) sim_compare \
@@ -1037,13 +1148,7 @@ coe_simple: comp
 	echo "[COE_SIMPLE] PASS $(COE_SIMPLE_NAME)"; \
 	grep -E "LED write|SEG write|CNT write|CNT read|PERF_|\\[PERIP\\]|\\[TB\\]|Simulation finished" "$$log" | tail -100
 
-coe_loop5_gen:
-	@mkdir -p "$(COE_LOOP5_DIR)"
-	perl sw/make_m3_loop_variant.pl \
-		"$(COE_LOOP5_DIR)/irom_M3_loop2_itcm.bin" "$(COE_LOOP5_ITCM_BIN)" 4
-	od -An -t x4 -w4 -v "$(COE_LOOP5_ITCM_BIN)" | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > "$(COE_LOOP5_ITCM)"
-	cp "$(COE_LOOP5_DIR)/dram_M_loop2.dtcm" "$(COE_LOOP5_DTCM)"
-	$(OBJDUMP) -D -b binary -m riscv:rv32 "$(COE_LOOP5_ITCM_BIN)" > "$(COE_LOOP5_DIR)/irom_M3_loop5.dump"
+coe_loop5_gen: $(COE_LOOP5_ITCM_BIN) $(COE_LOOP5_ITCM) $(COE_LOOP5_DTCM) $(COE_LOOP5_DUMP)
 
 coe_loop5: coe_loop5_gen
 	@$(MAKE) coe_simple \

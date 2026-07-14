@@ -3,9 +3,12 @@
 
 #include <stdint.h>
 
-#define SORT_DATA_COUNT 100u
+#define SORT_MAX_DATA_COUNT 101u
+#define SORT_LEGACY_DATA_COUNT 100u
+#define SORT_GENERATED_CASE_COUNT 90u
+#define SORT_TOTAL_CASE_COUNT (SORT_GENERATED_CASE_COUNT + 1u)
 
-#define SORT_DATA_INITIALIZER { \
+#define SORT_LEGACY_DATA_INITIALIZER { \
     42, -7, 1024, 0, 17, -256, 99, 3, 2048, -1, \
     77, 12, -99, 512, 6, 314, -271, 88, 45, -16, \
     731, 23, -512, 64, 9, 1000, -3, 55, 144, -89, \
