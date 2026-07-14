@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import signal
 import shutil
 import sqlite3
@@ -22,7 +23,6 @@ import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
-
 
 MAX_JOBS = 20
 ITCM_WORDS = 16 * 1024 // 4
@@ -320,6 +320,95 @@ def _db_open(path: Path) -> sqlite3.Connection:
     )
     db.commit()
     return db
+
+
+def _seed_history_open(args: argparse.Namespace, profile_id: str) -> sqlite3.Connection:
+    path = args.work_root / "history" / f"{profile_id}.sqlite3"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    db = sqlite3.connect(path)
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS seeds ("
+        "seed INTEGER PRIMARY KEY, allocated_at TEXT NOT NULL)"
+    )
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS failures ("
+        "seed INTEGER PRIMARY KEY, first_seen TEXT NOT NULL, "
+        "last_seen TEXT NOT NULL, last_status TEXT NOT NULL)"
+    )
+
+    known_seeds: set[int] = set()
+    known_failures: dict[int, str] = {}
+    profile_dir = args.work_root / "cache" / profile_id
+    for case_dir in profile_dir.glob("seed_*"):
+        try:
+            known_seeds.add(int(case_dir.name.removeprefix("seed_")))
+        except ValueError:
+            continue
+    for result_root in (args.work_root / "runs", args.work_root / "repro"):
+        for result_db in result_root.glob(f"*{profile_id}*/results.sqlite3"):
+            try:
+                source = sqlite3.connect(result_db)
+                for seed, status in source.execute("SELECT seed, status FROM results"):
+                    known_seeds.add(seed)
+                    if status in {"FAIL", "TIMEOUT", "ERROR"}:
+                        known_failures[seed] = status
+                source.close()
+            except sqlite3.Error:
+                continue
+    now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    db.executemany(
+        "INSERT OR IGNORE INTO seeds VALUES (?, ?)",
+        ((seed, now) for seed in known_seeds),
+    )
+    db.executemany(
+        "INSERT OR IGNORE INTO failures VALUES (?, ?, ?, ?)",
+        ((seed, now, now, status) for seed, status in known_failures.items()),
+    )
+    db.commit()
+    return db
+
+
+def _reserve_random_seed(db: sqlite3.Connection) -> int:
+    while True:
+        seed = secrets.randbelow(0x7fff_ffff) + 1
+        try:
+            db.execute(
+                "INSERT INTO seeds VALUES (?, ?)",
+                (seed, time.strftime("%Y-%m-%dT%H:%M:%S%z")),
+            )
+            db.commit()
+            return seed
+        except sqlite3.IntegrityError:
+            continue
+
+
+def _record_permanent_result(db: sqlite3.Connection, seed: int, status: str) -> None:
+    now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    db.execute(
+        "INSERT INTO failures VALUES (?, ?, ?, ?) "
+        "ON CONFLICT(seed) DO UPDATE SET last_seen=excluded.last_seen, "
+        "last_status=excluded.last_status",
+        (seed, now, now, status),
+    )
+    db.commit()
+
+
+def _active_runner_pid(runner_file: Path) -> int | None:
+    if not runner_file.is_file():
+        return None
+    try:
+        pid = int(json.loads(runner_file.read_text(encoding="utf-8"))["pid"])
+    except (KeyError, ValueError, json.JSONDecodeError):
+        runner_file.unlink(missing_ok=True)
+        return None
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        runner_file.unlink(missing_ok=True)
+        return None
+    except PermissionError:
+        pass
+    return pid
 
 
 def _tail(path: Path, lines: int = 80) -> str:
@@ -675,6 +764,191 @@ def command_run(args: argparse.Namespace, only_seed: int | None = None) -> int:
     return 1 if failures else 0
 
 
+def command_continuous(args: argparse.Namespace) -> int:
+    profile, profile_id = _profile_id(args)
+    suite_id = f"{profile_id}_random"
+    suite_dir = args.work_root / "runs" / suite_id
+    runner_file = args.work_root / "runner.json"
+    active_pid = _active_runner_pid(runner_file)
+    if active_pid is not None:
+        print(f"[RISCV-DV] ERROR: runner PID {active_pid} is already active", file=sys.stderr)
+        return 2
+    db = _db_open(suite_dir / "results.sqlite3")
+    history_db = _seed_history_open(args, profile_id)
+    permanent_seeds = [
+        row[0] for row in history_db.execute(
+            "SELECT seed FROM failures ORDER BY first_seen, seed"
+        )
+    ]
+    permanent_iter = iter(permanent_seeds)
+    retained_failures = (
+        len(list((suite_dir / "failures").glob("seed_*")))
+        if (suite_dir / "failures").exists() else 0
+    )
+    stop_file = args.work_root / "STOP"
+    stop_event = threading.Event()
+    stop_file.unlink(missing_ok=True)
+    _json_dump(
+        runner_file,
+        {"pid": os.getpid(), "mode": "random", "suite_id": suite_id,
+         "suite_dir": str(suite_dir)},
+    )
+
+    def request_stop(signum: int, _frame: Any) -> None:
+        print(
+            f"\n[RISCV-DV] signal {signum}: graceful stop requested; "
+            "waiting for active cases",
+            flush=True,
+        )
+        stop_event.set()
+        stop_file.touch()
+
+    old_handlers = {}
+    for signum in (signal.SIGINT, signal.SIGTERM):
+        old_handlers[signum] = signal.signal(signum, request_stop)
+
+    def prepare_and_run(seed: int) -> dict[str, Any]:
+        started = time.monotonic()
+        prepared = _prepare_one(args, profile, profile_id, seed)
+        if prepared["status"] not in {"prepared", "cached"}:
+            return {
+                "seed": seed,
+                "status": "ERROR",
+                "reason": f"program preparation failed: {prepared.get('error', prepared['status'])}",
+                "returncode": 2,
+                "elapsed": time.monotonic() - started,
+                "work": "",
+                "metrics": [],
+                "coverage": "",
+            }
+        row = _run_one(args, profile, profile_id, suite_dir, seed)
+        row["elapsed"] = time.monotonic() - started
+        return row
+
+    def record(row: dict[str, Any]) -> None:
+        nonlocal retained_failures
+        seed = row["seed"]
+        work = Path(row["work"]) if row.get("work") else None
+        case_dir = _case_dir(args, profile_id, seed)
+        artifact = ""
+        if row["status"] == "PASS":
+            if work and work.exists():
+                shutil.rmtree(work)
+            shutil.rmtree(suite_dir / "failures" / f"seed_{seed}", ignore_errors=True)
+            shutil.rmtree(case_dir, ignore_errors=True)
+        elif work and work.exists() and retained_failures < args.keep_failures:
+            failure_dir = suite_dir / "failures" / f"seed_{seed}"
+            failure_dir.parent.mkdir(parents=True, exist_ok=True)
+            if failure_dir.exists():
+                shutil.rmtree(failure_dir)
+            work.replace(failure_dir)
+            _gzip_failure_files(failure_dir)
+            artifact = str(failure_dir)
+            retained_failures += 1
+        elif (case_dir / "prepare_failure").exists() and retained_failures < args.keep_failures:
+            artifact = str(case_dir / "prepare_failure")
+            retained_failures += 1
+        else:
+            if work and work.exists():
+                shutil.rmtree(work)
+            shutil.rmtree(case_dir, ignore_errors=True)
+        db.execute(
+            "INSERT OR REPLACE INTO results VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (seed, row["status"], row["elapsed"],
+             row["reason"] + ("\n" + row.get("tail", "")[-4000:] if row.get("tail") else ""),
+             row["returncode"], json.dumps(row.get("metrics", [])), artifact,
+             time.strftime("%Y-%m-%dT%H:%M:%S%z")),
+        )
+        db.commit()
+        if (row["status"] in {"FAIL", "TIMEOUT", "ERROR"} or
+                row.get("permanent_replay")):
+            _record_permanent_result(history_db, seed, row["status"])
+        label = "REGRESSION" if row.get("permanent_replay") else "RANDOM"
+        print(
+            f"[{label}] seed={seed} status={row['status']} "
+            f"elapsed={row['elapsed']:.2f}s reason={row['reason']}",
+            flush=True,
+        )
+
+    futures: dict[concurrent.futures.Future[dict[str, Any]], tuple[int, bool]] = {}
+    completed_since_merge = 0
+    coverage_error = 0
+    print(
+        f"[RISCV-DV] RANDOM START profile={profile_id} jobs={args.jobs} "
+        f"history={history_db.execute('SELECT COUNT(*) FROM seeds').fetchone()[0]} "
+        f"permanent={len(permanent_seeds)}",
+        flush=True,
+    )
+
+    def submit_next(pool: concurrent.futures.ThreadPoolExecutor) -> None:
+        try:
+            seed = next(permanent_iter)
+            permanent_replay = True
+        except StopIteration:
+            seed = _reserve_random_seed(history_db)
+            permanent_replay = False
+        future = pool.submit(prepare_and_run, seed)
+        futures[future] = (seed, permanent_replay)
+
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
+            while len(futures) < args.jobs:
+                submit_next(pool)
+            while futures:
+                done, _ = concurrent.futures.wait(
+                    futures, timeout=1,
+                    return_when=concurrent.futures.FIRST_COMPLETED,
+                )
+                if not done:
+                    if stop_file.exists():
+                        stop_event.set()
+                    continue
+                for future in done:
+                    _, permanent_replay = futures.pop(future)
+                    row = future.result()
+                    row["permanent_replay"] = permanent_replay
+                    record(row)
+                    completed_since_merge += 1
+                if completed_since_merge >= args.coverage_batch:
+                    if _merge_coverage(args, suite_dir):
+                        coverage_error = 1
+                        stop_event.set()
+                    completed_since_merge = 0
+                if stop_file.exists():
+                    stop_event.set()
+                while not stop_event.is_set() and len(futures) < args.jobs:
+                    submit_next(pool)
+    finally:
+        coverage_error |= _merge_coverage(args, suite_dir)
+        runner_file.unlink(missing_ok=True)
+        for signum, handler in old_handlers.items():
+            signal.signal(signum, handler)
+
+    all_rows = [
+        {"seed": seed, "status": status, "elapsed": elapsed}
+        for seed, status, elapsed in db.execute(
+            "SELECT seed, status, elapsed FROM results ORDER BY updated_at"
+        )
+    ]
+    summary = _write_summary(
+        suite_dir, suite_id, all_rows, 0, 0, len(all_rows), stop_event.is_set()
+    )
+    history_count = history_db.execute("SELECT COUNT(*) FROM seeds").fetchone()[0]
+    permanent_count = history_db.execute("SELECT COUNT(*) FROM failures").fetchone()[0]
+    history_db.close()
+    db.close()
+    shutil.rmtree(suite_dir / "tmp", ignore_errors=True)
+    print((suite_dir / "summary.log").read_text(encoding="utf-8"), end="")
+    print(
+        f"[RISCV-DV] RANDOM HISTORY={history_count} "
+        f"PERMANENT_REGRESSIONS={permanent_count}"
+    )
+    failures = sum(
+        summary["counts"].get(key, 0) for key in ("FAIL", "TIMEOUT", "ERROR")
+    ) + coverage_error
+    return 1 if failures else 0
+
+
 def command_estimate(args: argparse.Namespace) -> int:
     _, profile_id = _profile_id(args)
     profile_dir = args.work_root / "cache" / profile_id
@@ -691,11 +965,39 @@ def command_estimate(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_status(args: argparse.Namespace) -> int:
+    _, profile_id = _profile_id(args)
+    history_db = _seed_history_open(args, profile_id)
+    history_count = history_db.execute("SELECT COUNT(*) FROM seeds").fetchone()[0]
+    failures = list(
+        history_db.execute(
+            "SELECT seed, first_seen, last_seen, last_status "
+            "FROM failures ORDER BY first_seen, seed"
+        )
+    )
+    history_db.close()
+    print(
+        f"[RISCV-DV] RANDOM STATUS profile={profile_id} "
+        f"history={history_count} permanent={len(failures)}"
+    )
+    for seed, first_seen, last_seen, status in failures:
+        print(
+            f"[PERMANENT] seed={seed} status={status} "
+            f"first_seen={first_seen} last_seen={last_seen}"
+        )
+    return 0
+
+
 def command_cleanup(args: argparse.Namespace) -> int:
     shutil.rmtree(args.work_root / "runs" / ".tmp", ignore_errors=True)
     for tmp in args.work_root.glob("runs/*/tmp"):
         shutil.rmtree(tmp, ignore_errors=True)
-    runs = sorted((p for p in (args.work_root / "runs").glob("*") if p.is_dir()), key=lambda p: p.stat().st_mtime, reverse=True)
+    runs = sorted(
+        (p for p in (args.work_root / "runs").glob("*")
+         if p.is_dir() and not p.name.endswith("_random")),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
     for old in runs[args.keep_runs:]:
         shutil.rmtree(old)
     repros = sorted((p for p in (args.work_root / "repro").glob("*") if p.is_dir()), key=lambda p: p.stat().st_mtime, reverse=True)
@@ -731,7 +1033,10 @@ def command_cleanup(args: argparse.Namespace) -> int:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=("prepare", "run", "reproduce", "estimate", "cleanup"))
+    parser.add_argument(
+        "command",
+        choices=("prepare", "run", "continuous", "reproduce", "estimate", "status", "cleanup"),
+    )
     parser.add_argument("--project-root", type=Path, required=True)
     parser.add_argument("--dv-root", type=Path, required=True)
     parser.add_argument("--work-root", type=Path, required=True)
@@ -793,10 +1098,14 @@ def main() -> int:
         return command_prepare(args)
     if args.command == "run":
         return command_run(args)
+    if args.command == "continuous":
+        return command_continuous(args)
     if args.command == "reproduce":
         return command_run(args, args.seed)
     if args.command == "estimate":
         return command_estimate(args)
+    if args.command == "status":
+        return command_status(args)
     return command_cleanup(args)
 
 

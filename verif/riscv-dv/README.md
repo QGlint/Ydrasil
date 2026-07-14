@@ -11,6 +11,34 @@ the generated startup reads `mhartid`.
 
 ## Regression commands
 
+For an open-ended uniform random regression, start the continuous runner and
+leave it active. It randomly allocates seeds that have never been used by the
+current generator profile, prepares each program on demand, and keeps replacing
+completed worker slots until a graceful stop is requested.
+
+```bash
+make riscv_dv_random
+```
+
+From another shell, inspect the active runner or request a graceful stop:
+
+```bash
+cat build/riscv-dv/runner.json
+make riscv_dv_random_status
+make riscv_dv_stop
+```
+
+Seed history is stored under `build/riscv-dv/history/` and survives normal
+cleanup. Successful program images and traces are removed after comparison;
+failure evidence and cumulative coverage are retained. Seed uniqueness is per
+profile, so changing the architecture, instruction count, or generator sources
+starts a new random history.
+
+Any `FAIL`, `TIMEOUT`, or `ERROR` seed is also added to the profile's permanent
+regression set. Later continuous runs replay that set before allocating new
+random seeds. A seed stays in the set after it passes so fixed bugs remain
+covered; `riscv_dv_random_status` lists the permanent set and last result.
+
 Run a fixed number of seeds. Generation, ELF compilation and model compilation
 are cached; rerunning the same command resumes the same suite without rebuilding
 prepared seeds.
