@@ -53,7 +53,13 @@ def _tree_hash(paths: list[Path], extra: dict[str, Any]) -> str:
         if root.is_file():
             files = [root]
         else:
-            files = sorted(p for p in root.rglob("*") if p.is_file() and p.suffix in {".py", ".h", ".s", ".ld"})
+            files = sorted(
+                p for p in root.rglob("*")
+                if p.is_file()
+                and not (root.name == "ip" and "dv" in p.relative_to(root).parts)
+                and (p.suffix.lower() in {".py", ".h", ".s", ".ld", ".sv", ".svh", ".v", ".cpp"}
+                     or p.name in {"Bender.yml", "Bender.yaml"})
+            )
         for path in files:
             digest.update(str(path).encode())
             digest.update(path.read_bytes())
@@ -75,8 +81,19 @@ def _profile_id(args: argparse.Namespace) -> tuple[Profile, str]:
     return profile, f"{profile.target}_i{profile.instr_count}_s{profile.subprograms}_{source_hash}"
 
 
-def _suite_id(profile_id: str, start_seed: int, count: int) -> str:
-    return f"{profile_id}_seed{start_seed}_n{count}"
+def _rtl_id(args: argparse.Namespace) -> str:
+    return _tree_hash(
+        [args.project_root / "hw/ip"],
+        {"coverage_model": 1},
+    )
+
+
+def _suite_id(profile_id: str, rtl_id: str, start_seed: int, count: int) -> str:
+    return f"{profile_id}_rtl{rtl_id}_seed{start_seed}_n{count}"
+
+
+def _random_suite_dir(args: argparse.Namespace, profile_id: str, rtl_id: str) -> Path:
+    return args.work_root / "runs" / f"{profile_id}_rtl{rtl_id}_random"
 
 
 def _run_logged(
@@ -655,8 +672,10 @@ def command_prepare(args: argparse.Namespace) -> int:
 
 def command_run(args: argparse.Namespace, only_seed: int | None = None) -> int:
     profile, profile_id = _profile_id(args)
+    rtl_id = _rtl_id(args)
     seeds = [only_seed] if only_seed is not None else list(range(args.start_seed, args.start_seed + args.count))
-    suite_id = _suite_id(profile_id, seeds[0], len(seeds)) if only_seed is None else f"repro_{profile_id}_seed{only_seed}_{time.strftime('%Y%m%d_%H%M%S')}"
+    suite_id = (_suite_id(profile_id, rtl_id, seeds[0], len(seeds)) if only_seed is None
+                else f"repro_{profile_id}_rtl{rtl_id}_seed{only_seed}_{time.strftime('%Y%m%d_%H%M%S')}")
     suite_dir = args.work_root / ("repro" if only_seed is not None else "runs") / suite_id
     db = _db_open(suite_dir / "results.sqlite3")
     completed = {} if args.rerun or only_seed is not None else {row[0]: row[1] for row in db.execute("SELECT seed, status FROM results")}
@@ -673,7 +692,8 @@ def command_run(args: argparse.Namespace, only_seed: int | None = None) -> int:
     stop_event = threading.Event()
     if only_seed is None:
         stop_file.unlink(missing_ok=True)
-        _json_dump(runner_file, {"pid": os.getpid(), "suite_id": suite_id, "suite_dir": str(suite_dir)})
+        _json_dump(runner_file, {"pid": os.getpid(), "rtl_id": rtl_id,
+                                 "suite_id": suite_id, "suite_dir": str(suite_dir)})
 
     def request_stop(signum: int, _frame: Any) -> None:
         print(f"\n[RISCV-DV] signal {signum}: graceful stop requested; waiting for active cases", flush=True)
@@ -766,13 +786,17 @@ def command_run(args: argparse.Namespace, only_seed: int | None = None) -> int:
 
 def command_continuous(args: argparse.Namespace) -> int:
     profile, profile_id = _profile_id(args)
-    suite_id = f"{profile_id}_random"
-    suite_dir = args.work_root / "runs" / suite_id
+    rtl_id = _rtl_id(args)
+    suite_dir = _random_suite_dir(args, profile_id, rtl_id)
+    suite_id = suite_dir.name
     runner_file = args.work_root / "runner.json"
     active_pid = _active_runner_pid(runner_file)
     if active_pid is not None:
         print(f"[RISCV-DV] ERROR: runner PID {active_pid} is already active", file=sys.stderr)
         return 2
+    if args.external_stop_file and args.external_stop_file.exists():
+        print(f"[RISCV-DV] external stop is already requested: {args.external_stop_file}")
+        return 0
     db = _db_open(suite_dir / "results.sqlite3")
     history_db = _seed_history_open(args, profile_id)
     permanent_seeds = [
@@ -790,7 +814,7 @@ def command_continuous(args: argparse.Namespace) -> int:
     stop_file.unlink(missing_ok=True)
     _json_dump(
         runner_file,
-        {"pid": os.getpid(), "mode": "random", "suite_id": suite_id,
+        {"pid": os.getpid(), "mode": "random", "rtl_id": rtl_id, "suite_id": suite_id,
          "suite_dir": str(suite_dir)},
     )
 
@@ -806,6 +830,14 @@ def command_continuous(args: argparse.Namespace) -> int:
     old_handlers = {}
     for signum in (signal.SIGINT, signal.SIGTERM):
         old_handlers[signum] = signal.signal(signum, request_stop)
+
+    def stop_requested() -> bool:
+        requested = stop_file.exists() or bool(
+            args.external_stop_file and args.external_stop_file.exists()
+        )
+        if requested:
+            stop_event.set()
+        return requested
 
     def prepare_and_run(seed: int) -> dict[str, Any]:
         started = time.monotonic()
@@ -892,7 +924,7 @@ def command_continuous(args: argparse.Namespace) -> int:
 
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
-            while len(futures) < args.jobs:
+            while len(futures) < args.jobs and not stop_requested():
                 submit_next(pool)
             while futures:
                 done, _ = concurrent.futures.wait(
@@ -900,8 +932,7 @@ def command_continuous(args: argparse.Namespace) -> int:
                     return_when=concurrent.futures.FIRST_COMPLETED,
                 )
                 if not done:
-                    if stop_file.exists():
-                        stop_event.set()
+                    stop_requested()
                     continue
                 for future in done:
                     _, permanent_replay = futures.pop(future)
@@ -914,8 +945,7 @@ def command_continuous(args: argparse.Namespace) -> int:
                         coverage_error = 1
                         stop_event.set()
                     completed_since_merge = 0
-                if stop_file.exists():
-                    stop_event.set()
+                stop_requested()
                 while not stop_event.is_set() and len(futures) < args.jobs:
                     submit_next(pool)
     finally:
@@ -947,6 +977,20 @@ def command_continuous(args: argparse.Namespace) -> int:
         summary["counts"].get(key, 0) for key in ("FAIL", "TIMEOUT", "ERROR")
     ) + coverage_error
     return 1 if failures else 0
+
+
+def command_coverage_path(args: argparse.Namespace) -> int:
+    _, profile_id = _profile_id(args)
+    rtl_id = _rtl_id(args)
+    merged = _random_suite_dir(args, profile_id, rtl_id) / "coverage" / "merged.dat"
+    if not merged.is_file():
+        print(
+            f"[RISCV-DV] no random coverage for current RTL fingerprint {rtl_id}",
+            file=sys.stderr,
+        )
+        return 2
+    print(merged.resolve())
+    return 0
 
 
 def command_estimate(args: argparse.Namespace) -> int:
@@ -1000,6 +1044,20 @@ def command_cleanup(args: argparse.Namespace) -> int:
     )
     for old in runs[args.keep_runs:]:
         shutil.rmtree(old)
+    _, current_profile = _profile_id(args)
+    current_random = _random_suite_dir(args, current_profile, _rtl_id(args))
+    random_runs = sorted(
+        (p for p in (args.work_root / "runs").glob("*_random") if p.is_dir()),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    kept_random = {current_random}
+    for candidate in random_runs:
+        if candidate != current_random and len(kept_random) < max(1, args.keep_runs):
+            kept_random.add(candidate)
+    for old in random_runs:
+        if old not in kept_random:
+            shutil.rmtree(old)
     repros = sorted((p for p in (args.work_root / "repro").glob("*") if p.is_dir()), key=lambda p: p.stat().st_mtime, reverse=True)
     for old in repros[args.keep_runs:]:
         shutil.rmtree(old)
@@ -1013,7 +1071,6 @@ def command_cleanup(args: argparse.Namespace) -> int:
         shutil.rmtree(cache_root, ignore_errors=True)
         shutil.rmtree(args.work_root / "repro", ignore_errors=True)
     else:
-        _, current_profile = _profile_id(args)
         limit = int(args.max_cache_gb * 1024 * 1024 * 1024)
         old_profiles = sorted(
             (p for p in cache_root.glob("*") if p.is_dir() and p.name != current_profile),
@@ -1035,7 +1092,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "command",
-        choices=("prepare", "run", "continuous", "reproduce", "estimate", "status", "cleanup"),
+        choices=("prepare", "run", "continuous", "reproduce", "estimate", "status",
+                 "coverage-path", "cleanup"),
     )
     parser.add_argument("--project-root", type=Path, required=True)
     parser.add_argument("--dv-root", type=Path, required=True)
@@ -1055,7 +1113,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int)
     parser.add_argument("--instr-count", type=int, default=400)
     parser.add_argument("--subprograms", type=int, default=0)
-    parser.add_argument("--jobs", type=int, default=12)
+    parser.add_argument("--jobs", type=int, default=20)
     parser.add_argument("--prepare-timeout", type=int, default=1200)
     parser.add_argument("--case-timeout", type=int, default=600)
     parser.add_argument("--sim-timeout", type=int, default=500000)
@@ -1064,6 +1122,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--keep-failures", type=int, default=20)
     parser.add_argument("--keep-runs", type=int, default=5)
     parser.add_argument("--coverage-batch", type=int, default=20)
+    parser.add_argument("--external-stop-file", type=Path)
     parser.add_argument("--max-cache-gb", type=float, default=4.0)
     parser.add_argument("--verilator-coverage", type=Path, default=Path("verilator_coverage"))
     parser.add_argument("--rerun", action="store_true")
@@ -1077,6 +1136,8 @@ def parse_args() -> argparse.Namespace:
     args.gcc = args.gcc.resolve()
     args.objcopy = args.objcopy.resolve()
     args.spike = args.spike.resolve()
+    if args.external_stop_file:
+        args.external_stop_file = args.external_stop_file.resolve()
     # Keep the venv launcher path. resolve() follows it to the system interpreter.
     args.python = Path(os.path.abspath(args.python))
     coverage_tool = shutil.which(str(args.verilator_coverage))
@@ -1106,6 +1167,8 @@ def main() -> int:
         return command_estimate(args)
     if args.command == "status":
         return command_status(args)
+    if args.command == "coverage-path":
+        return command_coverage_path(args)
     return command_cleanup(args)
 
 

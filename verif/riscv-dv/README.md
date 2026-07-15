@@ -11,6 +11,32 @@ the generated startup reads `mhartid`.
 
 ## Regression commands
 
+Run the full coverage regression. It reuses completed `coverage_all`, sort and
+sort-opt suites when their inputs are unchanged, then starts the unbounded
+20-worker random generator:
+
+```bash
+make regression
+```
+
+Stop the full regression from another shell. This requests the riscv-dv
+graceful stop, waits for active random cases and the parent regression, then
+merges all current-RTL suite coverage into `build/coverage-total/merged.dat`:
+
+```bash
+make regression_stop
+```
+
+The stop target also runs bounded riscv-dv cleanup; current history, permanent
+failures and the current RTL's merged coverage are retained.
+
+Any design RTL source change invalidates every static suite cache, rebuilds the
+riscv-dv model, and gives random coverage a new RTL-specific database. Testbench
+changes rebuild the simulation model but do not invalidate completed regression
+suites or change the random coverage identity. Generator seed history and
+permanent failing seeds remain global to the generator profile. Inputs changing
+while a suite is running prevent that run from being recorded as complete.
+
 For an open-ended uniform random regression, start the continuous runner and
 leave it active. It randomly allocates seeds that have never been used by the
 current generator profile, prepares each program on demand, and keeps replacing
@@ -86,6 +112,6 @@ directories are capped by `RISCV_DV_KEEP_RUNS` (default 5). Old generator
 profiles are removed when the cache exceeds `RISCV_DV_MAX_CACHE_GB` (default
 4 GiB), and preparation refuses a current profile projected beyond that limit.
 
-Parallelism defaults to 12 and is hard-capped in the driver at 20. Override it,
+Parallelism defaults to 20 and is hard-capped in the driver at 20. Override it,
 for example with `RISCV_DV_JOBS=8`, when lower CPU usage is preferred; values
 above 20 are rejected before work starts.

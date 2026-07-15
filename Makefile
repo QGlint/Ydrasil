@@ -62,11 +62,25 @@ SORT_OPT_BUILD_TARGETS := $(foreach profile,$(APP_OPT_PROFILES),$(foreach app,$(
 SORT_OPT_SIM_TARGETS := $(foreach profile,$(APP_OPT_PROFILES),$(foreach app,$(SORT_APP_NAMES),sort_opt_sim_$(profile)_$(app)))
 COVERAGE_QUICK_TARGETS ?= boundary_all test_all coremark_sim coe_loop5
 COVERAGE_QUICK_SUMMARY ?= $(PPA_DIR)/coverage_quick_summary.log
-REGRESSION_TARGETS ?= sort_all sort_opt_all riscv_dv_regression
+REGRESSION_TARGETS ?= coverage_all regression_sort regression_sort_opt riscv_dv_random
 REGRESSION_SUMMARY ?= $(PPA_DIR)/regression_summary.log
 REGRESSION_LOG_DIR ?= $(BUILD_DIR)/log/regression
 REGRESSION_RUN_ID ?=
 REGRESSION_CONTEXT_LINES ?= 12
+REGRESSION_CACHE_TOOL ?= $(PROJECT_ROOT)/verif/regression/cache.py
+REGRESSION_CACHE_DIR ?= $(BUILD_DIR)/regression-cache
+REGRESSION_CONTROL_DIR ?= $(BUILD_DIR)/regression-control
+REGRESSION_STOP_FILE ?= $(REGRESSION_CONTROL_DIR)/STOP
+REGRESSION_RUNNER_FILE ?= $(REGRESSION_CONTROL_DIR)/runner.json
+COVERAGE_ALL_CACHE_DIR ?= $(REGRESSION_CACHE_DIR)/coverage-all
+REGRESSION_SORT_COVERAGE_DIR ?= $(REGRESSION_CACHE_DIR)/coverage/sort
+REGRESSION_SORT_OPT_COVERAGE_DIR ?= $(REGRESSION_CACHE_DIR)/coverage/sort-opt
+REGRESSION_TOTAL_COVERAGE_DIR ?= $(BUILD_DIR)/coverage-total
+REGRESSION_TOTAL_COVERAGE_DATA ?= $(REGRESSION_TOTAL_COVERAGE_DIR)/merged.dat
+REGRESSION_TOTAL_COVERAGE_INFO ?= $(REGRESSION_TOTAL_COVERAGE_DIR)/coverage.info
+REGRESSION_TOTAL_COVERAGE_ANNOTATED ?= $(REGRESSION_TOTAL_COVERAGE_DIR)/annotated
+REGRESSION_TOTAL_COVERAGE_SUMMARY ?= $(PPA_DIR)/regression_coverage_summary.log
+REGRESSION_TOTAL_COVERAGE_UNCOVERED ?= $(PPA_DIR)/regression_coverage_uncovered.log
 RISCV_DV_ROOT ?= $(PROJECT_ROOT)/verif/riscv-dv
 RISCV_DV_DRIVER ?= $(RISCV_DV_ROOT)/ydrasil_regression.py
 RISCV_DV_WORK_ROOT ?= $(BUILD_DIR)/riscv-dv
@@ -75,10 +89,11 @@ RISCV_DV_PYTHON ?= $(RISCV_DV_VENV)/bin/python
 RISCV_DV_VENV_STAMP ?= $(RISCV_DV_VENV)/.generator-ready
 RISCV_DV_MODEL_DIR ?= $(RISCV_DV_WORK_ROOT)/model
 RISCV_DV_MODEL_BIN ?= $(RISCV_DV_MODEL_DIR)/ydrasil_core_tb
+RISCV_DV_MODEL_FINGERPRINT ?= $(RISCV_DV_MODEL_DIR)/.rtl-fingerprint
 RISCV_DV_LINKER ?= $(RISCV_DV_ROOT)/ydrasil/link.ld
 RISCV_DV_START_SEED ?= 1
 RISCV_DV_COUNT ?= 2000
-RISCV_DV_JOBS ?= 12
+RISCV_DV_JOBS ?= 20
 RISCV_DV_INSTR_COUNT ?= 400
 RISCV_DV_SUBPROGRAMS ?= 0
 RISCV_DV_SIM_TIMEOUT ?= 500000
@@ -87,6 +102,7 @@ RISCV_DV_SPIKE_MAXSTEPS ?= 200000
 RISCV_DV_KEEP_FAILURES ?= 20
 RISCV_DV_KEEP_RUNS ?= 5
 RISCV_DV_COVERAGE_BATCH ?= 20
+RISCV_DV_STOP_REPORT ?= 1
 RISCV_DV_RERUN ?= 0
 RISCV_DV_MAX_CACHE_GB ?= 4
 RISCV_DV_SUMMARY ?= $(PPA_DIR)/riscv_dv_summary.log
@@ -119,6 +135,7 @@ RISCV_DV_COMMON_ARGS = \
 	--keep-runs "$(RISCV_DV_KEEP_RUNS)" \
 	--max-cache-gb "$(RISCV_DV_MAX_CACHE_GB)" \
 	--coverage-batch "$(RISCV_DV_COVERAGE_BATCH)" \
+	--external-stop-file "$(REGRESSION_STOP_FILE)" \
 	--verilator-coverage "$(shell command -v verilator_coverage 2>/dev/null)" \
 	$(if $(filter 1,$(RISCV_DV_RERUN)),--rerun,)
 BOUNDARY_OPT_CFLAGS_O0 ?= -O0
@@ -253,7 +270,7 @@ ifeq ($(filter $(SYN_PLL_FREQ_MHZ),$(SYN_PLL_SUPPORTED_FREQS)),)
 $(error Unsupported SYN_PLL_FREQ_MHZ=$(SYN_PLL_FREQ_MHZ); supported values: $(SYN_PLL_SUPPORTED_FREQS))
 endif
 
-.PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests regression regression_all regression_clean init install-bender get_spike download_and_extract_spike check_spike_prebuilt_abi build_spike_from_source check_deps spike spike_wave_to_csv sim_compare commit_check commit_spike_csv commit_hw_trace commit_hw_csv commit_compare rv_test_comp_genmem ppa_rvtest_report ppa_perf_report coe_simple coe_smoke coe_smoke_led coe_isa_probes coverage_all coverage_quick coverage_clean coverage_report sw_boundary_test sw_coverage sw_coverage_clean sw_run_mode sw_coverage_report
+.PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests regression regression_all regression_stop regression_clean regression_sort regression_sort_opt regression_suite_coverage_merge regression_coverage_report init install-bender get_spike download_and_extract_spike check_spike_prebuilt_abi build_spike_from_source check_deps spike spike_wave_to_csv sim_compare commit_check commit_spike_csv commit_hw_trace commit_hw_csv commit_compare rv_test_comp_genmem ppa_rvtest_report ppa_perf_report coe_simple coe_smoke coe_smoke_led coe_isa_probes coverage_all coverage_all_run coverage_quick coverage_clean coverage_report sw_boundary_test sw_coverage sw_coverage_clean sw_run_mode sw_coverage_report
 .PHONY: coremark coremark_sim coremark_run coremark_result coremark-rebuild coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map coremark_opt_all coremark_opt_build_all coremark_opt_sim_all coremark_opt_report coremark_opt_clean app_opt_comp_expanded_if_needed $(COREMARK_OPT_BUILD_TARGETS) $(COREMARK_OPT_SIM_TARGETS) sort_app sort_all sort_sim_all sort_report sort_app_sim sort_app-rebuild sort_app-clean sort_opt_all sort_opt_build_all sort_opt_sim_all sort_opt_report sort_opt_clean $(SORT_OPT_BUILD_TARGETS) $(SORT_OPT_SIM_TARGETS) boundary_app boundary_all boundary_sim_all boundary_report boundary_app-rebuild boundary_app-clean boundary_opt_all boundary_opt_build_all boundary_opt_sim_all boundary_opt_report boundary_opt_clean $(BOUNDARY_OPT_BUILD_TARGETS) $(BOUNDARY_OPT_SIM_TARGETS) coe_loop2_gen coe_loop5 coe_loop5_gen coe_loop_lina coe_loop_lina_gen loop_lina
 .PHONY: riscv_dv_venv riscv_dv_model riscv_dv_prepare riscv_dv_run riscv_dv_random riscv_dv_random_status riscv_dv_regression riscv_dv_count riscv_dv_repro riscv_dv_estimate riscv_dv_stop riscv_dv_coverage_report riscv_dv_cleanup riscv_dv_distclean
 .PHONY: syn synf synf-board syn-extreme syn-venv syn-prep syn-stage-xpr syn-stage-memory syn-vivado syn-analyze syn-clean
@@ -279,14 +296,17 @@ riscv_dv_venv: $(RISCV_DV_VENV_STAMP)
 
 riscv_dv_model:
 	@set -e; rebuild=0; \
+	fingerprint=$$($(PYTHON) "$(REGRESSION_CACHE_TOOL)" fingerprint --project-root "$(PROJECT_ROOT)" --scope rtl); \
 	if [ ! -x "$(RISCV_DV_MODEL_BIN)" ]; then rebuild=1; \
-	elif find "$(PROJECT_ROOT)/hw/ip" "$(PROJECT_ROOT)/hw/dv" -type f \
+	elif [ ! -f "$(RISCV_DV_MODEL_FINGERPRINT)" ] || [ "$$(cat "$(RISCV_DV_MODEL_FINGERPRINT)")" != "$$fingerprint" ]; then rebuild=1; fi; \
+	if [ "$$rebuild" -eq 0 ] && find "$(PROJECT_ROOT)/hw/dv" "$(PROJECT_ROOT)/hw/ip" -type f -path '*/dv/*' \
 		\( -name '*.sv' -o -name '*.v' -o -name '*.cpp' -o -name '*.h' -o -name 'Bender.yml' \) \
 		-newer "$(RISCV_DV_MODEL_BIN)" -print -quit | grep -q .; then rebuild=1; fi; \
 	if [ "$$rebuild" -eq 1 ]; then \
 		echo "[RISCV-DV] Compiling shared Verilator model once"; \
 		$(MAKE) --no-print-directory comp OBJ_DIR="$(RISCV_DV_MODEL_DIR)" \
 			VERILATOR_COVERAGE=1 VERILATOR_TRACE=0 Compile_optimization=1; \
+		printf '%s\n' "$$fingerprint" > "$(RISCV_DV_MODEL_FINGERPRINT)"; \
 	else echo "[RISCV-DV] Reusing model: $(RISCV_DV_MODEL_BIN)"; fi
 
 riscv_dv_prepare: riscv_dv_venv get_spike
@@ -339,11 +359,12 @@ riscv_dv_stop:
 		echo "[RISCV-DV] Waiting for runner PID $$pid to merge active coverage..."; \
 		while kill -0 "$$pid" 2>/dev/null; do sleep 2; done; \
 	else echo "[RISCV-DV] No active runner found."; fi
-	@$(MAKE) --no-print-directory riscv_dv_coverage_report
+	@rm -f "$(RISCV_DV_WORK_ROOT)/STOP"
+	@if [ "$(RISCV_DV_STOP_REPORT)" = "1" ]; then $(MAKE) --no-print-directory riscv_dv_coverage_report; fi
 
 riscv_dv_coverage_report:
 	@mkdir -p "$(PPA_DIR)"; \
-	data=$$(find "$(RISCV_DV_WORK_ROOT)/runs" -path '*/coverage/merged.dat' -type f -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2-); \
+	data=$$("$(RISCV_DV_PYTHON)" "$(RISCV_DV_DRIVER)" coverage-path $(RISCV_DV_COMMON_ARGS)); \
 	if [ -z "$$data" ]; then echo "[RISCV-DV] No merged coverage database found"; exit 2; fi; \
 	cov_dir="$${data%/*}"; info="$$cov_dir/coverage.info"; annotated="$$cov_dir/annotated"; \
 	summary="$(PPA_DIR)/riscv_dv_coverage_summary.log"; uncovered="$(PPA_DIR)/riscv_dv_uncovered.log"; \
@@ -362,79 +383,156 @@ riscv_dv_distclean: riscv_dv_venv
 	@"$(RISCV_DV_PYTHON)" "$(RISCV_DV_DRIVER)" cleanup $(RISCV_DV_COMMON_ARGS) --all
 	@rm -rf "$(RISCV_DV_MODEL_DIR)" "$(RISCV_DV_VENV)"
 
+regression_suite_coverage_merge:
+	@set -e; data_dir="$(REGRESSION_SUITE_COVERAGE_DIR)/data"; output="$(REGRESSION_SUITE_COVERAGE_DIR)/merged.dat"; \
+	set -- $$(find "$$data_dir" -type f -name '*.dat' | sort); \
+	if [ "$$#" -eq 0 ]; then echo "[REGRESSION] No coverage data in $$data_dir"; exit 2; fi; \
+	mkdir -p "$(REGRESSION_SUITE_COVERAGE_DIR)"; \
+	verilator_coverage --write "$$output.next" "$$@"; mv "$$output.next" "$$output"; \
+	verilator_coverage --write-info "$(REGRESSION_SUITE_COVERAGE_DIR)/coverage.info" "$$output"; \
+	rm -rf "$$data_dir"; \
+	echo "[REGRESSION] Suite coverage merged: $$output ($$# inputs removed)"
+
+regression_sort:
+	@set -e; state="$(REGRESSION_CACHE_DIR)/sort.json"; merged="$(REGRESSION_SORT_COVERAGE_DIR)/merged.dat"; \
+	if $(PYTHON) "$(REGRESSION_CACHE_TOOL)" check --project-root "$(PROJECT_ROOT)" --scope sort \
+		--state "$$state" --artifact "$$merged" --artifact "$(PPA_SORT_LOG)" --artifact "$(SORT_RESULT_DIR)"; then \
+		echo "[REGRESSION] SKIP sort_all: completed inputs unchanged"; exit 0; \
+	fi; \
+	start_fp=$$($(PYTHON) "$(REGRESSION_CACHE_TOOL)" fingerprint --project-root "$(PROJECT_ROOT)" --scope sort); \
+	rm -f "$$state"; rm -rf "$(REGRESSION_SORT_COVERAGE_DIR)"; \
+	$(MAKE) --no-print-directory sort_all VERILATOR_COVERAGE=1 VERILATOR_TRACE=0 \
+		COVERAGE_DATA_DIR="$(REGRESSION_SORT_COVERAGE_DIR)/data"; \
+	$(MAKE) --no-print-directory regression_suite_coverage_merge \
+		REGRESSION_SUITE_COVERAGE_DIR="$(REGRESSION_SORT_COVERAGE_DIR)"; \
+	$(PYTHON) "$(REGRESSION_CACHE_TOOL)" record --project-root "$(PROJECT_ROOT)" --scope sort \
+		--state "$$state" --expected-fingerprint "$$start_fp" \
+		--artifact "$$merged" --artifact "$(PPA_SORT_LOG)" --artifact "$(SORT_RESULT_DIR)"
+
+regression_sort_opt:
+	@set -e; state="$(REGRESSION_CACHE_DIR)/sort_opt.json"; merged="$(REGRESSION_SORT_OPT_COVERAGE_DIR)/merged.dat"; \
+	if $(PYTHON) "$(REGRESSION_CACHE_TOOL)" check --project-root "$(PROJECT_ROOT)" --scope sort_opt \
+		--state "$$state" --artifact "$$merged" --artifact "$(PPA_SORT_OPT_LOG)" --artifact "$(SORT_OPT_RESULT_DIR)"; then \
+		echo "[REGRESSION] SKIP sort_opt_all: completed inputs unchanged"; exit 0; \
+	fi; \
+	start_fp=$$($(PYTHON) "$(REGRESSION_CACHE_TOOL)" fingerprint --project-root "$(PROJECT_ROOT)" --scope sort_opt); \
+	rm -f "$$state"; rm -rf "$(REGRESSION_SORT_OPT_COVERAGE_DIR)"; \
+	$(MAKE) --no-print-directory sort_opt_all VERILATOR_COVERAGE=1 VERILATOR_TRACE=0 \
+		COVERAGE_DATA_DIR="$(REGRESSION_SORT_OPT_COVERAGE_DIR)/data"; \
+	$(MAKE) --no-print-directory regression_suite_coverage_merge \
+		REGRESSION_SUITE_COVERAGE_DIR="$(REGRESSION_SORT_OPT_COVERAGE_DIR)"; \
+	$(PYTHON) "$(REGRESSION_CACHE_TOOL)" record --project-root "$(PROJECT_ROOT)" --scope sort_opt \
+		--state "$$state" --expected-fingerprint "$$start_fp" \
+		--artifact "$$merged" --artifact "$(PPA_SORT_OPT_LOG)" --artifact "$(SORT_OPT_RESULT_DIR)"
+
+regression_coverage_report:
+	@set -e; sources=(); \
+	if $(PYTHON) "$(REGRESSION_CACHE_TOOL)" check --project-root "$(PROJECT_ROOT)" --scope coverage_all \
+		--state "$(REGRESSION_CACHE_DIR)/coverage_all.json" --artifact "$(COVERAGE_ALL_CACHE_DIR)/merged.dat" >/dev/null; then \
+		sources+=("$(COVERAGE_ALL_CACHE_DIR)/merged.dat"); fi; \
+	if $(PYTHON) "$(REGRESSION_CACHE_TOOL)" check --project-root "$(PROJECT_ROOT)" --scope sort \
+		--state "$(REGRESSION_CACHE_DIR)/sort.json" --artifact "$(REGRESSION_SORT_COVERAGE_DIR)/merged.dat" >/dev/null; then \
+		sources+=("$(REGRESSION_SORT_COVERAGE_DIR)/merged.dat"); fi; \
+	if $(PYTHON) "$(REGRESSION_CACHE_TOOL)" check --project-root "$(PROJECT_ROOT)" --scope sort_opt \
+		--state "$(REGRESSION_CACHE_DIR)/sort_opt.json" --artifact "$(REGRESSION_SORT_OPT_COVERAGE_DIR)/merged.dat" >/dev/null; then \
+		sources+=("$(REGRESSION_SORT_OPT_COVERAGE_DIR)/merged.dat"); fi; \
+	riscv_data=$$("$(RISCV_DV_PYTHON)" "$(RISCV_DV_DRIVER)" coverage-path $(RISCV_DV_COMMON_ARGS) 2>/dev/null || true); \
+	if [ -n "$$riscv_data" ] && [ -f "$$riscv_data" ]; then sources+=("$$riscv_data"); fi; \
+	if [ "$${#sources[@]}" -eq 0 ]; then echo "[REGRESSION] No current-RTL coverage suites are complete"; exit 2; fi; \
+	rm -rf "$(REGRESSION_TOTAL_COVERAGE_DIR)"; mkdir -p "$(REGRESSION_TOTAL_COVERAGE_DIR)" "$(PPA_DIR)"; \
+	echo "[REGRESSION] Merging $${#sources[@]} suite databases"; printf '  %s\n' "$${sources[@]}"; \
+	verilator_coverage --write "$(REGRESSION_TOTAL_COVERAGE_DATA)" "$${sources[@]}"; \
+	verilator_coverage --write-info "$(REGRESSION_TOTAL_COVERAGE_INFO)" "$(REGRESSION_TOTAL_COVERAGE_DATA)"; \
+	verilator_coverage --annotate "$(REGRESSION_TOTAL_COVERAGE_ANNOTATED)" "$(REGRESSION_TOTAL_COVERAGE_DATA)" >/dev/null; \
+	$(PYTHON) "$(PROJECT_ROOT)/verif/coverage/coverage_summary.py" \
+		--data "$(REGRESSION_TOTAL_COVERAGE_DATA)" --info "$(REGRESSION_TOTAL_COVERAGE_INFO)" \
+		--annotated "$(REGRESSION_TOTAL_COVERAGE_ANNOTATED)" --databases "$${#sources[@]}" \
+		--summary "$(REGRESSION_TOTAL_COVERAGE_SUMMARY)" --uncovered "$(REGRESSION_TOTAL_COVERAGE_UNCOVERED)"; \
+	echo "[REGRESSION] Total coverage: $(REGRESSION_TOTAL_COVERAGE_DATA)"
+
 regression:
-	@set +e; failed=0; run_id="$(REGRESSION_RUN_ID)"; \
+	@set +e; failed=0; stopped=0; run_id="$(REGRESSION_RUN_ID)"; \
 	if [ -z "$$run_id" ]; then run_id="$$(date '+%Y%m%d_%H%M%S')_$$$$"; fi; \
-	run_dir="$(REGRESSION_LOG_DIR)/$$run_id"; coverage_dir="$(COVERAGE_DATA_DIR)/regression/$$run_id"; \
-	mkdir -p "$$run_dir" "$$coverage_dir" "$(PPA_DIR)"; summary="$$run_dir/summary.log"; \
+	run_dir="$(REGRESSION_LOG_DIR)/$$run_id"; mkdir -p "$$run_dir" "$(PPA_DIR)" "$(REGRESSION_CONTROL_DIR)"; \
+	summary="$$run_dir/summary.log"; rm -f "$(REGRESSION_STOP_FILE)"; \
+	printf '{"pid":%s,"run_id":"%s"}\n' "$$$$" "$$run_id" > "$(REGRESSION_RUNNER_FILE)"; \
+	trap 'rm -f "$(REGRESSION_RUNNER_FILE)" "$(REGRESSION_STOP_FILE)"' EXIT; \
 	echo "[REGRESSION] Run: $$run_id" | tee "$$summary"; \
-	echo "[REGRESSION] Coverage mode: accumulate" | tee -a "$$summary"; \
-	echo "[REGRESSION] Coverage data: $$coverage_dir" | tee -a "$$summary"; \
 	echo "[REGRESSION] Targets: $(REGRESSION_TARGETS)" | tee -a "$$summary"; \
 	for target in $(REGRESSION_TARGETS); do \
+		if [ -f "$(REGRESSION_STOP_FILE)" ]; then echo "[REGRESSION] STOP before $$target" | tee -a "$$summary"; stopped=1; break; fi; \
 		safe_target=$$(printf '%s' "$$target" | tr '/:' '__'); run_log="$$run_dir/$$safe_target.log"; \
 		marker="$$run_dir/.$$safe_target.start"; : > "$$marker"; \
 		echo "[REGRESSION] RUN  $$target" | tee -a "$$summary"; \
-		if $(MAKE) --no-print-directory "$$target" VERILATOR_COVERAGE=1 VERILATOR_TRACE=0 \
-			COVERAGE_DATA_DIR="$$coverage_dir" >"$$run_log" 2>&1; then \
+		if $(MAKE) --no-print-directory "$$target" VERILATOR_COVERAGE=1 VERILATOR_TRACE=0 >"$$run_log" 2>&1; then \
 			echo "[REGRESSION] PASS $$target log=$$run_log" | tee -a "$$summary"; \
 		else \
 			diagnostic="$$run_dir/$$safe_target.failure.log"; \
-			{ \
-				echo "TARGET=$$target"; echo "RUN_LOG=$$run_log"; \
-				echo "--- command error context ---"; \
-				grep -n -C "$(REGRESSION_CONTEXT_LINES)" -Ei 'SORT FAIL|TEST_FAIL|(^|[^[:alpha:]])(FAIL|ERROR|FATAL|timeout)' "$$run_log" | tail -800; \
-				echo "--- new status/hardware-log context ---"; \
-				find "$(RESULT_DIR)" "$(HW_TRACE_OUT_DIR)" -type f \
-					\( -name '*.status' -o -name 'hw.log' \) -newer "$$marker" -print 2>/dev/null | sort | \
-				while IFS= read -r artifact; do \
-					if grep -Eiq 'SORT FAIL|TEST_FAIL|(^|[^[:alpha:]])(FAIL|ERROR|FATAL|timeout)' "$$artifact"; then \
-						echo "FILE=$$artifact"; \
-						grep -n -C "$(REGRESSION_CONTEXT_LINES)" -Ei 'SORT FAIL|TEST_FAIL|(^|[^[:alpha:]])(FAIL|ERROR|FATAL|timeout)' "$$artifact" | tail -300; \
-					fi; \
-				done; \
-				echo "--- command tail ---"; tail -120 "$$run_log"; \
-			} > "$$diagnostic" 2>&1; \
+			{ echo "TARGET=$$target"; echo "RUN_LOG=$$run_log"; \
+			  grep -n -C "$(REGRESSION_CONTEXT_LINES)" -Ei 'SORT FAIL|TEST_FAIL|(^|[^[:alpha:]])(FAIL|ERROR|FATAL|timeout)' "$$run_log" | tail -800; \
+			  echo "--- command tail ---"; tail -120 "$$run_log"; } > "$$diagnostic" 2>&1; \
 			echo "[REGRESSION] FAIL $$target log=$$run_log diagnostic=$$diagnostic" | tee -a "$$summary"; failed=1; \
 		fi; \
 		rm -f "$$marker"; \
+		if [ -f "$(REGRESSION_STOP_FILE)" ]; then stopped=1; break; fi; \
 	done; \
-	dat_count=$$(find "$(COVERAGE_DATA_DIR)" -type f -name '*.dat' | wc -l); \
-	run_dat_count=$$(find "$$coverage_dir" -type f -name '*.dat' | wc -l); \
-	if [ "$$dat_count" -gt 0 ]; then \
-		if $(MAKE) --no-print-directory coverage_report; then \
-			echo "[REGRESSION] PASS coverage_report" | tee -a "$$summary"; \
-		else \
-			echo "[REGRESSION] FAIL coverage_report" | tee -a "$$summary"; failed=1; \
-		fi; \
-	else \
-		echo "[REGRESSION] FAIL no coverage databases generated" | tee -a "$$summary"; failed=1; \
-	fi; \
+	if [ "$$stopped" -eq 1 ] && [ -f "$(REGRESSION_STOP_FILE)" ]; then \
+		echo "[REGRESSION] Total coverage merge delegated to regression_stop" | tee -a "$$summary"; \
+	elif $(MAKE) --no-print-directory regression_coverage_report; then \
+		echo "[REGRESSION] PASS regression_coverage_report" | tee -a "$$summary"; \
+	else echo "[REGRESSION] FAIL regression_coverage_report" | tee -a "$$summary"; failed=1; fi; \
 	overall=PASS; if [ "$$failed" -ne 0 ]; then overall=FAIL; fi; \
-	echo "[REGRESSION] CORRECTNESS=$$overall run_databases=$$run_dat_count total_databases=$$dat_count" | tee -a "$$summary"; \
-	cp "$$summary" "$(REGRESSION_SUMMARY)"; \
-	echo "[REGRESSION] Summary: $$summary"; \
+	echo "[REGRESSION] CORRECTNESS=$$overall STOPPED=$$stopped" | tee -a "$$summary"; \
+	cp "$$summary" "$(REGRESSION_SUMMARY)"; echo "[REGRESSION] Summary: $$summary"; \
 	exit "$$failed"
 
 regression_all: regression
 
+regression_stop:
+	@set +e; mkdir -p "$(REGRESSION_CONTROL_DIR)"; touch "$(REGRESSION_STOP_FILE)"; \
+	pid=""; if [ -f "$(REGRESSION_RUNNER_FILE)" ]; then \
+		pid=$$($(PYTHON) -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' "$(REGRESSION_RUNNER_FILE)" 2>/dev/null); fi; \
+	echo "[REGRESSION] Global graceful stop requested"; \
+	$(MAKE) --no-print-directory riscv_dv_stop RISCV_DV_JOBS=20 RISCV_DV_STOP_REPORT=0 || true; \
+	if [ -n "$$pid" ]; then echo "[REGRESSION] Waiting for regression PID $$pid to finalize..."; \
+		while kill -0 "$$pid" 2>/dev/null; do sleep 2; done; fi; \
+	$(MAKE) --no-print-directory regression_coverage_report; rc=$$?; \
+	$(MAKE) --no-print-directory riscv_dv_cleanup; cleanup_rc=$$?; \
+	if [ "$$rc" -eq 0 ] && [ "$$cleanup_rc" -ne 0 ]; then rc=$$cleanup_rc; fi; \
+	rm -f "$(REGRESSION_STOP_FILE)"; exit "$$rc"
+
 regression_clean: coverage_clean
-	@rm -rf "$(REGRESSION_LOG_DIR)"; rm -f "$(REGRESSION_SUMMARY)"
+	@rm -rf "$(REGRESSION_LOG_DIR)" "$(REGRESSION_CACHE_DIR)" "$(REGRESSION_CONTROL_DIR)" "$(REGRESSION_TOTAL_COVERAGE_DIR)"
+	@rm -f "$(REGRESSION_SUMMARY)" "$(REGRESSION_TOTAL_COVERAGE_SUMMARY)" "$(REGRESSION_TOTAL_COVERAGE_UNCOVERED)"
 	@$(MAKE) --no-print-directory regression
 
 coverage_clean:
 	rm -rf "$(COVERAGE_DIR)"
 
-coverage_all: coverage_clean
+coverage_all:
+	@set -e; state="$(REGRESSION_CACHE_DIR)/coverage_all.json"; merged="$(COVERAGE_ALL_CACHE_DIR)/merged.dat"; \
+	if $(PYTHON) "$(REGRESSION_CACHE_TOOL)" check --project-root "$(PROJECT_ROOT)" --scope coverage_all \
+		--state "$$state" --artifact "$$merged" --artifact "$(COVERAGE_ALL_CACHE_DIR)/summary.log"; then \
+		echo "[REGRESSION] SKIP coverage_all: completed inputs unchanged"; exit 0; \
+	fi; \
+	start_fp=$$($(PYTHON) "$(REGRESSION_CACHE_TOOL)" fingerprint --project-root "$(PROJECT_ROOT)" --scope coverage_all); \
+	rm -f "$$state"; rm -rf "$(COVERAGE_ALL_CACHE_DIR)"; \
+	$(MAKE) --no-print-directory coverage_all_run COVERAGE_DIR="$(COVERAGE_ALL_CACHE_DIR)"; \
+	rm -rf "$(COVERAGE_ALL_CACHE_DIR)/data"; \
+	$(PYTHON) "$(REGRESSION_CACHE_TOOL)" record --project-root "$(PROJECT_ROOT)" --scope coverage_all \
+		--state "$$state" --expected-fingerprint "$$start_fp" \
+		--artifact "$$merged" --artifact "$(COVERAGE_ALL_CACHE_DIR)/summary.log"
+
+coverage_all_run: coverage_clean
 	@mkdir -p "$(COVERAGE_DATA_DIR)"
 	@$(MAKE) comp VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
-	-@$(MAKE) boundary_all VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
-	-@$(MAKE) boundary_opt_all VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
-	-@$(MAKE) coremark_opt_all VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
-	-@$(MAKE) test_all VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
-	-@$(MAKE) coremark_sim VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
-	-@$(MAKE) coe_loop5 VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
-	-@$(MAKE) coe_loop_lina VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
+	@$(MAKE) boundary_all VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
+	@$(MAKE) boundary_opt_all VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
+	@$(MAKE) coremark_opt_all VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
+	@$(MAKE) test_all VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
+	@$(MAKE) coremark_sim VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
+	@$(MAKE) coe_loop5 VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
+	@$(MAKE) coe_loop_lina VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
 	@$(MAKE) coverage_report
 	@$(MAKE) ppa_perf_report
 
