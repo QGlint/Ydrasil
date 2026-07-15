@@ -238,8 +238,12 @@ import ydrasil_pkg::*;
         (id_ctrl_i.rs2_addr == ex_hzd_i.rd_addr) &&
         !prev_alu_bypass_rs2 && !prev_load_bypass_rs2;
     wire rd_issue_hzd = 1'b0;
-    wire rs1_pending_stall = rs1_has_producer && !rs1_producer_ready;
-    wire rs2_pending_stall = rs2_has_producer && !rs2_producer_ready;
+    // A bypassable EX writer is newer than any producer already recorded for
+    // the same GPR. Do not let that older WAW entry block or wake the consumer.
+    wire rs1_pending_stall = rs1_has_producer && !rs1_producer_ready &&
+        !prev_alu_bypass_rs1 && !prev_load_bypass_rs1;
+    wire rs2_pending_stall = rs2_has_producer && !rs2_producer_ready &&
+        !prev_alu_bypass_rs2 && !prev_load_bypass_rs2;
     wire rd_waw_stall = 1'b0;
     wire store_data_wait = id_ctrl_i.store_req &&
         (rs2_issue_hzd | rs2_pending_stall);
@@ -247,6 +251,7 @@ import ydrasil_pkg::*;
     assign store_data_producer_id = rs2_issue_hzd ? ex_hzd_i.producer_id :
         rs2_producer_id;
     wire store_data_producer_tracked = id_ctrl_i.store_req &&
+        !prev_alu_bypass_rs2 &&
         (rs2_issue_hzd | rs2_has_producer);
     wire rs2_blocking_hzd = !id_ctrl_i.store_req &&
         (rs2_issue_hzd | rs2_pending_stall);

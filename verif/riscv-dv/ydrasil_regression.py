@@ -1055,7 +1055,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int)
     parser.add_argument("--instr-count", type=int, default=400)
     parser.add_argument("--subprograms", type=int, default=0)
-    parser.add_argument("--jobs", type=int, default=20)
+    parser.add_argument("--jobs", type=int, default=12)
     parser.add_argument("--prepare-timeout", type=int, default=1200)
     parser.add_argument("--case-timeout", type=int, default=600)
     parser.add_argument("--sim-timeout", type=int, default=500000)

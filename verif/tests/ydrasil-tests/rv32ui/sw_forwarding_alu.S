@@ -55,6 +55,28 @@ RVTEST_CODE_BEGIN
   lw t2, 4(t3)
   CHECK_EQ_IMM(7, t2, 0x60606060)
 
+  la t0, alu_bytes
+  la t1, old_word
+  li t2, 1
+  li t3, 2
+  lw s0, 0(t1)
+  or s0, t2, t3
+  sb s0, 0(t0)
+  lbu t4, 0(t0)
+  CHECK_EQ_IMM(8, t4, 3)
+
+  li t1, 0x76543210
+  li t2, 0x12345678
+  mulh s8, t1, t2
+auipc_store_value:
+  auipc s8, 0
+  sb s8, 1(t0)
+  lbu t4, 1(t0)
+  la t5, auipc_store_value
+  andi t5, t5, 0xff
+  li TESTNUM, 9
+  bne t4, t5, fail
+
   SW_TEST_PASSFAIL
 RVTEST_CODE_END
 
@@ -63,4 +85,8 @@ RVTEST_DATA_BEGIN
   .align 4
 alu_words:
   .space 24
+old_word:
+  .word 0x000000f8
+alu_bytes:
+  .space 2
 RVTEST_DATA_END

@@ -1,0 +1,4 @@
+build/**
+FPGA/**
+FPGA/Ydrasil_FPGA.gen/**
+FPGA/Ydrasil_FPGA.hw/**

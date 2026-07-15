@@ -86,5 +86,6 @@ directories are capped by `RISCV_DV_KEEP_RUNS` (default 5). Old generator
 profiles are removed when the cache exceeds `RISCV_DV_MAX_CACHE_GB` (default
 4 GiB), and preparation refuses a current profile projected beyond that limit.
 
-Parallelism is hard-capped in the driver at 20; larger `RISCV_DV_JOBS` values
-are rejected before work starts.
+Parallelism defaults to 12 and is hard-capped in the driver at 20. Override it,
+for example with `RISCV_DV_JOBS=8`, when lower CPU usage is preferred; values
+above 20 are rejected before work starts.
