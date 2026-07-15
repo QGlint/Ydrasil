@@ -64,6 +64,7 @@ COVERAGE_QUICK_TARGETS ?= boundary_all test_all coremark_sim coe_loop5
 COVERAGE_QUICK_SUMMARY ?= $(PPA_DIR)/coverage_quick_summary.log
 REGRESSION_TARGETS ?= coverage_all regression_sort regression_sort_opt riscv_dv_random
 REGRESSION_SUMMARY ?= $(PPA_DIR)/regression_summary.log
+REGRESSION_STATUS_REPORT ?= $(PPA_DIR)/regression_status.log
 REGRESSION_LOG_DIR ?= $(BUILD_DIR)/log/regression
 REGRESSION_RUN_ID ?=
 REGRESSION_CONTEXT_LINES ?= 12
@@ -270,7 +271,7 @@ ifeq ($(filter $(SYN_PLL_FREQ_MHZ),$(SYN_PLL_SUPPORTED_FREQS)),)
 $(error Unsupported SYN_PLL_FREQ_MHZ=$(SYN_PLL_FREQ_MHZ); supported values: $(SYN_PLL_SUPPORTED_FREQS))
 endif
 
-.PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests regression regression_all regression_stop regression_clean regression_sort regression_sort_opt regression_suite_coverage_merge regression_coverage_report init install-bender get_spike download_and_extract_spike check_spike_prebuilt_abi build_spike_from_source check_deps spike spike_wave_to_csv sim_compare commit_check commit_spike_csv commit_hw_trace commit_hw_csv commit_compare rv_test_comp_genmem ppa_rvtest_report ppa_perf_report coe_simple coe_smoke coe_smoke_led coe_isa_probes coverage_all coverage_all_run coverage_quick coverage_clean coverage_report sw_boundary_test sw_coverage sw_coverage_clean sw_run_mode sw_coverage_report
+.PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests regression regression_all regression_status regression_stop regression_clean regression_sort regression_sort_opt regression_suite_coverage_merge regression_coverage_report init install-bender get_spike download_and_extract_spike check_spike_prebuilt_abi build_spike_from_source check_deps spike spike_wave_to_csv sim_compare commit_check commit_spike_csv commit_hw_trace commit_hw_csv commit_compare rv_test_comp_genmem ppa_rvtest_report ppa_perf_report coe_simple coe_smoke coe_smoke_led coe_isa_probes coverage_all coverage_all_run coverage_quick coverage_clean coverage_report sw_boundary_test sw_coverage sw_coverage_clean sw_run_mode sw_coverage_report
 .PHONY: coremark coremark_sim coremark_run coremark_result coremark-rebuild coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map coremark_opt_all coremark_opt_build_all coremark_opt_sim_all coremark_opt_report coremark_opt_clean app_opt_comp_expanded_if_needed $(COREMARK_OPT_BUILD_TARGETS) $(COREMARK_OPT_SIM_TARGETS) sort_app sort_all sort_sim_all sort_report sort_app_sim sort_app-rebuild sort_app-clean sort_opt_all sort_opt_build_all sort_opt_sim_all sort_opt_report sort_opt_clean $(SORT_OPT_BUILD_TARGETS) $(SORT_OPT_SIM_TARGETS) boundary_app boundary_all boundary_sim_all boundary_report boundary_app-rebuild boundary_app-clean boundary_opt_all boundary_opt_build_all boundary_opt_sim_all boundary_opt_report boundary_opt_clean $(BOUNDARY_OPT_BUILD_TARGETS) $(BOUNDARY_OPT_SIM_TARGETS) coe_loop2_gen coe_loop5 coe_loop5_gen coe_loop_lina coe_loop_lina_gen loop_lina
 .PHONY: riscv_dv_venv riscv_dv_model riscv_dv_prepare riscv_dv_run riscv_dv_random riscv_dv_random_status riscv_dv_regression riscv_dv_count riscv_dv_repro riscv_dv_estimate riscv_dv_stop riscv_dv_coverage_report riscv_dv_cleanup riscv_dv_distclean
 .PHONY: syn synf synf-board syn-extreme syn-venv syn-prep syn-stage-xpr syn-stage-memory syn-vivado syn-analyze syn-clean
@@ -488,6 +489,38 @@ regression:
 
 regression_all: regression
 
+regression_status:
+	@set -e; mkdir -p "$(PPA_DIR)"; report="$(REGRESSION_STATUS_REPORT)"; tmp="$$report.tmp.$$$$"; \
+	trap 'rm -f "$$tmp"' EXIT; \
+	latest_regression=$$(find "$(REGRESSION_LOG_DIR)" -mindepth 2 -maxdepth 2 -name summary.log -type f \
+		-printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2-); \
+	latest_riscv_dv=$$(find "$(RISCV_DV_WORK_ROOT)/runs" -mindepth 2 -maxdepth 2 -name summary.log -type f \
+		-printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2-); \
+	report_runner() { \
+		label="$$1"; file="$$2"; \
+		if [ ! -f "$$file" ]; then echo "[RUNNER] $$label=IDLE"; return; fi; \
+		pid=$$($(PYTHON) -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' "$$file" 2>/dev/null || true); \
+		state=STALE; if [ -n "$$pid" ] && kill -0 "$$pid" 2>/dev/null; then state=ACTIVE; fi; \
+		printf '[RUNNER] %s=%s ' "$$label" "$$state"; tr -d '\n' < "$$file"; printf '\n'; \
+	}; \
+	{ \
+		echo "[REGRESSION STATUS] Generated: $$(date '+%Y-%m-%d %H:%M:%S %z')"; \
+		echo "[REGRESSION STATUS] Project: $(PROJECT_ROOT)"; \
+		echo; echo "===== LATEST REGRESSION ====="; \
+		if [ -n "$$latest_regression" ]; then echo "REPORT=$$latest_regression"; cat "$$latest_regression"; \
+		else echo "REPORT=NONE"; fi; \
+		echo; echo "===== LATEST RISCV-DV ====="; \
+		if [ -n "$$latest_riscv_dv" ]; then echo "REPORT=$$latest_riscv_dv"; cat "$$latest_riscv_dv"; \
+		else echo "REPORT=NONE"; fi; \
+		echo; echo "===== TOTAL COVERAGE ====="; \
+		if [ -s "$(REGRESSION_TOTAL_COVERAGE_SUMMARY)" ]; then cat "$(REGRESSION_TOTAL_COVERAGE_SUMMARY)"; \
+		else echo "REPORT=NONE"; fi; \
+		echo; echo "===== RUNNERS ====="; \
+		report_runner regression "$(REGRESSION_RUNNER_FILE)"; \
+		report_runner riscv-dv "$(RISCV_DV_WORK_ROOT)/runner.json"; \
+	} > "$$tmp"; \
+	mv "$$tmp" "$$report"; trap - EXIT; cat "$$report"; echo; echo "[REGRESSION STATUS] Report: $$report"
+
 regression_stop:
 	@set +e; mkdir -p "$(REGRESSION_CONTROL_DIR)"; touch "$(REGRESSION_STOP_FILE)"; \
 	pid=""; if [ -f "$(REGRESSION_RUNNER_FILE)" ]; then \
@@ -503,7 +536,7 @@ regression_stop:
 
 regression_clean: coverage_clean
 	@rm -rf "$(REGRESSION_LOG_DIR)" "$(REGRESSION_CACHE_DIR)" "$(REGRESSION_CONTROL_DIR)" "$(REGRESSION_TOTAL_COVERAGE_DIR)"
-	@rm -f "$(REGRESSION_SUMMARY)" "$(REGRESSION_TOTAL_COVERAGE_SUMMARY)" "$(REGRESSION_TOTAL_COVERAGE_UNCOVERED)"
+	@rm -f "$(REGRESSION_SUMMARY)" "$(REGRESSION_STATUS_REPORT)" "$(REGRESSION_TOTAL_COVERAGE_SUMMARY)" "$(REGRESSION_TOTAL_COVERAGE_UNCOVERED)"
 	@$(MAKE) --no-print-directory regression
 
 coverage_clean:

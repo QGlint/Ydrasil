@@ -27,6 +27,14 @@ merges all current-RTL suite coverage into `build/coverage-total/merged.dat`:
 make regression_stop
 ```
 
+Inspect the latest total regression, cumulative riscv-dv result, merged
+coverage and active-runner state. The command prints the report and atomically
+publishes the same contents to `build/PPA/regression_status.log`:
+
+```bash
+make regression_status
+```
+
 The stop target also runs bounded riscv-dv cleanup; current history, permanent
 failures and the current RTL's merged coverage are retained.
 
