@@ -74,6 +74,52 @@ make coe_loop_lina
 `loop_lina` 默认把12个80轮维度缩为16轮、最外层10轮缩为2轮；
 生成物位于 `build/fpga_coe_m3/`，结果会被 `make ppa_perf_report` 收集。
 
+225MHz、240MHz 和 250MHz 超频综合入口：
+
+```sh
+make syn225
+make syn240
+make syn250
+```
+
+三个入口都会执行 Vivado batch flow，完成综合、实现、生成 bitstream 和时序分析；结果分别写到
+`build/syn/pll225m/`、`build/syn/pll240m/` 和 `build/syn/pll250m/`。
+也可以通过通用 `syn` 入口指定支持的频率（150、200、225、240 或 250MHz）：
+
+```sh
+make syn SYN_PLL_FREQ_MHZ=240
+```
+
+200MHz bitstream 入口仍然保留：
+
+```sh
+make synf
+```
+
+如果需要板级 ILA 版本，可以继续使用：
+
+```sh
+make synf-board
+```
+
+通过 `IROM_COE` 和 `DRAM_COE` 指定自定义 COE 文件；该写法适用于三个超频入口：
+
+```sh
+make syn225 IROM_COE=/path/to/irom.coe DRAM_COE=/path/to/dram.coe
+make syn240 IROM_COE=/path/to/irom.coe DRAM_COE=/path/to/dram.coe
+make syn250 IROM_COE=/path/to/irom.coe DRAM_COE=/path/to/dram.coe
+```
+
+综合前会检查文件是否存在，并将它们复制到对应频率构建目录的 `memory/` 下。若只需把
+COE 转成文本或二进制内存文件，可使用：
+
+```sh
+perl sw/coe_to_mem.pl input.coe output.mem
+perl sw/coe_to_mem.pl --binary input.coe output.bin
+```
+
+`sw/coe_to_mem.pl` 只接受 `memory_initialization_radix=16` 的 COE 文件，初始化向量里的每个字都必须是 1 到 8 位十六进制数。
+
 长期回归目标由 `REGRESSION_TARGETS` 控制，默认包含完整 sort 与优化矩阵，
 可继续追加随机指令测试目标。完整 sort 不再属于 `coverage_all`，
 `coverage_quick` 也保持原有快速套件。
@@ -88,6 +134,20 @@ make syn SYN_JOBS=40
 
 ```sh
 make synf
+```
+
+使用超频入口综合、实现并生成 bitstream：
+
+```sh
+make syn225
+make syn240
+make syn250
+```
+
+自定义 COE 文件并运行综合：
+
+```sh
+make syn240 IROM_COE=/path/to/irom.coe DRAM_COE=/path/to/dram.coe
 ```
 
 只从已有 routed checkpoint 重新生成报告：
@@ -124,9 +184,12 @@ make syn VIVADO_SETTINGS=/path/to/settings64.sh VIVADO=/path/to/vivado
 | `build/syn/pll150m/reports` | 默认 150MHz Vivado batch 报告和 timing path 合并结果。 |
 | `build/syn/pll150m/checkpoints` | 默认 150MHz batch flow 保存的 Vivado checkpoint。 |
 | `build/syn/pll200m/artifacts` | 200MHz bitstream、checkpoint 副本和 manifest，使用 `make synf` 生成。 |
+| `build/syn/pll225m/artifacts` | 225MHz bitstream、checkpoint 副本和 manifest，使用 `make syn225` 生成。 |
+| `build/syn/pll240m/artifacts` | 240MHz bitstream、checkpoint 副本和 manifest，使用 `make syn240` 生成。 |
+| `build/syn/pll250m/artifacts` | 250MHz bitstream、checkpoint 副本和 manifest，使用 `make syn250` 生成。 |
 
 ## 备注
 
 - Bender 管理的 RTL 顺序主要用于 `hw/ip/jyd_fpga` 及其依赖的 core/mem 源码。
 - FPGA 综合脚本会保留 `hw/ip/Xilinx_ip_wrapper/rtl` 中的 FPGA wrapper，并跳过与 wrapper 同名的通用 RTL，避免 Vivado 里出现重复模块定义。
-- `FPGA/Ydrasil_FPGA.xpr` 保持 150MHz 基线；`syn` 流程会按 `SYN_PLL_FREQ_MHZ` 复制 staged 工程到 `build/syn/pllXXXm/project`，通过 `SYN_PLL_FREQ_150`/`SYN_PLL_FREQ_200` 宏选择 `ydrasil_clocking.sv` 中的 MMCM 参数。
+- `FPGA/Ydrasil_FPGA.xpr` 保持 150MHz 基线；`syn` 流程会按 `SYN_PLL_FREQ_MHZ` 复制 staged 工程到 `build/syn/pllXXXm/project`，通过对应的 `SYN_PLL_FREQ_XXX` 宏选择 `ydrasil_clocking.sv` 中的 MMCM 参数。

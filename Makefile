@@ -220,7 +220,7 @@ SYN_BUILD_DIR ?= $(BUILD_DIR)/syn
 SYN_VENV ?= $(SYN_BUILD_DIR)/.venv
 SYN_PYTHON ?= $(SYN_VENV)/bin/python
 SYN_PLL_FREQ_MHZ ?= 150
-SYN_PLL_SUPPORTED_FREQS := 150 200
+SYN_PLL_SUPPORTED_FREQS := 150 200 225 240 250
 SYN_PLL_FREQ_TAG = pll$(subst .,p,$(SYN_PLL_FREQ_MHZ))m
 SYN_PLL_DEFINE = SYN_PLL_FREQ_$(subst .,P,$(SYN_PLL_FREQ_MHZ))
 SYN_RTL_DEFINES = $(SYN_PLL_DEFINE)
@@ -280,7 +280,7 @@ endif
 .PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests regression regression_all regression_status regression_stop regression_clean regression_sort regression_sort_opt regression_suite_coverage_merge regression_coverage_report init install-bender get_spike download_and_extract_spike check_spike_prebuilt_abi build_spike_from_source check_deps spike spike_wave_to_csv sim_compare commit_check commit_spike_csv commit_hw_trace commit_hw_csv commit_compare rv_test_comp_genmem ppa_rvtest_report ppa_perf_report coe_simple coe_smoke coe_smoke_led coe_isa_probes coverage_all coverage_all_run coverage_quick coverage_closure coverage_closure_merge coverage_clean coverage_report sw_boundary_test sw_coverage sw_coverage_clean sw_run_mode sw_coverage_report
 .PHONY: coremark coremark_sim coremark_run coremark_result coremark-rebuild coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map coremark_opt_all coremark_opt_build_all coremark_opt_sim_all coremark_opt_report coremark_opt_clean app_opt_comp_expanded_if_needed $(COREMARK_OPT_BUILD_TARGETS) $(COREMARK_OPT_SIM_TARGETS) sort_app sort_all sort_sim_all sort_report sort_app_sim sort_app-rebuild sort_app-clean sort_opt_all sort_opt_build_all sort_opt_sim_all sort_opt_report sort_opt_clean $(SORT_OPT_BUILD_TARGETS) $(SORT_OPT_SIM_TARGETS) boundary_app boundary_all boundary_sim_all boundary_report boundary_app-rebuild boundary_app-clean boundary_opt_all boundary_opt_build_all boundary_opt_sim_all boundary_opt_report boundary_opt_clean $(BOUNDARY_OPT_BUILD_TARGETS) $(BOUNDARY_OPT_SIM_TARGETS) coe_loop2_gen coe_loop5 coe_loop5_gen coe_loop_lina coe_loop_lina_gen loop_lina
 .PHONY: riscv_dv_venv riscv_dv_model riscv_dv_prepare riscv_dv_run riscv_dv_random riscv_dv_random_status riscv_dv_regression riscv_dv_count riscv_dv_repro riscv_dv_estimate riscv_dv_stop riscv_dv_coverage_report riscv_dv_cleanup riscv_dv_distclean
-.PHONY: syn synf synf-board syn-extreme syn-venv syn-prep syn-stage-xpr syn-stage-memory syn-vivado syn-analyze syn-clean
+.PHONY: syn synf syn225 syn240 syn250 synf-board syn-extreme syn-venv syn-prep syn-stage-xpr syn-stage-memory syn-vivado syn-analyze syn-clean
 
 .SECONDEXPANSION:
 
@@ -815,6 +815,31 @@ synf: SYN_JOBS := 40
 synf: SYN_IMPL_RUNS := 5
 synf: SYN_THREADS_PER_RUN := 8
 synf: syn-vivado
+	@src="$(SYN_ARTIFACT_DIR)/jyd_fpga.bit"; \
+	if [ ! -f "$$src" ]; then \
+		echo "Error: best bitstream not found: $$src"; \
+		exit 1; \
+	fi; \
+	mkdir -p "$(SYN_BIT_DIR)"; \
+	timestamp=$$(date '+%Y%m%d_%H%M'); \
+	dst="$(SYN_BIT_DIR)/jyd_fpga$${timestamp}.bit"; \
+	cp "$$src" "$$dst"; \
+	ltx_src="$(SYN_ARTIFACT_DIR)/jyd_fpga.ltx"; \
+	if [ -f "$$ltx_src" ]; then \
+		ltx_dst="$${dst%.bit}.ltx"; cp "$$ltx_src" "$$ltx_dst"; \
+		echo "[SYN] ILA probes: $$ltx_dst"; \
+	fi; \
+	echo "[SYN] Best bitstream: $$dst"
+	@$(MAKE) syn-analyze SYN_PLL_FREQ_MHZ=$(SYN_PLL_FREQ_MHZ) SYN_PROFILE=$(SYN_PROFILE)
+
+syn225: SYN_PLL_FREQ_MHZ := 225
+syn240: SYN_PLL_FREQ_MHZ := 240
+syn250: SYN_PLL_FREQ_MHZ := 250
+syn225 syn240 syn250: SYN_RUN_TO := bitstream
+syn225 syn240 syn250: SYN_JOBS := 40
+syn225 syn240 syn250: SYN_IMPL_RUNS := 5
+syn225 syn240 syn250: SYN_THREADS_PER_RUN := 8
+syn225 syn240 syn250: syn-vivado
 	@src="$(SYN_ARTIFACT_DIR)/jyd_fpga.bit"; \
 	if [ ! -f "$$src" ]; then \
 		echo "Error: best bitstream not found: $$src"; \

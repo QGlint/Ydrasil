@@ -12,6 +12,18 @@ module ydrasil_clocking (
     localparam real MMCM_CLKFBOUT_MULT_F  = 5.000;
     localparam real MMCM_CLKOUT0_DIVIDE_F = 20.000;
     localparam int  MMCM_CLKOUT1_DIVIDE   = 5;
+`elsif SYN_PLL_FREQ_225
+    localparam real MMCM_CLKFBOUT_MULT_F  = 5.625;
+    localparam real MMCM_CLKOUT0_DIVIDE_F = 22.500;
+    localparam int  MMCM_CLKOUT1_DIVIDE   = 5;
+`elsif SYN_PLL_FREQ_240
+    localparam real MMCM_CLKFBOUT_MULT_F  = 6.000;
+    localparam real MMCM_CLKOUT0_DIVIDE_F = 24.000;
+    localparam int  MMCM_CLKOUT1_DIVIDE   = 5;
+`elsif SYN_PLL_FREQ_250
+    localparam real MMCM_CLKFBOUT_MULT_F  = 6.250;
+    localparam real MMCM_CLKOUT0_DIVIDE_F = 25.000;
+    localparam int  MMCM_CLKOUT1_DIVIDE   = 5;
 `else
     localparam real MMCM_CLKFBOUT_MULT_F  = 5.250;
     localparam real MMCM_CLKOUT0_DIVIDE_F = 21.000;
