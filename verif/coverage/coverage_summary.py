@@ -129,9 +129,8 @@ def main() -> int:
             if int(point["count"]) > 0:
                 totals[kind][0] += 1
 
-    annotation_hit, _ = annotation_counts(args.annotated)
+    annotation_hit, annotation_total = annotation_counts(args.annotated)
     lcov_hit, lcov_total = lcov_counts(args.info)
-    annotation_total = lcov_total
 
     lines = [f"[COVERAGE] Merging {args.databases} test databases", "Coverage Summary:"]
     for kind in DISPLAY_TYPES:
@@ -141,7 +140,7 @@ def main() -> int:
         [
             "Annotation Summary:",
             f"  lines with all attached points covered: "
-            f"{float(100 * annotation_hit // annotation_total) if annotation_total else 0.0:.2f}% "
+            f"{100.0 * annotation_hit / annotation_total if annotation_total else 0.0:.2f}% "
             f"({annotation_hit}/{annotation_total})",
             f"See lines with '%00' in {args.annotated}",
             f"[COVERAGE] LCOV source-line coverage: {lcov_hit}/{lcov_total} "

@@ -248,9 +248,10 @@ rv_sim_%:
 	fi; \
 	hw_log=$(HW_TRACE_OUT_DIR)/$$typ/$$base/hw.log; \
 	[ -f "$$hw_log" ] || hw_log=$$result_dir/$$base.log; \
-	cycles=$$(grep -o "CYCLES=[0-9]*" $$hw_log | cut -d= -f2); \
-	insts=$$(grep -o "INSTS=[0-9]*" $$hw_log | cut -d= -f2); \
-	ipc=$$(grep -o "IPC=[0-9.]*" $$hw_log | cut -d= -f2); \
+	perf_metric=$$(grep -m1 "^PERF_METRIC:" "$$hw_log"); \
+	cycles=$$(printf '%s\n' "$$perf_metric" | sed -n 's/.*CYCLES=\([0-9]*\).*/\1/p'); \
+	insts=$$(printf '%s\n' "$$perf_metric" | sed -n 's/.*INSTS=\([0-9]*\).*/\1/p'); \
+	ipc=$$(printf '%s\n' "$$perf_metric" | sed -n 's/.*IPC=\([0-9.]*\).*/\1/p'); \
 	bp_acc=$$(grep -m1 "^PERF_BP_ACC:" $$hw_log | sed -n 's/.*ACC=\([0-9.]*\).*/\1/p'); \
 	if [ -z "$$bp_acc" ]; then \
 		bp_acc=$$(grep -m1 "^PERF_BRANCH:" $$hw_log | sed -n 's/.*ACC=\([0-9.]*\).*/\1/p'); \
@@ -294,7 +295,7 @@ ppa_rvtest_report:
 		[ -d "$$result_dir" ] || continue; \
 		echo "========== $$typ ==========" >> "$(PPA_RVTEST_LOG)"; \
 		for f in $$(ls $$result_dir/*.status 2>/dev/null | sort); do \
-			cat $$f >> "$(PPA_RVTEST_LOG)"; \
+			awk -f "$(PROJECT_ROOT)/verif/tests/fix_test_all_summary.awk" "$$f" >> "$(PPA_RVTEST_LOG)"; \
 		done; \
 	done; \
 	echo "[PPA] RV test report: $(PPA_RVTEST_LOG)"

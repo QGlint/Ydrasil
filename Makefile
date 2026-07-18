@@ -62,6 +62,12 @@ SORT_OPT_BUILD_TARGETS := $(foreach profile,$(APP_OPT_PROFILES),$(foreach app,$(
 SORT_OPT_SIM_TARGETS := $(foreach profile,$(APP_OPT_PROFILES),$(foreach app,$(SORT_APP_NAMES),sort_opt_sim_$(profile)_$(app)))
 COVERAGE_QUICK_TARGETS ?= boundary_all test_all coremark_sim coe_loop5
 COVERAGE_QUICK_SUMMARY ?= $(PPA_DIR)/coverage_quick_summary.log
+COVERAGE_CLOSURE_DIR ?= $(BUILD_DIR)/coverage-closure
+COVERAGE_CLOSURE_DATA ?= $(COVERAGE_CLOSURE_DIR)/data/boundary_coverage_closure_edges.dat
+COVERAGE_CLOSURE_MERGED ?= $(COVERAGE_CLOSURE_DIR)/merged.dat
+COVERAGE_CLOSURE_INFO ?= $(COVERAGE_CLOSURE_DIR)/coverage.info
+COVERAGE_CLOSURE_ANNOTATED ?= $(COVERAGE_CLOSURE_DIR)/annotated
+COVERAGE_CLOSURE_BASES ?=
 REGRESSION_TARGETS ?= coverage_all regression_sort regression_sort_opt riscv_dv_random
 REGRESSION_SUMMARY ?= $(PPA_DIR)/regression_summary.log
 REGRESSION_STATUS_REPORT ?= $(PPA_DIR)/regression_status.log
@@ -150,7 +156,7 @@ BOUNDARY_OPT_CFLAGS_O3_app_unroll ?= -Os
 BOUNDARY_OPT_APP_CFLAGS_O3_app_unroll ?= -O3 -funroll-loops
 BOUNDARY_OPT_SPIKE_MAXSTEPS ?= 100000
 BOUNDARY_OPT_SPIKE_MAXSTEPS_exception_stress ?= 1000000
-BOUNDARY_OPT_SPIKE_SKIP_APPS ?= csr_counter_edges
+BOUNDARY_OPT_SPIKE_SKIP_APPS ?= csr_counter_edges coverage_closure_edges
 BOUNDARY_SIM_TIMEOUT ?= 2000000
 COVERAGE_QUICK_TIMEOUT ?= 750000
 COVERAGE_QUICK_MARGIN_PERCENT ?= 50
@@ -271,7 +277,7 @@ ifeq ($(filter $(SYN_PLL_FREQ_MHZ),$(SYN_PLL_SUPPORTED_FREQS)),)
 $(error Unsupported SYN_PLL_FREQ_MHZ=$(SYN_PLL_FREQ_MHZ); supported values: $(SYN_PLL_SUPPORTED_FREQS))
 endif
 
-.PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests regression regression_all regression_status regression_stop regression_clean regression_sort regression_sort_opt regression_suite_coverage_merge regression_coverage_report init install-bender get_spike download_and_extract_spike check_spike_prebuilt_abi build_spike_from_source check_deps spike spike_wave_to_csv sim_compare commit_check commit_spike_csv commit_hw_trace commit_hw_csv commit_compare rv_test_comp_genmem ppa_rvtest_report ppa_perf_report coe_simple coe_smoke coe_smoke_led coe_isa_probes coverage_all coverage_all_run coverage_quick coverage_clean coverage_report sw_boundary_test sw_coverage sw_coverage_clean sw_run_mode sw_coverage_report
+.PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests regression regression_all regression_status regression_stop regression_clean regression_sort regression_sort_opt regression_suite_coverage_merge regression_coverage_report init install-bender get_spike download_and_extract_spike check_spike_prebuilt_abi build_spike_from_source check_deps spike spike_wave_to_csv sim_compare commit_check commit_spike_csv commit_hw_trace commit_hw_csv commit_compare rv_test_comp_genmem ppa_rvtest_report ppa_perf_report coe_simple coe_smoke coe_smoke_led coe_isa_probes coverage_all coverage_all_run coverage_quick coverage_closure coverage_closure_merge coverage_clean coverage_report sw_boundary_test sw_coverage sw_coverage_clean sw_run_mode sw_coverage_report
 .PHONY: coremark coremark_sim coremark_run coremark_result coremark-rebuild coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map coremark_opt_all coremark_opt_build_all coremark_opt_sim_all coremark_opt_report coremark_opt_clean app_opt_comp_expanded_if_needed $(COREMARK_OPT_BUILD_TARGETS) $(COREMARK_OPT_SIM_TARGETS) sort_app sort_all sort_sim_all sort_report sort_app_sim sort_app-rebuild sort_app-clean sort_opt_all sort_opt_build_all sort_opt_sim_all sort_opt_report sort_opt_clean $(SORT_OPT_BUILD_TARGETS) $(SORT_OPT_SIM_TARGETS) boundary_app boundary_all boundary_sim_all boundary_report boundary_app-rebuild boundary_app-clean boundary_opt_all boundary_opt_build_all boundary_opt_sim_all boundary_opt_report boundary_opt_clean $(BOUNDARY_OPT_BUILD_TARGETS) $(BOUNDARY_OPT_SIM_TARGETS) coe_loop2_gen coe_loop5 coe_loop5_gen coe_loop_lina coe_loop_lina_gen loop_lina
 .PHONY: riscv_dv_venv riscv_dv_model riscv_dv_prepare riscv_dv_run riscv_dv_random riscv_dv_random_status riscv_dv_regression riscv_dv_count riscv_dv_repro riscv_dv_estimate riscv_dv_stop riscv_dv_coverage_report riscv_dv_cleanup riscv_dv_distclean
 .PHONY: syn synf synf-board syn-extreme syn-venv syn-prep syn-stage-xpr syn-stage-memory syn-vivado syn-analyze syn-clean
@@ -617,6 +623,64 @@ coverage_quick: coverage_clean
 	echo "[COVERAGE QUICK] CORRECTNESS=$$overall coverage_databases=$$dat_count" | tee -a "$(COVERAGE_QUICK_SUMMARY)"; \
 	echo "[COVERAGE QUICK] Summary: $(COVERAGE_QUICK_SUMMARY)"; \
 	exit "$$failed"
+
+coverage_closure:
+	@set -e; \
+	rm -rf "$(COVERAGE_CLOSURE_DIR)"; \
+	$(MAKE) --no-print-directory -C sw \
+		"$(BUILD_DIR)/app/boundary/coverage_closure_edges.itcm" \
+		"$(BUILD_DIR)/app/boundary/coverage_closure_edges.dtcm" \
+		"$(BUILD_DIR)/app/boundary/coverage_closure_edges.elf"; \
+	$(MAKE) --no-print-directory comp VERILATOR_COVERAGE=1 VERILATOR_TRACE=0; \
+	$(MAKE) --no-print-directory boundary_sim_coverage_closure_edges \
+		VERILATOR_COVERAGE=1 VERILATOR_TRACE=0 \
+		COVERAGE_DIR="$(COVERAGE_CLOSURE_DIR)"; \
+	grep -q '\[coverage_closure_edges\] \[PASS\]' \
+		"$(BOUNDARY_RESULT_DIR)/coverage_closure_edges.status"; \
+	test -s "$(COVERAGE_CLOSURE_DATA)"; \
+	verilator_coverage --write "$(COVERAGE_CLOSURE_MERGED).next" \
+		"$(COVERAGE_CLOSURE_DATA)"; \
+	mv "$(COVERAGE_CLOSURE_MERGED).next" "$(COVERAGE_CLOSURE_MERGED)"; \
+	verilator_coverage --write-info "$(COVERAGE_CLOSURE_INFO)" \
+		"$(COVERAGE_CLOSURE_MERGED)"; \
+	rm -rf "$(COVERAGE_CLOSURE_ANNOTATED)"; \
+	verilator_coverage --annotate "$(COVERAGE_CLOSURE_ANNOTATED)" \
+		"$(COVERAGE_CLOSURE_MERGED)" >/dev/null; \
+	echo "[COVERAGE CLOSURE] PASS data=$(COVERAGE_CLOSURE_MERGED)"
+
+coverage_closure_merge: coverage_closure
+	@set -e; \
+	if [ -z "$(strip $(COVERAGE_CLOSURE_BASES))" ]; then \
+		echo "[COVERAGE CLOSURE] Set COVERAGE_CLOSURE_BASES to suite-level databases"; \
+		exit 2; \
+	fi; \
+	set -- $(COVERAGE_CLOSURE_BASES) "$(COVERAGE_CLOSURE_MERGED)"; \
+	for input in "$$@"; do \
+		if [ ! -s "$$input" ]; then echo "[COVERAGE CLOSURE] Missing $$input"; exit 2; fi; \
+	done; \
+	databases=$$#; \
+	mkdir -p "$(REGRESSION_TOTAL_COVERAGE_DIR)" "$(PPA_DIR)"; \
+	verilator_coverage --write "$(REGRESSION_TOTAL_COVERAGE_DATA).next" "$$@"; \
+	verilator_coverage --write-info "$(REGRESSION_TOTAL_COVERAGE_INFO).next" \
+		"$(REGRESSION_TOTAL_COVERAGE_DATA).next"; \
+	rm -rf "$(REGRESSION_TOTAL_COVERAGE_ANNOTATED).next"; \
+	verilator_coverage --annotate "$(REGRESSION_TOTAL_COVERAGE_ANNOTATED).next" \
+		"$(REGRESSION_TOTAL_COVERAGE_DATA).next" >/dev/null; \
+	mv "$(REGRESSION_TOTAL_COVERAGE_DATA).next" \
+		"$(REGRESSION_TOTAL_COVERAGE_DATA)"; \
+	mv "$(REGRESSION_TOTAL_COVERAGE_INFO).next" \
+		"$(REGRESSION_TOTAL_COVERAGE_INFO)"; \
+	rm -rf "$(REGRESSION_TOTAL_COVERAGE_ANNOTATED)"; \
+	mv "$(REGRESSION_TOTAL_COVERAGE_ANNOTATED).next" \
+		"$(REGRESSION_TOTAL_COVERAGE_ANNOTATED)"; \
+	$(PYTHON) "$(PROJECT_ROOT)/verif/coverage/coverage_summary.py" \
+		--data "$(REGRESSION_TOTAL_COVERAGE_DATA)" \
+		--info "$(REGRESSION_TOTAL_COVERAGE_INFO)" \
+		--annotated "$(REGRESSION_TOTAL_COVERAGE_ANNOTATED)" \
+		--databases "$$databases" \
+		--summary "$(REGRESSION_TOTAL_COVERAGE_SUMMARY)" \
+		--uncovered "$(REGRESSION_TOTAL_COVERAGE_UNCOVERED)"; \
+	echo "[COVERAGE CLOSURE] merged into $(REGRESSION_TOTAL_COVERAGE_DATA)"
 
 ppa_perf_report:
 	@bash sw/scripts/collect_perf_stats.sh "$(HW_TRACE_OUT_DIR)" "$(PPA_DIR)"
