@@ -455,6 +455,22 @@ import ydrasil_pkg::*;
     assign dtcm_wmask_o = dtcm_store_req ? store_wmask : 4'b0000;
     assign dtcm_wdata_o = dtcm_store_req ? store_wdata : 32'b0;
 
+`ifndef SYNTHESIS
+    reg [31:0] lsu_cycle_q;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) lsu_cycle_q <= 0;
+        else lsu_cycle_q <= lsu_cycle_q + 1;
+    end
+    always @(posedge clk) begin
+        if (dtcm_store_req)
+            $display("[LSU STORE] c=%0d addr=%h wmask=%b wdata=%h robidx=%0d rs2=x%0d",
+                     lsu_cycle_q, ex_lsu_mem_addr_i, store_wmask, store_wdata, id_store_rob_idx_i, id_lsu_rs2_raddr_i);
+        if (dtcm_load_req)
+            $display("[LSU LOAD ] c=%0d addr=%h",
+                     lsu_cycle_q, ex_lsu_mem_addr_i);
+    end
+`endif
+
     assign mmio_req_o = mmio_req_valid_q;
     assign mmio_wen_o = mmio_req_valid_q & mmio_is_store_q;
     assign mmio_addr_o = mmio_addr_q;
@@ -467,6 +483,14 @@ import ydrasil_pkg::*;
     assign selected_wb_result =
         load_s1_fast_wb ? dtcm_load_result :
         load_s2_valid_q ? dtcm_load_s2_result : mmio_wb_result_q;
+
+`ifndef SYNTHESIS
+    always @(posedge clk) begin
+        if (dtcm_wb_valid)
+            $display("[LSU LDWB ] c=%0d rd=x%0d result=%h s1fast=%b s2=%b rdata=%h s1addr=%0d",
+                     lsu_cycle_q, selected_wb_rd_addr, selected_wb_result, load_s1_fast_wb, load_s2_valid_q, dtcm_rdata_i, load_s1_addr_index_q);
+    end
+`endif
     assign selected_wb_rd_addr =
         load_s1_fast_wb ? load_s1_rd_addr_q :
         load_s2_valid_q ? load_s2_rd_addr_q : mmio_wb_rd_addr_q;

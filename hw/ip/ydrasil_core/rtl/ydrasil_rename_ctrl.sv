@@ -31,6 +31,7 @@ import ydrasil_pkg::*;
 
     input  wire rn_alloc_valid_i,
     input  wire rn_if_rd_valid_i,
+    input  wire rn_if_store_valid_i,
     input  wire rn_if_ctrl_valid_i,
     input  wire [REGS_ADDR_WIDTH-1:0] rn_alloc_rd_addr_i,
     input  wire rn_alloc1_valid_i,
@@ -585,7 +586,7 @@ import ydrasil_pkg::*;
                     pdst_rob_valid_q[alloc_pdst_q] <= 1'b1;
                 end
                 rob_valid_q[alloc0_tail] <= 1'b1;
-                rob_ready_q[alloc0_tail] <= !alloc_rd_valid && !rn_if_ctrl_valid_i;
+                rob_ready_q[alloc0_tail] <= !alloc_rd_valid && !rn_if_ctrl_valid_i && !rn_if_store_valid_i;
                 rob_arch_rd_q[alloc0_tail] <= alloc_rd_valid ? rn_alloc_rd_addr_i : '0;
                 rob_new_pdst_q[alloc0_tail] <= alloc_rd_valid ? alloc_pdst_q : '0;
                 rob_old_pdst_q[alloc0_tail] <= alloc_rd_valid ? rat_q[rn_alloc_rd_addr_i] : '0;

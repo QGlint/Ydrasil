@@ -21,7 +21,9 @@ module ydrmem_ram #(
     localparam DEPTH = (1 << (ADDR_WIDTH));
 
     // 使用计算出的深度定义存储器
+    /* verilator tracing_off */
     (* ram_style = "block" *) reg [DATA_WIDTH-1:0] mem_r[0:DEPTH-1];
+    /* verilator tracing_on */
 
     wire [ADDR_WIDTH-1:0] word_addr;
     assign word_addr = addr_i;
@@ -34,14 +36,16 @@ module ydrmem_ram #(
             if (we_mask_i[1]) mem_r[word_addr][15:8] <= data_i[15:8];
             if (we_mask_i[2]) mem_r[word_addr][23:16] <= data_i[23:16];
             if (we_mask_i[3]) mem_r[word_addr][31:24] <= data_i[31:24];
-            if (word_addr >= 16'h1490 && word_addr <= 16'h14a0)
-                $display("[DTCM W] t=%0d addr=%h wmask=%b wdata=%h", $time, word_addr, we_mask_i, data_i);
+            if (word_addr == 16'h149f)
+                $display("[RAM WR149f] t=%0d wmask=%b wdata=%h", $time, we_mask_i, data_i);
         end
     end
 
     // 同步读取逻辑：匹配无额外输出寄存器的一拍 BRAM 行为。
     always @(posedge clk) begin
         if (en_i) begin
+            if (word_addr == 16'h149f)
+                $display("[RAM RD149f] t=%0d we=%b -> %h", $time, we_i, mem_r[word_addr]);
             data_o <= mem_r[word_addr];
         end
     end

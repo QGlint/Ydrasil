@@ -34,7 +34,9 @@ module ydrmem_ram2#(
     wire                  write_a_fire;
     wire                  write_b_fire;
 
+    /* verilator tracing_off */
     (* ram_style = "block" *) reg [DATA_WIDTH-1:0] mem_r[0:DEPTH-1];
+    /* verilator tracing_on */
 
     reg [DATA_WIDTH-1:0] rdata_a_ff;
     reg [DATA_WIDTH-1:0] rdata_b_ff;

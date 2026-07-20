@@ -290,6 +290,7 @@ import ydrasil_pipeline_pkg::*;
 	wire [5:0]                      pipe1_ctrl_rs2_psrc;
 	wire [5:0]                      id_rn_pdst;
 	wire                            rn_if_rd_valid;
+	wire                            rn_if_store_valid;
 	wire                            rn_if_ctrl_valid;
 	wire                            rn_alloc_valid;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    rn_alloc_rd_addr;
@@ -447,6 +448,7 @@ import ydrasil_pipeline_pkg::*;
 		.pipe1_ctrl_rs2_psrc_i(pipe1_ctrl_rs2_psrc),
 		.rn_alloc_valid_i(rn_alloc_valid),
 		.rn_if_rd_valid_i(rn_if_rd_valid),
+		.rn_if_store_valid_i(rn_if_store_valid),
 		.rn_if_ctrl_valid_i(rn_if_ctrl_valid),
 		.rn_alloc_rd_addr_i(rn_alloc_rd_addr),
 		.rn_alloc1_valid_i(rn_alloc1_valid),
@@ -539,8 +541,9 @@ import ydrasil_pipeline_pkg::*;
 		.rename_frontend_stall_o(rename_frontend_stall),
 		.rn_alloc_valid_o(rn_alloc_valid),
 		.rn_alloc_rd_addr_o(rn_alloc_rd_addr),
-		.rn_if_rd_valid_o(rn_if_rd_valid),
-		.rn_alloc1_valid_o(rn_alloc1_valid),
+			.rn_if_rd_valid_o(rn_if_rd_valid),
+			.rn_if_store_valid_o(rn_if_store_valid),
+			.rn_alloc1_valid_o(rn_alloc1_valid),
 		.rn_alloc1_rd_addr_o(rn_alloc1_rd_addr),
 		.rn_if1_rd_valid_o(rn_if1_rd_valid),
 		.rn_if_ctrl_valid_o(rn_if_ctrl_valid)

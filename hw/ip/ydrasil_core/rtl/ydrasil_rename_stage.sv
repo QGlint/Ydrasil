@@ -24,6 +24,7 @@ import ydrasil_pipeline_pkg::*;
     output wire              rn_alloc_valid_o,
     output wire [REGS_ADDR_WIDTH-1:0] rn_alloc_rd_addr_o,
     output wire              rn_if_rd_valid_o,
+    output wire              rn_if_store_valid_o,
     output wire              rn_alloc1_valid_o,
     output wire [REGS_ADDR_WIDTH-1:0] rn_alloc1_rd_addr_o,
     output wire              rn_if1_rd_valid_o,
@@ -62,7 +63,8 @@ import ydrasil_pipeline_pkg::*;
     wire slot0_needs_rob =
         id_decode_pair_i.slot0.valid &&
         (slot0_needs_rd ||
-         id_decode_pair_i.slot0.operator_type[OPERATOR_TYPE_BJP]);
+         id_decode_pair_i.slot0.operator_type[OPERATOR_TYPE_BJP] ||
+         id_decode_pair_i.slot0.operator_type[OPERATOR_TYPE_STORE]);
 
     wire output_valid = issue_pair_ff.slot0.dec.valid;
     wire issue_accept = output_valid && !issue_stall_i;
@@ -74,6 +76,9 @@ import ydrasil_pipeline_pkg::*;
     assign rn_alloc_valid_o = rename_request && slot0_needs_rob;
     assign rn_alloc_rd_addr_o = id_decode_pair_i.slot0.rf_waddr_rd;
     assign rn_if_rd_valid_o = slot0_needs_rd;
+    assign rn_if_store_valid_o =
+        slot0_in_valid &&
+        id_decode_pair_i.slot0.operator_type[OPERATOR_TYPE_STORE];
     assign rn_if_ctrl_valid_o =
         slot0_in_valid &&
         id_decode_pair_i.slot0.operator_type[OPERATOR_TYPE_BJP];

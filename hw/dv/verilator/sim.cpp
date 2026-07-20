@@ -48,6 +48,8 @@ int main(int argc, char **argv) {
     TB_CLASS_NAME *tb = new TB_CLASS_NAME;
     // check if trace is enabled
     int trace_en = 0;
+    vluint64_t trace_start = 0;     // dump only after this time (0 = from start)
+    vluint64_t trace_end   = 0;     // dump only before this time  (0 = until end)
     for (int i = 0; i < argc; i++)
     {
         if (strcmp(argv[i], "+trace") == 0)
@@ -56,6 +58,10 @@ int main(int argc, char **argv) {
             trace_en = 1;
         if (sscanf(argv[i], "+cpp_timeout=%lu", &MAX_TIME) == 1)
             printf("C++ timeout set to %lu\n", MAX_TIME);
+        if (sscanf(argv[i], "+trace_start=%lu", &trace_start) == 1)
+            printf("Trace window start = %lu\n", trace_start);
+        if (sscanf(argv[i], "+trace_end=%lu", &trace_end) == 1)
+            printf("Trace window end   = %lu\n", trace_end);
     }
 
     if (trace_en)
@@ -108,11 +114,14 @@ int main(int argc, char **argv) {
 
     // ---------------- Main simulation ----------------
     while ((!Verilated::gotFinish() )&&(Verilated::time() <= MAX_TIME)) {
-        tb->clk = !tb->clk;   
+        tb->clk = !tb->clk;
         tb->eval();
 #ifdef VERILATOR_TRACE
-            if (trace_en)
-                tfp->dump(Verilated::time());
+            if (trace_en) {
+                vluint64_t t = Verilated::time();
+                if ((trace_end == 0 || t <= trace_end) && t >= trace_start)
+                    tfp->dump(t);
+            }
 #endif
         Verilated::timeInc(1);
 

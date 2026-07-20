@@ -31,7 +31,9 @@ import ydrasil_pkg::*;
     input  wire [REGS_DATA_WIDTH-1:0] wr2_data_i
 );
 
+    /* verilator tracing_off */
     reg [REGS_DATA_WIDTH-1:0] prf_q [0:PHYS_REGS-1];
+    /* verilator tracing_on */
 
     always_ff @(posedge clk or negedge rst_n) begin
         integer i;
