@@ -1021,6 +1021,10 @@ BOUNDARY_APP_SW_MAKE_ARGS = $(COREMARK_SW_MAKE_ARGS)
 BOUNDARY_APP_SW_MAKE_ARGS += BOUNDARY_EXTRA_CFLAGS="$(BOUNDARY_EXTRA_CFLAGS)"
 COREMARK_RESULT_LOG ?= $(HW_TRACE_OUT_DIR)/coremark/hw.log
 COREMARK_SIM_COMPARE ?= none
+RTTHREAD_RESULT_LOG ?= $(HW_TRACE_OUT_DIR)/rtthread/hw.log
+RTTHREAD_SIM_TIMEOUT ?= 20000000
+RTTHREAD_SW_MAKE_ARGS = $(COREMARK_SW_MAKE_ARGS)
+RTTHREAD_HW_OUT ?= $(BUILD_DIR)/app/rtthread-hw
 COMPARE_TRACE_DEFINES = $(if $(filter none,$(SIM_COMPARE)),,$(if $(findstring +commit_trace,$(COMPARE_SIM_EXTRA_DEFINES)),,+commit_trace))
 COMPARE_SIM_DEFINES = $(strip $(COMPARE_SIM_EXTRA_DEFINES) $(COMPARE_TRACE_DEFINES))
 
@@ -1045,6 +1049,65 @@ coremark_sim: coremark comp
 	exit $$rc
 
 coremark_run: coremark_sim
+
+.PHONY: rtthread rtthread-rebuild rtthread_hw rtthread-hw rtthread_sim rtthread_run rtthread_result rtthread-clean
+
+rtthread:
+	@$(MAKE) -C sw rtthread $(RTTHREAD_SW_MAKE_ARGS)
+
+rtthread-rebuild:
+	@$(MAKE) -C sw rtthread-rebuild $(RTTHREAD_SW_MAKE_ARGS)
+
+rtthread_hw:
+	@$(MAKE) -C sw rtthread-rebuild $(RTTHREAD_SW_MAKE_ARGS) \
+		RTTHREAD_OUT=$(RTTHREAD_HW_OUT) \
+		RTTHREAD_SIM_CTRL=0 \
+		RTTHREAD_ITERATIONS=0 \
+		RTTHREAD_IGNORE_10S_ERROR=0
+
+rtthread-hw: rtthread_hw
+
+rtthread_sim: rtthread
+	@$(MAKE) comp VERILATOR_TRACE=0
+	@rm -f $(RTTHREAD_RESULT_LOG); \
+	$(MAKE) sim_compare \
+		COMPARE_NAME=rtthread \
+		COMPARE_ELF=$(BUILD_DIR)/app/rtthread/rtthread.elf \
+		COMPARE_ITCM=$(BUILD_DIR)/app/rtthread/rtthread.itcm \
+		COMPARE_DTCM=$(BUILD_DIR)/app/rtthread/rtthread.dtcm \
+		SIM_COMPARE=none \
+		COMPARE_SIM_EXTRA_DEFINES="+cpp_timeout=$(RTTHREAD_SIM_TIMEOUT) +sv_timeout=$(RTTHREAD_SIM_TIMEOUT)"; \
+	rc=$$?; \
+	$(MAKE) --no-print-directory rtthread_result; \
+	exit $$rc
+
+rtthread_run: rtthread_sim
+
+rtthread_result:
+	@if [ ! -f "$(RTTHREAD_RESULT_LOG)" ]; then \
+		echo "[RTTHREAD] FAIL: log not found: $(RTTHREAD_RESULT_LOG)"; exit 1; \
+	fi; \
+	failed=0; \
+	for marker in \
+		"Thread Nano Operating System" \
+		"[RTT] main thread running: main" \
+		"[RTT] CoreMark thread running: coremark" \
+		"Correct operation validated" \
+		"COREMARK DONE" \
+		"[RTT] CoreMark thread completed, result=0"; do \
+		if ! grep -Fq "$$marker" "$(RTTHREAD_RESULT_LOG)"; then \
+			echo "[RTTHREAD] missing marker: $$marker"; failed=1; \
+		fi; \
+	done; \
+	grep -E 'Thread Nano Operating System|^\[RTT\]|^(CoreMark Size|Total ticks|Iterations|Compiler|Memory location|seedcrc|\[[0-9]+\]crc|Correct operation validated|COREMARK DONE)' "$(RTTHREAD_RESULT_LOG)" || true; \
+	if [ "$$failed" -ne 0 ]; then \
+		echo "[RTTHREAD] FAIL"; exit 1; \
+	fi; \
+	echo "[RTTHREAD] PASS: kernel startup, context switch and CoreMark validated"
+
+rtthread-clean:
+	@$(MAKE) -C sw rtthread-clean $(RTTHREAD_SW_MAKE_ARGS)
+	@rm -rf "$(HW_TRACE_OUT_DIR)/rtthread"
 
 $(APP_OPT_EXPANDED_LINKER): $(PROJECT_ROOT)/sw/bsp/link.lds
 	@mkdir -p "$(dir $@)"

@@ -129,7 +129,9 @@ portable_init(core_portable *p, int *argc, char *argv[])
 {
     (void)argc; // prevent unused warning
     (void)argv; // prevent unused warning
+#ifndef COREMARK_RTTHREAD
     sim_ctrl_init();
+#endif
 
     if (sizeof(ee_ptr_int) != sizeof(ee_u8 *))
     {
@@ -151,7 +153,9 @@ portable_fini(core_portable *p)
 {
     p->portable_id = 0;
     ee_printf("COREMARK DONE\n");
+#ifndef COREMARK_RTTHREAD
     sim_end();
     while (1) {
     }
+#endif
 }

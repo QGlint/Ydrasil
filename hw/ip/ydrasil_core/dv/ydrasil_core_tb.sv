@@ -1150,8 +1150,10 @@ end
     end
 
 	initial begin
-		$monitor("[TB] time=%0t, rst_n=%b, LED=0x%08h, seg_wdata=0x%08h",
-			$time, rst_n, LED, seg_wdata);
+		if ($test$plusargs("tb_monitor")) begin
+			$monitor("[TB] time=%0t, rst_n=%b, LED=0x%08h, seg_wdata=0x%08h",
+				$time, rst_n, LED, seg_wdata);
+		end
 	end
 
 	initial begin

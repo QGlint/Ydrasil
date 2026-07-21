@@ -20,6 +20,7 @@ extern "C" {
 uint32_t get_cpu_freq(void);
 uint32_t measure_cpu_freq(uint32_t n);
 void delay_1ms(uint32_t count);
+void SystemInit(void);
 
 #ifdef __cplusplus
 }

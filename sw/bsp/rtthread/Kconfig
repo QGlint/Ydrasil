@@ -1,0 +1,5 @@
+mainmenu "Ydrasil RT-Thread Configuration"
+
+RTT_DIR := ../../rt-thread
+
+source "$(RTT_DIR)/Kconfig"

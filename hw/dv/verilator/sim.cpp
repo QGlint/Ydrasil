@@ -74,6 +74,8 @@ int main(int argc, char **argv) {
     }
 
 #ifdef VERILATOR_TRACE
+    if (trace_en)
+    {
         Verilated::traceEverOn(true);
         tb->trace(tfp, 99);
 #if CONFIG_FST_WAVE_TRACE
@@ -81,6 +83,7 @@ int main(int argc, char **argv) {
 #else
         tfp->open("tb_top.vcd");
 #endif
+    }
 #endif
 
     // ---------------- Reset phase ----------------
@@ -92,14 +95,16 @@ int main(int argc, char **argv) {
         tb->eval();
 
 #ifdef VERILATOR_TRACE
-        tfp->dump(Verilated::time());
+        if (trace_en)
+            tfp->dump(Verilated::time());
 #endif     
         Verilated::timeInc(1);
 
 #ifdef DOUBLE_TICK
 
 #ifdef VERILATOR_TRACE
-            tfp->dump(Verilated::time());
+            if (trace_en)
+                tfp->dump(Verilated::time());
 #endif
         Verilated::timeInc(1);
 #endif
@@ -112,7 +117,8 @@ int main(int argc, char **argv) {
         tb->clk = !tb->clk;   
         tb->eval();
 #ifdef VERILATOR_TRACE
-            tfp->dump(Verilated::time());
+            if (trace_en)
+                tfp->dump(Verilated::time());
 #endif
         Verilated::timeInc(1);
 
@@ -120,7 +126,8 @@ int main(int argc, char **argv) {
         tb->eval();
 
 #ifdef VERILATOR_TRACE
-            tfp->dump(Verilated::time());
+            if (trace_en)
+                tfp->dump(Verilated::time());
 #endif
         Verilated::timeInc(1);
 #endif
@@ -135,6 +142,7 @@ int main(int argc, char **argv) {
     std::cout << "Coverage data written to " << coverage_file << "\n";
 #endif
     #ifdef VERILATOR_TRACE
+    if (trace_en)
         tfp->close();
     delete tfp;
     #endif

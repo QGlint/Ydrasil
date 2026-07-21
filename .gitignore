@@ -6,3 +6,4 @@ tools/
 spec/
 spec
 __pycache__/
+sw/bsp/rtthread/rtconfig.h

@@ -186,6 +186,7 @@ DTCM_BIN  := $(OUT_DIR)/bin/$(NAME)_dtcm.bin
 
 .PHONY: rv_all rv_elf rv_dump rv_mem
 .PHONY: coremark coremark-rebuild coremark-clean coremark-clean-all sort_app sort_app-rebuild sort_app-clean
+.PHONY: rtthread rtthread-rebuild rtthread-clean
 .PHONY: boundary_app boundary_app-rebuild boundary_app-clean
 .PHONY: coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map
 rv_comp_genmem:
@@ -300,6 +301,163 @@ coremark-clean-mem:
 
 coremark-clean-map:
 	rm -f $(COREMARK_MAP)
+
+# RT-Thread + CoreMark application
+RTTHREAD_DIR := $(PROJECT_ROOT)/sw/rt-thread
+RTTHREAD_BSP_DIR := $(BSP_DIR)/rtthread
+RTTHREAD_OUT ?= $(PROJECT_ROOT)/build/app/rtthread
+RTTHREAD_NAME := rtthread
+RTTHREAD_ELF := $(RTTHREAD_OUT)/$(RTTHREAD_NAME).elf
+RTTHREAD_DUMP := $(RTTHREAD_OUT)/$(RTTHREAD_NAME).dump
+RTTHREAD_MAP := $(RTTHREAD_OUT)/$(RTTHREAD_NAME).map
+RTTHREAD_ITCM := $(RTTHREAD_OUT)/$(RTTHREAD_NAME).itcm
+RTTHREAD_DTCM := $(RTTHREAD_OUT)/$(RTTHREAD_NAME).dtcm
+RTTHREAD_ITCM_BIN := $(RTTHREAD_OUT)/$(RTTHREAD_NAME)_itcm.bin
+RTTHREAD_DTCM_BIN := $(RTTHREAD_OUT)/$(RTTHREAD_NAME)_dtcm.bin
+RTTHREAD_CONFIG := $(RTTHREAD_BSP_DIR)/rtconfig.h
+RTTHREAD_ITERATIONS ?= 1
+RTTHREAD_HAS_FLOAT ?= 0
+RTTHREAD_SIM_CTRL ?= 1
+RTTHREAD_IGNORE_10S_ERROR ?= $(RTTHREAD_SIM_CTRL)
+
+RTTHREAD_KERNEL_C_SRCS := \
+	$(RTTHREAD_DIR)/src/clock.c \
+	$(RTTHREAD_DIR)/src/components.c \
+	$(RTTHREAD_DIR)/src/cpu_up.c \
+	$(RTTHREAD_DIR)/src/defunct.c \
+	$(RTTHREAD_DIR)/src/idle.c \
+	$(RTTHREAD_DIR)/src/ipc.c \
+	$(RTTHREAD_DIR)/src/irq.c \
+	$(RTTHREAD_DIR)/src/kservice.c \
+	$(RTTHREAD_DIR)/src/object.c \
+	$(RTTHREAD_DIR)/src/scheduler_comm.c \
+	$(RTTHREAD_DIR)/src/scheduler_up.c \
+	$(RTTHREAD_DIR)/src/thread.c \
+	$(RTTHREAD_DIR)/src/timer.c \
+	$(RTTHREAD_DIR)/src/klibc/kerrno.c \
+	$(RTTHREAD_DIR)/src/klibc/kstdio.c \
+	$(RTTHREAD_DIR)/src/klibc/kstring.c \
+	$(RTTHREAD_DIR)/src/klibc/rt_vsnprintf_tiny.c \
+	$(RTTHREAD_DIR)/libcpu/risc-v/common/cpuport.c
+RTTHREAD_KERNEL_ASM_SRCS := \
+	$(RTTHREAD_DIR)/libcpu/risc-v/common/context_gcc.S \
+	$(RTTHREAD_DIR)/libcpu/risc-v/common/interrupt_gcc.S
+RTTHREAD_BSP_C_SRCS := \
+	$(BSP_DIR)/lib/platform.c \
+	$(BSP_DIR)/lib/memory.c \
+	$(BSP_DIR)/lib/sim_ctrl.c \
+	$(BSP_DIR)/lib/uart.c \
+	$(BSP_DIR)/lib/xprintf.c \
+	$(RTTHREAD_BSP_DIR)/board.c \
+	$(RTTHREAD_BSP_DIR)/main.c
+RTTHREAD_BSP_ASM_SRCS := $(BSP_DIR)/startup.S
+RTTHREAD_COREMARK_C_SRCS := \
+	$(COREMARK_DIR)/core_list_join.c \
+	$(COREMARK_DIR)/core_matrix.c \
+	$(COREMARK_DIR)/core_state.c \
+	$(COREMARK_DIR)/core_util.c \
+	$(COREMARK_DIR)/$(COREMARK_PORT_DIR)/core_portme.c
+RTTHREAD_COMMON_SRCS := $(RTTHREAD_KERNEL_C_SRCS) $(RTTHREAD_KERNEL_ASM_SRCS) \
+	$(RTTHREAD_BSP_C_SRCS) $(RTTHREAD_BSP_ASM_SRCS) $(RTTHREAD_COREMARK_C_SRCS)
+
+RTTHREAD_CFLAGS := \
+	-march=$(ARCH) \
+	-mabi=$(ABI) \
+	-mcmodel=medany \
+	-Os \
+	-flto \
+	-ffunction-sections \
+	-fdata-sections \
+	-fno-builtin \
+	-fno-tree-loop-distribute-patterns \
+	-fno-common \
+	-fno-stack-protector \
+	-nostdlib \
+	-nostartfiles \
+	-static \
+	-D__RTTHREAD__ \
+	-D__RT_KERNEL_SOURCE__ \
+	-DRTOS_RTTHREAD=1 \
+	-DCOREMARK_RTTHREAD=1 \
+	-DITERATIONS=$(RTTHREAD_ITERATIONS) \
+	-DHAS_FLOAT=$(RTTHREAD_HAS_FLOAT) \
+	-DPERFORMANCE_RUN=1 \
+	-DSDK_BANNER=0 \
+	-DFLAGS_STR=\"$(ARCH)-$(ABI)-Os-RTThread\" \
+	-I$(RTTHREAD_BSP_DIR) \
+	-I$(RTTHREAD_DIR)/include \
+	-I$(RTTHREAD_DIR)/libcpu/risc-v/common \
+	-I$(COREMARK_DIR) \
+	-I$(COREMARK_DIR)/$(COREMARK_PORT_DIR) \
+	$(BSP_INCLUDES)
+ifeq ($(RTTHREAD_SIM_CTRL),1)
+RTTHREAD_CFLAGS += -DYDRASIL_SIM_CTRL=1
+endif
+ifeq ($(RTTHREAD_IGNORE_10S_ERROR),1)
+RTTHREAD_CFLAGS += -DCOREMARK_IGNORE_10S_ERROR=1
+endif
+RTTHREAD_LDFLAGS := \
+	-march=$(ARCH) \
+	-mabi=$(ABI) \
+	-mcmodel=medany \
+	-flto \
+	-nostartfiles \
+	-nostdlib \
+	-static \
+	-T $(BSP_LINKER_SCRIPT) \
+	-Wl,-Map,$(RTTHREAD_MAP) \
+	-Wl,-u,memcpy \
+	-Wl,-u,memset \
+	-Wl,--gc-sections
+
+rtthread: $(RTTHREAD_ELF) $(RTTHREAD_DUMP) $(RTTHREAD_ITCM) $(RTTHREAD_DTCM)
+	@echo "[rtthread] ELF  $(RTTHREAD_ELF)"
+	@echo "[rtthread] ITCM $(RTTHREAD_ITCM)"
+	@echo "[rtthread] DTCM $(RTTHREAD_DTCM)"
+
+$(RTTHREAD_CONFIG): $(RTTHREAD_BSP_DIR)/.config $(RTTHREAD_DIR)/tools/env_utility.py
+	@cd $(RTTHREAD_BSP_DIR) && python3 -c "import sys; sys.path.insert(0, '../../rt-thread/tools'); from env_utility import mk_rtconfig; mk_rtconfig('.config')"
+
+$(RTTHREAD_OUT):
+	@mkdir -p $@
+
+$(RTTHREAD_ELF): $(RTTHREAD_COMMON_SRCS) $(COREMARK_DIR)/core_main.c $(RTTHREAD_CONFIG) $(BSP_LINKER_SCRIPT) Makefile | $(RTTHREAD_OUT)
+	@set -eu; obj_dir="$(RTTHREAD_OUT)/obj"; rm -rf "$$obj_dir"; mkdir -p "$$obj_dir"; objects=""; index=0; \
+	for src in $(RTTHREAD_COMMON_SRCS); do obj="$$obj_dir/obj_$$index.o"; \
+		$(CC) $(RTTHREAD_CFLAGS) -c "$$src" -o "$$obj"; objects="$$objects $$obj"; index=$$((index + 1)); done; \
+	core_obj="$$obj_dir/core_main.o"; \
+	$(CC) $(RTTHREAD_CFLAGS) -Dmain=coremark_main -c "$(COREMARK_DIR)/core_main.c" -o "$$core_obj"; \
+	$(CC) $(RTTHREAD_LDFLAGS) $$objects "$$core_obj" -lgcc -o "$@"
+
+$(RTTHREAD_DUMP): $(RTTHREAD_ELF)
+	$(OBJDUMP) -h -d $< > $@
+
+$(RTTHREAD_ITCM): $(RTTHREAD_ELF) | $(RTTHREAD_OUT)
+	$(OBJCOPY) -O binary --gap-fill=0x00 \
+		--only-section=.init \
+		--only-section=.text \
+		--only-section=.text.* \
+		$< $(RTTHREAD_ITCM_BIN)
+	od -An -t x4 -w4 -v $(RTTHREAD_ITCM_BIN) | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > $@
+
+$(RTTHREAD_DTCM): $(RTTHREAD_ELF) | $(RTTHREAD_OUT)
+	$(OBJCOPY) -O binary --gap-fill=0x00 \
+		--only-section=.data \
+		--only-section=.bss \
+		--only-section=.stack \
+		--set-section-flags .bss=alloc,load,contents \
+		--set-section-flags .stack=alloc,load,contents \
+		$< $(RTTHREAD_DTCM_BIN) || true
+	@if [ -s $(RTTHREAD_DTCM_BIN) ]; then \
+		od -An -t x4 -w4 -v $(RTTHREAD_DTCM_BIN) | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > $@; \
+	else \
+		printf "00000000\n" > $@; \
+	fi
+
+rtthread-rebuild: rtthread-clean rtthread
+
+rtthread-clean:
+	rm -rf $(RTTHREAD_OUT)
 
 sort_app: $(SORT_APP_ELFS) $(SORT_APP_BINS) $(SORT_APP_DUMPS) $(SORT_APP_ITCMS) $(SORT_APP_DTCMS)
 	@echo "[sort_app] built: $(SORT_APP_NAMES)"
