@@ -116,6 +116,12 @@ SECTIONS
     PROVIDE( _data = . );
   } >dtcm
 
+  .tohost         :
+  {
+    KEEP(*(.tohost.tohost))
+    KEEP(*(.tohost.fromhost))
+  } >dtcm AT>dtcm
+
   .data          :
   {
     *(.rdata)

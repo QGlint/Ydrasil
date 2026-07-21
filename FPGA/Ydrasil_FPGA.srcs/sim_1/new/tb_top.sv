@@ -38,7 +38,7 @@ module tb_top;
     );
     
 
-    //  clock 50MHz=2.5 20ns
+    //  clock 200MHz=2.5 5ns
     initial begin
         clk = 0;
         forever #2.5 clk = ~clk;

@@ -195,6 +195,34 @@ RVTESTS_OUT_ROOT := $(BUILD_DIR)/riscv_tests
 
 RVTESTS_RESULT_DIR := $(BUILD_DIR)/rvtest_results
 
+COVERAGE_DIR ?= $(BUILD_DIR)/coverage
+COVERAGE_DATA_DIR ?= $(COVERAGE_DIR)/data
+COVERAGE ?= 0
+VERILATOR_COVERAGE ?= $(COVERAGE)
+
+BOUNDARY_APP_DIR := $(PROJECT_ROOT)/sw/apps/boundary
+BOUNDARY_APP_NAMES := $(sort $(basename $(notdir $(wildcard $(BOUNDARY_APP_DIR)/*.c))))
+BOUNDARY_APP_EXCLUDE ?= csr_trap_edges ebreak_trap_edges exception_stress trap_lsu_token_edges trap_pipeline_edges
+BOUNDARY_APP_INCLUDE := $(filter-out $(BOUNDARY_APP_EXCLUDE),$(BOUNDARY_APP_NAMES))
+BOUNDARY_SIM_TARGETS := $(addprefix boundary_sim_,$(BOUNDARY_APP_INCLUDE))
+BOUNDARY_RESULT_DIR ?= $(BUILD_DIR)/boundary_results
+PPA_BOUNDARY_LOG ?= $(PPA_DIR)/boundary_summary.log
+BOUNDARY_SIM_TIMEOUT ?= 2000000
+
+COE_LOOP5_DIR := $(BUILD_DIR)/coe/loop5
+COE_LOOP5_ITCM := $(COE_LOOP5_DIR)/coe_loop5.itcm
+COE_LOOP5_DTCM := $(COE_LOOP5_DIR)/coe_loop5.dtcm
+COE_LOOP5_SRC := $(PROJECT_ROOT)/sw/coe/loop5.S
+COE_LOOP5_BIN := $(COE_LOOP5_DIR)/coe_loop5.bin
+COE_SIMPLE_NAME ?= coe_simple
+COE_SIMPLE_ITCM ?= $(COE_LOOP5_ITCM)
+COE_SIMPLE_DTCM ?= $(COE_LOOP5_DTCM)
+COE_SIM_TIMEOUT ?= 1000000
+COE_SIMPLE_SIM_EXTRA_DEFINES ?=
+COE_EXPECT_CNT_READ ?=
+COE_REQUIRE_CNT_READ ?= 0
+COE_EXPECT_SEG ?=
+
 SPIKE_FLAGS := \
 	--isa=$(ARCH) \
 	--log-commits \

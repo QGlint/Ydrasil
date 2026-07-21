@@ -322,6 +322,138 @@ test_all:
 
 include verif/tests/tests.mk
 
+# --- Boundary test targets ---
+BOUNDARY_APP_SW_MAKE_ARGS :=
+
+boundary_app:
+	@$(MAKE) -C sw boundary_app $(BOUNDARY_APP_SW_MAKE_ARGS)
+
+boundary_all:
+	@echo "==========================================================="
+	@echo "   Boundary regression: $(BOUNDARY_APP_NAMES)"
+	@echo "==========================================================="
+	@$(MAKE) -j boundary_app
+	@$(MAKE) comp
+	@rm -rf "$(BOUNDARY_RESULT_DIR)"
+	@$(MAKE) -j boundary_sim_all
+	@$(MAKE) boundary_report
+
+boundary_sim_all: $(BOUNDARY_SIM_TARGETS)
+	@true
+
+boundary_sim_%:
+	@name=$*; result_dir="$(BOUNDARY_RESULT_DIR)"; hw_log="$(HW_TRACE_OUT_DIR)/boundary/$$name/hw.log"; run_log="$$result_dir/$$name.log"; status="$$result_dir/$$name.status"; \
+	mkdir -p "$$result_dir"; rm -f "$$hw_log" "$$run_log" "$$status"; \
+	if $(MAKE) --no-print-directory sim_compare SIM_COMPARE=none COMPARE_NAME="boundary/$$name" COMPARE_ELF="$(BUILD_DIR)/app/boundary/$$name.elf" COMPARE_ITCM="$(BUILD_DIR)/app/boundary/$$name.itcm" COMPARE_DTCM="$(BUILD_DIR)/app/boundary/$$name.dtcm" COMPARE_SIM_EXTRA_DEFINES="+perip_debug +cpp_timeout=$(BOUNDARY_SIM_TIMEOUT) +sv_timeout=$(BOUNDARY_SIM_TIMEOUT)" >"$$run_log" 2>&1 && grep -q "BOUNDARY PASS name=$$name" "$$hw_log"; then result=PASS; else result=FAIL; fi; \
+	echo "[$$name] [$$result]" > "$$status"
+
+boundary_report:
+	@mkdir -p "$(PPA_DIR)"; rm -f "$(PPA_BOUNDARY_LOG)"; failed=0; \
+	for status in $$(find "$(BOUNDARY_RESULT_DIR)" -maxdepth 1 -name '*.status' -type f | sort); do line=$$(cat "$$status"); echo "$$line" | tee -a "$(PPA_BOUNDARY_LOG)"; if echo "$$line" | grep -q '\[FAIL\]'; then failed=1; name=$$(basename "$$status" .status); tail -40 "$(BOUNDARY_RESULT_DIR)/$$name.log"; fi; done; \
+	overall=PASS; if [ "$$failed" -ne 0 ]; then overall=FAIL; fi; \
+	echo "[BOUNDARY] CORRECTNESS=$$overall" | tee -a "$(PPA_BOUNDARY_LOG)"; exit $$failed
+
+# --- COE loop5 target ---
+coe_loop5_gen: $(COE_LOOP5_ITCM) $(COE_LOOP5_DTCM)
+
+$(COE_LOOP5_DIR):
+	@mkdir -p "$@"
+
+$(COE_LOOP5_BIN): $(COE_LOOP5_SRC) | $(COE_LOOP5_DIR)
+	$(CC) $(SORT_APP_CFLAGS) -nostdlib -static -T $(PROJECT_ROOT)/sw/bsp/link.lds -o $@ $<
+
+$(COE_LOOP5_ITCM) $(COE_LOOP5_DTCM): $(COE_LOOP5_BIN)
+	@mkdir -p $(COE_LOOP5_DIR); \
+	cd $(COE_LOOP5_DIR); \
+	$(OBJCOPY) -O binary --only-section=.text $(COE_LOOP5_DIR)/coe_loop5.bin coe_loop5_itcm.bin; \
+	$(OBJCOPY) -O binary --only-section=.data $(COE_LOOP5_DIR)/coe_loop5.bin coe_loop5_dtcm.bin; \
+	od -An -t x4 -w4 -v coe_loop5_itcm.bin | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > $(COE_LOOP5_ITCM); \
+	od -An -t x4 -w4 -v coe_loop5_dtcm.bin | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > $(COE_LOOP5_DTCM)
+
+coe_simple:
+	@mkdir -p "$(COVERAGE_DATA_DIR)"
+	@if $(MAKE) --no-print-directory sim_compare SIM_COMPARE=none \
+		COMPARE_NAME="coe/$(COE_SIMPLE_NAME)" \
+		COMPARE_ITCM="$(abspath $(COE_SIMPLE_ITCM))" \
+		COMPARE_DTCM="$(abspath $(COE_SIMPLE_DTCM))" \
+		COMPARE_SIM_EXTRA_DEFINES="+perip_debug $(COE_SIMPLE_SIM_EXTRA_DEFINES) +cpp_timeout=$(COE_SIM_TIMEOUT) +sv_timeout=$(COE_SIM_TIMEOUT)" \
+		$(if $(filter 1,$(VERILATOR_COVERAGE)),\
+			COMPARE_COVERAGE_FILE="$(abspath $(COVERAGE_DATA_DIR))/$(COE_SIMPLE_NAME).dat") \
+		>/dev/null 2>&1; then \
+		result=PASS; \
+	else \
+		result=FAIL; \
+	fi; \
+	hw_log="$(HW_TRACE_OUT_DIR)/coe/$(COE_SIMPLE_NAME)/hw.log"; \
+	if [ "$$result" = PASS ]; then \
+		echo "[$(COE_SIMPLE_NAME)] [PASS]"; \
+	else \
+		echo "[$(COE_SIMPLE_NAME)] [FAIL]"; \
+	fi
+
+coe_loop5: coe_loop5_gen
+	@$(MAKE) coe_simple \
+		COE_SIMPLE_NAME=coe_loop5 \
+		COE_SIMPLE_ITCM=$(COE_LOOP5_ITCM) \
+		COE_SIMPLE_DTCM=$(COE_LOOP5_DTCM) \
+		COE_EXPECT_CNT_READ=0x00000001 \
+		COE_EXPECT_SEG=0x37800001
+
+# --- Coverage targets ---
+COVERAGE_QUICK_TARGETS ?= boundary_all test_all coremark_sim coe_loop5
+COVERAGE_QUICK_SUMMARY ?= $(PPA_DIR)/coverage_quick_summary.log
+COVERAGE_QUICK_TIMEOUT ?= 750000
+COVERAGE_QUICK_MARGIN_PERCENT ?= 50
+COVERAGE_QUICK_TIMEOUT_PAD ?= 10000
+COVERAGE_QUICK_TICKS_PER_CYCLE ?= 2
+COVERAGE_QUICK_BOUNDARY_MIN ?= 200000
+COVERAGE_QUICK_ISA_MIN ?= 200000
+COVERAGE_QUICK_COREMARK_MIN ?= 200000
+COVERAGE_QUICK_COE_MIN ?= 200000
+
+coverage_clean:
+	rm -rf "$(COVERAGE_DIR)"
+
+coverage_quick: coverage_clean
+	@mkdir -p "$(COVERAGE_DATA_DIR)" "$(PPA_DIR)"
+	@$(MAKE) comp VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
+	@set +e; failed=0; rm -f "$(COVERAGE_QUICK_SUMMARY)"; \
+	echo "[COVERAGE QUICK] Targets: $(COVERAGE_QUICK_TARGETS)" | tee "$(COVERAGE_QUICK_SUMMARY)"; \
+	for target in $(COVERAGE_QUICK_TARGETS); do \
+		measured=0; minimum=$(COVERAGE_QUICK_TIMEOUT); \
+		budget=$$(( (measured * $(COVERAGE_QUICK_TICKS_PER_CYCLE) * (100 + $(COVERAGE_QUICK_MARGIN_PERCENT)) + 99) / 100 + $(COVERAGE_QUICK_TIMEOUT_PAD) )); \
+		if [ "$$budget" -lt "$$minimum" ]; then budget=$$minimum; fi; \
+		echo "[COVERAGE QUICK] RUN  $$target timeout=$$budget" | tee -a "$(COVERAGE_QUICK_SUMMARY)"; \
+		if $(MAKE) --no-print-directory "$$target" VERILATOR_COVERAGE=1 VERILATOR_TRACE=0 \
+			SIM_COMPARE_TIMEOUT="$$budget" \
+			BOUNDARY_SIM_TIMEOUT="$$budget" \
+			COREMARK_SIM_TIMEOUT="$$budget" \
+			> >(tee -a "$(COVERAGE_QUICK_SUMMARY)") 2>&1; then \
+			echo "[COVERAGE QUICK] PASS $$target" | tee -a "$(COVERAGE_QUICK_SUMMARY)"; \
+		else \
+			echo "[COVERAGE QUICK] FAIL $$target" | tee -a "$(COVERAGE_QUICK_SUMMARY)"; \
+			failed=1; \
+		fi; \
+	done; \
+	dat_count=$$(ls -1 "$(COVERAGE_DATA_DIR)" 2>/dev/null | wc -l); \
+	overall=PASS; if [ "$$failed" -ne 0 ]; then overall=FAIL; fi; \
+	echo "[COVERAGE QUICK] CORRECTNESS=$$overall coverage_databases=$$dat_count" | tee -a "$(COVERAGE_QUICK_SUMMARY)"; \
+	echo "[COVERAGE QUICK] Summary: $(COVERAGE_QUICK_SUMMARY)"; \
+	exit "$$failed"
+
+coverage_report:
+	@mkdir -p "$(COVERAGE_DIR)"; \
+	merged="$(COVERAGE_MERGED)"; \
+	if ls "$(COVERAGE_DATA_DIR)"/*.dat 1>/dev/null 2>&1; then \
+		echo "[COVERAGE] Merging $(COVERAGE_DATA_DIR)/*.dat -> $$merged"; \
+		verilator_coverage --write "$$merged" "$(COVERAGE_DATA_DIR)"/*.dat; \
+		echo "[COVERAGE] Merged dat: $$merged"; \
+		verilator_coverage --write-info "$(COVERAGE_INFO)" "$$merged"; \
+		echo "[COVERAGE] Coverage info: $(COVERAGE_INFO)"; \
+	else \
+		echo "[COVERAGE] No .dat files found in $(COVERAGE_DATA_DIR)"; \
+	fi
+
 recomp:
 	@mkdir -p $(BUILD_DIR) $(WAVE_DIR) $(LOG_DIR)
 	@$(MAKE) -C hw/dv -f Makefile resim

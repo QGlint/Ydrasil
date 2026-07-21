@@ -1,0 +1,5 @@
+PyYAML
+bitstring
+pyvsc
+pandas
+tabulate
