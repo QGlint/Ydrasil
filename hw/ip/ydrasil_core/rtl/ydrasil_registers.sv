@@ -58,7 +58,7 @@ import ydrasil_pkg::*;
         for (j = 0; j < ydrasil_pkg::REGS_NUM; j = j + 1) begin : gen_regs
             always_ff @(posedge clk or negedge rst_n) begin
                 if (!rst_n) begin
-                    registers[j] <= '0;
+                    registers[j] <= (j == 8) ? 32'h8000_0000 : '0;
                 end else begin
                     if ((j != 0) && rf_wen2_rd_i && (rf_waddr2_rd_i == j)) begin
                         registers[j] <= rf_wdata2_rd_i;

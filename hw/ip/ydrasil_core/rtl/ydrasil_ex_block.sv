@@ -517,6 +517,7 @@ import ydrasil_pkg::*;
     assign alu_rf_waddr_rd_o = alu_rf_waddr_rd_ff;
     assign alu_rn_pdst_o = alu_rn_pdst_ff;
     assign pipe1_alu_result_o = pipe1_alu_result_ff;
+
 	    assign pipe1_alu_rf_wen_rd_o = pipe1_alu_rf_wen_rd_ff;
 	    assign pipe1_alu_rf_waddr_rd_o = pipe1_alu_rf_waddr_rd_ff;
 	    assign pipe1_alu_rn_pdst_o = pipe1_alu_rn_pdst_ff;
@@ -588,7 +589,7 @@ import ydrasil_pkg::*;
         ({32{bitmanip_rf_wen_rd}}   & bitmanip_result) |
         ({32{csr_wen}}              & csr_reg_wdata);
 
-    assign ex_prf_wr_en_o = 1'b0; // TEMP DISABLED: normal_alu_rf_wen_rd & id_alu_rf_wen_rd_i;
+    assign ex_prf_wr_en_o = normal_alu_rf_wen_rd;
     assign ex_prf_wr_addr_o = id_rn_pdst_i;
     assign ex_prf_wr_data_o = ex_is_jump ? fast_add_result : alu_result;
 

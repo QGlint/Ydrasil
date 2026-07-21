@@ -97,21 +97,21 @@ rv_sim_%:
 	mem_dir=$(RVTESTS_OUT_ROOT)/$$typ/mem; \
 	elf_dir=$(RVTESTS_OUT_ROOT)/$$typ/elf; \
 	result_dir=$(RVTESTS_RESULT_DIR)/$$typ; \
-	compare_dir=$(SIM_COMPARE_DIR)/$$typ/$$base; \
+	compare_dir=$(SIM_COMPARE_DIR)/$$typ/$$name; \
 	mkdir -p $$result_dir; \
 	if $(MAKE) --no-print-directory sim_compare \
-		COMPARE_NAME=$$typ/$$base \
-		COMPARE_ELF=$$elf_dir/$$base.elf \
-		COMPARE_ITCM=$$mem_dir/$$base.itcm \
-		COMPARE_DTCM=$$mem_dir/$$base.dtcm \
+		COMPARE_NAME=$$typ/$$name \
+		COMPARE_ELF=$$elf_dir/$$name.elf \
+		COMPARE_ITCM=$$mem_dir/$$name.itcm \
+		COMPARE_DTCM=$$mem_dir/$$name.dtcm \
 		COMPARE_OUT_DIR=$$compare_dir \
-		> $$result_dir/$$base.log 2>&1; then \
+		> $$result_dir/$$name.log 2>&1; then \
 		match_status=MATCH; \
 	else \
 		match_status=MISMATCH; \
 	fi; \
-	hw_log=$(HW_TRACE_OUT_DIR)/$$typ/$$base/hw.log; \
-	[ -f "$$hw_log" ] || hw_log=$$result_dir/$$base.log; \
+	hw_log=$(HW_TRACE_OUT_DIR)/$$typ/$$name/hw.log; \
+	[ -f "$$hw_log" ] || hw_log=$$result_dir/$$name.log; \
 	metric_line=$$(grep -m1 "^PERF_METRIC:" $$hw_log); \
 	cycles=$$(printf '%s\n' "$$metric_line" | sed -n 's/.*CYCLES=\([0-9][0-9]*\).*/\1/p'); \
 	insts=$$(printf '%s\n' "$$metric_line" | sed -n 's/.*INSTS=\([0-9][0-9]*\).*/\1/p'); \
@@ -137,9 +137,9 @@ rv_sim_%:
 	else \
 		pass_status=FAIL; \
 	fi; \
-	status_line="[$$typ/$$base] [Cycles: $$cycles | Insts: $$insts | IPC: $$ipc | BP Acc: $$bp_acc%] [$$match_status] [$$pass_status]"; \
-	echo "$$status_line" >> $$result_dir/$$base.log; \
-	echo "$$status_line" > $$result_dir/$$base.status
+	status_line="[$$typ/$$name] [Cycles: $$cycles | Insts: $$insts | IPC: $$ipc | BP Acc: $$bp_acc%] [$$match_status] [$$pass_status]"; \
+	echo "$$status_line" >> $$result_dir/$$name.log; \
+	echo "$$status_line" > $$result_dir/$$name.status
 
 rv_test_report_all: $(RVTESTS_REPORT_TARGETS)
 

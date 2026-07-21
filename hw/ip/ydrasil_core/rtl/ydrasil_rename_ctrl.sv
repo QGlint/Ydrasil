@@ -416,6 +416,7 @@ import ydrasil_pkg::*;
     assign ctrl_at_head_o = ctrl_at_head;
     assign pipe1_branch_order_escape_o = pipe1_branch_order_escape;
 `endif
+
     assign unused_o = 1'b0;
 
     always_comb begin

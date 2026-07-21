@@ -39,7 +39,7 @@ import ydrasil_pkg::*;
         integer i;
         if (!rst_n) begin
             for (i = 0; i < PHYS_REGS; i = i + 1) begin
-                prf_q[i] <= '0;
+                prf_q[i] <= (i == 8) ? 32'h8000_0000 : '0;
             end
         end else begin
             if (wr0_en_i && (wr0_addr_i != '0)) begin

@@ -456,24 +456,24 @@ import ydrasil_pipeline_pkg::*;
     wire pipe0_src1_wb_fwd =
         wb_fwd_valid_i && pipe0_pkt.dec.rf_ren_rs1 &&
         (pipe0_pkt.dec.rf_raddr_rs1 != '0) &&
-        iq_src1_arch_map[0] && !prf_rs1_uncommitted_i &&
+        iq_src1_arch_map[0] && !rn_preg_ready_i[pipe0_pkt.rn.rs1_psrc] &&
         (pipe0_pkt.dec.rf_raddr_rs1 == wb_fwd_addr_i);
     wire pipe0_src2_wb_fwd =
         wb_fwd_valid_i && pipe0_uses_rs2 &&
         (pipe0_pkt.dec.rf_raddr_rs2 != '0) &&
-        iq_src2_arch_map[0] && !prf_rs2_uncommitted_i &&
+        iq_src2_arch_map[0] && !rn_preg_ready_i[pipe0_pkt.rn.rs2_psrc] &&
         (pipe0_pkt.dec.rf_raddr_rs2 == wb_fwd_addr_i);
     wire pipe1_src1_wb_fwd =
         wb_fwd_valid_i && pipe1_pkt.dec.rf_ren_rs1 &&
         (pipe1_pkt.dec.rf_raddr_rs1 != '0) &&
         (pipe1_pkt.rn.rs1_psrc == {1'b0, pipe1_pkt.dec.rf_raddr_rs1}) &&
-        !pipe1_prf_rs1_uncommitted_i &&
+        !rn_preg_ready_i[pipe1_pkt.rn.rs1_psrc] &&
         (pipe1_pkt.dec.rf_raddr_rs1 == wb_fwd_addr_i);
     wire pipe1_src2_wb_fwd =
         wb_fwd_valid_i && pipe1_uses_rs2 &&
         (pipe1_pkt.dec.rf_raddr_rs2 != '0) &&
         (pipe1_pkt.rn.rs2_psrc == {1'b0, pipe1_pkt.dec.rf_raddr_rs2}) &&
-        !pipe1_prf_rs2_uncommitted_i &&
+        !rn_preg_ready_i[pipe1_pkt.rn.rs2_psrc] &&
         (pipe1_pkt.dec.rf_raddr_rs2 == wb_fwd_addr_i);
     wire rs1_wb_fwd = pipe0_src1_wb_fwd;
     wire rs2_wb_fwd = pipe0_src2_wb_fwd;
@@ -483,56 +483,56 @@ import ydrasil_pipeline_pkg::*;
         pipe0_pkt.dec.rf_ren_rs1 &&
         (pipe0_pkt.dec.rf_raddr_rs1 != '0) &&
         (pipe0_pkt.rn.rs1_psrc != '0) &&
-        (prf_rs1_uncommitted_i || !iq_src1_arch_map[0]) &&
+        (rn_preg_ready_i[pipe0_pkt.rn.rs1_psrc] || !iq_src1_arch_map[0]) &&
         (pipe0_pkt.rn.rs1_psrc != pipe0_pkt.rn.pdst);
     wire pipe0_src2_prf_use =
         pipe0_uses_rs2 &&
         (pipe0_pkt.dec.rf_raddr_rs2 != '0) &&
         (pipe0_pkt.rn.rs2_psrc != '0) &&
-        (prf_rs2_uncommitted_i || !iq_src2_arch_map[0]) &&
+        (rn_preg_ready_i[pipe0_pkt.rn.rs2_psrc] || !iq_src2_arch_map[0]) &&
         (pipe0_pkt.rn.rs2_psrc != pipe0_pkt.rn.pdst);
     wire pipe1_src1_prf_use =
         pipe1_pkt.dec.rf_ren_rs1 &&
         (pipe1_pkt.dec.rf_raddr_rs1 != '0) &&
         (pipe1_pkt.rn.rs1_psrc != '0) &&
-        (pipe1_prf_rs1_uncommitted_i ||
+        (rn_preg_ready_i[pipe1_pkt.rn.rs1_psrc] ||
          (pipe1_pkt.rn.rs1_psrc != {1'b0, pipe1_pkt.dec.rf_raddr_rs1})) &&
         (pipe1_pkt.rn.rs1_psrc != pipe1_pkt.rn.pdst);
     wire pipe1_src2_prf_use =
         pipe1_uses_rs2 &&
         (pipe1_pkt.dec.rf_raddr_rs2 != '0) &&
         (pipe1_pkt.rn.rs2_psrc != '0) &&
-        (pipe1_prf_rs2_uncommitted_i ||
+        (rn_preg_ready_i[pipe1_pkt.rn.rs2_psrc] ||
          (pipe1_pkt.rn.rs2_psrc != {1'b0, pipe1_pkt.dec.rf_raddr_rs2})) &&
         (pipe1_pkt.rn.rs2_psrc != pipe1_pkt.rn.pdst);
 
     wire [DATA_WIDTH-1:0] pipe0_rs1_data =
-        (pipe0_src1_prf_use && prf_rs1_ready_i) ? prf_rs1_data_i :
         iq_src1_lsu_fwd[0] ? lsu_fwd_data_i :
         iq_src1_alu_fwd[0] ? alu_fwd_data_i :
         iq_src1_p1_fwd[0]  ? pipe1_alu_fwd_data_i :
         pipe0_src1_wb_fwd ? wb_fwd_data_i :
+        pipe0_src1_prf_use ? prf_rs1_data_i :
         rf_rdata_rs1_i;
     wire [DATA_WIDTH-1:0] pipe0_rs2_data =
-        (pipe0_src2_prf_use && prf_rs2_ready_i) ? prf_rs2_data_i :
         iq_src2_lsu_fwd[0] ? lsu_fwd_data_i :
         iq_src2_alu_fwd[0] ? alu_fwd_data_i :
         iq_src2_p1_fwd[0]  ? pipe1_alu_fwd_data_i :
         pipe0_src2_wb_fwd ? wb_fwd_data_i :
+        pipe0_src2_prf_use ? prf_rs2_data_i :
         rf_rdata_rs2_i;
     wire [DATA_WIDTH-1:0] pipe1_rs1_data =
-        (pipe1_src1_prf_use && pipe1_prf_rs1_ready_i) ? pipe1_prf_rs1_data_i :
         iq_src1_lsu_fwd[pipe1_sel_idx] ? lsu_fwd_data_i :
         iq_src1_alu_fwd[pipe1_sel_idx] ? alu_fwd_data_i :
         iq_src1_p1_fwd[pipe1_sel_idx]  ? pipe1_alu_fwd_data_i :
         pipe1_src1_wb_fwd ? wb_fwd_data_i :
+        pipe1_src1_prf_use ? pipe1_prf_rs1_data_i :
         pipe1_rf_rdata_rs1_i;
     wire [DATA_WIDTH-1:0] pipe1_rs2_data =
-        (pipe1_src2_prf_use && pipe1_prf_rs2_ready_i) ? pipe1_prf_rs2_data_i :
         iq_src2_lsu_fwd[pipe1_sel_idx] ? lsu_fwd_data_i :
         iq_src2_alu_fwd[pipe1_sel_idx] ? alu_fwd_data_i :
         iq_src2_p1_fwd[pipe1_sel_idx]  ? pipe1_alu_fwd_data_i :
         pipe1_src2_wb_fwd ? wb_fwd_data_i :
+        pipe1_src2_prf_use ? pipe1_prf_rs2_data_i :
         pipe1_rf_rdata_rs2_i;
 
     wire [DATA_WIDTH-1:0] pipe0_operand_a =
