@@ -212,6 +212,25 @@ COE_LOOP_LINA_ITCM_BIN ?= $(COE_LOOP_LINA_DIR)/irom_M3_loop_lina_itcm.bin
 COE_LOOP_LINA_ITCM ?= $(COE_LOOP_LINA_DIR)/irom_M3_loop_lina.itcm
 COE_LOOP_LINA_DTCM ?= $(COE_LOOP_LINA_DIR)/dram_M_loop_lina.dtcm
 COE_LOOP_LINA_DUMP ?= $(COE_LOOP_LINA_DIR)/irom_M3_loop_lina.dump
+COE_MFLINA_DIR ?= $(BUILD_DIR)/fpga_coe_mflina
+COE_MFLINA_PATCH ?= $(PROJECT_ROOT)/sw/make_mf_lina.pl
+COE_MFLINA_IROM_SOURCE ?= $(PROJECT_ROOT)/FPGA/coe/irom_MF.coe
+COE_MFLINA_DRAM_SOURCE ?= $(PROJECT_ROOT)/FPGA/coe/dram_MF.coe
+COE_MFLINA_MATRIX_ITERATIONS ?= 8
+COE_MFLINA_OUTER_ITERATIONS ?= 1
+COE_MFLINA_SORT_LENGTH ?= 100
+COE_MFLINA_SORT_OUTER_ITERATIONS ?= 1
+COE_MFLINA_PRIME_LIMIT ?= 20
+COE_MFLINA_RANDOM_OUTER_ITERATIONS ?= 5
+COE_MFLINA_CRC_LENGTH ?= 1024
+COE_MFLINA_CRC_OUTER_ITERATIONS ?= 1
+COE_MFLINA_SIM_TIMEOUT ?= 5000000
+COE_MFLINA_SIM_EXTRA_DEFINES ?= +no_finish_on_led +no_finish_on_tohost +finish_on_terminal_led +perip_debug +cpp_timeout=$(COE_MFLINA_SIM_TIMEOUT) +sv_timeout=$(COE_MFLINA_SIM_TIMEOUT)
+COE_MFLINA_SOURCE_ITCM_BIN ?= $(COE_MFLINA_DIR)/irom_MF_itcm.bin
+COE_MFLINA_ITCM_BIN ?= $(COE_MFLINA_DIR)/irom_MFlina_itcm.bin
+COE_MFLINA_ITCM ?= $(COE_MFLINA_DIR)/irom_MFlina.itcm
+COE_MFLINA_DTCM ?= $(COE_MFLINA_DIR)/dram_MF.dtcm
+COE_MFLINA_DUMP ?= $(COE_MFLINA_DIR)/irom_MFlina.dump
 
 export PROJECT_ROOT BUILD_DIR WAVE_DIR LOG_DIR SIM_TOOL IP VERILATOR_MOD COVERAGE VERILATOR_COVERAGE UVM USE_BENDER BENDER DIV_IMPL LSU_IMPL MEMS_IMPL ARCH ABI RISCV_PREFIX CC OBJCOPY OBJDUMP GDB QEMU TRACE_TO_CSV TRACE_COMPARE
 
@@ -247,8 +266,8 @@ SYN_LOG_DIR ?= $(SYN_FREQ_BUILD_DIR)/log
 SYN_ARTIFACT_DIR ?= $(SYN_FREQ_BUILD_DIR)/artifacts
 SYN_BIT_DIR ?= $(SYN_FREQ_BUILD_DIR)/bit
 SYN_CHECKPOINT_DIR ?= $(SYN_FREQ_BUILD_DIR)/checkpoints
-IROM_COE ?= $(PROJECT_ROOT)/FPGA/coe/irom_M3.coe
-DRAM_COE ?= $(PROJECT_ROOT)/FPGA/coe/dram_M.coe
+IROM_COE ?= $(PROJECT_ROOT)/FPGA/coe/irom_MF.coe
+DRAM_COE ?= $(PROJECT_ROOT)/FPGA/coe/dram_MF.coe
 SYN_MEMORY_DIR ?= $(SYN_FREQ_BUILD_DIR)/memory
 SYN_STAGED_IROM_COE ?= $(SYN_MEMORY_DIR)/irom.coe
 SYN_STAGED_DRAM_COE ?= $(SYN_MEMORY_DIR)/dram.coe
@@ -278,7 +297,7 @@ $(error Unsupported SYN_PLL_FREQ_MHZ=$(SYN_PLL_FREQ_MHZ); supported values: $(SY
 endif
 
 .PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests regression regression_all regression_status regression_stop regression_clean regression_sort regression_sort_opt regression_suite_coverage_merge regression_coverage_report init install-bender get_spike download_and_extract_spike check_spike_prebuilt_abi build_spike_from_source check_deps spike spike_wave_to_csv sim_compare commit_check commit_spike_csv commit_hw_trace commit_hw_csv commit_compare rv_test_comp_genmem ppa_rvtest_report ppa_perf_report coe_simple coe_smoke coe_smoke_led coe_isa_probes coverage_all coverage_all_run coverage_quick coverage_closure coverage_closure_merge coverage_clean coverage_report sw_boundary_test sw_coverage sw_coverage_clean sw_run_mode sw_coverage_report
-.PHONY: coremark coremark_sim coremark_run coremark_result coremark-rebuild coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map coremark_opt_all coremark_opt_build_all coremark_opt_sim_all coremark_opt_report coremark_opt_clean app_opt_comp_expanded_if_needed $(COREMARK_OPT_BUILD_TARGETS) $(COREMARK_OPT_SIM_TARGETS) sort_app sort_all sort_sim_all sort_report sort_app_sim sort_app-rebuild sort_app-clean sort_opt_all sort_opt_build_all sort_opt_sim_all sort_opt_report sort_opt_clean $(SORT_OPT_BUILD_TARGETS) $(SORT_OPT_SIM_TARGETS) boundary_app boundary_all boundary_sim_all boundary_report boundary_app-rebuild boundary_app-clean boundary_opt_all boundary_opt_build_all boundary_opt_sim_all boundary_opt_report boundary_opt_clean $(BOUNDARY_OPT_BUILD_TARGETS) $(BOUNDARY_OPT_SIM_TARGETS) coe_loop2_gen coe_loop5 coe_loop5_gen coe_loop_lina coe_loop_lina_gen loop_lina
+.PHONY: coremark coremark_sim coremark_run coremark_result coremark-rebuild coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map coremark_opt_all coremark_opt_build_all coremark_opt_sim_all coremark_opt_report coremark_opt_clean app_opt_comp_expanded_if_needed $(COREMARK_OPT_BUILD_TARGETS) $(COREMARK_OPT_SIM_TARGETS) sort_app sort_all sort_sim_all sort_report sort_app_sim sort_app-rebuild sort_app-clean sort_opt_all sort_opt_build_all sort_opt_sim_all sort_opt_report sort_opt_clean $(SORT_OPT_BUILD_TARGETS) $(SORT_OPT_SIM_TARGETS) boundary_app boundary_all boundary_sim_all boundary_report boundary_app-rebuild boundary_app-clean boundary_opt_all boundary_opt_build_all boundary_opt_sim_all boundary_opt_report boundary_opt_clean $(BOUNDARY_OPT_BUILD_TARGETS) $(BOUNDARY_OPT_SIM_TARGETS) coe_loop2_gen coe_loop5 coe_loop5_gen coe_loop_lina coe_loop_lina_gen loop_lina coe_MFlina coe_MFlina_gen coe_mflina coe_mflina_gen
 .PHONY: riscv_dv_venv riscv_dv_model riscv_dv_prepare riscv_dv_run riscv_dv_random riscv_dv_random_status riscv_dv_regression riscv_dv_count riscv_dv_repro riscv_dv_estimate riscv_dv_stop riscv_dv_coverage_report riscv_dv_cleanup riscv_dv_distclean
 .PHONY: syn synf syn225 syn240 syn250 synf-board syn-extreme syn-venv syn-prep syn-stage-xpr syn-stage-memory syn-vivado syn-analyze syn-clean
 
@@ -1486,6 +1505,27 @@ $(COE_LOOP_LINA_ITCM): $(COE_LOOP_LINA_ITCM_BIN)
 $(COE_LOOP_LINA_DUMP): $(COE_LOOP_LINA_ITCM_BIN)
 	$(OBJDUMP) -D -b binary -m riscv:rv32 "$<" > "$@"
 
+$(COE_MFLINA_SOURCE_ITCM_BIN): $(COE_MFLINA_IROM_SOURCE) $(COE_TO_MEM)
+	@mkdir -p "$(@D)"
+	perl "$(COE_TO_MEM)" --binary "$<" "$@"
+
+$(COE_MFLINA_ITCM_BIN): $(COE_MFLINA_SOURCE_ITCM_BIN) $(COE_MFLINA_PATCH)
+	perl "$(COE_MFLINA_PATCH)" "$<" "$@" \
+		"$(COE_MFLINA_MATRIX_ITERATIONS)" "$(COE_MFLINA_OUTER_ITERATIONS)" \
+		"$(COE_MFLINA_SORT_LENGTH)" "$(COE_MFLINA_SORT_OUTER_ITERATIONS)" \
+		"$(COE_MFLINA_PRIME_LIMIT)" "$(COE_MFLINA_RANDOM_OUTER_ITERATIONS)" \
+		"$(COE_MFLINA_CRC_LENGTH)" "$(COE_MFLINA_CRC_OUTER_ITERATIONS)"
+
+$(COE_MFLINA_ITCM): $(COE_MFLINA_ITCM_BIN)
+	od -An -t x4 -w4 -v "$<" | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > "$@"
+
+$(COE_MFLINA_DTCM): $(COE_MFLINA_DRAM_SOURCE) $(COE_TO_MEM)
+	@mkdir -p "$(@D)"
+	perl "$(COE_TO_MEM)" "$<" "$@"
+
+$(COE_MFLINA_DUMP): $(COE_MFLINA_ITCM_BIN)
+	$(OBJDUMP) -D -b binary -m riscv:rv32 "$<" > "$@"
+
 coe_loop2_gen: $(COE_M3_ITCM) $(COE_M3_ITCM_BIN) $(COE_M3_DTCM) \
 		$(COE_LOOP2_ITCM_BIN) $(COE_LOOP2_ITCM) $(COE_LOOP2_DTCM)
 
@@ -1572,6 +1612,24 @@ coe_loop_lina: coe_loop_lina_gen
 		COE_EXPECT_SEG_REGEX='0x3780[0-9a-fA-F]{4}'
 
 loop_lina: coe_loop_lina
+
+coe_MFlina_gen: $(COE_MFLINA_SOURCE_ITCM_BIN) $(COE_MFLINA_ITCM_BIN) \
+		$(COE_MFLINA_ITCM) $(COE_MFLINA_DTCM) $(COE_MFLINA_DUMP)
+
+coe_MFlina: coe_MFlina_gen
+	@$(MAKE) coe_simple \
+		COE_SIMPLE_NAME=coe_MFlina \
+		COE_SIMPLE_ITCM=$(COE_MFLINA_ITCM) \
+		COE_SIMPLE_DTCM=$(COE_MFLINA_DTCM) \
+		COE_SIM_TIMEOUT=$(COE_MFLINA_SIM_TIMEOUT) \
+		COE_SIMPLE_SIM_EXTRA_DEFINES="$(COE_MFLINA_SIM_EXTRA_DEFINES)" \
+		COE_EXPECT_CNT_READ= \
+		COE_REQUIRE_CNT_READ=1 \
+		COE_EXPECT_SEG= \
+		COE_EXPECT_SEG_REGEX='0x3780[0-9a-fA-F]{4}'
+
+coe_mflina_gen: coe_MFlina_gen
+coe_mflina: coe_MFlina
 
 coe_smoke:
 	@$(MAKE) coe_simple

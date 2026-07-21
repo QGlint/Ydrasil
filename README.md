@@ -74,6 +74,17 @@ make coe_loop_lina
 `loop_lina` 默认把12个80轮维度缩为16轮、最外层10轮缩为2轮；
 生成物位于 `build/fpga_coe_m3/`，结果会被 `make ppa_perf_report` 收集。
 
+从 MF COE 生成极短 lina 版本并运行 Verilator 仿真：
+
+```sh
+make coe_MFlina
+```
+
+该目标将矩阵、排序、素数筛、随机压力和CRC压力循环分别缩短至少约
+1000倍；随机压力段的硬编码checksum也会按新循环精确重算，其他测试
+继续执行原有动态结果比较。所有中间产物均位于
+`build/fpga_coe_mflina/`，不会在 `FPGA/coe/` 中生成新 COE。
+
 225MHz、240MHz 和 250MHz 超频综合入口：
 
 ```sh
