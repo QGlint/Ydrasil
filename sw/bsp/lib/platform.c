@@ -14,6 +14,8 @@ void SystemInit(void)
 {
 #ifdef YDRASIL_SIM_CTRL
     sim_ctrl_init();
+#elif defined(YDRASIL_CONTEST_FPGA)
+    /* The contest UART is reserved for the digital-twin controller. */
 #else
     // 初始化UART0，波特率115200
     uart_init((UART_TypeDef *)UART0_BASE, 115200);

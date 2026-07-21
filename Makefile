@@ -1025,6 +1025,14 @@ RTTHREAD_RESULT_LOG ?= $(HW_TRACE_OUT_DIR)/rtthread/hw.log
 RTTHREAD_SIM_TIMEOUT ?= 20000000
 RTTHREAD_SW_MAKE_ARGS = $(COREMARK_SW_MAKE_ARGS)
 RTTHREAD_HW_OUT ?= $(BUILD_DIR)/app/rtthread-hw
+RTTHREAD_HW_ITERATIONS ?= 4000
+RTTHREAD_HW_CPU_FREQ_HZ ?= 200000000
+RTTHREAD_FPGA_COE_DIR ?= $(RTTHREAD_HW_OUT)/coe
+RTTHREAD_FPGA_IROM_COE ?= $(RTTHREAD_FPGA_COE_DIR)/rtthread_irom.coe
+RTTHREAD_FPGA_DRAM_COE ?= $(RTTHREAD_FPGA_COE_DIR)/rtthread_dram.coe
+RTTHREAD_MEM_TO_COE ?= $(PROJECT_ROOT)/sw/mem_to_coe.py
+RTTHREAD_FPGA_VIVADO ?= $(if $(wildcard /mnt/c/Xilinx/Vivado/2024.2/bin/vivado),/mnt/c/Xilinx/Vivado/2024.2/bin/vivado,$(VIVADO))
+RTTHREAD_FPGA_VIVADO_SETTINGS ?= $(if $(wildcard /mnt/c/Xilinx/Vivado/2024.2/settings64.sh),/mnt/c/Xilinx/Vivado/2024.2/settings64.sh,$(VIVADO_SETTINGS))
 COMPARE_TRACE_DEFINES = $(if $(filter none,$(SIM_COMPARE)),,$(if $(findstring +commit_trace,$(COMPARE_SIM_EXTRA_DEFINES)),,+commit_trace))
 COMPARE_SIM_DEFINES = $(strip $(COMPARE_SIM_EXTRA_DEFINES) $(COMPARE_TRACE_DEFINES))
 
@@ -1050,7 +1058,7 @@ coremark_sim: coremark comp
 
 coremark_run: coremark_sim
 
-.PHONY: rtthread rtthread-rebuild rtthread_hw rtthread-hw rtthread_sim rtthread_run rtthread_result rtthread-clean
+.PHONY: rtthread rtthread-rebuild rtthread_hw rtthread-hw rtthread_fpga_coe rtthread-fpga-coe rtthread_fpga rtthread-fpga rtthread_sim rtthread_run rtthread_result rtthread-clean
 
 rtthread:
 	@$(MAKE) -C sw rtthread $(RTTHREAD_SW_MAKE_ARGS)
@@ -1062,10 +1070,32 @@ rtthread_hw:
 	@$(MAKE) -C sw rtthread-rebuild $(RTTHREAD_SW_MAKE_ARGS) \
 		RTTHREAD_OUT=$(RTTHREAD_HW_OUT) \
 		RTTHREAD_SIM_CTRL=0 \
-		RTTHREAD_ITERATIONS=0 \
-		RTTHREAD_IGNORE_10S_ERROR=0
+		RTTHREAD_ITERATIONS=$(RTTHREAD_HW_ITERATIONS) \
+		RTTHREAD_IGNORE_10S_ERROR=0 \
+		RTTHREAD_EXTRA_CFLAGS="-DYDRASIL_CONTEST_FPGA=1 -DSYSTEM_CLOCK=$(RTTHREAD_HW_CPU_FREQ_HZ)"
 
 rtthread-hw: rtthread_hw
+
+rtthread_fpga_coe: rtthread_hw
+	@mkdir -p "$(RTTHREAD_FPGA_COE_DIR)"
+	python3 "$(RTTHREAD_MEM_TO_COE)" "$(RTTHREAD_HW_OUT)/rtthread.itcm" "$(RTTHREAD_FPGA_IROM_COE)"
+	python3 "$(RTTHREAD_MEM_TO_COE)" "$(RTTHREAD_HW_OUT)/rtthread.dtcm" "$(RTTHREAD_FPGA_DRAM_COE)"
+	@echo "[RTTHREAD FPGA] IROM COE $(RTTHREAD_FPGA_IROM_COE)"
+	@echo "[RTTHREAD FPGA] DRAM COE $(RTTHREAD_FPGA_DRAM_COE)"
+
+rtthread-fpga-coe: rtthread_fpga_coe
+
+rtthread_fpga: rtthread_fpga_coe
+	@$(MAKE) syn-vivado \
+		SYN_PLL_FREQ_MHZ=200 \
+		SYN_RUN_TO=bitstream \
+		IROM_COE=$(RTTHREAD_FPGA_IROM_COE) \
+		DRAM_COE=$(RTTHREAD_FPGA_DRAM_COE) \
+		VIVADO=$(RTTHREAD_FPGA_VIVADO) \
+		VIVADO_SETTINGS=$(RTTHREAD_FPGA_VIVADO_SETTINGS)
+	@echo "[RTTHREAD FPGA] Bitstream $(BUILD_DIR)/syn/pll200m/artifacts/jyd_fpga.bit"
+
+rtthread-fpga: rtthread_fpga
 
 rtthread_sim: rtthread
 	@$(MAKE) comp VERILATOR_TRACE=0
