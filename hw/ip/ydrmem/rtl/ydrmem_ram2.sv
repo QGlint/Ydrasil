@@ -25,7 +25,7 @@
     wire [DATA_WIDTH-1:0] rdata_a_no_change;
     wire [DATA_WIDTH-1:0] rdata_b_no_change;
 
-    reg [DATA_WIDTH-1:0] mem [(2**ADDR_WIDTH)-1:0];
+    reg [DATA_WIDTH-1:0] mem_r [(2**ADDR_WIDTH)-1:0];
 
     reg [DATA_WIDTH-1:0] rdata_a_ff;
     reg [DATA_WIDTH-1:0] rdata_b_ff;
@@ -33,24 +33,24 @@
     assign rdata_a = rdata_a_ff;
     assign rdata_b = rdata_b_ff;
 
-    assign rdata_a_n = (READ_MODE == "READ_FIRST") ? rdata_a_read_first : (READ_MODE == "WRITE_FIRST") ? rdata_a_write_first : (READ_MODE == "NO_CHANGE") ? rdata_a_no_change : mem[addr_a];
-    assign rdata_b_n = (READ_MODE == "READ_FIRST") ? rdata_b_read_first : (READ_MODE == "WRITE_FIRST") ? rdata_b_write_first : (READ_MODE == "NO_CHANGE") ? rdata_b_no_change : mem[addr_b];
+    assign rdata_a_n = (READ_MODE == "READ_FIRST") ? rdata_a_read_first : (READ_MODE == "WRITE_FIRST") ? rdata_a_write_first : (READ_MODE == "NO_CHANGE") ? rdata_a_no_change : mem_r[addr_a];
+    assign rdata_b_n = (READ_MODE == "READ_FIRST") ? rdata_b_read_first : (READ_MODE == "WRITE_FIRST") ? rdata_b_write_first : (READ_MODE == "NO_CHANGE") ? rdata_b_no_change : mem_r[addr_b];
 
-    assign rdata_a_read_first = mem[addr_a];
-    assign rdata_b_read_first = mem[addr_b];
+    assign rdata_a_read_first = mem_r[addr_a];
+    assign rdata_b_read_first = mem_r[addr_b];
 
-    assign rdata_a_write_first = we_a ? wdata_a : mem[addr_a];
-    assign rdata_b_write_first = we_b ? wdata_b : mem[addr_b];
+    assign rdata_a_write_first = we_a ? wdata_a : mem_r[addr_a];
+    assign rdata_b_write_first = we_b ? wdata_b : mem_r[addr_b];
 
     assign rdata_a_no_change = rdata_a_ff;
     assign rdata_b_no_change = rdata_b_ff;
 
     always @(posedge clk) begin
         if (we_a) begin
-            mem[addr_a] <= wdata_a;
+            mem_r[addr_a] <= wdata_a;
         end
         else if (we_b) begin
-            mem[addr_b] <= wdata_b;
+            mem_r[addr_b] <= wdata_b;
         end
     end
 

@@ -15,6 +15,12 @@ import ydrasil_pkg::*;
     input  wire [REGS_ADDR_WIDTH-1:0] alu_waddr_i,
     input  wire [REGS_DATA_WIDTH-1:0] alu_wdata_i,
 
+    input  wire dual_alu_valid_i,
+    input  wire [INST_ADDR_WIDTH-1:0] dual_alu_pc_i,
+    input  wire [INST_DATA_WIDTH-1:0] dual_alu_instr_i,
+    input  wire [REGS_ADDR_WIDTH-1:0] dual_alu_waddr_i,
+    input  wire [REGS_DATA_WIDTH-1:0] dual_alu_wdata_i,
+
     input  wire lsu_issue_valid_i,
     input  wire [INST_ADDR_WIDTH-1:0] lsu_issue_pc_i,
     input  wire [INST_DATA_WIDTH-1:0] lsu_issue_instr_i,
@@ -118,6 +124,16 @@ import ydrasil_pkg::*;
                 commit_instr_q[commit_wptr_q] = alu_instr_i;
                 commit_waddr_q[commit_wptr_q] = alu_waddr_i;
                 commit_wdata_q[commit_wptr_q] = alu_wdata_i;
+                commit_ready_q[commit_wptr_q] = 1'b1;
+                commit_wptr_q = commit_wptr_q + FIFO_PTR_WIDTH'(1);
+            end
+
+            if (dual_alu_valid_i) begin
+                commit_kind_q[commit_wptr_q] = COMMIT_ALU;
+                commit_pc_q[commit_wptr_q] = dual_alu_pc_i;
+                commit_instr_q[commit_wptr_q] = dual_alu_instr_i;
+                commit_waddr_q[commit_wptr_q] = dual_alu_waddr_i;
+                commit_wdata_q[commit_wptr_q] = dual_alu_wdata_i;
                 commit_ready_q[commit_wptr_q] = 1'b1;
                 commit_wptr_q = commit_wptr_q + FIFO_PTR_WIDTH'(1);
             end

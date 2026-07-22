@@ -268,15 +268,16 @@ package ydrasil_pkg;
 
 	localparam int BP_BTB_ENTRIES = 512;
 	localparam int BP_BHT_ENTRIES = 512;
-	localparam int PRODUCER_NUM = 4;
+	localparam int PRODUCER_NUM = 6;
 	localparam int PRODUCER_SLOT_WIDTH = $clog2(PRODUCER_NUM);
 	localparam int PRODUCER_ID_WIDTH = PRODUCER_SLOT_WIDTH + 1;
 	typedef logic [PRODUCER_SLOT_WIDTH-1:0] producer_slot_t;
 	typedef logic [PRODUCER_ID_WIDTH-1:0] producer_id_t;
-	localparam int COMPLETION_LANES = 3;
+	localparam int COMPLETION_LANES = 4;
 	localparam int COMPLETION_ALU = 0;
 	localparam int COMPLETION_LSU = 1;
 	localparam int COMPLETION_MUL = 2;
+	localparam int COMPLETION_DUAL_ALU = 3;
 
 	typedef struct packed {
 		logic [INST_ADDR_WIDTH-1:0]          pc;

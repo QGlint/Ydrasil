@@ -241,6 +241,8 @@ end
     reg [31:0] retire_one_count;
     reg [31:0] retire_two_count;
     reg [31:0] retire_three_count;
+    reg [31:0] retire_four_count;
+    reg [31:0] dual_issue_count;
     reg [31:0] bubble_cause_hist [0:31];
     reg [31:0] producer_occ_zero_count;
     reg [31:0] producer_occ_one_count;
@@ -616,6 +618,8 @@ end
             retire_one_count <= 32'b0;
             retire_two_count <= 32'b0;
             retire_three_count <= 32'b0;
+            retire_four_count <= 32'b0;
+            dual_issue_count <= 32'b0;
             for (perf_stat_idx = 0; perf_stat_idx < 32; perf_stat_idx = perf_stat_idx + 1)
                 bubble_cause_hist[perf_stat_idx] <= 32'b0;
             producer_occ_zero_count <= 32'b0;
@@ -990,11 +994,14 @@ end
             end
 
             unique case (u_dut.instret_inc_count)
-                2'd0: retire_zero_count <= retire_zero_count + 1'b1;
-                2'd1: retire_one_count <= retire_one_count + 1'b1;
-                2'd2: retire_two_count <= retire_two_count + 1'b1;
-                2'd3: retire_three_count <= retire_three_count + 1'b1;
+                3'd0: retire_zero_count <= retire_zero_count + 1'b1;
+                3'd1: retire_one_count <= retire_one_count + 1'b1;
+                3'd2: retire_two_count <= retire_two_count + 1'b1;
+                3'd3: retire_three_count <= retire_three_count + 1'b1;
+                3'd4: retire_four_count <= retire_four_count + 1'b1;
             endcase
+            if (u_dut.issue_consume_two)
+                dual_issue_count <= dual_issue_count + 1'b1;
 
             bubble_cause_hist[{u_dut.clint_stall, u_dut.wb_backpressure,
                 u_dut.u_ctrl.producer_full_stall, u_dut.lsu_struct_stall,
@@ -1110,7 +1117,8 @@ end
 
     // PC监控逻辑
     always @(pc) begin
-        if (pc == finish_pc && pc != last_pc) begin
+        if (((pc == finish_pc) || ((pc + 32'd4) == finish_pc)) &&
+            pc != last_pc) begin
             pc_write_to_host_cnt = pc_write_to_host_cnt + 1'b1;
             if (pc_write_to_host_flag == 1'b0) begin
                 pc_write_to_host_cycle = cycle_count;
@@ -1403,14 +1411,16 @@ end
                 decode_refill_after_predict_count,
                 decode_refill_after_fence_count,
                 decode_refill_after_supply_count);
-            $display("PERF_HAZARD_ACCOUNT: RAW_ONLY=%-d WAW_ONLY=%-d RAW_WAW=%-d RETIRE_0=%-d RETIRE_1=%-d RETIRE_2=%-d RETIRE_3=%-d",
+            $display("PERF_HAZARD_ACCOUNT: RAW_ONLY=%-d WAW_ONLY=%-d RAW_WAW=%-d RETIRE_0=%-d RETIRE_1=%-d RETIRE_2=%-d RETIRE_3=%-d RETIRE_4=%-d",
                 acct_raw_only_count,
                 acct_waw_only_count,
                 acct_raw_waw_count,
                 retire_zero_count,
                 retire_one_count,
                 retire_two_count,
-                retire_three_count);
+                retire_three_count,
+                retire_four_count);
+            $display("PERF_DUAL_ISSUE: PAIRS=%-d", dual_issue_count);
             $display("PERF_CAUSE_HIST: NONE=%-d SB=%-d LSU=%-d LSU_SB=%-d PF=%-d PF_SB=%-d PF_LSU=%-d PF_LSU_SB=%-d WB_ANY=%-d CLINT_ANY=%-d",
                 bubble_cause_hist[0], bubble_cause_hist[1], bubble_cause_hist[2],
                 bubble_cause_hist[3], bubble_cause_hist[4], bubble_cause_hist[5],

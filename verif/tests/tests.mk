@@ -48,6 +48,7 @@ SW_ALIGNED_TESTS := \
     sw_jalr_lui_bypass \
     sw_forwarding_csr \
     sw_mul_div_edge_results
+SW_ALIGNED_TESTS += sw_dual_issue
 SW_NEW_ONLY_TESTS := \
     sw_misaligned_boundary \
     sw_misaligned_negative \
