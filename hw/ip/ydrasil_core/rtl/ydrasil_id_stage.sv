@@ -54,6 +54,15 @@ import ydrasil_pkg::*;
     );
 
     always_comb begin
+		logic fp_load;
+		logic fp_store;
+		logic fp_op;
+		logic fp_fma;
+		logic fp_known;
+		logic fp_rm_used;
+		logic [6:0] fp_funct7;
+		logic [2:0] fp_funct3;
+		logic [4:0] fp_rs2;
         decode_pkt_o = '0;
         decode_pkt_o.pc = pc_i;
         decode_pkt_o.instr = instr_i;
@@ -83,6 +92,113 @@ import ydrasil_pkg::*;
         decode_pkt_o.sys_op_info = sys_op_info;
         decode_pkt_o.fence_i = (instr_i[6:0] == RV32I_INS_FENCE) &&
             (instr_i[14:12] == 3'b001);
+
+		fp_load = (instr_i[6:0] == 7'b0000111) && (instr_i[14:12] == 3'b010);
+		fp_store = (instr_i[6:0] == 7'b0100111) && (instr_i[14:12] == 3'b010);
+		fp_op = instr_i[6:0] == 7'b1010011;
+		fp_fma = ((instr_i[6:0] == 7'b1000011) ||
+		          (instr_i[6:0] == 7'b1000111) ||
+		          (instr_i[6:0] == 7'b1001011) ||
+		          (instr_i[6:0] == 7'b1001111)) && (instr_i[26:25] == 2'b00);
+		fp_funct7 = instr_i[31:25];
+		fp_funct3 = instr_i[14:12];
+		fp_rs2 = instr_i[24:20];
+		fp_known = fp_load || fp_store || fp_fma;
+		fp_rm_used = 1'b0;
+		decode_pkt_o.fp_op = FPU_OP_ADD;
+		if (fp_fma) begin
+			fp_rm_used = 1'b1;
+			case (instr_i[6:0])
+				7'b1000011: decode_pkt_o.fp_op = FPU_OP_FMADD;
+				7'b1000111: decode_pkt_o.fp_op = FPU_OP_FMSUB;
+				7'b1001011: decode_pkt_o.fp_op = FPU_OP_FNMSUB;
+				default:    decode_pkt_o.fp_op = FPU_OP_FNMADD;
+			endcase
+		end else if (fp_op) begin
+			case (fp_funct7)
+				7'b0000000: begin fp_known = 1'b1; fp_rm_used = 1'b1; decode_pkt_o.fp_op = FPU_OP_ADD; end
+				7'b0000100: begin fp_known = 1'b1; fp_rm_used = 1'b1; decode_pkt_o.fp_op = FPU_OP_SUB; end
+				7'b0001000: begin fp_known = 1'b1; fp_rm_used = 1'b1; decode_pkt_o.fp_op = FPU_OP_MUL; end
+				7'b0001100: begin fp_known = 1'b1; fp_rm_used = 1'b1; decode_pkt_o.fp_op = FPU_OP_DIV; end
+				7'b0101100: begin fp_known = fp_rs2 == 5'd0; fp_rm_used = 1'b1; decode_pkt_o.fp_op = FPU_OP_SQRT; end
+				7'b0010000: begin
+					fp_known = fp_funct3 <= 3'b010;
+					case (fp_funct3)
+						3'b000: decode_pkt_o.fp_op = FPU_OP_SGNJ;
+						3'b001: decode_pkt_o.fp_op = FPU_OP_SGNJN;
+						default: decode_pkt_o.fp_op = FPU_OP_SGNJX;
+					endcase
+				end
+				7'b0010100: begin
+					fp_known = fp_funct3 <= 3'b001;
+					decode_pkt_o.fp_op = fp_funct3[0] ? FPU_OP_MAX : FPU_OP_MIN;
+				end
+				7'b1010000: begin
+					fp_known = (fp_funct3 == 3'b000) || (fp_funct3 == 3'b001) || (fp_funct3 == 3'b010);
+					case (fp_funct3)
+						3'b010: decode_pkt_o.fp_op = FPU_OP_EQ;
+						3'b001: decode_pkt_o.fp_op = FPU_OP_LT;
+						default: decode_pkt_o.fp_op = FPU_OP_LE;
+					endcase
+				end
+				7'b1110000: begin
+					fp_known = (fp_rs2 == 5'd0) && ((fp_funct3 == 3'b000) || (fp_funct3 == 3'b001));
+					decode_pkt_o.fp_op = fp_funct3[0] ? FPU_OP_CLASS : FPU_OP_MV_X_W;
+				end
+				7'b1100000: begin
+					fp_known = fp_rs2 <= 5'd1; fp_rm_used = 1'b1;
+					decode_pkt_o.fp_op = fp_rs2[0] ? FPU_OP_CVT_WU_S : FPU_OP_CVT_W_S;
+				end
+				7'b1101000: begin
+					fp_known = fp_rs2 <= 5'd1; fp_rm_used = 1'b1;
+					decode_pkt_o.fp_op = fp_rs2[0] ? FPU_OP_CVT_S_WU : FPU_OP_CVT_S_W;
+				end
+				7'b1111000: begin fp_known = (fp_rs2 == 5'd0) && (fp_funct3 == 3'b000); decode_pkt_o.fp_op = FPU_OP_MV_W_X; end
+				default: fp_known = 1'b0;
+			endcase
+		end else if (fp_load) begin
+			decode_pkt_o.fp_op = FPU_OP_FLW;
+		end else if (fp_store) begin
+			decode_pkt_o.fp_op = FPU_OP_FSW;
+		end
+
+`ifdef YDRASIL_ENABLE_FPU
+		decode_pkt_o.fp_valid = fp_load || fp_store || fp_fma || fp_op;
+		decode_pkt_o.fp_illegal = decode_pkt_o.fp_valid &&
+			(!fp_known || (fp_rm_used && (fp_funct3 > 3'b100) && (fp_funct3 != 3'b111)));
+		decode_pkt_o.fp_rm = fp_funct3;
+		decode_pkt_o.fp_rs1_addr = instr_i[19:15];
+		decode_pkt_o.fp_rs2_addr = instr_i[24:20];
+		decode_pkt_o.fp_rs3_addr = instr_i[31:27];
+		decode_pkt_o.fp_rd_addr = instr_i[11:7];
+		decode_pkt_o.fp_rs1_fpr = fp_fma || (fp_op && (fp_funct7 != 7'b1101000) && (fp_funct7 != 7'b1111000));
+		decode_pkt_o.fp_rs2_fpr = fp_fma || fp_store || (fp_op && ((fp_funct7 == 7'b0000000) ||
+			(fp_funct7 == 7'b0000100) || (fp_funct7 == 7'b0001000) || (fp_funct7 == 7'b0001100) ||
+			(fp_funct7 == 7'b0010000) || (fp_funct7 == 7'b0010100) || (fp_funct7 == 7'b1010000)));
+		decode_pkt_o.fp_rs3_fpr = fp_fma;
+		decode_pkt_o.fp_rd_gpr = fp_op && ((fp_funct7 == 7'b1010000) || (fp_funct7 == 7'b1110000) || (fp_funct7 == 7'b1100000));
+		decode_pkt_o.fp_rd_fpr = decode_pkt_o.fp_valid && !fp_store && !decode_pkt_o.fp_rd_gpr;
+		if (decode_pkt_o.fp_valid) begin
+			decode_pkt_o.operator_type[OPERATOR_TYPE_FPU] = 1'b1;
+			decode_pkt_o.operator_type[OPERATOR_TYPE_LOAD] = fp_load;
+			decode_pkt_o.operator_type[OPERATOR_TYPE_STORE] = fp_store;
+			decode_pkt_o.operator_lsu = '0;
+			decode_pkt_o.operator_lsu[OP_LSU_LW] = fp_load;
+			decode_pkt_o.operator_lsu[OP_LSU_SW] = fp_store;
+			decode_pkt_o.rs1_addr = instr_i[19:15];
+			decode_pkt_o.rs2_addr = instr_i[24:20];
+			decode_pkt_o.rd_addr = instr_i[11:7];
+			decode_pkt_o.rs1_ren = !decode_pkt_o.fp_rs1_fpr;
+			decode_pkt_o.rs2_ren = 1'b0;
+			decode_pkt_o.rd_wen = decode_pkt_o.fp_rd_gpr;
+			decode_pkt_o.imm = fp_load ? {{20{instr_i[31]}}, instr_i[31:20]} :
+				fp_store ? {{20{instr_i[31]}}, instr_i[31:25], instr_i[11:7]} : '0;
+		end
+`else
+		decode_pkt_o.fp_valid = fp_load || fp_store || fp_fma || fp_op;
+		decode_pkt_o.fp_illegal = decode_pkt_o.fp_valid;
+		decode_pkt_o.operator_type[OPERATOR_TYPE_FPU] = decode_pkt_o.fp_valid;
+`endif
     end
 endmodule
 

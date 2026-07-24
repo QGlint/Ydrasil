@@ -16,9 +16,15 @@ BENDER ?= bender
 BENDER_INCLUDE_TB ?= 1
 BENDER_TB_TARGET ?= ip_tb
 DIV_IMPL ?= lzc
+FPU ?= 0
 ITCM_ADDR_WIDTH_OVERRIDE ?=
 
 BENDER_TARGET_ARGS := -t $(SIM_TOOL)
+ifeq ($(FPU),1)
+BENDER_TARGET_ARGS += -t fpu
+else ifneq ($(FPU),0)
+$(error Unsupported FPU '$(FPU)'. Use FPU=0 or FPU=1)
+endif
 ifeq ($(BENDER_INCLUDE_TB),1)
 BENDER_TARGET_ARGS += -t $(BENDER_TB_TARGET)
 endif
@@ -79,6 +85,10 @@ endif
 SIM_DEFINES += $(SIM_EXTRA_DEFINES)
 
 DEFINES := RANDOM_SEED=$(RANDOM_SEED)
+
+ifeq ($(FPU),1)
+DEFINES += YDRASIL_ENABLE_FPU
+endif
 
 ifeq ($(DIV_IMPL),lzc)
 DEFINES += YDRASIL_DIV_IMPL_LZC

@@ -390,7 +390,8 @@ end
             if (u_dut.clint_csr_we) begin
                 assert ((u_dut.clint_csr_waddr == ydrasil_pkg::CSR_MSTATUS) ||
                         (u_dut.clint_csr_waddr == ydrasil_pkg::CSR_MEPC) ||
-                        (u_dut.clint_csr_waddr == ydrasil_pkg::CSR_MCAUSE))
+                        (u_dut.clint_csr_waddr == ydrasil_pkg::CSR_MCAUSE) ||
+                        (u_dut.clint_csr_waddr == ydrasil_pkg::CSR_MTVAL))
                     else $fatal(1, "ASSERT_BAD_TRAP_CSR_WRITE addr=0x%03h data=0x%08h",
                                 u_dut.clint_csr_waddr, u_dut.clint_csr_wdata);
             end

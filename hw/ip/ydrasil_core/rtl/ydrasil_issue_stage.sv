@@ -26,6 +26,12 @@ import ydrasil_pkg::*;
     input  wire [DATA_WIDTH-1:0]           rf_rdata_rs2_i,
     input  wire [DATA_WIDTH-1:0]           rf_rdata_rs3_i,
     input  wire [DATA_WIDTH-1:0]           rf_rdata_rs4_i,
+    output wire [4:0]                      fpr_addr_rs1_o,
+    output wire [4:0]                      fpr_addr_rs2_o,
+    output wire [4:0]                      fpr_addr_rs3_o,
+    input  wire [DATA_WIDTH-1:0]           fpr_rdata_rs1_i,
+    input  wire [DATA_WIDTH-1:0]           fpr_rdata_rs2_i,
+    input  wire [DATA_WIDTH-1:0]           fpr_rdata_rs3_i,
     input  ydrasil_gpr_fwd_pkt_t           wb_fwd_i,
     input  ydrasil_gpr_fwd_pkt_t           wb_fwd1_i,
     input  ydrasil_gpr_fwd_pkt_t           producer_rs1_fwd_i,
@@ -60,6 +66,7 @@ import ydrasil_pkg::*;
     output wire [DATA_WIDTH-1:0]           bt_b_operand_o,
 
     output ydrasil_lsu_req_pkt_t           lsu_req_o,
+    output ydrasil_fpu_req_pkt_t           fpu_req_o,
 
     output wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] operator_type_o, // 操作类型信号
 
@@ -138,6 +145,15 @@ import ydrasil_pkg::*;
     reg [ydrasil_pkg::OPERATOR_WIDTH-1:0]           operator_ff;
 
     reg [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0]         operator_lsu_ff;
+    ydrasil_fpu_op_t                                 fpu_op_ff;
+    reg [2:0]                                        fpu_rm_ff;
+    reg                                              fpu_illegal_ff;
+    reg                                              fpu_rd_fpr_ff;
+    reg                                              fpu_rd_gpr_ff;
+    reg [DATA_WIDTH-1:0]                             fpu_operand_a_ff;
+    reg [DATA_WIDTH-1:0]                             fpu_operand_b_ff;
+    reg [DATA_WIDTH-1:0]                             fpu_operand_c_ff;
+    reg [INST_DATA_WIDTH-1:0]                        fpu_instr_ff;
 
     wire [DATA_WIDTH-1:0]                bt_a_operand;
     wire [DATA_WIDTH-1:0]                bt_b_operand;
@@ -253,6 +269,9 @@ import ydrasil_pkg::*;
     assign rf_addr_rs2_o = issue_rf_raddr_rs2_ff;
     assign rf_addr_rs3_o = issue1_rs1_addr;
     assign rf_addr_rs4_o = issue1_rs2_addr;
+    assign fpr_addr_rs1_o = decode_pkt_i.fp_rs1_addr;
+    assign fpr_addr_rs2_o = decode_pkt_i.fp_rs2_addr;
+    assign fpr_addr_rs3_o = decode_pkt_i.fp_rs3_addr;
 
     // Keep ALU source selection consistent with decoder control outputs.
     wire rs1_wb_fwd =
@@ -384,6 +403,15 @@ import ydrasil_pkg::*;
             producer_id_ff      <= '0;
             producer_tracked_ff <= 1'b0;
             operator_lsu_ff     <= '0;
+            fpu_op_ff           <= FPU_OP_ADD;
+            fpu_rm_ff           <= '0;
+            fpu_illegal_ff      <= 1'b0;
+            fpu_rd_fpr_ff       <= 1'b0;
+            fpu_rd_gpr_ff       <= 1'b0;
+            fpu_operand_a_ff    <= '0;
+            fpu_operand_b_ff    <= '0;
+            fpu_operand_c_ff    <= '0;
+            fpu_instr_ff        <= '0;
             id_lsu_store_data_ff <= '0;
             id_lsu_store_data_valid_ff <= 1'b0;
             id_lsu_store_data_producer_id_ff <= '0;
@@ -442,12 +470,23 @@ import ydrasil_pkg::*;
                 producer_id_ff      <= producer_alloc_id_i;
                 producer_tracked_ff <= producer_alloc_tracked_i;
                 operator_lsu_ff     <= issue_operator_lsu_ff;
+                fpu_op_ff           <= decode_pkt_i.fp_op;
+                fpu_rm_ff           <= decode_pkt_i.fp_rm;
+                fpu_illegal_ff      <= decode_pkt_i.fp_illegal;
+                fpu_rd_fpr_ff       <= decode_pkt_i.fp_rd_fpr;
+                fpu_rd_gpr_ff       <= decode_pkt_i.fp_rd_gpr;
+                fpu_operand_a_ff    <= decode_pkt_i.fp_rs1_fpr ? fpr_rdata_rs1_i : issue_rs1_data;
+                fpu_operand_b_ff    <= fpr_rdata_rs2_i;
+                fpu_operand_c_ff    <= fpr_rdata_rs3_i;
+                fpu_instr_ff        <= decode_pkt_i.instr;
                 // Register raw store data here; lane alignment belongs after the
                 // ID/LSU boundary so the RF read path does not also include the
                 // LSU address adder and byte-lane mux.
-                id_lsu_store_data_ff <= issue_rs2_data;
+                id_lsu_store_data_ff <= decode_pkt_i.fp_valid &&
+                    decode_pkt_i.fp_rs2_fpr ? fpr_rdata_rs2_i : issue_rs2_data;
                 id_lsu_store_data_valid_ff <=
                     !issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] |
+                    issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_FPU] |
                     hzd_status_i.issue_store_data_ready;
                 id_lsu_store_data_producer_id_ff <=
                     hzd_status_i.store_data_producer_id;
@@ -560,6 +599,26 @@ import ydrasil_pkg::*;
     assign lsu_req_o.store_data_producer_id = id_lsu_store_data_producer_id_ff;
     assign lsu_req_o.store_data_producer_tracked =
         id_lsu_store_data_producer_tracked_ff;
+    assign lsu_req_o.fp_load = operator_type_ff[OPERATOR_TYPE_FPU] &&
+        operator_type_ff[OPERATOR_TYPE_LOAD];
+    assign lsu_req_o.fp_rd_addr = rf_waddr_rd_ff;
+    assign fpu_req_o.valid = id_ex_valid_ff &&
+        operator_type_ff[OPERATOR_TYPE_FPU] &&
+        !operator_type_ff[OPERATOR_TYPE_LOAD] &&
+        !operator_type_ff[OPERATOR_TYPE_STORE];
+    assign fpu_req_o.illegal = fpu_illegal_ff;
+    assign fpu_req_o.op = fpu_op_ff;
+    assign fpu_req_o.rm = fpu_rm_ff;
+    assign fpu_req_o.operand_a = fpu_operand_a_ff;
+    assign fpu_req_o.operand_b = fpu_operand_b_ff;
+    assign fpu_req_o.operand_c = fpu_operand_c_ff;
+    assign fpu_req_o.rd_addr = rf_waddr_rd_ff;
+    assign fpu_req_o.rd_fpr = fpu_rd_fpr_ff;
+    assign fpu_req_o.rd_gpr = fpu_rd_gpr_ff;
+    assign fpu_req_o.producer_id = producer_id_ff;
+    assign fpu_req_o.producer_tracked = producer_tracked_ff;
+    assign fpu_req_o.pc = id_instr_addr_ff;
+    assign fpu_req_o.instr = fpu_instr_ff;
     assign bt_a_operand_o       = bt_a_operand_ff;
     assign bt_b_operand_o       = bt_b_operand_ff;
     assign  id_csr_raddr_o = csr_reg_raddr_ff;
@@ -606,9 +665,13 @@ import ydrasil_pkg::*;
     assign id_ctrl_o.rs2_addr = issue_rf_raddr_rs2_ff;
     assign id_ctrl_o.rs1_ren = issue_valid_ff & issue_rf_ren_rs1_ff;
     assign id_ctrl_o.rs2_ren = issue_valid_ff &
-        (issue_rf_ren_rs2_ff | issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]);
+        (issue_rf_ren_rs2_ff |
+         (issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
+          !issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_FPU]));
     assign id_ctrl_o.rd_wen = issue_valid_ff & (issue_rf_waddr_rd_ff != '0) &
-        (issue_rf_wen_rd_ff | issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD]);
+        (issue_rf_wen_rd_ff |
+         (issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
+          !issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_FPU]));
     assign id_ctrl_o.rd_addr = issue_rf_waddr_rd_ff;
     assign id_ctrl_o.lsu_req = issue_valid_ff &
         (issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] |

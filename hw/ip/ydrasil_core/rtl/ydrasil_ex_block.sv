@@ -55,6 +55,8 @@ import ydrasil_pkg::*;
 
     output wire                            ex_csr_wen_o,
     output wire [DATA_WIDTH-1:0]           ex_csr_wdata_o,
+    output wire [1:0]                      ex_csr_fs_wdata_o,
+    output wire                            ex_csr_mstatus_wen_o,
     output wire [CSR_ADDR_WIDTH-1:0]       ex_csr_waddr_o,
 
     output wire                            ex_branch_jump_o,
@@ -344,13 +346,16 @@ import ydrasil_pkg::*;
     assign bitmanip_rf_wen_rd =
         id_ex_valid_i & op_bitmanip & !fast_bitmanip_op & id_alu_rf_wen_rd_i &
         !interrupt_i & !flush_ex_i;
-    assign normal_alu_rf_wen_rd = id_ex_valid_i & alu_rf_wen_rd & !op_m_unit & !op_bitmanip & !flush_ex_i;
+    assign normal_alu_rf_wen_rd = id_ex_valid_i & alu_rf_wen_rd &
+        (operator_type_i[OPERATOR_TYPE_ALU] | operator_type_i[OPERATOR_TYPE_BJP]) &
+        !op_m_unit & !op_bitmanip & !flush_ex_i;
     assign ex_rf_wen_rd =
         div_rf_wen_rd | bitmanip_rf_wen_rd | fast_bitmanip_rf_wen_rd |
         normal_alu_rf_wen_rd | csr_wen;
     assign mul_result_valid_o = mul_result_valid;
     assign ex_instret_inc_o =
-        (id_ex_valid_i & !interrupt_i & !flush_ex_i & !op_load & !op_mul & !op_div) |
+        (id_ex_valid_i & !interrupt_i & !flush_ex_i & !op_load & !op_mul & !op_div &
+         !operator_type_i[OPERATOR_TYPE_FPU]) |
         div_complete;
 
     wire fast_alu_op =
@@ -484,6 +489,8 @@ import ydrasil_pkg::*;
     wire [31:0] csr_wdata;
 
     reg [REGS_DATA_WIDTH-1:0] ex_csr_wdata_o_ff;
+    (* dont_touch = "yes" *) reg [1:0] ex_csr_fs_wdata_o_ff;
+    (* dont_touch = "yes" *) reg ex_csr_mstatus_wen_o_ff;
     reg                       ex_csr_wen_o_ff;
     reg [CSR_ADDR_WIDTH-1:0]  ex_csr_waddr_o_ff;
 
@@ -511,6 +518,8 @@ import ydrasil_pkg::*;
             alu_bypass_valid_q  <= 1'b0;
             alu_bypass_data_q   <= '0;
             ex_csr_wdata_o_ff   <= '0;
+            ex_csr_fs_wdata_o_ff <= '0;
+            ex_csr_mstatus_wen_o_ff <= 1'b0;
             ex_csr_wen_o_ff     <= 1'b0;
             ex_csr_waddr_o_ff   <= '0;
             div_active_q        <= 1'b0;
@@ -526,6 +535,8 @@ import ydrasil_pkg::*;
             alu_bypass_valid_q  <= 1'b0;
             alu_bypass_data_q   <= '0;
             ex_csr_wdata_o_ff   <= '0;
+            ex_csr_fs_wdata_o_ff <= '0;
+            ex_csr_mstatus_wen_o_ff <= 1'b0;
             ex_csr_wen_o_ff     <= 1'b0;
             ex_csr_waddr_o_ff   <= '0;
             div_active_q        <= 1'b0;
@@ -545,6 +556,8 @@ import ydrasil_pkg::*;
             alu_bypass_data_q  <= bypassable_alu_op ?
                                   (shift_alu_op ? alu_result : fast_alu_result) : '0;
             ex_csr_wdata_o_ff  <= csr_wdata;
+            ex_csr_fs_wdata_o_ff <= csr_wdata[14:13];
+            ex_csr_mstatus_wen_o_ff <= csr_wen && (id_ex_csr_waddr_i == CSR_MSTATUS);
             ex_csr_wen_o_ff    <= csr_wen;
             ex_csr_waddr_o_ff  <= id_ex_csr_waddr_i;
 
@@ -561,6 +574,8 @@ import ydrasil_pkg::*;
     end
 
     assign ex_csr_wdata_o = ex_csr_wdata_o_ff;
+    assign ex_csr_fs_wdata_o = ex_csr_fs_wdata_o_ff;
+    assign ex_csr_mstatus_wen_o = ex_csr_mstatus_wen_o_ff;
     assign ex_csr_wen_o = ex_csr_wen_o_ff;
     assign ex_csr_waddr_o = ex_csr_waddr_o_ff;
     assign slow_result_wen = div_rf_wen_rd | csr_wen;
