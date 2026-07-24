@@ -4,3 +4,6 @@
 [submodule "verif/tools/riscv-isa-sim"]
 	path = verif/tools/riscv-isa-sim
 	url = https://github.com/riscv-software-src/riscv-isa-sim.git
+[submodule "hw/vendor/cvfpu"]
+	path = hw/vendor/cvfpu
+	url = https://github.com/openhwgroup/cvfpu.git

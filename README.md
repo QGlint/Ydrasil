@@ -2,6 +2,34 @@
 
 Ydrasil 是一个 RV32 处理器/FPGA 工程仓库，包含 RTL、FPGA Vivado 工程、仿真验证、RISC-V 测试生成、软件链接脚本，以及服务器上的 batch 综合布线和时序分析脚本。
 
+## 可配置 RV32F 扩展
+
+浮点扩展由公开构建变量 `FPU` 控制，默认关闭。FPGA 顶层端口和板级约束不随配置变化。
+
+| 配置 | ISA/ABI | 浮点行为 |
+| --- | --- | --- |
+| `FPU=0`（默认） | `rv32im...` / `ilp32` | 不编译、例化浮点链路，浮点指令触发 illegal-instruction。 |
+| `FPU=1` | `rv32imf...` / `ilp32f` | 启用完整 RV32F、32×32 FPR、`fflags/frm/fcsr`、`mstatus.FS` 和 `misa.F`。 |
+
+`FPU=1` 支持 `FLW/FSW`、四类 FMA、加减乘除、开方、符号注入、min/max、比较、分类、整数/浮点转换和搬运；支持 RNE、RTZ、RDN、RUP、RMM 及动态舍入，并累计 NV、DZ、OF、UF、NX 异常标志。任意时刻最多一条 FP/FLSU 指令在途，浮点指令只从 slot0 发射，无关整数指令仍可继续执行。FP→GPR 与整数 MUL 共用已有 slow-result 通道，MUL 同拍优先。
+
+FPU 基于 FPnew v0.8.1，子模块固定在 commit `79e453139072df42c9ec8f697132ba485d74e23d`。首次使用先初始化依赖：
+
+```sh
+git submodule update --init hw/vendor/cvfpu
+git -C hw/vendor/cvfpu submodule update --init src/common_cells
+```
+
+常用验证与综合命令如下。快速验收只运行 `coverage_quick`，不要用完整 `regression` 代替：
+
+```sh
+make coverage_quick FPU=0
+make coverage_quick FPU=1
+make synf FPU=1
+```
+
+FPU 综合产物与默认基线隔离，位于 `build/syn/pll200m-fpu/`；200MHz 验收报告为 `build/syn/pll200m-fpu/reports/cpu200_timing_summary.rpt`。
+
 ## 仓库构成
 
 | 路径 | 内容 |

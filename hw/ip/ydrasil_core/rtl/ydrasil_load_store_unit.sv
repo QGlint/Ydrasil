@@ -14,7 +14,10 @@ import ydrasil_pkg::*;
     output ydrasil_mem_req_pkt_t           mmio_req_o,
 
     output ydrasil_lsu_status_pkt_t        status_o,
-    output ydrasil_gpr_fwd_pkt_t           completion_o
+    output ydrasil_gpr_fwd_pkt_t           completion_o,
+    output wire                            fp_completion_valid_o,
+    output wire [REGS_ADDR_WIDTH-1:0]      fp_completion_addr_o,
+    output wire [REGS_DATA_WIDTH-1:0]      fp_completion_data_o
 );
     localparam int QUEUE_DEPTH = 4;
     localparam int QUEUE_COUNT_WIDTH = $clog2(QUEUE_DEPTH + 1);
@@ -80,6 +83,9 @@ import ydrasil_pkg::*;
         queue_q[0].producer_id : req_i.producer_id;
     wire active_producer_tracked = active_from_queue ?
         queue_q[0].producer_tracked : req_i.producer_tracked;
+    wire active_fp_load = active_from_queue ? queue_q[0].fp_load : req_i.fp_load;
+    wire [REGS_ADDR_WIDTH-1:0] active_fp_rd_addr = active_from_queue ?
+        queue_q[0].fp_rd_addr : req_i.fp_rd_addr;
     wire [3:0] active_store_mask = active_from_queue ?
         queue_q[0].store_mask : req_i.store_mask;
     wire [REGS_DATA_WIDTH-1:0] active_store_raw_data = active_from_queue ?
@@ -118,11 +124,15 @@ import ydrasil_pkg::*;
     reg [REGS_ADDR_WIDTH-1:0] mmio_rd_addr_q;
     producer_id_t mmio_producer_id_q;
     reg mmio_producer_tracked_q;
+    reg mmio_fp_load_q;
+    reg [REGS_ADDR_WIDTH-1:0] mmio_fp_rd_addr_q;
     reg mmio_wb_valid_q;
     reg [REGS_DATA_WIDTH-1:0] mmio_wb_result_q;
     reg [REGS_ADDR_WIDTH-1:0] mmio_wb_rd_addr_q;
     producer_id_t mmio_wb_producer_id_q;
     reg mmio_wb_producer_tracked_q;
+    reg mmio_wb_fp_load_q;
+    reg [REGS_ADDR_WIDTH-1:0] mmio_wb_fp_rd_addr_q;
     wire mmio_busy = mmio_req_valid_q | mmio_wait_q | mmio_wb_valid_q;
 
     reg load_s1_valid_q;
@@ -133,6 +143,8 @@ import ydrasil_pkg::*;
     reg [1:0] load_s1_addr_index_q;
     reg [BUS_ADDR_WIDTH-1:2] load_s1_word_addr_q;
     reg [1:0] load_s1_hot_generation_q;
+    reg load_s1_fp_load_q;
+    reg [REGS_ADDR_WIDTH-1:0] load_s1_fp_rd_addr_q;
 
     reg load_s2_valid_q;
     reg [REGS_ADDR_WIDTH-1:0] load_s2_rd_addr_q;
@@ -142,6 +154,8 @@ import ydrasil_pkg::*;
     reg [1:0] load_s2_addr_index_q;
     reg load_s2_hot_q;
     reg [REGS_DATA_WIDTH-1:0] load_s2_hot_shifted_q;
+    reg load_s2_fp_load_q;
+    reg [REGS_ADDR_WIDTH-1:0] load_s2_fp_rd_addr_q;
 
     localparam int HOT_ENTRIES = 8;
     localparam int HOT_INDEX_WIDTH = $clog2(HOT_ENTRIES);
@@ -295,14 +309,22 @@ import ydrasil_pkg::*;
         dtcm_load_result : mmio_wb_result_q;
     wire [REGS_ADDR_WIDTH-1:0] selected_wb_rd_addr = dtcm_wb_valid ?
         load_s2_rd_addr_q : mmio_wb_rd_addr_q;
+    wire selected_wb_fp_load = dtcm_wb_valid ? load_s2_fp_load_q : mmio_wb_fp_load_q;
+    wire selected_wb_producer_tracked = dtcm_wb_valid ?
+        load_s2_producer_tracked_q : mmio_wb_producer_tracked_q;
+    wire [REGS_ADDR_WIDTH-1:0] selected_wb_fp_rd_addr = dtcm_wb_valid ?
+        load_s2_fp_rd_addr_q : mmio_wb_fp_rd_addr_q;
 
-    assign completion_o.valid = dtcm_wb_valid | mmio_wb_out_valid;
+    assign completion_o.valid =
+        (dtcm_wb_valid | mmio_wb_out_valid) && selected_wb_producer_tracked;
     assign completion_o.data = selected_wb_result;
     assign completion_o.addr = completion_o.valid ? selected_wb_rd_addr : '0;
     assign completion_o.producer_id = dtcm_wb_valid ?
         load_s2_producer_id_q : mmio_wb_producer_id_q;
-    assign completion_o.producer_tracked = dtcm_wb_valid ?
-        load_s2_producer_tracked_q : mmio_wb_producer_tracked_q;
+    assign completion_o.producer_tracked = selected_wb_producer_tracked;
+    assign fp_completion_valid_o = (dtcm_wb_valid | mmio_wb_out_valid) && selected_wb_fp_load;
+    assign fp_completion_addr_o = selected_wb_fp_rd_addr;
+    assign fp_completion_data_o = selected_wb_result;
 
 `ifndef SYNTHESIS
     reg [31:0] perf_hot_lookup_q;
@@ -330,11 +352,15 @@ import ydrasil_pkg::*;
             mmio_rd_addr_q <= '0;
             mmio_producer_id_q <= '0;
             mmio_producer_tracked_q <= 1'b0;
+            mmio_fp_load_q <= 1'b0;
+            mmio_fp_rd_addr_q <= '0;
             mmio_wb_valid_q <= 1'b0;
             mmio_wb_result_q <= '0;
             mmio_wb_rd_addr_q <= '0;
             mmio_wb_producer_id_q <= '0;
             mmio_wb_producer_tracked_q <= 1'b0;
+            mmio_wb_fp_load_q <= 1'b0;
+            mmio_wb_fp_rd_addr_q <= '0;
 
             load_s1_valid_q <= 1'b0;
             load_s1_rd_addr_q <= '0;
@@ -344,6 +370,8 @@ import ydrasil_pkg::*;
             load_s1_addr_index_q <= '0;
             load_s1_word_addr_q <= '0;
             load_s1_hot_generation_q <= '0;
+            load_s1_fp_load_q <= 1'b0;
+            load_s1_fp_rd_addr_q <= '0;
             load_s2_valid_q <= 1'b0;
             load_s2_rd_addr_q <= '0;
             load_s2_producer_id_q <= '0;
@@ -352,6 +380,8 @@ import ydrasil_pkg::*;
             load_s2_addr_index_q <= '0;
             load_s2_hot_q <= 1'b0;
             load_s2_hot_shifted_q <= '0;
+            load_s2_fp_load_q <= 1'b0;
+            load_s2_fp_rd_addr_q <= '0;
 
             hot_valid_q <= '0;
             hot_fill_valid_q <= 1'b0;
@@ -412,6 +442,8 @@ import ydrasil_pkg::*;
                 load_s1_addr_index_q <= active_addr_index;
                 load_s1_word_addr_q <= active_addr[BUS_ADDR_WIDTH-1:2];
                 load_s1_hot_generation_q <= hot_generation_q[hot_lookup_idx];
+                load_s1_fp_load_q <= active_fp_load;
+                load_s1_fp_rd_addr_q <= active_fp_rd_addr;
             end
 
             load_s2_valid_q <= load_s1_valid_q | hot_load_req;
@@ -423,12 +455,16 @@ import ydrasil_pkg::*;
                 load_s2_operator_lsu_q <= active_op;
                 load_s2_addr_index_q <= active_addr_index;
                 load_s2_hot_shifted_q <= hot_load_shifted;
+                load_s2_fp_load_q <= active_fp_load;
+                load_s2_fp_rd_addr_q <= active_fp_rd_addr;
             end else if (load_s1_valid_q) begin
                 load_s2_rd_addr_q <= load_s1_rd_addr_q;
                 load_s2_producer_id_q <= load_s1_producer_id_q;
                 load_s2_producer_tracked_q <= load_s1_producer_tracked_q;
                 load_s2_operator_lsu_q <= load_s1_operator_lsu_q;
                 load_s2_addr_index_q <= load_s1_addr_index_q;
+                load_s2_fp_load_q <= load_s1_fp_load_q;
+                load_s2_fp_rd_addr_q <= load_s1_fp_rd_addr_q;
             end
 
             hot_fill_valid_q <= load_s1_valid_q;
@@ -464,6 +500,8 @@ import ydrasil_pkg::*;
                 mmio_wb_rd_addr_q <= mmio_rd_addr_q;
                 mmio_wb_producer_id_q <= mmio_producer_id_q;
                 mmio_wb_producer_tracked_q <= mmio_producer_tracked_q;
+                mmio_wb_fp_load_q <= mmio_fp_load_q;
+                mmio_wb_fp_rd_addr_q <= mmio_fp_rd_addr_q;
             end
 
             if (mmio_req_valid_q) begin
@@ -484,6 +522,8 @@ import ydrasil_pkg::*;
                 mmio_rd_addr_q <= active_rd_addr;
                 mmio_producer_id_q <= active_producer_id;
                 mmio_producer_tracked_q <= active_producer_tracked;
+                mmio_fp_load_q <= active_fp_load;
+                mmio_fp_rd_addr_q <= active_fp_rd_addr;
             end
 
 `ifndef SYNTHESIS

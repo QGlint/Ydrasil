@@ -472,6 +472,7 @@ import ydrasil_pkg::*;
 	assign operator_type_o [ydrasil_pkg::OPERATOR_TYPE_SYS] = is_sys;
 	assign operator_type_o [ydrasil_pkg::OPERATOR_TYPE_MUL] = is_mul_use;
 	assign operator_type_o [ydrasil_pkg::OPERATOR_TYPE_BITMANIP] = is_bitmanip_use;
+	assign operator_type_o [ydrasil_pkg::OPERATOR_TYPE_FPU] = 1'b0;
 	// wire [`OPERATOR_WIDTH-1:0] alu_op_info_mark = ({`OPERATOR_WIDTH{is_alu_use }}& {{{`OPERATOR_WIDTH-`OP_ALU_INFO_WIDTH}{1'b0}},alu_op_info});
 	// wire [`OPERATOR_WIDTH-1:0] bjp_op_info_mark = ({`OPERATOR_WIDTH{is_bjp_use }}& {{{`OPERATOR_WIDTH-`OP_BJP_INFO_WIDTH}{1'b0}},bjp_op_info});
 	// assign lsu_op_info_mark =  operator_type_o [OPERATOR_TYPE_LOAD] ? {{`OPERATOR_WIDTH-`OP_LSU_INFO_WIDTH{1'b0}},lsu_op_info} : '0;

@@ -11,6 +11,7 @@ USE_BENDER ?= 1
 BENDER ?= bender
 VERILATOR_TRACE ?= 1
 DIV_IMPL ?= lzc
+FPU ?= 0
 PYTHON ?= python3
 TRACE_TO_CSV ?= $(PROJECT_ROOT)/verif/sim/riscv_trace_csv.py
 TRACE_COMPARE ?= $(PROJECT_ROOT)/verif/sim/ydrasil_sim.py
@@ -198,8 +199,15 @@ endif
 OBJCOPY ?= $(RISCV_PREFIX)-objcopy
 OBJDUMP ?= $(RISCV_PREFIX)-objdump
 
+ifeq ($(FPU),1)
+ARCH := rv32imf_zicsr_zifencei_zba_zbb_zbc_zbkb_zbkx_zbs
+ABI  := ilp32f
+else ifeq ($(FPU),0)
 ARCH := rv32im_zicsr_zifencei_zba_zbb_zbc_zbkb_zbkx_zbs
 ABI  := ilp32
+else
+$(error Unsupported FPU '$(FPU)'. Use FPU=0 or FPU=1)
+endif
 PRIV := m
 
 RISCV_CFLAGS := \
@@ -211,6 +219,9 @@ RISCV_CFLAGS := \
     -mcmodel=medany
 
 RVTESTS_TYPE := rv32ui rv32um rv32uzba rv32uzbb rv32uzbc rv32uzbkb rv32uzbkx rv32uzbs rv32mi
+ifeq ($(FPU),1)
+RVTESTS_TYPE += rv32uf
+endif
 RV32MI_TESTS ?= csr mcsr
 RVTESTS_EXCLUDE ?= rv32ui/ma_data
 

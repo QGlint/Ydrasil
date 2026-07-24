@@ -21,6 +21,12 @@ import ydrasil_pkg::*;
     input wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0]    clint_csr_waddr_i,  // clint模块写寄存器地址
     input wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]   clint_csr_data_i,   // clint模块写寄存器数据
 
+	input wire                          fp_flags_valid_i,
+	input wire [4:0]                    fp_flags_i,
+	input wire                          fp_state_dirty_i,
+	output wire [2:0]                   frm_o,
+	output wire                         fp_enabled_o,
+
     output wire global_int_en_o,  // 全局中断使能标志
 
     // to clint
@@ -34,7 +40,11 @@ import ydrasil_pkg::*;
 
 );
 
-    localparam logic [31:0] MISA_RV32_IM = 32'h4000_1100;
+`ifdef YDRASIL_ENABLE_FPU
+    localparam logic [31:0] MISA_VALUE = 32'h4000_1120;
+`else
+    localparam logic [31:0] MISA_VALUE = 32'h4000_1100;
+`endif
 
     reg  [ydrasil_pkg::DOUBLE_REGS_WIDTH-1:0] cycle;
     reg  [ydrasil_pkg::DOUBLE_REGS_WIDTH-1:0] instret;
@@ -48,13 +58,19 @@ import ydrasil_pkg::*;
     reg  [ydrasil_pkg::REGS_DATA_WIDTH-1:0] mtval;
     reg  [ydrasil_pkg::REGS_DATA_WIDTH-1:0] mcounteren;
     reg  [ydrasil_pkg::REGS_DATA_WIDTH-1:0] mcountinhibit;
+    reg  [4:0] fflags;
+    reg  [2:0] frm;
+	wire [31:0] mstatus_read = {mstatus[14:13] == 2'b11, mstatus[30:0]};
+
+	assign frm_o = frm;
+	assign fp_enabled_o = |mstatus[14:13];
 
     assign global_int_en_o   = (mstatus[3] == 1'b1) ? 1'b1 : 1'b0;
 
 
     assign csr_clint_mtvec   = mtvec;
     assign csr_clint_mepc    = mepc;
-    assign csr_clint_mstatus = mstatus;
+    assign csr_clint_mstatus = mstatus_read;
 
     reg ex_csr_addr_writeable;
     reg clint_csr_addr_writeable;
@@ -88,6 +104,12 @@ import ydrasil_pkg::*;
             ydrasil_pkg::CSR_MINSTRET,
             ydrasil_pkg::CSR_MINSTRETH:
                 ex_csr_addr_writeable = 1'b1;
+`ifdef YDRASIL_ENABLE_FPU
+            ydrasil_pkg::CSR_FFLAGS,
+            ydrasil_pkg::CSR_FRM,
+            ydrasil_pkg::CSR_FCSR:
+                ex_csr_addr_writeable = 1'b1;
+`endif
             default:
                 ex_csr_addr_writeable = 1'b0;
         endcase
@@ -162,13 +184,18 @@ import ydrasil_pkg::*;
             ydrasil_pkg::CSR_MCAUSE:        csr_ex_read_value = mcause;
             ydrasil_pkg::CSR_MEPC:          csr_ex_read_value = mepc;
             ydrasil_pkg::CSR_MIE:           csr_ex_read_value = mie;
-            ydrasil_pkg::CSR_MSTATUS:       csr_ex_read_value = mstatus;
+            ydrasil_pkg::CSR_MSTATUS:       csr_ex_read_value = mstatus_read;
             ydrasil_pkg::CSR_MSCRATCH:      csr_ex_read_value = mscratch;
             ydrasil_pkg::CSR_MIP:           csr_ex_read_value = mip;
             ydrasil_pkg::CSR_MTVAL:         csr_ex_read_value = mtval;
             ydrasil_pkg::CSR_MCOUNTEREN:    csr_ex_read_value = mcounteren;
             ydrasil_pkg::CSR_MCOUNTINHIBIT: csr_ex_read_value = mcountinhibit;
-            ydrasil_pkg::CSR_MISA:          csr_ex_read_value = MISA_RV32_IM;
+            ydrasil_pkg::CSR_MISA:          csr_ex_read_value = MISA_VALUE;
+`ifdef YDRASIL_ENABLE_FPU
+            ydrasil_pkg::CSR_FFLAGS:        csr_ex_read_value = {27'b0, fflags};
+            ydrasil_pkg::CSR_FRM:           csr_ex_read_value = {29'b0, frm};
+            ydrasil_pkg::CSR_FCSR:          csr_ex_read_value = {24'b0, frm, fflags};
+`endif
             ydrasil_pkg::CSR_MVENDORID,
             ydrasil_pkg::CSR_MARCHID,
             ydrasil_pkg::CSR_MIMPID,
@@ -199,13 +226,18 @@ import ydrasil_pkg::*;
             ydrasil_pkg::CSR_MCAUSE:        csr_clint_read_value = mcause;
             ydrasil_pkg::CSR_MEPC:          csr_clint_read_value = mepc;
             ydrasil_pkg::CSR_MIE:           csr_clint_read_value = mie;
-            ydrasil_pkg::CSR_MSTATUS:       csr_clint_read_value = mstatus;
+            ydrasil_pkg::CSR_MSTATUS:       csr_clint_read_value = mstatus_read;
             ydrasil_pkg::CSR_MSCRATCH:      csr_clint_read_value = mscratch;
             ydrasil_pkg::CSR_MIP:           csr_clint_read_value = mip;
             ydrasil_pkg::CSR_MTVAL:         csr_clint_read_value = mtval;
             ydrasil_pkg::CSR_MCOUNTEREN:    csr_clint_read_value = mcounteren;
             ydrasil_pkg::CSR_MCOUNTINHIBIT: csr_clint_read_value = mcountinhibit;
-            ydrasil_pkg::CSR_MISA:          csr_clint_read_value = MISA_RV32_IM;
+            ydrasil_pkg::CSR_MISA:          csr_clint_read_value = MISA_VALUE;
+`ifdef YDRASIL_ENABLE_FPU
+            ydrasil_pkg::CSR_FFLAGS:        csr_clint_read_value = {27'b0, fflags};
+            ydrasil_pkg::CSR_FRM:           csr_clint_read_value = {29'b0, frm};
+            ydrasil_pkg::CSR_FCSR:          csr_clint_read_value = {24'b0, frm, fflags};
+`endif
             ydrasil_pkg::CSR_MVENDORID,
             ydrasil_pkg::CSR_MARCHID,
             ydrasil_pkg::CSR_MIMPID,
@@ -230,6 +262,8 @@ import ydrasil_pkg::*;
             mtval         <= {ydrasil_pkg::REGS_DATA_WIDTH{1'b0}};
             mcounteren    <= {ydrasil_pkg::REGS_DATA_WIDTH{1'b0}};
             mcountinhibit <= {ydrasil_pkg::REGS_DATA_WIDTH{1'b0}};
+            fflags        <= 5'b0;
+            frm           <= 3'b0;
         end else begin
             if (mcycle_we) begin
                 cycle[31:0] <= csr_write_data;
@@ -259,10 +293,31 @@ import ydrasil_pkg::*;
                     ydrasil_pkg::CSR_MTVAL:         mtval         <= csr_write_data;
                     ydrasil_pkg::CSR_MCOUNTEREN:    mcounteren    <= csr_write_data;
                     ydrasil_pkg::CSR_MCOUNTINHIBIT: mcountinhibit <= csr_write_mcountinhibit_data;
+`ifdef YDRASIL_ENABLE_FPU
+                    ydrasil_pkg::CSR_FFLAGS: begin
+                        fflags <= csr_write_data[4:0];
+                        if (mstatus[14:13] != 2'b00) mstatus[14:13] <= 2'b11;
+                    end
+                    ydrasil_pkg::CSR_FRM: begin
+                        frm <= csr_write_data[2:0];
+                        if (mstatus[14:13] != 2'b00) mstatus[14:13] <= 2'b11;
+                    end
+                    ydrasil_pkg::CSR_FCSR: begin
+                        frm <= csr_write_data[7:5];
+                        fflags <= csr_write_data[4:0];
+                        if (mstatus[14:13] != 2'b00) mstatus[14:13] <= 2'b11;
+                    end
+`endif
                     default: begin
                     end
                 endcase
             end
+`ifdef YDRASIL_ENABLE_FPU
+            if (fp_flags_valid_i)
+                fflags <= fflags | fp_flags_i;
+            if (fp_state_dirty_i && (mstatus[14:13] != 2'b00))
+                mstatus[14:13] <= 2'b11;
+`endif
         end
     end
 

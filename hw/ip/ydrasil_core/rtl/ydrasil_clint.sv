@@ -17,6 +17,8 @@ import ydrasil_pkg::*;
     // 添加系统操作输入端口
     input wire [ydrasil_pkg::OP_SYS_INFO_WIDTH-1:0] sys_op_info_i,
     input wire                          sys_op_i,
+    input wire                          illegal_instr_i,
+    input wire [INST_DATA_WIDTH-1:0]    illegal_instr_value_i,
 
     // from ctrl
     // input wire                        stall_if_i,
@@ -58,11 +60,12 @@ import ydrasil_pkg::*;
     localparam S_INT_MRET = 4'b1000;  // 中断返回状态
 
     // CSR write state machine
-    localparam S_CSR_IDLE = 5'b00001;  // CSR写入空闲状态
-    localparam S_CSR_MSTATUS = 5'b00010;  // 写入mstatus寄存器状态
-    localparam S_CSR_MEPC = 5'b00100;  // 写入mepc寄存器状态
-    localparam S_CSR_MSTATUS_MRET = 5'b01000;  // 中断返回时写入mstatus寄存器状态
-    localparam S_CSR_MCAUSE = 5'b10000;  // 写入mcause寄存器状态
+    localparam S_CSR_IDLE = 6'b000001;  // CSR写入空闲状态
+    localparam S_CSR_MSTATUS = 6'b000010;  // 写入mstatus寄存器状态
+    localparam S_CSR_MEPC = 6'b000100;  // 写入mepc寄存器状态
+    localparam S_CSR_MSTATUS_MRET = 6'b001000;  // 中断返回时写入mstatus寄存器状态
+    localparam S_CSR_MCAUSE = 6'b010000;  // 写入mcause寄存器状态
+    localparam S_CSR_MTVAL = 6'b100000;  // 非法指令写入mtval
 
     reg [ydrasil_pkg::INST_ADDR_WIDTH-1:0] int_addr;
     reg                         int_assert;
@@ -70,14 +73,15 @@ import ydrasil_pkg::*;
 
     // 状态机和相关信号声明
     wire [                 3:0] int_state;  // 中断状态机当前状态
-    reg  [                 4:0] csr_state;  // CSR写状态机当前状态
+    reg  [                 5:0] csr_state;  // CSR写状态机当前状态
     reg  [ydrasil_pkg::INST_ADDR_WIDTH-1:0] instr_addr;  // 保存的指令地址
     reg  [                31:0] cause;  // 中断原因代码
 
     // 下一个状态信号声明
-    wire [                 4:0] next_csr_state;  // CSR写状态机下一状态
+    wire [                 5:0] next_csr_state;  // CSR写状态机下一状态
     wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] next_instr_addr;  // 下一个保存的指令地址
     wire [                31:0] next_cause;  // 下一个中断原因代码
+    reg  [INST_DATA_WIDTH-1:0] illegal_instr_value_q;
 
     // 暂停信号产生逻辑 - 当中断状态机或CSR写状态机不在空闲状态时暂停流水线
     assign clint_stall_o = ((int_state != S_INT_IDLE) | (csr_state != S_CSR_IDLE)) ? 1'b1 : 1'b0;
@@ -85,31 +89,35 @@ import ydrasil_pkg::*;
     // 中断处理逻辑
     assign int_state = 
         ({4{!rst_n}} & S_INT_IDLE) |
-        ({4{((sys_op_ecall_i || sys_op_ebreak_i) )}} & S_INT_SYNC_ASSERT) |
+        ({4{((sys_op_ecall_i || sys_op_ebreak_i || illegal_instr_i) )}} & S_INT_SYNC_ASSERT) |
         ({4{sys_op_mret_i}} & S_INT_MRET) |
-        ({4{!(!rst_n || ((sys_op_ecall_i || sys_op_ebreak_i) ) || sys_op_mret_i)}} & S_INT_IDLE);
+        ({4{!(!rst_n || ((sys_op_ecall_i || sys_op_ebreak_i || illegal_instr_i) ) || sys_op_mret_i)}} & S_INT_IDLE);
 
     // CSR写状态机的并行选择逻辑
     assign next_csr_state = 
-        ({5{!rst_n}} & S_CSR_IDLE) |
-        ({5{csr_state == S_CSR_IDLE && int_state == S_INT_SYNC_ASSERT}} & S_CSR_MEPC) |
-        ({5{csr_state == S_CSR_IDLE && int_state == S_INT_MRET}} & S_CSR_MSTATUS_MRET) |
-        ({5{csr_state == S_CSR_MEPC}} & S_CSR_MSTATUS) |
-        ({5{csr_state == S_CSR_MSTATUS}} & S_CSR_MCAUSE) |
-        ({5{csr_state == S_CSR_MCAUSE || csr_state == S_CSR_MSTATUS_MRET}} & S_CSR_IDLE) |
-        ({5{!(!rst_n || 
-             (csr_state == S_CSR_IDLE && int_state == S_INT_SYNC_ASSERT) || 
-             (csr_state == S_CSR_IDLE && int_state == S_INT_MRET) || 
-             csr_state == S_CSR_MEPC || 
-             csr_state == S_CSR_MSTATUS || 
-             (csr_state == S_CSR_MCAUSE || csr_state == S_CSR_MSTATUS_MRET))}} & S_CSR_IDLE);
+        ({6{!rst_n}} & S_CSR_IDLE) |
+        ({6{csr_state == S_CSR_IDLE && int_state == S_INT_SYNC_ASSERT}} & S_CSR_MEPC) |
+        ({6{csr_state == S_CSR_IDLE && int_state == S_INT_MRET}} & S_CSR_MSTATUS_MRET) |
+        ({6{csr_state == S_CSR_MEPC}} & S_CSR_MSTATUS) |
+        ({6{csr_state == S_CSR_MSTATUS}} & S_CSR_MCAUSE) |
+        ({6{csr_state == S_CSR_MCAUSE && cause == 32'd2}} & S_CSR_MTVAL) |
+        ({6{(csr_state == S_CSR_MCAUSE && cause != 32'd2) ||
+             csr_state == S_CSR_MTVAL || csr_state == S_CSR_MSTATUS_MRET}} & S_CSR_IDLE) |
+        ({6{!(!rst_n ||
+             (csr_state == S_CSR_IDLE && int_state == S_INT_SYNC_ASSERT) ||
+             (csr_state == S_CSR_IDLE && int_state == S_INT_MRET) ||
+             csr_state == S_CSR_MEPC ||
+             csr_state == S_CSR_MSTATUS ||
+             csr_state == S_CSR_MCAUSE || csr_state == S_CSR_MTVAL ||
+             csr_state == S_CSR_MSTATUS_MRET)}} & S_CSR_IDLE);
 
     // 下一个中断原因cause值的并行选择逻辑
     assign next_cause = 
         ({32{!rst_n}} & '0) |
         ({32{csr_state == S_CSR_IDLE && int_state == S_INT_SYNC_ASSERT && sys_op_ecall_i}} & 32'd11) |
         ({32{csr_state == S_CSR_IDLE && int_state == S_INT_SYNC_ASSERT && sys_op_ebreak_i}} & 32'd3) |
-        ({32{csr_state == S_CSR_IDLE && int_state == S_INT_SYNC_ASSERT && !sys_op_ecall_i && !sys_op_ebreak_i}} & 32'd10) |
+        ({32{csr_state == S_CSR_IDLE && int_state == S_INT_SYNC_ASSERT && illegal_instr_i}} & 32'd2) |
+        ({32{csr_state == S_CSR_IDLE && int_state == S_INT_SYNC_ASSERT && !sys_op_ecall_i && !sys_op_ebreak_i && !illegal_instr_i}} & 32'd10) |
         ({32{!(!rst_n || (csr_state == S_CSR_IDLE && int_state == S_INT_SYNC_ASSERT))}} & cause);
 
     // 下一个保存的指令地址instr_addr值的并行选择逻辑
@@ -126,7 +134,7 @@ import ydrasil_pkg::*;
 
     // 计算写使能信号 - 当需要写入任何CSR寄存器时置为WriteEnable
     assign next_we_o = (!rst_n) ? 1'b0 :
-                      (csr_state == S_CSR_MEPC || csr_state == S_CSR_MCAUSE || 
+                      (csr_state == S_CSR_MEPC || csr_state == S_CSR_MCAUSE || csr_state == S_CSR_MTVAL ||
                        csr_state == S_CSR_MSTATUS || csr_state == S_CSR_MSTATUS_MRET) ? 1'b1 :
                       1'b0;
 
@@ -134,6 +142,7 @@ import ydrasil_pkg::*;
     assign next_waddr_o = (!rst_n) ? '0 :
                          (csr_state == S_CSR_MEPC) ? { ydrasil_pkg::CSR_MEPC} :            // 写入mepc寄存器
         (csr_state == S_CSR_MCAUSE) ? {ydrasil_pkg::CSR_MCAUSE} :  // 写入mcause寄存器
+        (csr_state == S_CSR_MTVAL) ? {ydrasil_pkg::CSR_MTVAL} :
         (csr_state == S_CSR_MSTATUS || csr_state == S_CSR_MSTATUS_MRET) ? {ydrasil_pkg::CSR_MSTATUS} : // 写入mstatus寄存器
         '0;
 
@@ -141,6 +150,7 @@ import ydrasil_pkg::*;
     assign next_data_o = (!rst_n) ? '0 :
                         (csr_state == S_CSR_MEPC) ? instr_addr :                     // 保存当前指令地址到mepc
         (csr_state == S_CSR_MCAUSE) ? cause :  // 写入中断原因到mcause
+        (csr_state == S_CSR_MTVAL) ? illegal_instr_value_q :
         (csr_state == S_CSR_MSTATUS) ?
             {csr_clint_mstatus[31:8], csr_clint_mstatus[3],
              csr_clint_mstatus[6:4], 1'b0, csr_clint_mstatus[2:0]} :
@@ -155,12 +165,14 @@ import ydrasil_pkg::*;
 
     // 计算中断断言信号 - 在完成CSR写入或中断返回时断言
     assign next_int_assert_o = (!rst_n) ? 1'b0 :
-                              (csr_state == S_CSR_MCAUSE || csr_state == S_CSR_MSTATUS_MRET) ? 1'b1 :
+                              ((csr_state == S_CSR_MCAUSE && cause != 32'd2) ||
+                               csr_state == S_CSR_MTVAL || csr_state == S_CSR_MSTATUS_MRET) ? 1'b1 :
                               1'b0;
 
     // 计算中断地址 - 中断处理或中断返回的目标地址
     assign next_int_addr_o = (!rst_n) ? '0 :
-                            (csr_state == S_CSR_MCAUSE) ? csr_clint_mtvec :      // 中断发生时跳转到mtvec
+                            ((csr_state == S_CSR_MCAUSE && cause != 32'd2) ||
+                             csr_state == S_CSR_MTVAL) ? csr_clint_mtvec :      // 中断发生时跳转到mtvec
         (csr_state == S_CSR_MSTATUS_MRET) ? csr_clint_mepc :  // 中断返回时跳转到mepc
         '0;
 
@@ -181,6 +193,7 @@ import ydrasil_pkg::*;
             int_assert  <= 1'b0;
             int_addr    <= {ydrasil_pkg::INST_ADDR_WIDTH{1'b0}};
             raddr_o       <= {ydrasil_pkg::CSR_ADDR_WIDTH{1'b0}};
+            illegal_instr_value_q <= '0;
         end else begin
             csr_state     <= next_csr_state;
             cause         <= next_cause;
@@ -191,6 +204,8 @@ import ydrasil_pkg::*;
             int_assert  <= next_int_assert_o;
             int_addr    <= next_int_addr_o;
             raddr_o       <= {ydrasil_pkg::CSR_ADDR_WIDTH{1'b0}};
+            if (csr_state == S_CSR_IDLE && illegal_instr_i)
+                illegal_instr_value_q <= illegal_instr_value_i;
         end
     end
 

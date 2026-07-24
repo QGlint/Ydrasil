@@ -82,6 +82,12 @@ import ydrasil_pkg::*;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] rf_raddr_rs4;
 	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] rf_rdata_rs3;
 	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] rf_rdata_rs4;
+	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] fpr_raddr_rs1;
+	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] fpr_raddr_rs2;
+	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] fpr_raddr_rs3;
+	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] fpr_rdata_rs1;
+	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] fpr_rdata_rs2;
+	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] fpr_rdata_rs3;
 
 	// ID -> EX
 	wire [31:0]                    operand_a;
@@ -101,6 +107,8 @@ import ydrasil_pkg::*;
 	wire [31:0]                    bt_b_operand;
 	ydrasil_lsu_req_pkt_t         id_lsu_req_pkt;
 	ydrasil_lsu_req_pkt_t         lsu_req_pkt;
+	ydrasil_fpu_req_pkt_t         id_fpu_req_pkt;
+	ydrasil_fpu_req_pkt_t         fpu_req_pkt;
 	wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] operator_type;
 	wire                           id_alu_rf_wen_rd;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    id_rf_waddr_rd;
@@ -133,6 +141,10 @@ import ydrasil_pkg::*;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] mul_rf_waddr_rd;
 	producer_id_t               mul_producer_id;
 	wire                        mul_result_valid;
+	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] slow_wb_result;
+	wire                        slow_rf_wen_rd;
+	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] slow_rf_waddr_rd;
+	producer_id_t               slow_producer_id;
 	wire                        ex_instret_inc;
 	wire                        ex_pc_redirect;
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] ex_pc_redirect_target;
@@ -201,14 +213,46 @@ import ydrasil_pkg::*;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] lsu_rf_waddr_rd;
 	producer_id_t               lsu_producer_id;
 	wire                        lsu_producer_tracked;
+	wire                        lsu_fp_completion_valid;
+	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] lsu_fp_completion_addr;
+	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] lsu_fp_completion_data;
+
+	wire                        fpu_busy;
+	wire                        fpu_req_ready;
+	wire                        fpu_result_valid;
+	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] fpu_result;
+	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] fpu_result_addr;
+	wire                        fpu_result_fpr;
+	wire                        fpu_result_gpr;
+	producer_id_t               fpu_result_producer_id;
+	wire                        fpu_result_producer_tracked;
+	wire [4:0]                  fpu_result_fflags;
+	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] fpu_result_pc;
+	wire [ydrasil_pkg::INST_DATA_WIDTH-1:0] fpu_result_instr;
+	wire                        fpu_result_ready;
+	wire                        fpu_result_consumed;
+	wire                        fpr_write_valid;
+	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] fpr_write_addr;
+	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] fpr_write_data;
+	wire [2:0]                  csr_frm;
+	wire                        csr_fp_enabled;
+	wire                        fpu_illegal_ex;
+	wire                        fpu_decode_block;
+	wire                        fpu_backend_stall;
+	reg                         fp_mem_busy_q;
 
 	// WB -> RF
 	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] rf_wdata_rd;
 	wire                        rf_wen_rd;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] rf_waddr_rd;
+	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] wb_rf_wdata_rd;
+	wire                        wb_rf_wen_rd;
+	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] wb_rf_waddr_rd;
 	wire [ydrasil_pkg::REGS_NUM-1:0] rf_write_wen;
 	producer_id_t               rf_producer_id;
+	producer_id_t               wb_rf_producer_id;
 	wire                        rf_producer_tracked;
+	wire                        wb_rf_producer_tracked;
 	wire                        rf_write_commit;
 	wire                        wb_backpressure;
 	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] rf_wdata_rd1;
@@ -221,6 +265,14 @@ import ydrasil_pkg::*;
 	wire                        wb_hzd_valid_q;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] wb_hzd_addr_q;
 	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] wb_hzd_data_q;
+
+`ifdef YDRASIL_ENABLE_FPU
+	reg [ydrasil_pkg::REGS_DATA_WIDTH-1:0] rf_wdata_rd_q;
+	reg                         rf_wen_rd_q;
+	reg [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] rf_waddr_rd_q;
+	producer_id_t               rf_producer_id_q;
+	reg                         rf_producer_tracked_q;
+`endif
 
     //LSU -> CTRL
 	wire                            lsu_ctrl_busy;
@@ -240,6 +292,10 @@ import ydrasil_pkg::*;
 	ydrasil_gpr_fwd_pkt_t           producer_rs3_fwd_pkt;
 	ydrasil_gpr_fwd_pkt_t           producer_rs4_fwd_pkt;
 	ydrasil_gpr_fwd_pkt_t           lsu_fwd_pkt;
+	ydrasil_gpr_fwd_pkt_t           lsu_wb_fwd_pkt;
+`ifdef YDRASIL_ENABLE_FPU
+	ydrasil_gpr_fwd_pkt_t           lsu_completion_q;
+`endif
 	ydrasil_gpr_fwd_pkt_t           alu_fwd_pkt;
 	ydrasil_gpr_fwd_pkt_t           mul_fwd_pkt;
 	ydrasil_gpr_fwd_pkt_t           dual_alu_fwd_pkt;
@@ -255,6 +311,7 @@ import ydrasil_pkg::*;
 	wire                            load_bypass_completion_ready;
 	wire                            load_replay_stall;
 	wire                            id_ex_execute_valid;
+	wire                            id_ex_issue_valid;
 	wire                            ex_backend_stall;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    id_ctrl_rs1_addr;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    id_ctrl_rs2_addr;
@@ -296,6 +353,8 @@ import ydrasil_pkg::*;
 	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]      csr_ex_rdata;
 	wire 					    ex_csr_wen;
 	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]      ex_csr_wdata;
+	wire [1:0]                                    ex_csr_fs_wdata;
+	wire                                          ex_csr_mstatus_wen;
 	wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0]       ex_csr_waddr;
 
 	// CSR <-> CLINT wires
@@ -345,6 +404,9 @@ import ydrasil_pkg::*;
 	reg commit_mul_issue_valid_q;
 	reg [ydrasil_pkg::INST_ADDR_WIDTH-1:0] commit_mul_issue_pc_q;
 	reg [ydrasil_pkg::INST_DATA_WIDTH-1:0] commit_mul_issue_instr_q;
+	reg commit_fpu_issue_valid_q;
+	reg [ydrasil_pkg::INST_ADDR_WIDTH-1:0] commit_fpu_issue_pc_q;
+	reg [ydrasil_pkg::INST_DATA_WIDTH-1:0] commit_fpu_issue_instr_q;
 
 	reg [ydrasil_pkg::INST_DATA_WIDTH-1:0] commit_instr;
 	always_comb begin
@@ -375,30 +437,51 @@ import ydrasil_pkg::*;
 			commit_mul_issue_valid_q <= 1'b0;
 			commit_mul_issue_pc_q <= '0;
 			commit_mul_issue_instr_q <= '0;
+			commit_fpu_issue_valid_q <= 1'b0;
+			commit_fpu_issue_pc_q <= '0;
+			commit_fpu_issue_instr_q <= '0;
 		end else begin
 			commit_ex_valid_q <= id_ex_execute_valid & !interrupt & !flush_ex;
 			commit_ex_pc_q <= id_instr_addr;
 			commit_ex_instr_q <= commit_alu_instr;
-			commit_lsu_issue_valid_q <= ex_accept_valid & operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD];
+			commit_lsu_issue_valid_q <= ex_accept_valid & id_ex_execute_valid &
+				operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD];
 			commit_lsu_issue_pc_q <= id_instr_addr;
 			commit_lsu_issue_instr_q <= commit_lsu_instr;
 			commit_mul_issue_valid_q <= ex_mul_issue;
 			commit_mul_issue_pc_q <= id_instr_addr;
 			commit_mul_issue_instr_q <= commit_mul_instr;
+			commit_fpu_issue_valid_q <= fpu_req_pkt.valid && fpu_req_ready;
+			commit_fpu_issue_pc_q <= id_fpu_req_pkt.pc;
+			commit_fpu_issue_instr_q <= id_fpu_req_pkt.instr;
 		end
 	end
 `endif
 
-	assign load_bypass_completion_ready = lsu_fwd_pkt.valid &&
-		lsu_fwd_pkt.producer_tracked &&
-		(lsu_fwd_pkt.producer_id == id_ex_load_bypass_producer_id);
+	assign load_bypass_completion_ready = lsu_wb_fwd_pkt.valid &&
+		lsu_wb_fwd_pkt.producer_tracked &&
+		(lsu_wb_fwd_pkt.producer_id == id_ex_load_bypass_producer_id);
 	assign load_replay_stall = id_ex_valid &&
 		(id_ex_load_bypass_rs1 || id_ex_load_bypass_rs2) &&
 		!load_bypass_completion_ready;
-	assign id_ex_execute_valid = id_ex_valid && !load_replay_stall;
-	assign ex_backend_stall = ex_mul_stall | load_replay_stall;
+	wire fpu_csr_ex = id_ex_valid && operator_type[OPERATOR_TYPE_CSR] &&
+		!operator_type[OPERATOR_TYPE_SYS] &&
+		((id_ex_csr_waddr == CSR_FFLAGS) || (id_ex_csr_waddr == CSR_FRM) ||
+		 (id_ex_csr_waddr == CSR_FCSR));
+	wire csr_fp_enabled_ex = ex_csr_mstatus_wen ?
+		(|ex_csr_fs_wdata) : csr_fp_enabled;
+	assign fpu_illegal_ex =
+		(id_ex_valid && operator_type[OPERATOR_TYPE_FPU] &&
+		 (id_fpu_req_pkt.illegal || !csr_fp_enabled_ex ||
+		  ((id_fpu_req_pkt.rm == 3'b111) && (csr_frm > 3'b100)))) ||
+		(fpu_csr_ex && !csr_fp_enabled_ex);
+	// 非法浮点指令仍从 issue 队列消费并交给 CLINT 触发 trap；只屏蔽执行副作用。
+	// 这样可避免 FS/CSR 判定组合反馈到前端 decode/issue 关键路径。
+	assign id_ex_issue_valid = id_ex_valid && !load_replay_stall;
+	assign id_ex_execute_valid = id_ex_issue_valid && !fpu_illegal_ex;
+	assign ex_backend_stall = ex_mul_stall | load_replay_stall | fpu_backend_stall;
 
-	assign ex_hzd_pkt.valid = id_ex_execute_valid;
+	assign ex_hzd_pkt.valid = id_ex_issue_valid;
 	assign ex_hzd_pkt.interrupt = interrupt;
 	assign ex_hzd_pkt.producer_id = id_ex_producer_id;
 	assign ex_hzd_pkt.producer_tracked = id_ex_producer_tracked;
@@ -419,13 +502,30 @@ import ydrasil_pkg::*;
 	assign alu_fwd_pkt.producer_tracked = alu_fwd_pkt.valid && (alu_fwd_pkt.addr != '0);
 	assign alu_fwd_pkt.addr = alu_rf_waddr_rd;
 	assign alu_fwd_pkt.data = alu_result;
-	assign mul_fwd_pkt.valid = mul_rf_wen_rd;
-	assign mul_fwd_pkt.producer_id = mul_producer_id;
+	assign slow_wb_result = mul_rf_wen_rd ? mul_wb_result : fpu_result;
+	assign slow_rf_wen_rd = mul_rf_wen_rd | (fpu_result_consumed & fpu_result_gpr);
+	assign slow_rf_waddr_rd = mul_rf_wen_rd ? mul_rf_waddr_rd : fpu_result_addr;
+	assign slow_producer_id = mul_rf_wen_rd ? mul_producer_id : fpu_result_producer_id;
+	assign mul_fwd_pkt.valid = slow_rf_wen_rd;
+	assign mul_fwd_pkt.producer_id = slow_producer_id;
 	assign mul_fwd_pkt.producer_tracked = mul_fwd_pkt.valid && (mul_fwd_pkt.addr != '0);
-	assign mul_fwd_pkt.addr = mul_rf_waddr_rd;
-	assign mul_fwd_pkt.data = mul_wb_result;
+	assign mul_fwd_pkt.addr = slow_rf_waddr_rd;
+	assign mul_fwd_pkt.data = slow_wb_result;
 	assign completion_bus[ydrasil_pkg::COMPLETION_ALU] = alu_fwd_pkt;
-	assign completion_bus[ydrasil_pkg::COMPLETION_LSU] = lsu_fwd_pkt;
+`ifdef YDRASIL_ENABLE_FPU
+	// FPU 配置增加了布局压力；仅延迟 producer 唤醒一拍，使 LSU 返回到
+	// decode/scoreboard 的长控制链从靠近 decode 的寄存边界起步。
+	always_ff @(posedge clk or negedge rst_n) begin
+		if (!rst_n)
+			lsu_completion_q <= '0;
+		else
+			lsu_completion_q <= lsu_fwd_pkt;
+	end
+	assign lsu_wb_fwd_pkt = lsu_completion_q;
+`else
+	assign lsu_wb_fwd_pkt = lsu_fwd_pkt;
+`endif
+	assign completion_bus[ydrasil_pkg::COMPLETION_LSU] = lsu_wb_fwd_pkt;
 	assign completion_bus[ydrasil_pkg::COMPLETION_MUL] = mul_fwd_pkt;
 	assign completion_bus[ydrasil_pkg::COMPLETION_DUAL_ALU] = dual_alu_fwd_pkt;
 	assign wb_hzd_valid_q = wb_fwd_pkt.valid;
@@ -442,7 +542,7 @@ import ydrasil_pkg::*;
 	assign id_ctrl_prev_alu_bypass_ok = id_ctrl_pkt.prev_alu_bypass_ok;
 	always_comb begin
 		lsu_req_pkt = id_lsu_req_pkt;
-		lsu_req_pkt.valid = id_lsu_req_pkt.valid & ex_accept_valid;
+		lsu_req_pkt.valid = id_lsu_req_pkt.valid & ex_accept_valid & id_ex_execute_valid;
 		lsu_req_pkt.addr = ex_lsu_mem_addr;
 		lsu_req_pkt.store_data = ex_lsu_result;
 		if (id_ex_load_bypass_rs2 && load_bypass_completion_ready) begin
@@ -461,6 +561,75 @@ import ydrasil_pkg::*;
 		else
 			lsu_req_pkt.store_mask = 4'b0000;
 	end
+`ifdef YDRASIL_ENABLE_FPU
+	always_comb begin
+		fpu_req_pkt = id_fpu_req_pkt;
+		fpu_req_pkt.valid = id_fpu_req_pkt.valid & ex_accept_valid &
+			!interrupt & !flush_ex & !fpu_illegal_ex;
+	end
+	assign fpu_backend_stall = id_fpu_req_pkt.valid && !fpu_req_ready;
+	assign fpu_decode_block = decode_valid &&
+		(decode_pkt.fp_valid ||
+		 (decode_pkt.operator_type[OPERATOR_TYPE_CSR] &&
+		  !decode_pkt.operator_type[OPERATOR_TYPE_SYS] &&
+		  ((decode_pkt.csr_raddr == CSR_FFLAGS) || (decode_pkt.csr_raddr == CSR_FRM) ||
+		   (decode_pkt.csr_raddr == CSR_FCSR)))) &&
+		(fpu_busy || fp_mem_busy_q ||
+		 (id_ex_valid && operator_type[OPERATOR_TYPE_FPU]));
+	assign fpu_result_ready = fpu_result_fpr ||
+		(fpu_result_gpr && !mul_rf_wen_rd && !wb_backpressure);
+	assign fpu_result_consumed = fpu_result_valid && fpu_result_ready;
+	assign fpr_write_valid = lsu_fp_completion_valid ||
+		(fpu_result_consumed && fpu_result_fpr);
+	assign fpr_write_addr = lsu_fp_completion_valid ?
+		lsu_fp_completion_addr : fpu_result_addr;
+	assign fpr_write_data = lsu_fp_completion_valid ?
+		lsu_fp_completion_data : fpu_result;
+
+	always_ff @(posedge clk or negedge rst_n) begin
+		if (!rst_n) begin
+			fp_mem_busy_q <= 1'b0;
+		end else begin
+			if (ex_accept_valid && id_ex_execute_valid &&
+			    operator_type[OPERATOR_TYPE_FPU] &&
+			    (operator_type[OPERATOR_TYPE_LOAD] || operator_type[OPERATOR_TYPE_STORE]))
+				fp_mem_busy_q <= 1'b1;
+			if (lsu_fp_completion_valid ||
+			    (fp_mem_busy_q && lsu_status_pkt.idle))
+				fp_mem_busy_q <= 1'b0;
+		end
+	end
+`else
+	always_comb begin
+		fpu_req_pkt = '0;
+	end
+	assign fpu_backend_stall = 1'b0;
+	assign fpu_decode_block = 1'b0;
+	assign fpu_result_ready = 1'b0;
+	assign fpu_result_consumed = 1'b0;
+	assign fpr_write_valid = 1'b0;
+	assign fpr_write_addr = '0;
+	assign fpr_write_data = '0;
+	assign fpu_busy = 1'b0;
+	assign fpu_req_ready = 1'b1;
+	assign fpu_result_valid = 1'b0;
+	assign fpu_result = '0;
+	assign fpu_result_addr = '0;
+	assign fpu_result_fpr = 1'b0;
+	assign fpu_result_gpr = 1'b0;
+	assign fpu_result_producer_id = '0;
+	assign fpu_result_producer_tracked = 1'b0;
+	assign fpu_result_fflags = '0;
+	assign fpu_result_pc = '0;
+	assign fpu_result_instr = '0;
+	assign fpr_rdata_rs1 = '0;
+	assign fpr_rdata_rs2 = '0;
+	assign fpr_rdata_rs3 = '0;
+	always_ff @(posedge clk or negedge rst_n) begin
+		if (!rst_n) fp_mem_busy_q <= 1'b0;
+		else fp_mem_busy_q <= 1'b0;
+	end
+`endif
 	assign scoreboard_stall = hzd_status_pkt.scoreboard_stall;
 	assign lsu_struct_stall = hzd_status_pkt.lsu_struct_stall;
 	assign issue_store_data_ready = hzd_status_pkt.issue_store_data_ready;
@@ -509,11 +678,11 @@ import ydrasil_pkg::*;
 	assign mmio_we = mmio_req_pkt.write;
 	assign mmio_req = mmio_req_pkt.valid;
 	assign mmio_wmask = mmio_req_pkt.wmask;
-	assign lsu_wb_result = lsu_fwd_pkt.data;
-	assign lsu_rf_wen_rd = lsu_fwd_pkt.valid;
-	assign lsu_rf_waddr_rd = lsu_fwd_pkt.addr;
-	assign lsu_producer_id = lsu_fwd_pkt.producer_id;
-	assign lsu_producer_tracked = lsu_fwd_pkt.producer_tracked;
+	assign lsu_wb_result = lsu_wb_fwd_pkt.data;
+	assign lsu_rf_wen_rd = lsu_wb_fwd_pkt.valid;
+	assign lsu_rf_waddr_rd = lsu_wb_fwd_pkt.addr;
+	assign lsu_producer_id = lsu_wb_fwd_pkt.producer_id;
+	assign lsu_producer_tracked = lsu_wb_fwd_pkt.producer_tracked;
 	assign lsu_ctrl_busy = lsu_status_pkt.busy;
 	assign lsu_fast_load = lsu_status_pkt.fast_load;
 	assign rf_wdata_rd1 = dual_alu_fwd_pkt.data;
@@ -522,13 +691,45 @@ import ydrasil_pkg::*;
 	assign rf_producer_id1 = dual_alu_fwd_pkt.producer_id;
 	assign rf_producer_tracked1 = dual_alu_fwd_pkt.producer_tracked;
 
+`ifdef YDRASIL_ENABLE_FPU
+	// 将写回仲裁与高扇出的 GPR 写使能译码隔开，避免 FPU 面积增加后
+	// MUL FIFO 状态跨越核心到寄存器堆形成 200 MHz 关键路径。
+	always_ff @(posedge clk or negedge rst_n) begin
+		if (!rst_n) begin
+			rf_wdata_rd_q <= '0;
+			rf_wen_rd_q <= 1'b0;
+			rf_waddr_rd_q <= '0;
+			rf_producer_id_q <= '0;
+			rf_producer_tracked_q <= 1'b0;
+		end else begin
+			rf_wdata_rd_q <= wb_rf_wdata_rd;
+			rf_wen_rd_q <= wb_rf_wen_rd;
+			rf_waddr_rd_q <= wb_rf_waddr_rd;
+			rf_producer_id_q <= wb_rf_producer_id;
+			rf_producer_tracked_q <= wb_rf_producer_tracked;
+		end
+	end
+	assign rf_wdata_rd = rf_wdata_rd_q;
+	assign rf_wen_rd = rf_wen_rd_q;
+	assign rf_waddr_rd = rf_waddr_rd_q;
+	assign rf_producer_id = rf_producer_id_q;
+	assign rf_producer_tracked = rf_producer_tracked_q;
+`else
+	assign rf_wdata_rd = wb_rf_wdata_rd;
+	assign rf_wen_rd = wb_rf_wen_rd;
+	assign rf_waddr_rd = wb_rf_waddr_rd;
+	assign rf_producer_id = wb_rf_producer_id;
+	assign rf_producer_tracked = wb_rf_producer_tracked;
+`endif
+
 	assign perip_addr = mmio_req_pkt.addr;
 	assign perip_wen = mmio_req_pkt.valid && mmio_req_pkt.write;
 	assign perip_mask = mmio_req_pkt.wmask;
 	assign perip_wdata = mmio_req_pkt.wdata;
 	assign instret_inc_count =
 		{2'b0, ex_instret_inc} + {2'b0, lsu_rf_wen_rd} +
-		{2'b0, mul_result_valid} + {2'b0, dual_instret_inc};
+		{2'b0, mul_result_valid} + {2'b0, dual_instret_inc} +
+		{2'b0, fpu_result_consumed} + {2'b0, lsu_fp_completion_valid};
 
 	ydrasil_load_store_unit u_ydrasil_load_store_unit (
 		.clk               (clk),
@@ -540,8 +741,36 @@ import ydrasil_pkg::*;
 		.mmio_rdata_i      (perip_rdata),
 		.mmio_req_o        (mmio_req_pkt),
 		.status_o          (lsu_status_pkt),
-		.completion_o      (lsu_fwd_pkt)
+		.completion_o      (lsu_fwd_pkt),
+		.fp_completion_valid_o(lsu_fp_completion_valid),
+		.fp_completion_addr_o(lsu_fp_completion_addr),
+		.fp_completion_data_o(lsu_fp_completion_data)
 	);
+
+`ifdef YDRASIL_ENABLE_FPU
+	ydrasil_fpu_registers u_ydrasil_fpu_registers (
+		.clk(clk), .rst_n(rst_n),
+		.write_valid_i(fpr_write_valid), .write_addr_i(fpr_write_addr),
+		.write_data_i(fpr_write_data),
+		.read_addr1_i(fpr_raddr_rs1), .read_addr2_i(fpr_raddr_rs2),
+		.read_addr3_i(fpr_raddr_rs3),
+		.read_data1_o(fpr_rdata_rs1), .read_data2_o(fpr_rdata_rs2),
+		.read_data3_o(fpr_rdata_rs3)
+	);
+
+	ydrasil_fpu u_ydrasil_fpu (
+		.clk(clk), .rst_n(rst_n), .req_i(fpu_req_pkt),
+		.req_ready_o(fpu_req_ready), .frm_i(csr_frm),
+		.result_ready_i(fpu_result_ready), .busy_o(fpu_busy),
+		.result_valid_o(fpu_result_valid), .result_o(fpu_result),
+		.result_addr_o(fpu_result_addr), .result_fpr_o(fpu_result_fpr),
+		.result_gpr_o(fpu_result_gpr),
+		.result_producer_id_o(fpu_result_producer_id),
+		.result_producer_tracked_o(fpu_result_producer_tracked),
+		.result_fflags_o(fpu_result_fflags), .result_pc_o(fpu_result_pc),
+		.result_instr_o(fpu_result_instr)
+	);
+`endif
 
 		ydrasil_branch_predictor #(
 			.BP_ENTRIES(BP_ENTRIES),
@@ -663,7 +892,7 @@ import ydrasil_pkg::*;
 		.clk                 (clk),
 		.rst_n               (rst_n),
 		.stall_id_i          (stall_id),
-		.bubble_id_i         (bubble_id),
+		.bubble_id_i         (bubble_id | fpu_decode_block),
 		.flush_id_i          (flush_id),
 		.decode_valid_i      (decode_valid),
 		.decode_pkt_i        (decode_pkt),
@@ -679,6 +908,12 @@ import ydrasil_pkg::*;
 		.rf_rdata_rs2_i     (rf_rdata_rs2),
 		.rf_rdata_rs3_i     (rf_rdata_rs3),
 		.rf_rdata_rs4_i     (rf_rdata_rs4),
+		.fpr_addr_rs1_o     (fpr_raddr_rs1),
+		.fpr_addr_rs2_o     (fpr_raddr_rs2),
+		.fpr_addr_rs3_o     (fpr_raddr_rs3),
+		.fpr_rdata_rs1_i    (fpr_rdata_rs1),
+		.fpr_rdata_rs2_i    (fpr_rdata_rs2),
+		.fpr_rdata_rs3_i    (fpr_rdata_rs3),
 		.wb_fwd_i           (wb_fwd_pkt),
 		.wb_fwd1_i          (wb_fwd_pkt1),
 		.producer_rs1_fwd_i (producer_rs1_fwd_pkt),
@@ -708,6 +943,7 @@ import ydrasil_pkg::*;
 		.bt_a_operand_o     (bt_a_operand),
 		.bt_b_operand_o     (bt_b_operand),
 		.lsu_req_o          (id_lsu_req_pkt),
+		.fpu_req_o          (id_fpu_req_pkt),
 		.operator_type_o    (operator_type),
 		.id_ctrl_o          (id_ctrl_pkt),
 		.id_csr_raddr_o     (id_csr_raddr),
@@ -798,6 +1034,8 @@ import ydrasil_pkg::*;
 		.csr_ex_rdata_i     (csr_ex_rdata) ,
 		.ex_csr_wen_o       (ex_csr_wen),
 		.ex_csr_wdata_o     (ex_csr_wdata),
+		.ex_csr_fs_wdata_o  (ex_csr_fs_wdata),
+		.ex_csr_mstatus_wen_o(ex_csr_mstatus_wen),
 		.ex_csr_waddr_o     (ex_csr_waddr),
 		.ex_branch_jump_o   (ex_branch_jump),
 		.ex_branch_target_o (ex_branch_target),
@@ -886,18 +1124,18 @@ import ydrasil_pkg::*;
 		.lsu_rf_waddr_rd_i(lsu_rf_waddr_rd),
 		.lsu_producer_id_i(lsu_producer_id),
 		.lsu_producer_tracked_i(lsu_producer_tracked),
-		.mul_wdata_rd_i   (mul_wb_result),
-		.mul_rf_wen_rd_i  (mul_rf_wen_rd),
-		.mul_rf_waddr_rd_i(mul_rf_waddr_rd),
-		.mul_producer_id_i(mul_producer_id),
+		.mul_wdata_rd_i   (slow_wb_result),
+		.mul_rf_wen_rd_i  (slow_rf_wen_rd),
+		.mul_rf_waddr_rd_i(slow_rf_waddr_rd),
+		.mul_producer_id_i(slow_producer_id),
 		.wb_mul_complete_o(),
 		.wb_mul_complete_waddr_o(),
 		.wb_backpressure_o(wb_backpressure),
-		.rf_wdata_rd_o    (rf_wdata_rd),
-		.rf_wen_rd_o      (rf_wen_rd),
-		.rf_waddr_rd_o    (rf_waddr_rd),
-		.rf_producer_id_o (rf_producer_id)
-		,.rf_producer_tracked_o(rf_producer_tracked)
+		.rf_wdata_rd_o    (wb_rf_wdata_rd),
+		.rf_wen_rd_o      (wb_rf_wen_rd),
+		.rf_waddr_rd_o    (wb_rf_waddr_rd),
+		.rf_producer_id_o (wb_rf_producer_id)
+		,.rf_producer_tracked_o(wb_rf_producer_tracked)
 	);
 
 	ydrasil_registers u_ydrasil_registers (
@@ -983,6 +1221,13 @@ import ydrasil_pkg::*;
 		.clint_csr_raddr_i (clint_csr_raddr),
 		.clint_csr_waddr_i (clint_csr_waddr),
 		.clint_csr_data_i  (clint_csr_wdata),
+		.fp_flags_valid_i  (fpu_result_consumed),
+		.fp_flags_i        (fpu_result_fflags),
+		.fp_state_dirty_i  (fpu_result_consumed | lsu_fp_completion_valid |
+			(ex_accept_valid && operator_type[OPERATOR_TYPE_FPU] &&
+			 operator_type[OPERATOR_TYPE_STORE])),
+		.frm_o             (csr_frm),
+		.fp_enabled_o      (csr_fp_enabled),
 		.global_int_en_o   (global_int_en),
 		.csr_clint_data_o  (csr_clint_data),
 		.csr_clint_mtvec   (csr_clint_mtvec),
@@ -999,6 +1244,8 @@ import ydrasil_pkg::*;
 		.ex_branch_target_i       (ex_branch_target),
         .sys_op_info_i      (id_op_sys_info),
         .sys_op_i           (ex_accept_valid & operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS]), // 只要有任意
+		.illegal_instr_i   (fpu_illegal_ex),
+		.illegal_instr_value_i(id_fpu_req_pkt.instr),
 		.csr_clint_data_i  (csr_clint_data),
 		.csr_clint_mtvec   (csr_clint_mtvec),
 		.csr_clint_mepc    (csr_clint_mepc),
@@ -1033,12 +1280,22 @@ import ydrasil_pkg::*;
 		.lsu_valid_i      (lsu_rf_wen_rd),
 		.lsu_waddr_i      (lsu_rf_waddr_rd),
 		.lsu_wdata_i      (lsu_wb_result),
+		.lsu_fp_valid_i   (lsu_fp_completion_valid),
+		.lsu_fp_waddr_i   (lsu_fp_completion_addr),
+		.lsu_fp_wdata_i   (lsu_fp_completion_data),
 		.mul_issue_valid_i(commit_mul_issue_valid_q),
 		.mul_issue_pc_i   (commit_mul_issue_pc_q),
 		.mul_issue_instr_i(commit_mul_issue_instr_q),
 		.mul_valid_i      (mul_rf_wen_rd),
 		.mul_waddr_i      (mul_rf_waddr_rd),
-		.mul_wdata_i      (mul_wb_result)
+		.mul_wdata_i      (mul_wb_result),
+		.fpu_issue_valid_i(commit_fpu_issue_valid_q),
+		.fpu_issue_pc_i   (commit_fpu_issue_pc_q),
+		.fpu_issue_instr_i(commit_fpu_issue_instr_q),
+		.fpu_valid_i      (fpu_result_consumed),
+		.fpu_result_fpr_i (fpu_result_fpr),
+		.fpu_waddr_i      (fpu_result_addr),
+		.fpu_wdata_i      (fpu_result)
 	);
 `endif
 
