@@ -7,8 +7,42 @@ RTT_ROOT = os.path.abspath(os.path.join(BSP_ROOT, '..', '..', 'rt-thread-5.2.2')
 sys.path.insert(0, os.path.join(RTT_ROOT, 'tools'))
 
 from building import *
+from SCons import SConsign
 
-TARGET = 'rtthread.elf'
+os.makedirs(rtconfig.OUTPUT_DIR, exist_ok=True)
+os.environ.setdefault('RTT_BUILD_DIR', os.path.join(rtconfig.OUTPUT_DIR, 'objects'))
+SConsign.File(os.path.join(rtconfig.OUTPUT_DIR, '.sconsign.dblite'))
+
+# RT-Thread 5.2.2's stock building.py uses fixed `build` and
+# `build/kernel` variant directories. Redirect those calls here so the
+# decompressed RT-Thread tree remains unmodified and all intermediates stay
+# with the selected application output.
+import inspect
+import building as _building
+
+_variant_root = os.path.abspath(os.environ['RTT_BUILD_DIR'])
+_sconscript = _building.SConscript
+
+
+def _redirect_variant_dir(script, *args, **kwargs):
+    variant_dir = kwargs.get('variant_dir')
+    if variant_dir == 'build':
+        kwargs['variant_dir'] = os.path.join(_variant_root, 'bsp')
+    elif variant_dir == 'build/kernel':
+        kwargs['variant_dir'] = os.path.join(_variant_root, 'kernel')
+    elif isinstance(variant_dir, str) and variant_dir.startswith('build/kernel/'):
+        suffix = variant_dir[len('build/kernel/'):]
+        kwargs['variant_dir'] = os.path.join(_variant_root, 'kernel', suffix)
+    if kwargs.get('exports') == 'remove_components':
+        caller = inspect.currentframe().f_back
+        kwargs['exports'] = {
+            'remove_components': caller.f_locals.get('remove_components', [])
+        }
+    return _sconscript(script, *args, **kwargs)
+
+
+_building.SConscript = _redirect_variant_dir
+TARGET = os.path.relpath(rtconfig.TARGET, BSP_ROOT)
 
 DefaultEnvironment(tools=[])
 env = Environment(AS=rtconfig.AS, ASFLAGS=rtconfig.AFLAGS,
@@ -23,8 +57,9 @@ Export('rtconfig')
 
 objects = PrepareBuilding(env, RTT_ROOT)
 DoBuilding(TARGET, objects)
-env.Depends(TARGET, os.path.join(BSP_ROOT, '..', 'link.lds'))
+Default(TARGET)
+env.Depends(TARGET, rtconfig.LINK_SCRIPT)
 env.Clean(TARGET, [
-    'rtthread.dump', 'rtthread_itcm.bin', 'rtthread_dtcm.bin',
-    'rtthread.itcm', 'rtthread.dtcm'
+    rtconfig.DUMP, rtconfig.ITCM_BIN, rtconfig.DTCM_BIN,
+    rtconfig.ITCM, rtconfig.DTCM, rtconfig.MAP
 ])

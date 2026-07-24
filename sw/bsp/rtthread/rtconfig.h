@@ -4,8 +4,6 @@
 #define SOC_YDRASIL
 #define ARCH_RISCV
 #define ARCH_RISCV32
-#define ARCH_RISCV_FPU
-#define ARCH_RISCV_FPU_S
 
 #define RT_CPUS_NR 1
 #define RT_NAME_MAX 16
@@ -51,5 +49,9 @@
 #define UTEST_THR_PRIORITY 20
 
 #define BSP_USING_SIM_CONSOLE
+
+#ifdef RTT_COREMARK_BUILD
+#define BSP_USING_COREMARK
+#endif
 
 #endif

@@ -27,6 +27,7 @@ _start:
 # data_copy_end:
 
 	//       清零.bss段
+	#ifndef RTOS_RTTHREAD
 	la       a0, __bss_start // a0 = .bss段起始地址
 	la       a1, _end // a1 = .bss段结束地址
 	bgeu     a0, a1, bss_clear_end // 如果a0 >= a1，跳转到bss_clear_end
@@ -35,6 +36,7 @@ bss_clear_loop:
 	addi     a0, a0, 4
 	bltu     a0, a1, bss_clear_loop // 如果a0 < a1，继续循环
 bss_clear_end:
+#endif
 
 	//       设置异常和中断入口地址
 #ifdef RTOS_RTTHREAD

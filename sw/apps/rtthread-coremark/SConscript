@@ -1,0 +1,57 @@
+import os
+
+from building import *
+
+
+app_root = GetCurrentDir()
+sw_root = os.path.abspath(os.path.join(app_root, '..', '..'))
+coremark_root = os.path.join(sw_root, 'coremark')
+bsp_root = os.path.join(sw_root, 'bsp')
+build_root = os.path.abspath(os.getenv('RTT_BUILD_DIR', 'build'))
+app_variant_root = os.path.join(build_root, 'app-sources')
+coremark_variant = os.path.join(app_variant_root, 'coremark')
+bsp_lib_variant = os.path.join(app_variant_root, 'bsp-lib')
+
+VariantDir(coremark_variant, coremark_root, duplicate=0)
+VariantDir(bsp_lib_variant, os.path.join(bsp_root, 'lib'), duplicate=0)
+
+core_sources = [
+    os.path.join(coremark_variant, name + '.c')
+    for name in ('core_list_join', 'core_main', 'core_matrix',
+                 'core_state', 'core_util')
+]
+sources = core_sources + [
+    os.path.join(coremark_variant, 'simple', 'core_portme.c'),
+    os.path.join(bsp_lib_variant, 'sim_ctrl.c'),
+    os.path.join(bsp_lib_variant, 'xprintf.c'),
+]
+
+profile = os.getenv('RTT_APP_PROFILE',
+                    os.getenv('RTT_COREMARK_PROFILE', 'custom'))
+iterations = int(os.getenv('RTT_APP_ITERATIONS',
+                           os.getenv('RTT_COREMARK_ITERATIONS', '1')))
+
+defines = [
+    ('ITERATIONS', iterations),
+    ('PERFORMANCE_RUN', 1),
+    ('COREMARK_IGNORE_10S_ERROR', 1),
+    ('HAS_FLOAT', 1),
+    ('MAIN_HAS_NORETURN', 0),
+    ('FLAGS_STR', '\\"RT-Thread-' + profile + '\\"'),
+]
+
+group = DefineGroup(
+    'RT-Thread App: CoreMark',
+    sources,
+    depend=[''],
+    CPPPATH=[
+        app_root,
+        sw_root,
+        coremark_root,
+        os.path.join(coremark_root, 'simple'),
+        os.path.join(bsp_root, 'include'),
+    ],
+    CPPDEFINES=defines,
+)
+
+Return('group')

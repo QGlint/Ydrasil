@@ -298,7 +298,7 @@ $(error Unsupported SYN_PLL_FREQ_MHZ=$(SYN_PLL_FREQ_MHZ); supported values: $(SY
 endif
 
 .PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests regression regression_all regression_status regression_stop regression_clean regression_sort regression_sort_opt regression_suite_coverage_merge regression_coverage_report init install-bender get_spike download_and_extract_spike check_spike_prebuilt_abi build_spike_from_source check_deps spike spike_wave_to_csv sim_compare commit_check commit_spike_csv commit_hw_trace commit_hw_csv commit_compare rv_test_comp_genmem ppa_rvtest_report ppa_perf_report coe_simple coe_smoke coe_smoke_led coe_isa_probes coverage_all coverage_all_run coverage_quick coverage_closure coverage_closure_merge coverage_clean coverage_report sw_boundary_test sw_coverage sw_coverage_clean sw_run_mode sw_coverage_report
-.PHONY: coremark coremark_sim coremark_run coremark_result coremark-rebuild coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map coremark_opt_all coremark_opt_build_all coremark_opt_sim_all coremark_opt_report coremark_opt_clean app_opt_comp_expanded_if_needed $(COREMARK_OPT_BUILD_TARGETS) $(COREMARK_OPT_SIM_TARGETS) sort_app sort_all sort_sim_all sort_report sort_app_sim sort_app-rebuild sort_app-clean sort_opt_all sort_opt_build_all sort_opt_sim_all sort_opt_report sort_opt_clean $(SORT_OPT_BUILD_TARGETS) $(SORT_OPT_SIM_TARGETS) boundary_app boundary_all boundary_sim_all boundary_report boundary_app-rebuild boundary_app-clean boundary_opt_all boundary_opt_build_all boundary_opt_sim_all boundary_opt_report boundary_opt_clean $(BOUNDARY_OPT_BUILD_TARGETS) $(BOUNDARY_OPT_SIM_TARGETS) coe_loop2_gen coe_loop5 coe_loop5_gen coe_loop_lina coe_loop_lina_gen loop_lina coe_MFlina coe_MFlina_gen coe_mflina coe_mflina_gen
+.PHONY: coremark coremark_sim coremark_run coremark_result coremark-rebuild coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map coremark_opt_all coremark_opt_build_all coremark_opt_sim_all coremark_opt_report coremark_opt_clean $(COREMARK_OPT_BUILD_TARGETS) $(COREMARK_OPT_SIM_TARGETS) sort_app sort_all sort_sim_all sort_report sort_app_sim sort_app-rebuild sort_app-clean sort_opt_all sort_opt_build_all sort_opt_sim_all sort_opt_report sort_opt_clean $(SORT_OPT_BUILD_TARGETS) $(SORT_OPT_SIM_TARGETS) boundary_app boundary_all boundary_sim_all boundary_report boundary_app-rebuild boundary_app-clean boundary_opt_all boundary_opt_build_all boundary_opt_sim_all boundary_opt_report boundary_opt_clean $(BOUNDARY_OPT_BUILD_TARGETS) $(BOUNDARY_OPT_SIM_TARGETS) coe_loop2_gen coe_loop5 coe_loop5_gen coe_loop_lina coe_loop_lina_gen loop_lina coe_MFlina coe_MFlina_gen coe_mflina coe_mflina_gen rtthread rtthread-clean rtthread-coremark rtthread-coremark-clean
 .PHONY: riscv_dv_venv riscv_dv_model riscv_dv_prepare riscv_dv_run riscv_dv_random riscv_dv_random_status riscv_dv_regression riscv_dv_count riscv_dv_repro riscv_dv_estimate riscv_dv_stop riscv_dv_coverage_report riscv_dv_cleanup riscv_dv_distclean
 .PHONY: syn synf syn225 syn240 syn250 synf-board syn-extreme syn-venv syn-prep syn-stage-xpr syn-stage-memory syn-vivado syn-analyze syn-clean
 
@@ -1031,6 +1031,18 @@ coremark:
 
 coremark-rebuild:
 	@$(MAKE) -C sw coremark-rebuild $(COREMARK_SW_MAKE_ARGS)
+
+rtthread:
+	@$(MAKE) -C sw rtthread
+
+rtthread-clean:
+	@$(MAKE) -C sw rtthread-clean
+
+rtthread-coremark:
+	@$(MAKE) -C sw rtthread-coremark-build
+
+rtthread-coremark-clean:
+	@$(MAKE) -C sw rtthread-coremark-clean
 
 coremark_sim: coremark comp
 	@set +e; \

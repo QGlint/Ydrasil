@@ -1,6 +1,18 @@
+import os
 from building import *
 
 cwd = GetCurrentDir()
-group = DefineGroup('Applications', ['main.c'], depend=[''], CPPPATH=[cwd])
+sw_root = os.path.abspath(os.path.join(cwd, '..', '..', '..'))
+app_name = os.getenv('RTT_APP', 'default')
+
+if app_name in ('', 'default'):
+    group = DefineGroup('Applications', ['main.c'], depend=[''], CPPPATH=[cwd])
+else:
+    app_root = os.path.join(sw_root, 'apps', app_name)
+    app_script = os.path.join(app_root, 'SConscript')
+    if not os.path.isfile(app_script):
+        raise RuntimeError(
+            'RTT_APP=%s has no application manifest: %s' % (app_name, app_script))
+    group = SConscript(app_script)
 
 Return('group')

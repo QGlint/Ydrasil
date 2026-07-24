@@ -93,8 +93,14 @@ static void xput_float(double val, unsigned int width, unsigned int precision, u
 	} cvt;
 
 	cvt.d = val;
+	/* RISC-V targets in this tree are little-endian. */
+#if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
 	hi = cvt.w[0];
 	lo = cvt.w[1];
+#else
+	hi = cvt.w[1];
+	lo = cvt.w[0];
+#endif
 	neg = hi >> 31;
 	exp_bits = (hi >> 20) & 0x7ff;
 	mant = ((unsigned long long)(hi & 0xfffff) << 32) | lo;

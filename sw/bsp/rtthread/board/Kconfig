@@ -4,7 +4,6 @@ config SOC_YDRASIL
     bool
     default y
     select ARCH_RISCV32
-    select ARCH_RISCV_FPU_S
 
 config BSP_USING_SIM_CONSOLE
     bool "Use the 0x80200060 simulation output register"
@@ -33,5 +32,12 @@ config BSP_USING_PLIC
     help
         Enable only after the PLIC and machine-external interrupt path are
         connected in hardware.
+
+config BSP_USING_COREMARK
+    bool "Build CoreMark as the RT-Thread main application"
+    default n
+    help
+        This option is selected by the BSP Makefile benchmark targets. CoreMark
+        itself is an integer workload and does not require the FPU.
 
 endmenu

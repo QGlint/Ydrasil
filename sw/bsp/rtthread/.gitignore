@@ -8,3 +8,10 @@ rtthread_dtcm.bin
 rtthread.itcm
 rtthread.dtcm
 __pycache__/
+*.elf
+*.bin
+*.dump
+*.map
+*.itcm
+*.dtcm
+*.o

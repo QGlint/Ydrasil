@@ -97,6 +97,37 @@ BSP_C_SRCS := \
 	$(BSP_DIR)/lib/sim_ctrl.c \
 	$(BSP_DIR)/lib/syscalls.c \
 	$(BSP_DIR)/lib/xprintf.c
+
+# RT-Thread applications use the same software entry point as the other
+# programs in this directory.  The BSP remains responsible for board/kernel
+# integration; an application supplies only its own SConscript manifest.
+rtthread_abs = $(abspath $(if $(filter /%,$(1)),$(1),$(PROJECT_ROOT)/$(1)))
+RTTHREAD_BSP_DIR := $(PROJECT_ROOT)/sw/bsp/rtthread
+RTTHREAD_SCONS ?= $(if $(strip $(SCONS)),$(SCONS),scons)
+RTTHREAD_JOBS ?= $(shell nproc 2>/dev/null || echo 1)
+RTTHREAD_APP ?= default
+RTTHREAD_PROFILE ?= custom
+RTTHREAD_OPT ?= -Os
+RTTHREAD_ITERATIONS ?= 1
+RTTHREAD_OUTPUT_DIR ?= $(PROJECT_ROOT)/build/app/rtthread
+RTTHREAD_OUTPUT_BASENAME ?= rtthread
+RTTHREAD_LINKER ?= $(BSP_LINKER_SCRIPT)
+RTTHREAD_BUILD_DIR ?= $(RTTHREAD_OUTPUT_DIR)/objects
+RTTHREAD_SCONS_ARGS ?=
+override RTTHREAD_OUTPUT_DIR := $(call rtthread_abs,$(RTTHREAD_OUTPUT_DIR))
+override RTTHREAD_LINKER := $(call rtthread_abs,$(RTTHREAD_LINKER))
+override RTTHREAD_BUILD_DIR := $(call rtthread_abs,$(RTTHREAD_BUILD_DIR))
+
+RTTHREAD_COREMARK_PROFILES ?= Os O2 O3
+RTTHREAD_COREMARK_OPT_Os := -Os
+RTTHREAD_COREMARK_OPT_O2 := -O2
+RTTHREAD_COREMARK_OPT_O3 := -O3
+RTTHREAD_COREMARK_OUTPUT_ROOT ?= $(PROJECT_ROOT)/build/app/rtthread-coremark
+RTTHREAD_COREMARK_LINKER ?= $(RTTHREAD_COREMARK_OUTPUT_ROOT)/itcm-64K.lds
+RTTHREAD_COREMARK_ITERATIONS ?= 1
+override RTTHREAD_COREMARK_OUTPUT_ROOT := $(call rtthread_abs,$(RTTHREAD_COREMARK_OUTPUT_ROOT))
+override RTTHREAD_COREMARK_LINKER := $(call rtthread_abs,$(RTTHREAD_COREMARK_LINKER))
+RTTHREAD_COREMARK_BUILD_TARGETS := $(addprefix rtthread-coremark-build-,$(RTTHREAD_COREMARK_PROFILES))
 COREMARK_C_SRCS := \
 	$(COREMARK_DIR)/core_list_join.c \
 	$(COREMARK_DIR)/core_main.c \
@@ -399,3 +430,53 @@ boundary_app-rebuild: boundary_app-clean
 
 boundary_app-clean:
 	rm -rf $(BOUNDARY_APP_OUT)
+
+.PHONY: rtthread rtthread-build rtthread-clean rtthread-coremark \
+	rtthread-coremark-build rtthread-coremark-build-all rtthread-coremark-clean \
+	$(RTTHREAD_COREMARK_BUILD_TARGETS)
+
+rtthread: rtthread-build
+
+rtthread-build:
+	@mkdir -p "$(RTTHREAD_OUTPUT_DIR)"
+	@cd "$(RTTHREAD_BSP_DIR)" && \
+		PYTHONDONTWRITEBYTECODE=1 \
+		RTT_APP="$(RTTHREAD_APP)" \
+		RTT_APP_PROFILE="$(RTTHREAD_PROFILE)" \
+		RTT_APP_ITERATIONS="$(RTTHREAD_ITERATIONS)" \
+		RTT_OPT="$(RTTHREAD_OPT)" \
+		RTT_OUTPUT_DIR="$(RTTHREAD_OUTPUT_DIR)" \
+		RTT_OUTPUT_BASENAME="$(RTTHREAD_OUTPUT_BASENAME)" \
+		RTT_LINKER="$(RTTHREAD_LINKER)" \
+		RTT_BUILD_DIR="$(RTTHREAD_BUILD_DIR)" \
+		$(RTTHREAD_SCONS) -j$(RTTHREAD_JOBS) $(RTTHREAD_SCONS_ARGS)
+
+rtthread-clean:
+	rm -rf "$(RTTHREAD_OUTPUT_DIR)"
+
+rtthread-coremark: rtthread-coremark-build
+
+rtthread-coremark-build: rtthread-coremark-build-all
+
+rtthread-coremark-build-all: $(RTTHREAD_COREMARK_BUILD_TARGETS)
+
+$(RTTHREAD_COREMARK_LINKER): $(BSP_LINKER_SCRIPT)
+	@mkdir -p "$(dir $@)"
+	@sed 's/LENGTH = 16K/LENGTH = 64K/' "$<" > "$@"
+	@grep -q 'LENGTH = 64K' "$@"
+
+define RTTHREAD_COREMARK_BUILD_template
+rtthread-coremark-build-$(1): $(RTTHREAD_COREMARK_LINKER)
+	@$(MAKE) --no-print-directory rtthread \
+		RTTHREAD_APP=rtthread-coremark \
+		RTTHREAD_PROFILE=$(1) \
+		RTTHREAD_OPT="$(RTTHREAD_COREMARK_OPT_$(1))" \
+		RTTHREAD_ITERATIONS=$(RTTHREAD_COREMARK_ITERATIONS) \
+		RTTHREAD_OUTPUT_DIR="$(RTTHREAD_COREMARK_OUTPUT_ROOT)/$(1)" \
+		RTTHREAD_OUTPUT_BASENAME=rtthread_coremark \
+		RTTHREAD_LINKER="$(RTTHREAD_COREMARK_LINKER)"
+endef
+$(foreach profile,$(RTTHREAD_COREMARK_PROFILES),$(eval $(call RTTHREAD_COREMARK_BUILD_template,$(profile))))
+
+rtthread-coremark-clean:
+	rm -rf "$(RTTHREAD_COREMARK_OUTPUT_ROOT)"
