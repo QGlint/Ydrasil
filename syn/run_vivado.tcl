@@ -436,7 +436,12 @@ proc open_impl_design {run_name checkpoint_dir} {
     }
     set run_dir [get_property DIRECTORY $run_obj]
     set top_name [get_property top [get_filesets sources_1]]
-    set candidates [list [file join $run_dir "${top_name}_routed.dcp"]]
+    # ExplorePostRoutePhysOpt writes a legal optimized checkpoint after route.
+    # Prefer it when present so sweep selection and final reports describe the
+    # implementation that is actually used to produce the bitstream.
+    set candidates [list \
+        [file join $run_dir "${top_name}_postroute_physopt.dcp"] \
+        [file join $run_dir "${top_name}_routed.dcp"]]
     if {$run_name eq "impl_1" && $checkpoint_dir ne ""} {
         lappend candidates [file join $checkpoint_dir "impl_1_route.dcp"]
     }
@@ -454,6 +459,54 @@ proc open_impl_design {run_name checkpoint_dir} {
     }
 
     error "could not open $run_name ($msg) and no routed checkpoint found in: $candidates"
+}
+
+proc improve_post_route_timing {checkpoint_dir target_wns max_attempts} {
+    set worst [get_timing_paths -quiet -setup -max_paths 1 -nworst 1]
+    if {[llength $worst] == 0} {
+        error "post-route design has no setup timing path"
+    }
+
+    set initial_wns [get_property SLACK [lindex $worst 0]]
+    puts "Post-route timing before iterative physopt: WNS=$initial_wns ns"
+    if {double($initial_wns) > double($target_wns)} {
+        return $initial_wns
+    }
+
+    set source_dcp [file join $checkpoint_dir pre_iter_physopt_route.dcp]
+    set best_dcp [file join $checkpoint_dir best_iter_physopt_route.dcp]
+    write_checkpoint -force $source_dcp
+    set best_wns $initial_wns
+    file copy -force $source_dcp $best_dcp
+    close_design
+
+    for {set attempt 0} {$attempt < $max_attempts} {incr attempt} {
+        open_checkpoint $source_dcp
+        puts "Post-route iterative physopt attempt [expr {$attempt + 1}]/$max_attempts"
+        phys_opt_design -directive AggressiveExplore
+        set worst [get_timing_paths -quiet -setup -max_paths 1 -nworst 1]
+        if {[llength $worst] == 0} {
+            close_design
+            error "iterative physopt produced no setup timing path"
+        }
+        set wns [get_property SLACK [lindex $worst 0]]
+        puts "Post-route iterative physopt attempt [expr {$attempt + 1}] WNS=$wns ns"
+        if {double($wns) > double($best_wns)} {
+            set best_wns $wns
+            write_checkpoint -force $best_dcp
+        }
+        close_design
+        if {double($best_wns) > double($target_wns)} {
+            break
+        }
+    }
+
+    open_checkpoint $best_dcp
+    if {double($best_wns) <= double($target_wns)} {
+        error "post-route WNS $best_wns ns does not meet strict target > $target_wns ns"
+    }
+    puts "Post-route iterative physopt accepted: WNS=$best_wns ns"
+    return $best_wns
 }
 
 if {[lsearch -exact $argv "-help"] >= 0 || [lsearch -exact $argv "--help"] >= 0} {
@@ -664,6 +717,10 @@ if {[llength $impl_run_obj] > 0} {
 }
 
 open_impl_design $best_impl_run $checkpoint_dir
+set final_wns [improve_post_route_timing $checkpoint_dir -0.100 4]
+set best_fp [open [file join $report_dir best_implementation.txt] a]
+puts $best_fp "iterative_physopt_wns_ns=$final_wns"
+close $best_fp
 report_if_possible "post-route timing summary" \
     "report_timing_summary -delay_type max -max_paths $timing_summary_max_paths -report_unconstrained -check_timing_verbose -file [file join $report_dir post_route_timing_summary.rpt]"
 report_if_possible "post-route violating timing paths" \
@@ -692,6 +749,9 @@ report_if_possible "QoR suggestions" \
 write_checkpoint -force [file join $checkpoint_dir best_impl_route.dcp]
 if {$enable_ila} {
     write_debug_probes -force [file join $impl_run_dir "${top_name}.ltx"]
+}
+if {$run_to eq "bitstream"} {
+    write_bitstream -force [file join $impl_run_dir "${top_name}.bit"]
 }
 archive_run_artifacts $best_impl_run $artifact_dir $pll_freq_mhz $run_to $report_dir $checkpoint_dir $impl_run_dir $top_name
 

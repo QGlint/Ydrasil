@@ -7,7 +7,7 @@ import ydrasil_pkg::*;
 
     input wire clk,
     input wire rst_n,
-    input wire [1:0] instret_inc_count_i,
+    input wire [2:0] instret_inc_count_i,
 
     // form ex
     input wire                          ex_csr_wen_i,     // ex模块写寄存器标志

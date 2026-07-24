@@ -6,3 +6,5 @@ tools/
 spec/
 spec
 __pycache__/
+*.log
+*.jou

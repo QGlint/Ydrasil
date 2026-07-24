@@ -6,7 +6,17 @@ module itcm #(
     input wire                  clk,
     input wire                  itcm_en,
     input wire [ITCM_ADDR_WIDTH-1:0]           itcm_addr,
-    output wire [INST_DATA_WIDTH-1:0]          itcm_data_o
+    output wire [INST_DATA_WIDTH-1:0]          itcm_data_o,
+    input wire                  itcm_en1,
+    input wire [ITCM_ADDR_WIDTH-1:0]           itcm_addr1,
+    output wire [INST_DATA_WIDTH-1:0]          itcm_data1_o
+);
+
+IROM u_IROM1 (
+  .clka(clk),
+  .ena(itcm_en1),
+  .addra(itcm_addr1),
+  .douta(itcm_data1_o)
 );
 
 
