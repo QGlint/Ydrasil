@@ -128,6 +128,11 @@ RTTHREAD_COREMARK_ITERATIONS ?= 1
 override RTTHREAD_COREMARK_OUTPUT_ROOT := $(call rtthread_abs,$(RTTHREAD_COREMARK_OUTPUT_ROOT))
 override RTTHREAD_COREMARK_LINKER := $(call rtthread_abs,$(RTTHREAD_COREMARK_LINKER))
 RTTHREAD_COREMARK_BUILD_TARGETS := $(addprefix rtthread-coremark-build-,$(RTTHREAD_COREMARK_PROFILES))
+RTTHREAD_UTEST_OPT ?= -Os
+RTTHREAD_UTEST_OUTPUT_ROOT ?= $(PROJECT_ROOT)/build/app/rtthread-utest
+RTTHREAD_UTEST_LINKER ?= $(RTTHREAD_UTEST_OUTPUT_ROOT)/itcm-64K.lds
+override RTTHREAD_UTEST_OUTPUT_ROOT := $(call rtthread_abs,$(RTTHREAD_UTEST_OUTPUT_ROOT))
+override RTTHREAD_UTEST_LINKER := $(call rtthread_abs,$(RTTHREAD_UTEST_LINKER))
 COREMARK_C_SRCS := \
 	$(COREMARK_DIR)/core_list_join.c \
 	$(COREMARK_DIR)/core_main.c \
@@ -433,6 +438,7 @@ boundary_app-clean:
 
 .PHONY: rtthread rtthread-build rtthread-clean rtthread-coremark \
 	rtthread-coremark-build rtthread-coremark-build-all rtthread-coremark-clean \
+	rtthread-utest rtthread-utest-build rtthread-utest-clean \
 	$(RTTHREAD_COREMARK_BUILD_TARGETS)
 
 rtthread: rtthread-build
@@ -480,3 +486,22 @@ $(foreach profile,$(RTTHREAD_COREMARK_PROFILES),$(eval $(call RTTHREAD_COREMARK_
 
 rtthread-coremark-clean:
 	rm -rf "$(RTTHREAD_COREMARK_OUTPUT_ROOT)"
+
+rtthread-utest: rtthread-utest-build
+
+rtthread-utest-build: $(RTTHREAD_UTEST_LINKER)
+	@$(MAKE) --no-print-directory rtthread \
+		RTTHREAD_APP=rtthread-utest \
+		RTTHREAD_PROFILE=utest \
+		RTTHREAD_OPT="$(RTTHREAD_UTEST_OPT)" \
+		RTTHREAD_OUTPUT_DIR="$(RTTHREAD_UTEST_OUTPUT_ROOT)" \
+		RTTHREAD_OUTPUT_BASENAME=rtthread_utest \
+		RTTHREAD_LINKER="$(RTTHREAD_UTEST_LINKER)"
+
+$(RTTHREAD_UTEST_LINKER): $(BSP_LINKER_SCRIPT)
+	@mkdir -p "$(dir $@)"
+	@sed 's/LENGTH = 16K/LENGTH = 64K/' "$<" > "$@"
+	@grep -q 'LENGTH = 64K' "$@"
+
+rtthread-utest-clean:
+	rm -rf "$(RTTHREAD_UTEST_OUTPUT_ROOT)"

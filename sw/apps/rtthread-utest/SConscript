@@ -1,0 +1,23 @@
+import os
+
+from building import *
+
+
+app_root = GetCurrentDir()
+sw_root = os.path.abspath(os.path.join(app_root, '..', '..'))
+rtt_root = os.path.join(sw_root, 'rt-thread-5.2.2')
+utest_root = os.path.join(rtt_root, 'components', 'utilities', 'utest')
+board_root = os.path.join(sw_root, 'bsp', 'rtthread', 'board')
+build_root = os.path.abspath(os.getenv('RTT_BUILD_DIR', 'build'))
+app_variant = os.path.join(build_root, 'app-sources', 'rtthread-utest')
+
+VariantDir(app_variant, app_root, duplicate=0)
+
+group = DefineGroup(
+    'RT-Thread Utest smoke application',
+    [os.path.join(app_variant, 'main.c')],
+    depend=[''],
+    CPPPATH=[app_root, board_root, utest_root],
+)
+
+Return('group')

@@ -17,6 +17,23 @@ The canonical software entry point is `sw/Makefile`:
 make -C sw rtthread
 ```
 
+The repository-root Makefile exposes the same individual actions:
+
+```sh
+make rtthread-coremark-build
+make rtthread-coremark-sim
+make rtthread-coremark-report
+make rtthread-coremark-compare
+make rtthread-utest-build
+make rtthread-utest-sim
+make rtthread-utest-report
+```
+
+`rtthread-coremark-report` appends the RT-Thread single-iteration results and
+their bare-metal deltas to `build/PPA/coremark_opt_summary.log`. The Utest
+smoke run writes `build/PPA/rtthread_utest_summary.log` and returns failure if
+the testcase does not emit `RT_UTEST PASS`.
+
 The direct SCons command remains useful for BSP bring-up, but application
 builds should normally go through `sw/Makefile` so all software programs use
 the same output and toolchain rules.

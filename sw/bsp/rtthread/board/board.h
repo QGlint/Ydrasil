@@ -4,10 +4,12 @@
 #include <stdint.h>
 
 #define YDRASIL_SIM_STDOUT_REG 0x80200060UL
+#define YDRASIL_SIM_END_REG    0x80200040UL
 #define YDRASIL_UART0_BASE     0x84004000UL
 #define YDRASIL_CLINT_BASE     0x02000000UL
 #define YDRASIL_TIMER_FREQ_HZ  100000000UL
 
 void ydrasil_tick_init(void);
+void ydrasil_sim_end(void);
 
 #endif

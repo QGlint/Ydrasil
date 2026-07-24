@@ -27,6 +27,11 @@ void rt_hw_console_output(const char *str)
 #endif
 }
 
+void ydrasil_sim_end(void)
+{
+    *(volatile uint32_t *)YDRASIL_SIM_END_REG = 1;
+}
+
 void rt_hw_board_init(void)
 {
     rt_hw_interrupt_init();
