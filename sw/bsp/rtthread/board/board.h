@@ -1,0 +1,13 @@
+#ifndef YDRASIL_RTTHREAD_BOARD_H
+#define YDRASIL_RTTHREAD_BOARD_H
+
+#include <stdint.h>
+
+#define YDRASIL_SIM_STDOUT_REG 0x80200060UL
+#define YDRASIL_UART0_BASE     0x84004000UL
+#define YDRASIL_CLINT_BASE     0x02000000UL
+#define YDRASIL_TIMER_FREQ_HZ  100000000UL
+
+void ydrasil_tick_init(void);
+
+#endif

@@ -1,0 +1,8 @@
+from building import *
+
+objects = []
+objects += SConscript('applications/SConscript')
+objects += SConscript('board/SConscript')
+objects += SConscript('drivers/SConscript')
+
+Return('objects')

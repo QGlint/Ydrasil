@@ -1,0 +1,30 @@
+import os
+import sys
+
+BSP_ROOT = os.path.abspath(os.getcwd())
+RTT_ROOT = os.path.abspath(os.path.join(BSP_ROOT, '..', '..', 'rt-thread-5.2.2'))
+
+sys.path.insert(0, os.path.join(RTT_ROOT, 'tools'))
+
+from building import *
+
+TARGET = 'rtthread.elf'
+
+DefaultEnvironment(tools=[])
+env = Environment(AS=rtconfig.AS, ASFLAGS=rtconfig.AFLAGS,
+                  CC=rtconfig.CC, CFLAGS=rtconfig.CFLAGS,
+                  CXX=rtconfig.CXX, CXXFLAGS=rtconfig.CXXFLAGS,
+                  AR=rtconfig.AR, ARFLAGS='-rc',
+                  LINK=rtconfig.LINK, LINKFLAGS=rtconfig.LFLAGS)
+env.PrependENVPath('PATH', rtconfig.EXEC_PATH)
+
+Export('RTT_ROOT')
+Export('rtconfig')
+
+objects = PrepareBuilding(env, RTT_ROOT)
+DoBuilding(TARGET, objects)
+env.Depends(TARGET, os.path.join(BSP_ROOT, '..', 'link.lds'))
+env.Clean(TARGET, [
+    'rtthread.dump', 'rtthread_itcm.bin', 'rtthread_dtcm.bin',
+    'rtthread.itcm', 'rtthread.dtcm'
+])

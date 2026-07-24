@@ -1,0 +1,12 @@
+mainmenu "RT-Thread Configuration"
+
+config BSP_DIR
+    string
+    option env="BSP_ROOT"
+
+config RTT_DIR
+    string
+    option env="RTT_ROOT"
+
+source "$RTT_DIR/Kconfig"
+source "$BSP_DIR/board/Kconfig"

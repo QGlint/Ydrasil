@@ -161,16 +161,14 @@ SECTIONS
   PROVIDE( _end = . );
   PROVIDE( end = . );
 
-  /* Reserve space for heap before stack */
-  . = . + 16K;  /* Reserve 16KB for heap */
-  PROVIDE( _heap_end = . );
+  /* Keep the runtime heap below a fixed stack at the top of DTCM. */
+  PROVIDE( _heap_start = _end );
+  PROVIDE( _sp = ORIGIN(dtcm) + LENGTH(dtcm) );
+  PROVIDE( __stack_top = _sp );
+  PROVIDE( __rt_rvstack = _sp );
+  PROVIDE( __stack_bottom = _sp - __stack_size );
+  PROVIDE( _heap_end = __stack_bottom );
 
-  .stack :
-  {
-    . = . + __stack_size;
-    PROVIDE( _sp = . );
-    __stack_top = .;
-    PROVIDE( __rt_rvstack = . );
-  } >dtcm AT>dtcm
+  ASSERT(_end <= _heap_end, "DTCM overflow: data/BSS overlaps the runtime stack")
 
 }
