@@ -27,8 +27,8 @@ import ydrasil_pkg::*;
     input  wire [DATA_WIDTH-1:0]           id_ex_pred_target_i,
     input  wire [1:0]                      id_ex_pred_counter_i,
     input  wire [DATA_WIDTH-1:0]           id_ex_pred_bht_index_i,
-    input  wire                            interrupt_i,
-    input  wire [INST_ADDR_WIDTH-1:0]      clint_ex_int_addr_i,
+    input  wire                            trap_redirect_i,
+    input  wire [INST_ADDR_WIDTH-1:0]      trap_redirect_addr_i,
 
     output wire                            ex_branch_jump_o,
     output wire [DATA_WIDTH-1:0]           ex_branch_target_o,
@@ -96,7 +96,7 @@ import ydrasil_pkg::*;
         (ex_bjp_bge  &  ex_branch_ge_signed) |
         (ex_bjp_bltu & !ex_branch_ge_unsigned) |
         (ex_bjp_bgeu &  ex_branch_ge_unsigned);
-    wire ex_branch_taken = ex_is_branch & ex_branch_jump & !interrupt_i;
+    wire ex_branch_taken = ex_is_branch & ex_branch_jump & !trap_redirect_i;
     wire ex_pred_taken = id_ex_pred_hit_i & id_ex_pred_taken_i;
     wire [DATA_WIDTH-1:0] ex_branch_actual_next_pc =
         ex_branch_taken ? ex_branch_target : ex_branch_next_pc;
@@ -106,13 +106,13 @@ import ydrasil_pkg::*;
     wire ex_branch_target_miss =
         ex_branch_taken & ex_pred_taken & (ex_branch_target != id_ex_pred_target_i);
     wire ex_branch_mispredict =
-        ex_is_branch & !interrupt_i &
+        ex_is_branch & !trap_redirect_i &
         (ex_branch_direction_miss | ex_branch_target_miss);
 
     wire ex_pc_redirect =
-        interrupt_i | (ex_is_jump & ex_branch_jump & !interrupt_i) | ex_branch_mispredict;
-    wire ex_direct_redirect = interrupt_i | ex_is_jump;
-    wire ex_bp_train_valid = ex_is_branch & !interrupt_i;
+        trap_redirect_i | (ex_is_jump & ex_branch_jump & !trap_redirect_i) | ex_branch_mispredict;
+    wire ex_direct_redirect = trap_redirect_i | ex_is_jump;
+    wire ex_bp_train_valid = ex_is_branch & !trap_redirect_i;
 
     reg                       ex2_branch_jump_q;
     reg [DATA_WIDTH-1:0]      ex2_branch_target_q;
@@ -194,8 +194,8 @@ import ydrasil_pkg::*;
             dbg_bp_mispredict_q <= 1'b0;
 `endif
         end else begin
-            ex2_branch_jump_q <= ex_branch_jump | interrupt_i;
-            ex2_branch_target_q <= interrupt_i ? clint_ex_int_addr_i : ex_jump_target;
+            ex2_branch_jump_q <= ex_branch_jump | trap_redirect_i;
+            ex2_branch_target_q <= trap_redirect_i ? trap_redirect_addr_i : ex_jump_target;
             ex2_pc_redirect_q <= ex_pc_redirect;
             ex2_direct_redirect_q <= ex_direct_redirect;
             ex2_branch_next_pc_q <= ex_branch_next_pc;

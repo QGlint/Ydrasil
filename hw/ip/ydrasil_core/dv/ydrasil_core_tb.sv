@@ -3,6 +3,7 @@
 parameter longint time_end = 100000; 
 
 module ydrasil_core_tb
+import ydrasil_pkg::*;
 (
 `ifdef VERILATOR_CC
     input clk,
@@ -49,11 +50,14 @@ end
 	logic        rst_n;
 `endif
 
-	logic [31:0] perip_addr;
-	logic        perip_wen;
-	logic [3:0]  perip_mask;
-	logic [31:0] perip_wdata;
-	logic [31:0] perip_rdata;
+		ydrasil_axi_lite_m2s_pkt_t axi_m2s;
+		ydrasil_axi_lite_s2m_pkt_t axi_s2m;
+		ydrasil_irq_pkt_t irq;
+		wire [31:0] perip_addr;
+		wire        perip_wen;
+		wire [3:0]  perip_mask;
+		wire [31:0] perip_wdata;
+		wire [31:0] perip_rdata;
 
     // 通用寄存器访问 - 仅用于错误信息显示
     wire [31:0] x3 = u_dut.u_ydrasil_registers.registers[3];
@@ -291,11 +295,9 @@ end
 	ydrasil_core u_dut (
 		.clk      (clk),
 		.rst_n    (rst_n),
-		.perip_addr (perip_addr),
-		.perip_wen  (perip_wen),
-		.perip_mask (perip_mask),
-		.perip_wdata(perip_wdata),
-		.perip_rdata(perip_rdata)
+		.axi_m2s_o (axi_m2s),
+		.axi_s2m_i (axi_s2m),
+		.irq_i     (irq)
 `ifndef SYNTHESIS
         ,.dbg_bp_predict_pc_o(dbg_bp_predict_pc)
         ,.dbg_bp_predict_hit_o(dbg_bp_predict_hit)
@@ -1193,7 +1195,13 @@ end
 	wire [39:0] virtual_seg_output;
 	wire [63:0] virtual_sw_input = 0;
 	wire [7:0]  virtual_key_input = 0;
-	wire        perip_req = u_dut.mmio_req;
+	wire        perip_req = u_mmio_subsystem.apb_req.psel &&
+		u_mmio_subsystem.apb_req.penable;
+	assign perip_addr = u_mmio_subsystem.apb_req.paddr;
+	assign perip_wen = perip_req && u_mmio_subsystem.apb_req.pwrite;
+	assign perip_mask = u_mmio_subsystem.apb_req.pstrb;
+	assign perip_wdata = u_mmio_subsystem.apb_req.pwdata;
+	assign perip_rdata = u_mmio_subsystem.apb_rsp.prdata;
 
 	initial begin
 		finish_on_led = !$test$plusargs("no_finish_on_led");
@@ -1204,15 +1212,14 @@ end
 		void'($value$plusargs("finish_pc=%h", finish_pc));
 	end
 
-	perip_bridge bridge_inst (
+	ydrasil_mmio_subsystem u_mmio_subsystem (
 		.clk                (clk),
 		.cnt_clk            (clk),
-		.rst                (rst),
-		.perip_addr         (perip_addr),
-		.perip_wdata        (perip_wdata),
-		.perip_wen          (perip_wen),
-		.perip_mask         (perip_mask),
-		.perip_rdata        (perip_rdata),
+		.rst_n              (rst_n),
+		.axi_m2s_i          (axi_m2s),
+		.axi_s2m_o          (axi_s2m),
+		.external_irq_i     (1'b0),
+		.irq_o              (irq),
 		.virtual_sw_input   (virtual_sw_input),
 		.virtual_key_input  (virtual_key_input),
 		.virtual_seg_output (virtual_seg_output),
@@ -1220,7 +1227,7 @@ end
 	);
 
 	assign LED = virtual_led_output;
-	assign seg_wdata = bridge_inst.seg_wdata;
+	assign seg_wdata = u_mmio_subsystem.u_perip_bridge.seg_wdata_q;
 
 	always_ff @(posedge clk) begin
 		if (rst) begin

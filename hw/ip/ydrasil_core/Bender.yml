@@ -25,10 +25,13 @@ sources:
       - rtl/ydrasil_bru.sv
       - rtl/ydrasil_ex_block.sv
       - rtl/ydrasil_load_store_unit.sv
+      - rtl/ydrasil_axi_lite_master.sv
+      - rtl/ydrasil_axi_to_apb.sv
       - rtl/ydrasil_mems.sv
       - rtl/ydrasil_wb_stage.sv
       - rtl/ydrasil_registers.sv
       - rtl/ydrasil_registers_csr.sv
+      - rtl/ydrasil_exception_ctrl.sv
       - rtl/ydrasil_clint.sv
       - rtl/ydrasil_ctrl.sv
       - rtl/ydrasil_core.sv
@@ -40,9 +43,11 @@ sources:
       - ../jyd_fpga/rtl/display_seg.sv
       - ../jyd_fpga/rtl/counter.sv
       - ../jyd_fpga/rtl/perip_bridge.sv
+      - ../jyd_fpga/rtl/ydrasil_mmio_subsystem.sv
       - dv/ydrasil_commit_trace.sv
       - dv/ydrasil_core_tb.sv
       - dv/ydrasil_branch_predictor_tb.sv
+      - dv/ydrasil_bus_irq_tb.sv
 
   - target: fpu
     include_dirs:

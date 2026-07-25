@@ -8,14 +8,10 @@ import ydrasil_pkg::*;
 		parameter int BHT_ENTRIES = (BP_ENTRIES != 0) ? BP_ENTRIES : ydrasil_pkg::BP_BHT_ENTRIES
 	)(
 	input  wire clk,
-	input  wire rst_n
-    
-    
-    ,output wire [31:0]  perip_addr,
-    output wire         perip_wen,
-	output wire [ 3:0]  perip_mask,
-    output wire [31:0]  perip_wdata,
-    input  wire [31:0]  perip_rdata
+	input  wire rst_n,
+	output ydrasil_axi_lite_m2s_pkt_t axi_m2s_o,
+	input  ydrasil_axi_lite_s2m_pkt_t axi_s2m_i,
+	input  ydrasil_irq_pkt_t          irq_i
 `ifndef SYNTHESIS
     ,output wire [31:0] dbg_bp_predict_pc_o
     ,output wire        dbg_bp_predict_hit_o
@@ -195,6 +191,7 @@ import ydrasil_pkg::*;
 	// LSU request path
 	ydrasil_mem_req_pkt_t       dtcm_req_pkt;
 	ydrasil_mem_req_pkt_t       mmio_req_pkt;
+	ydrasil_mem_rsp_pkt_t       mmio_rsp_pkt;
 	ydrasil_lsu_status_pkt_t    lsu_status_pkt;
 	wire [ydrasil_pkg::BUS_DATA_WIDTH-1:0]  dtcm_wdata;
 	wire [ydrasil_pkg::BUS_ADDR_WIDTH-1:0]  dtcm_addr;
@@ -357,19 +354,20 @@ import ydrasil_pkg::*;
 	wire                                          ex_csr_mstatus_wen;
 	wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0]       ex_csr_waddr;
 
-	// CSR <-> CLINT wires
-	wire                             clint_csr_we;
-	wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0]       clint_csr_waddr;
-	wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0]       clint_csr_raddr;
-	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]      clint_csr_wdata;
-	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]      csr_clint_data;
-	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]      csr_clint_mtvec;
-	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]      csr_clint_mepc;
-	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]      csr_clint_mstatus;
-	wire                             global_int_en;
+	// Trap control packets.  Compatibility aliases remain visible to the
+	// existing coverage testbench while new RTL uses the precise names.
+	ydrasil_exception_req_pkt_t  exception_req_pkt;
+	ydrasil_csr_trap_state_pkt_t trap_csr_state_pkt;
+	ydrasil_csr_write_pkt_t      trap_csr_write_pkt;
+	ydrasil_trap_ctrl_pkt_t      trap_ctrl_pkt;
 	wire                             interrupt;
+	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0]      trap_redirect_addr;
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0]      clint_ex_int_addr;
+	wire                             trap_stall;
 	wire                             clint_stall;
+	wire                             clint_csr_we;
+	wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0] clint_csr_waddr;
+	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] clint_csr_wdata;
 	wire [2:0]                       instret_inc_count;
 	wire                             dual_instret_inc;
 	wire [31:0]                      dual_operand_a;
@@ -722,10 +720,14 @@ import ydrasil_pkg::*;
 	assign rf_producer_tracked = wb_rf_producer_tracked;
 `endif
 
-	assign perip_addr = mmio_req_pkt.addr;
-	assign perip_wen = mmio_req_pkt.valid && mmio_req_pkt.write;
-	assign perip_mask = mmio_req_pkt.wmask;
-	assign perip_wdata = mmio_req_pkt.wdata;
+	assign interrupt = trap_ctrl_pkt.redirect;
+	assign trap_redirect_addr = trap_ctrl_pkt.redirect_addr;
+	assign trap_stall = trap_ctrl_pkt.stall;
+	assign clint_ex_int_addr = trap_redirect_addr;
+	assign clint_stall = trap_stall;
+	assign clint_csr_we = trap_csr_write_pkt.valid;
+	assign clint_csr_waddr = trap_csr_write_pkt.addr;
+	assign clint_csr_wdata = trap_csr_write_pkt.data;
 	assign instret_inc_count =
 		{2'b0, ex_instret_inc} + {2'b0, lsu_rf_wen_rd} +
 		{2'b0, mul_result_valid} + {2'b0, dual_instret_inc} +
@@ -738,13 +740,22 @@ import ydrasil_pkg::*;
 		.completion_bus_i  (completion_bus),
 		.dtcm_rdata_i      (dtcm_rdata),
 		.dtcm_req_o        (dtcm_req_pkt),
-		.mmio_rdata_i      (perip_rdata),
+		.mmio_rsp_i        (mmio_rsp_pkt),
 		.mmio_req_o        (mmio_req_pkt),
 		.status_o          (lsu_status_pkt),
 		.completion_o      (lsu_fwd_pkt),
 		.fp_completion_valid_o(lsu_fp_completion_valid),
 		.fp_completion_addr_o(lsu_fp_completion_addr),
 		.fp_completion_data_o(lsu_fp_completion_data)
+	);
+
+	ydrasil_axi_lite_master u_ydrasil_axi_lite_master (
+		.clk       (clk),
+		.rst_n     (rst_n),
+		.mem_req_i (mmio_req_pkt),
+		.mem_rsp_o (mmio_rsp_pkt),
+		.axi_m2s_o (axi_m2s_o),
+		.axi_s2m_i (axi_s2m_i)
 	);
 
 `ifdef YDRASIL_ENABLE_FPU
@@ -1024,8 +1035,8 @@ import ydrasil_pkg::*;
 		.id_ex_pred_target_i(id_ex_pred_target),
 		.id_ex_pred_counter_i(id_ex_pred_counter),
 		.id_ex_pred_bht_index_i(id_ex_pred_bht_index),
-		.interrupt_i        (interrupt),
-		.clint_ex_int_addr_i(clint_ex_int_addr),
+			.trap_redirect_i   (interrupt),
+			.trap_redirect_addr_i(trap_redirect_addr),
 		.id_rf_waddr_rd_i   (id_rf_waddr_rd),
 		.id_alu_rf_wen_rd_i (id_alu_rf_wen_rd),
 		.id_ex_producer_id_i(id_ex_producer_id),
@@ -1166,7 +1177,7 @@ import ydrasil_pkg::*;
 			.id_ctrl1_i        (id_ctrl_pkt1),
 			.completion_bus_i  (completion_bus),
 			.lsu_status_i      (lsu_status_pkt),
-			.clint_stall_i     (clint_stall),
+				.trap_stall_i      (trap_stall),
 			.ex_mul_stall_i     (ex_backend_stall),
 			.wb_backpressure_i  (wb_backpressure),
 			.rf_wen_rd_i       (rf_wen_rd),
@@ -1217,10 +1228,8 @@ import ydrasil_pkg::*;
 		.id_csr_raddr_i    (id_csr_raddr),
 		.ex_csr_waddr_i    (ex_csr_waddr),
 		.ex_csr_data_i     (ex_csr_wdata),
-		.clint_csr_we_i    (clint_csr_we),
-		.clint_csr_raddr_i (clint_csr_raddr),
-		.clint_csr_waddr_i (clint_csr_waddr),
-		.clint_csr_data_i  (clint_csr_wdata),
+			.trap_csr_write_i (trap_csr_write_pkt),
+			.irq_i            (irq_i),
 		.fp_flags_valid_i  (fpu_result_consumed),
 		.fp_flags_i        (fpu_result_fflags),
 		.fp_state_dirty_i  (fpu_result_consumed | lsu_fp_completion_valid |
@@ -1228,37 +1237,38 @@ import ydrasil_pkg::*;
 			 operator_type[OPERATOR_TYPE_STORE])),
 		.frm_o             (csr_frm),
 		.fp_enabled_o      (csr_fp_enabled),
-		.global_int_en_o   (global_int_en),
-		.csr_clint_data_o  (csr_clint_data),
-		.csr_clint_mtvec   (csr_clint_mtvec),
-		.csr_clint_mepc    (csr_clint_mepc),
-		.csr_clint_mstatus (csr_clint_mstatus),
-		.csr_ex_data_o     (csr_ex_rdata)
-	);
+			.trap_state_o     (trap_csr_state_pkt),
+			.csr_ex_data_o     (csr_ex_rdata)
+		);
 
-	ydrasil_clint u_clint (
-		.clk               (clk),
-		.rst_n             (rst_n),
-		.instr_addr_i       (id_instr_addr),
-		.ex_branch_jump_i       (ex_branch_jump),
-		.ex_branch_target_i       (ex_branch_target),
-        .sys_op_info_i      (id_op_sys_info),
-        .sys_op_i           (ex_accept_valid & operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS]), // 只要有任意
-		.illegal_instr_i   (fpu_illegal_ex),
-		.illegal_instr_value_i(id_fpu_req_pkt.instr),
-		.csr_clint_data_i  (csr_clint_data),
-		.csr_clint_mtvec   (csr_clint_mtvec),
-		.csr_clint_mepc    (csr_clint_mepc),
-		.csr_clint_mstatus (csr_clint_mstatus),
-		.global_int_en_i   (global_int_en),
-		.clint_stall_o     (clint_stall),
-		.clint_csr_we_o    (clint_csr_we),
-		.clint_csr_waddr_o (clint_csr_waddr),
-		.clint_csr_raddr_o (clint_csr_raddr),
-		.clint_csr_data_o  (clint_csr_wdata),
-		.interrupt_o        (interrupt),
-		.clint_ex_int_addr_o      (clint_ex_int_addr)
-	);
+	assign exception_req_pkt.valid =
+		(ex_accept_valid && operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS]) ||
+		fpu_illegal_ex;
+	assign exception_req_pkt.ecall = id_op_sys_info[ydrasil_pkg::OP_SYS_ECALL];
+	assign exception_req_pkt.ebreak = id_op_sys_info[ydrasil_pkg::OP_SYS_EBREAK];
+	assign exception_req_pkt.mret = id_op_sys_info[ydrasil_pkg::OP_SYS_MRET];
+	assign exception_req_pkt.illegal = fpu_illegal_ex;
+	assign exception_req_pkt.pc = id_instr_addr;
+	assign exception_req_pkt.tval = fpu_illegal_ex ? id_fpu_req_pkt.instr : 32'b0;
+
+	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] async_resume_pc =
+		dual_id_ex_valid ? (dual_id_ex_pc + 32'd4) :
+		id_ex_valid ? (id_instr_addr + 32'd4) : if_id_pc;
+	wire trap_backend_idle = lsu_status_pkt.idle && !(|gpr_pending_q) &&
+		!id_ex_valid && !dual_id_ex_valid && !ex_mul_stall &&
+		!wb_backpressure && !fpu_busy && !fpu_result_valid;
+
+		ydrasil_exception_ctrl u_exception_ctrl (
+			.clk               (clk),
+			.rst_n             (rst_n),
+			.exception_req_i   (exception_req_pkt),
+			.irq_i             (irq_i),
+			.csr_state_i       (trap_csr_state_pkt),
+			.backend_idle_i    (trap_backend_idle),
+			.async_pc_i        (async_resume_pc),
+			.csr_write_o       (trap_csr_write_pkt),
+			.trap_ctrl_o       (trap_ctrl_pkt)
+		);
 
 `ifndef SYNTHESIS
 	ydrasil_commit_trace u_ydrasil_commit_trace (

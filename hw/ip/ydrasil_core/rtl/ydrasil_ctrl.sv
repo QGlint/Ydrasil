@@ -11,7 +11,7 @@ import ydrasil_pkg::*;
     input ydrasil_id_ctrl_pkt_t id_ctrl1_i,
     input ydrasil_completion_bus_t completion_bus_i,
     input ydrasil_lsu_status_pkt_t lsu_status_i,
-    input wire clint_stall_i,
+    input wire trap_stall_i,
     input wire ex_mul_stall_i,
     input wire wb_backpressure_i,
     input wire rf_wen_rd_i,
@@ -454,7 +454,7 @@ import ydrasil_pkg::*;
     wire lsu_serialize_stall = id_ctrl_i.serialize_before && !lsu_status_i.idle;
     wire decode_bubble_stall = scoreboard_stall | lsu_struct_stall |
         lsu_serialize_stall |
-        producer_full_stall | clint_stall_i | wb_backpressure_i;
+        producer_full_stall | trap_stall_i | wb_backpressure_i;
 
     assign rf_write_commit_o = !rf_wen_rd_i || !rf_producer_tracked_i ||
         (latest_valid_q[rf_waddr_rd_i] &&

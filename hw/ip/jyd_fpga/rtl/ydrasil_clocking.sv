@@ -8,6 +8,11 @@ module ydrasil_clocking (
     output wire locked
 );
 
+`ifdef VERILATOR_SV
+    assign clk_50mhz = clk_in1_p;
+    assign cpu_clk = clk_in1_p;
+    assign locked = 1'b1;
+`else
 `ifdef SYN_PLL_FREQ_200
     localparam real MMCM_CLKFBOUT_MULT_F  = 5.000;
     localparam real MMCM_CLKOUT0_DIVIDE_F = 20.000;
@@ -126,5 +131,6 @@ module ydrasil_clocking (
         .O (cpu_clk),
         .I (cpu_clk_mmcm)
     );
+`endif
 
 endmodule

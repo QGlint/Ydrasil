@@ -7,6 +7,9 @@ RESULT_DIR := $(LOG_DIR)/test_results
 PPA_DIR ?= $(BUILD_DIR)/PPA
 PPA_RVTEST_LOG ?= $(PPA_DIR)/test_all_summary.log
 PPA_COREMARK_LOG ?= $(PPA_DIR)/coremark_summary.log
+BUS_IRQ_OBJ_DIR ?= $(BUILD_DIR)/ydrasil_bus_irq_tb$(if $(filter 1,$(VERILATOR_COVERAGE)),-coverage,)
+BUS_IRQ_COVERAGE_FILE ?= $(COVERAGE_DATA_DIR)/bus_irq.dat
+BUS_IRQ_TIMEOUT ?= 5000
 SORT_APP_DIR := $(PROJECT_ROOT)/sw/apps/sort
 SORT_APP_NAMES := $(sort $(basename $(notdir $(wildcard $(SORT_APP_DIR)/*.c))))
 SORT_SIM_TARGETS := $(addprefix sort_sim_,$(SORT_APP_NAMES))
@@ -183,6 +186,8 @@ COE_M3_DIR ?= $(BUILD_DIR)/fpga_coe_m3
 COE_TO_MEM ?= $(PROJECT_ROOT)/sw/coe_to_mem.pl
 COE_LOOP_PATCH ?= $(PROJECT_ROOT)/sw/make_m3_loop_variant.pl
 COE_LOOP_LINA_PATCH ?= $(PROJECT_ROOT)/sw/make_m3_loop_lina.pl
+COE_M3_IROM_SOURCE ?= $(PROJECT_ROOT)/FPGA/coe/irom_M3.coe
+COE_M3_DRAM_SOURCE ?= $(PROJECT_ROOT)/FPGA/coe/dram_M.coe
 COE_M3_ITCM ?= $(COE_M3_DIR)/irom_M3.itcm
 COE_M3_ITCM_BIN ?= $(COE_M3_DIR)/irom_M3_itcm.bin
 COE_M3_DTCM ?= $(COE_M3_DIR)/dram_M.dtcm
@@ -300,8 +305,8 @@ ifeq ($(filter $(SYN_PLL_FREQ_MHZ),$(SYN_PLL_SUPPORTED_FREQS)),)
 $(error Unsupported SYN_PLL_FREQ_MHZ=$(SYN_PLL_FREQ_MHZ); supported values: $(SYN_PLL_SUPPORTED_FREQS))
 endif
 
-.PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests regression regression_all regression_status regression_stop regression_clean regression_sort regression_sort_opt regression_suite_coverage_merge regression_coverage_report init install-bender get_spike download_and_extract_spike check_spike_prebuilt_abi build_spike_from_source check_deps spike spike_wave_to_csv sim_compare commit_check commit_spike_csv commit_hw_trace commit_hw_csv commit_compare rv_test_comp_genmem ppa_rvtest_report ppa_perf_report coe_simple coe_smoke coe_smoke_led coe_isa_probes coverage_all coverage_all_run coverage_quick coverage_closure coverage_closure_merge coverage_clean coverage_report sw_boundary_test sw_coverage sw_coverage_clean sw_run_mode sw_coverage_report
-.PHONY: coremark coremark_sim coremark_run coremark_result coremark-rebuild coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map coremark_opt_all coremark_opt_build_all coremark_opt_sim_all coremark_opt_report coremark_opt_clean $(COREMARK_OPT_BUILD_TARGETS) $(COREMARK_OPT_SIM_TARGETS) sort_app sort_all sort_sim_all sort_report sort_app_sim sort_app-rebuild sort_app-clean sort_opt_all sort_opt_build_all sort_opt_sim_all sort_opt_report sort_opt_clean $(SORT_OPT_BUILD_TARGETS) $(SORT_OPT_SIM_TARGETS) boundary_app boundary_all boundary_sim_all boundary_report boundary_app-rebuild boundary_app-clean boundary_opt_all boundary_opt_build_all boundary_opt_sim_all boundary_opt_report boundary_opt_clean $(BOUNDARY_OPT_BUILD_TARGETS) $(BOUNDARY_OPT_SIM_TARGETS) coe_loop2_gen coe_loop5 coe_loop5_gen coe_loop_lina coe_loop_lina_gen loop_lina coe_MFlina coe_MFlina_gen coe_mflina coe_mflina_gen rtthread rtthread-build rtthread-clean rtthread-coremark rtthread-coremark-build rtthread-coremark-build-all rtthread-coremark-sim rtthread-coremark-sim-all rtthread-coremark-report rtthread-coremark-compare rtthread-coremark-clean rtthread-utest rtthread-utest-build rtthread-utest-sim rtthread-utest-report rtthread-utest-clean $(RTTHREAD_COREMARK_PROFILE_BUILD_TARGETS) $(RTTHREAD_COREMARK_PROFILE_SIM_TARGETS)
+.PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests regression regression_all regression_status regression_stop regression_clean regression_sort regression_sort_opt regression_suite_coverage_merge regression_coverage_report init install-bender get_spike download_and_extract_spike check_spike_prebuilt_abi build_spike_from_source check_deps spike spike_wave_to_csv sim_compare commit_check commit_spike_csv commit_hw_trace commit_hw_csv commit_compare rv_test_comp_genmem ppa_rvtest_report ppa_perf_report coe_simple coe_smoke coe_smoke_led coe_isa_probes coverage_all coverage_all_run coverage_quick coverage_closure coverage_closure_merge coverage_clean coverage_report bus_irq_test bus_irq_coverage sw_boundary_test sw_coverage sw_coverage_clean sw_run_mode sw_coverage_report
+.PHONY: coremark coremark_sim coremark_run coremark_result coremark-rebuild coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map coremark_opt_all coremark_opt_build_all coremark_opt_sim_all coremark_opt_report coremark_opt_clean $(COREMARK_OPT_BUILD_TARGETS) $(COREMARK_OPT_SIM_TARGETS) sort_app sort_all sort_sim_all sort_report sort_app_sim sort_app-rebuild sort_app-clean sort_opt_all sort_opt_build_all sort_opt_sim_all sort_opt_report sort_opt_clean $(SORT_OPT_BUILD_TARGETS) $(SORT_OPT_SIM_TARGETS) boundary_app boundary_all boundary_sim_all boundary_report boundary_app-rebuild boundary_app-clean boundary_opt_all boundary_opt_build_all boundary_opt_sim_all boundary_opt_report boundary_opt_clean $(BOUNDARY_OPT_BUILD_TARGETS) $(BOUNDARY_OPT_SIM_TARGETS) coe_m3_force coe_loop2_gen coe_loop5 coe_loop5_gen coe_loop_lina coe_loop_lina_gen loop_lina coe_MFlina coe_MFlina_gen coe_mflina coe_mflina_gen rtthread rtthread-build rtthread-clean rtthread-coremark rtthread-coremark-build rtthread-coremark-build-all rtthread-coremark-sim rtthread-coremark-sim-all rtthread-coremark-report rtthread-coremark-compare rtthread-coremark-clean rtthread-utest rtthread-utest-build rtthread-utest-sim rtthread-utest-report rtthread-utest-clean $(RTTHREAD_COREMARK_PROFILE_BUILD_TARGETS) $(RTTHREAD_COREMARK_PROFILE_SIM_TARGETS)
 .PHONY: riscv_dv_venv riscv_dv_model riscv_dv_prepare riscv_dv_run riscv_dv_random riscv_dv_random_status riscv_dv_regression riscv_dv_count riscv_dv_repro riscv_dv_estimate riscv_dv_stop riscv_dv_coverage_report riscv_dv_cleanup riscv_dv_distclean
 .PHONY: syn synf syn225 syn240 syn250 synf-board syn-extreme syn-venv syn-prep syn-stage-xpr syn-stage-memory syn-vivado syn-analyze syn-clean
 
@@ -588,6 +593,7 @@ coverage_all:
 coverage_all_run: coverage_clean
 	@mkdir -p "$(COVERAGE_DATA_DIR)"
 	@$(MAKE) comp VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
+	@$(MAKE) bus_irq_coverage VERILATOR_TRACE=0
 	@$(MAKE) boundary_all VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
 	@$(MAKE) boundary_opt_all VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
 	@$(MAKE) coremark_opt_all VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
@@ -597,6 +603,20 @@ coverage_all_run: coverage_clean
 	@$(MAKE) coe_loop_lina VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
 	@$(MAKE) coverage_report
 	@$(MAKE) ppa_perf_report
+
+bus_irq_test:
+	@mkdir -p "$(COVERAGE_DATA_DIR)"
+	@$(MAKE) -C hw/dv comp TOP=ydrasil_bus_irq_tb \
+		OBJ_DIR="$(BUS_IRQ_OBJ_DIR)" VERILATOR_TRACE=0 \
+		VERILATOR_MOD=sv VERILATOR_COVERAGE=$(VERILATOR_COVERAGE)
+	@$(MAKE) -C hw/dv sim TOP=ydrasil_bus_irq_tb \
+		OBJ_DIR="$(BUS_IRQ_OBJ_DIR)" VERILATOR_TRACE=0 \
+		VERILATOR_MOD=sv LOG_OUTPUT=1 VERILATOR_COVERAGE=$(VERILATOR_COVERAGE) \
+		SIM_EXTRA_DEFINES="+cpp_timeout=$(BUS_IRQ_TIMEOUT) $(if $(filter 1,$(VERILATOR_COVERAGE)),+coverage_file=$(abspath $(BUS_IRQ_COVERAGE_FILE)),)"
+	@grep -q "BUS_IRQ_TEST_PASS" "$(LOG_DIR)/ydrasil_bus_irq_tb.ver.sim.log"
+
+bus_irq_coverage:
+	@$(MAKE) --no-print-directory bus_irq_test VERILATOR_COVERAGE=1
 
 coverage_quick: coverage_clean
 	@mkdir -p "$(COVERAGE_DATA_DIR)" "$(PPA_DIR)"
@@ -1534,15 +1554,17 @@ coremark_result:
 		echo "[COREMARK] HW log not found: $(COREMARK_RESULT_LOG)" | tee -a "$(PPA_COREMARK_LOG)"; \
 	fi
 
-$(COE_M3_ITCM): $(IROM_COE) $(COE_TO_MEM)
+coe_m3_force:
+
+$(COE_M3_ITCM): $(COE_M3_IROM_SOURCE) $(COE_TO_MEM) coe_m3_force
 	@mkdir -p "$(@D)"
 	perl "$(COE_TO_MEM)" "$<" "$@"
 
-$(COE_M3_ITCM_BIN): $(IROM_COE) $(COE_TO_MEM)
+$(COE_M3_ITCM_BIN): $(COE_M3_IROM_SOURCE) $(COE_TO_MEM) coe_m3_force
 	@mkdir -p "$(@D)"
 	perl "$(COE_TO_MEM)" --binary "$<" "$@"
 
-$(COE_M3_DTCM) $(COE_LOOP2_DTCM) $(COE_LOOP5_DTCM) $(COE_LOOP_LINA_DTCM): $(DRAM_COE) $(COE_TO_MEM)
+$(COE_M3_DTCM) $(COE_LOOP2_DTCM) $(COE_LOOP5_DTCM) $(COE_LOOP_LINA_DTCM): $(COE_M3_DRAM_SOURCE) $(COE_TO_MEM) coe_m3_force
 	@mkdir -p "$(@D)"
 	perl "$(COE_TO_MEM)" "$<" "$@"
 

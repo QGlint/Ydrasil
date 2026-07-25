@@ -15,11 +15,8 @@ import ydrasil_pkg::*;
     input wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0]    ex_csr_waddr_i,  // ex模块写寄存器地址
     input wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]   ex_csr_data_i,   // ex模块写寄存器数据
 
-    // from clint
-    input wire                          clint_csr_we_i,     // clint模块写寄存器标志
-    input wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0]    clint_csr_raddr_i,  // clint模块读寄存器地址
-    input wire [ydrasil_pkg::CSR_ADDR_WIDTH-1:0]    clint_csr_waddr_i,  // clint模块写寄存器地址
-    input wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]   clint_csr_data_i,   // clint模块写寄存器数据
+    input ydrasil_csr_write_pkt_t       trap_csr_write_i,
+    input ydrasil_irq_pkt_t             irq_i,
 
 	input wire                          fp_flags_valid_i,
 	input wire [4:0]                    fp_flags_i,
@@ -27,18 +24,17 @@ import ydrasil_pkg::*;
 	output wire [2:0]                   frm_o,
 	output wire                         fp_enabled_o,
 
-    output wire global_int_en_o,  // 全局中断使能标志
-
-    // to clint
-    output wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] csr_clint_data_o,      // clint模块读寄存器数据
-    output wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] csr_clint_mtvec,   // mtvec
-    output wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] csr_clint_mepc,    // mepc
-    output wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] csr_clint_mstatus, // mstatus
+    output ydrasil_csr_trap_state_pkt_t trap_state_o,
 
     // to ex
     output wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] csr_ex_data_o  // ex模块读寄存器数据
 
 );
+
+    wire clint_csr_we_i = trap_csr_write_i.valid;
+    wire [CSR_ADDR_WIDTH-1:0] clint_csr_raddr_i = '0;
+    wire [CSR_ADDR_WIDTH-1:0] clint_csr_waddr_i = trap_csr_write_i.addr;
+    wire [REGS_DATA_WIDTH-1:0] clint_csr_data_i = trap_csr_write_i.data;
 
 `ifdef YDRASIL_ENABLE_FPU
     localparam logic [31:0] MISA_VALUE = 32'h4000_1120;
@@ -65,12 +61,11 @@ import ydrasil_pkg::*;
 	assign frm_o = frm;
 	assign fp_enabled_o = |mstatus[14:13];
 
-    assign global_int_en_o   = (mstatus[3] == 1'b1) ? 1'b1 : 1'b0;
-
-
-    assign csr_clint_mtvec   = mtvec;
-    assign csr_clint_mepc    = mepc;
-    assign csr_clint_mstatus = mstatus_read;
+    assign trap_state_o.mtvec = mtvec;
+    assign trap_state_o.mepc = mepc;
+    assign trap_state_o.mstatus = mstatus_read;
+    assign trap_state_o.mie = mie;
+    assign trap_state_o.mip = mip;
 
     reg ex_csr_addr_writeable;
     reg clint_csr_addr_writeable;
@@ -312,6 +307,9 @@ import ydrasil_pkg::*;
                     end
                 endcase
             end
+            mip[3] <= irq_i.software;
+            mip[7] <= irq_i.timer;
+            mip[11] <= irq_i.external;
 `ifdef YDRASIL_ENABLE_FPU
             if (fp_flags_valid_i)
                 fflags <= fflags | fp_flags_i;
@@ -325,10 +323,5 @@ import ydrasil_pkg::*;
     assign csr_ex_data_o = ex_csr_forward ?
         ex_csr_write_read_value :
         csr_ex_read_value;
-
-    // clint模块读CSR寄存器
-    assign csr_clint_data_o = clint_csr_forward ?
-        clint_csr_write_read_value :
-        csr_clint_read_value;
 
 endmodule

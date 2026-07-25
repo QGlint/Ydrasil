@@ -10,7 +10,7 @@ import ydrasil_pkg::*;
     input  wire [BUS_DATA_WIDTH-1:0]       dtcm_rdata_i,
     output ydrasil_mem_req_pkt_t           dtcm_req_o,
 
-    input  wire [BUS_DATA_WIDTH-1:0]       mmio_rdata_i,
+    input  ydrasil_mem_rsp_pkt_t           mmio_rsp_i,
     output ydrasil_mem_req_pkt_t           mmio_req_o,
 
     output ydrasil_lsu_status_pkt_t        status_o,
@@ -113,7 +113,6 @@ import ydrasil_pkg::*;
     end
 
     reg mmio_req_valid_q;
-    reg mmio_wait_q;
     reg mmio_is_load_q;
     reg mmio_is_store_q;
     reg [BUS_ADDR_WIDTH-1:0] mmio_addr_q;
@@ -133,7 +132,7 @@ import ydrasil_pkg::*;
     reg mmio_wb_producer_tracked_q;
     reg mmio_wb_fp_load_q;
     reg [REGS_ADDR_WIDTH-1:0] mmio_wb_fp_rd_addr_q;
-    wire mmio_busy = mmio_req_valid_q | mmio_wait_q | mmio_wb_valid_q;
+    wire mmio_busy = mmio_req_valid_q | mmio_wb_valid_q;
 
     reg load_s1_valid_q;
     reg [REGS_ADDR_WIDTH-1:0] load_s1_rd_addr_q;
@@ -274,32 +273,32 @@ import ydrasil_pkg::*;
     end
 
     always_comb begin
-        mmio_load_result = mmio_rdata_i;
+        mmio_load_result = mmio_rsp_i.rdata;
         unique case (1'b1)
             mmio_operator_lsu_q[OP_LSU_LB]: begin
                 unique case (mmio_addr_index_q)
-                    2'b00: mmio_load_result = {{24{mmio_rdata_i[7]}}, mmio_rdata_i[7:0]};
-                    2'b01: mmio_load_result = {{24{mmio_rdata_i[15]}}, mmio_rdata_i[15:8]};
-                    2'b10: mmio_load_result = {{24{mmio_rdata_i[23]}}, mmio_rdata_i[23:16]};
-                    default: mmio_load_result = {{24{mmio_rdata_i[31]}}, mmio_rdata_i[31:24]};
+                    2'b00: mmio_load_result = {{24{mmio_rsp_i.rdata[7]}}, mmio_rsp_i.rdata[7:0]};
+                    2'b01: mmio_load_result = {{24{mmio_rsp_i.rdata[15]}}, mmio_rsp_i.rdata[15:8]};
+                    2'b10: mmio_load_result = {{24{mmio_rsp_i.rdata[23]}}, mmio_rsp_i.rdata[23:16]};
+                    default: mmio_load_result = {{24{mmio_rsp_i.rdata[31]}}, mmio_rsp_i.rdata[31:24]};
                 endcase
             end
             mmio_operator_lsu_q[OP_LSU_LBU]: begin
                 unique case (mmio_addr_index_q)
-                    2'b00: mmio_load_result = {24'b0, mmio_rdata_i[7:0]};
-                    2'b01: mmio_load_result = {24'b0, mmio_rdata_i[15:8]};
-                    2'b10: mmio_load_result = {24'b0, mmio_rdata_i[23:16]};
-                    default: mmio_load_result = {24'b0, mmio_rdata_i[31:24]};
+                    2'b00: mmio_load_result = {24'b0, mmio_rsp_i.rdata[7:0]};
+                    2'b01: mmio_load_result = {24'b0, mmio_rsp_i.rdata[15:8]};
+                    2'b10: mmio_load_result = {24'b0, mmio_rsp_i.rdata[23:16]};
+                    default: mmio_load_result = {24'b0, mmio_rsp_i.rdata[31:24]};
                 endcase
             end
             mmio_operator_lsu_q[OP_LSU_LH]:
                 mmio_load_result = mmio_addr_index_q[1] ?
-                    {{16{mmio_rdata_i[31]}}, mmio_rdata_i[31:16]} :
-                    {{16{mmio_rdata_i[15]}}, mmio_rdata_i[15:0]};
+                    {{16{mmio_rsp_i.rdata[31]}}, mmio_rsp_i.rdata[31:16]} :
+                    {{16{mmio_rsp_i.rdata[15]}}, mmio_rsp_i.rdata[15:0]};
             mmio_operator_lsu_q[OP_LSU_LHU]:
                 mmio_load_result = mmio_addr_index_q[1] ?
-                    {16'b0, mmio_rdata_i[31:16]} : {16'b0, mmio_rdata_i[15:0]};
-            default: mmio_load_result = mmio_rdata_i;
+                    {16'b0, mmio_rsp_i.rdata[31:16]} : {16'b0, mmio_rsp_i.rdata[15:0]};
+            default: mmio_load_result = mmio_rsp_i.rdata;
         endcase
     end
 
@@ -341,7 +340,6 @@ import ydrasil_pkg::*;
                 queue_q[queue_idx] <= '0;
 
             mmio_req_valid_q <= 1'b0;
-            mmio_wait_q <= 1'b0;
             mmio_is_load_q <= 1'b0;
             mmio_is_store_q <= 1'b0;
             mmio_addr_q <= '0;
@@ -493,21 +491,17 @@ import ydrasil_pkg::*;
             if (mmio_wb_valid_q && !load_s2_valid_q)
                 mmio_wb_valid_q <= 1'b0;
 
-            if (mmio_wait_q) begin
-                mmio_wait_q <= 1'b0;
-                mmio_wb_valid_q <= 1'b1;
-                mmio_wb_result_q <= mmio_load_result;
-                mmio_wb_rd_addr_q <= mmio_rd_addr_q;
-                mmio_wb_producer_id_q <= mmio_producer_id_q;
-                mmio_wb_producer_tracked_q <= mmio_producer_tracked_q;
-                mmio_wb_fp_load_q <= mmio_fp_load_q;
-                mmio_wb_fp_rd_addr_q <= mmio_fp_rd_addr_q;
-            end
-
-            if (mmio_req_valid_q) begin
+            if (mmio_req_valid_q && mmio_rsp_i.valid) begin
                 mmio_req_valid_q <= 1'b0;
-                if (mmio_is_load_q)
-                    mmio_wait_q <= 1'b1;
+                if (mmio_is_load_q) begin
+                    mmio_wb_valid_q <= 1'b1;
+                    mmio_wb_result_q <= mmio_load_result;
+                    mmio_wb_rd_addr_q <= mmio_rd_addr_q;
+                    mmio_wb_producer_id_q <= mmio_producer_id_q;
+                    mmio_wb_producer_tracked_q <= mmio_producer_tracked_q;
+                    mmio_wb_fp_load_q <= mmio_fp_load_q;
+                    mmio_wb_fp_rd_addr_q <= mmio_fp_rd_addr_q;
+                end
             end
 
             if (mmio_fire) begin

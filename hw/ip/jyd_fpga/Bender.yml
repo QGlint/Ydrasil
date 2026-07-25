@@ -13,6 +13,7 @@ sources:
       - rtl/display_seg.sv
       - rtl/counter.sv
       - rtl/perip_bridge.sv
+      - rtl/ydrasil_mmio_subsystem.sv
       - rtl/twin_controller.sv
       - rtl/uart.sv
       - rtl/ydrasil_clocking.sv

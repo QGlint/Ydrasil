@@ -35,16 +35,16 @@ module student_top#(
     output [P_LED_CNT - 1:0]                    virtual_led   ,
     output [P_SEG_CNT - 1:0]                    virtual_seg   
 );
+    import ydrasil_pkg::*;
 
     // IROM
     logic [31:0] pc;
     // logic [11:0] inst_addr;
     logic [31:0] instruction;
 
-    // perip
-    logic [31:0] perip_addr, perip_wdata, perip_rdata;
-    logic perip_wen;
-    logic [3:0] perip_mask;
+    ydrasil_axi_lite_m2s_pkt_t axi_m2s;
+    ydrasil_axi_lite_s2m_pkt_t axi_s2m;
+    ydrasil_irq_pkt_t irq;
 
     // 16KB = 2^12 * 32bit
     // assign inst_addr = pc[13:2];
@@ -57,12 +57,9 @@ module student_top#(
         // .irom_addr          (pc),             
         // .irom_data          (instruction),   
 
-        // Interface to DRAM & periphera
-        .perip_addr         (perip_addr),     
-        .perip_wen          (perip_wen),     
-        .perip_mask         (perip_mask),   
-        .perip_wdata        (perip_wdata),    
-        .perip_rdata        (perip_rdata)     
+        .axi_m2s_o          (axi_m2s),
+        .axi_s2m_i          (axi_s2m),
+        .irq_i              (irq)
     );
 
     // IROM Mem_IROM (
@@ -70,18 +67,17 @@ module student_top#(
     //     .spo        (instruction)
     // );
     
-    perip_bridge bridge_inst (
-        .clk				(w_cpu_clk),
+    ydrasil_mmio_subsystem u_mmio_subsystem (
+        .clk                (w_cpu_clk),
         .cnt_clk            (w_clk_50Mhz),
-        .rst                (w_clk_rst),
-        .perip_addr			(perip_addr),
-        .perip_wdata		(perip_wdata),
-        .perip_wen			(perip_wen),
-        .perip_mask			(perip_mask),
-        .perip_rdata		(perip_rdata),
-        .virtual_sw_input	(virtual_sw),
-        .virtual_key_input	(virtual_key),	
-        .virtual_seg_output	(virtual_seg),
+        .rst_n              (~w_clk_rst),
+        .axi_m2s_i          (axi_m2s),
+        .axi_s2m_o          (axi_s2m),
+        .external_irq_i     (1'b0),
+        .irq_o              (irq),
+        .virtual_sw_input   (virtual_sw),
+        .virtual_key_input  (virtual_key),
+        .virtual_seg_output (virtual_seg),
         .virtual_led_output (virtual_led)
     );
 

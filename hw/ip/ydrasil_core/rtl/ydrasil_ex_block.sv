@@ -46,8 +46,8 @@ import ydrasil_pkg::*;
     input  wire [REGS_ADDR_WIDTH-1:0]      id_rf_waddr_rd_i,
     input  wire                            id_alu_rf_wen_rd_i,
     input  producer_id_t                   id_ex_producer_id_i,
-    input  wire                            interrupt_i,
-    input  wire [INST_ADDR_WIDTH-1:0]      clint_ex_int_addr_i,
+    input  wire                            trap_redirect_i,
+    input  wire [INST_ADDR_WIDTH-1:0]      trap_redirect_addr_i,
 
     input  wire [CSR_ADDR_WIDTH-1:0]       id_ex_csr_waddr_i,
     input  wire [OP_CSR_INFO_WIDTH-1:0]    id_op_csr_info_i,
@@ -233,8 +233,8 @@ import ydrasil_pkg::*;
         .id_ex_pred_target_i         (id_ex_pred_target_i),
         .id_ex_pred_counter_i        (id_ex_pred_counter_i),
         .id_ex_pred_bht_index_i      (id_ex_pred_bht_index_i),
-        .interrupt_i                 (interrupt_i),
-        .clint_ex_int_addr_i         (clint_ex_int_addr_i),
+        .trap_redirect_i             (trap_redirect_i),
+        .trap_redirect_addr_i        (trap_redirect_addr_i),
         .ex_branch_jump_o            (ex_branch_jump_o),
         .ex_branch_target_o          (ex_branch_target_o),
         .ex_pc_redirect_o            (ex_pc_redirect_o),
@@ -279,13 +279,13 @@ import ydrasil_pkg::*;
          operator_i[OP_MUL_REM]  |
          operator_i[OP_MUL_REMU]);
 
-    assign mul_issue_valid = id_ex_valid_i & op_mul & mul_issue_ready & !interrupt_i & !flush_ex_i;
+    assign mul_issue_valid = id_ex_valid_i & op_mul & mul_issue_ready & !trap_redirect_i & !flush_ex_i;
     assign mul_issue_wen = id_alu_rf_wen_rd_i & (id_rf_waddr_rd_i != '0);
     assign mul_issue_o = mul_issue_valid & mul_issue_wen;
     assign mul_issue_waddr_o = id_rf_waddr_rd_i;
 
-    assign div_start = id_ex_valid_i & op_div & !div_active_q & !div_busy & !div_done & !interrupt_i & !flush_ex_i;
-    assign div_complete = div_active_q & div_done & !interrupt_i & !flush_ex_i;
+    assign div_start = id_ex_valid_i & op_div & !div_active_q & !div_busy & !div_done & !trap_redirect_i & !flush_ex_i;
+    assign div_complete = div_active_q & div_done & !trap_redirect_i & !flush_ex_i;
     assign div_rf_wen_rd = div_complete & div_wen_q;
     assign ex_mul_stall_o = ((id_ex_valid_i & op_div) | div_active_q) & !div_done & !flush_ex_i;
 
@@ -341,11 +341,11 @@ import ydrasil_pkg::*;
         fast_b_shadd_result | fast_b_logic_result | fast_b_bit_result |
         fast_b_pack_result | fast_b_extend_result;
     wire fast_bitmanip_rf_wen_rd =
-        id_ex_valid_i & fast_bitmanip_op & id_alu_rf_wen_rd_i & !interrupt_i & !flush_ex_i;
+        id_ex_valid_i & fast_bitmanip_op & id_alu_rf_wen_rd_i & !trap_redirect_i & !flush_ex_i;
 
     assign bitmanip_rf_wen_rd =
         id_ex_valid_i & op_bitmanip & !fast_bitmanip_op & id_alu_rf_wen_rd_i &
-        !interrupt_i & !flush_ex_i;
+        !trap_redirect_i & !flush_ex_i;
     assign normal_alu_rf_wen_rd = id_ex_valid_i & alu_rf_wen_rd &
         (operator_type_i[OPERATOR_TYPE_ALU] | operator_type_i[OPERATOR_TYPE_BJP]) &
         !op_m_unit & !op_bitmanip & !flush_ex_i;
@@ -354,7 +354,7 @@ import ydrasil_pkg::*;
         normal_alu_rf_wen_rd | csr_wen;
     assign mul_result_valid_o = mul_result_valid;
     assign ex_instret_inc_o =
-        (id_ex_valid_i & !interrupt_i & !flush_ex_i & !op_load & !op_mul & !op_div &
+        (id_ex_valid_i & !trap_redirect_i & !flush_ex_i & !op_load & !op_mul & !op_div &
          !operator_type_i[OPERATOR_TYPE_FPU]) |
         div_complete;
 
@@ -374,9 +374,9 @@ import ydrasil_pkg::*;
         (operator_i[OP_ALU_SLL] | operator_i[OP_ALU_SRL] | operator_i[OP_ALU_SRA]);
     wire bypassable_alu_op =
         id_ex_valid_i & id_alu_rf_wen_rd_i & (id_rf_waddr_rd_i != '0) &
-        (fast_alu_op | shift_alu_op) & !interrupt_i & !flush_ex_i;
+        (fast_alu_op | shift_alu_op) & !trap_redirect_i & !flush_ex_i;
     wire fast_result_wen =
-        (id_ex_valid_i & !interrupt_i & !flush_ex_i & !op_m_unit &
+        (id_ex_valid_i & !trap_redirect_i & !flush_ex_i & !op_m_unit &
          !op_bitmanip & (fast_alu_op | op_load | op_store | op_bjp));
     assign fast_add_result = operand_a + operand_b;
     wire [32:0] fast_sub_result_ext = {1'b0, operand_a} + {1'b0, ~operand_b} + 33'd1;
@@ -404,7 +404,7 @@ import ydrasil_pkg::*;
         .operand_b_i          (operand_b),
         .operator_i           (operator_i),
         .operator_type_i      (operator_type_i),
-        .interrupt_i          (interrupt_i),
+        .interrupt_i          (trap_redirect_i),
         .id_rf_waddr_rd_i     (id_rf_waddr_rd_i),
         .id_alu_rf_wen_rd_i   (id_alu_rf_wen_rd_i),
         .comp_result_o        (alu_comp_result),
@@ -416,7 +416,7 @@ import ydrasil_pkg::*;
     ydrasil_div u_ydrasil_div (
         .clk             (clk),
         .rst_n           (rst_n),
-        .flush_i         (flush_ex_i | interrupt_i),
+        .flush_i         (flush_ex_i | trap_redirect_i),
         .start_i         (div_start),
         .operand_a_i     (mul_operand_a),
         .operand_b_i     (mul_operand_b),
@@ -429,7 +429,7 @@ import ydrasil_pkg::*;
     ydrasil_mul u_ydrasil_mul (
         .clk             (clk),
         .rst_n           (rst_n),
-        .flush_i         (interrupt_i),
+        .flush_i         (trap_redirect_i),
         .issue_valid_i   (mul_issue_valid),
         .issue_ready_o   (mul_issue_ready),
         .operand_a_i     (mul_operand_a),
@@ -481,7 +481,7 @@ import ydrasil_pkg::*;
 
     wire [31:0] slow_result;
     wire        slow_result_wen;
-    wire op_csr = id_ex_valid_i & operator_type_i[OPERATOR_TYPE_CSR] & !interrupt_i & !flush_ex_i;
+    wire op_csr = id_ex_valid_i & operator_type_i[OPERATOR_TYPE_CSR] & !trap_redirect_i & !flush_ex_i;
     wire csr_csrrw = op_csr & id_op_csr_info_i[OP_CSR_CSRRW];
     wire csr_csrrs = op_csr & id_op_csr_info_i[OP_CSR_CSRRS];
     wire csr_csrrc = op_csr & id_op_csr_info_i[OP_CSR_CSRRC];
@@ -494,9 +494,9 @@ import ydrasil_pkg::*;
     reg                       ex_csr_wen_o_ff;
     reg [CSR_ADDR_WIDTH-1:0]  ex_csr_waddr_o_ff;
 
-    assign csr_reg_wdata = interrupt_i ? '0 : csr_ex_rdata_i;
+    assign csr_reg_wdata = trap_redirect_i ? '0 : csr_ex_rdata_i;
     assign csr_wdata =
-        interrupt_i ? '0 :
+        trap_redirect_i ? '0 :
         ({REGS_DATA_WIDTH{csr_csrrw}} & csr_operand_a) |
         ({REGS_DATA_WIDTH{csr_csrrs}} & (csr_operand_a | csr_ex_rdata_i)) |
         ({REGS_DATA_WIDTH{csr_csrrc}} & (csr_ex_rdata_i & (~csr_operand_a)));
