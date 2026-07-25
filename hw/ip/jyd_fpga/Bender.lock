@@ -6,9 +6,16 @@ packages:
       Path: ../ydrasil_core
     dependencies:
     - ydrasil::memory
+    - ydrasil::utils
   ydrasil::memory:
     revision: null
     version: null
     source:
       Path: ../ydrasil_core/../ydrmem
+    dependencies: []
+  ydrasil::utils:
+    revision: null
+    version: null
+    source:
+      Path: ../ydrasil_utils
     dependencies: []

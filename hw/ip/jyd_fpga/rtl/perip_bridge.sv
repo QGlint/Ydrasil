@@ -1,10 +1,9 @@
 `timescale 1ns / 1ns
 
 module perip_bridge
-import ydrasil_pkg::*;
+import ydrasil_apb_pkg::*;
 (
     input  wire                    clk,
-    input  wire                    cnt_clk,
     input  wire                    rst,
     input  ydrasil_apb_req_pkt_t   apb_req_i,
     output ydrasil_apb_rsp_pkt_t   apb_rsp_o,
@@ -110,13 +109,12 @@ import ydrasil_pkg::*;
     assign seg_output[37] = 1'b0;
 
     counter counter_inst (
-        .clk(cnt_clk),
-        .perip_clk(clk),
+        .clk(clk),
         .rst(rst),
-        .perip_cmd_valid(cnt_cmd_valid_q),
-        .perip_cmd_start(cnt_cmd_start_q),
-        .perip_cmd_stop(cnt_cmd_stop_q),
-        .perip_rdata(cnt_rdata)
+        .cmd_valid_i(cnt_cmd_valid_q),
+        .cmd_start_i(cnt_cmd_start_q),
+        .cmd_stop_i(cnt_cmd_stop_q),
+        .count_o(cnt_rdata)
     );
 
     assign virtual_led_output = led_q;

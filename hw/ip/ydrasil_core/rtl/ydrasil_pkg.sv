@@ -420,50 +420,6 @@ package ydrasil_pkg;
 		logic                                error;
 	} ydrasil_mem_rsp_pkt_t;
 
-	// AXI4-Lite is used at the core boundary.  The packed request/response
-	// records keep the channel wiring atomic while preserving independent
-	// address and data handshakes.
-	typedef struct packed {
-		logic                                awvalid;
-		logic [BUS_ADDR_WIDTH-1:0]           awaddr;
-		logic [2:0]                          awprot;
-		logic                                wvalid;
-		logic [BUS_DATA_WIDTH-1:0]           wdata;
-		logic [3:0]                          wstrb;
-		logic                                bready;
-		logic                                arvalid;
-		logic [BUS_ADDR_WIDTH-1:0]           araddr;
-		logic [2:0]                          arprot;
-		logic                                rready;
-	} ydrasil_axi_lite_m2s_pkt_t;
-
-	typedef struct packed {
-		logic                                awready;
-		logic                                wready;
-		logic                                bvalid;
-		logic [1:0]                          bresp;
-		logic                                arready;
-		logic                                rvalid;
-		logic [BUS_DATA_WIDTH-1:0]           rdata;
-		logic [1:0]                          rresp;
-	} ydrasil_axi_lite_s2m_pkt_t;
-
-	typedef struct packed {
-		logic                                psel;
-		logic                                penable;
-		logic                                pwrite;
-		logic [BUS_ADDR_WIDTH-1:0]           paddr;
-		logic [BUS_DATA_WIDTH-1:0]           pwdata;
-		logic [3:0]                          pstrb;
-		logic [2:0]                          pprot;
-	} ydrasil_apb_req_pkt_t;
-
-	typedef struct packed {
-		logic                                pready;
-		logic [BUS_DATA_WIDTH-1:0]           prdata;
-		logic                                pslverr;
-	} ydrasil_apb_rsp_pkt_t;
-
 	typedef struct packed {
 		logic                                software;
 		logic                                timer;

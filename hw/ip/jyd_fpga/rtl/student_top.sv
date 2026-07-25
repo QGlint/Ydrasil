@@ -36,6 +36,7 @@ module student_top#(
     output [P_SEG_CNT - 1:0]                    virtual_seg   
 );
     import ydrasil_pkg::*;
+    import ydrasil_axi_pkg::*;
 
     // IROM
     logic [31:0] pc;
@@ -68,8 +69,8 @@ module student_top#(
     // );
     
     ydrasil_mmio_subsystem u_mmio_subsystem (
-        .clk                (w_cpu_clk),
-        .cnt_clk            (w_clk_50Mhz),
+        .axi_clk            (w_cpu_clk),
+        .apb_clk            (w_clk_50Mhz),
         .rst_n              (~w_clk_rst),
         .axi_m2s_i          (axi_m2s),
         .axi_s2m_o          (axi_s2m),

@@ -4,6 +4,8 @@ parameter longint time_end = 100000;
 
 module ydrasil_core_tb
 import ydrasil_pkg::*;
+import ydrasil_axi_pkg::*;
+import ydrasil_apb_pkg::*;
 (
 `ifdef VERILATOR_CC
     input clk,
@@ -50,9 +52,9 @@ end
 	logic        rst_n;
 `endif
 
-		ydrasil_axi_lite_m2s_pkt_t axi_m2s;
-		ydrasil_axi_lite_s2m_pkt_t axi_s2m;
-		ydrasil_irq_pkt_t irq;
+			ydrasil_axi_lite_m2s_pkt_t axi_m2s;
+			ydrasil_axi_lite_s2m_pkt_t axi_s2m;
+			ydrasil_irq_pkt_t irq;
 		wire [31:0] perip_addr;
 		wire        perip_wen;
 		wire [3:0]  perip_mask;
@@ -1213,8 +1215,8 @@ end
 	end
 
 	ydrasil_mmio_subsystem u_mmio_subsystem (
-		.clk                (clk),
-		.cnt_clk            (clk),
+		.axi_clk            (clk),
+		.apb_clk            (clk),
 		.rst_n              (rst_n),
 		.axi_m2s_i          (axi_m2s),
 		.axi_s2m_o          (axi_s2m),

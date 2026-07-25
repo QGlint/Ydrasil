@@ -5,3 +5,9 @@ packages:
     source:
       Path: ../ydrmem
     dependencies: []
+  ydrasil::utils:
+    revision: null
+    version: null
+    source:
+      Path: ../ydrasil_utils
+    dependencies: []

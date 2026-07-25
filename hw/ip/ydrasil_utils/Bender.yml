@@ -1,0 +1,16 @@
+package:
+  name: ydrasil::utils
+  description: Reusable bus, CDC, and SoC utility blocks for Ydrasil
+
+sources:
+  - target: any(verilator, iverilog, vcs)
+    include_dirs:
+      - rtl
+    files:
+      - rtl/ydrasil_axi_pkg.sv
+      - rtl/ydrasil_apb_pkg.sv
+      - rtl/ydrasil_cdc_sync.sv
+      - rtl/ydrasil_axi_lite_master.sv
+      - rtl/ydrasil_axi_to_apb.sv
+      - rtl/ydrasil_apb_demux_1to2.sv
+      - rtl/ydrasil_clint.sv

@@ -1,10 +1,16 @@
 module ydrasil_axi_lite_master
-import ydrasil_pkg::*;
+import ydrasil_axi_pkg::*;
 (
     input  wire                         clk,
     input  wire                         rst_n,
-    input  ydrasil_mem_req_pkt_t        mem_req_i,
-    output ydrasil_mem_rsp_pkt_t        mem_rsp_o,
+    input  wire                         req_valid_i,
+    input  wire                         req_write_i,
+    input  wire [AXI_ADDR_WIDTH-1:0]    req_addr_i,
+    input  wire [AXI_DATA_WIDTH-1:0]    req_wdata_i,
+    input  wire [AXI_STRB_WIDTH-1:0]    req_wstrb_i,
+    output logic                        rsp_valid_o,
+    output logic [AXI_DATA_WIDTH-1:0]   rsp_rdata_o,
+    output logic                        rsp_error_o,
     output ydrasil_axi_lite_m2s_pkt_t   axi_m2s_o,
     input  ydrasil_axi_lite_s2m_pkt_t   axi_s2m_i
 );
@@ -17,9 +23,9 @@ import ydrasil_pkg::*;
     } state_t;
 
     state_t state_q;
-    logic [BUS_ADDR_WIDTH-1:0] addr_q;
-    logic [BUS_DATA_WIDTH-1:0] wdata_q;
-    logic [3:0] wstrb_q;
+    logic [AXI_ADDR_WIDTH-1:0] addr_q;
+    logic [AXI_DATA_WIDTH-1:0] wdata_q;
+    logic [AXI_STRB_WIDTH-1:0] wstrb_q;
     logic aw_done_q;
     logic w_done_q;
 
@@ -32,12 +38,9 @@ import ydrasil_pkg::*;
     always_comb begin
         axi_m2s_o = '0;
         axi_m2s_o.awaddr = addr_q;
-        axi_m2s_o.awprot = 3'b000;
         axi_m2s_o.wdata = wdata_q;
         axi_m2s_o.wstrb = wstrb_q;
         axi_m2s_o.araddr = addr_q;
-        axi_m2s_o.arprot = 3'b000;
-
         unique case (state_q)
             S_WRITE_ADDR_DATA: begin
                 axi_m2s_o.awvalid = !aw_done_q;
@@ -52,14 +55,16 @@ import ydrasil_pkg::*;
     end
 
     always_comb begin
-        mem_rsp_o = '0;
+        rsp_valid_o = 1'b0;
+        rsp_rdata_o = '0;
+        rsp_error_o = 1'b0;
         if ((state_q == S_WRITE_RESP) && b_fire) begin
-            mem_rsp_o.valid = 1'b1;
-            mem_rsp_o.error = axi_s2m_i.bresp[1];
+            rsp_valid_o = 1'b1;
+            rsp_error_o = axi_s2m_i.bresp[1];
         end else if ((state_q == S_READ_DATA) && r_fire) begin
-            mem_rsp_o.valid = 1'b1;
-            mem_rsp_o.rdata = axi_s2m_i.rdata;
-            mem_rsp_o.error = axi_s2m_i.rresp[1];
+            rsp_valid_o = 1'b1;
+            rsp_rdata_o = axi_s2m_i.rdata;
+            rsp_error_o = axi_s2m_i.rresp[1];
         end
     end
 
@@ -76,12 +81,11 @@ import ydrasil_pkg::*;
                 S_IDLE: begin
                     aw_done_q <= 1'b0;
                     w_done_q <= 1'b0;
-                    if (mem_req_i.valid) begin
-                        addr_q <= mem_req_i.addr;
-                        wdata_q <= mem_req_i.wdata;
-                        wstrb_q <= mem_req_i.wmask;
-                        state_q <= mem_req_i.write ?
-                            S_WRITE_ADDR_DATA : S_READ_ADDR;
+                    if (req_valid_i) begin
+                        addr_q <= req_addr_i;
+                        wdata_q <= req_wdata_i;
+                        wstrb_q <= req_wstrb_i;
+                        state_q <= req_write_i ? S_WRITE_ADDR_DATA : S_READ_ADDR;
                     end
                 end
                 S_WRITE_ADDR_DATA: begin
@@ -92,18 +96,9 @@ import ydrasil_pkg::*;
                     if ((aw_done_q || aw_fire) && (w_done_q || w_fire))
                         state_q <= S_WRITE_RESP;
                 end
-                S_WRITE_RESP: begin
-                    if (b_fire)
-                        state_q <= S_IDLE;
-                end
-                S_READ_ADDR: begin
-                    if (ar_fire)
-                        state_q <= S_READ_DATA;
-                end
-                S_READ_DATA: begin
-                    if (r_fire)
-                        state_q <= S_IDLE;
-                end
+                S_WRITE_RESP: if (b_fire) state_q <= S_IDLE;
+                S_READ_ADDR: if (ar_fire) state_q <= S_READ_DATA;
+                S_READ_DATA: if (r_fire) state_q <= S_IDLE;
                 default: state_q <= S_IDLE;
             endcase
         end

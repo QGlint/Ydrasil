@@ -2,6 +2,7 @@
 
 module ydrasil_core
 import ydrasil_pkg::*;
+import ydrasil_axi_pkg::*;
 	 #(
 		parameter int BP_ENTRIES  = 0,
 		parameter int BTB_ENTRIES = (BP_ENTRIES != 0) ? BP_ENTRIES : ydrasil_pkg::BP_BTB_ENTRIES,
@@ -750,12 +751,18 @@ import ydrasil_pkg::*;
 	);
 
 	ydrasil_axi_lite_master u_ydrasil_axi_lite_master (
-		.clk       (clk),
-		.rst_n     (rst_n),
-		.mem_req_i (mmio_req_pkt),
-		.mem_rsp_o (mmio_rsp_pkt),
-		.axi_m2s_o (axi_m2s_o),
-		.axi_s2m_i (axi_s2m_i)
+		.clk         (clk),
+		.rst_n       (rst_n),
+		.req_valid_i (mmio_req_pkt.valid),
+		.req_write_i (mmio_req_pkt.write),
+		.req_addr_i  (mmio_req_pkt.addr),
+		.req_wdata_i (mmio_req_pkt.wdata),
+		.req_wstrb_i (mmio_req_pkt.wmask),
+		.rsp_valid_o (mmio_rsp_pkt.valid),
+		.rsp_rdata_o (mmio_rsp_pkt.rdata),
+		.rsp_error_o (mmio_rsp_pkt.error),
+		.axi_m2s_o   (axi_m2s_o),
+		.axi_s2m_i   (axi_s2m_i)
 	);
 
 `ifdef YDRASIL_ENABLE_FPU

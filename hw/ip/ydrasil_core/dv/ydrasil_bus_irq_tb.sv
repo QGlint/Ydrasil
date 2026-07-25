@@ -2,6 +2,8 @@
 
 module ydrasil_bus_irq_tb
 import ydrasil_pkg::*;
+import ydrasil_axi_pkg::*;
+import ydrasil_apb_pkg::*;
 (
 `ifdef VERILATOR_CC
     input wire clk,
@@ -10,15 +12,29 @@ import ydrasil_pkg::*;
 );
 `ifndef VERILATOR_CC
     logic clk;
+    logic apb_clk;
     logic rst_n;
     initial begin
         clk = 1'b0;
         forever #1 clk = ~clk;
     end
     initial begin
+        apb_clk = 1'b0;
+        forever #3 apb_clk = ~apb_clk;
+    end
+    initial begin
         rst_n = 1'b0;
         repeat (10) @(posedge clk);
         rst_n = 1'b1;
+    end
+`endif
+`ifdef VERILATOR_CC
+    logic apb_clk;
+    always_ff @(negedge clk or negedge rst_n) begin
+        if (!rst_n)
+            apb_clk <= 1'b0;
+        else
+            apb_clk <= ~apb_clk;
     end
 `endif
 
@@ -34,10 +50,12 @@ import ydrasil_pkg::*;
     logic [31:0] held_addr_q;
 
     ydrasil_axi_to_apb u_bridge (
-        .clk(clk),
-        .rst_n(rst_n),
+        .axi_clk_i(clk),
+        .axi_rst_n_i(rst_n),
         .axi_m2s_i(axi_m2s),
         .axi_s2m_o(axi_s2m),
+        .apb_clk_i(apb_clk),
+        .apb_rst_n_i(rst_n),
         .apb_req_o(bridge_apb_req),
         .apb_rsp_i(bridge_apb_rsp)
     );
@@ -49,7 +67,7 @@ import ydrasil_pkg::*;
         bridge_apb_rsp.pslverr = model_error_q;
     end
 
-    always_ff @(posedge clk or negedge rst_n) begin
+    always_ff @(posedge apb_clk or negedge rst_n) begin
         if (!rst_n) begin
             wait_count_q <= '0;
             setup_seen_q <= 1'b0;
@@ -146,14 +164,22 @@ import ydrasil_pkg::*;
     ydrasil_apb_rsp_pkt_t clint_apb_rsp;
     wire clint_software_irq;
     wire clint_timer_irq;
+    wire [1:0] clint_irq_axi;
 
     ydrasil_clint u_clint (
-        .clk(clk),
+        .clk(apb_clk),
         .rst_n(rst_n),
         .apb_req_i(clint_apb_req),
         .apb_rsp_o(clint_apb_rsp),
         .software_irq_o(clint_software_irq),
         .timer_irq_o(clint_timer_irq)
+    );
+
+    ydrasil_cdc_sync #(.WIDTH(2)) u_clint_irq_sync (
+        .clk_i(clk),
+        .rst_n_i(rst_n),
+        .async_i({clint_timer_irq, clint_software_irq}),
+        .sync_o(clint_irq_axi)
     );
 
     task automatic clint_write(
@@ -162,20 +188,20 @@ import ydrasil_pkg::*;
         input [3:0] strb
     );
         begin
-            @(negedge clk);
+            @(negedge apb_clk);
             clint_apb_req = '0;
             clint_apb_req.psel = 1'b1;
             clint_apb_req.pwrite = 1'b1;
             clint_apb_req.paddr = addr;
             clint_apb_req.pwdata = data;
             clint_apb_req.pstrb = strb;
-            @(posedge clk);
-            @(negedge clk);
+            @(posedge apb_clk);
+            @(negedge apb_clk);
             clint_apb_req.penable = 1'b1;
-            @(posedge clk);
+            @(posedge apb_clk);
             if (!clint_apb_rsp.pready || clint_apb_rsp.pslverr)
                 $fatal(1, "CLINT APB write failed addr=%08x", addr);
-            @(negedge clk);
+            @(negedge apb_clk);
             clint_apb_req = '0;
         end
     endtask
@@ -341,12 +367,18 @@ import ydrasil_pkg::*;
         clint_write(32'h0200_0000, 32'h1, 4'b0001);
         if (!clint_software_irq)
             $fatal(1, "MSIP set did not assert software IRQ");
+        repeat (3) @(posedge clk);
+        if (!clint_irq_axi[0])
+            $fatal(1, "software IRQ was not synchronized to AXI clock domain");
         clint_write(32'h0200_0000, 32'h0, 4'b0000);
         if (!clint_software_irq)
             $fatal(1, "zero PSTRB modified MSIP");
         clint_write(32'h0200_0000, 32'h0, 4'b0001);
         if (clint_software_irq)
             $fatal(1, "MSIP clear did not deassert software IRQ");
+        repeat (3) @(posedge clk);
+        if (clint_irq_axi[0])
+            $fatal(1, "software IRQ deassertion was not synchronized");
 
         clint_write(32'h0200_4004, 32'h0, 4'b1111);
         clint_write(32'h0200_4000, 32'd100, 4'b1111);
@@ -356,14 +388,14 @@ import ydrasil_pkg::*;
             $fatal(1, "timer IRQ asserted before mtimecmp");
         timer_timeout = 0;
         while (!clint_timer_irq && timer_timeout < 130) begin
-            @(posedge clk);
+            @(posedge apb_clk);
             timer_timeout = timer_timeout + 1;
         end
         if (!clint_timer_irq)
             $fatal(1, "mtime did not reach mtimecmp");
         clint_write(32'h0200_bffc, 32'hffff_ffff, 4'b1111);
         clint_write(32'h0200_bff8, 32'hffff_fffd, 4'b1111);
-        repeat (6) @(posedge clk);
+        repeat (6) @(posedge apb_clk);
         if (u_clint.mtime_q[63:32] != 32'h0000_0000)
             $fatal(1, "mtime rollover failed value=%016x", u_clint.mtime_q);
 

@@ -1,8 +1,8 @@
 module ydrasil_clint
-import ydrasil_pkg::*;
+import ydrasil_apb_pkg::*;
 #(
     parameter logic [31:0] BASE_ADDR = 32'h0200_0000
-)(
+) (
     input  wire                    clk,
     input  wire                    rst_n,
     input  ydrasil_apb_req_pkt_t   apb_req_i,
@@ -10,11 +10,11 @@ import ydrasil_pkg::*;
     output wire                    software_irq_o,
     output wire                    timer_irq_o
 );
-    localparam logic [31:0] MSIP_ADDR       = BASE_ADDR + 32'h0000_0000;
+    localparam logic [31:0] MSIP_ADDR = BASE_ADDR + 32'h0000_0000;
     localparam logic [31:0] MTIMECMP_LO_ADDR = BASE_ADDR + 32'h0000_4000;
     localparam logic [31:0] MTIMECMP_HI_ADDR = BASE_ADDR + 32'h0000_4004;
-    localparam logic [31:0] MTIME_LO_ADDR    = BASE_ADDR + 32'h0000_BFF8;
-    localparam logic [31:0] MTIME_HI_ADDR    = BASE_ADDR + 32'h0000_BFFC;
+    localparam logic [31:0] MTIME_LO_ADDR = BASE_ADDR + 32'h0000_BFF8;
+    localparam logic [31:0] MTIME_HI_ADDR = BASE_ADDR + 32'h0000_BFFC;
 
     logic msip_q;
     logic [63:0] mtime_q;
@@ -31,7 +31,8 @@ import ydrasil_pkg::*;
             apply_strobe = old_value;
             for (byte_idx = 0; byte_idx < 4; byte_idx = byte_idx + 1)
                 if (strobe[byte_idx])
-                    apply_strobe[byte_idx*8 +: 8] = new_value[byte_idx*8 +: 8];
+                    apply_strobe[byte_idx*8 +: 8] =
+                        new_value[byte_idx*8 +: 8];
         end
     endfunction
 

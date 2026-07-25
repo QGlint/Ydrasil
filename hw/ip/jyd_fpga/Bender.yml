@@ -5,6 +5,8 @@ package:
 dependencies:
   ydrasil::core:
     path: ../ydrasil_core
+  ydrasil::utils:
+    path: ../ydrasil_utils
 
 sources:
   - target: any(verilator, iverilog, vcs)

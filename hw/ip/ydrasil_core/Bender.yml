@@ -5,6 +5,8 @@ package:
 dependencies:
   ydrasil::memory:
     path: ../ydrmem
+  ydrasil::utils:
+    path: ../ydrasil_utils
 
 sources:
   - target: any(verilator, iverilog, vcs)
@@ -25,14 +27,11 @@ sources:
       - rtl/ydrasil_bru.sv
       - rtl/ydrasil_ex_block.sv
       - rtl/ydrasil_load_store_unit.sv
-      - rtl/ydrasil_axi_lite_master.sv
-      - rtl/ydrasil_axi_to_apb.sv
       - rtl/ydrasil_mems.sv
       - rtl/ydrasil_wb_stage.sv
       - rtl/ydrasil_registers.sv
       - rtl/ydrasil_registers_csr.sv
       - rtl/ydrasil_exception_ctrl.sv
-      - rtl/ydrasil_clint.sv
       - rtl/ydrasil_ctrl.sv
       - rtl/ydrasil_core.sv
 
