@@ -1,6 +1,6 @@
 `timescale 1ns/1ns
 
-module ydrasil_commit_trace
+module ydrasil_commit_trace_legacy
 import ydrasil_pkg::*;
 #(
     parameter int FIFO_DEPTH = 256,
@@ -74,7 +74,8 @@ import ydrasil_pkg::*;
     reg [FIFO_PTR_WIDTH-1:0] div_commit_idx_q;
     reg                      div_pending_q;
     reg                      div_active_seen_q;
-    bit trace_en;
+	bit trace_en;
+	bit trace_time_en;
 
     // DIV is completed through the ALU writeback path and has no public trace
     // issue port. Observe it here so the verification-only commit FIFO still
@@ -91,9 +92,10 @@ import ydrasil_pkg::*;
     wire [INST_DATA_WIDTH-1:0] div_issue_instr =
         $root.ydrasil_core_tb.u_dut.commit_mul_instr;
 
-    initial begin
-        trace_en = $test$plusargs("commit_trace");
-    end
+	initial begin
+		trace_en = $test$plusargs("commit_trace");
+		trace_time_en = $test$plusargs("commit_trace_time");
+	end
 
     task automatic print_register_commit;
         input [INST_ADDR_WIDTH-1:0] pc;
@@ -101,9 +103,11 @@ import ydrasil_pkg::*;
         input [REGS_ADDR_WIDTH-1:0] waddr;
         input [REGS_DATA_WIDTH-1:0] wdata;
         input is_fpr;
-        begin
-            if (trace_en && (is_fpr || (waddr != '0))) begin
-                $display("core   0: 0x%08h (0x%08h) unknown", pc, instr);
+		begin
+			if (trace_en && (is_fpr || (waddr != '0))) begin
+				if (trace_time_en)
+					$display("YDRASIL_TRACE_TIME time=%0t pc=0x%08h", $time, pc);
+				$display("core   0: 0x%08h (0x%08h) unknown", pc, instr);
                 if (is_fpr)
                     $display("3 0x%08h (0x%08h) f%0d 0x%08h", pc, instr, waddr, wdata);
                 else
@@ -259,4 +263,41 @@ import ydrasil_pkg::*;
         end
     end
 
+endmodule
+
+module ydrasil_commit_trace_rob
+import ydrasil_pkg::*;
+(
+    input wire clk,
+    input wire rst_n,
+    input ydrasil_retire_bus_t retire_bus_i
+);
+    bit trace_en;
+    bit trace_time_en;
+
+    initial begin
+        trace_en = $test$plusargs("commit_trace");
+        trace_time_en = $test$plusargs("commit_trace_time");
+    end
+
+    task automatic print_commit(input ydrasil_commit_pkt_t pkt);
+        begin
+            if (trace_en && pkt.valid && pkt.writes_gpr) begin
+                if (trace_time_en)
+                    $display("YDRASIL_TRACE_TIME time=%0t pc=0x%08h", $time, pkt.pc);
+                $display("core   0: 0x%08h (0x%08h) unknown", pkt.pc, pkt.instr);
+                $display("3 0x%08h (0x%08h) x%0d 0x%08h",
+                         pkt.pc, pkt.instr, pkt.rd_addr, pkt.value);
+            end
+        end
+    endtask
+
+    always @(negedge clk) begin
+        if (rst_n) begin
+            print_commit(retire_bus_i.slot0);
+            print_commit(retire_bus_i.slot1);
+            print_commit(retire_bus_i.slot2);
+            print_commit(retire_bus_i.slot3);
+        end
+    end
 endmodule

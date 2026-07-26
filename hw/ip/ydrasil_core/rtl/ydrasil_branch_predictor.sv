@@ -15,20 +15,18 @@ import ydrasil_pkg::*;
     output wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] predict_target_o,
     output wire [1:0]                      predict_counter_o,
     output wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] predict_bht_index_o,
+    output wire [ydrasil_pkg::BP_GHR_WIDTH-1:0] predict_history_o,
 
-    input  wire                            train_valid_i,
-    input  wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] train_pc_i,
-    input  wire                            train_taken_i,
-    input  wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] train_target_i,
-    input  wire [1:0]                      train_counter_i,
-    input  wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] train_bht_index_i,
+    input  ydrasil_bp_spec_update_pkt_t    spec_update_i,
+    input  ydrasil_bp_recover_pkt_t        recover_i,
+    input  ydrasil_bp_train_pkt_t          train_i,
 
     input  wire                            invalidate_i
 );
 
     localparam int BTB_INDEX_WIDTH = (BTB_ENTRIES > 1) ? $clog2(BTB_ENTRIES) : 1;
     localparam int BHT_INDEX_WIDTH = (BHT_ENTRIES > 1) ? $clog2(BHT_ENTRIES) : 1;
-    localparam int GHR_WIDTH = (BHT_INDEX_WIDTH > 4) ? 4 : BHT_INDEX_WIDTH;
+    localparam int GHR_WIDTH = ydrasil_pkg::BP_GHR_WIDTH;
     localparam int BTB_TAG_WIDTH = ydrasil_pkg::INST_ADDR_WIDTH - BTB_INDEX_WIDTH - 2;
     localparam int BTB_DATA_WIDTH = BTB_TAG_WIDTH + ydrasil_pkg::INST_ADDR_WIDTH;
 
@@ -53,6 +51,7 @@ import ydrasil_pkg::*;
     logic [BTB_ENTRIES-1:0] btb_valid_q;
     logic [BHT_ENTRIES-1:0] bht_valid_q;
     logic [GHR_WIDTH-1:0] ghr_q;
+    logic [GHR_WIDTH-1:0] predict_history_q;
 
     wire [BTB_INDEX_WIDTH-1:0] predict_btb_index;
     wire [BHT_INDEX_WIDTH-1:0] predict_bht_index;
@@ -86,18 +85,31 @@ import ydrasil_pkg::*;
     assign ghr_index_mask = USE_GSHARE ? {{(BHT_INDEX_WIDTH-GHR_WIDTH){1'b0}}, ghr_q} : '0;
     assign predict_bht_index = predict_pc_bht_index ^ ghr_index_mask;
     assign predict_btb_tag   = predict_pc_i[ydrasil_pkg::INST_ADDR_WIDTH-1:BTB_INDEX_WIDTH+2];
-    assign train_btb_index   = train_pc_i[BTB_INDEX_WIDTH+1:2];
-    assign train_bht_index   = train_bht_index_i[BHT_INDEX_WIDTH-1:0];
-    assign train_btb_tag     = train_pc_i[ydrasil_pkg::INST_ADDR_WIDTH-1:BTB_INDEX_WIDTH+2];
+    assign train_btb_index   = train_i.pc[BTB_INDEX_WIDTH+1:2];
+    assign train_bht_index   = train_i.bht_index[BHT_INDEX_WIDTH-1:0];
+    assign train_btb_tag     = train_i.pc[ydrasil_pkg::INST_ADDR_WIDTH-1:BTB_INDEX_WIDTH+2];
     assign predict_bht_index_o = {{(ydrasil_pkg::INST_ADDR_WIDTH-BHT_INDEX_WIDTH){1'b0}}, predict_bht_index_q};
+    assign predict_history_o = predict_history_q;
 
-    assign bht_next_counter = train_taken_i ?
-        ((train_counter_i == 2'b11) ? train_counter_i : (train_counter_i + 2'b01)) :
-        ((train_counter_i == 2'b00) ? train_counter_i : (train_counter_i - 2'b01));
-    assign btb_wdata = {train_btb_tag, train_target_i};
+    function automatic logic [GHR_WIDTH-1:0] advance_history(
+        input logic [GHR_WIDTH-1:0] history,
+        input logic [1:0] count,
+        input logic [1:0] taken
+    );
+        case (count)
+            2'd1: advance_history = {history[GHR_WIDTH-2:0], taken[0]};
+            2'd2: advance_history = {history[GHR_WIDTH-3:0], taken[0], taken[1]};
+            default: advance_history = history;
+        endcase
+    endfunction
+
+    assign bht_next_counter = train_i.taken ?
+        ((train_i.counter == 2'b11) ? train_i.counter : (train_i.counter + 2'b01)) :
+        ((train_i.counter == 2'b00) ? train_i.counter : (train_i.counter - 2'b01));
+    assign btb_wdata = {train_btb_tag, train_i.target};
     assign bht_wdata = bht_next_counter;
     assign {btb_rtag, btb_rtarget} = btb_rdata;
-    assign train_fire = train_valid_i && !invalidate_i;
+    assign train_fire = train_i.valid && !invalidate_i;
     assign predict_btb_entry_valid = btb_valid_q[predict_btb_index];
     assign predict_bht_entry_valid = bht_valid_q[predict_bht_index];
 
@@ -138,6 +150,7 @@ import ydrasil_pkg::*;
             btb_valid_q         <= '0;
             bht_valid_q         <= '0;
             ghr_q               <= '0;
+            predict_history_q   <= '0;
         end else if (invalidate_i) begin
             predict_btb_tag_q   <= '0;
             predict_bht_index_q <= '0;
@@ -146,17 +159,23 @@ import ydrasil_pkg::*;
             btb_valid_q         <= '0;
             bht_valid_q         <= '0;
             ghr_q               <= '0;
+            predict_history_q   <= '0;
         end else begin
             predict_btb_tag_q   <= predict_btb_tag;
             predict_bht_index_q <= predict_bht_index;
             predict_btb_valid_q <= predict_btb_entry_valid;
             predict_bht_valid_q <= predict_bht_entry_valid;
+            predict_history_q   <= ghr_q;
 
             if (train_fire) begin
                 btb_valid_q[train_btb_index] <= 1'b1;
                 bht_valid_q[train_bht_index] <= 1'b1;
-                ghr_q <= {ghr_q[GHR_WIDTH-2:0], train_taken_i};
             end
+            if (recover_i.valid)
+                ghr_q <= recover_i.history;
+            else
+                ghr_q <= advance_history(ghr_q, spec_update_i.count,
+                                         spec_update_i.taken);
         end
     end
 

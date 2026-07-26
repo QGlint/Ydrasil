@@ -44,6 +44,10 @@ import ydrasil_pkg::*;
 
     reg  [ydrasil_pkg::DOUBLE_REGS_WIDTH-1:0] cycle;
     reg  [ydrasil_pkg::DOUBLE_REGS_WIDTH-1:0] instret;
+    // A low-half write can wrap before the following high-half write reaches
+    // the CSR block. Preserve that architectural carry across the pair.
+    reg                         mcycle_low_write_pending;
+    reg                         mcycle_low_write_carry;
     reg  [ydrasil_pkg::REGS_DATA_WIDTH-1:0] mtvec;
     reg  [ydrasil_pkg::REGS_DATA_WIDTH-1:0] mcause;
     reg  [ydrasil_pkg::REGS_DATA_WIDTH-1:0] mepc;
@@ -54,9 +58,13 @@ import ydrasil_pkg::*;
     reg  [ydrasil_pkg::REGS_DATA_WIDTH-1:0] mtval;
     reg  [ydrasil_pkg::REGS_DATA_WIDTH-1:0] mcounteren;
     reg  [ydrasil_pkg::REGS_DATA_WIDTH-1:0] mcountinhibit;
-    reg  [4:0] fflags;
-    reg  [2:0] frm;
+	reg  [4:0] fflags;
+	reg  [2:0] frm;
 	wire [31:0] mstatus_read = {mstatus[14:13] == 2'b11, mstatus[30:0]};
+	wire [31:0] mip_read = mip |
+		({31'b0, irq_i.software} << 3) |
+		({31'b0, irq_i.timer} << 7) |
+		({31'b0, irq_i.external} << 11);
 
 	assign frm_o = frm;
 	assign fp_enabled_o = |mstatus[14:13];
@@ -65,7 +73,7 @@ import ydrasil_pkg::*;
     assign trap_state_o.mepc = mepc;
     assign trap_state_o.mstatus = mstatus_read;
     assign trap_state_o.mie = mie;
-    assign trap_state_o.mip = mip;
+    assign trap_state_o.mip = mip_read;
 
     reg ex_csr_addr_writeable;
     reg clint_csr_addr_writeable;
@@ -153,6 +161,12 @@ import ydrasil_pkg::*;
         csr_write_en && (csr_write_addr == ydrasil_pkg::CSR_MINSTRET);
     wire minstreth_we =
         csr_write_en && (csr_write_addr == ydrasil_pkg::CSR_MINSTRETH);
+    wire mcountinhibit_we =
+        csr_write_en && (csr_write_addr == ydrasil_pkg::CSR_MCOUNTINHIBIT);
+    wire cycle_inhibited = mcountinhibit_we ?
+        csr_write_mcountinhibit_data[0] : mcountinhibit[0];
+    wire instret_inhibited = mcountinhibit_we ?
+        csr_write_mcountinhibit_data[2] : mcountinhibit[2];
 
     wire ex_csr_forward =
         ex_csr_write_effective && (ex_csr_waddr_i[11:0] == id_csr_raddr_i[11:0]);
@@ -181,7 +195,7 @@ import ydrasil_pkg::*;
             ydrasil_pkg::CSR_MIE:           csr_ex_read_value = mie;
             ydrasil_pkg::CSR_MSTATUS:       csr_ex_read_value = mstatus_read;
             ydrasil_pkg::CSR_MSCRATCH:      csr_ex_read_value = mscratch;
-            ydrasil_pkg::CSR_MIP:           csr_ex_read_value = mip;
+            ydrasil_pkg::CSR_MIP:           csr_ex_read_value = mip_read;
             ydrasil_pkg::CSR_MTVAL:         csr_ex_read_value = mtval;
             ydrasil_pkg::CSR_MCOUNTEREN:    csr_ex_read_value = mcounteren;
             ydrasil_pkg::CSR_MCOUNTINHIBIT: csr_ex_read_value = mcountinhibit;
@@ -223,7 +237,7 @@ import ydrasil_pkg::*;
             ydrasil_pkg::CSR_MIE:           csr_clint_read_value = mie;
             ydrasil_pkg::CSR_MSTATUS:       csr_clint_read_value = mstatus_read;
             ydrasil_pkg::CSR_MSCRATCH:      csr_clint_read_value = mscratch;
-            ydrasil_pkg::CSR_MIP:           csr_clint_read_value = mip;
+            ydrasil_pkg::CSR_MIP:           csr_clint_read_value = mip_read;
             ydrasil_pkg::CSR_MTVAL:         csr_clint_read_value = mtval;
             ydrasil_pkg::CSR_MCOUNTEREN:    csr_clint_read_value = mcounteren;
             ydrasil_pkg::CSR_MCOUNTINHIBIT: csr_clint_read_value = mcountinhibit;
@@ -247,6 +261,8 @@ import ydrasil_pkg::*;
         if (!rst_n) begin
             cycle         <= {ydrasil_pkg::DOUBLE_REGS_WIDTH{1'b0}};
             instret       <= {ydrasil_pkg::DOUBLE_REGS_WIDTH{1'b0}};
+            mcycle_low_write_pending <= 1'b0;
+            mcycle_low_write_carry   <= 1'b0;
             mtvec         <= {ydrasil_pkg::REGS_DATA_WIDTH{1'b0}};
             mcause        <= {ydrasil_pkg::REGS_DATA_WIDTH{1'b0}};
             mepc          <= {ydrasil_pkg::REGS_DATA_WIDTH{1'b0}};
@@ -262,17 +278,24 @@ import ydrasil_pkg::*;
         end else begin
             if (mcycle_we) begin
                 cycle[31:0] <= csr_write_data;
+                mcycle_low_write_pending <= 1'b1;
+                mcycle_low_write_carry   <= 1'b0;
             end else if (mcycleh_we) begin
-                cycle[63:32] <= csr_write_data;
-            end else if (!mcountinhibit[0]) begin
+                cycle[63:32] <= csr_write_data +
+                    (mcycle_low_write_pending && mcycle_low_write_carry);
+                mcycle_low_write_pending <= 1'b0;
+                mcycle_low_write_carry   <= 1'b0;
+            end else if (!cycle_inhibited) begin
                 cycle <= cycle + 1'b1;
+                if (mcycle_low_write_pending && (cycle[31:0] == 32'hffff_ffff))
+                    mcycle_low_write_carry <= 1'b1;
             end
 
             if (minstret_we) begin
                 instret[31:0] <= csr_write_data;
             end else if (minstreth_we) begin
                 instret[63:32] <= csr_write_data;
-            end else if ((instret_inc_count_i != 2'b0) && !mcountinhibit[2]) begin
+            end else if ((instret_inc_count_i != 2'b0) && !instret_inhibited) begin
                 instret <= instret + instret_inc_count_i;
             end
 
@@ -307,9 +330,6 @@ import ydrasil_pkg::*;
                     end
                 endcase
             end
-            mip[3] <= irq_i.software;
-            mip[7] <= irq_i.timer;
-            mip[11] <= irq_i.external;
 `ifdef YDRASIL_ENABLE_FPU
             if (fp_flags_valid_i)
                 fflags <= fflags | fp_flags_i;

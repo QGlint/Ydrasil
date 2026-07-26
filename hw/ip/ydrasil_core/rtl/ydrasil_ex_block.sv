@@ -30,8 +30,13 @@ import ydrasil_pkg::*;
     input  wire                            id_ex_jalr_i,
     input  wire                            id_ex_alu_bypass_rs1_i,
     input  wire                            id_ex_alu_bypass_rs2_i,
+    input  wire                            id_ex_dual_bypass_rs1_i,
+    input  wire                            id_ex_dual_bypass_rs2_i,
+    input  wire                            dual_bypass_valid_i,
+    input  wire [DATA_WIDTH-1:0]           dual_bypass_data_i,
     input  wire                            id_ex_load_bypass_rs1_i,
     input  wire                            id_ex_load_bypass_rs2_i,
+    input  wire                            load_bypass_valid_i,
     input  wire [DATA_WIDTH-1:0]           load_bypass_data_i,
     input  wire [DATA_WIDTH-1:0]           id_ex_branch_target_i,
     input  wire [DATA_WIDTH-1:0]           id_ex_branch_next_pc_i,
@@ -43,6 +48,7 @@ import ydrasil_pkg::*;
     input  wire [DATA_WIDTH-1:0]           id_ex_pred_target_i,
     input  wire [1:0]                      id_ex_pred_counter_i,
     input  wire [DATA_WIDTH-1:0]           id_ex_pred_bht_index_i,
+    input  wire [BP_GHR_WIDTH-1:0]         id_ex_pred_history_i,
     input  wire [REGS_ADDR_WIDTH-1:0]      id_rf_waddr_rd_i,
     input  wire                            id_alu_rf_wen_rd_i,
     input  producer_id_t                   id_ex_producer_id_i,
@@ -69,7 +75,9 @@ import ydrasil_pkg::*;
     output wire [DATA_WIDTH-1:0]           ex_bp_train_target_o,
     output wire [1:0]                      ex_bp_train_counter_o,
     output wire [DATA_WIDTH-1:0]           ex_bp_train_bht_index_o,
+    output wire [BP_GHR_WIDTH-1:0]         ex_bp_recover_history_o,
     output wire                            ex_branch_mispredict_o,
+    output ydrasil_bp_resolve_pkt_t        ex_bp_fast_resolve_o,
     output wire [BUS_ADDR_WIDTH-1:0]       ex_lsu_mem_addr_o,
 
     output wire [DATA_WIDTH-1:0]           ex_lsu_result_o,
@@ -81,11 +89,8 @@ import ydrasil_pkg::*;
 
     output wire                            mul_issue_o,
     output wire [REGS_ADDR_WIDTH-1:0]      mul_issue_waddr_o,
-    output wire [REGS_DATA_WIDTH-1:0]      mul_wdata_rd_o,
-    output wire                            mul_rf_wen_rd_o,
-    output wire [REGS_ADDR_WIDTH-1:0]      mul_rf_waddr_rd_o,
-    output producer_id_t                   mul_producer_id_o,
-    output wire                            mul_result_valid_o,
+    output ydrasil_gpr_fwd_pkt_t           mul_completion_pkt_o,
+    output ydrasil_gpr_fwd_pkt_t           div_completion_pkt_o,
 
     output wire                            ex_instret_inc_o,
     output wire                            ex_mul_stall_o
@@ -126,6 +131,10 @@ import ydrasil_pkg::*;
     wire mul_issue_valid;
     wire mul_issue_wen;
     wire mul_result_valid;
+    wire mul_result_wen;
+    wire [REGS_ADDR_WIDTH-1:0] mul_result_waddr;
+    producer_id_t mul_result_producer_id;
+    wire [REGS_DATA_WIDTH-1:0] mul_result_wdata;
 
     wire [REGS_DATA_WIDTH-1:0] bitmanip_result;
     wire                       bitmanip_rf_wen_rd;
@@ -137,6 +146,7 @@ import ydrasil_pkg::*;
     reg                        div_active_q;
     reg                        div_wen_q;
     reg [REGS_ADDR_WIDTH-1:0]  div_waddr_q;
+    producer_id_t              div_producer_id_q;
 
     reg [REGS_DATA_WIDTH-1:0] alu_result_ff;
     reg [REGS_DATA_WIDTH-1:0] bitmanip_result_ff;
@@ -164,46 +174,79 @@ import ydrasil_pkg::*;
     wire [31:0] lsu_fast_add_result;
     wire [31:0] lsu_base_add_result;
     wire [31:0] lsu_bypass_add_result;
+    wire [31:0] lsu_dual_bypass_add_result;
     wire        lsu_addr_alu_bypass;
+    wire        lsu_addr_dual_bypass;
+
+    wire main_bypass_rs1 = id_ex_alu_bypass_rs1_i & alu_bypass_valid_q;
+    wire main_bypass_rs2 = id_ex_alu_bypass_rs2_i & alu_bypass_valid_q;
+    wire dual_bypass_rs1 = id_ex_dual_bypass_rs1_i & dual_bypass_valid_i;
+    wire dual_bypass_rs2 = id_ex_dual_bypass_rs2_i & dual_bypass_valid_i;
+    wire load_bypass_rs1 = id_ex_load_bypass_rs1_i & load_bypass_valid_i;
+    wire load_bypass_rs2 = id_ex_load_bypass_rs2_i & load_bypass_valid_i;
 
     assign bt_a_operand =
-        (id_ex_jalr_i & id_ex_load_bypass_rs1_i) ? load_bypass_data_i :
-        (id_ex_jalr_i & id_ex_alu_bypass_rs1_i & alu_bypass_valid_q) ?
-        alu_bypass_data_q : bt_a_operand_i;
+        (id_ex_jalr_i & load_bypass_rs1) ? load_bypass_data_i :
+        (id_ex_jalr_i & dual_bypass_rs1) ? dual_bypass_data_i :
+        (id_ex_jalr_i & main_bypass_rs1) ? alu_bypass_data_q :
+        bt_a_operand_i;
     assign bt_b_operand = bt_b_operand_i;
 
     // JALR uses rs1 only for the BRU target. Its architectural rd value is
     // always PC+4, so the ALU link operand must remain the registered PC.
     assign operand_a = id_ex_jalr_i ? alu_operand_a_i :
-        id_ex_load_bypass_rs1_i ? load_bypass_data_i :
-        (id_ex_alu_bypass_rs1_i & alu_bypass_valid_q) ? alu_bypass_data_q : alu_operand_a_i;
-    assign operand_b = id_ex_load_bypass_rs2_i ? load_bypass_data_i :
-        (id_ex_alu_bypass_rs2_i & alu_bypass_valid_q) ? alu_bypass_data_q : alu_operand_b_i;
-    assign bitmanip_operand_a = alu_operand_a_i;
-    assign bitmanip_operand_b = alu_operand_b_i;
-    assign bru_operand_a = id_ex_load_bypass_rs1_i ? load_bypass_data_i :
-        (id_ex_alu_bypass_rs1_i & alu_bypass_valid_q) ? alu_bypass_data_q : bru_operand_a_i;
-    assign bru_operand_b = id_ex_load_bypass_rs2_i ? load_bypass_data_i :
-        (id_ex_alu_bypass_rs2_i & alu_bypass_valid_q) ? alu_bypass_data_q : bru_operand_b_i;
+        load_bypass_rs1 ? load_bypass_data_i :
+        dual_bypass_rs1 ? dual_bypass_data_i :
+        main_bypass_rs1 ? alu_bypass_data_q : alu_operand_a_i;
+    assign operand_b = load_bypass_rs2 ? load_bypass_data_i :
+        dual_bypass_rs2 ? dual_bypass_data_i :
+        main_bypass_rs2 ? alu_bypass_data_q : alu_operand_b_i;
+    assign bitmanip_operand_a =
+        load_bypass_rs1 ? load_bypass_data_i :
+        dual_bypass_rs1 ? dual_bypass_data_i :
+        main_bypass_rs1 ? alu_bypass_data_q : alu_operand_a_i;
+    assign bitmanip_operand_b =
+        load_bypass_rs2 ? load_bypass_data_i :
+        dual_bypass_rs2 ? dual_bypass_data_i :
+        main_bypass_rs2 ? alu_bypass_data_q : alu_operand_b_i;
+    assign bru_operand_a = load_bypass_rs1 ? load_bypass_data_i :
+        dual_bypass_rs1 ? dual_bypass_data_i :
+        main_bypass_rs1 ? alu_bypass_data_q : bru_operand_a_i;
+    assign bru_operand_b = load_bypass_rs2 ? load_bypass_data_i :
+        dual_bypass_rs2 ? dual_bypass_data_i :
+        main_bypass_rs2 ? alu_bypass_data_q : bru_operand_b_i;
     // LSU consumers are held by the scoreboard until load data is registered.
     // Keep branch/ALU load replay out of the otherwise inactive AGU cone.
     assign lsu_addr_alu_bypass =
-        id_ex_alu_bypass_rs1_i & alu_bypass_valid_q;
+        main_bypass_rs1;
+    assign lsu_addr_dual_bypass = dual_bypass_rs1;
     assign lsu_operand_b = lsu_operand_b_i;
     assign lsu_store_data =
-        (id_ex_alu_bypass_rs2_i & alu_bypass_valid_q) ?
-        alu_bypass_data_q : lsu_store_data_i;
-    assign mul_operand_a = (id_ex_alu_bypass_rs1_i & alu_bypass_valid_q) ? alu_bypass_data_q : mul_operand_a_i;
-    assign mul_operand_b = (id_ex_alu_bypass_rs2_i & alu_bypass_valid_q) ? alu_bypass_data_q : mul_operand_b_i;
-    assign csr_operand_a = (id_ex_alu_bypass_rs1_i & alu_bypass_valid_q) ? alu_bypass_data_q : csr_operand_a_i;
+        load_bypass_rs2 ? load_bypass_data_i :
+        dual_bypass_rs2 ? dual_bypass_data_i :
+        main_bypass_rs2 ? alu_bypass_data_q : lsu_store_data_i;
+    assign mul_operand_a = load_bypass_rs1 ? load_bypass_data_i :
+        dual_bypass_rs1 ? dual_bypass_data_i :
+        main_bypass_rs1 ? alu_bypass_data_q : mul_operand_a_i;
+    assign mul_operand_b = load_bypass_rs2 ? load_bypass_data_i :
+        dual_bypass_rs2 ? dual_bypass_data_i :
+        main_bypass_rs2 ? alu_bypass_data_q : mul_operand_b_i;
+    assign csr_operand_a = load_bypass_rs1 ? load_bypass_data_i :
+        dual_bypass_rs1 ? dual_bypass_data_i :
+        main_bypass_rs1 ? alu_bypass_data_q : csr_operand_a_i;
 
     // Put the bypass select after the carry chains.  Both adder inputs are
     // registered, and the selected result is architecturally identical to a
     // mux in front of one adder, without placing bypass-valid on the carry path.
+    wire [31:0] lsu_load_bypass_add_result = load_bypass_data_i + lsu_operand_b;
     assign lsu_base_add_result = lsu_operand_a_i + lsu_operand_b;
     assign lsu_bypass_add_result = alu_bypass_data_q + lsu_operand_b;
-    assign lsu_fast_add_result = lsu_addr_alu_bypass ?
-        lsu_bypass_add_result : lsu_base_add_result;
+    assign lsu_dual_bypass_add_result = dual_bypass_data_i + lsu_operand_b;
+    assign lsu_fast_add_result = load_bypass_rs1 ?
+        lsu_load_bypass_add_result :
+        lsu_addr_dual_bypass ?
+        lsu_dual_bypass_add_result :
+        (lsu_addr_alu_bypass ? lsu_bypass_add_result : lsu_base_add_result);
     assign ex_lsu_mem_addr_o = lsu_fast_add_result;
     assign ex_lsu_result_o = lsu_store_data;
 
@@ -233,6 +276,7 @@ import ydrasil_pkg::*;
         .id_ex_pred_target_i         (id_ex_pred_target_i),
         .id_ex_pred_counter_i        (id_ex_pred_counter_i),
         .id_ex_pred_bht_index_i      (id_ex_pred_bht_index_i),
+        .id_ex_pred_history_i        (id_ex_pred_history_i),
         .trap_redirect_i             (trap_redirect_i),
         .trap_redirect_addr_i        (trap_redirect_addr_i),
         .ex_branch_jump_o            (ex_branch_jump_o),
@@ -245,7 +289,9 @@ import ydrasil_pkg::*;
         .ex_bp_train_target_o        (ex_bp_train_target_o),
         .ex_bp_train_counter_o       (ex_bp_train_counter_o),
         .ex_bp_train_bht_index_o     (ex_bp_train_bht_index_o),
-        .ex_branch_mispredict_o      (ex_branch_mispredict_o)
+        .ex_bp_recover_history_o     (ex_bp_recover_history_o),
+        .ex_branch_mispredict_o      (ex_branch_mispredict_o),
+        .ex_bp_fast_resolve_o        (ex_bp_fast_resolve_o)
 `ifndef SYNTHESIS
         ,.dbg_bp_resolve_valid_o     (dbg_bp_resolve_valid_o)
         ,.dbg_bp_resolve_pc_o        (dbg_bp_resolve_pc_o)
@@ -351,8 +397,22 @@ import ydrasil_pkg::*;
         !op_m_unit & !op_bitmanip & !flush_ex_i;
     assign ex_rf_wen_rd =
         div_rf_wen_rd | bitmanip_rf_wen_rd | fast_bitmanip_rf_wen_rd |
-        normal_alu_rf_wen_rd | csr_wen;
-    assign mul_result_valid_o = mul_result_valid;
+        normal_alu_rf_wen_rd | op_csr;
+    always_comb begin
+        mul_completion_pkt_o = '0;
+        mul_completion_pkt_o.valid = mul_result_valid;
+        mul_completion_pkt_o.producer_id = mul_result_producer_id;
+        mul_completion_pkt_o.producer_tracked = mul_result_valid;
+        mul_completion_pkt_o.addr = mul_result_waddr;
+        mul_completion_pkt_o.data = mul_result_wdata;
+
+        div_completion_pkt_o = '0;
+        div_completion_pkt_o.valid = div_complete;
+        div_completion_pkt_o.producer_id = div_producer_id_q;
+        div_completion_pkt_o.producer_tracked = div_complete;
+        div_completion_pkt_o.addr = div_waddr_q;
+        div_completion_pkt_o.data = div_result;
+    end
     assign ex_instret_inc_o =
         (id_ex_valid_i & !trap_redirect_i & !flush_ex_i & !op_load & !op_mul & !op_div &
          !operator_type_i[OPERATOR_TYPE_FPU]) |
@@ -374,7 +434,8 @@ import ydrasil_pkg::*;
         (operator_i[OP_ALU_SLL] | operator_i[OP_ALU_SRL] | operator_i[OP_ALU_SRA]);
     wire bypassable_alu_op =
         id_ex_valid_i & id_alu_rf_wen_rd_i & (id_rf_waddr_rd_i != '0) &
-        (fast_alu_op | shift_alu_op) & !trap_redirect_i & !flush_ex_i;
+        (fast_alu_op | shift_alu_op | op_bitmanip) &
+        !trap_redirect_i & !flush_ex_i;
     wire fast_result_wen =
         (id_ex_valid_i & !trap_redirect_i & !flush_ex_i & !op_m_unit &
          !op_bitmanip & (fast_alu_op | op_load | op_store | op_bjp));
@@ -439,10 +500,10 @@ import ydrasil_pkg::*;
         .issue_waddr_i   (id_rf_waddr_rd_i),
         .issue_producer_id_i(id_ex_producer_id_i),
         .result_valid_o  (mul_result_valid),
-        .result_wen_o    (mul_rf_wen_rd_o),
-        .result_waddr_o  (mul_rf_waddr_rd_o),
-        .result_producer_id_o(mul_producer_id_o),
-        .result_wdata_o  (mul_wdata_rd_o)
+        .result_wen_o    (mul_result_wen),
+        .result_waddr_o  (mul_result_waddr),
+        .result_producer_id_o(mul_result_producer_id),
+        .result_wdata_o  (mul_result_wdata)
     );
 
     logic [OPERATOR_WIDTH-1:0] slow_bitmanip_operator;
@@ -500,7 +561,7 @@ import ydrasil_pkg::*;
         ({REGS_DATA_WIDTH{csr_csrrw}} & csr_operand_a) |
         ({REGS_DATA_WIDTH{csr_csrrs}} & (csr_operand_a | csr_ex_rdata_i)) |
         ({REGS_DATA_WIDTH{csr_csrrc}} & (csr_ex_rdata_i & (~csr_operand_a)));
-    assign csr_wen = op_csr;
+    assign csr_wen = op_csr & id_op_csr_info_i[OP_CSR_WRITE];
 
     assign alu_result_o = bitmanip_result_valid_ff ? bitmanip_result_ff : alu_result_ff;
     assign alu_rf_wen_rd_o = alu_rf_wen_rd_ff;
@@ -525,6 +586,7 @@ import ydrasil_pkg::*;
             div_active_q        <= 1'b0;
             div_wen_q           <= 1'b0;
             div_waddr_q         <= '0;
+            div_producer_id_q   <= '0;
         end else if (flush_ex_i) begin
             alu_result_ff       <= '0;
             bitmanip_result_ff  <= '0;
@@ -542,6 +604,7 @@ import ydrasil_pkg::*;
             div_active_q        <= 1'b0;
             div_wen_q           <= 1'b0;
             div_waddr_q         <= '0;
+            div_producer_id_q   <= '0;
         end else begin
             alu_result_ff      <= fast_result_wen ? fast_result :
                                   slow_result_wen ? slow_result : alu_result;
@@ -554,7 +617,9 @@ import ydrasil_pkg::*;
             alu_producer_id_ff <= id_ex_producer_id_i;
             alu_bypass_valid_q <= bypassable_alu_op;
             alu_bypass_data_q  <= bypassable_alu_op ?
-                                  (shift_alu_op ? alu_result : fast_alu_result) : '0;
+                                  (op_bitmanip ?
+                                   (fast_bitmanip_op ? fast_bitmanip_result : bitmanip_result) :
+                                   (shift_alu_op ? alu_result : fast_alu_result)) : '0;
             ex_csr_wdata_o_ff  <= csr_wdata;
             ex_csr_fs_wdata_o_ff <= csr_wdata[14:13];
             ex_csr_mstatus_wen_o_ff <= csr_wen && (id_ex_csr_waddr_i == CSR_MSTATUS);
@@ -565,10 +630,12 @@ import ydrasil_pkg::*;
                 div_active_q <= 1'b1;
                 div_wen_q    <= id_alu_rf_wen_rd_i & (id_rf_waddr_rd_i != '0);
                 div_waddr_q  <= id_rf_waddr_rd_i;
+                div_producer_id_q <= id_ex_producer_id_i;
             end else if (div_done) begin
                 div_active_q <= 1'b0;
                 div_wen_q    <= 1'b0;
                 div_waddr_q  <= '0;
+                div_producer_id_q <= '0;
             end
         end
     end
@@ -578,16 +645,17 @@ import ydrasil_pkg::*;
     assign ex_csr_mstatus_wen_o = ex_csr_mstatus_wen_o_ff;
     assign ex_csr_wen_o = ex_csr_wen_o_ff;
     assign ex_csr_waddr_o = ex_csr_waddr_o_ff;
-    assign slow_result_wen = div_rf_wen_rd | csr_wen;
+    assign slow_result_wen = div_rf_wen_rd | op_csr;
     assign slow_result =
         ({32{div_rf_wen_rd}}        & div_result) |
-        ({32{csr_wen}}              & csr_reg_wdata);
+        ({32{op_csr}}               & csr_reg_wdata);
 
 `ifndef SYNTHESIS
     always_ff @(posedge clk) begin
-        if (rst_n && id_ex_valid_i && (op_load || op_store)) begin
-            assert (!id_ex_load_bypass_rs1_i && !id_ex_load_bypass_rs2_i)
-                else $fatal(1, "LSU instruction entered EX with load replay enabled");
+        if (rst_n && id_ex_valid_i &&
+            (id_ex_load_bypass_rs1_i || id_ex_load_bypass_rs2_i)) begin
+            assert (load_bypass_valid_i)
+                else $fatal(1, "predicted load bypass reached EX without matching load data");
         end
     end
 `endif

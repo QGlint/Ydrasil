@@ -27,6 +27,7 @@ import ydrasil_pkg::*;
     input  wire [DATA_WIDTH-1:0]           id_ex_pred_target_i,
     input  wire [1:0]                      id_ex_pred_counter_i,
     input  wire [DATA_WIDTH-1:0]           id_ex_pred_bht_index_i,
+    input  wire [BP_GHR_WIDTH-1:0]         id_ex_pred_history_i,
     input  wire                            trap_redirect_i,
     input  wire [INST_ADDR_WIDTH-1:0]      trap_redirect_addr_i,
 
@@ -40,7 +41,9 @@ import ydrasil_pkg::*;
     output wire [DATA_WIDTH-1:0]           ex_bp_train_target_o,
     output wire [1:0]                      ex_bp_train_counter_o,
     output wire [DATA_WIDTH-1:0]           ex_bp_train_bht_index_o,
-    output wire                            ex_branch_mispredict_o
+    output wire [BP_GHR_WIDTH-1:0]         ex_bp_recover_history_o,
+    output wire                            ex_branch_mispredict_o,
+    output ydrasil_bp_resolve_pkt_t        ex_bp_fast_resolve_o
 `ifndef SYNTHESIS
     ,output wire                           dbg_bp_resolve_valid_o
     ,output wire [DATA_WIDTH-1:0]          dbg_bp_resolve_pc_o
@@ -60,7 +63,7 @@ import ydrasil_pkg::*;
     wire [DATA_WIDTH-1:0] ex_jump_target =
         id_ex_jalr_i ? {bt_alu_result[DATA_WIDTH-1:1], 1'b0} : bt_alu_result;
     wire [DATA_WIDTH-1:0] ex_branch_target = id_ex_branch_target_i;
-    wire [DATA_WIDTH-1:0] ex_branch_pc = bt_a_operand_i;
+    wire [DATA_WIDTH-1:0] ex_branch_pc = id_ex_branch_next_pc_i - DATA_WIDTH'(4);
     wire [DATA_WIDTH-1:0] ex_branch_next_pc = id_ex_branch_next_pc_i;
 
     wire ex_bjp_op   = operator_type_i[OPERATOR_TYPE_BJP];
@@ -108,11 +111,32 @@ import ydrasil_pkg::*;
     wire ex_branch_mispredict =
         ex_is_branch & !trap_redirect_i &
         (ex_branch_direction_miss | ex_branch_target_miss);
+    wire ex_jump_mispredict = ex_is_jump & !trap_redirect_i &
+        (!ex_pred_taken || (id_ex_pred_target_i != ex_jump_target));
 
     wire ex_pc_redirect =
-        trap_redirect_i | (ex_is_jump & ex_branch_jump & !trap_redirect_i) | ex_branch_mispredict;
+        trap_redirect_i | ex_jump_mispredict | ex_branch_mispredict;
     wire ex_direct_redirect = trap_redirect_i | ex_is_jump;
-    wire ex_bp_train_valid = ex_is_branch & !trap_redirect_i;
+    wire ex_bp_train_valid = (ex_is_branch | ex_is_jump) & !trap_redirect_i;
+    wire ex_bp_train_taken = ex_is_jump | ex_branch_taken;
+    wire [DATA_WIDTH-1:0] ex_bp_train_target =
+        ex_is_jump ? ex_jump_target : ex_branch_target;
+
+    always_comb begin
+        ex_bp_fast_resolve_o = '0;
+        ex_bp_fast_resolve_o.valid = ex_bp_train_valid;
+        ex_bp_fast_resolve_o.redirect = ex_jump_mispredict |
+            ex_branch_mispredict;
+        ex_bp_fast_resolve_o.conditional = ex_is_branch;
+        ex_bp_fast_resolve_o.pc = ex_branch_pc;
+        ex_bp_fast_resolve_o.taken = ex_bp_train_taken;
+        ex_bp_fast_resolve_o.target = ex_bp_train_target;
+        ex_bp_fast_resolve_o.next_pc = ex_is_jump ? ex_jump_target :
+            ex_branch_actual_next_pc;
+        ex_bp_fast_resolve_o.pred_counter = id_ex_pred_counter_i;
+        ex_bp_fast_resolve_o.pred_bht_index = id_ex_pred_bht_index_i;
+        ex_bp_fast_resolve_o.pred_history = id_ex_pred_history_i;
+    end
 
     reg                       ex2_branch_jump_q;
     reg [DATA_WIDTH-1:0]      ex2_branch_target_q;
@@ -125,6 +149,7 @@ import ydrasil_pkg::*;
     reg [DATA_WIDTH-1:0]      ex2_bp_train_target_q;
     reg [1:0]                 ex2_bp_train_counter_q;
     reg [DATA_WIDTH-1:0]      ex2_bp_train_bht_index_q;
+    reg [BP_GHR_WIDTH-1:0]    ex2_bp_recover_history_q;
     reg                       ex2_branch_mispredict_q;
 `ifndef SYNTHESIS
     reg                       dbg_bp_resolve_valid_q;
@@ -153,6 +178,34 @@ import ydrasil_pkg::*;
             ex2_bp_train_target_q <= '0;
             ex2_bp_train_counter_q <= 2'b01;
             ex2_bp_train_bht_index_q <= '0;
+            ex2_bp_recover_history_q <= '0;
+            ex2_branch_mispredict_q <= 1'b0;
+`ifndef SYNTHESIS
+            dbg_bp_resolve_valid_q <= 1'b0;
+            dbg_bp_resolve_pc_q <= '0;
+            dbg_bp_actual_taken_q <= 1'b0;
+            dbg_bp_actual_target_q <= '0;
+            dbg_bp_actual_next_pc_q <= '0;
+            dbg_bp_pred_hit_q <= 1'b0;
+            dbg_bp_pred_taken_q <= 1'b0;
+            dbg_bp_pred_target_q <= '0;
+            dbg_bp_pred_counter_q <= 2'b01;
+            dbg_bp_pred_next_pc_q <= '0;
+            dbg_bp_mispredict_q <= 1'b0;
+`endif
+        end else if (trap_redirect_i) begin
+            ex2_branch_jump_q <= 1'b1;
+            ex2_branch_target_q <= trap_redirect_addr_i;
+            ex2_pc_redirect_q <= 1'b1;
+            ex2_direct_redirect_q <= 1'b1;
+            ex2_branch_next_pc_q <= '0;
+            ex2_bp_train_valid_q <= 1'b0;
+            ex2_bp_train_pc_q <= '0;
+            ex2_bp_train_taken_q <= 1'b0;
+            ex2_bp_train_target_q <= '0;
+            ex2_bp_train_counter_q <= 2'b01;
+            ex2_bp_train_bht_index_q <= '0;
+            ex2_bp_recover_history_q <= '0;
             ex2_branch_mispredict_q <= 1'b0;
 `ifndef SYNTHESIS
             dbg_bp_resolve_valid_q <= 1'b0;
@@ -179,6 +232,7 @@ import ydrasil_pkg::*;
             ex2_bp_train_target_q <= '0;
             ex2_bp_train_counter_q <= 2'b01;
             ex2_bp_train_bht_index_q <= '0;
+            ex2_bp_recover_history_q <= '0;
             ex2_branch_mispredict_q <= 1'b0;
 `ifndef SYNTHESIS
             dbg_bp_resolve_valid_q <= 1'b0;
@@ -201,13 +255,14 @@ import ydrasil_pkg::*;
             ex2_branch_next_pc_q <= ex_branch_next_pc;
             ex2_bp_train_valid_q <= ex_bp_train_valid;
             ex2_bp_train_pc_q <= ex_branch_pc;
-            ex2_bp_train_taken_q <= ex_branch_taken;
-            ex2_bp_train_target_q <= ex_branch_target;
+            ex2_bp_train_taken_q <= ex_bp_train_taken;
+            ex2_bp_train_target_q <= ex_bp_train_target;
             ex2_bp_train_counter_q <= id_ex_pred_counter_i;
             ex2_bp_train_bht_index_q <= id_ex_pred_bht_index_i;
+            ex2_bp_recover_history_q <= id_ex_pred_history_i;
             ex2_branch_mispredict_q <= ex_branch_mispredict;
 `ifndef SYNTHESIS
-            dbg_bp_resolve_valid_q <= ex_bp_train_valid;
+            dbg_bp_resolve_valid_q <= ex_is_branch & !trap_redirect_i;
             dbg_bp_resolve_pc_q <= ex_branch_pc;
             dbg_bp_actual_taken_q <= ex_branch_taken;
             dbg_bp_actual_target_q <= ex_branch_target;
@@ -235,6 +290,7 @@ import ydrasil_pkg::*;
     assign ex_bp_train_target_o = ex2_bp_train_target_q;
     assign ex_bp_train_counter_o = ex2_bp_train_counter_q;
     assign ex_bp_train_bht_index_o = ex2_bp_train_bht_index_q;
+    assign ex_bp_recover_history_o = ex2_bp_recover_history_q;
 `ifndef SYNTHESIS
     assign dbg_bp_resolve_valid_o = dbg_bp_resolve_valid_q;
     assign dbg_bp_resolve_pc_o = dbg_bp_resolve_pc_q;

@@ -96,6 +96,7 @@ import ydrasil_pkg::*;
         trap_ctrl_o = '0;
         trap_ctrl_o.stall = (state_q != S_IDLE) || irq_pending ||
             exception_req_i.valid;
+        trap_ctrl_o.retire = (state_q == S_MRET_REDIRECT);
         if (state_q == S_REDIRECT) begin
             trap_ctrl_o.redirect = 1'b1;
             trap_ctrl_o.redirect_addr = trap_target;
@@ -127,15 +128,17 @@ import ydrasil_pkg::*;
                         state_q <= S_DRAIN;
                     end else if (irq_pending) begin
                         cause_q <= irq_cause;
-                        epc_q <= async_pc_i;
                         tval_q <= 32'b0;
                         is_interrupt_q <= 1'b1;
                         state_q <= S_DRAIN;
                     end
                 end
                 S_DRAIN: begin
-                    if (backend_idle_i)
+                    if (backend_idle_i) begin
+                        if (is_interrupt_q)
+                            epc_q <= async_pc_i;
                         state_q <= S_WRITE_MEPC;
+                    end
                 end
                 S_WRITE_MEPC: state_q <= S_WRITE_MSTATUS;
                 S_WRITE_MSTATUS: state_q <= S_WRITE_MCAUSE;

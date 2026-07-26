@@ -203,10 +203,11 @@ package ydrasil_pkg;
 	localparam int OP_LSU_SH  = 6;
 	localparam int OP_LSU_SW  = 7;
 
-	localparam int OP_CSR_INFO_WIDTH = 3;
+	localparam int OP_CSR_INFO_WIDTH = 4;
 	localparam int OP_CSR_CSRRW = 0;
 	localparam int OP_CSR_CSRRS = 1;
 	localparam int OP_CSR_CSRRC = 2;
+	localparam int OP_CSR_WRITE = 3;
 
 	localparam int OP_SYS_INFO_WIDTH = 3;
 	localparam int OP_SYS_ECALL  = 0;
@@ -280,12 +281,26 @@ package ydrasil_pkg;
 	localparam int BTASELRS = 2;
 
 	localparam int BP_BTB_ENTRIES = 512;
-	localparam int BP_BHT_ENTRIES = 512;
-	localparam int PRODUCER_NUM = 6;
+	localparam int BP_BHT_ENTRIES = 4096;
+	localparam int BP_GHR_WIDTH = 12;
+	// The dependency tag is the architectural ROB identity. A 64-entry window
+	// exposes enough independent work for the asymmetric second execution lane;
+	// completion still uses direct slot lookup plus a generation bit.
+	localparam int PRODUCER_NUM = 64;
 	localparam int PRODUCER_SLOT_WIDTH = $clog2(PRODUCER_NUM);
 	localparam int PRODUCER_ID_WIDTH = PRODUCER_SLOT_WIDTH + 1;
 	typedef logic [PRODUCER_SLOT_WIDTH-1:0] producer_slot_t;
-	typedef logic [PRODUCER_ID_WIDTH-1:0] producer_id_t;
+	typedef logic [PRODUCER_ID_WIDTH-1:0] rob_tag_t;
+	typedef rob_tag_t producer_id_t;
+	typedef struct packed {
+		logic       valid;
+		rob_tag_t   age;
+		rob_tag_t   tag;
+	} ydrasil_sched_candidate_pkt_t;
+	typedef struct packed {
+		ydrasil_sched_candidate_pkt_t first;
+		ydrasil_sched_candidate_pkt_t second;
+	} ydrasil_sched_pair_pkt_t;
 	localparam int COMPLETION_LANES = 4;
 	localparam int COMPLETION_ALU = 0;
 	localparam int COMPLETION_LSU = 1;
@@ -295,11 +310,14 @@ package ydrasil_pkg;
 	typedef struct packed {
 		logic [INST_ADDR_WIDTH-1:0]          pc;
 		logic [INST_DATA_WIDTH-1:0]          instr;
+		logic [INST_ADDR_WIDTH-1:0]          branch_target;
+		logic [INST_ADDR_WIDTH-1:0]          next_pc;
 		logic                                pred_hit;
 		logic                                pred_taken;
 		logic [INST_ADDR_WIDTH-1:0]          pred_target;
 		logic [1:0]                          pred_counter;
 		logic [INST_ADDR_WIDTH-1:0]          pred_bht_index;
+		logic [BP_GHR_WIDTH-1:0]             pred_history;
 		logic [REGS_ADDR_WIDTH-1:0]          rs1_addr;
 		logic [REGS_ADDR_WIDTH-1:0]          rs2_addr;
 		logic [REGS_ADDR_WIDTH-1:0]          rd_addr;
@@ -337,6 +355,113 @@ package ydrasil_pkg;
 
 	typedef struct packed {
 		logic                                valid;
+		rob_tag_t                            rob_tag;
+		ydrasil_decode_pkt_t                 decode;
+		logic                                rs1_ready;
+		logic                                rs2_ready;
+		logic                                rs1_early_alu;
+		logic                                rs2_early_alu;
+		logic                                rs1_early_dual;
+		logic                                rs2_early_dual;
+		logic                                rs1_early_load;
+		logic                                rs2_early_load;
+		rob_tag_t                            rs1_tag;
+		rob_tag_t                            rs2_tag;
+		logic [REGS_DATA_WIDTH-1:0]          rs1_value;
+		logic [REGS_DATA_WIDTH-1:0]          rs2_value;
+	} ydrasil_issue_pkt_t;
+
+	typedef struct packed {
+		logic                                valid;
+		rob_tag_t                            rob_tag;
+		logic [INST_ADDR_WIDTH-1:0]          pc;
+		logic [INST_DATA_WIDTH-1:0]          instr;
+		logic [INST_ADDR_WIDTH-1:0]          branch_target;
+		logic [INST_ADDR_WIDTH-1:0]          next_pc;
+		logic [OPERATOR_WIDTH-1:0]           operator_info;
+		logic [OPERATOR_TYPE_WIDTH-1:0]      operator_type;
+		logic                                pred_hit;
+		logic                                pred_taken;
+		logic [INST_ADDR_WIDTH-1:0]          pred_target;
+		logic [1:0]                          pred_counter;
+		logic [INST_ADDR_WIDTH-1:0]          pred_bht_index;
+		logic [BP_GHR_WIDTH-1:0]             pred_history;
+	} ydrasil_branch_issue_pkt_t;
+
+	typedef struct packed {
+		logic                                valid;
+		logic                                redirect;
+		logic                                conditional;
+		rob_tag_t                            rob_tag;
+		logic [INST_ADDR_WIDTH-1:0]          pc;
+		logic                                taken;
+		logic [INST_ADDR_WIDTH-1:0]          target;
+		logic [INST_ADDR_WIDTH-1:0]          next_pc;
+		logic [1:0]                          pred_counter;
+		logic [INST_ADDR_WIDTH-1:0]          pred_bht_index;
+		logic [BP_GHR_WIDTH-1:0]             pred_history;
+	} ydrasil_bp_resolve_pkt_t;
+
+	typedef struct packed {
+		logic [1:0]                          count;
+		logic [1:0]                          taken;
+	} ydrasil_bp_spec_update_pkt_t;
+
+	typedef struct packed {
+		logic                                valid;
+		logic [BP_GHR_WIDTH-1:0]             history;
+	} ydrasil_bp_recover_pkt_t;
+
+	typedef struct packed {
+		logic                                valid;
+		logic [INST_ADDR_WIDTH-1:0]          pc;
+		logic                                taken;
+		logic [INST_ADDR_WIDTH-1:0]          target;
+		logic [1:0]                          counter;
+		logic [INST_ADDR_WIDTH-1:0]          bht_index;
+	} ydrasil_bp_train_pkt_t;
+
+	typedef struct packed {
+		logic                                valid;
+		rob_tag_t                            rob_tag;
+		logic                                writes_gpr;
+		logic [REGS_ADDR_WIDTH-1:0]          rd_addr;
+		logic [REGS_DATA_WIDTH-1:0]          value;
+		logic [INST_ADDR_WIDTH-1:0]          pc;
+		logic [INST_DATA_WIDTH-1:0]          instr;
+	} ydrasil_commit_pkt_t;
+
+	localparam int RETIRE_WIDTH = 4;
+	localparam int GPR_COMMIT_WIDTH = 2;
+
+	// Retirement is wider than the physical GPR write interface. Keeping the
+	// ordered architectural events separate from the compacted writes lets
+	// branches, stores and x0 destinations drain without adding RF write ports.
+	typedef struct packed {
+		ydrasil_commit_pkt_t                 slot0;
+		ydrasil_commit_pkt_t                 slot1;
+		ydrasil_commit_pkt_t                 slot2;
+		ydrasil_commit_pkt_t                 slot3;
+	} ydrasil_retire_bus_t;
+
+	typedef struct packed {
+		ydrasil_commit_pkt_t                 slot0;
+		ydrasil_commit_pkt_t                 slot1;
+	} ydrasil_gpr_commit_bus_t;
+
+	typedef struct packed {
+		logic                                valid;
+		logic                                recover_rob;
+		rob_tag_t                            rob_tag;
+		logic [INST_ADDR_WIDTH-1:0]          target;
+		logic                                replay_valid;
+		rob_tag_t                            replay_tag;
+		logic                                replay1_valid;
+		rob_tag_t                            replay1_tag;
+	} ydrasil_redirect_pkt_t;
+
+	typedef struct packed {
+		logic                                valid;
 		logic                                illegal;
 		ydrasil_fpu_op_t                     op;
 		logic [2:0]                          rm;
@@ -359,6 +484,17 @@ package ydrasil_pkg;
 		logic [REGS_ADDR_WIDTH-1:0]          addr;
 		logic [REGS_DATA_WIDTH-1:0]          data;
 	} ydrasil_gpr_fwd_pkt_t;
+
+	typedef struct packed {
+		logic                                rs1_early_alu;
+		logic                                rs2_early_alu;
+		logic                                rs1_early_dual;
+		logic                                rs2_early_dual;
+		logic                                rs1_early_load;
+		logic                                rs2_early_load;
+		producer_id_t                        rs1_tag;
+		producer_id_t                        rs2_tag;
+	} ydrasil_operand_bypass_pkt_t;
 
 	typedef ydrasil_gpr_fwd_pkt_t ydrasil_completion_bus_t [COMPLETION_LANES];
 
@@ -393,6 +529,11 @@ package ydrasil_pkg;
 		logic                                is_store;
 		logic [OP_LSU_INFO_WIDTH-1:0]        op;
 		logic [BUS_ADDR_WIDTH-1:0]           addr;
+		logic                                addr_valid;
+		logic [REGS_DATA_WIDTH-1:0]          addr_base;
+		logic [REGS_DATA_WIDTH-1:0]          addr_offset;
+		producer_id_t                        addr_producer_id;
+		logic                                addr_producer_tracked;
 		logic                                addr_is_dtcm;
 		logic [REGS_ADDR_WIDTH-1:0]          rd_addr;
 		producer_id_t                        producer_id;
@@ -453,8 +594,17 @@ package ydrasil_pkg;
 	typedef struct packed {
 		logic                                stall;
 		logic                                redirect;
+		logic                                retire;
 		logic [INST_ADDR_WIDTH-1:0]          redirect_addr;
 	} ydrasil_trap_ctrl_pkt_t;
+
+	typedef struct packed {
+		logic                                empty;
+		logic                                full;
+		logic                                execution_idle;
+		logic [$clog2(PRODUCER_NUM+1)-1:0]   count;
+		logic [INST_ADDR_WIDTH-1:0]          resume_pc;
+	} ydrasil_rob_status_pkt_t;
 
 	typedef struct packed {
 		logic                                busy;
@@ -465,11 +615,16 @@ package ydrasil_pkg;
 	typedef struct packed {
 		logic                                scoreboard_stall;
 		logic                                lsu_struct_stall;
+		logic                                issue_addr_ready;
+		producer_id_t                        addr_producer_id;
+		logic                                addr_producer_tracked;
 		logic                                issue_store_data_ready;
 		producer_id_t                        store_data_producer_id;
 		logic                                store_data_producer_tracked;
 		logic                                prev_alu_bypass_rs1;
 		logic                                prev_alu_bypass_rs2;
+		logic                                prev_dual_bypass_rs1;
+		logic                                prev_dual_bypass_rs2;
 		logic                                prev_load_bypass_rs1;
 		logic                                prev_load_bypass_rs2;
 		producer_id_t                        prev_load_producer_id;

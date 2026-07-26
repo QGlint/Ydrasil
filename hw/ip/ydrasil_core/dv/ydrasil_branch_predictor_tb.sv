@@ -47,6 +47,18 @@ module ydrasil_branch_predictor_tb
     logic [31:0] train_bht_index;
     logic        invalidate;
     int          step;
+	localparam ydrasil_pkg::ydrasil_bp_spec_update_pkt_t SPEC_IDLE = '0;
+	localparam ydrasil_pkg::ydrasil_bp_recover_pkt_t RECOVER_IDLE = '0;
+	ydrasil_pkg::ydrasil_bp_train_pkt_t train_pkt;
+	always_comb begin
+		train_pkt = '0;
+		train_pkt.valid = train_valid;
+		train_pkt.pc = train_pc;
+		train_pkt.taken = train_taken;
+		train_pkt.target = train_target;
+		train_pkt.counter = train_counter;
+		train_pkt.bht_index = train_bht_index;
+	end
 
     ydrasil_branch_predictor #(
         .BTB_ENTRIES(BTB_ENTRIES),
@@ -60,12 +72,10 @@ module ydrasil_branch_predictor_tb
         .predict_target_o (predict_target),
         .predict_counter_o(predict_counter),
         .predict_bht_index_o(predict_bht_index),
-        .train_valid_i    (train_valid),
-        .train_pc_i       (train_pc),
-        .train_taken_i    (train_taken),
-        .train_target_i   (train_target),
-        .train_counter_i  (train_counter),
-        .train_bht_index_i(train_bht_index),
+		.predict_history_o(),
+		.spec_update_i    (SPEC_IDLE),
+		.recover_i        (RECOVER_IDLE),
+		.train_i          (train_pkt),
         .invalidate_i     (invalidate)
     );
 

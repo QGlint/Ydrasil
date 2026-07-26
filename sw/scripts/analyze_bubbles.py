@@ -9,6 +9,7 @@ import re
 from pathlib import Path
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PERF_RE = re.compile(r"^([A-Z][A-Z0-9_]*):\s*(.*)$")
 FIELD_RE = re.compile(r"([A-Z][A-Z0-9_]*)=\s*([0-9]+(?:\.[0-9]+)?)")
 
@@ -45,8 +46,8 @@ def selected_logs(root: Path) -> list[Path]:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("root", nargs="?", type=Path, default=Path("build/sim/hw"))
-    parser.add_argument("out_dir", nargs="?", type=Path, default=Path("build/PPA"))
+    parser.add_argument("root", nargs="?", type=Path, default=PROJECT_ROOT / "build/sim/hw")
+    parser.add_argument("out_dir", nargs="?", type=Path, default=PROJECT_ROOT / "build/PPA")
     args = parser.parse_args()
     args.out_dir.mkdir(parents=True, exist_ok=True)
 

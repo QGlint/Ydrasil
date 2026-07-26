@@ -1,7 +1,8 @@
 # rvtest_min.mk - minimal standalone builder for riscv-tests ISA
 
 # ====== user config ======
-PROJECT_ROOT ?= $(abspath ..)
+SW_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+PROJECT_ROOT ?= $(abspath $(SW_ROOT)/..)
 
 RISCV_PREFIX ?= riscv64-elf
 ARCH ?= rv32im_zicsr_zifencei
@@ -18,7 +19,7 @@ REBUILD ?= 0
 NAME ?= rv32ui_lb
 
 # 输出目录
-OUT_DIR ?= build/test
+OUT_DIR ?= $(PROJECT_ROOT)/build/test
 INCLUDES ?=
 LDSCRIPT ?=
 

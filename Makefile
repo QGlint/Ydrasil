@@ -1,6 +1,7 @@
 include config.mk
 
 SHELL := /bin/bash
+export PYTHONDONTWRITEBYTECODE := 1
 # 硬件verilator编译 VERILATOR_IGNORE_ALL=0 不忽略所有语法检查
 # --- 自动化测试相关定义 ---
 RESULT_DIR := $(LOG_DIR)/test_results
@@ -170,7 +171,7 @@ COVERAGE_QUICK_TIMEOUT_PAD ?= 10000
 COVERAGE_QUICK_TICKS_PER_CYCLE ?= 2
 COVERAGE_QUICK_BOUNDARY_MIN ?= 200000
 COVERAGE_QUICK_ISA_MIN ?= 50000
-COVERAGE_QUICK_COREMARK_MIN ?= 550000
+COVERAGE_QUICK_COREMARK_MIN ?= 2000000
 COVERAGE_QUICK_COE_MIN ?= 300000
 COREMARK_SIM_TIMEOUT ?= 10000000
 COE_SIM_TIMEOUT ?= 2000000
@@ -207,11 +208,23 @@ COE_EXPECT_CNT_STOP ?= 0xffffffff
 COE_EXPECT_CNT_READ ?= 0x00000000
 COE_REQUIRE_CNT_READ ?= 0
 COE_EXPECT_LED ?= 0x078b7323
-COE_LOOP5_DIR ?= $(COE_M3_DIR)
-COE_LOOP5_ITCM_BIN ?= $(COE_LOOP5_DIR)/irom_M3_loop5_itcm.bin
-COE_LOOP5_ITCM ?= $(COE_LOOP5_DIR)/irom_M3_loop5.itcm
-COE_LOOP5_DTCM ?= $(COE_LOOP5_DIR)/dram_M_loop5.dtcm
-COE_LOOP5_DUMP ?= $(COE_LOOP5_DIR)/irom_M3_loop5.dump
+COE_LOOP5_DIR ?= $(BUILD_DIR)/fpga_coe_loop5
+COE_LOOP5_PATCH ?= $(PROJECT_ROOT)/sw/make_mf_lina.pl
+COE_LOOP5_IROM_SOURCE ?= $(PROJECT_ROOT)/FPGA/coe/irom_MF.coe
+COE_LOOP5_DRAM_SOURCE ?= $(PROJECT_ROOT)/FPGA/coe/dram_MF.coe
+COE_LOOP5_MATRIX_ITERATIONS ?= 5
+COE_LOOP5_OUTER_ITERATIONS ?= 1
+COE_LOOP5_SORT_LENGTH ?= 32
+COE_LOOP5_SORT_OUTER_ITERATIONS ?= 1
+COE_LOOP5_PRIME_LIMIT ?= 20
+COE_LOOP5_RANDOM_OUTER_ITERATIONS ?= 1
+COE_LOOP5_CRC_LENGTH ?= 64
+COE_LOOP5_CRC_OUTER_ITERATIONS ?= 1
+COE_LOOP5_SOURCE_ITCM_BIN ?= $(COE_LOOP5_DIR)/irom_MF_itcm.bin
+COE_LOOP5_ITCM_BIN ?= $(COE_LOOP5_DIR)/irom_MF_loop5_itcm.bin
+COE_LOOP5_ITCM ?= $(COE_LOOP5_DIR)/irom_MF_loop5.itcm
+COE_LOOP5_DTCM ?= $(COE_LOOP5_DIR)/dram_MF_loop5.dtcm
+COE_LOOP5_DUMP ?= $(COE_LOOP5_DIR)/irom_MF_loop5.dump
 COE_LOOP_LINA_DIR ?= $(COE_M3_DIR)
 COE_LOOP_LINA_SCALE ?= 5
 COE_LOOP_LINA_SIM_TIMEOUT ?= 5000000
@@ -272,6 +285,7 @@ SYN_XPR ?= $(SYN_STAGE_FPGA_DIR)/Ydrasil_FPGA.xpr
 SYN_SOURCES_TCL ?= $(SYN_FREQ_BUILD_DIR)/vivado_sources.tcl
 SYN_REPORT_DIR ?= $(SYN_FREQ_BUILD_DIR)/reports
 SYN_LOG_DIR ?= $(SYN_FREQ_BUILD_DIR)/log
+SYN_WORK_DIR ?= $(SYN_FREQ_BUILD_DIR)/work
 SYN_ARTIFACT_DIR ?= $(SYN_FREQ_BUILD_DIR)/artifacts
 SYN_BIT_DIR ?= $(SYN_FREQ_BUILD_DIR)/bit
 SYN_CHECKPOINT_DIR ?= $(SYN_FREQ_BUILD_DIR)/checkpoints
@@ -956,8 +970,8 @@ syn-stage-memory:
 	@printf 'IROM_COE=%s\nDRAM_COE=%s\n' "$(abspath $(IROM_COE))" "$(abspath $(DRAM_COE))" > "$(SYN_MEMORY_DIR)/sources.txt"
 
 syn-vivado: syn-prep syn-stage-xpr syn-stage-memory
-	@mkdir -p $(SYN_REPORT_DIR) $(SYN_LOG_DIR) $(SYN_ARTIFACT_DIR)
-	. $(VIVADO_SETTINGS) && $(VIVADO) -mode batch -nojournal -log $(SYN_LOG_DIR)/vivado.log \
+	@mkdir -p $(SYN_REPORT_DIR) $(SYN_LOG_DIR) $(SYN_WORK_DIR) $(SYN_ARTIFACT_DIR)
+	cd $(SYN_WORK_DIR) && . $(VIVADO_SETTINGS) && $(VIVADO) -mode batch -nojournal -log $(SYN_LOG_DIR)/vivado.log \
 		-source $(SYN_DIR)/run_vivado.tcl \
 		-tclargs \
 		-xpr $(SYN_XPR) \
@@ -1034,15 +1048,18 @@ comp_and_sim_cpu: comp
 
 COREMARK_SW_MAKE_ARGS = \
 		PROJECT_ROOT=$(PROJECT_ROOT) \
+		COREMARK_OUT=$(BUILD_DIR)/app/coremark \
 		RISCV_PREFIX=$(RISCV_PREFIX) \
 		ARCH=rv32im_zicsr_zifencei_zba_zbb_zbc_zbkb_zbkx_zbs \
 		ABI=$(ABI)
 SORT_APP_SW_MAKE_ARGS = \
 		PROJECT_ROOT=$(PROJECT_ROOT) \
+		SORT_APP_OUT=$(BUILD_DIR)/app/sort \
 		RISCV_PREFIX=$(RISCV_PREFIX) \
 		ARCH=rv32im_zicsr_zifencei \
 		ABI=$(ABI)
 BOUNDARY_APP_SW_MAKE_ARGS = $(COREMARK_SW_MAKE_ARGS)
+BOUNDARY_APP_SW_MAKE_ARGS += BOUNDARY_APP_OUT=$(BUILD_DIR)/app/boundary
 BOUNDARY_APP_SW_MAKE_ARGS += BOUNDARY_EXTRA_CFLAGS="$(BOUNDARY_EXTRA_CFLAGS)"
 COREMARK_RESULT_LOG ?= $(HW_TRACE_OUT_DIR)/coremark/hw.log
 COREMARK_SIM_COMPARE ?= none
@@ -1123,10 +1140,12 @@ coremark_sim: coremark comp
 		COMPARE_ELF=$(BUILD_DIR)/app/coremark/coremark.elf \
 		COMPARE_ITCM=$(BUILD_DIR)/app/coremark/coremark.itcm \
 		COMPARE_DTCM=$(BUILD_DIR)/app/coremark/coremark.dtcm \
+		COMPARE_COMPLETE_PROGRAM=1 \
 		SIM_COMPARE=$(COREMARK_SIM_COMPARE) \
-		COMPARE_SIM_EXTRA_DEFINES="+cpp_timeout=$(COREMARK_SIM_TIMEOUT) +sv_timeout=$(COREMARK_SIM_TIMEOUT)"; \
+		COMPARE_SIM_EXTRA_DEFINES="+no_finish_on_tohost +cpp_timeout=$(COREMARK_SIM_TIMEOUT) +sv_timeout=$(COREMARK_SIM_TIMEOUT)"; \
 	rc=$$?; \
-	$(MAKE) --no-print-directory coremark_result; \
+	result_rc=0; $(MAKE) --no-print-directory coremark_result || result_rc=$$?; \
+	if [ "$$rc" -eq 0 ]; then rc=$$result_rc; fi; \
 	exit $$rc
 
 coremark_run: coremark_sim
@@ -1408,7 +1427,8 @@ boundary_sim_all: $(BOUNDARY_SIM_TARGETS)
 boundary_sim_%:
 	@name=$*; result_dir="$(BOUNDARY_RESULT_DIR)"; hw_log="$(HW_TRACE_OUT_DIR)/boundary/$$name/hw.log"; run_log="$$result_dir/$$name.log"; status="$$result_dir/$$name.status"; \
 	mkdir -p "$$result_dir"; rm -f "$$hw_log" "$$run_log" "$$status"; \
-	if $(MAKE) --no-print-directory sim_compare SIM_COMPARE=none COMPARE_NAME="boundary/$$name" COMPARE_ELF="$(BUILD_DIR)/app/boundary/$$name.elf" COMPARE_ITCM="$(BUILD_DIR)/app/boundary/$$name.itcm" COMPARE_DTCM="$(BUILD_DIR)/app/boundary/$$name.dtcm" COMPARE_SIM_EXTRA_DEFINES="+perip_debug +cpp_timeout=$(BOUNDARY_SIM_TIMEOUT) +sv_timeout=$(BOUNDARY_SIM_TIMEOUT)" >"$$run_log" 2>&1 && grep -q "BOUNDARY PASS name=$$name" "$$hw_log"; then result=PASS; else result=FAIL; fi; \
+	if $(MAKE) --no-print-directory sim_compare SIM_COMPARE=none COMPARE_NAME="boundary/$$name" COMPARE_ELF="$(BUILD_DIR)/app/boundary/$$name.elf" COMPARE_ITCM="$(BUILD_DIR)/app/boundary/$$name.itcm" COMPARE_DTCM="$(BUILD_DIR)/app/boundary/$$name.dtcm" COMPARE_SIM_EXTRA_DEFINES="+no_finish_on_led +no_finish_on_tohost +finish_on_terminal_led +perip_debug +cpp_timeout=$(BOUNDARY_SIM_TIMEOUT) +sv_timeout=$(BOUNDARY_SIM_TIMEOUT)" >"$$run_log" 2>&1 && \
+		{ grep -q "BOUNDARY PASS name=$$name" "$$hw_log" || grep -q '\[PERIP\].*LED write 0x00504f53' "$$hw_log"; }; then result=PASS; else result=FAIL; fi; \
 	echo "[$$name] [$$result]" > "$$status"
 
 boundary_report:
@@ -1526,7 +1546,7 @@ boundary_opt_clean:
 	@rm -rf "$(BOUNDARY_OPT_APP_ROOT)" "$(BOUNDARY_OPT_RESULT_DIR)" "$(BOUNDARY_OPT_RUN_DIR)" "$(HW_TRACE_OUT_DIR)/boundary-opt"
 
 coremark_result:
-	@mkdir -p "$(PPA_DIR)"; \
+	@mkdir -p "$(PPA_DIR)"; failed=0; \
 	rm -f "$(PPA_COREMARK_LOG)"; \
 	if [ -f "$(COREMARK_RESULT_LOG)" ]; then \
 		echo "[COREMARK] Result from $(COREMARK_RESULT_LOG)" | tee -a "$(PPA_COREMARK_LOG)"; \
@@ -1548,11 +1568,20 @@ coremark_result:
 			grep -E '^(CoreMark Size|Total ticks|Total time \(secs\)|Iterations/Sec|Iterations       |Compiler version|Compiler flags|Memory location|seedcrc|Correct operation validated|CoreMark 1\.0 :|Errors detected|ERROR!|COREMARK DONE|PERF_METRIC:|PERF_STALL:|PERF_SCOREBOARD_DETAIL:|PERF_LOAD_DETAIL:|PERF_ALU_DETAIL:|PERF_PENDING_DETAIL:|PERF_LSU_HOT:|PERF_FRONTEND:|PERF_BRANCH:|PERF_BP_ACC:|PERF_BP_DETAIL:|\[[0-9]+\]crc)' "$$tmp" | tee -a "$(PPA_COREMARK_LOG)"; \
 		else \
 			echo "[COREMARK] No CoreMark result lines found in $(COREMARK_RESULT_LOG)" | tee -a "$(PPA_COREMARK_LOG)"; \
+			failed=1; \
+		fi; \
+		if ! grep -q '^Correct operation validated\.' "$(COREMARK_RESULT_LOG)" || \
+		   ! grep -q '^CoreMark 1\.0 :' "$(COREMARK_RESULT_LOG)" || \
+		   ! grep -q '^COREMARK DONE$$' "$(COREMARK_RESULT_LOG)"; then \
+			echo "[COREMARK] Incomplete or invalid CoreMark run" | tee -a "$(PPA_COREMARK_LOG)"; \
+			failed=1; \
 		fi; \
 		rm -f $$tmp; \
 	else \
 		echo "[COREMARK] HW log not found: $(COREMARK_RESULT_LOG)" | tee -a "$(PPA_COREMARK_LOG)"; \
-	fi
+		failed=1; \
+	fi; \
+	exit $$failed
 
 coe_m3_force:
 
@@ -1564,7 +1593,15 @@ $(COE_M3_ITCM_BIN): $(COE_M3_IROM_SOURCE) $(COE_TO_MEM) coe_m3_force
 	@mkdir -p "$(@D)"
 	perl "$(COE_TO_MEM)" --binary "$<" "$@"
 
-$(COE_M3_DTCM) $(COE_LOOP2_DTCM) $(COE_LOOP5_DTCM) $(COE_LOOP_LINA_DTCM): $(COE_M3_DRAM_SOURCE) $(COE_TO_MEM) coe_m3_force
+$(COE_M3_DTCM) $(COE_LOOP2_DTCM) $(COE_LOOP_LINA_DTCM): $(COE_M3_DRAM_SOURCE) $(COE_TO_MEM) coe_m3_force
+	@mkdir -p "$(@D)"
+	perl "$(COE_TO_MEM)" "$<" "$@"
+
+$(COE_LOOP5_SOURCE_ITCM_BIN): $(COE_LOOP5_IROM_SOURCE) $(COE_TO_MEM)
+	@mkdir -p "$(@D)"
+	perl "$(COE_TO_MEM)" --binary "$<" "$@"
+
+$(COE_LOOP5_DTCM): $(COE_LOOP5_DRAM_SOURCE) $(COE_TO_MEM)
 	@mkdir -p "$(@D)"
 	perl "$(COE_TO_MEM)" "$<" "$@"
 
@@ -1574,8 +1611,12 @@ $(COE_LOOP2_ITCM_BIN): $(COE_M3_ITCM_BIN) $(COE_LOOP_PATCH)
 $(COE_LOOP2_ITCM): $(COE_LOOP2_ITCM_BIN)
 	od -An -t x4 -w4 -v "$<" | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > "$@"
 
-$(COE_LOOP5_ITCM_BIN): $(COE_M3_ITCM_BIN) $(COE_LOOP_PATCH)
-	perl "$(COE_LOOP_PATCH)" "$<" "$@" 4
+$(COE_LOOP5_ITCM_BIN): $(COE_LOOP5_SOURCE_ITCM_BIN) $(COE_LOOP5_PATCH) Makefile
+	perl "$(COE_LOOP5_PATCH)" "$<" "$@" \
+		"$(COE_LOOP5_MATRIX_ITERATIONS)" "$(COE_LOOP5_OUTER_ITERATIONS)" \
+		"$(COE_LOOP5_SORT_LENGTH)" "$(COE_LOOP5_SORT_OUTER_ITERATIONS)" \
+		"$(COE_LOOP5_PRIME_LIMIT)" "$(COE_LOOP5_RANDOM_OUTER_ITERATIONS)" \
+		"$(COE_LOOP5_CRC_LENGTH)" "$(COE_LOOP5_CRC_OUTER_ITERATIONS)"
 
 $(COE_LOOP5_ITCM): $(COE_LOOP5_ITCM_BIN)
 	od -An -t x4 -w4 -v "$<" | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > "$@"
@@ -1680,8 +1721,11 @@ coe_loop5: coe_loop5_gen
 		COE_SIMPLE_NAME=coe_loop5 \
 		COE_SIMPLE_ITCM=$(COE_LOOP5_ITCM) \
 		COE_SIMPLE_DTCM=$(COE_LOOP5_DTCM) \
-		COE_EXPECT_CNT_READ=0x00000001 \
-		COE_EXPECT_SEG=0x37800001
+		COE_SIMPLE_SIM_EXTRA_DEFINES="+no_finish_on_led +no_finish_on_tohost +finish_on_terminal_led +perip_debug +commit_trace +cpp_timeout=$(COE_SIM_TIMEOUT) +sv_timeout=$(COE_SIM_TIMEOUT)" \
+		COE_EXPECT_CNT_READ= \
+		COE_REQUIRE_CNT_READ=1 \
+		COE_EXPECT_SEG= \
+		COE_EXPECT_SEG_REGEX='0x3780[0-9a-fA-F]{4}'
 
 coe_loop_lina_gen: $(COE_LOOP_LINA_ITCM_BIN) $(COE_LOOP_LINA_ITCM) \
 		$(COE_LOOP_LINA_DTCM) $(COE_LOOP_LINA_DUMP)

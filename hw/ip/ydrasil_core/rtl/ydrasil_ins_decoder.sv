@@ -398,6 +398,10 @@ import ydrasil_pkg::*;
 	assign csr_op_info[ydrasil_pkg::OP_CSR_CSRRW]  = is_csrrw | is_csrrwi;
 	assign csr_op_info[ydrasil_pkg::OP_CSR_CSRRS]  = is_csrrs | is_csrrsi;
 	assign csr_op_info[ydrasil_pkg::OP_CSR_CSRRC]  = is_csrrc | is_csrrci;
+	assign csr_op_info[ydrasil_pkg::OP_CSR_WRITE]  =
+		is_csrrw | is_csrrwi |
+		((is_csrrs | is_csrrsi | is_csrrc | is_csrrci) &&
+		 (instr_i[19:15] != '0));
 
 	assign sys_op_info[ydrasil_pkg::OP_SYS_ECALL]  = is_ecall;
 	assign sys_op_info[ydrasil_pkg::OP_SYS_EBREAK] = is_ebreak;

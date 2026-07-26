@@ -45,6 +45,7 @@ import ydrasil_pkg::*;
     input  wire                            producer_alloc_tracked_i,
     input  producer_id_t                   producer_alloc_id1_i,
     input  wire                            producer_alloc_tracked1_i,
+	input  ydrasil_operand_bypass_pkt_t     dual_bypass_pkt_i,
 
     // Dispatch to EX   
     // output wire                            alu_valid_o,
@@ -73,6 +74,8 @@ import ydrasil_pkg::*;
     output wire                            id_ex_jalr_o,
     output wire                            id_ex_alu_bypass_rs1_o,
     output wire                            id_ex_alu_bypass_rs2_o,
+    output wire                            id_ex_dual_bypass_rs1_o,
+    output wire                            id_ex_dual_bypass_rs2_o,
     output wire                            id_ex_load_bypass_rs1_o,
     output wire                            id_ex_load_bypass_rs2_o,
     output producer_id_t                   id_ex_load_bypass_producer_id_o,
@@ -95,6 +98,7 @@ import ydrasil_pkg::*;
     output wire [DATA_WIDTH-1:0]           id_ex_pred_target_o,
     output wire [1:0]                      id_ex_pred_counter_o,
     output wire [DATA_WIDTH-1:0]           id_ex_pred_bht_index_o,
+    output wire [BP_GHR_WIDTH-1:0]         id_ex_pred_history_o,
     output wire                            id_ex_valid_o,
     output producer_id_t                   id_ex_producer_id_o,
     output wire                            id_ex_producer_tracked_o,
@@ -108,6 +112,8 @@ import ydrasil_pkg::*;
     output wire                            dual_valid_o,
     output wire [INST_ADDR_WIDTH-1:0]      dual_pc_o,
     output wire [INST_DATA_WIDTH-1:0]      dual_instr_o,
+	output ydrasil_operand_bypass_pkt_t     dual_bypass_pkt_o,
+    output ydrasil_branch_issue_pkt_t      dual_branch_pkt_o,
     output ydrasil_id_ctrl_pkt_t           id_ctrl1_o,
     // Generic writeback information
     output wire                            id_alu_rf_wen_rd_o,
@@ -125,6 +131,9 @@ import ydrasil_pkg::*;
     reg                                 id_lsu_store_data_valid_ff;
     producer_id_t                       id_lsu_store_data_producer_id_ff;
     reg                                 id_lsu_store_data_producer_tracked_ff;
+    reg                                 id_lsu_addr_valid_ff;
+    producer_id_t                       id_lsu_addr_producer_id_ff;
+    reg                                 id_lsu_addr_producer_tracked_ff;
 
     reg [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0]       operator_type_ff;
 
@@ -163,6 +172,8 @@ import ydrasil_pkg::*;
     reg                                  id_ex_jalr_ff;
     (* max_fanout = 8 *) reg             id_ex_alu_bypass_rs1_ff;
     (* max_fanout = 8 *) reg             id_ex_alu_bypass_rs2_ff;
+    (* max_fanout = 8 *) reg             id_ex_dual_bypass_rs1_ff;
+    (* max_fanout = 8 *) reg             id_ex_dual_bypass_rs2_ff;
     (* max_fanout = 8 *) reg             id_ex_load_bypass_rs1_ff;
     (* max_fanout = 8 *) reg             id_ex_load_bypass_rs2_ff;
     producer_id_t                       id_ex_load_bypass_producer_id_ff;
@@ -173,6 +184,7 @@ import ydrasil_pkg::*;
     reg [DATA_WIDTH-1:0]                 id_ex_pred_target_ff;
     reg [1:0]                            id_ex_pred_counter_ff;
     reg [DATA_WIDTH-1:0]                 id_ex_pred_bht_index_ff;
+    reg [BP_GHR_WIDTH-1:0]               id_ex_pred_history_ff;
     reg                                  id_ex_valid_ff;
     reg                                  id_fence_i_ff;
     reg [DATA_WIDTH-1:0]                 dual_operand_a_q;
@@ -185,6 +197,8 @@ import ydrasil_pkg::*;
     reg                                  dual_valid_q;
     reg [INST_ADDR_WIDTH-1:0]            dual_pc_q;
     reg [INST_DATA_WIDTH-1:0]            dual_instr_q;
+	ydrasil_operand_bypass_pkt_t          dual_bypass_pkt_q;
+    ydrasil_branch_issue_pkt_t           dual_branch_pkt_q;
     reg [ydrasil_pkg::CSR_ADDR_WIDTH-1:0] 	 csr_reg_raddr_ff;
 
     reg [ydrasil_pkg::CSR_ADDR_WIDTH-1:0] 	  csr_ex_waddr_ff; 
@@ -200,6 +214,7 @@ import ydrasil_pkg::*;
     wire [DATA_WIDTH-1:0]           issue_pred_target_ff = decode_pkt_i.pred_target;
     wire [1:0]                      issue_pred_counter_ff = decode_pkt_i.pred_counter;
     wire [DATA_WIDTH-1:0]           issue_pred_bht_index_ff = decode_pkt_i.pred_bht_index;
+    wire [BP_GHR_WIDTH-1:0]         issue_pred_history_ff = decode_pkt_i.pred_history;
     wire [4:0]                      issue_rf_raddr_rs1_ff = decode_pkt_i.rs1_addr;
     wire [4:0]                      issue_rf_raddr_rs2_ff = decode_pkt_i.rs2_addr;
     wire                            issue_rf_ren_rs1_ff = decode_pkt_i.rs1_ren;
@@ -249,8 +264,10 @@ import ydrasil_pkg::*;
          (issue1_rs2_ren && (issue1_rs2_addr == decode_pkt_i.rd_addr)));
     wire pair_waw = slot0_writes && issue1_rd_wen &&
         (decode_pkt_i.rd_addr == decode_pkt1_i.rd_addr);
-    wire pair_eligible = slot0_simple_int && slot1_simple_int &&
-        !pair_raw && !pair_waw && !hzd_status1_i.scoreboard_stall;
+    // Rename and dependency checking are owned by the unified ROB window.  A
+    // secondary packet presented here is already ready, lane-compatible and
+    // ordered with respect to barriers; WAW is resolved by in-order commit.
+    wire pair_eligible = decode_valid_i && decode_valid1_i;
 `ifndef SYNTHESIS
     // Retain zero-valued observability points used by the coverage testbench.
     // The former issue-stage early ALU is intentionally removed from hardware.
@@ -358,14 +375,34 @@ import ydrasil_pkg::*;
 
     assign bt_a_operand = issue_bt_a_rs_sel_ff ? issue_rs1_data : issue_pc_ff;
     assign bt_b_operand = issue_imm_ff;
-    wire [DATA_WIDTH-1:0] issue_branch_pc_target = issue_pc_ff + issue_imm_ff;
-    wire [DATA_WIDTH-1:0] issue_branch_next_pc = issue_pc_ff + 32'd4;
+    wire [DATA_WIDTH-1:0] issue_branch_pc_target = decode_pkt_i.branch_target;
+    wire [DATA_WIDTH-1:0] issue_branch_next_pc = decode_pkt_i.next_pc;
     reg held_store_wake_valid;
     reg [DATA_WIDTH-1:0] held_store_wake_data;
+    reg held_addr_wake_valid;
+    reg [DATA_WIDTH-1:0] held_addr_wake_data;
+    reg held_main_load_wake_valid;
+    reg [DATA_WIDTH-1:0] held_main_load_wake_data;
+    reg launch_main_load_wake_valid;
+    reg [DATA_WIDTH-1:0] launch_main_load_wake_data;
+    reg held_dual_rs1_wake_valid;
+    reg [DATA_WIDTH-1:0] held_dual_rs1_wake_data;
+    reg held_dual_rs2_wake_valid;
+    reg [DATA_WIDTH-1:0] held_dual_rs2_wake_data;
     integer held_store_lane;
     always_comb begin
         held_store_wake_valid = 1'b0;
         held_store_wake_data = '0;
+        held_addr_wake_valid = 1'b0;
+        held_addr_wake_data = '0;
+        held_main_load_wake_valid = 1'b0;
+        held_main_load_wake_data = '0;
+        launch_main_load_wake_valid = 1'b0;
+        launch_main_load_wake_data = '0;
+        held_dual_rs1_wake_valid = 1'b0;
+        held_dual_rs1_wake_data = '0;
+        held_dual_rs2_wake_valid = 1'b0;
+        held_dual_rs2_wake_data = '0;
         for (held_store_lane = 0; held_store_lane < COMPLETION_LANES;
              held_store_lane = held_store_lane + 1) begin
             if (id_ex_valid_ff &&
@@ -378,6 +415,63 @@ import ydrasil_pkg::*;
                  id_lsu_store_data_producer_id_ff)) begin
                 held_store_wake_valid = 1'b1;
                 held_store_wake_data = completion_bus_i[held_store_lane].data;
+            end
+            if (id_ex_valid_ff &&
+                (operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] ||
+                 operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) &&
+                !id_lsu_addr_valid_ff &&
+                id_lsu_addr_producer_tracked_ff &&
+                completion_bus_i[held_store_lane].valid &&
+                completion_bus_i[held_store_lane].producer_tracked &&
+                (completion_bus_i[held_store_lane].producer_id ==
+                 id_lsu_addr_producer_id_ff)) begin
+                held_addr_wake_valid = 1'b1;
+                held_addr_wake_data = completion_bus_i[held_store_lane].data;
+            end
+            if (id_ex_valid_ff &&
+                (id_ex_load_bypass_rs1_ff || id_ex_load_bypass_rs2_ff) &&
+                completion_bus_i[held_store_lane].valid &&
+                completion_bus_i[held_store_lane].producer_tracked &&
+                (completion_bus_i[held_store_lane].producer_id ==
+                 id_ex_load_bypass_producer_id_ff)) begin
+                held_main_load_wake_valid = 1'b1;
+                held_main_load_wake_data =
+                    completion_bus_i[held_store_lane].data;
+            end
+            if (issue_valid_ff &&
+                (hzd_status_i.prev_load_bypass_rs1 ||
+                 hzd_status_i.prev_load_bypass_rs2) &&
+                completion_bus_i[held_store_lane].valid &&
+                completion_bus_i[held_store_lane].producer_tracked &&
+                (completion_bus_i[held_store_lane].producer_id ==
+                 hzd_status_i.prev_load_producer_id)) begin
+                launch_main_load_wake_valid = 1'b1;
+                launch_main_load_wake_data =
+                    completion_bus_i[held_store_lane].data;
+            end
+            if (dual_valid_q &&
+                (dual_bypass_pkt_q.rs1_early_alu ||
+                 dual_bypass_pkt_q.rs1_early_dual ||
+                 dual_bypass_pkt_q.rs1_early_load) &&
+                completion_bus_i[held_store_lane].valid &&
+                completion_bus_i[held_store_lane].producer_tracked &&
+                (completion_bus_i[held_store_lane].producer_id ==
+                 dual_bypass_pkt_q.rs1_tag)) begin
+                held_dual_rs1_wake_valid = 1'b1;
+                held_dual_rs1_wake_data =
+                    completion_bus_i[held_store_lane].data;
+            end
+            if (dual_valid_q &&
+                (dual_bypass_pkt_q.rs2_early_alu ||
+                 dual_bypass_pkt_q.rs2_early_dual ||
+                 dual_bypass_pkt_q.rs2_early_load) &&
+                completion_bus_i[held_store_lane].valid &&
+                completion_bus_i[held_store_lane].producer_tracked &&
+                (completion_bus_i[held_store_lane].producer_id ==
+                 dual_bypass_pkt_q.rs2_tag)) begin
+                held_dual_rs2_wake_valid = 1'b1;
+                held_dual_rs2_wake_data =
+                    completion_bus_i[held_store_lane].data;
             end
         end
     end
@@ -416,6 +510,9 @@ import ydrasil_pkg::*;
             id_lsu_store_data_valid_ff <= 1'b0;
             id_lsu_store_data_producer_id_ff <= '0;
             id_lsu_store_data_producer_tracked_ff <= 1'b0;
+            id_lsu_addr_valid_ff <= 1'b0;
+            id_lsu_addr_producer_id_ff <= '0;
+            id_lsu_addr_producer_tracked_ff <= 1'b0;
             bt_a_operand_ff     <= '0;
             bt_b_operand_ff     <= '0;
             csr_reg_raddr_ff <= '0;
@@ -427,6 +524,8 @@ import ydrasil_pkg::*;
             id_ex_jalr_ff <= 1'b0;
             id_ex_alu_bypass_rs1_ff <= 1'b0;
             id_ex_alu_bypass_rs2_ff <= 1'b0;
+            id_ex_dual_bypass_rs1_ff <= 1'b0;
+            id_ex_dual_bypass_rs2_ff <= 1'b0;
             id_ex_load_bypass_rs1_ff <= 1'b0;
             id_ex_load_bypass_rs2_ff <= 1'b0;
             id_ex_load_bypass_producer_id_ff <= '0;
@@ -437,6 +536,7 @@ import ydrasil_pkg::*;
             id_ex_pred_target_ff <= '0;
             id_ex_pred_counter_ff <= 2'b01;
             id_ex_pred_bht_index_ff <= '0;
+            id_ex_pred_history_ff <= '0;
             id_ex_valid_ff <= 1'b0;
             id_fence_i_ff <= 1'b0;
             dual_operand_a_q <= '0;
@@ -449,6 +549,8 @@ import ydrasil_pkg::*;
             dual_valid_q <= 1'b0;
             dual_pc_q <= '0;
             dual_instr_q <= RV32I_INS_NOP;
+			dual_bypass_pkt_q <= '0;
+            dual_branch_pkt_q <= '0;
         end else begin
             if (!stall_id_i) begin
                 operand_a_ff        <= operand_a;
@@ -492,6 +594,13 @@ import ydrasil_pkg::*;
                     hzd_status_i.store_data_producer_id;
                 id_lsu_store_data_producer_tracked_ff <=
                     hzd_status_i.store_data_producer_tracked;
+                id_lsu_addr_valid_ff <=
+                    !issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] &&
+                    !issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] ||
+                    hzd_status_i.issue_addr_ready;
+                id_lsu_addr_producer_id_ff <= hzd_status_i.addr_producer_id;
+                id_lsu_addr_producer_tracked_ff <=
+                    hzd_status_i.addr_producer_tracked;
                 bt_a_operand_ff     <= bt_a_operand;
                 bt_b_operand_ff     <= bt_b_operand;
                 csr_reg_raddr_ff <= issue_csr_reg_raddr_ff;
@@ -503,8 +612,14 @@ import ydrasil_pkg::*;
                 id_ex_jalr_ff <= issue_bt_a_rs_sel_ff;
                 id_ex_alu_bypass_rs1_ff <= issue_valid_ff & hzd_status_i.prev_alu_bypass_rs1;
                 id_ex_alu_bypass_rs2_ff <= issue_valid_ff & hzd_status_i.prev_alu_bypass_rs2;
-                id_ex_load_bypass_rs1_ff <= issue_valid_ff & hzd_status_i.prev_load_bypass_rs1;
-                id_ex_load_bypass_rs2_ff <= issue_valid_ff & hzd_status_i.prev_load_bypass_rs2;
+                id_ex_dual_bypass_rs1_ff <= issue_valid_ff & hzd_status_i.prev_dual_bypass_rs1;
+                id_ex_dual_bypass_rs2_ff <= issue_valid_ff & hzd_status_i.prev_dual_bypass_rs2;
+                id_ex_load_bypass_rs1_ff <= issue_valid_ff &
+                    hzd_status_i.prev_load_bypass_rs1 &
+                    !launch_main_load_wake_valid;
+                id_ex_load_bypass_rs2_ff <= issue_valid_ff &
+                    hzd_status_i.prev_load_bypass_rs2 &
+                    !launch_main_load_wake_valid;
                 id_ex_load_bypass_producer_id_ff <=
                     hzd_status_i.prev_load_producer_id;
                 id_ex_branch_pc_target_ff <= issue_branch_pc_target;
@@ -514,6 +629,7 @@ import ydrasil_pkg::*;
                 id_ex_pred_target_ff <= issue_pred_target_ff;
                 id_ex_pred_counter_ff <= issue_pred_counter_ff;
                 id_ex_pred_bht_index_ff <= issue_pred_bht_index_ff;
+                id_ex_pred_history_ff <= issue_pred_history_ff;
                 dual_operand_a_q <= issue1_operand_a;
                 dual_operand_b_q <= issue1_operand_b;
                 dual_operator_q <= decode_pkt1_i.operator_info;
@@ -523,34 +639,123 @@ import ydrasil_pkg::*;
                 dual_producer_tracked_q <= producer_alloc_tracked1_i;
                 dual_pc_q <= decode_pkt1_i.pc;
                 dual_instr_q <= decode_pkt1_i.instr;
-            end else if (stall_id_i && !flush_id_i && held_store_wake_valid) begin
-                // A replayed store may receive its data before its address
-                // dependency completes. Absorb that completion into the held
-                // ID/EX packet so the later LSU request cannot miss the pulse.
-                id_lsu_store_data_ff <= held_store_wake_data;
-                id_lsu_store_data_valid_ff <= 1'b1;
-                id_lsu_store_data_producer_tracked_ff <= 1'b0;
+				dual_bypass_pkt_q <= dual_bypass_pkt_i;
+                dual_branch_pkt_q.rob_tag <= producer_alloc_id1_i;
+                dual_branch_pkt_q.pc <= decode_pkt1_i.pc;
+                dual_branch_pkt_q.instr <= decode_pkt1_i.instr;
+                dual_branch_pkt_q.branch_target <= decode_pkt1_i.branch_target;
+                dual_branch_pkt_q.next_pc <= decode_pkt1_i.next_pc;
+                dual_branch_pkt_q.operator_info <= decode_pkt1_i.operator_info;
+                dual_branch_pkt_q.operator_type <= decode_pkt1_i.operator_type;
+                dual_branch_pkt_q.pred_hit <= decode_pkt1_i.pred_hit;
+                dual_branch_pkt_q.pred_taken <= decode_pkt1_i.pred_taken;
+                dual_branch_pkt_q.pred_target <= decode_pkt1_i.pred_target;
+                dual_branch_pkt_q.pred_counter <= decode_pkt1_i.pred_counter;
+                dual_branch_pkt_q.pred_bht_index <= decode_pkt1_i.pred_bht_index;
+                dual_branch_pkt_q.pred_history <= decode_pkt1_i.pred_history;
+                if (launch_main_load_wake_valid) begin
+                    if (hzd_status_i.prev_load_bypass_rs1) begin
+                        operand_a_ff <= launch_main_load_wake_data;
+                        if (!issue_bt_a_rs_sel_ff)
+                            alu_operand_a_ff <= launch_main_load_wake_data;
+                        bru_operand_a_ff <= launch_main_load_wake_data;
+                        lsu_operand_a_ff <= launch_main_load_wake_data;
+                        mul_operand_a_ff <= launch_main_load_wake_data;
+                        csr_operand_a_ff <= launch_main_load_wake_data;
+                        if (issue_bt_a_rs_sel_ff)
+                            bt_a_operand_ff <= launch_main_load_wake_data;
+                        fpu_operand_a_ff <= launch_main_load_wake_data;
+                    end
+                    if (hzd_status_i.prev_load_bypass_rs2) begin
+                        operand_b_ff <= launch_main_load_wake_data;
+                        alu_operand_b_ff <= launch_main_load_wake_data;
+                        bru_operand_b_ff <= launch_main_load_wake_data;
+                        mul_operand_b_ff <= launch_main_load_wake_data;
+                        csr_operand_b_ff <= launch_main_load_wake_data;
+                        id_lsu_store_data_ff <= launch_main_load_wake_data;
+                    end
+                end
+            end else if (stall_id_i && !flush_id_i &&
+                         (held_store_wake_valid || held_addr_wake_valid ||
+                          held_main_load_wake_valid ||
+                          held_dual_rs1_wake_valid ||
+                          held_dual_rs2_wake_valid)) begin
+                // A held ID/EX packet must absorb one-cycle completions.  This
+                // applies both to replayed LSU operands and to a secondary ALU
+                // operation waiting behind a backend stall.
+                if (held_store_wake_valid) begin
+                    id_lsu_store_data_ff <= held_store_wake_data;
+                    id_lsu_store_data_valid_ff <= 1'b1;
+                    id_lsu_store_data_producer_tracked_ff <= 1'b0;
+                end
+                if (held_addr_wake_valid) begin
+                    lsu_operand_a_ff <= held_addr_wake_data;
+                    id_lsu_addr_valid_ff <= 1'b1;
+                    id_lsu_addr_producer_tracked_ff <= 1'b0;
+                end
+                if (held_main_load_wake_valid) begin
+                    if (id_ex_load_bypass_rs1_ff) begin
+                        operand_a_ff <= held_main_load_wake_data;
+                        if (!id_ex_jalr_ff)
+                            alu_operand_a_ff <= held_main_load_wake_data;
+                        bru_operand_a_ff <= held_main_load_wake_data;
+                        lsu_operand_a_ff <= held_main_load_wake_data;
+                        mul_operand_a_ff <= held_main_load_wake_data;
+                        csr_operand_a_ff <= held_main_load_wake_data;
+                        if (id_ex_jalr_ff)
+                            bt_a_operand_ff <= held_main_load_wake_data;
+                        fpu_operand_a_ff <= held_main_load_wake_data;
+                        id_ex_load_bypass_rs1_ff <= 1'b0;
+                    end
+                    if (id_ex_load_bypass_rs2_ff) begin
+                        operand_b_ff <= held_main_load_wake_data;
+                        alu_operand_b_ff <= held_main_load_wake_data;
+                        bru_operand_b_ff <= held_main_load_wake_data;
+                        mul_operand_b_ff <= held_main_load_wake_data;
+                        csr_operand_b_ff <= held_main_load_wake_data;
+                        id_lsu_store_data_ff <= held_main_load_wake_data;
+                        id_ex_load_bypass_rs2_ff <= 1'b0;
+                    end
+                end
+                if (held_dual_rs1_wake_valid) begin
+                    dual_operand_a_q <= held_dual_rs1_wake_data;
+                    dual_bypass_pkt_q.rs1_early_alu <= 1'b0;
+                    dual_bypass_pkt_q.rs1_early_dual <= 1'b0;
+                    dual_bypass_pkt_q.rs1_early_load <= 1'b0;
+                end
+                if (held_dual_rs2_wake_valid) begin
+                    dual_operand_b_q <= held_dual_rs2_wake_data;
+                    dual_bypass_pkt_q.rs2_early_alu <= 1'b0;
+                    dual_bypass_pkt_q.rs2_early_dual <= 1'b0;
+                    dual_bypass_pkt_q.rs2_early_load <= 1'b0;
+                end
             end
 
             if (flush_id_i) begin
                 id_ex_valid_ff <= 1'b0;
                 id_ex_alu_bypass_rs1_ff <= 1'b0;
                 id_ex_alu_bypass_rs2_ff <= 1'b0;
+                id_ex_dual_bypass_rs1_ff <= 1'b0;
+                id_ex_dual_bypass_rs2_ff <= 1'b0;
                 id_ex_load_bypass_rs1_ff <= 1'b0;
                 id_ex_load_bypass_rs2_ff <= 1'b0;
                 id_ex_load_bypass_producer_id_ff <= '0;
                 id_fence_i_ff <= 1'b0;
                 dual_valid_q <= 1'b0;
+                dual_branch_pkt_q.valid <= 1'b0;
+				dual_bypass_pkt_q <= '0;
             end else if (id_advance) begin
                 id_ex_valid_ff <= issue_valid_ff;
                 id_fence_i_ff <= issue_valid_ff & issue_fence_i_ff;
                 dual_valid_q <= pair_eligible;
+                dual_branch_pkt_q.valid <= pair_eligible;
             end else if (stall_id_i) begin
                 // A backend replay holds the complete ID/EX packet. Do not let
                 // a simultaneous decode bubble clear only its valid/bypass bits.
                 id_ex_valid_ff <= id_ex_valid_ff;
                 id_fence_i_ff <= id_fence_i_ff;
                 dual_valid_q <= dual_valid_q;
+                dual_branch_pkt_q.valid <= dual_branch_pkt_q.valid;
             end else if (bubble_id_i) begin
                 id_ex_valid_ff <= 1'b0;
                 // The invalid bit already suppresses the complete ID/EX
@@ -558,9 +763,12 @@ import ydrasil_pkg::*;
                 // so scoreboard bubble generation is not part of their D cone.
                 id_fence_i_ff <= 1'b0;
                 dual_valid_q <= 1'b0;
+                dual_branch_pkt_q.valid <= 1'b0;
+				dual_bypass_pkt_q <= '0;
             end else begin
                 id_fence_i_ff <= 1'b0;
                 dual_valid_q <= 1'b0;
+                dual_branch_pkt_q.valid <= 1'b0;
             end
         end
     end
@@ -589,6 +797,12 @@ import ydrasil_pkg::*;
     assign lsu_req_o.op = operator_lsu_ff;
     // EX supplies the address after applying its local previous-ALU bypass.
     assign lsu_req_o.addr = '0;
+    assign lsu_req_o.addr_valid = id_lsu_addr_valid_ff;
+    assign lsu_req_o.addr_base = lsu_operand_a_ff;
+    assign lsu_req_o.addr_offset = lsu_operand_b_ff;
+    assign lsu_req_o.addr_producer_id = id_lsu_addr_producer_id_ff;
+    assign lsu_req_o.addr_producer_tracked =
+        id_lsu_addr_producer_tracked_ff;
     assign lsu_req_o.addr_is_dtcm = 1'b0;
     assign lsu_req_o.rd_addr = rf_waddr_rd_ff;
     assign lsu_req_o.producer_id = producer_id_ff;
@@ -630,6 +844,8 @@ import ydrasil_pkg::*;
     assign id_ex_jalr_o = id_ex_jalr_ff;
     assign id_ex_alu_bypass_rs1_o = id_ex_alu_bypass_rs1_ff;
     assign id_ex_alu_bypass_rs2_o = id_ex_alu_bypass_rs2_ff;
+    assign id_ex_dual_bypass_rs1_o = id_ex_dual_bypass_rs1_ff;
+    assign id_ex_dual_bypass_rs2_o = id_ex_dual_bypass_rs2_ff;
     assign id_ex_load_bypass_rs1_o = id_ex_load_bypass_rs1_ff;
     assign id_ex_load_bypass_rs2_o = id_ex_load_bypass_rs2_ff;
     assign id_ex_load_bypass_producer_id_o =
@@ -647,6 +863,7 @@ import ydrasil_pkg::*;
     assign id_ex_pred_target_o = id_ex_pred_target_ff;
     assign id_ex_pred_counter_o = id_ex_pred_counter_ff;
     assign id_ex_pred_bht_index_o = id_ex_pred_bht_index_ff;
+    assign id_ex_pred_history_o = id_ex_pred_history_ff;
     assign id_ex_valid_o = id_ex_valid_ff;
     assign id_ex_producer_id_o = producer_id_ff;
     assign id_ex_producer_tracked_o = producer_tracked_ff;
@@ -660,6 +877,8 @@ import ydrasil_pkg::*;
     assign dual_valid_o = dual_valid_q;
     assign dual_pc_o = dual_pc_q;
     assign dual_instr_o = dual_instr_q;
+	assign dual_bypass_pkt_o = dual_bypass_pkt_q;
+    assign dual_branch_pkt_o = dual_branch_pkt_q;
 
     assign id_ctrl_o.rs1_addr = issue_rf_raddr_rs1_ff;
     assign id_ctrl_o.rs2_addr = issue_rf_raddr_rs2_ff;
@@ -727,7 +946,10 @@ import ydrasil_pkg::*;
     input  wire                           producer_tracked_i,
     input  wire [INST_ADDR_WIDTH-1:0]     pc_i,
     input  wire [INST_DATA_WIDTH-1:0]     instr_i,
+    input  ydrasil_branch_issue_pkt_t      branch_issue_i,
     output ydrasil_gpr_fwd_pkt_t          completion_o,
+    output ydrasil_bp_resolve_pkt_t        bp_fast_resolve_o,
+    output ydrasil_bp_resolve_pkt_t        bp_resolve_o,
     output wire                           instret_valid_o,
     output wire [INST_ADDR_WIDTH-1:0]     commit_pc_o,
     output wire [INST_DATA_WIDTH-1:0]     commit_instr_o
@@ -796,6 +1018,42 @@ import ydrasil_pkg::*;
     reg producer_tracked_q;
     reg [INST_ADDR_WIDTH-1:0] pc_q;
     reg [INST_DATA_WIDTH-1:0] instr_q;
+    ydrasil_bp_resolve_pkt_t bp_resolve_q;
+
+    wire dual_branch_eq = operand_a_i == operand_b_i;
+    wire dual_branch_ge_signed = $signed(operand_a_i) >= $signed(operand_b_i);
+    wire dual_branch_ge_unsigned = operand_a_i >= operand_b_i;
+    wire dual_branch_taken =
+        (branch_issue_i.operator_info[OP_BJP_BEQ]  &&  dual_branch_eq) ||
+        (branch_issue_i.operator_info[OP_BJP_BNE]  && !dual_branch_eq) ||
+        (branch_issue_i.operator_info[OP_BJP_BLT]  && !dual_branch_ge_signed) ||
+        (branch_issue_i.operator_info[OP_BJP_BGE]  &&  dual_branch_ge_signed) ||
+        (branch_issue_i.operator_info[OP_BJP_BLTU] && !dual_branch_ge_unsigned) ||
+        (branch_issue_i.operator_info[OP_BJP_BGEU] &&  dual_branch_ge_unsigned);
+    wire dual_is_branch = valid_i && branch_issue_i.valid &&
+        branch_issue_i.operator_type[OPERATOR_TYPE_BJP] &&
+        !branch_issue_i.operator_info[OP_BJP_JUMP];
+    wire dual_pred_taken = branch_issue_i.pred_hit && branch_issue_i.pred_taken;
+    wire [INST_ADDR_WIDTH-1:0] dual_actual_next_pc = dual_branch_taken ?
+        branch_issue_i.branch_target : branch_issue_i.next_pc;
+    wire [INST_ADDR_WIDTH-1:0] dual_pred_next_pc = dual_pred_taken ?
+        branch_issue_i.pred_target : branch_issue_i.next_pc;
+
+    always_comb begin
+        bp_fast_resolve_o = '0;
+        bp_fast_resolve_o.valid = dual_is_branch;
+        bp_fast_resolve_o.redirect = dual_is_branch &&
+            (dual_actual_next_pc != dual_pred_next_pc);
+        bp_fast_resolve_o.conditional = dual_is_branch;
+        bp_fast_resolve_o.rob_tag = branch_issue_i.rob_tag;
+        bp_fast_resolve_o.pc = branch_issue_i.pc;
+        bp_fast_resolve_o.taken = dual_branch_taken;
+        bp_fast_resolve_o.target = branch_issue_i.branch_target;
+        bp_fast_resolve_o.next_pc = dual_actual_next_pc;
+        bp_fast_resolve_o.pred_counter = branch_issue_i.pred_counter;
+        bp_fast_resolve_o.pred_bht_index = branch_issue_i.pred_bht_index;
+        bp_fast_resolve_o.pred_history = branch_issue_i.pred_history;
+    end
 
     always_comb begin
         slow_bitmanip_operator = operator_i;
@@ -844,6 +1102,7 @@ import ydrasil_pkg::*;
             producer_tracked_q <= 1'b0;
             pc_q <= '0;
             instr_q <= RV32I_INS_NOP;
+            bp_resolve_q <= '0;
         end else begin
             valid_q <= valid_i && !interrupt_i;
             result_q <= operator_type_i[OPERATOR_TYPE_BITMANIP] ?
@@ -854,14 +1113,19 @@ import ydrasil_pkg::*;
             producer_tracked_q <= producer_tracked_i;
             pc_q <= pc_i;
             instr_q <= instr_i;
+            bp_resolve_q <= bp_fast_resolve_o;
         end
     end
 
-    assign completion_o.valid = valid_q && (rd_addr_q != '0);
+    // Every instruction owns a ROB tag, including operations that do not write
+    // a GPR.  Completion therefore means execution finished; commit decides
+    // whether the result updates architectural state.
+    assign completion_o.valid = valid_q;
     assign completion_o.producer_id = producer_id_q;
     assign completion_o.producer_tracked = producer_tracked_q;
     assign completion_o.addr = rd_addr_q;
     assign completion_o.data = result_q;
+    assign bp_resolve_o = bp_resolve_q;
     assign instret_valid_o = valid_q;
     assign commit_pc_o = pc_q;
     assign commit_instr_o = instr_q;

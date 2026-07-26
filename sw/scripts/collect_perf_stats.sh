@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-root=${1:-build/sim/hw}
-out_dir=${2:-build/PPA}
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+project_root=$(cd -- "$script_dir/../.." && pwd)
+root=${1:-"$project_root/build/sim/hw"}
+out_dir=${2:-"$project_root/build/PPA"}
 csv="$out_dir/perf_stats.csv"
 summary="$out_dir/perf_stats_summary.log"
 mkdir -p "$out_dir"

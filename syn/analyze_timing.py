@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SLACK_RE = re.compile(r"Slack\s*\((?P<status>[^)]*)\)\s*:\s*(?P<value>[-+]?\d+(?:\.\d+)?)ns")
 FIELD_RE = re.compile(
     r"^\s*(Source|Destination|Path Group|Requirement|Data Path Delay|Logic Levels|Clock Path Skew|Clock Uncertainty):\s*(.*?)\s*$",
@@ -472,7 +473,7 @@ def analyze_sweep(report_dir: Path) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--report-dir", type=Path, default=Path("build/syn/reports"))
+    parser.add_argument("--report-dir", type=Path, default=PROJECT_ROOT / "build/syn/reports")
     parser.add_argument("--timing-report", type=Path, default=None)
     parser.add_argument("--violation-report", type=Path, default=None)
     parser.add_argument("--csv", type=Path, default=None)
