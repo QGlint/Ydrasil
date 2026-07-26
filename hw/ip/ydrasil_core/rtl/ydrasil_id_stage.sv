@@ -210,6 +210,7 @@ import ydrasil_pkg::*;
     end
 endmodule
 
+(* keep_hierarchy = "yes" *)
 module ydrasil_oldest_pair_select
 import ydrasil_pkg::*;
 (
@@ -282,6 +283,7 @@ import ydrasil_pkg::*;
     always_comb selected_o = merge_pair(level5[0], level5[1]);
 endmodule
 
+(* keep_hierarchy = "yes" *)
 module ydrasil_id_stage
 import ydrasil_pkg::*;
 (

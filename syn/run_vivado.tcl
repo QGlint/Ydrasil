@@ -639,6 +639,10 @@ if {$force_runs} {
     reset_run synth_1
 }
 set_property strategy Flow_AreaOptimized_high [get_runs synth_1]
+# The 64-entry ROB scheduler contains wide packed-struct arrays and selection
+# trees.  Vivado 2024.2 can stall indefinitely while flattening this logic in
+# Cross Boundary and Area Optimization, so preserve the RTL hierarchy here.
+set_property STEPS.SYNTH_DESIGN.ARGS.FLATTEN_HIERARCHY none [get_runs synth_1]
 set synth_status [get_property STATUS [get_runs synth_1]]
 if {!$force_runs && [regexp -nocase {complete} $synth_status]} {
     puts "Reusing completed synth_1: $synth_status"

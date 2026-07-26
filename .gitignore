@@ -3,6 +3,7 @@ build/
 hw/ip/alioth/
 hw/ip/alkaid/
 tools/
+ref/
 spec/
 spec
 __pycache__/
