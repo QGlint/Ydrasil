@@ -185,7 +185,7 @@ import ydrasil_axi_pkg::*;
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] bp_bram_predict1_bht_index;
 		// Compatibility observability now reflects the FF target table.
 		wire l0_hit;
-		wire l0_hit1 = 1'b0;
+		wire l0_hit1;
 	wire                        id_fence_i;
 	wire [31:0]                 fence_resume_pc;
 		(* max_fanout = 8 *) wire   pipeline_flush;
@@ -327,6 +327,11 @@ import ydrasil_axi_pkg::*;
 	reg [1:0]                       issue_pipe_tail_q;
 	reg [2:0]                       issue_pipe_count_q;
 	ydrasil_issue_wb_pkt_t          issue_wb_pkt;
+	wire                            issue_ready;
+	wire                            issue_consume_two;
+	wire                            issue_slot1_replay;
+	wire                            issue_pair_execute = issue_consume_two &&
+		!issue_slot1_replay;
 	// Reserve space for the largest (two instruction) ID transfer. The ready
 	// decision is entirely registered-state based.
 	wire                            issue_pipe_has_room = issue_pipe_count_q <= 3'd2;
@@ -338,7 +343,7 @@ import ydrasil_axi_pkg::*;
 		(issue_pipe_push_two ? 2'd2 : 2'd1) : '0;
 	wire [1:0]                      issue_pipe_pop_count =
 		(issue_ready && (issue_pipe_count_q != '0)) ?
-		(issue_consume_two ? 2'd2 : 2'd1) : '0;
+		(issue_pair_execute ? 2'd2 : 2'd1) : '0;
 	wire [1:0]                      issue_pipe_head1 = issue_pipe_head_q + 2'd1;
 	wire [1:0]                      issue_pipe_tail1 = issue_pipe_tail_q + 2'd1;
 	always_comb begin
@@ -393,8 +398,6 @@ import ydrasil_axi_pkg::*;
 	ydrasil_decode_pkt_t            decode_pkt;
 	assign decode_pkt = issue_pkt.decode;
 	wire                            decode_if_ready;
-	wire                            issue_ready;
-	wire                            issue_consume_two;
 	wire                            decode_consume_two;
 	wire                            id_ex_execute_valid;
 	wire                            id_ex_issue_valid;
@@ -957,6 +960,7 @@ import ydrasil_axi_pkg::*;
 			.bp_predict1_bht_index_i(bp_predict1_bht_index),
 			.bp_invalidate_i(id_fence_i),
 			.bp_invalidate_target_i(fence_resume_pc),
+			.target_ff_train_i(ex_bp_train_pkt),
 			.if_mem_addr_o   (if_mem_addr),
 			.if_mem_addr1_o  (if_mem_addr1),
 			.bp_lookup_pc_o   (bp_lookup_pc),
@@ -979,6 +983,7 @@ import ydrasil_axi_pkg::*;
 			,.if_id1_valid_o   (if_id1_valid)
 				,.if_id1_instr_o   (if_id1_instr)
 				,.target_ff_hit_o  (l0_hit)
+				,.target_ff_hit1_o (l0_hit1)
 				,.target_ff_correction_o()
 			);
 
@@ -1020,6 +1025,7 @@ import ydrasil_axi_pkg::*;
 		.issue_pkt1_i        (issue_pkt1),
 		.issue_ready_o       (issue_ready),
 		.issue_consume_two_o (issue_consume_two),
+		.issue_slot1_replay_o(issue_slot1_replay),
 		.rf_addr_rs1_o       (rf_raddr_rs1),
 		.rf_addr_rs2_o      (rf_raddr_rs2),
 		.rf_addr_rs3_o      (rf_raddr_rs3),

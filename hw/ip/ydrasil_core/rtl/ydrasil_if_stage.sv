@@ -25,6 +25,8 @@ import ydrasil_pkg::*;
     input  wire [31:0] bp_predict1_bht_index_i,
     input  wire        bp_invalidate_i,
     input  wire [31:0] bp_invalidate_target_i,
+    // Install L0 entries only after EX has resolved real control flow.
+    input  ydrasil_bp_train_pkt_t target_ff_train_i,
 
     output wire [31:0] if_mem_addr_o,
     output wire [31:0] if_mem_addr1_o,
@@ -50,6 +52,7 @@ import ydrasil_pkg::*;
     output wire        if_id1_valid_o,
     output wire [31:0] if_id1_instr_o,
     output wire        target_ff_hit_o,
+    output wire        target_ff_hit1_o,
     output wire        target_ff_correction_o
 );
 
@@ -64,9 +67,13 @@ import ydrasil_pkg::*;
     reg        pending_redirect_valid_q;
     reg [31:0] pending_redirect_target_q;
 
-    localparam int TARGET_FF_ENTRIES = 32;
+    // Include the word-select bit in the index.  A paired fetch must never
+    // alias PC and PC+4, otherwise a lane1 branch target can skip lane0's
+    // architectural instruction on the following visit.
+    localparam int TARGET_FF_ENTRIES = 64;
     reg [TARGET_FF_ENTRIES-1:0] target_ff_valid_q;
     reg [TARGET_FF_ENTRIES-1:0] target_ff_taken_q;
+    reg [23:0] target_ff_tag_q [0:TARGET_FF_ENTRIES-1];
     reg [29:0] target_ff_target_q [0:TARGET_FF_ENTRIES-1];
 
     reg [COUNT_WIDTH-1:0] fetchq_count_q;
@@ -106,17 +113,33 @@ import ydrasil_pkg::*;
         !predict_correction_resp;
     wire [31:0] fetch_addr = pending_redirect_valid_q ?
         pending_redirect_target_q : pc_q;
-		wire [4:0] target_ff_index = fetch_addr[7:3];
-		wire target_ff_hit = target_ff_valid_q[target_ff_index] &&
-			target_ff_taken_q[target_ff_index];
-			wire [31:0] target_ff_target =
-				{target_ff_target_q[target_ff_index], 2'b00};
-		assign target_ff_hit_o = fetch_issue && target_ff_hit;
-		assign target_ff_correction_o = predict_correction_resp;
     wire fetch_addr_is_dtcm =
         (fetch_addr >= DTCM_BASE_ADDR) &&
         (fetch_addr < (DTCM_BASE_ADDR + ((32'd1 << DTCM_ADDR_WIDTH) << 2)));
     wire fetch_two = !fetch_addr_is_dtcm;
+    wire [31:0] fetch_addr1 = fetch_addr + 32'd4;
+    wire [5:0] target_ff_index = fetch_addr[7:2];
+    wire [5:0] target_ff_index1 = fetch_addr1[7:2];
+    wire [31:0] target_ff_target0 =
+        {target_ff_target_q[target_ff_index], 2'b00};
+    wire [31:0] target_ff_target1 =
+        {target_ff_target_q[target_ff_index1], 2'b00};
+    wire target_ff_hit0 = target_ff_valid_q[target_ff_index] &&
+        target_ff_taken_q[target_ff_index] &&
+        (target_ff_tag_q[target_ff_index] == fetch_addr[31:8]) &&
+        bp_predict_taken_i &&
+        (bp_predict_target_i == target_ff_target0);
+    wire target_ff_hit1 = target_ff_valid_q[target_ff_index1] &&
+        target_ff_taken_q[target_ff_index1] &&
+        (target_ff_tag_q[target_ff_index1] == fetch_addr1[31:8]) &&
+        bp_predict1_taken_i &&
+        (bp_predict1_target_i == target_ff_target1);
+    wire target_ff_hit = target_ff_hit0 || (fetch_two && target_ff_hit1);
+    wire [31:0] target_ff_target = target_ff_hit0 ? target_ff_target0 :
+        target_ff_target1;
+    assign target_ff_hit_o = fetch_issue && target_ff_hit0;
+    assign target_ff_hit1_o = fetch_issue && fetch_two && target_ff_hit1;
+    assign target_ff_correction_o = predict_correction_resp;
     // Preserve the established verification observability points.
     wire [31:0] pc_ff = pc_q;
     wire mem_req_valid_ff = mem_req_valid_q;
@@ -124,7 +147,7 @@ import ydrasil_pkg::*;
     wire bp_predict_redirect = predict_redirect_resp;
 
     assign if_mem_addr_o = fetch_addr;
-    assign if_mem_addr1_o = fetch_addr + 32'd4;
+    assign if_mem_addr1_o = fetch_addr1;
     assign bp_lookup_pc_o = fetch_addr;
 
     assign if_id_valid_o = fetchq_valid0;
@@ -146,6 +169,7 @@ import ydrasil_pkg::*;
     assign if_id1_pred_bht_index_o = fetchq_valid1 ? fetchq_pred_bht_index_q[1] : '0;
 
     integer idx;
+    wire [31:0] mem_req_pc1 = mem_req_pc_q + 32'd4;
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             pc_q <= RESET_INS;
@@ -167,6 +191,8 @@ import ydrasil_pkg::*;
                 fetchq_pred_counter_q[idx] <= 2'b01;
                 fetchq_pred_bht_index_q[idx] <= '0;
             end
+			for (idx = 0; idx < TARGET_FF_ENTRIES; idx = idx + 1)
+				target_ff_tag_q[idx] <= '0;
         end else if (flush_fetch || bp_invalidate_i) begin
             pc_q <= flush_fetch ? flush_target : bp_invalidate_target_i;
             mem_req_valid_q <= 1'b0;
@@ -185,10 +211,10 @@ import ydrasil_pkg::*;
             if (fetch_issue) begin
                 mem_req_pc_q <= fetch_addr;
                 mem_req_two_q <= fetch_two;
-				mem_req_next_pc_q <= target_ff_hit ? target_ff_target :
-					(fetch_addr + (fetch_two ? 32'd8 : 32'd4));
+                mem_req_next_pc_q <= target_ff_hit ? target_ff_target :
+                    (fetch_addr + (fetch_two ? 32'd8 : 32'd4));
                 pc_q <= target_ff_hit ? target_ff_target :
-					(fetch_addr + (fetch_two ? 32'd8 : 32'd4));
+                    (fetch_addr + (fetch_two ? 32'd8 : 32'd4));
             end
 
             if (pending_redirect_valid_q && fetch_issue)
@@ -198,12 +224,18 @@ import ydrasil_pkg::*;
 				pending_redirect_target_q <= predict_next_pc;
             end
 
-			if (mem_resp_valid) begin
-				target_ff_valid_q[mem_req_pc_q[7:3]] <= 1'b1;
-				target_ff_taken_q[mem_req_pc_q[7:3]] <= predict_redirect_resp;
-				if (predict_redirect_resp)
-					target_ff_target_q[mem_req_pc_q[7:3]] <= predict_next_pc[31:2];
-			end
+            // Keep direct jumps on the established BTB path.  A zero-bubble
+            // early target for JAL can overtake a paired slot1 store replay;
+            // conditional branches are the high-frequency L0 use case.
+            if (target_ff_train_i.valid && target_ff_train_i.conditional) begin
+                target_ff_valid_q[target_ff_train_i.pc[7:2]] <= 1'b1;
+                target_ff_taken_q[target_ff_train_i.pc[7:2]] <=
+                    target_ff_train_i.taken;
+                target_ff_tag_q[target_ff_train_i.pc[7:2]] <=
+                    target_ff_train_i.pc[31:8];
+                target_ff_target_q[target_ff_train_i.pc[7:2]] <=
+                    target_ff_train_i.target[31:2];
+            end
 
             if (pop_count == 2'd2) begin
                 for (idx = 0; idx < FETCHQ_DEPTH-2; idx = idx + 1) begin

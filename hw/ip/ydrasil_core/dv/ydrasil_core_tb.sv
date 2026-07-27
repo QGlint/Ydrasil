@@ -220,6 +220,9 @@ end
     reg [31:0] sb_ready_but_stall_count;
     reg [31:0] sb_complete_visible_count;
     reg [31:0] sb_registered_visible_count;
+    reg [31:0] mul_tail_slot_release_late_count;
+    reg [31:0] mul_tail_ready_late_count;
+    reg [31:0] mul_tail_consumer_no_bypass_count;
     reg [31:0] acct_flush_count;
     reg [31:0] acct_mul_hold_count;
     reg [31:0] acct_scoreboard_count;
@@ -261,9 +264,10 @@ end
     reg [31:0] retire_four_count;
     reg [31:0] dual_issue_count;
     reg [31:0] dual_alu_alu_count;
-    reg [31:0] dual_alu_load_count;
-    reg [31:0] dual_alu_store_count;
-    reg [31:0] dual_alu_bmlite_count;
+    reg [31:0] dual_bru_alu_count;
+    reg [31:0] dual_lsu_alu_count;
+    reg [31:0] dual_muldiv_alu_count;
+    reg [31:0] dual_other_count;
     reg [31:0] l0_lookup_count;
     reg [31:0] l0_hit_count;
     reg [31:0] l0_correction_count;
@@ -605,6 +609,9 @@ end
             sb_ready_but_stall_count <= 32'b0;
             sb_complete_visible_count <= 32'b0;
             sb_registered_visible_count <= 32'b0;
+            mul_tail_slot_release_late_count <= 32'b0;
+            mul_tail_ready_late_count <= 32'b0;
+            mul_tail_consumer_no_bypass_count <= 32'b0;
             acct_flush_count <= 32'b0;
             acct_mul_hold_count <= 32'b0;
             acct_scoreboard_count <= 32'b0;
@@ -646,9 +653,10 @@ end
             retire_four_count <= 32'b0;
             dual_issue_count <= 32'b0;
             dual_alu_alu_count <= 32'b0;
-            dual_alu_load_count <= 32'b0;
-            dual_alu_store_count <= 32'b0;
-            dual_alu_bmlite_count <= 32'b0;
+            dual_bru_alu_count <= 32'b0;
+            dual_lsu_alu_count <= 32'b0;
+            dual_muldiv_alu_count <= 32'b0;
+            dual_other_count <= 32'b0;
             l0_lookup_count <= 32'b0;
             l0_hit_count <= 32'b0;
             l0_correction_count <= 32'b0;
@@ -944,6 +952,26 @@ end
                    u_dut.u_ctrl.producer_ready_q[u_dut.u_ctrl.rs1_producer_slot]) ||
                   (u_dut.u_ctrl.rs2_has_producer &&
                    u_dut.u_ctrl.producer_ready_q[u_dut.u_ctrl.rs2_producer_slot])) ? 32'd1 : 32'd0);
+            // MUL tail attribution.  A result that cannot find its producer
+            // identifies a slot-lifetime problem; a matched but not-yet-ready
+            // result identifies Future File ready latency; a matching blocked
+            // consumer identifies the remaining missing direct bypass case.
+            mul_tail_slot_release_late_count <= mul_tail_slot_release_late_count +
+                ((u_dut.mul_result_valid &&
+                  !(|u_dut.u_ctrl.producer_complete_mask)) ? 32'd1 : 32'd0);
+            mul_tail_ready_late_count <= mul_tail_ready_late_count +
+                ((u_dut.mul_result_valid &&
+                  (|u_dut.u_ctrl.producer_complete_mask) &&
+                  !((u_dut.u_ctrl.rs1_has_producer &&
+                     u_dut.u_ctrl.producer_ready_q[u_dut.u_ctrl.rs1_producer_slot]) ||
+                    (u_dut.u_ctrl.rs2_has_producer &&
+                     u_dut.u_ctrl.producer_ready_q[u_dut.u_ctrl.rs2_producer_slot]))) ? 32'd1 : 32'd0);
+            mul_tail_consumer_no_bypass_count <= mul_tail_consumer_no_bypass_count +
+                ((u_dut.mul_result_valid && u_dut.scoreboard_stall &&
+                  ((u_dut.u_ctrl.rs1_has_producer &&
+                    u_dut.u_ctrl.producer_complete_mask[u_dut.u_ctrl.rs1_producer_slot]) ||
+                   (u_dut.u_ctrl.rs2_has_producer &&
+                    u_dut.u_ctrl.producer_complete_mask[u_dut.u_ctrl.rs2_producer_slot]))) ? 32'd1 : 32'd0);
 
             // Mutually exclusive cycle accounting. Keep this TB-only so it cannot affect RTL.
             if (u_dut.flush_ex) begin
@@ -1032,16 +1060,19 @@ end
                 3'd3: retire_three_count <= retire_three_count + 1'b1;
                 3'd4: retire_four_count <= retire_four_count + 1'b1;
             endcase
-            if (u_dut.issue_consume_two) begin
+            if (u_dut.issue_pair_execute) begin
                 dual_issue_count <= dual_issue_count + 1'b1;
-                if (u_dut.issue_pkt1.decode.operator_type[OPERATOR_TYPE_LOAD])
-                    dual_alu_load_count <= dual_alu_load_count + 1'b1;
-                else if (u_dut.issue_pkt1.decode.operator_type[OPERATOR_TYPE_STORE])
-                    dual_alu_store_count <= dual_alu_store_count + 1'b1;
-                else if (u_dut.issue_pkt1.decode.operator_type[OPERATOR_TYPE_BITMANIP])
-                    dual_alu_bmlite_count <= dual_alu_bmlite_count + 1'b1;
-                else
+                if (u_dut.issue_pkt.decode.resources[RESOURCE_BRU])
+                    dual_bru_alu_count <= dual_bru_alu_count + 1'b1;
+                else if (u_dut.issue_pkt.decode.resources[RESOURCE_LSU])
+                    dual_lsu_alu_count <= dual_lsu_alu_count + 1'b1;
+                else if (u_dut.issue_pkt.decode.resources[RESOURCE_MULDIV])
+                    dual_muldiv_alu_count <= dual_muldiv_alu_count + 1'b1;
+                else if (u_dut.issue_pkt.decode.resources[RESOURCE_ALU] ||
+                         u_dut.issue_pkt.decode.resources[RESOURCE_FULL_BITMANIP])
                     dual_alu_alu_count <= dual_alu_alu_count + 1'b1;
+                else
+                    dual_other_count <= dual_other_count + 1'b1;
             end
             if (u_dut.u_ydrasil_if_stage.fetch_issue) begin
                 l0_lookup_count <= l0_lookup_count +
@@ -1438,6 +1469,9 @@ end
                 sb_ready_but_stall_count,
                 sb_complete_visible_count,
                 sb_registered_visible_count);
+            $display("PERF_MUL_TAIL: SLOT_RELEASE_LATE=%-d READY_LATE=%-d CONSUMER_NO_BYPASS=%-d",
+                mul_tail_slot_release_late_count, mul_tail_ready_late_count,
+                mul_tail_consumer_no_bypass_count);
             $display("PERF_CYCLE_ACCOUNT: FLUSH=%-d MUL_HOLD=%-d SCOREBOARD=%-d LSU_STRUCT=%-d LSU_SERIALIZE=%-d PRODUCER_FULL=%-d WB=%-d CLINT=%-d MULTI=%-d NO_IF_VALID=%-d ISSUE=%-d OTHER=%-d ACCOUNTED=%-d SAMPLE_CYCLES=%-d ARCH_CYCLE_DELTA=%-d",
                 acct_flush_count,
                 acct_mul_hold_count,
@@ -1485,9 +1519,9 @@ end
                 retire_two_count,
                 retire_three_count,
                 retire_four_count);
-            $display("PERF_DUAL_ISSUE: PAIRS=%-d ALU_ALU=%-d ALU_LOAD=%-d ALU_STORE=%-d ALU_BMLITE=%-d",
-                dual_issue_count, dual_alu_alu_count, dual_alu_load_count,
-                dual_alu_store_count, dual_alu_bmlite_count);
+            $display("PERF_DUAL_ISSUE: PAIRS=%-d ALU_ALU=%-d BRU_ALU=%-d LSU_ALU=%-d MULDIV_ALU=%-d OTHER=%-d",
+                dual_issue_count, dual_alu_alu_count, dual_bru_alu_count,
+                dual_lsu_alu_count, dual_muldiv_alu_count, dual_other_count);
             $display("PERF_L0_BTB: LOOKUP=%-d HIT=%-d CORRECTION=%-d",
                 l0_lookup_count, l0_hit_count, l0_correction_count);
             $display("PERF_CAUSE_HIST: NONE=%-d SB=%-d LSU=%-d LSU_SB=%-d PF=%-d PF_SB=%-d PF_LSU=%-d PF_LSU_SB=%-d WB_ANY=%-d CLINT_ANY=%-d",

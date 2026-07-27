@@ -120,6 +120,18 @@ import ydrasil_pkg::*;
     wire [1:0] queue_commit_count = {1'b0, queue_commit0} +
         {1'b0, queue_commit1};
 
+    // Retirement previously broadcast two dynamically indexed queue entries
+    // into every Future File bit.  Capture the two post-commit heads once and
+    // replicate their small control fields by eight-register groups.  The
+    // ready-vector update below consequently has no queue-head mux or 5-bit
+    // compare in each of its 32 generated instances.
+    reg [REGS_NUM-1:0] head0_rd_onehot_q;
+    reg [REGS_NUM-1:0] head1_rd_onehot_q;
+    (* max_fanout = 8 *) reg [3:0] head0_writes_gpr_rep_q;
+    (* max_fanout = 8 *) reg [3:0] head1_writes_gpr_rep_q;
+    (* max_fanout = 8 *) producer_id_t head0_tag_rep_q [0:3];
+    (* max_fanout = 8 *) producer_id_t head1_tag_rep_q [0:3];
+
     assign retire_commit_o.valid = queue_commit0;
     assign retire_commit_o.writes_gpr = queue_commit0 &&
         producer_writes_gpr_q[queue_head_q];
@@ -345,13 +357,22 @@ import ydrasil_pkg::*;
     wire [2:0] dbg_rs2_producer_kind = rs2_has_producer ?
         dbg_producer_kind_q[rs2_producer_slot] : 3'd0;
 `endif
-    // Completion broadcasts terminate at the Future File registers. Dispatch
-    // observes them on the following cycle; there is no completion-to-issue
-    // wake/select path in the same cycle.
+    // MUL/DIV has a dedicated same-cycle Future File forward.  Its result is
+    // already registered at the multiplier/divider boundary, so this removes
+    // the otherwise mandatory ready-bit cycle without putting LSU completion
+    // on the BRU operand mux (the BRU keeps its dedicated capture registers).
+    wire rs1_mul_complete_now = rs1_has_producer &&
+        completion_bus_i[COMPLETION_MUL].valid &&
+        completion_bus_i[COMPLETION_MUL].producer_tracked &&
+        (rs1_producer_id == completion_bus_i[COMPLETION_MUL].producer_id);
+    wire rs2_mul_complete_now = rs2_has_producer &&
+        completion_bus_i[COMPLETION_MUL].valid &&
+        completion_bus_i[COMPLETION_MUL].producer_tracked &&
+        (rs2_producer_id == completion_bus_i[COMPLETION_MUL].producer_id);
     wire rs1_producer_ready = rs1_has_producer &&
-        latest_ready_q[id_ctrl_i.rs1_addr];
+        (latest_ready_q[id_ctrl_i.rs1_addr] || rs1_mul_complete_now);
     wire rs2_producer_ready = rs2_has_producer &&
-        latest_ready_q[id_ctrl_i.rs2_addr];
+        (latest_ready_q[id_ctrl_i.rs2_addr] || rs2_mul_complete_now);
 
     wire rs3_has_producer = id_ctrl1_i.rs1_ren &&
         latest_valid_q[id_ctrl1_i.rs1_addr];
@@ -467,17 +488,21 @@ import ydrasil_pkg::*;
     // Operand packets only expose values retained in the registered Future
     // File. Completion matching and data capture terminate at that boundary.
     assign producer_rs1_fwd_o.valid = rs1_has_producer &&
-        latest_ready_q[id_ctrl_i.rs1_addr];
+        (latest_ready_q[id_ctrl_i.rs1_addr] || rs1_mul_complete_now);
     assign producer_rs1_fwd_o.producer_id = rs1_producer_id;
     assign producer_rs1_fwd_o.producer_tracked = rs1_has_producer;
     assign producer_rs1_fwd_o.addr = id_ctrl_i.rs1_addr;
-    assign producer_rs1_fwd_o.data = producer_value_q[rs1_producer_slot];
+    assign producer_rs1_fwd_o.data = rs1_mul_complete_now ?
+        completion_bus_i[COMPLETION_MUL].data :
+        producer_value_q[rs1_producer_slot];
     assign producer_rs2_fwd_o.valid = rs2_has_producer &&
-        latest_ready_q[id_ctrl_i.rs2_addr];
+        (latest_ready_q[id_ctrl_i.rs2_addr] || rs2_mul_complete_now);
     assign producer_rs2_fwd_o.producer_id = rs2_producer_id;
     assign producer_rs2_fwd_o.producer_tracked = rs2_has_producer;
     assign producer_rs2_fwd_o.addr = id_ctrl_i.rs2_addr;
-    assign producer_rs2_fwd_o.data = producer_value_q[rs2_producer_slot];
+    assign producer_rs2_fwd_o.data = rs2_mul_complete_now ?
+        completion_bus_i[COMPLETION_MUL].data :
+        producer_value_q[rs2_producer_slot];
     assign producer_rs3_fwd_o.valid = rs3_has_producer &&
         latest_ready_q[id_ctrl1_i.rs1_addr];
     assign producer_rs3_fwd_o.producer_id = rs3_producer_id;
@@ -541,6 +566,44 @@ import ydrasil_pkg::*;
     wire [REGS_NUM-1:0] completion_ready_mask;
     wire [REGS_NUM-1:0] latest_ready_next;
     wire [REGS_NUM-1:0] latest_valid_next;
+    wire producer_slot_t queue_head_after_commit =
+        queue_ptr_add(queue_head_q, queue_commit_count);
+    wire producer_slot_t head1_after_commit =
+        queue_ptr_add(queue_head_after_commit, 2'd1);
+    wire head0_next_writes_gpr =
+        (queue_alloc0 && (ex_producer_slot == queue_head_after_commit)) ?
+            ex_hzd_i.producer_tracked :
+        (queue_alloc1 && (ex_producer_slot1 == queue_head_after_commit)) ?
+            ex_hzd1_i.producer_tracked :
+            producer_writes_gpr_q[queue_head_after_commit];
+    wire head1_next_writes_gpr =
+        (queue_alloc0 && (ex_producer_slot == head1_after_commit)) ?
+            ex_hzd_i.producer_tracked :
+        (queue_alloc1 && (ex_producer_slot1 == head1_after_commit)) ?
+            ex_hzd1_i.producer_tracked :
+            producer_writes_gpr_q[head1_after_commit];
+    wire [REGS_ADDR_WIDTH-1:0] head0_next_rd =
+        (queue_alloc0 && (ex_producer_slot == queue_head_after_commit)) ?
+            ex_hzd_i.rd_addr :
+        (queue_alloc1 && (ex_producer_slot1 == queue_head_after_commit)) ?
+            ex_hzd1_i.rd_addr : producer_rd_q[queue_head_after_commit];
+    wire [REGS_ADDR_WIDTH-1:0] head1_next_rd =
+        (queue_alloc0 && (ex_producer_slot == head1_after_commit)) ?
+            ex_hzd_i.rd_addr :
+        (queue_alloc1 && (ex_producer_slot1 == head1_after_commit)) ?
+            ex_hzd1_i.rd_addr : producer_rd_q[head1_after_commit];
+    producer_id_t head0_next_tag;
+    producer_id_t head1_next_tag;
+    assign head0_next_tag =
+        (queue_alloc0 && (ex_producer_slot == queue_head_after_commit)) ?
+            ex_hzd_i.producer_id :
+        (queue_alloc1 && (ex_producer_slot1 == queue_head_after_commit)) ?
+            ex_hzd1_i.producer_id : producer_tag_q[queue_head_after_commit];
+    assign head1_next_tag =
+        (queue_alloc0 && (ex_producer_slot == head1_after_commit)) ?
+            ex_hzd_i.producer_id :
+        (queue_alloc1 && (ex_producer_slot1 == head1_after_commit)) ?
+            ex_hzd1_i.producer_id : producer_tag_q[head1_after_commit];
     genvar ready_idx;
     generate
         for (ready_idx = 0; ready_idx < REGS_NUM; ready_idx++) begin : g_ready_next
@@ -569,15 +632,15 @@ import ydrasil_pkg::*;
             wire alloc1_here = producer_alloc_ex1 &&
                 (ex_hzd1_i.rd_addr == REGS_ADDR_WIDTH'(ready_idx));
             wire retire0_here = queue_commit0 &&
-                producer_writes_gpr_q[queue_head_q] &&
-                (producer_rd_q[queue_head_q] == REGS_ADDR_WIDTH'(ready_idx)) &&
+                head0_writes_gpr_rep_q[ready_idx / 8] &&
+                head0_rd_onehot_q[ready_idx] &&
                 latest_valid_q[ready_idx] &&
-                (latest_id_q[ready_idx] == producer_tag_q[queue_head_q]);
+                (latest_id_q[ready_idx] == head0_tag_rep_q[ready_idx / 8]);
             wire retire1_here = queue_commit1 &&
-                producer_writes_gpr_q[queue_head1] &&
-                (producer_rd_q[queue_head1] == REGS_ADDR_WIDTH'(ready_idx)) &&
+                head1_writes_gpr_rep_q[ready_idx / 8] &&
+                head1_rd_onehot_q[ready_idx] &&
                 latest_valid_q[ready_idx] &&
-                (latest_id_q[ready_idx] == producer_tag_q[queue_head1]);
+                (latest_id_q[ready_idx] == head1_tag_rep_q[ready_idx / 8]);
 
             assign latest_retire_mask[ready_idx] = retire0_here | retire1_here;
             assign latest_valid_next[ready_idx] = (alloc1_here | alloc0_here) ?
@@ -599,8 +662,6 @@ import ydrasil_pkg::*;
     wire resolved_branch_live = (branch_count_q != '0) &&
         producer_valid_q[resolved_branch_slot] &&
         (producer_tag_q[resolved_branch_slot] == resolved_branch_tag);
-    wire producer_slot_t queue_head_after_commit =
-        queue_ptr_add(queue_head_q, queue_commit_count);
     wire [QUEUE_COUNT_WIDTH-1:0] recovery_count =
         queue_distance(queue_head_after_commit, resolved_branch_next);
     wire [PRODUCER_NUM-1:0] recovery_live_mask;
@@ -685,6 +746,18 @@ import ydrasil_pkg::*;
             latest_ready_q <= '0;
             wb_fwd_q <= '0;
             wb_fwd1_q <= '0;
+            head0_rd_onehot_q <= '0;
+            head1_rd_onehot_q <= '0;
+            head0_writes_gpr_rep_q <= '0;
+            head1_writes_gpr_rep_q <= '0;
+            head0_tag_rep_q[0] <= '0;
+            head0_tag_rep_q[1] <= '0;
+            head0_tag_rep_q[2] <= '0;
+            head0_tag_rep_q[3] <= '0;
+            head1_tag_rep_q[0] <= '0;
+            head1_tag_rep_q[1] <= '0;
+            head1_tag_rep_q[2] <= '0;
+            head1_tag_rep_q[3] <= '0;
             for (slot_idx = 0; slot_idx < PRODUCER_NUM; slot_idx++) begin
                 producer_rd_q[slot_idx] <= '0;
                 producer_value_q[slot_idx] <= '0;
@@ -710,6 +783,18 @@ import ydrasil_pkg::*;
             latest_ready_q <= '0;
             wb_fwd_q <= '0;
             wb_fwd1_q <= '0;
+            head0_rd_onehot_q <= '0;
+            head1_rd_onehot_q <= '0;
+            head0_writes_gpr_rep_q <= '0;
+            head1_writes_gpr_rep_q <= '0;
+            head0_tag_rep_q[0] <= '0;
+            head0_tag_rep_q[1] <= '0;
+            head0_tag_rep_q[2] <= '0;
+            head0_tag_rep_q[3] <= '0;
+            head1_tag_rep_q[0] <= '0;
+            head1_tag_rep_q[1] <= '0;
+            head1_tag_rep_q[2] <= '0;
+            head1_tag_rep_q[3] <= '0;
         end else begin
             if (queue_commit_count != '0)
                 queue_head_q <= queue_ptr_add(queue_head_q, queue_commit_count);
@@ -719,6 +804,20 @@ import ydrasil_pkg::*;
                 QUEUE_COUNT_WIDTH'(queue_commit_count);
             latest_valid_q <= latest_valid_next;
             latest_ready_q <= latest_ready_next;
+            head0_rd_onehot_q <= head0_next_writes_gpr ?
+                (REGS_NUM'(1) << head0_next_rd) : '0;
+            head1_rd_onehot_q <= head1_next_writes_gpr ?
+                (REGS_NUM'(1) << head1_next_rd) : '0;
+            head0_writes_gpr_rep_q <= {4{head0_next_writes_gpr}};
+            head1_writes_gpr_rep_q <= {4{head1_next_writes_gpr}};
+            head0_tag_rep_q[0] <= head0_next_tag;
+            head0_tag_rep_q[1] <= head0_next_tag;
+            head0_tag_rep_q[2] <= head0_next_tag;
+            head0_tag_rep_q[3] <= head0_next_tag;
+            head1_tag_rep_q[0] <= head1_next_tag;
+            head1_tag_rep_q[1] <= head1_next_tag;
+            head1_tag_rep_q[2] <= head1_next_tag;
+            head1_tag_rep_q[3] <= head1_next_tag;
             wb_fwd_q.valid <= rf_wen_rd_i && rf_write_commit_o;
             wb_fwd_q.producer_id <= rf_producer_id_i;
             wb_fwd_q.producer_tracked <= rf_producer_tracked_i;

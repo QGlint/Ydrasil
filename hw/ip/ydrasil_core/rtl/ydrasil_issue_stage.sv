@@ -14,6 +14,7 @@ import ydrasil_pkg::*;
     input  ydrasil_issue_pkt_t              issue_pkt1_i,
     output wire                            issue_ready_o,
     output wire                            issue_consume_two_o,
+    output wire                            issue_slot1_replay_o,
 
     // Register file read ports 
     output wire [4:0]                      rf_addr_rs1_o,
@@ -219,8 +220,12 @@ import ydrasil_pkg::*;
     wire issue1_rs2_ren = issue_pkt1_i.ctrl.rs2_ren;
     wire issue1_rd_wen = issue_pkt1_i.ctrl.rd_wen;
     wire slot1_memory = issue_pkt1_i.memory_op;
+    // Pair eligibility belongs to the packed ID contract.  A lane1 hazard is
+    // handled locally as a replay so lane0 can advance without backpressuring
+    // ID or changing its two-packet transfer.
     wire pair_eligible = issue_pkt_i.pair_eligible;
-    wire pair_issue = pair_eligible && !hzd_status1_i.scoreboard_stall;
+    wire slot1_replay = pair_eligible && hzd_status1_i.scoreboard_stall;
+    wire pair_issue = pair_eligible && !slot1_replay;
 
     // LSU completions terminate in BRU-specific holding registers while a
     // branch waits at the issue head.  The EX BRU still sees only its normal
@@ -259,7 +264,8 @@ import ydrasil_pkg::*;
 `endif
     assign id_advance = !stall_id_i && !bubble_id_i;
     assign issue_ready_o = id_advance;
-    assign issue_consume_two_o = id_advance && pair_issue;
+    assign issue_consume_two_o = id_advance && pair_eligible;
+    assign issue_slot1_replay_o = id_advance && slot1_replay;
 
     assign rf_addr_rs1_o = issue_rf_raddr_rs1_ff;
     assign rf_addr_rs2_o = issue_rf_raddr_rs2_ff;
