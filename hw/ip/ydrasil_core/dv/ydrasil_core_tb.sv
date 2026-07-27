@@ -73,7 +73,9 @@ end
     // 通用寄存器访问 - 仅用于错误信息显示
     wire [31:0] x3 = u_dut.u_ydrasil_registers.registers[3];
     // PC 监控
-    wire [31:0] pc = u_dut.u_ydrasil_if_stage.pc_ff;
+    // ID and issue are independently buffered.  Use the execution-side PC
+    // for tohost detection; the fetch PC can be several instructions ahead.
+    wire [31:0] pc = u_dut.id_instr_addr;
     wire [31:0] csr_instret = u_dut.u_ydrasil_registers_csr.instret[31:0];
     wire [31:0] csr_cyclel = u_dut.u_ydrasil_registers_csr.cycle[31:0];
 

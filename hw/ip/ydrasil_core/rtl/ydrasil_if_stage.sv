@@ -23,13 +23,8 @@ import ydrasil_pkg::*;
     input  wire [31:0] bp_predict1_target_i,
     input  wire [1:0]  bp_predict1_counter_i,
     input  wire [31:0] bp_predict1_bht_index_i,
-    input  wire        l0_predict_hit_i,
-    input  wire        l0_predict_taken_i,
-    input  wire [31:0] l0_predict_target_i,
-    input  wire        l0_predict1_hit_i,
-    input  wire        l0_predict1_taken_i,
-    input  wire [31:0] l0_predict1_target_i,
     input  wire        bp_invalidate_i,
+    input  wire [31:0] bp_invalidate_target_i,
 
     output wire [31:0] if_mem_addr_o,
     output wire [31:0] if_mem_addr1_o,
@@ -63,8 +58,6 @@ import ydrasil_pkg::*;
     reg        mem_req_valid_q;
     reg        mem_req_two_q;
     reg [31:0] mem_req_pc_q;
-    reg        mem_req_l0_taken_q;
-    reg [31:0] mem_req_l0_target_q;
     reg        pending_redirect_valid_q;
     reg [31:0] pending_redirect_target_q;
 
@@ -82,25 +75,12 @@ import ydrasil_pkg::*;
     wire [31:0] flush_target = branch_jump_i ? branch_target_i : pc_plus4;
     wire fetchq_valid0 = fetchq_count_q != '0;
     wire fetchq_valid1 = fetchq_count_q > COUNT_WIDTH'(1);
-    wire [31:0] invalidate_target = fetchq_valid0 ?
-        (fetchq_pc_q[0] + 32'd4) : pc_q;
 
     wire [1:0] pop_count = (!flush_fetch && !stall_if_i && fetchq_valid0) ?
         ((consume_two_i && fetchq_valid1) ? 2'd2 : 2'd1) : 2'd0;
-    // A large-BTB correction is registered at the F2 boundary.  The request
-    // already launched beside that response belongs to the old L0 path, so
-    // discard it while the registered correction is being replayed.
-    wire mem_resp_valid = !flush_fetch && mem_req_valid_q &&
-        !pending_redirect_valid_q;
-    wire bram_predict_taken = bp_predict_taken_i ||
-        (mem_req_two_q && bp_predict1_taken_i);
-    wire [31:0] bram_predict_target = bp_predict_taken_i ?
-        bp_predict_target_i : bp_predict1_target_i;
-    wire l0_disagrees = mem_resp_valid &&
-        ((mem_req_l0_taken_q != bram_predict_taken) ||
-         (bram_predict_taken &&
-          (mem_req_l0_target_q != bram_predict_target)));
-    wire predict_redirect_resp = l0_disagrees;
+    wire mem_resp_valid = !flush_fetch && mem_req_valid_q;
+    wire predict_redirect_resp = mem_resp_valid &&
+        (bp_predict_taken_i || (mem_req_two_q && bp_predict1_taken_i));
     wire [1:0] push_count = mem_resp_valid ?
         ((bp_predict_taken_i || !mem_req_two_q) ? 2'd1 : 2'd2) : 2'd0;
     wire [COUNT_WIDTH-1:0] post_pop_count = fetchq_count_q - COUNT_WIDTH'(pop_count);
@@ -109,23 +89,15 @@ import ydrasil_pkg::*;
         (mem_req_valid_q ? (mem_req_two_q ? RESERVED_WIDTH'(2) :
          RESERVED_WIDTH'(1)) : '0);
     wire pair_capacity = reserved_count <= RESERVED_WIDTH'(FETCHQ_DEPTH - 2);
-    // Keep BRAM prediction results out of the next request's enable cone.
-    // An L0 disagreement is captured below and redirects on the next cycle.
-    wire fetch_issue = !flush_fetch && !bp_invalidate_i && pair_capacity;
+    wire fetch_issue = !flush_fetch && !bp_invalidate_i && pair_capacity &&
+        !predict_redirect_resp;
     wire [31:0] fetch_addr = pending_redirect_valid_q ?
         pending_redirect_target_q : pc_q;
     wire fetch_addr_is_dtcm =
         (fetch_addr >= DTCM_BASE_ADDR) &&
         (fetch_addr < (DTCM_BASE_ADDR + ((32'd1 << DTCM_ADDR_WIDTH) << 2)));
     wire fetch_two = !fetch_addr_is_dtcm;
-    wire l0_lane0_taken = l0_predict_hit_i && l0_predict_taken_i;
-    wire l0_lane1_taken = fetch_two && !l0_lane0_taken &&
-        l0_predict1_hit_i && l0_predict1_taken_i;
-    wire l0_fetch_taken = l0_lane0_taken || l0_lane1_taken;
-    wire [31:0] l0_fetch_target = l0_lane0_taken ?
-        l0_predict_target_i : l0_predict1_target_i;
-
-    // 保留验证环境使用的历史观测点名称。
+    // Preserve the established verification observability points.
     wire [31:0] pc_ff = pc_q;
     wire mem_req_valid_ff = mem_req_valid_q;
     wire pending_redirect_valid_ff = pending_redirect_valid_q;
@@ -160,8 +132,6 @@ import ydrasil_pkg::*;
             mem_req_valid_q <= 1'b0;
             mem_req_two_q <= 1'b0;
             mem_req_pc_q <= RESET_INS;
-            mem_req_l0_taken_q <= 1'b0;
-            mem_req_l0_target_q <= '0;
             pending_redirect_valid_q <= 1'b0;
             pending_redirect_target_q <= '0;
             fetchq_count_q <= '0;
@@ -175,12 +145,10 @@ import ydrasil_pkg::*;
                 fetchq_pred_bht_index_q[idx] <= '0;
             end
         end else if (flush_fetch || bp_invalidate_i) begin
-            pc_q <= flush_fetch ? flush_target : invalidate_target;
+            pc_q <= flush_fetch ? flush_target : bp_invalidate_target_i;
             mem_req_valid_q <= 1'b0;
             mem_req_two_q <= 1'b0;
-            mem_req_pc_q <= flush_fetch ? flush_target : invalidate_target;
-            mem_req_l0_taken_q <= 1'b0;
-            mem_req_l0_target_q <= '0;
+            mem_req_pc_q <= flush_fetch ? flush_target : bp_invalidate_target_i;
             pending_redirect_valid_q <= 1'b0;
             pending_redirect_target_q <= '0;
             fetchq_count_q <= '0;
@@ -189,19 +157,15 @@ import ydrasil_pkg::*;
             if (fetch_issue) begin
                 mem_req_pc_q <= fetch_addr;
                 mem_req_two_q <= fetch_two;
-                mem_req_l0_taken_q <= l0_fetch_taken;
-                mem_req_l0_target_q <= l0_fetch_target;
-                pc_q <= l0_fetch_taken ? l0_fetch_target :
-                    (fetch_addr + (fetch_two ? 32'd8 : 32'd4));
+                pc_q <= fetch_addr + (fetch_two ? 32'd8 : 32'd4);
             end
 
             if (pending_redirect_valid_q && fetch_issue)
                 pending_redirect_valid_q <= 1'b0;
             if (predict_redirect_resp) begin
                 pending_redirect_valid_q <= 1'b1;
-                pending_redirect_target_q <= bram_predict_taken ?
-                    bram_predict_target :
-                    (mem_req_pc_q + (mem_req_two_q ? 32'd8 : 32'd4));
+                pending_redirect_target_q <= bp_predict_taken_i ?
+                    bp_predict_target_i : bp_predict1_target_i;
             end
 
             if (pop_count == 2'd2) begin

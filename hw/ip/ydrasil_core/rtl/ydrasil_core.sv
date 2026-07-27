@@ -172,7 +172,7 @@ import ydrasil_axi_pkg::*;
 	wire [1:0]                  bp_predict1_counter;
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] bp_predict1_bht_index;
 	// Raw BRAM predictor outputs.  The architectural prediction path first
-	// consults the 16-entry FF L0-BTB and falls back to these outputs.
+		// Feed fetch directly from the BRAM branch predictor.
 	wire                        bp_bram_predict_hit;
 	wire                        bp_bram_predict_taken;
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] bp_bram_predict_target;
@@ -183,20 +183,12 @@ import ydrasil_axi_pkg::*;
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] bp_bram_predict1_target;
 	wire [1:0]                  bp_bram_predict1_counter;
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] bp_bram_predict1_bht_index;
-	localparam int L0_ENTRIES = 16;
-	localparam int L0_INDEX_WIDTH = 4;
-	reg [L0_ENTRIES-1:0] l0_valid_q;
-	reg [L0_ENTRIES-1:0] l0_taken_q;
-	reg [L0_ENTRIES-1:0] l0_conditional_q;
-	reg [31:0] l0_target_q [0:L0_ENTRIES-1];
-	reg [25:0] l0_tag_q [0:L0_ENTRIES-1];
-	wire [L0_INDEX_WIDTH-1:0] l0_index = bp_lookup_pc[5:2];
-	wire [25:0] l0_tag = bp_lookup_pc[31:6];
-	wire [L0_INDEX_WIDTH-1:0] l0_index1 = if_mem_addr1[5:2];
-	wire [25:0] l0_tag1 = if_mem_addr1[31:6];
-	wire l0_hit = l0_valid_q[l0_index] && (l0_tag_q[l0_index] == l0_tag);
-	wire l0_hit1 = l0_valid_q[l0_index1] && (l0_tag_q[l0_index1] == l0_tag1);
+	// Compatibility-only observability for the removed L0-BTB.
+	wire l0_hit = 1'b0;
+	wire l0_hit1 = 1'b0;
 	wire                        id_fence_i;
+	wire [31:0]                 fence_resume_pc;
+	wire                        pipeline_flush;
 	wire                        id_ex_pred_hit;
 	wire                        id_ex_pred_taken;
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] id_ex_pred_target;
@@ -301,8 +293,8 @@ import ydrasil_axi_pkg::*;
     //LSU -> ID
 	ydrasil_id_ctrl_pkt_t           id_ctrl_pkt;
 	ydrasil_id_ctrl_pkt_t           id_ctrl_pkt1;
-	assign id_ctrl_pkt = id_issue_pkt.ctrl;
-	assign id_ctrl_pkt1 = id_issue_pkt1.ctrl;
+	assign id_ctrl_pkt = issue_pkt.ctrl;
+	assign id_ctrl_pkt1 = issue_pkt1.ctrl;
 	ydrasil_ex_hzd_pkt_t            ex_hzd_pkt;
 	ydrasil_ex_hzd_pkt_t            ex_hzd_pkt1;
 	ydrasil_hzd_status_pkt_t        hzd_status_pkt;
@@ -326,24 +318,78 @@ import ydrasil_axi_pkg::*;
 	ydrasil_issue_pkt_t             id_issue_pkt1;
 	ydrasil_issue_pkt_t             issue_pkt;
 	ydrasil_issue_pkt_t             issue_pkt1;
+	// ID and issue are separated by a packed, four-entry elastic pipeline.
+	// Its input-ready signal comes only from registered occupancy, never from
+	// the current scoreboard result, so decode FIFO state is off the EX->ID
+	// combinational path.
+	ydrasil_issue_pkt_t             issue_pipe_q [0:3];
+	reg [1:0]                       issue_pipe_head_q;
+	reg [1:0]                       issue_pipe_tail_q;
+	reg [2:0]                       issue_pipe_count_q;
 	ydrasil_issue_wb_pkt_t          issue_wb_pkt;
+	// Reserve space for the largest (two instruction) ID transfer. The ready
+	// decision is entirely registered-state based.
+	wire                            issue_pipe_has_room = issue_pipe_count_q <= 3'd2;
+	wire                            issue_pipe_push_two = issue_pipe_has_room &&
+		id_issue_pkt.valid && id_issue_pkt.pair_eligible;
+	wire                            issue_pipe_push = issue_pipe_has_room &&
+		id_issue_pkt.valid;
+	wire [1:0]                      issue_pipe_push_count = issue_pipe_push ?
+		(issue_pipe_push_two ? 2'd2 : 2'd1) : '0;
+	wire [1:0]                      issue_pipe_pop_count =
+		(issue_ready && (issue_pipe_count_q != '0)) ?
+		(issue_consume_two ? 2'd2 : 2'd1) : '0;
+	wire [1:0]                      issue_pipe_head1 = issue_pipe_head_q + 2'd1;
+	wire [1:0]                      issue_pipe_tail1 = issue_pipe_tail_q + 2'd1;
 	always_comb begin
-		issue_pkt = id_issue_pkt;
+		issue_pkt = issue_pipe_q[issue_pipe_head_q];
+		if (issue_pipe_count_q == '0)
+			issue_pkt = '0;
 		issue_pkt.schedule.hazard = hzd_status_pkt;
 		issue_pkt.schedule.src1 = producer_rs1_fwd_pkt;
 		issue_pkt.schedule.src2 = producer_rs2_fwd_pkt;
 		issue_pkt.schedule.producer_id = producer_alloc_id;
 		issue_pkt.schedule.producer_tracked = producer_alloc_tracked;
-		issue_pkt1 = id_issue_pkt1;
+		issue_pkt1 = issue_pipe_q[issue_pipe_head1];
+		if ((issue_pipe_count_q < 3'd2) || !issue_pkt.pair_eligible)
+			issue_pkt1 = '0;
 		issue_pkt1.schedule.hazard = hzd_status_pkt1;
 		issue_pkt1.schedule.src1 = producer_rs3_fwd_pkt;
 		issue_pkt1.schedule.src2 = producer_rs4_fwd_pkt;
 		issue_pkt1.schedule.producer_id = producer_alloc_id1;
 		issue_pkt1.schedule.producer_tracked = producer_alloc_tracked1;
 	end
+	always_ff @(posedge clk or negedge rst_n) begin
+		if (!rst_n) begin
+			issue_pipe_head_q <= '0;
+			issue_pipe_tail_q <= '0;
+			issue_pipe_count_q <= '0;
+			issue_pipe_q[0] <= '0;
+			issue_pipe_q[1] <= '0;
+			issue_pipe_q[2] <= '0;
+			issue_pipe_q[3] <= '0;
+		end else if (pipeline_flush) begin
+			issue_pipe_head_q <= '0;
+			issue_pipe_tail_q <= '0;
+			issue_pipe_count_q <= '0;
+		end else begin
+			if (issue_pipe_push) begin
+				issue_pipe_q[issue_pipe_tail_q] <= id_issue_pkt;
+				if (issue_pipe_push_two)
+					issue_pipe_q[issue_pipe_tail1] <= id_issue_pkt1;
+				issue_pipe_tail_q <= issue_pipe_tail_q + issue_pipe_push_count;
+			end
+			if (issue_pipe_pop_count != '0)
+				issue_pipe_head_q <= issue_pipe_head_q + issue_pipe_pop_count;
+			issue_pipe_count_q <= issue_pipe_count_q + issue_pipe_push_count -
+				issue_pipe_pop_count;
+		end
+	end
 	assign issue_wb_pkt.wb0 = wb_fwd_pkt;
 	assign issue_wb_pkt.wb1 = wb_fwd_pkt1;
 	wire                            decode_valid = issue_pkt.valid;
+	assign fence_resume_pc = id_instr_addr + 32'd4;
+	assign pipeline_flush = flush_id | id_fence_i;
 	ydrasil_decode_pkt_t            decode_pkt;
 	assign decode_pkt = issue_pkt.decode;
 	wire                            decode_if_ready;
@@ -866,9 +912,9 @@ import ydrasil_axi_pkg::*;
 			.predict_target_o (bp_bram_predict_target),
 			.predict_counter_o(bp_bram_predict_counter),
 			.predict_bht_index_o(bp_bram_predict_bht_index),
-			.predict0_spec_valid_i(l0_hit),
-			.predict0_spec_conditional_i(l0_conditional_q[l0_index]),
-			.predict0_spec_taken_i(l0_taken_q[l0_index]),
+			.predict0_spec_valid_i(1'b0),
+			.predict0_spec_conditional_i(1'b0),
+			.predict0_spec_taken_i(1'b0),
 			.predict_pc1_i    (if_mem_addr1),
 			.predict1_hit_o   (bp_bram_predict1_hit),
 			.predict1_taken_o (bp_bram_predict1_taken),
@@ -878,28 +924,6 @@ import ydrasil_axi_pkg::*;
 			.train_i          (ex_bp_train_pkt),
 			.invalidate_i     (id_fence_i)
 		);
-
-	// L0-BTB is a small FF array in F1.  Training is synchronous with the
-	// shared BRAM predictor, so a hit costs no extra cycle and a stale entry is
-	// invalidated by the same fence/redirect epoch.
-	integer l0_idx;
-	always_ff @(posedge clk or negedge rst_n) begin
-		if (!rst_n || id_fence_i) begin
-			l0_valid_q <= '0;
-			l0_conditional_q <= '0;
-			for (l0_idx = 0; l0_idx < L0_ENTRIES; l0_idx = l0_idx + 1) begin
-				l0_taken_q[l0_idx] <= 1'b0;
-				l0_target_q[l0_idx] <= '0;
-				l0_tag_q[l0_idx] <= '0;
-			end
-		end else if (ex_bp_train_pkt.valid) begin
-			l0_valid_q[ex_bp_train_pkt.pc[5:2]] <= 1'b1;
-			l0_taken_q[ex_bp_train_pkt.pc[5:2]] <= ex_bp_train_pkt.taken;
-			l0_conditional_q[ex_bp_train_pkt.pc[5:2]] <= ex_bp_train_pkt.conditional;
-			l0_target_q[ex_bp_train_pkt.pc[5:2]] <= ex_bp_train_pkt.target;
-			l0_tag_q[ex_bp_train_pkt.pc[5:2]] <= ex_bp_train_pkt.pc[31:6];
-		end
-	end
 
 	assign bp_predict_hit = bp_bram_predict_hit;
 	assign bp_predict_taken = bp_bram_predict_taken;
@@ -931,13 +955,8 @@ import ydrasil_axi_pkg::*;
 			.bp_predict1_target_i(bp_predict1_target),
 			.bp_predict1_counter_i(bp_predict1_counter),
 			.bp_predict1_bht_index_i(bp_predict1_bht_index),
-			.l0_predict_hit_i(l0_hit),
-			.l0_predict_taken_i(l0_taken_q[l0_index]),
-			.l0_predict_target_i(l0_target_q[l0_index]),
-			.l0_predict1_hit_i(l0_hit1),
-			.l0_predict1_taken_i(l0_taken_q[l0_index1]),
-			.l0_predict1_target_i(l0_target_q[l0_index1]),
 			.bp_invalidate_i(id_fence_i),
+			.bp_invalidate_target_i(fence_resume_pc),
 			.if_mem_addr_o   (if_mem_addr),
 			.if_mem_addr1_o  (if_mem_addr1),
 			.bp_lookup_pc_o   (bp_lookup_pc),
@@ -964,9 +983,9 @@ import ydrasil_axi_pkg::*;
 	ydrasil_id_stage u_ydrasil_id_stage (
 		.clk                 (clk),
 		.rst_n               (rst_n),
-		.flush_i             (flush_id),
-		.issue_ready_i       (issue_ready),
-		.issue_consume_two_i (issue_consume_two),
+		.flush_i             (pipeline_flush),
+		.issue_ready_i       (issue_pipe_has_room),
+		.issue_consume_two_i (issue_pipe_has_room && id_issue_pkt.pair_eligible),
 		.if_id_pc_i          (if_id_pc),
 		.if_id_instr_i       (if_id_instr),
 		.if_id_pred_hit_i    (if_id_pred_hit),
@@ -994,7 +1013,7 @@ import ydrasil_axi_pkg::*;
 		.rst_n               (rst_n),
 		.stall_id_i          (stall_id),
 		.bubble_id_i         (bubble_id | fpu_decode_block),
-		.flush_id_i          (flush_id),
+		.flush_id_i          (pipeline_flush),
 		.issue_pkt_i         (issue_pkt),
 		.issue_pkt1_i        (issue_pkt1),
 		.issue_ready_o       (issue_ready),
