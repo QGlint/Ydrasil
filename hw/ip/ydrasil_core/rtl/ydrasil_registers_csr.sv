@@ -203,8 +203,9 @@ import ydrasil_pkg::*;
             ydrasil_pkg::CSR_FRM:           csr_ex_read_value = {29'b0, frm};
             ydrasil_pkg::CSR_FCSR:          csr_ex_read_value = {24'b0, frm, fflags};
 `endif
+            ydrasil_pkg::CSR_MARCHID:
+                csr_ex_read_value = ydrasil_pkg::MARCHID_VALUE;
             ydrasil_pkg::CSR_MVENDORID,
-            ydrasil_pkg::CSR_MARCHID,
             ydrasil_pkg::CSR_MIMPID,
             ydrasil_pkg::CSR_MHARTID:
                 csr_ex_read_value = 32'b0;
@@ -245,8 +246,9 @@ import ydrasil_pkg::*;
             ydrasil_pkg::CSR_FRM:           csr_clint_read_value = {29'b0, frm};
             ydrasil_pkg::CSR_FCSR:          csr_clint_read_value = {24'b0, frm, fflags};
 `endif
+            ydrasil_pkg::CSR_MARCHID:
+                csr_clint_read_value = ydrasil_pkg::MARCHID_VALUE;
             ydrasil_pkg::CSR_MVENDORID,
-            ydrasil_pkg::CSR_MARCHID,
             ydrasil_pkg::CSR_MIMPID,
             ydrasil_pkg::CSR_MHARTID:
                 csr_clint_read_value = 32'b0;

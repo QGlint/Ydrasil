@@ -310,7 +310,6 @@ import ydrasil_pkg::*;
     assign decode_pkt1 = decode_fifo_q[decode_rptr1];
 
     wire slot1_lane1_capable = decode_valid1 &&
-        !decode_pkt1.resources[RESOURCE_FULL_BITMANIP] &&
         !decode_pkt1.resources[RESOURCE_BRU] &&
         !decode_pkt1.resources[RESOURCE_MULDIV] &&
         !decode_pkt1.resources[RESOURCE_SERIAL] &&
@@ -377,12 +376,9 @@ import ydrasil_pkg::*;
         issue_pkt_o.ctrl.store_req = decode_valid &&
             decode_pkt.operator_type[OPERATOR_TYPE_STORE];
         issue_pkt_o.ctrl.prev_alu_bypass_ok = decode_valid &&
-            ((decode_pkt.operator_type[OPERATOR_TYPE_ALU] &&
-              !decode_pkt.operator_type[OPERATOR_TYPE_BITMANIP]) ||
-             decode_pkt.operator_type[OPERATOR_TYPE_LOAD] ||
-             decode_pkt.operator_type[OPERATOR_TYPE_STORE] ||
-             (decode_pkt.operator_type[OPERATOR_TYPE_BJP] &&
-              decode_pkt.rs1_ren && decode_pkt.rs2_ren && !decode_pkt.rd_wen));
+            !decode_pkt.operator_type[OPERATOR_TYPE_FPU] &&
+            !decode_pkt.operator_type[OPERATOR_TYPE_CSR] &&
+            !decode_pkt.operator_type[OPERATOR_TYPE_SYS];
 		issue_pkt_o.ctrl.serialize_before = decode_valid &&
             (decode_pkt.operator_type[OPERATOR_TYPE_CSR] ||
              decode_pkt.operator_type[OPERATOR_TYPE_SYS] || decode_pkt.fence_i);
@@ -419,14 +415,11 @@ import ydrasil_pkg::*;
             decode_pkt1.operator_type[OPERATOR_TYPE_STORE];
     end
 
-    integer idx;
-    always_ff @(posedge clk or negedge rst_n) begin
+    always_ff @(posedge clk) begin
         if (!rst_n) begin
             decode_count_q <= '0;
             decode_rptr_q <= '0;
             decode_wptr_q <= '0;
-            for (idx = 0; idx < DECODE_FIFO_DEPTH; idx = idx + 1)
-                decode_fifo_q[idx] <= '0;
         end else if (flush_i) begin
             decode_count_q <= '0;
             decode_rptr_q <= '0;

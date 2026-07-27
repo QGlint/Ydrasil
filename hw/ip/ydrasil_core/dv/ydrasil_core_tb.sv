@@ -95,7 +95,6 @@ end
     reg [31:0] pc_write_to_host_cycle;
     wire  [31:0] cycle_count = csr_cyclel;
     reg pc_write_to_host_flag;
-    reg [31:0] last_pc;
 
     // 添加指令计数和IPC计算相关变量
     wire [31:0] instruction_count = csr_instret; // Use CSR instret as the retired instruction count.
@@ -536,7 +535,6 @@ end
     // 周期计数器 - 保持同步实现
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            last_pc           <= 32'b0;
             bp_branch_count <= 32'b0;
             bp_hit_count <= 32'b0;
             bp_taken_count <= 32'b0;
@@ -719,7 +717,6 @@ end
                 fence_refill_active_q <= 1'b1;
             else if (u_dut.if_id_valid)
                 fence_refill_active_q <= 1'b0;
-            last_pc     <= pc;
             if (bp_branch_valid) begin
                 bp_branch_count <= bp_branch_count + 1;
                 bp_hit_count <= bp_hit_count + (bp_pred_hit ? 32'd1 : 32'd0);
@@ -1200,24 +1197,29 @@ end
         end
     end
 
-    // PC监控逻辑
-    always @(pc) begin
-        if (((pc == finish_pc) || ((pc + 32'd4) == finish_pc)) &&
-            pc != last_pc) begin
-            pc_write_to_host_cnt = pc_write_to_host_cnt + 1'b1;
-            if (pc_write_to_host_flag == 1'b0) begin
-                pc_write_to_host_cycle = cycle_count;
-                pc_write_to_host_flag  = 1'b1;
-            end
-        end
-    end
+    wire lane0_finish_accept = u_dut.ex_accept_valid &&
+        ((u_dut.id_instr_addr == finish_pc) ||
+         ((u_dut.id_instr_addr + 32'd4) == finish_pc));
+    wire lane1_finish_accept = u_dut.ex_accept_valid1 &&
+        ((u_dut.dual_id_ex_pc == finish_pc) ||
+         ((u_dut.dual_id_ex_pc + 32'd4) == finish_pc));
+    wire [1:0] finish_accept_count =
+        {1'b0, lane0_finish_accept} + {1'b0, lane1_finish_accept};
 
-    // 添加异步复位逻辑
-    always @(negedge rst_n) begin
+    // ID/Issue decoupling and dual issue can place write_tohost in either E
+    // lane. Count accepted instructions so a held packet is never counted
+    // twice and a lane1-only pass loop still terminates the simulation.
+    always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            pc_write_to_host_cnt   = 32'b0;
-            pc_write_to_host_flag  = 1'b0;
-            pc_write_to_host_cycle = 32'b0;
+            pc_write_to_host_cnt   <= 32'b0;
+            pc_write_to_host_flag  <= 1'b0;
+            pc_write_to_host_cycle <= 32'b0;
+        end else if (finish_accept_count != 2'b0) begin
+            pc_write_to_host_cnt <= pc_write_to_host_cnt + finish_accept_count;
+            if (!pc_write_to_host_flag) begin
+                pc_write_to_host_cycle <= cycle_count;
+                pc_write_to_host_flag  <= 1'b1;
+            end
         end
     end
 
@@ -1360,7 +1362,7 @@ end
 
     // 对pc_write_to_host_cnt的变化进行监控
     always @(pc_write_to_host_cnt) begin
-        if (finish_on_tohost && (pc_write_to_host_cnt == 32'd8)) begin
+        if (finish_on_tohost && (pc_write_to_host_cnt >= 32'd8)) begin
             ipc = (instruction_count > 0 && cycle_count > 0) ? (instruction_count * 1.0) / cycle_count : 0.0;
             bp_accuracy = (bp_branch_count > 0) ?
                 ((bp_branch_count - bp_mispredict_count) * 100.0) / bp_branch_count : 0.0;

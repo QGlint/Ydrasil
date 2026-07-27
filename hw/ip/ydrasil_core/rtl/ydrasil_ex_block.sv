@@ -28,8 +28,10 @@ import ydrasil_pkg::*;
     input  wire [OPERATOR_TYPE_WIDTH-1:0]  operator_type_i,
     input  wire                            id_ex_valid_i,
     input  wire                            id_ex_jalr_i,
-    input  wire                            id_ex_alu_bypass_rs1_i,
-    input  wire                            id_ex_alu_bypass_rs2_i,
+    input  ydrasil_bypass_sel_t            id_ex_bypass_rs1_i,
+    input  ydrasil_bypass_sel_t            id_ex_bypass_rs2_i,
+    input  wire                            lane1_bypass_valid_i,
+    input  wire [REGS_DATA_WIDTH-1:0]      lane1_bypass_data_i,
     input  wire [DATA_WIDTH-1:0]           id_ex_branch_target_i,
     input  wire [DATA_WIDTH-1:0]           id_ex_branch_next_pc_i,
     input  wire                            id_ex_branch_eq_i,
@@ -71,6 +73,8 @@ import ydrasil_pkg::*;
     output wire [REGS_ADDR_WIDTH-1:0]      alu_rf_waddr_rd_o,
     output producer_id_t                   alu_producer_id_o,
     output ydrasil_gpr_fwd_pkt_t           completion_o,
+    output wire                            lane0_bypass_valid_o,
+    output wire [REGS_DATA_WIDTH-1:0]      lane0_bypass_data_o,
 
     output wire                            mul_issue_o,
     output wire [REGS_ADDR_WIDTH-1:0]      mul_issue_waddr_o,
@@ -159,40 +163,50 @@ import ydrasil_pkg::*;
     wire [31:0] lsu_bypass_add_result;
     wire        lsu_addr_alu_bypass;
 
+	wire bypass_rs1_lane0 = (id_ex_bypass_rs1_i == BYPASS_LANE0) &&
+		alu_bypass_valid_q;
+	wire bypass_rs1_lane1 = (id_ex_bypass_rs1_i == BYPASS_LANE1) &&
+		lane1_bypass_valid_i;
+	wire bypass_rs2_lane0 = (id_ex_bypass_rs2_i == BYPASS_LANE0) &&
+		alu_bypass_valid_q;
+	wire bypass_rs2_lane1 = (id_ex_bypass_rs2_i == BYPASS_LANE1) &&
+		lane1_bypass_valid_i;
+	wire bypass_rs1_valid = bypass_rs1_lane0 | bypass_rs1_lane1;
+	wire bypass_rs2_valid = bypass_rs2_lane0 | bypass_rs2_lane1;
+	wire [REGS_DATA_WIDTH-1:0] bypass_rs1_data = bypass_rs1_lane1 ?
+		lane1_bypass_data_i : alu_bypass_data_q;
+	wire [REGS_DATA_WIDTH-1:0] bypass_rs2_data = bypass_rs2_lane1 ?
+		lane1_bypass_data_i : alu_bypass_data_q;
+
 	assign bt_a_operand =
-		(id_ex_jalr_i & id_ex_alu_bypass_rs1_i & alu_bypass_valid_q) ?
-        alu_bypass_data_q : bt_a_operand_i;
+		(id_ex_jalr_i & bypass_rs1_valid) ? bypass_rs1_data : bt_a_operand_i;
     assign bt_b_operand = bt_b_operand_i;
 
     // JALR uses rs1 only for the BRU target. Its architectural rd value is
     // always PC+4, so the ALU link operand must remain the registered PC.
 	assign operand_a = id_ex_jalr_i ? alu_operand_a_i :
-		(id_ex_alu_bypass_rs1_i & alu_bypass_valid_q) ? alu_bypass_data_q : alu_operand_a_i;
-	assign operand_b = (id_ex_alu_bypass_rs2_i & alu_bypass_valid_q) ?
-		alu_bypass_data_q : alu_operand_b_i;
-    assign bitmanip_operand_a = alu_operand_a_i;
-    assign bitmanip_operand_b = alu_operand_b_i;
-	assign bru_operand_a = (id_ex_alu_bypass_rs1_i & alu_bypass_valid_q) ?
-		alu_bypass_data_q : bru_operand_a_i;
-	assign bru_operand_b = (id_ex_alu_bypass_rs2_i & alu_bypass_valid_q) ?
-		alu_bypass_data_q : bru_operand_b_i;
+		bypass_rs1_valid ? bypass_rs1_data : alu_operand_a_i;
+	assign operand_b = bypass_rs2_valid ? bypass_rs2_data : alu_operand_b_i;
+    assign bitmanip_operand_a = bypass_rs1_valid ? bypass_rs1_data : alu_operand_a_i;
+    assign bitmanip_operand_b = bypass_rs2_valid ? bypass_rs2_data : alu_operand_b_i;
+	assign bru_operand_a = bypass_rs1_valid ? bypass_rs1_data : bru_operand_a_i;
+	assign bru_operand_b = bypass_rs2_valid ? bypass_rs2_data : bru_operand_b_i;
     // LSU consumers are held by the scoreboard until load data is registered.
     // Keep branch/ALU load replay out of the otherwise inactive AGU cone.
     assign lsu_addr_alu_bypass =
-        id_ex_alu_bypass_rs1_i & alu_bypass_valid_q;
+        bypass_rs1_valid;
     assign lsu_operand_b = lsu_operand_b_i;
     assign lsu_store_data =
-        (id_ex_alu_bypass_rs2_i & alu_bypass_valid_q) ?
-        alu_bypass_data_q : lsu_store_data_i;
-    assign mul_operand_a = (id_ex_alu_bypass_rs1_i & alu_bypass_valid_q) ? alu_bypass_data_q : mul_operand_a_i;
-    assign mul_operand_b = (id_ex_alu_bypass_rs2_i & alu_bypass_valid_q) ? alu_bypass_data_q : mul_operand_b_i;
-    assign csr_operand_a = (id_ex_alu_bypass_rs1_i & alu_bypass_valid_q) ? alu_bypass_data_q : csr_operand_a_i;
+        bypass_rs2_valid ? bypass_rs2_data : lsu_store_data_i;
+    assign mul_operand_a = bypass_rs1_valid ? bypass_rs1_data : mul_operand_a_i;
+    assign mul_operand_b = bypass_rs2_valid ? bypass_rs2_data : mul_operand_b_i;
+    assign csr_operand_a = bypass_rs1_valid ? bypass_rs1_data : csr_operand_a_i;
 
     // Put the bypass select after the carry chains.  Both adder inputs are
     // registered, and the selected result is architecturally identical to a
     // mux in front of one adder, without placing bypass-valid on the carry path.
     assign lsu_base_add_result = lsu_operand_a_i + lsu_operand_b;
-    assign lsu_bypass_add_result = alu_bypass_data_q + lsu_operand_b;
+    assign lsu_bypass_add_result = bypass_rs1_data + lsu_operand_b;
     assign lsu_fast_add_result = lsu_addr_alu_bypass ?
         lsu_bypass_add_result : lsu_base_add_result;
     assign ex_lsu_mem_addr_o = lsu_fast_add_result;
@@ -212,8 +226,8 @@ import ydrasil_pkg::*;
         .operator_type_i             (operator_type_i),
         .id_ex_valid_i               (id_ex_valid_i),
         .id_ex_jalr_i                (id_ex_jalr_i),
-        .id_ex_alu_bypass_rs1_i      (id_ex_alu_bypass_rs1_i),
-        .id_ex_alu_bypass_rs2_i      (id_ex_alu_bypass_rs2_i),
+        .id_ex_alu_bypass_rs1_i      (bypass_rs1_valid),
+        .id_ex_alu_bypass_rs2_i      (bypass_rs2_valid),
         .id_ex_branch_target_i       (id_ex_branch_target_i),
         .id_ex_branch_next_pc_i      (id_ex_branch_next_pc_i),
         .id_ex_branch_eq_i           (id_ex_branch_eq_i),
@@ -539,9 +553,8 @@ import ydrasil_pkg::*;
             alu_rf_wen_rd_ff   <= ex_rf_wen_rd;
             alu_rf_waddr_rd_ff <= div_rf_wen_rd ? div_waddr_q : alu_rf_waddr_rd;
             alu_producer_id_ff <= id_ex_producer_id_i;
-            alu_bypass_valid_q <= bypassable_alu_op;
-            alu_bypass_data_q  <= bypassable_alu_op ?
-                                  (shift_alu_op ? alu_result : fast_alu_result) : '0;
+            alu_bypass_valid_q <= completion_o.valid;
+            alu_bypass_data_q  <= completion_o.valid ? completion_o.data : '0;
             ex_csr_wdata_o_ff  <= csr_wdata;
             ex_csr_fs_wdata_o_ff <= csr_wdata[14:13];
             ex_csr_mstatus_wen_o_ff <= csr_wen && (id_ex_csr_waddr_i == CSR_MSTATUS);
@@ -580,5 +593,7 @@ import ydrasil_pkg::*;
         fast_bitmanip_result : bitmanip_rf_wen_rd ?
         bitmanip_result : slow_result_wen ? slow_result :
         fast_result_wen ? fast_result : alu_result;
+    assign lane0_bypass_valid_o = alu_bypass_valid_q;
+    assign lane0_bypass_data_o = alu_bypass_data_q;
 
 endmodule

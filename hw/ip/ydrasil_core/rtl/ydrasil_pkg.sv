@@ -76,6 +76,7 @@ package ydrasil_pkg;
 	localparam logic [11:0] CSR_MVENDORID     = 12'hf11;
 	localparam logic [11:0] CSR_MARCHID       = 12'hf12;
 	localparam logic [11:0] CSR_MIMPID        = 12'hf13;
+	localparam logic [31:0] MARCHID_VALUE     = 32'd5;
 	localparam logic [11:0] CSR_MHARTID       = 12'hf14;
 	localparam logic [11:0] CSR_FFLAGS        = 12'h001;
 	localparam logic [11:0] CSR_FRM           = 12'h002;
@@ -173,7 +174,9 @@ package ydrasil_pkg;
 		localparam int RESOURCE_LSU = 3;
 		localparam int RESOURCE_MULDIV = 4;
 		localparam int RESOURCE_SERIAL = 5;
-		localparam logic [RESOURCE_WIDTH-1:0] RESOURCE_EXCLUSIVE_MASK = 6'b11_1110;
+		// ALU and bitmanip have one copy per execution lane. BRU, LSU, MULDIV
+		// and serial resources remain single-owner.
+		localparam logic [RESOURCE_WIDTH-1:0] RESOURCE_EXCLUSIVE_MASK = 6'b11_1100;
 
 	localparam int OPERATOR_WIDTH = 40;
 
@@ -292,11 +295,16 @@ package ydrasil_pkg;
 	localparam int BP_BHT_ENTRIES = 512;
 	// Future File: each producer carries its value independently of the two
 	// architectural writeback ports.
-		localparam int PRODUCER_NUM = 12;
+	localparam int PRODUCER_NUM = 8;
 	localparam int PRODUCER_SLOT_WIDTH = $clog2(PRODUCER_NUM);
 	localparam int PRODUCER_ID_WIDTH = PRODUCER_SLOT_WIDTH + 1;
 	typedef logic [PRODUCER_SLOT_WIDTH-1:0] producer_slot_t;
 	typedef logic [PRODUCER_ID_WIDTH-1:0] producer_id_t;
+	typedef enum logic [1:0] {
+		BYPASS_NONE  = 2'b00,
+		BYPASS_LANE0 = 2'b01,
+		BYPASS_LANE1 = 2'b10
+	} ydrasil_bypass_sel_t;
 	localparam int COMPLETION_LANES = 4;
 	localparam int COMPLETION_ALU = 0;
 	localparam int COMPLETION_LSU = 1;
@@ -410,6 +418,7 @@ package ydrasil_pkg;
 	typedef struct packed {
 		logic                                valid;
 		logic                                interrupt;
+		logic                                flush_younger;
 		producer_id_t                        producer_id;
 		logic                                producer_tracked;
 		logic [REGS_ADDR_WIDTH-1:0]          rd_addr;
@@ -519,13 +528,16 @@ package ydrasil_pkg;
 		logic [REGS_NUM-1:0]                 gpr_pending_for_hazard;
 	} ydrasil_hzd_status_pkt_t;
 
-	// Rename/scoreboard results are part of the registered D-to-R contract.
-	// Issue does not reach back into ctrl through independent sideband ports.
+	// Dynamic rename/scoreboard results belong to Issue, not to the registered
+	// ID/Issue dispatch queue.  Keeping them in a separate packet makes the
+	// DispatchQ contents stable while its head is stalled.
 	typedef struct packed {
-		ydrasil_hzd_status_pkt_t              hazard;
-		ydrasil_gpr_fwd_pkt_t                 src1;
-		ydrasil_gpr_fwd_pkt_t                 src2;
-		producer_id_t                          producer_id;
+			ydrasil_hzd_status_pkt_t              hazard;
+			ydrasil_gpr_fwd_pkt_t                 src1;
+			ydrasil_gpr_fwd_pkt_t                 src2;
+			ydrasil_bypass_sel_t                  bypass_rs1;
+			ydrasil_bypass_sel_t                  bypass_rs2;
+			producer_id_t                          producer_id;
 		logic                                  producer_tracked;
 	} ydrasil_issue_schedule_pkt_t;
 
@@ -537,7 +549,6 @@ package ydrasil_pkg;
 		logic                                  memory_op;
 		ydrasil_id_ctrl_pkt_t                  ctrl;
 		ydrasil_decode_pkt_t                   decode;
-		ydrasil_issue_schedule_pkt_t           schedule;
 	} ydrasil_issue_pkt_t;
 
 	typedef struct packed {
@@ -545,11 +556,71 @@ package ydrasil_pkg;
 		ydrasil_gpr_fwd_pkt_t                 wb1;
 	} ydrasil_issue_wb_pkt_t;
 
+	typedef struct packed {
+		ydrasil_issue_schedule_pkt_t          slot0;
+		ydrasil_issue_schedule_pkt_t          slot1;
+		ydrasil_issue_wb_pkt_t                wb;
+	} ydrasil_issue_state_pkt_t;
+
+	// Registered Issue/EX contract.  Operand selection, Future File lookup and
+	// final lane steering terminate before this packet is produced.
+	typedef struct packed {
+		logic [REGS_DATA_WIDTH-1:0]           operand_a;
+		logic [REGS_DATA_WIDTH-1:0]           operand_b;
+		logic [OPERATOR_WIDTH-1:0]            operator_info;
+		logic [OPERATOR_TYPE_WIDTH-1:0]       operator_type;
+		logic                                valid;
+		logic                                jalr;
+			ydrasil_bypass_sel_t                bypass_rs1;
+			ydrasil_bypass_sel_t                bypass_rs2;
+		logic [INST_ADDR_WIDTH-1:0]           branch_target;
+		logic [INST_ADDR_WIDTH-1:0]           branch_next_pc;
+		logic                                branch_eq;
+		logic                                branch_ge_signed;
+		logic                                branch_ge_unsigned;
+		logic [REGS_DATA_WIDTH-1:0]           bt_a_operand;
+		logic [REGS_DATA_WIDTH-1:0]           bt_b_operand;
+		logic                                pred_hit;
+		logic                                pred_taken;
+		logic [INST_ADDR_WIDTH-1:0]           pred_target;
+		logic [1:0]                          pred_counter;
+		logic [INST_ADDR_WIDTH-1:0]           pred_bht_index;
+		logic [CSR_ADDR_WIDTH-1:0]            csr_raddr;
+		logic [CSR_ADDR_WIDTH-1:0]            csr_waddr;
+		logic [OP_CSR_INFO_WIDTH-1:0]         csr_op_info;
+		logic [OP_SYS_INFO_WIDTH-1:0]         sys_op_info;
+		logic [INST_ADDR_WIDTH-1:0]           pc;
+		logic                                fence_i;
+		logic                                rd_wen;
+		logic [REGS_ADDR_WIDTH-1:0]           rd_addr;
+		producer_id_t                        producer_id;
+		logic                                producer_tracked;
+		ydrasil_lsu_req_pkt_t                lsu_req;
+		ydrasil_fpu_req_pkt_t                fpu_req;
+		logic [REGS_DATA_WIDTH-1:0]           lane1_operand_a;
+		logic [REGS_DATA_WIDTH-1:0]           lane1_operand_b;
+		logic [OPERATOR_WIDTH-1:0]            lane1_operator_info;
+		logic [OPERATOR_TYPE_WIDTH-1:0]       lane1_operator_type;
+		logic [OP_LSU_INFO_WIDTH-1:0]         lane1_operator_lsu;
+			logic [REGS_DATA_WIDTH-1:0]           lane1_store_data;
+			logic                                lane1_store_data_valid;
+			ydrasil_bypass_sel_t                lane1_bypass_rs1;
+			ydrasil_bypass_sel_t                lane1_bypass_rs2;
+		logic [REGS_ADDR_WIDTH-1:0]           lane1_rd_addr;
+		producer_id_t                        lane1_producer_id;
+		logic                                lane1_producer_tracked;
+		logic                                lane1_valid;
+		logic [INST_ADDR_WIDTH-1:0]           lane1_pc;
+		logic [INST_DATA_WIDTH-1:0]           lane1_instr;
+	} ydrasil_issue_ex_pkt_t;
+
 	// Issue-local captures feed back only their control eligibility.  The
 	// captured data remains inside issue_stage and crosses no module boundary.
 	typedef struct packed {
-		logic                                  bru_lsu_rs1_hit;
-		logic                                  bru_lsu_rs2_hit;
-	} ydrasil_issue_feedback_pkt_t;
+			logic                                  bru_lsu_rs1_hit;
+			logic                                  bru_lsu_rs2_hit;
+			logic                                  slot0_fixed_dtcm_load;
+			logic                                  slot1_fixed_dtcm_load;
+		} ydrasil_issue_feedback_pkt_t;
 
 endpackage
