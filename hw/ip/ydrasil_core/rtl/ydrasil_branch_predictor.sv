@@ -38,9 +38,7 @@ import ydrasil_pkg::*;
     localparam int BHT_INDEX_WIDTH = (BHT_ENTRIES > 1) ? $clog2(BHT_ENTRIES) : 1;
     localparam int GHR_WIDTH = (BHT_INDEX_WIDTH > 4) ? 4 : BHT_INDEX_WIDTH;
     localparam int BTB_TAG_WIDTH = ydrasil_pkg::INST_ADDR_WIDTH - BTB_INDEX_WIDTH - 2;
-    localparam int BTB_EPOCH_WIDTH = 4;
-    localparam int BTB_DATA_WIDTH = BTB_EPOCH_WIDTH + 1 + BTB_TAG_WIDTH +
-        ydrasil_pkg::INST_ADDR_WIDTH;
+    localparam int BTB_DATA_WIDTH = BTB_TAG_WIDTH + ydrasil_pkg::INST_ADDR_WIDTH;
     localparam int BTB_MEM_DATA_WIDTH = ((BTB_DATA_WIDTH + 7) / 8) * 8;
     localparam int BHT_MEM_DATA_WIDTH = 8;
 
@@ -62,8 +60,9 @@ import ydrasil_pkg::*;
         end
     end
 
+    logic [BTB_ENTRIES-1:0] btb_valid_q;
+    logic [BHT_ENTRIES-1:0] bht_valid_q;
     logic [GHR_WIDTH-1:0] ghr_q;
-    logic [BTB_EPOCH_WIDTH-1:0] btb_epoch_q;
 
     wire [BTB_INDEX_WIDTH-1:0] predict_btb_index;
     wire [BHT_INDEX_WIDTH-1:0] predict_bht_index;
@@ -85,8 +84,6 @@ import ydrasil_pkg::*;
     wire [BTB_MEM_DATA_WIDTH-1:0] btb_mem_rdata;
     wire [BTB_MEM_DATA_WIDTH-1:0] btb_mem_rdata1;
     wire [BTB_MEM_DATA_WIDTH-1:0] btb_mem_wdata;
-    wire [BTB_EPOCH_WIDTH-1:0] btb_repoch;
-    wire       btb_runconditional;
     wire [BTB_TAG_WIDTH-1:0] btb_rtag;
     wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] btb_rtarget;
     wire [1:0] bht_rdata;
@@ -107,6 +104,8 @@ import ydrasil_pkg::*;
     wire [BTB_TAG_WIDTH-1:0] predict_btb_tag1;
     logic [BTB_TAG_WIDTH-1:0] predict_btb_tag1_q;
     logic [BHT_INDEX_WIDTH-1:0] predict_bht_index1_q;
+    logic predict_btb_valid1_q;
+    logic predict_bht_valid1_q;
     wire [GHR_WIDTH-1:0] lane1_ghr =
         (predict0_spec_valid_i && predict0_spec_conditional_i) ?
         {ghr_q[GHR_WIDTH-2:0], predict0_spec_taken_i} : ghr_q;
@@ -130,7 +129,7 @@ import ydrasil_pkg::*;
     assign bht_next_counter = train_i.taken ?
         ((train_i.counter == 2'b11) ? train_i.counter : (train_i.counter + 2'b01)) :
         ((train_i.counter == 2'b00) ? train_i.counter : (train_i.counter - 2'b01));
-    assign btb_wdata = {btb_epoch_q, !train_i.conditional, train_btb_tag, train_i.target};
+    assign btb_wdata = {train_btb_tag, train_i.target};
     assign bht_wdata = bht_next_counter;
     assign btb_mem_wdata = {{(BTB_MEM_DATA_WIDTH-BTB_DATA_WIDTH){1'b0}}, btb_wdata};
     assign btb_rdata = btb_mem_rdata[BTB_DATA_WIDTH-1:0];
@@ -142,9 +141,9 @@ import ydrasil_pkg::*;
         (bht_wdata ^ 2'b01)};
     assign bht_rdata = bht_mem_rdata[1:0] ^ 2'b01;
     assign bht_rdata1 = bht_mem_rdata1[1:0] ^ 2'b01;
-    assign {btb_repoch, btb_runconditional, btb_rtag, btb_rtarget} = btb_rdata;
+    assign {btb_rtag, btb_rtarget} = btb_rdata;
     assign train_fire = train_i.valid && !invalidate_i;
-    assign conditional_train_fire = train_fire && train_i.conditional;
+    assign conditional_train_fire = train_fire;
 
     ydrmem_1r1w_ram #(
         .DEPTH(BTB_ENTRIES),
@@ -202,10 +201,11 @@ import ydrasil_pkg::*;
             predict_bht_valid_q <= 1'b0;
             predict_btb_tag1_q  <= '0;
             predict_bht_index1_q <= '0;
+            predict_btb_valid1_q <= 1'b0;
+            predict_bht_valid1_q <= 1'b0;
+            btb_valid_q         <= '0;
+            bht_valid_q         <= '0;
             ghr_q               <= '0;
-            // BRAM initializes to zero, so epoch one invalidates every entry
-            // without a 512-bit side valid array or a reset-time clear loop.
-            btb_epoch_q         <= {{(BTB_EPOCH_WIDTH-1){1'b0}}, 1'b1};
         end else if (invalidate_i) begin
             predict_btb_tag_q   <= '0;
             predict_bht_index_q <= '0;
@@ -213,46 +213,47 @@ import ydrasil_pkg::*;
             predict_bht_valid_q <= 1'b0;
             predict_btb_tag1_q  <= '0;
             predict_bht_index1_q <= '0;
+            predict_btb_valid1_q <= 1'b0;
+            predict_bht_valid1_q <= 1'b0;
+            btb_valid_q         <= '0;
+            bht_valid_q         <= '0;
             ghr_q               <= '0;
-            btb_epoch_q         <= btb_epoch_q + 1'b1;
         end else begin
             predict_btb_tag_q   <= predict_btb_tag;
             predict_bht_index_q <= predict_bht_index;
-            predict_btb_valid_q <= |btb_repoch;
-            predict_bht_valid_q <= 1'b1;
+            predict_btb_valid_q <= btb_valid_q[predict_btb_index];
+            predict_bht_valid_q <= bht_valid_q[predict_bht_index];
             predict_btb_tag1_q  <= predict_btb_tag1;
             predict_bht_index1_q <= predict_bht_index1;
+            predict_btb_valid1_q <= btb_valid_q[predict_btb_index1];
+            predict_bht_valid1_q <= bht_valid_q[predict_bht_index1];
 
-            if (conditional_train_fire) begin
+            if (train_fire) begin
+                btb_valid_q[train_btb_index] <= 1'b1;
+                bht_valid_q[train_bht_index] <= 1'b1;
+            end
+            if (train_fire && train_i.conditional) begin
                 ghr_q <= {ghr_q[GHR_WIDTH-2:0], train_i.taken};
             end
         end
     end
 
-    // The BRAM read data and its embedded valid bit are already registered at
-    // the same boundary as the predicted tag.  Using the previous cycle's
-    // valid pipeline here mispaired valid/tag and collapsed BP accuracy.
-    assign btb_hit           = (btb_repoch == btb_epoch_q) &&
+    assign btb_hit           = predict_btb_valid_q &&
         (btb_rtag == predict_btb_tag_q);
-    wire [BTB_EPOCH_WIDTH-1:0] btb_repoch1;
-    wire btb_runconditional1;
     wire [BTB_TAG_WIDTH-1:0] btb_rtag1;
     wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] btb_rtarget1;
-    assign {btb_repoch1, btb_runconditional1, btb_rtag1, btb_rtarget1} = btb_rdata1;
-    assign btb_hit1          = (btb_repoch1 == btb_epoch_q) &&
+    assign {btb_rtag1, btb_rtarget1} = btb_rdata1;
+    assign btb_hit1          = predict_btb_valid1_q &&
         (btb_rtag1 == predict_btb_tag1_q);
-    // BHT entries are initialized to weak-not-taken in BRAM, so no side valid
-    // array or extra validity pipeline is needed.
-    assign bht_counter       = bht_rdata;
+    assign bht_counter       = predict_bht_valid_q ? bht_rdata : 2'b01;
     assign predict_hit_o     = !invalidate_i && btb_hit;
     assign predict_counter_o = !invalidate_i ? bht_counter : 2'b01;
-    assign predict_taken_o   = predict_hit_o &&
-        (btb_runconditional || predict_counter_o[1]);
+    assign predict_taken_o   = predict_hit_o && predict_counter_o[1];
     assign predict_target_o  = btb_rtarget;
     assign predict1_hit_o = !invalidate_i && btb_hit1;
-    assign predict1_counter_o = !invalidate_i ? bht_rdata1 : 2'b01;
-    assign predict1_taken_o = predict1_hit_o &&
-        (btb_runconditional1 || predict1_counter_o[1]);
+    assign predict1_counter_o = !invalidate_i && predict_bht_valid1_q ?
+        bht_rdata1 : 2'b01;
+    assign predict1_taken_o = predict1_hit_o && predict1_counter_o[1];
     assign predict1_target_o = btb_rtarget1;
     assign predict1_bht_index_o =
         {{(ydrasil_pkg::INST_ADDR_WIDTH-BHT_INDEX_WIDTH){1'b0}},

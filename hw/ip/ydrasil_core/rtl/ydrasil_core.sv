@@ -60,13 +60,13 @@ import ydrasil_axi_pkg::*;
 	wire        if_consume_two;
 
 	// CTRL signals
-	wire                        stall_if;
-	wire                        stall_id;
-    wire                       stall_pc;
-	wire                        flush_if;
-	wire                        flush_id;
-	wire                        flush_ex;
-	wire                        bubble_id;
+		(* max_fanout = 8 *) wire   stall_if;
+		(* max_fanout = 8 *) wire   stall_id;
+    (* max_fanout = 8 *) wire   stall_pc;
+		(* max_fanout = 8 *) wire   flush_if;
+		(* max_fanout = 8 *) wire   flush_id;
+		(* max_fanout = 8 *) wire   flush_ex;
+		(* max_fanout = 8 *) wire   bubble_id;
 	wire                        branch_jump;
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] branch_target;
 
@@ -183,12 +183,12 @@ import ydrasil_axi_pkg::*;
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] bp_bram_predict1_target;
 	wire [1:0]                  bp_bram_predict1_counter;
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] bp_bram_predict1_bht_index;
-	// Compatibility-only observability for the removed L0-BTB.
-	wire l0_hit = 1'b0;
-	wire l0_hit1 = 1'b0;
+		// Compatibility observability now reflects the FF target table.
+		wire l0_hit;
+		wire l0_hit1 = 1'b0;
 	wire                        id_fence_i;
 	wire [31:0]                 fence_resume_pc;
-	wire                        pipeline_flush;
+		(* max_fanout = 8 *) wire   pipeline_flush;
 	wire                        id_ex_pred_hit;
 	wire                        id_ex_pred_taken;
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] id_ex_pred_target;
@@ -977,8 +977,10 @@ import ydrasil_axi_pkg::*;
 			,.if_id1_pred_counter_o(if_id1_pred_counter)
 			,.if_id1_pred_bht_index_o(if_id1_pred_bht_index)
 			,.if_id1_valid_o   (if_id1_valid)
-			,.if_id1_instr_o   (if_id1_instr)
-		);
+				,.if_id1_instr_o   (if_id1_instr)
+				,.target_ff_hit_o  (l0_hit)
+				,.target_ff_correction_o()
+			);
 
 	ydrasil_id_stage u_ydrasil_id_stage (
 		.clk                 (clk),
@@ -1263,7 +1265,7 @@ import ydrasil_axi_pkg::*;
 			.clk               (clk),
 			.rst_n             (rst_n),
 			.ex_branch_jump_i  (ex_pc_redirect),
-			.ex_branch_resolve_i(ex_bp_train_pkt.valid && ex_bp_train_pkt.conditional),
+				.ex_branch_resolve_i(ex_bp_train_pkt.valid),
 			.ex_branch_target_i(ex_pc_redirect_target),
 			.ex_pc_i           (id_instr_addr),
 			.ex_pc1_i          (dual_id_ex_pc),

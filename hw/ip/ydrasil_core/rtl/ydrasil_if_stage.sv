@@ -48,7 +48,9 @@ import ydrasil_pkg::*;
     output wire [1:0]  if_id1_pred_counter_o,
     output wire [31:0] if_id1_pred_bht_index_o,
     output wire        if_id1_valid_o,
-    output wire [31:0] if_id1_instr_o
+    output wire [31:0] if_id1_instr_o,
+    output wire        target_ff_hit_o,
+    output wire        target_ff_correction_o
 );
 
     localparam int COUNT_WIDTH = $clog2(FETCHQ_DEPTH + 1);
@@ -58,8 +60,14 @@ import ydrasil_pkg::*;
     reg        mem_req_valid_q;
     reg        mem_req_two_q;
     reg [31:0] mem_req_pc_q;
+    reg [31:0] mem_req_next_pc_q;
     reg        pending_redirect_valid_q;
     reg [31:0] pending_redirect_target_q;
+
+    localparam int TARGET_FF_ENTRIES = 32;
+    reg [TARGET_FF_ENTRIES-1:0] target_ff_valid_q;
+    reg [TARGET_FF_ENTRIES-1:0] target_ff_taken_q;
+    reg [29:0] target_ff_target_q [0:TARGET_FF_ENTRIES-1];
 
     reg [COUNT_WIDTH-1:0] fetchq_count_q;
     reg [31:0] fetchq_pc_q [0:FETCHQ_DEPTH-1];
@@ -81,6 +89,11 @@ import ydrasil_pkg::*;
     wire mem_resp_valid = !flush_fetch && mem_req_valid_q;
     wire predict_redirect_resp = mem_resp_valid &&
         (bp_predict_taken_i || (mem_req_two_q && bp_predict1_taken_i));
+    wire [31:0] predict_next_pc = bp_predict_taken_i ? bp_predict_target_i :
+        ((mem_req_two_q && bp_predict1_taken_i) ? bp_predict1_target_i :
+         (mem_req_pc_q + (mem_req_two_q ? 32'd8 : 32'd4)));
+    wire predict_correction_resp = mem_resp_valid &&
+        (predict_next_pc != mem_req_next_pc_q);
     wire [1:0] push_count = mem_resp_valid ?
         ((bp_predict_taken_i || !mem_req_two_q) ? 2'd1 : 2'd2) : 2'd0;
     wire [COUNT_WIDTH-1:0] post_pop_count = fetchq_count_q - COUNT_WIDTH'(pop_count);
@@ -90,9 +103,16 @@ import ydrasil_pkg::*;
          RESERVED_WIDTH'(1)) : '0);
     wire pair_capacity = reserved_count <= RESERVED_WIDTH'(FETCHQ_DEPTH - 2);
     wire fetch_issue = !flush_fetch && !bp_invalidate_i && pair_capacity &&
-        !predict_redirect_resp;
+        !predict_correction_resp;
     wire [31:0] fetch_addr = pending_redirect_valid_q ?
         pending_redirect_target_q : pc_q;
+		wire [4:0] target_ff_index = fetch_addr[7:3];
+		wire target_ff_hit = target_ff_valid_q[target_ff_index] &&
+			target_ff_taken_q[target_ff_index];
+			wire [31:0] target_ff_target =
+				{target_ff_target_q[target_ff_index], 2'b00};
+		assign target_ff_hit_o = fetch_issue && target_ff_hit;
+		assign target_ff_correction_o = predict_correction_resp;
     wire fetch_addr_is_dtcm =
         (fetch_addr >= DTCM_BASE_ADDR) &&
         (fetch_addr < (DTCM_BASE_ADDR + ((32'd1 << DTCM_ADDR_WIDTH) << 2)));
@@ -132,8 +152,11 @@ import ydrasil_pkg::*;
             mem_req_valid_q <= 1'b0;
             mem_req_two_q <= 1'b0;
             mem_req_pc_q <= RESET_INS;
+            mem_req_next_pc_q <= RESET_INS + 32'd8;
             pending_redirect_valid_q <= 1'b0;
             pending_redirect_target_q <= '0;
+            target_ff_valid_q <= '0;
+            target_ff_taken_q <= '0;
             fetchq_count_q <= '0;
             for (idx = 0; idx < FETCHQ_DEPTH; idx = idx + 1) begin
                 fetchq_pc_q[idx] <= '0;
@@ -149,24 +172,38 @@ import ydrasil_pkg::*;
             mem_req_valid_q <= 1'b0;
             mem_req_two_q <= 1'b0;
             mem_req_pc_q <= flush_fetch ? flush_target : bp_invalidate_target_i;
+            mem_req_next_pc_q <= flush_fetch ? flush_target : bp_invalidate_target_i;
             pending_redirect_valid_q <= 1'b0;
             pending_redirect_target_q <= '0;
             fetchq_count_q <= '0;
+			if (bp_invalidate_i) begin
+				target_ff_valid_q <= '0;
+				target_ff_taken_q <= '0;
+			end
         end else begin
             mem_req_valid_q <= fetch_issue;
             if (fetch_issue) begin
                 mem_req_pc_q <= fetch_addr;
                 mem_req_two_q <= fetch_two;
-                pc_q <= fetch_addr + (fetch_two ? 32'd8 : 32'd4);
+				mem_req_next_pc_q <= target_ff_hit ? target_ff_target :
+					(fetch_addr + (fetch_two ? 32'd8 : 32'd4));
+                pc_q <= target_ff_hit ? target_ff_target :
+					(fetch_addr + (fetch_two ? 32'd8 : 32'd4));
             end
 
             if (pending_redirect_valid_q && fetch_issue)
                 pending_redirect_valid_q <= 1'b0;
-            if (predict_redirect_resp) begin
+            if (predict_correction_resp) begin
                 pending_redirect_valid_q <= 1'b1;
-                pending_redirect_target_q <= bp_predict_taken_i ?
-                    bp_predict_target_i : bp_predict1_target_i;
+				pending_redirect_target_q <= predict_next_pc;
             end
+
+			if (mem_resp_valid) begin
+				target_ff_valid_q[mem_req_pc_q[7:3]] <= 1'b1;
+				target_ff_taken_q[mem_req_pc_q[7:3]] <= predict_redirect_resp;
+				if (predict_redirect_resp)
+					target_ff_target_q[mem_req_pc_q[7:3]] <= predict_next_pc[31:2];
+			end
 
             if (pop_count == 2'd2) begin
                 for (idx = 0; idx < FETCHQ_DEPTH-2; idx = idx + 1) begin

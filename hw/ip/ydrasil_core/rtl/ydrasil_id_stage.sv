@@ -199,13 +199,47 @@ import ydrasil_pkg::*;
 		decode_pkt_o.fp_illegal = decode_pkt_o.fp_valid;
 		decode_pkt_o.operator_type[OPERATOR_TYPE_FPU] = decode_pkt_o.fp_valid;
 `endif
+
+		// Resource ownership is decoded once and travels with the packed packet.
+		// ALU has two copies; all other resources are lane0/port exclusive.
+		decode_pkt_o.resources = '0;
+		decode_pkt_o.resources[RESOURCE_ALU] =
+			decode_pkt_o.operator_type[OPERATOR_TYPE_ALU] ||
+			decode_pkt_o.operator_type[OPERATOR_TYPE_BITMANIP];
+		decode_pkt_o.resources[RESOURCE_FULL_BITMANIP] =
+			decode_pkt_o.operator_type[OPERATOR_TYPE_BITMANIP] &&
+			!(decode_pkt_o.operator_info[OP_B_SH1ADD] |
+			  decode_pkt_o.operator_info[OP_B_SH2ADD] |
+			  decode_pkt_o.operator_info[OP_B_SH3ADD] |
+			  decode_pkt_o.operator_info[OP_B_ANDN]   |
+			  decode_pkt_o.operator_info[OP_B_ORN]    |
+			  decode_pkt_o.operator_info[OP_B_XNOR]   |
+			  decode_pkt_o.operator_info[OP_B_MIN]    |
+			  decode_pkt_o.operator_info[OP_B_MAX]    |
+			  decode_pkt_o.operator_info[OP_B_MINU]   |
+			  decode_pkt_o.operator_info[OP_B_MAXU]   |
+			  decode_pkt_o.operator_info[OP_B_REV8]   |
+			  decode_pkt_o.operator_info[OP_B_SEXT_B] |
+			  decode_pkt_o.operator_info[OP_B_SEXT_H] |
+			  decode_pkt_o.operator_info[OP_B_ZEXT_H]);
+		decode_pkt_o.resources[RESOURCE_BRU] =
+			decode_pkt_o.operator_type[OPERATOR_TYPE_BJP];
+		decode_pkt_o.resources[RESOURCE_LSU] =
+			decode_pkt_o.operator_type[OPERATOR_TYPE_LOAD] ||
+			decode_pkt_o.operator_type[OPERATOR_TYPE_STORE];
+		decode_pkt_o.resources[RESOURCE_MULDIV] =
+			decode_pkt_o.operator_type[OPERATOR_TYPE_MUL];
+		decode_pkt_o.resources[RESOURCE_SERIAL] =
+			decode_pkt_o.operator_type[OPERATOR_TYPE_CSR] ||
+			decode_pkt_o.operator_type[OPERATOR_TYPE_SYS] ||
+			decode_pkt_o.operator_type[OPERATOR_TYPE_FPU] || decode_pkt_o.fence_i;
     end
 endmodule
 
 module ydrasil_id_stage
 import ydrasil_pkg::*;
 #(
-    parameter int DECODE_FIFO_DEPTH = 4
+    parameter int DECODE_FIFO_DEPTH = 8
 ) (
     input  wire                  clk,
     input  wire                  rst_n,
@@ -275,56 +309,41 @@ import ydrasil_pkg::*;
     assign decode_pkt = decode_fifo_q[decode_rptr_q];
     assign decode_pkt1 = decode_fifo_q[decode_rptr1];
 
-    wire slot0_simple_int = decode_valid &&
-        (decode_pkt.operator_type[OPERATOR_TYPE_ALU] ||
-         decode_pkt.operator_type[OPERATOR_TYPE_BITMANIP]) &&
-        !decode_pkt.operator_type[OPERATOR_TYPE_BJP] &&
-        !decode_pkt.operator_type[OPERATOR_TYPE_LOAD] &&
-        !decode_pkt.operator_type[OPERATOR_TYPE_STORE] &&
-        !decode_pkt.operator_type[OPERATOR_TYPE_MUL] &&
-        !decode_pkt.operator_type[OPERATOR_TYPE_CSR] &&
-        !decode_pkt.operator_type[OPERATOR_TYPE_SYS] && !decode_pkt.fence_i;
-    wire slot1_light_bitmanip =
-        decode_pkt1.operator_type[OPERATOR_TYPE_BITMANIP] &&
-        (decode_pkt1.operator_info[OP_B_SH1ADD] |
-         decode_pkt1.operator_info[OP_B_SH2ADD] |
-         decode_pkt1.operator_info[OP_B_SH3ADD] |
-         decode_pkt1.operator_info[OP_B_ANDN]   |
-         decode_pkt1.operator_info[OP_B_ORN]    |
-         decode_pkt1.operator_info[OP_B_XNOR]   |
-         decode_pkt1.operator_info[OP_B_MIN]    |
-         decode_pkt1.operator_info[OP_B_MAX]    |
-         decode_pkt1.operator_info[OP_B_MINU]   |
-         decode_pkt1.operator_info[OP_B_MAXU]   |
-         decode_pkt1.operator_info[OP_B_REV8]   |
-         decode_pkt1.operator_info[OP_B_SEXT_B] |
-         decode_pkt1.operator_info[OP_B_SEXT_H] |
-         decode_pkt1.operator_info[OP_B_ZEXT_H]);
-    wire slot1_simple_int = decode_valid1 &&
-        ((decode_pkt1.operator_type[OPERATOR_TYPE_ALU] &&
-          !decode_pkt1.operator_type[OPERATOR_TYPE_BITMANIP]) ||
-         slot1_light_bitmanip) &&
-        !decode_pkt1.operator_type[OPERATOR_TYPE_BJP] &&
-        !decode_pkt1.operator_type[OPERATOR_TYPE_LOAD] &&
-        !decode_pkt1.operator_type[OPERATOR_TYPE_STORE] &&
-        !decode_pkt1.operator_type[OPERATOR_TYPE_MUL] &&
-        !decode_pkt1.operator_type[OPERATOR_TYPE_CSR] &&
-        !decode_pkt1.operator_type[OPERATOR_TYPE_SYS] && !decode_pkt1.fence_i;
-    wire slot1_memory = decode_valid1 &&
-        (decode_pkt1.operator_type[OPERATOR_TYPE_LOAD] ||
-         decode_pkt1.operator_type[OPERATOR_TYPE_STORE]) &&
+    wire slot1_lane1_capable = decode_valid1 &&
+        !decode_pkt1.resources[RESOURCE_FULL_BITMANIP] &&
+        !decode_pkt1.resources[RESOURCE_BRU] &&
+        !decode_pkt1.resources[RESOURCE_MULDIV] &&
+        !decode_pkt1.resources[RESOURCE_SERIAL] &&
         !decode_pkt1.operator_type[OPERATOR_TYPE_FPU];
-    wire slot0_writes = decode_pkt.rd_wen && (decode_pkt.rd_addr != '0);
+    wire slot0_writes = (decode_pkt.rd_addr != '0) &&
+        (decode_pkt.rd_wen ||
+         (decode_pkt.operator_type[OPERATOR_TYPE_LOAD] &&
+          !decode_pkt.operator_type[OPERATOR_TYPE_FPU]));
+    wire slot1_writes = (decode_pkt1.rd_addr != '0) &&
+        (decode_pkt1.rd_wen ||
+         (decode_pkt1.operator_type[OPERATOR_TYPE_LOAD] &&
+          !decode_pkt1.operator_type[OPERATOR_TYPE_FPU]));
     wire pair_raw = slot0_writes &&
         ((decode_pkt1.rs1_ren && (decode_pkt1.rs1_addr == decode_pkt.rd_addr)) ||
          ((decode_pkt1.rs2_ren ||
            (decode_pkt1.operator_type[OPERATOR_TYPE_STORE] &&
             !decode_pkt1.operator_type[OPERATOR_TYPE_FPU])) &&
           (decode_pkt1.rs2_addr == decode_pkt.rd_addr)));
-    wire pair_waw = slot0_writes && decode_pkt1.rd_wen &&
+    wire pair_waw = slot0_writes && slot1_writes &&
         (decode_pkt.rd_addr == decode_pkt1.rd_addr);
-    wire pair_eligible = slot0_simple_int &&
-        (slot1_simple_int || slot1_memory) && !pair_raw && !pair_waw;
+    wire pair_resource_conflict =
+        |(decode_pkt.resources & decode_pkt1.resources & RESOURCE_EXCLUSIVE_MASK);
+    wire pair_serialize = decode_pkt.resources[RESOURCE_SERIAL] ||
+        decode_pkt1.resources[RESOURCE_SERIAL];
+    // A younger integer result can be squashed by branch recovery, but an LSU
+    // request may already have changed memory or observed MMIO.  Keep memory
+    // out of the speculative lane behind a control-flow instruction.
+    wire pair_control_memory =
+        decode_pkt.resources[RESOURCE_BRU] &&
+        decode_pkt1.resources[RESOURCE_LSU];
+    wire pair_eligible = decode_valid && slot1_lane1_capable &&
+        !pair_resource_conflict && !pair_raw && !pair_waw && !pair_serialize &&
+        !pair_control_memory;
 
     // ID owns the registered decode FIFO and emits a fixed packed dispatch
     // contract.  Issue consumes this packet without reaching back into the
@@ -334,8 +353,7 @@ import ydrasil_pkg::*;
         issue_pkt_o.valid = decode_valid;
         issue_pkt_o.decode = decode_pkt;
         issue_pkt_o.dual_capable = decode_valid &&
-            (decode_pkt.operator_type[OPERATOR_TYPE_ALU] ||
-             decode_pkt.operator_type[OPERATOR_TYPE_BITMANIP]);
+            !decode_pkt.resources[RESOURCE_SERIAL];
         issue_pkt_o.pair_eligible = pair_eligible;
         issue_pkt_o.memory_op = decode_valid &&
             (decode_pkt.operator_type[OPERATOR_TYPE_LOAD] ||
@@ -369,8 +387,7 @@ import ydrasil_pkg::*;
             (decode_pkt.operator_type[OPERATOR_TYPE_CSR] ||
              decode_pkt.operator_type[OPERATOR_TYPE_SYS] || decode_pkt.fence_i);
         issue_pkt_o.ctrl.checkpoint_req = decode_valid &&
-            decode_pkt.operator_type[OPERATOR_TYPE_BJP] &&
-            !decode_pkt.operator_info[OP_BJP_JUMP];
+            decode_pkt.operator_type[OPERATOR_TYPE_BJP];
         issue_pkt1_o = '0;
         issue_pkt1_o.valid = decode_valid1;
         issue_pkt1_o.lane1 = 1'b1;

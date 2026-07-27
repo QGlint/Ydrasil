@@ -219,8 +219,34 @@ import ydrasil_pkg::*;
     wire issue1_rs2_ren = issue_pkt1_i.ctrl.rs2_ren;
     wire issue1_rd_wen = issue_pkt1_i.ctrl.rd_wen;
     wire slot1_memory = issue_pkt1_i.memory_op;
-    wire pair_eligible = issue_pkt_i.pair_eligible &&
-        !hzd_status1_i.scoreboard_stall;
+    wire pair_eligible = issue_pkt_i.pair_eligible;
+    wire pair_issue = pair_eligible && !hzd_status1_i.scoreboard_stall;
+
+    // LSU completions terminate in BRU-specific holding registers while a
+    // branch waits at the issue head.  The EX BRU still sees only its normal
+    // registered operands; no completion input is added to the EX muxes.
+    reg bru_lsu_rs1_valid_q;
+    reg bru_lsu_rs2_valid_q;
+    producer_id_t bru_lsu_rs1_tag_q;
+    producer_id_t bru_lsu_rs2_tag_q;
+    reg [DATA_WIDTH-1:0] bru_lsu_rs1_data_q;
+    reg [DATA_WIDTH-1:0] bru_lsu_rs2_data_q;
+    wire issue_is_branch = issue_pkt_i.valid &&
+        decode_pkt_i.operator_type[OPERATOR_TYPE_BJP];
+    wire lsu_bru_rs1_capture = issue_is_branch &&
+        producer_rs1_fwd_i.producer_tracked && completion_bus_i[COMPLETION_LSU].valid &&
+        completion_bus_i[COMPLETION_LSU].producer_tracked &&
+        (producer_rs1_fwd_i.producer_id == completion_bus_i[COMPLETION_LSU].producer_id);
+    wire lsu_bru_rs2_capture = issue_is_branch &&
+        producer_rs2_fwd_i.producer_tracked && completion_bus_i[COMPLETION_LSU].valid &&
+        completion_bus_i[COMPLETION_LSU].producer_tracked &&
+        (producer_rs2_fwd_i.producer_id == completion_bus_i[COMPLETION_LSU].producer_id);
+    wire bru_lsu_rs1_hit = issue_is_branch && bru_lsu_rs1_valid_q &&
+        producer_rs1_fwd_i.producer_tracked &&
+        (bru_lsu_rs1_tag_q == producer_rs1_fwd_i.producer_id);
+    wire bru_lsu_rs2_hit = issue_is_branch && bru_lsu_rs2_valid_q &&
+        producer_rs2_fwd_i.producer_tracked &&
+        (bru_lsu_rs2_tag_q == producer_rs2_fwd_i.producer_id);
 `ifndef SYNTHESIS
     // Retain zero-valued observability points used by the coverage testbench.
     // The former issue-stage early ALU is intentionally removed from hardware.
@@ -233,7 +259,7 @@ import ydrasil_pkg::*;
 `endif
     assign id_advance = !stall_id_i && !bubble_id_i;
     assign issue_ready_o = id_advance;
-    assign issue_consume_two_o = id_advance && pair_eligible;
+    assign issue_consume_two_o = id_advance && pair_issue;
 
     assign rf_addr_rs1_o = issue_rf_raddr_rs1_ff;
     assign rf_addr_rs2_o = issue_rf_raddr_rs2_ff;
@@ -291,10 +317,12 @@ import ydrasil_pkg::*;
          (completion_bus_i[3].producer_id == producer_rs2_fwd_i.producer_id));
 `endif
     wire [DATA_WIDTH-1:0] issue_rs1_data =
+        bru_lsu_rs1_hit ? bru_lsu_rs1_data_q :
         producer_rs1_fwd_i.valid ? producer_rs1_fwd_i.data :
         rs1_wb_fwd1 ? wb_fwd1_i.data :
         rs1_wb_fwd  ? wb_fwd_i.data  : rf_rdata_rs1_i;
     wire [DATA_WIDTH-1:0] issue_rs2_data =
+        bru_lsu_rs2_hit ? bru_lsu_rs2_data_q :
         producer_rs2_fwd_i.valid ? producer_rs2_fwd_i.data :
         rs2_wb_fwd1 ? wb_fwd1_i.data :
         rs2_wb_fwd  ? wb_fwd_i.data  : rf_rdata_rs2_i;
@@ -332,6 +360,12 @@ import ydrasil_pkg::*;
     wire [DATA_WIDTH-1:0] issue_branch_next_pc = issue_pc_ff + 32'd4;
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
+			bru_lsu_rs1_valid_q <= 1'b0;
+			bru_lsu_rs2_valid_q <= 1'b0;
+			bru_lsu_rs1_tag_q <= '0;
+			bru_lsu_rs2_tag_q <= '0;
+			bru_lsu_rs1_data_q <= '0;
+			bru_lsu_rs2_data_q <= '0;
             operand_a_ff        <= '0;
             operand_b_ff        <= '0;
             operator_ff         <= '0;
@@ -386,6 +420,20 @@ import ydrasil_pkg::*;
             dual_pc_q <= '0;
             dual_instr_q <= RV32I_INS_NOP;
         end else begin
+			if (flush_id_i || (id_advance && issue_pkt_i.valid)) begin
+				bru_lsu_rs1_valid_q <= 1'b0;
+				bru_lsu_rs2_valid_q <= 1'b0;
+			end
+			if (lsu_bru_rs1_capture) begin
+				bru_lsu_rs1_valid_q <= 1'b1;
+				bru_lsu_rs1_tag_q <= completion_bus_i[COMPLETION_LSU].producer_id;
+				bru_lsu_rs1_data_q <= completion_bus_i[COMPLETION_LSU].data;
+			end
+			if (lsu_bru_rs2_capture) begin
+				bru_lsu_rs2_valid_q <= 1'b1;
+				bru_lsu_rs2_tag_q <= completion_bus_i[COMPLETION_LSU].producer_id;
+				bru_lsu_rs2_data_q <= completion_bus_i[COMPLETION_LSU].data;
+			end
             if (!stall_id_i) begin
                 operand_a_ff        <= operand_a;
                 operand_b_ff        <= operand_b;
@@ -455,7 +503,7 @@ import ydrasil_pkg::*;
             end else if (id_advance) begin
                 id_ex_valid_ff <= issue_valid_ff;
                 id_fence_i_ff <= issue_valid_ff & issue_fence_i_ff;
-                dual_valid_q <= pair_eligible;
+                dual_valid_q <= pair_issue;
             end else if (stall_id_i) begin
                 // A backend replay holds the complete ID/EX packet. Do not let
                 // a simultaneous decode bubble clear only its valid/bypass bits.

@@ -165,7 +165,15 @@ package ydrasil_pkg;
 	localparam int OPERATOR_TYPE_MUL   = 6;
 	localparam int OPERATOR_TYPE_BITMANIP = 7;
 	localparam int OPERATOR_TYPE_FPU   = 8;
-	localparam int OPERATOR_TYPE_LSU_BASE = 2;
+		localparam int OPERATOR_TYPE_LSU_BASE = 2;
+		localparam int RESOURCE_WIDTH = 6;
+		localparam int RESOURCE_ALU = 0;
+		localparam int RESOURCE_FULL_BITMANIP = 1;
+		localparam int RESOURCE_BRU = 2;
+		localparam int RESOURCE_LSU = 3;
+		localparam int RESOURCE_MULDIV = 4;
+		localparam int RESOURCE_SERIAL = 5;
+		localparam logic [RESOURCE_WIDTH-1:0] RESOURCE_EXCLUSIVE_MASK = 6'b11_1110;
 
 	localparam int OPERATOR_WIDTH = 40;
 
@@ -284,7 +292,7 @@ package ydrasil_pkg;
 	localparam int BP_BHT_ENTRIES = 512;
 	// Future File: each producer carries its value independently of the two
 	// architectural writeback ports.
-	localparam int PRODUCER_NUM = 8;
+		localparam int PRODUCER_NUM = 12;
 	localparam int PRODUCER_SLOT_WIDTH = $clog2(PRODUCER_NUM);
 	localparam int PRODUCER_ID_WIDTH = PRODUCER_SLOT_WIDTH + 1;
 	typedef logic [PRODUCER_SLOT_WIDTH-1:0] producer_slot_t;
@@ -317,7 +325,8 @@ package ydrasil_pkg;
 		logic                                operand_b_jump_sel;
 		logic [OPERATOR_WIDTH-1:0]           operator_info;
 		logic [OP_LSU_INFO_WIDTH-1:0]        operator_lsu;
-		logic [OPERATOR_TYPE_WIDTH-1:0]      operator_type;
+			logic [OPERATOR_TYPE_WIDTH-1:0]      operator_type;
+			logic [RESOURCE_WIDTH-1:0]           resources;
 		logic [CSR_ADDR_WIDTH-1:0]           csr_raddr;
 		logic [CSR_ADDR_WIDTH-1:0]           csr_waddr;
 		logic [OP_CSR_INFO_WIDTH-1:0]        csr_op_info;
