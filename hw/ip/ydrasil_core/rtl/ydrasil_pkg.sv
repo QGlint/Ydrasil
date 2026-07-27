@@ -545,4 +545,11 @@ package ydrasil_pkg;
 		ydrasil_gpr_fwd_pkt_t                 wb1;
 	} ydrasil_issue_wb_pkt_t;
 
+	// Issue-local captures feed back only their control eligibility.  The
+	// captured data remains inside issue_stage and crosses no module boundary.
+	typedef struct packed {
+		logic                                  bru_lsu_rs1_hit;
+		logic                                  bru_lsu_rs2_hit;
+	} ydrasil_issue_feedback_pkt_t;
+
 endpackage

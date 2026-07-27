@@ -12,6 +12,7 @@ import ydrasil_pkg::*;
     input ydrasil_ex_hzd_pkt_t ex_hzd1_i,
     input ydrasil_id_ctrl_pkt_t id_ctrl_i,
     input ydrasil_id_ctrl_pkt_t id_ctrl1_i,
+	input ydrasil_issue_feedback_pkt_t issue_feedback_i,
     input ydrasil_completion_bus_t completion_bus_i,
     input ydrasil_lsu_status_pkt_t lsu_status_i,
     input wire trap_stall_i,
@@ -406,10 +407,10 @@ import ydrasil_pkg::*;
     wire rd_issue_hzd = 1'b0;
     // A bypassable EX writer is newer than any producer already recorded for
     // the same GPR. Do not let that older WAW entry block or wake the consumer.
-	wire rs1_pending_stall = rs1_has_producer && !rs1_producer_ready &&
-		!prev_alu_bypass_rs1;
-	wire rs2_pending_stall = rs2_has_producer && !rs2_producer_ready &&
-		!prev_alu_bypass_rs2;
+	wire bru_lsu_rs1_bypass = issue_feedback_i.bru_lsu_rs1_hit;
+	wire bru_lsu_rs2_bypass = issue_feedback_i.bru_lsu_rs2_hit;
+	wire rs1_pending_stall = rs1_has_producer && !rs1_producer_ready && !prev_alu_bypass_rs1 && !bru_lsu_rs1_bypass;
+	wire rs2_pending_stall = rs2_has_producer && !rs2_producer_ready && !prev_alu_bypass_rs2 && !bru_lsu_rs2_bypass;
 	wire rd_waw_stall = 1'b0;
 	wire store_data_wait = id_ctrl_i.store_req &&
 		rs2_blocking_hzd;
@@ -669,42 +670,34 @@ import ydrasil_pkg::*;
     generate
         for (recovery_idx = 0; recovery_idx < PRODUCER_NUM; recovery_idx++) begin : g_recovery_live
             assign recovery_live_mask[recovery_idx] = resolved_branch_live &&
-                (queue_distance(queue_head_after_commit,
-                    producer_slot_t'(recovery_idx)) < recovery_count);
+				producer_valid_q[recovery_idx] &&
+				((queue_head_after_commit <= resolved_branch_slot) ?
+				 ((producer_slot_t'(recovery_idx) >= queue_head_after_commit) &&
+				  (producer_slot_t'(recovery_idx) <= resolved_branch_slot)) :
+				 ((producer_slot_t'(recovery_idx) >= queue_head_after_commit) ||
+				  (producer_slot_t'(recovery_idx) <= resolved_branch_slot)));
         end
     endgenerate
 
-    reg [REGS_NUM-1:0] recovery_rat_valid;
-    reg [REGS_NUM-1:0] recovery_rat_ready;
-    producer_id_t recovery_rat_id [0:REGS_NUM-1];
-    integer recovery_reg;
-    integer recovery_offset;
-    integer recovery_slot;
-    always_comb begin
-        recovery_rat_valid = '0;
-        recovery_rat_ready = '0;
-        for (recovery_reg = 0; recovery_reg < REGS_NUM; recovery_reg++)
-            recovery_rat_id[recovery_reg] = '0;
-        // Walk old-to-new through the surviving interval.  A later writer to
-        // the same GPR overwrites the earlier tag and reconstructs the RAT.
-        for (recovery_offset = 0; recovery_offset < PRODUCER_NUM;
-             recovery_offset++) begin
-            recovery_slot = queue_head_after_commit + recovery_offset;
-            if (recovery_slot >= PRODUCER_NUM)
-                recovery_slot = recovery_slot - PRODUCER_NUM;
-            if ((recovery_offset < recovery_count) &&
-                producer_valid_q[recovery_slot] &&
-                producer_writes_gpr_q[recovery_slot] &&
-                (producer_rd_q[recovery_slot] != '0)) begin
-                recovery_rat_valid[producer_rd_q[recovery_slot]] = 1'b1;
-                recovery_rat_ready[producer_rd_q[recovery_slot]] =
-                    producer_ready_q[recovery_slot] |
-                    producer_complete_mask[recovery_slot];
-                recovery_rat_id[producer_rd_q[recovery_slot]] =
-                    producer_tag_q[recovery_slot];
-            end
-        end
-    end
+	wire [REGS_NUM-1:0] recovery_rat_valid;
+	wire [REGS_NUM-1:0] recovery_rat_ready;
+	producer_id_t recovery_rat_id [0:REGS_NUM-1];
+	genvar recovery_reg;
+	generate
+		for (recovery_reg = 0; recovery_reg < REGS_NUM;
+			 recovery_reg++) begin : g_recovery_rat_clear
+			wire producer_slot_t rat_slot =
+				latest_id_q[recovery_reg][PRODUCER_SLOT_WIDTH-1:0];
+			wire rat_entry_survives = latest_valid_q[recovery_reg] &&
+				recovery_live_mask[rat_slot] &&
+				(producer_tag_q[rat_slot] == latest_id_q[recovery_reg]);
+			assign recovery_rat_valid[recovery_reg] = rat_entry_survives;
+			assign recovery_rat_ready[recovery_reg] = rat_entry_survives &&
+				(latest_ready_q[recovery_reg] || producer_ready_q[rat_slot] ||
+				 producer_complete_mask[rat_slot]);
+			assign recovery_rat_id[recovery_reg] = latest_id_q[recovery_reg];
+		end
+	endgenerate
 
     integer branch_idx;
     always_ff @(posedge clk or negedge rst_n) begin

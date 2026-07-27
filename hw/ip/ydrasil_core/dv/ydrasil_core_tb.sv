@@ -1074,13 +1074,17 @@ end
                 else
                     dual_other_count <= dual_other_count + 1'b1;
             end
+			assert (dual_alu_alu_count + dual_bru_alu_count +
+				dual_lsu_alu_count + dual_muldiv_alu_count +
+				dual_other_count == dual_issue_count)
+				else $fatal(1, "dual-issue resource classification lost a pair");
             if (u_dut.u_ydrasil_if_stage.fetch_issue) begin
                 l0_lookup_count <= l0_lookup_count +
                     (u_dut.u_ydrasil_if_stage.fetch_two ? 2'd2 : 2'd1);
                 l0_hit_count <= l0_hit_count + u_dut.l0_hit +
                     (u_dut.u_ydrasil_if_stage.fetch_two ? u_dut.l0_hit1 : 1'b0);
             end
-            if (u_dut.u_ydrasil_if_stage.predict_redirect_resp) begin
+            if (u_dut.u_ydrasil_if_stage.predict_correction_resp) begin
                 l0_correction_count <= l0_correction_count + 1'b1;
             end
 

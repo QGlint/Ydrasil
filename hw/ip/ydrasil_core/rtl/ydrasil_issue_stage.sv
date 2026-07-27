@@ -15,6 +15,7 @@ import ydrasil_pkg::*;
     output wire                            issue_ready_o,
     output wire                            issue_consume_two_o,
     output wire                            issue_slot1_replay_o,
+	output ydrasil_issue_feedback_pkt_t     issue_feedback_o,
 
     // Register file read ports 
     output wire [4:0]                      rf_addr_rs1_o,
@@ -252,6 +253,8 @@ import ydrasil_pkg::*;
     wire bru_lsu_rs2_hit = issue_is_branch && bru_lsu_rs2_valid_q &&
         producer_rs2_fwd_i.producer_tracked &&
         (bru_lsu_rs2_tag_q == producer_rs2_fwd_i.producer_id);
+	assign issue_feedback_o.bru_lsu_rs1_hit = bru_lsu_rs1_hit;
+	assign issue_feedback_o.bru_lsu_rs2_hit = bru_lsu_rs2_hit;
 `ifndef SYNTHESIS
     // Retain zero-valued observability points used by the coverage testbench.
     // The former issue-stage early ALU is intentionally removed from hardware.

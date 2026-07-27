@@ -327,6 +327,7 @@ import ydrasil_axi_pkg::*;
 	reg [1:0]                       issue_pipe_tail_q;
 	reg [2:0]                       issue_pipe_count_q;
 	ydrasil_issue_wb_pkt_t          issue_wb_pkt;
+	ydrasil_issue_feedback_pkt_t    issue_feedback_pkt;
 	wire                            issue_ready;
 	wire                            issue_consume_two;
 	wire                            issue_slot1_replay;
@@ -1026,6 +1027,7 @@ import ydrasil_axi_pkg::*;
 		.issue_ready_o       (issue_ready),
 		.issue_consume_two_o (issue_consume_two),
 		.issue_slot1_replay_o(issue_slot1_replay),
+		.issue_feedback_o   (issue_feedback_pkt),
 		.rf_addr_rs1_o       (rf_raddr_rs1),
 		.rf_addr_rs2_o      (rf_raddr_rs2),
 		.rf_addr_rs3_o      (rf_raddr_rs3),
@@ -1279,6 +1281,7 @@ import ydrasil_axi_pkg::*;
 			.ex_hzd1_i         (ex_hzd_pkt1),
 			.id_ctrl_i         (id_ctrl_pkt),
 			.id_ctrl1_i        (id_ctrl_pkt1),
+			.issue_feedback_i  (issue_feedback_pkt),
 			.completion_bus_i  (completion_bus),
 			.lsu_status_i      (lsu_status_pkt),
 				.trap_stall_i      (trap_stall),
