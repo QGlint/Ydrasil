@@ -1,120 +1,114 @@
 module ydrasil_load_store_unit
 import ydrasil_pkg::*;
 (
-    input  wire clk,
-    input  wire rst_n,
-
+    input  wire                            clk,
+    input  wire                            rst_n,
     input  ydrasil_lsu_req_pkt_t           req_i,
-    input  ydrasil_completion_bus_t        completion_bus_i,
-
     input  wire [BUS_DATA_WIDTH-1:0]       dtcm_rdata_i,
-    output ydrasil_mem_req_pkt_t           dtcm_req_o,
-
+    output ydrasil_dtcm_req_pkt_t          dtcm_req_o,
     input  ydrasil_mem_rsp_pkt_t           mmio_rsp_i,
     output ydrasil_mem_req_pkt_t           mmio_req_o,
-
     output ydrasil_lsu_status_pkt_t        status_o,
     output ydrasil_gpr_fwd_pkt_t           completion_o,
     output wire                            fp_completion_valid_o,
     output wire [REGS_ADDR_WIDTH-1:0]      fp_completion_addr_o,
     output wire [REGS_DATA_WIDTH-1:0]      fp_completion_data_o
 );
-    localparam int QUEUE_DEPTH = 4;
+    localparam int QUEUE_DEPTH = 2;
+    localparam int STORE_BUFFER_DEPTH = 4;
     localparam int QUEUE_COUNT_WIDTH = $clog2(QUEUE_DEPTH + 1);
+    localparam int STORE_COUNT_WIDTH = $clog2(STORE_BUFFER_DEPTH + 1);
+
+    function automatic [31:0] align_store_data(
+        input [OP_LSU_INFO_WIDTH-1:0] op,
+        input [1:0] addr_index,
+        input [31:0] raw_data
+    );
+        begin
+            align_store_data = raw_data;
+            if (op[OP_LSU_SB]) begin
+                unique case (addr_index)
+                    2'b00: align_store_data = {24'b0, raw_data[7:0]};
+                    2'b01: align_store_data = {16'b0, raw_data[7:0], 8'b0};
+                    2'b10: align_store_data = {8'b0, raw_data[7:0], 16'b0};
+                    default: align_store_data = {raw_data[7:0], 24'b0};
+                endcase
+            end else if (op[OP_LSU_SH]) begin
+                align_store_data = addr_index[1] ?
+                    {raw_data[15:0], 16'b0} : {16'b0, raw_data[15:0]};
+            end
+        end
+    endfunction
 
     ydrasil_lsu_req_pkt_t queue_q [0:QUEUE_DEPTH-1];
     reg [QUEUE_COUNT_WIDTH-1:0] queue_count_q;
+    ydrasil_lsu_req_pkt_t store_buf_q [0:STORE_BUFFER_DEPTH-1];
+    reg [STORE_COUNT_WIDTH-1:0] store_buf_count_q;
 
-    wire input_is_load = req_i.is_load;
-    wire input_is_store = req_i.is_store;
-    wire input_valid = req_i.valid;
-    wire queue_empty = (queue_count_q == '0);
-    wire queue_full = (queue_count_q == QUEUE_COUNT_WIDTH'(QUEUE_DEPTH));
+    wire queue_empty = queue_count_q == '0;
+    wire queue_full = queue_count_q == QUEUE_COUNT_WIDTH'(QUEUE_DEPTH);
+    wire store_buf_empty = store_buf_count_q == '0;
+    wire store_buf_full =
+        store_buf_count_q == STORE_COUNT_WIDTH'(STORE_BUFFER_DEPTH);
+
+    // Completion data first lands in the store buffer.  Draining or forwarding
+    // it in the wakeup cycle would put tag matching, data selection and store
+    // alignment on the DTCM write path in one 200 MHz cycle.
+    wire store_head_data_valid = !store_buf_empty &&
+        store_buf_q[0].store_data_valid;
+    wire [31:0] store_head_raw_data = store_buf_q[0].store_data;
+    wire [31:0] store_head_wdata = align_store_data(
+        store_buf_q[0].op, store_buf_q[0].addr[1:0], store_head_raw_data);
+    wire store_buf_dequeue = store_head_data_valid;
+
+	ydrasil_lsu_req_pkt_t active_pkt;
+	assign active_pkt = queue_empty ? req_i : queue_q[0];
+
     wire active_from_queue = !queue_empty;
+    wire active_valid = active_pkt.valid;
+    wire active_dtcm_load = active_valid && active_pkt.addr_is_dtcm &&
+        active_pkt.is_load;
+    wire active_dtcm_store = active_valid && active_pkt.addr_is_dtcm &&
+        active_pkt.is_store;
+    wire active_mmio = active_valid && !active_pkt.addr_is_dtcm;
 
-    reg input_wake_valid;
-    reg [REGS_DATA_WIDTH-1:0] input_wake_data;
-    reg [QUEUE_DEPTH-1:0] queue_wake_valid;
-    reg [REGS_DATA_WIDTH-1:0] queue_wake_data [0:QUEUE_DEPTH-1];
-    integer wake_entry;
-    integer wake_lane;
-
+    reg load_store_pending;
+    reg [3:0] load_forward_mask;
+    reg [31:0] load_forward_data;
+    reg [31:0] store_aligned_data [0:STORE_BUFFER_DEPTH-1];
+    integer store_scan;
+    integer byte_scan;
     always_comb begin
-        input_wake_valid = 1'b0;
-        input_wake_data = '0;
-        for (wake_entry = 0; wake_entry < QUEUE_DEPTH; wake_entry = wake_entry + 1) begin
-            queue_wake_valid[wake_entry] = 1'b0;
-            queue_wake_data[wake_entry] = '0;
-            for (wake_lane = 0; wake_lane < COMPLETION_LANES; wake_lane = wake_lane + 1) begin
-                if (queue_q[wake_entry].valid &&
-                    queue_q[wake_entry].store_data_producer_tracked &&
-                    completion_bus_i[wake_lane].valid &&
-                    completion_bus_i[wake_lane].producer_tracked &&
-                    (completion_bus_i[wake_lane].producer_id ==
-                     queue_q[wake_entry].store_data_producer_id)) begin
-                    queue_wake_valid[wake_entry] = 1'b1;
-                    queue_wake_data[wake_entry] = completion_bus_i[wake_lane].data;
-                end
-                if (input_valid && input_is_store && !req_i.store_data_valid &&
-                    req_i.store_data_producer_tracked &&
-                    completion_bus_i[wake_lane].valid &&
-                    completion_bus_i[wake_lane].producer_tracked &&
-                    (completion_bus_i[wake_lane].producer_id ==
-                     req_i.store_data_producer_id)) begin
-                    input_wake_valid = 1'b1;
-                    input_wake_data = completion_bus_i[wake_lane].data;
+        load_store_pending = 1'b0;
+        load_forward_mask = '0;
+        load_forward_data = '0;
+        for (store_scan = 0; store_scan < STORE_BUFFER_DEPTH; store_scan++) begin
+            store_aligned_data[store_scan] = align_store_data(
+                store_buf_q[store_scan].op,
+                store_buf_q[store_scan].addr[1:0],
+                store_buf_q[store_scan].store_data);
+            if ((store_scan < store_buf_count_q) &&
+                store_buf_q[store_scan].valid &&
+                (store_buf_q[store_scan].addr[BUS_ADDR_WIDTH-1:2] ==
+                 active_pkt.addr[BUS_ADDR_WIDTH-1:2])) begin
+                if (!store_buf_q[store_scan].store_data_valid) begin
+                    load_store_pending = 1'b1;
+                end else begin
+                    for (byte_scan = 0; byte_scan < 4; byte_scan++) begin
+                        if (store_buf_q[store_scan].store_mask[byte_scan]) begin
+                            load_forward_mask[byte_scan] = 1'b1;
+                            load_forward_data[byte_scan*8 +: 8] =
+                                store_aligned_data[store_scan]
+                                    [byte_scan*8 +: 8];
+                        end
+                    end
                 end
             end
         end
     end
 
-    wire active_is_load = active_from_queue ? queue_q[0].is_load : input_is_load;
-    wire active_is_store = active_from_queue ? queue_q[0].is_store : input_is_store;
-    wire [OP_LSU_INFO_WIDTH-1:0] active_op = active_from_queue ?
-        queue_q[0].op : req_i.op;
-    wire [BUS_ADDR_WIDTH-1:0] active_addr = active_from_queue ?
-        queue_q[0].addr : req_i.addr;
-    wire active_addr_is_dtcm = active_from_queue ?
-        queue_q[0].addr_is_dtcm : req_i.addr_is_dtcm;
-    wire [REGS_ADDR_WIDTH-1:0] active_rd_addr = active_from_queue ?
-        queue_q[0].rd_addr : req_i.rd_addr;
-    producer_id_t active_producer_id;
-    assign active_producer_id = active_from_queue ?
-        queue_q[0].producer_id : req_i.producer_id;
-    wire active_producer_tracked = active_from_queue ?
-        queue_q[0].producer_tracked : req_i.producer_tracked;
-    wire active_fp_load = active_from_queue ? queue_q[0].fp_load : req_i.fp_load;
-    wire [REGS_ADDR_WIDTH-1:0] active_fp_rd_addr = active_from_queue ?
-        queue_q[0].fp_rd_addr : req_i.fp_rd_addr;
-    wire [3:0] active_store_mask = active_from_queue ?
-        queue_q[0].store_mask : req_i.store_mask;
-    wire [REGS_DATA_WIDTH-1:0] active_store_raw_data = active_from_queue ?
-        queue_q[0].store_data : req_i.store_data;
-    wire active_store_data_valid = active_from_queue ?
-        queue_q[0].store_data_valid : req_i.store_data_valid;
-    wire active_valid = active_from_queue | input_valid;
-    wire [1:0] active_addr_index = active_addr[1:0];
-
-    reg [31:0] active_store_data;
-    always_comb begin
-        active_store_data = active_store_raw_data;
-        if (active_op[OP_LSU_SB]) begin
-            unique case (active_addr_index)
-                2'b00: active_store_data = {24'b0, active_store_raw_data[7:0]};
-                2'b01: active_store_data = {16'b0, active_store_raw_data[7:0], 8'b0};
-                2'b10: active_store_data = {8'b0, active_store_raw_data[7:0], 16'b0};
-                default: active_store_data = {active_store_raw_data[7:0], 24'b0};
-            endcase
-        end else if (active_op[OP_LSU_SH]) begin
-            active_store_data = active_addr_index[1] ?
-                {active_store_raw_data[15:0], 16'b0} :
-                {16'b0, active_store_raw_data[15:0]};
-        end
-    end
-
     reg mmio_req_valid_q;
     reg mmio_is_load_q;
-    reg mmio_is_store_q;
     reg [BUS_ADDR_WIDTH-1:0] mmio_addr_q;
     reg [BUS_DATA_WIDTH-1:0] mmio_wdata_q;
     reg [3:0] mmio_wmask_q;
@@ -126,222 +120,180 @@ import ydrasil_pkg::*;
     reg mmio_fp_load_q;
     reg [REGS_ADDR_WIDTH-1:0] mmio_fp_rd_addr_q;
     reg mmio_wb_valid_q;
-    reg [REGS_DATA_WIDTH-1:0] mmio_wb_result_q;
+    reg [31:0] mmio_wb_result_q;
     reg [REGS_ADDR_WIDTH-1:0] mmio_wb_rd_addr_q;
     producer_id_t mmio_wb_producer_id_q;
     reg mmio_wb_producer_tracked_q;
     reg mmio_wb_fp_load_q;
     reg [REGS_ADDR_WIDTH-1:0] mmio_wb_fp_rd_addr_q;
-    wire mmio_busy = mmio_req_valid_q | mmio_wb_valid_q;
+    wire mmio_busy = mmio_req_valid_q || mmio_wb_valid_q;
 
     reg load_s1_valid_q;
     reg [REGS_ADDR_WIDTH-1:0] load_s1_rd_addr_q;
     producer_id_t load_s1_producer_id_q;
     reg load_s1_producer_tracked_q;
-    reg [OP_LSU_INFO_WIDTH-1:0] load_s1_operator_lsu_q;
+    reg [OP_LSU_INFO_WIDTH-1:0] load_s1_op_q;
     reg [1:0] load_s1_addr_index_q;
-    reg [BUS_ADDR_WIDTH-1:2] load_s1_word_addr_q;
-    reg [1:0] load_s1_hot_generation_q;
+    reg [3:0] load_s1_forward_mask_q;
+    reg [31:0] load_s1_forward_data_q;
     reg load_s1_fp_load_q;
     reg [REGS_ADDR_WIDTH-1:0] load_s1_fp_rd_addr_q;
 
-    reg load_s2_valid_q;
-    reg [REGS_ADDR_WIDTH-1:0] load_s2_rd_addr_q;
-    producer_id_t load_s2_producer_id_q;
-    reg load_s2_producer_tracked_q;
-    reg [OP_LSU_INFO_WIDTH-1:0] load_s2_operator_lsu_q;
-    reg [1:0] load_s2_addr_index_q;
-    reg load_s2_hot_q;
-    reg [REGS_DATA_WIDTH-1:0] load_s2_hot_shifted_q;
-    reg load_s2_fp_load_q;
-    reg [REGS_ADDR_WIDTH-1:0] load_s2_fp_rd_addr_q;
-
-    localparam int HOT_ENTRIES = 8;
-    localparam int HOT_INDEX_WIDTH = $clog2(HOT_ENTRIES);
-    reg [HOT_ENTRIES-1:0] hot_valid_q;
-    reg [BUS_ADDR_WIDTH-1:2] hot_addr_q [0:HOT_ENTRIES-1];
-    reg [31:0] hot_data_q [0:HOT_ENTRIES-1];
-    reg [1:0] hot_generation_q [0:HOT_ENTRIES-1];
-    reg hot_lookup_hit;
-    reg [HOT_INDEX_WIDTH-1:0] hot_lookup_idx;
-    reg [31:0] hot_lookup_data;
-    reg hot_fill_valid_q;
-    reg [BUS_ADDR_WIDTH-1:2] hot_fill_addr_q;
-    reg [1:0] hot_fill_generation_q;
-    wire dtcm_store_req;
-    wire [HOT_INDEX_WIDTH-1:0] hot_fill_idx =
-        hot_fill_addr_q[HOT_INDEX_WIDTH+1:2];
-    wire hot_fill_store_same_index = hot_fill_valid_q && dtcm_store_req &&
-        (hot_fill_idx == hot_lookup_idx);
-    integer hot_idx;
-
-    always_comb begin
-        hot_lookup_idx = active_addr[HOT_INDEX_WIDTH+1:2];
-        hot_lookup_hit = hot_valid_q[hot_lookup_idx] &&
-            (hot_addr_q[hot_lookup_idx] == active_addr[BUS_ADDR_WIDTH-1:2]);
-        hot_lookup_data = hot_data_q[hot_lookup_idx];
-    end
-
-    // MMIO is a strict ordering boundary; no younger DTCM request may pass it.
-    wire dtcm_backend_ready = !mmio_busy;
-    wire active_operand_ready = active_is_load |
-        (active_is_store & active_store_data_valid);
-    wire dtcm_fire = active_valid & active_addr_is_dtcm &
-        active_operand_ready & dtcm_backend_ready;
-    wire mmio_fire = active_valid & !active_addr_is_dtcm &
-        active_operand_ready & !mmio_busy;
-    wire active_fire = dtcm_fire | mmio_fire;
-    wire queue_dequeue = active_from_queue & active_fire;
-    wire input_direct_fire = !active_from_queue & active_fire;
-    wire queue_enqueue = input_valid & (active_from_queue | !input_direct_fire);
+    // Give a buffered peripheral response a bounded path to completion. At
+    // most one already-issued DTCM response remains after this hold asserts.
+    wire load_issue_hold = mmio_wb_valid_q ||
+        (mmio_req_valid_q && mmio_rsp_i.valid && mmio_is_load_q);
+    // The request interface is a full FF boundary. Every E-stage request first
+    // enters the two-entry queue; CAM lookup and DTCM launch only consume queue
+    // registers on the following cycle.
+    wire active_load_ready = !load_store_pending;
+    wire dtcm_load_fire = active_dtcm_load && active_load_ready &&
+        !load_issue_hold;
+    wire store_buf_has_room = !store_buf_full || store_buf_dequeue;
+    wire dtcm_store_fire = active_dtcm_store && store_buf_has_room;
+    // MMIO observes all older buffered stores before it starts. Once launched,
+    // younger DTCM requests can proceed independently while APB is busy.
+    wire active_store_data_valid = active_pkt.store_data_valid;
+    wire mmio_fire = active_mmio && !mmio_busy && store_buf_empty &&
+        (!active_pkt.is_store || active_store_data_valid);
+    wire active_fire = dtcm_load_fire || dtcm_store_fire || mmio_fire;
+    wire input_direct_fire = active_fire && !active_from_queue;
+    wire queue_dequeue = active_fire && active_from_queue;
     wire [QUEUE_COUNT_WIDTH-1:0] queue_post_dequeue_count =
         queue_count_q - (queue_dequeue ? QUEUE_COUNT_WIDTH'(1) : '0);
+    wire queue_enqueue = req_i.valid && !input_direct_fire &&
+        (queue_post_dequeue_count < QUEUE_COUNT_WIDTH'(QUEUE_DEPTH));
+    wire store_buf_enqueue = dtcm_store_fire;
+    wire [STORE_COUNT_WIDTH-1:0] store_post_dequeue_count =
+        store_buf_count_q - (store_buf_dequeue ? STORE_COUNT_WIDTH'(1) : '0);
+
 `ifndef SYNTHESIS
-    // Compatibility probes for the existing coverage counters. A shift queue
-    // has a fixed head; its insertion position is the post-dequeue count.
     wire [1:0] queue_head_q = 2'b00;
-    wire [1:0] queue_tail_q = queue_post_dequeue_count[1:0];
+    wire [1:0] queue_tail_q = 2'(queue_post_dequeue_count);
+    reg [31:0] perf_stb_lookup_q;
+    reg [31:0] perf_stb_hit_q;
+    reg [31:0] perf_stb_block_q;
+    reg [31:0] perf_stb_drain_q;
 `endif
-    ydrasil_lsu_req_pkt_t enqueue_pkt;
+
+    // Backpressure reflects request-queue capacity. Store-buffer pressure is
+    // absorbed behind this FF boundary and only stops the queue head when all
+    // four entries are actually occupied.
+    assign status_o.busy = queue_full ||
+        (req_i.valid &&
+         (queue_count_q >= QUEUE_COUNT_WIDTH'(QUEUE_DEPTH-1)));
+    assign status_o.idle = queue_empty && !req_i.valid && store_buf_empty &&
+        !mmio_busy && !load_s1_valid_q;
+    assign status_o.fast_load = 1'b0;
+
     always_comb begin
-        enqueue_pkt = req_i;
-        enqueue_pkt.valid = 1'b1;
-        enqueue_pkt.store_data = req_i.store_data_valid ?
-            req_i.store_data : input_wake_data;
-        enqueue_pkt.store_data_valid = input_is_load |
-            req_i.store_data_valid | input_wake_valid;
+        dtcm_req_o = '0;
+        dtcm_req_o.load.valid = dtcm_load_fire;
+        dtcm_req_o.load.addr = active_pkt.addr;
+        dtcm_req_o.store.valid = store_buf_dequeue;
+        dtcm_req_o.store.write = store_buf_dequeue;
+        dtcm_req_o.store.addr = store_buf_q[0].addr;
+        dtcm_req_o.store.wdata = store_head_wdata;
+        dtcm_req_o.store.wmask = store_buf_q[0].store_mask;
     end
-
-    localparam bit HOT_BYPASS_ENABLE = 1'b1;
-    wire hot_load_req = dtcm_fire & active_is_load & hot_lookup_hit &
-        HOT_BYPASS_ENABLE & !load_s1_valid_q;
-    wire dtcm_array_load_req = dtcm_fire & active_is_load &
-        !(hot_lookup_hit & HOT_BYPASS_ENABLE & !load_s1_valid_q);
-    assign dtcm_store_req = dtcm_fire & active_is_store;
-    wire [31:0] hot_load_shifted = hot_lookup_data >>
-        ({3'b000, active_addr_index} << 3);
-
-    assign status_o.fast_load = hot_load_req & !active_from_queue;
-    assign status_o.busy = queue_count_q >= QUEUE_COUNT_WIDTH'(QUEUE_DEPTH-1);
-    assign status_o.idle = queue_empty & !input_valid & !mmio_busy &
-        !load_s1_valid_q & !load_s2_valid_q;
-
-    assign dtcm_req_o.valid = dtcm_array_load_req | dtcm_store_req;
-    assign dtcm_req_o.write = dtcm_store_req;
-    assign dtcm_req_o.addr = active_addr;
-    // valid/write are the only BRAM side-effect controls.  Keep address decode
-    // out of the data and mask cones so a new direct request does not carry the
-    // AGU path into the BRAM data inputs.
-    assign dtcm_req_o.wmask = active_store_mask;
-    assign dtcm_req_o.wdata = active_store_data;
 
     assign mmio_req_o.valid = mmio_req_valid_q;
-    assign mmio_req_o.write = mmio_req_valid_q & mmio_is_store_q;
+    assign mmio_req_o.write = mmio_req_valid_q && !mmio_is_load_q;
     assign mmio_req_o.addr = mmio_addr_q;
-    assign mmio_req_o.wmask = mmio_req_o.write ? mmio_wmask_q : 4'b0000;
-    assign mmio_req_o.wdata = mmio_req_o.write ? mmio_wdata_q : 32'b0;
+    assign mmio_req_o.wdata = mmio_wdata_q;
+    assign mmio_req_o.wmask = mmio_req_o.write ? mmio_wmask_q : 4'b0;
 
-    reg [31:0] load_s2_array_shifted;
+    reg [31:0] load_merged_word;
+    reg [31:0] load_shifted;
     reg [31:0] dtcm_load_result;
     reg [31:0] mmio_load_result;
-
     always_comb begin
-        unique case (load_s2_addr_index_q)
-            2'b00: load_s2_array_shifted = dtcm_rdata_i;
-            2'b01: load_s2_array_shifted = {8'b0, dtcm_rdata_i[31:8]};
-            2'b10: load_s2_array_shifted = {16'b0, dtcm_rdata_i[31:16]};
-            default: load_s2_array_shifted = {24'b0, dtcm_rdata_i[31:24]};
-        endcase
-    end
-
-    wire [31:0] load_s2_shifted = load_s2_hot_q ?
-        load_s2_hot_shifted_q : load_s2_array_shifted;
-
-    always_comb begin
-        dtcm_load_result = load_s2_shifted;
+        load_merged_word = dtcm_rdata_i;
+        for (byte_scan = 0; byte_scan < 4; byte_scan++) begin
+            if (load_s1_forward_mask_q[byte_scan])
+                load_merged_word[byte_scan*8 +: 8] =
+                    load_s1_forward_data_q[byte_scan*8 +: 8];
+        end
+        load_shifted = load_merged_word >>
+            ({3'b000, load_s1_addr_index_q} << 3);
+        dtcm_load_result = load_shifted;
         unique case (1'b1)
-            load_s2_operator_lsu_q[OP_LSU_LB]:
-                dtcm_load_result = {{24{load_s2_shifted[7]}}, load_s2_shifted[7:0]};
-            load_s2_operator_lsu_q[OP_LSU_LBU]:
-                dtcm_load_result = {24'b0, load_s2_shifted[7:0]};
-            load_s2_operator_lsu_q[OP_LSU_LH]:
-                dtcm_load_result = {{16{load_s2_shifted[15]}}, load_s2_shifted[15:0]};
-            load_s2_operator_lsu_q[OP_LSU_LHU]:
-                dtcm_load_result = {16'b0, load_s2_shifted[15:0]};
-            default: dtcm_load_result = load_s2_shifted;
+            load_s1_op_q[OP_LSU_LB]:
+                dtcm_load_result = {{24{load_shifted[7]}}, load_shifted[7:0]};
+            load_s1_op_q[OP_LSU_LBU]:
+                dtcm_load_result = {24'b0, load_shifted[7:0]};
+            load_s1_op_q[OP_LSU_LH]:
+                dtcm_load_result = {{16{load_shifted[15]}}, load_shifted[15:0]};
+            load_s1_op_q[OP_LSU_LHU]:
+                dtcm_load_result = {16'b0, load_shifted[15:0]};
+            default: dtcm_load_result = load_shifted;
         endcase
-    end
 
-    always_comb begin
-        mmio_load_result = mmio_rsp_i.rdata;
+        mmio_load_result = mmio_rsp_i.rdata >>
+            ({3'b000, mmio_addr_index_q} << 3);
         unique case (1'b1)
-            mmio_operator_lsu_q[OP_LSU_LB]: begin
-                unique case (mmio_addr_index_q)
-                    2'b00: mmio_load_result = {{24{mmio_rsp_i.rdata[7]}}, mmio_rsp_i.rdata[7:0]};
-                    2'b01: mmio_load_result = {{24{mmio_rsp_i.rdata[15]}}, mmio_rsp_i.rdata[15:8]};
-                    2'b10: mmio_load_result = {{24{mmio_rsp_i.rdata[23]}}, mmio_rsp_i.rdata[23:16]};
-                    default: mmio_load_result = {{24{mmio_rsp_i.rdata[31]}}, mmio_rsp_i.rdata[31:24]};
-                endcase
-            end
-            mmio_operator_lsu_q[OP_LSU_LBU]: begin
-                unique case (mmio_addr_index_q)
-                    2'b00: mmio_load_result = {24'b0, mmio_rsp_i.rdata[7:0]};
-                    2'b01: mmio_load_result = {24'b0, mmio_rsp_i.rdata[15:8]};
-                    2'b10: mmio_load_result = {24'b0, mmio_rsp_i.rdata[23:16]};
-                    default: mmio_load_result = {24'b0, mmio_rsp_i.rdata[31:24]};
-                endcase
-            end
+            mmio_operator_lsu_q[OP_LSU_LB]:
+                mmio_load_result = {{24{mmio_load_result[7]}}, mmio_load_result[7:0]};
+            mmio_operator_lsu_q[OP_LSU_LBU]:
+                mmio_load_result = {24'b0, mmio_load_result[7:0]};
             mmio_operator_lsu_q[OP_LSU_LH]:
-                mmio_load_result = mmio_addr_index_q[1] ?
-                    {{16{mmio_rsp_i.rdata[31]}}, mmio_rsp_i.rdata[31:16]} :
-                    {{16{mmio_rsp_i.rdata[15]}}, mmio_rsp_i.rdata[15:0]};
+                mmio_load_result = {{16{mmio_load_result[15]}}, mmio_load_result[15:0]};
             mmio_operator_lsu_q[OP_LSU_LHU]:
-                mmio_load_result = mmio_addr_index_q[1] ?
-                    {16'b0, mmio_rsp_i.rdata[31:16]} : {16'b0, mmio_rsp_i.rdata[15:0]};
-            default: mmio_load_result = mmio_rsp_i.rdata;
+                mmio_load_result = {16'b0, mmio_load_result[15:0]};
+            default: mmio_load_result = mmio_load_result;
         endcase
     end
 
-    wire dtcm_wb_valid = load_s2_valid_q;
-    wire mmio_wb_out_valid = mmio_wb_valid_q & !dtcm_wb_valid;
-    wire [REGS_DATA_WIDTH-1:0] selected_wb_result = dtcm_wb_valid ?
+    // The BRAM output and S1 metadata are the LSU response. Future File is the
+    // second response register; a separate load_s2 register would add a third
+    // cycle before the value becomes usable.
+    wire dtcm_wb_valid = load_s1_valid_q;
+    wire mmio_wb_out_valid = mmio_wb_valid_q && !dtcm_wb_valid;
+    assign completion_o.valid = dtcm_wb_valid ?
+        load_s1_producer_tracked_q :
+        (mmio_wb_out_valid && mmio_wb_producer_tracked_q);
+    assign completion_o.data = dtcm_wb_valid ?
         dtcm_load_result : mmio_wb_result_q;
-    wire [REGS_ADDR_WIDTH-1:0] selected_wb_rd_addr = dtcm_wb_valid ?
-        load_s2_rd_addr_q : mmio_wb_rd_addr_q;
-    wire selected_wb_fp_load = dtcm_wb_valid ? load_s2_fp_load_q : mmio_wb_fp_load_q;
-    wire selected_wb_producer_tracked = dtcm_wb_valid ?
-        load_s2_producer_tracked_q : mmio_wb_producer_tracked_q;
-    wire [REGS_ADDR_WIDTH-1:0] selected_wb_fp_rd_addr = dtcm_wb_valid ?
-        load_s2_fp_rd_addr_q : mmio_wb_fp_rd_addr_q;
-
-    assign completion_o.valid =
-        (dtcm_wb_valid | mmio_wb_out_valid) && selected_wb_producer_tracked;
-    assign completion_o.data = selected_wb_result;
-    assign completion_o.addr = completion_o.valid ? selected_wb_rd_addr : '0;
+    assign completion_o.addr = dtcm_wb_valid ?
+        load_s1_rd_addr_q : mmio_wb_rd_addr_q;
     assign completion_o.producer_id = dtcm_wb_valid ?
-        load_s2_producer_id_q : mmio_wb_producer_id_q;
-    assign completion_o.producer_tracked = selected_wb_producer_tracked;
-    assign fp_completion_valid_o = (dtcm_wb_valid | mmio_wb_out_valid) && selected_wb_fp_load;
-    assign fp_completion_addr_o = selected_wb_fp_rd_addr;
-    assign fp_completion_data_o = selected_wb_result;
+        load_s1_producer_id_q : mmio_wb_producer_id_q;
+    assign completion_o.producer_tracked = dtcm_wb_valid ?
+        load_s1_producer_tracked_q : mmio_wb_producer_tracked_q;
+    assign fp_completion_valid_o = dtcm_wb_valid ? load_s1_fp_load_q :
+        (mmio_wb_out_valid && mmio_wb_fp_load_q);
+    assign fp_completion_addr_o = dtcm_wb_valid ?
+        load_s1_fp_rd_addr_q : mmio_wb_fp_rd_addr_q;
+    assign fp_completion_data_o = completion_o.data;
 
-`ifndef SYNTHESIS
-    reg [31:0] perf_hot_lookup_q;
-    reg [31:0] perf_hot_hit_q;
-    reg [31:0] perf_hot_fill_q;
-    reg [31:0] perf_hot_store_update_q;
-`endif
+	ydrasil_lsu_req_pkt_t enqueue_pkt;
+	always_comb begin
+		enqueue_pkt = req_i;
+		enqueue_pkt.valid = 1'b1;
+	end
 
     integer queue_idx;
-    always_ff @(posedge clk or negedge rst_n) begin
+    integer store_idx;
+	always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             queue_count_q <= '0;
-            for (queue_idx = 0; queue_idx < QUEUE_DEPTH; queue_idx = queue_idx + 1)
+            store_buf_count_q <= '0;
+            for (queue_idx = 0; queue_idx < QUEUE_DEPTH; queue_idx++)
                 queue_q[queue_idx] <= '0;
-
+            for (store_idx = 0; store_idx < STORE_BUFFER_DEPTH; store_idx++)
+                store_buf_q[store_idx] <= '0;
+            load_s1_valid_q <= 1'b0;
+            load_s1_rd_addr_q <= '0;
+            load_s1_producer_id_q <= '0;
+            load_s1_producer_tracked_q <= 1'b0;
+            load_s1_op_q <= '0;
+            load_s1_addr_index_q <= '0;
+            load_s1_forward_mask_q <= '0;
+            load_s1_forward_data_q <= '0;
+            load_s1_fp_load_q <= 1'b0;
+            load_s1_fp_rd_addr_q <= '0;
             mmio_req_valid_q <= 1'b0;
             mmio_is_load_q <= 1'b0;
-            mmio_is_store_q <= 1'b0;
             mmio_addr_q <= '0;
             mmio_wdata_q <= '0;
             mmio_wmask_q <= '0;
@@ -359,138 +311,56 @@ import ydrasil_pkg::*;
             mmio_wb_producer_tracked_q <= 1'b0;
             mmio_wb_fp_load_q <= 1'b0;
             mmio_wb_fp_rd_addr_q <= '0;
-
-            load_s1_valid_q <= 1'b0;
-            load_s1_rd_addr_q <= '0;
-            load_s1_producer_id_q <= '0;
-            load_s1_producer_tracked_q <= 1'b0;
-            load_s1_operator_lsu_q <= '0;
-            load_s1_addr_index_q <= '0;
-            load_s1_word_addr_q <= '0;
-            load_s1_hot_generation_q <= '0;
-            load_s1_fp_load_q <= 1'b0;
-            load_s1_fp_rd_addr_q <= '0;
-            load_s2_valid_q <= 1'b0;
-            load_s2_rd_addr_q <= '0;
-            load_s2_producer_id_q <= '0;
-            load_s2_producer_tracked_q <= 1'b0;
-            load_s2_operator_lsu_q <= '0;
-            load_s2_addr_index_q <= '0;
-            load_s2_hot_q <= 1'b0;
-            load_s2_hot_shifted_q <= '0;
-            load_s2_fp_load_q <= 1'b0;
-            load_s2_fp_rd_addr_q <= '0;
-
-            hot_valid_q <= '0;
-            hot_fill_valid_q <= 1'b0;
-            hot_fill_addr_q <= '0;
-            hot_fill_generation_q <= '0;
-            for (hot_idx = 0; hot_idx < HOT_ENTRIES; hot_idx = hot_idx + 1) begin
-                hot_addr_q[hot_idx] <= '0;
-                hot_data_q[hot_idx] <= '0;
-                hot_generation_q[hot_idx] <= '0;
-            end
 `ifndef SYNTHESIS
-            perf_hot_lookup_q <= '0;
-            perf_hot_hit_q <= '0;
-            perf_hot_fill_q <= '0;
-            perf_hot_store_update_q <= '0;
+            perf_stb_lookup_q <= '0;
+            perf_stb_hit_q <= '0;
+            perf_stb_block_q <= '0;
+            perf_stb_drain_q <= '0;
 `endif
         end else begin
-            for (queue_idx = 0; queue_idx < QUEUE_DEPTH; queue_idx = queue_idx + 1) begin
-                if (queue_wake_valid[queue_idx] && !queue_q[queue_idx].store_data_valid) begin
-                    queue_q[queue_idx].store_data_valid <= 1'b1;
-                    queue_q[queue_idx].store_data <= queue_wake_data[queue_idx];
-                end
-            end
-
-            if (queue_dequeue) begin
-                for (queue_idx = 0; queue_idx < QUEUE_DEPTH-1; queue_idx = queue_idx + 1) begin
-                    queue_q[queue_idx] <= queue_q[queue_idx+1];
-                    if (queue_wake_valid[queue_idx+1] &&
-                        !queue_q[queue_idx+1].store_data_valid) begin
-                        queue_q[queue_idx].store_data_valid <= 1'b1;
-                        queue_q[queue_idx].store_data <= queue_wake_data[queue_idx+1];
-                    end
-                end
-                queue_q[QUEUE_DEPTH-1] <= '0;
-            end
-
+			if (queue_dequeue) begin
+				queue_q[0] <= queue_q[1];
+				queue_q[1] <= '0;
+			end
             if (queue_enqueue) begin
-                unique case (queue_post_dequeue_count)
-                    0: queue_q[0] <= enqueue_pkt;
-                    1: queue_q[1] <= enqueue_pkt;
-                    2: queue_q[2] <= enqueue_pkt;
-                    default: queue_q[3] <= enqueue_pkt;
-                endcase
+                queue_q[queue_post_dequeue_count] <= enqueue_pkt;
             end
-
             unique case ({queue_enqueue, queue_dequeue})
                 2'b10: queue_count_q <= queue_count_q + 1'b1;
                 2'b01: queue_count_q <= queue_count_q - 1'b1;
                 default: queue_count_q <= queue_count_q;
             endcase
 
-            load_s1_valid_q <= dtcm_array_load_req;
-            if (dtcm_array_load_req) begin
-                load_s1_rd_addr_q <= active_rd_addr;
-                load_s1_producer_id_q <= active_producer_id;
-                load_s1_producer_tracked_q <= active_producer_tracked;
-                load_s1_operator_lsu_q <= active_op;
-                load_s1_addr_index_q <= active_addr_index;
-                load_s1_word_addr_q <= active_addr[BUS_ADDR_WIDTH-1:2];
-                load_s1_hot_generation_q <= hot_generation_q[hot_lookup_idx];
-                load_s1_fp_load_q <= active_fp_load;
-                load_s1_fp_rd_addr_q <= active_fp_rd_addr;
+            if (store_buf_dequeue) begin
+                for (store_idx = 0; store_idx < STORE_BUFFER_DEPTH-1; store_idx++) begin
+                    store_buf_q[store_idx] <= store_buf_q[store_idx+1];
+				end
+				store_buf_q[STORE_BUFFER_DEPTH-1] <= '0;
+			end
+            if (store_buf_enqueue) begin
+                store_buf_q[store_post_dequeue_count] <= active_pkt;
+                store_buf_q[store_post_dequeue_count].valid <= 1'b1;
             end
+            unique case ({store_buf_enqueue, store_buf_dequeue})
+                2'b10: store_buf_count_q <= store_buf_count_q + 1'b1;
+                2'b01: store_buf_count_q <= store_buf_count_q - 1'b1;
+                default: store_buf_count_q <= store_buf_count_q;
+            endcase
 
-            load_s2_valid_q <= load_s1_valid_q | hot_load_req;
-            load_s2_hot_q <= hot_load_req;
-            if (hot_load_req) begin
-                load_s2_rd_addr_q <= active_rd_addr;
-                load_s2_producer_id_q <= active_producer_id;
-                load_s2_producer_tracked_q <= active_producer_tracked;
-                load_s2_operator_lsu_q <= active_op;
-                load_s2_addr_index_q <= active_addr_index;
-                load_s2_hot_shifted_q <= hot_load_shifted;
-                load_s2_fp_load_q <= active_fp_load;
-                load_s2_fp_rd_addr_q <= active_fp_rd_addr;
-            end else if (load_s1_valid_q) begin
-                load_s2_rd_addr_q <= load_s1_rd_addr_q;
-                load_s2_producer_id_q <= load_s1_producer_id_q;
-                load_s2_producer_tracked_q <= load_s1_producer_tracked_q;
-                load_s2_operator_lsu_q <= load_s1_operator_lsu_q;
-                load_s2_addr_index_q <= load_s1_addr_index_q;
-                load_s2_fp_load_q <= load_s1_fp_load_q;
-                load_s2_fp_rd_addr_q <= load_s1_fp_rd_addr_q;
+            load_s1_valid_q <= dtcm_load_fire;
+            if (dtcm_load_fire) begin
+                load_s1_rd_addr_q <= active_pkt.rd_addr;
+                load_s1_producer_id_q <= active_pkt.producer_id;
+                load_s1_producer_tracked_q <= active_pkt.producer_tracked;
+                load_s1_op_q <= active_pkt.op;
+                load_s1_addr_index_q <= active_pkt.addr[1:0];
+                load_s1_forward_mask_q <= load_forward_mask;
+                load_s1_forward_data_q <= load_forward_data;
+                load_s1_fp_load_q <= active_pkt.fp_load;
+                load_s1_fp_rd_addr_q <= active_pkt.fp_rd_addr;
             end
-
-            hot_fill_valid_q <= load_s1_valid_q;
-            if (load_s1_valid_q) begin
-                hot_fill_addr_q <= load_s1_word_addr_q;
-                hot_fill_generation_q <= load_s1_hot_generation_q;
-            end
-
-            if (hot_fill_valid_q &&
-                (hot_fill_generation_q == hot_generation_q[hot_fill_idx]) &&
-                !hot_fill_store_same_index) begin
-                hot_valid_q[hot_fill_idx] <= 1'b1;
-                hot_addr_q[hot_fill_idx] <= hot_fill_addr_q;
-                hot_data_q[hot_fill_idx] <= dtcm_rdata_i;
-            end
-
-            if (dtcm_store_req) begin
-                hot_generation_q[hot_lookup_idx] <=
-                    hot_generation_q[hot_lookup_idx] + 1'b1;
-                // A store conservatively invalidates its indexed entry. This
-                // removes the AGU/hit/byte-merge path from all 256 data FFs;
-                // the following load refills the entry from DTCM.
-                hot_valid_q[hot_lookup_idx] <= 1'b0;
-            end
-
-            if (mmio_wb_valid_q && !load_s2_valid_q)
+            if (mmio_wb_valid_q && !load_s1_valid_q)
                 mmio_wb_valid_q <= 1'b0;
-
             if (mmio_req_valid_q && mmio_rsp_i.valid) begin
                 mmio_req_valid_q <= 1'b0;
                 if (mmio_is_load_q) begin
@@ -503,34 +373,37 @@ import ydrasil_pkg::*;
                     mmio_wb_fp_rd_addr_q <= mmio_fp_rd_addr_q;
                 end
             end
-
             if (mmio_fire) begin
                 mmio_req_valid_q <= 1'b1;
-                mmio_is_load_q <= active_is_load;
-                mmio_is_store_q <= active_is_store;
-                mmio_addr_q <= active_addr;
-                mmio_wdata_q <= active_store_data;
-                mmio_wmask_q <= active_store_mask;
-                mmio_addr_index_q <= active_addr_index;
-                mmio_operator_lsu_q <= active_op;
-                mmio_rd_addr_q <= active_rd_addr;
-                mmio_producer_id_q <= active_producer_id;
-                mmio_producer_tracked_q <= active_producer_tracked;
-                mmio_fp_load_q <= active_fp_load;
-                mmio_fp_rd_addr_q <= active_fp_rd_addr;
+                mmio_is_load_q <= active_pkt.is_load;
+                mmio_addr_q <= active_pkt.addr;
+                mmio_wdata_q <= align_store_data(
+                    active_pkt.op, active_pkt.addr[1:0], active_pkt.store_data);
+                mmio_wmask_q <= active_pkt.store_mask;
+                mmio_addr_index_q <= active_pkt.addr[1:0];
+                mmio_operator_lsu_q <= active_pkt.op;
+                mmio_rd_addr_q <= active_pkt.rd_addr;
+                mmio_producer_id_q <= active_pkt.producer_id;
+                mmio_producer_tracked_q <= active_pkt.producer_tracked;
+                mmio_fp_load_q <= active_pkt.fp_load;
+                mmio_fp_rd_addr_q <= active_pkt.fp_rd_addr;
             end
 
 `ifndef SYNTHESIS
-            if (dtcm_fire & active_is_load) perf_hot_lookup_q <= perf_hot_lookup_q + 1'b1;
-            if (hot_load_req) perf_hot_hit_q <= perf_hot_hit_q + 1'b1;
-            if (load_s1_valid_q) perf_hot_fill_q <= perf_hot_fill_q + 1'b1;
-            if (dtcm_store_req && hot_lookup_hit)
-                perf_hot_store_update_q <= perf_hot_store_update_q + 1'b1;
-            if (queue_enqueue && queue_full && !queue_dequeue)
-                $fatal(1, "LSU request queue overflow");
-            if (queue_enqueue && input_is_store && !req_i.store_data_valid &&
-                !req_i.store_data_producer_tracked && !input_wake_valid)
-                $fatal(1, "LSU delayed store has no producer token");
+            if (dtcm_load_fire) begin
+                perf_stb_lookup_q <= perf_stb_lookup_q + 1'b1;
+                if (|load_forward_mask)
+                    perf_stb_hit_q <= perf_stb_hit_q + 1'b1;
+            end
+            if (active_dtcm_load && load_store_pending)
+                perf_stb_block_q <= perf_stb_block_q + 1'b1;
+            if (store_buf_dequeue)
+                perf_stb_drain_q <= perf_stb_drain_q + 1'b1;
+            if (req_i.valid && !queue_enqueue && !input_direct_fire &&
+                !(queue_dequeue && queue_full))
+                $fatal(1, "LSU two-entry load queue overflow");
+            if (store_buf_enqueue && store_buf_full && !store_buf_dequeue)
+                $fatal(1, "LSU store buffer overflow");
 `endif
         end
     end

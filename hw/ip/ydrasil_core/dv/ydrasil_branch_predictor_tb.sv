@@ -28,23 +28,25 @@ module ydrasil_branch_predictor_tb
     localparam int BHT_ENTRIES = 8;
     localparam logic [31:0] PC_A = 32'h8000_0000;
     localparam logic [31:0] PC_B = PC_A + (BTB_ENTRIES * 32'd4);
+    localparam logic [31:0] PC_C = PC_A + 32'd4;
     localparam logic [31:0] TARGET_A0 = 32'h8000_0040;
     localparam logic [31:0] TARGET_B0 = 32'h8000_0080;
     localparam logic [31:0] TARGET_B1 = 32'h8000_00c0;
+    localparam logic [31:0] TARGET_C0 = 32'h8000_0100;
 
     logic        predict_hit;
     logic        predict_taken;
     logic [31:0] predict_target;
     logic [1:0]  predict_counter;
     logic [31:0] predict_bht_index;
+    logic        predict1_hit;
+    logic        predict1_taken;
+    logic [31:0] predict1_target;
+    logic [1:0]  predict1_counter;
+    logic [31:0] predict1_bht_index;
 
     logic [31:0] predict_pc;
-    logic        train_valid;
-    logic [31:0] train_pc;
-    logic        train_taken;
-    logic [31:0] train_target;
-    logic [1:0]  train_counter;
-    logic [31:0] train_bht_index;
+    ydrasil_pkg::ydrasil_bp_train_pkt_t train_pkt;
     logic        invalidate;
     int          step;
 
@@ -60,24 +62,23 @@ module ydrasil_branch_predictor_tb
         .predict_target_o (predict_target),
         .predict_counter_o(predict_counter),
         .predict_bht_index_o(predict_bht_index),
-        .train_valid_i    (train_valid),
-        .train_pc_i       (train_pc),
-        .train_taken_i    (train_taken),
-        .train_target_i   (train_target),
-        .train_counter_i  (train_counter),
-        .train_bht_index_i(train_bht_index),
+        .predict0_spec_valid_i(1'b0),
+        .predict0_spec_conditional_i(1'b1),
+        .predict0_spec_taken_i(1'b0),
+        .predict_pc1_i    (predict_pc + 32'd4),
+        .predict1_hit_o   (predict1_hit),
+        .predict1_taken_o (predict1_taken),
+        .predict1_target_o(predict1_target),
+        .predict1_counter_o(predict1_counter),
+        .predict1_bht_index_o(predict1_bht_index),
+        .train_i          (train_pkt),
         .invalidate_i     (invalidate)
     );
 
     task automatic drive_idle(input logic [31:0] pc);
         begin
             predict_pc    <= pc;
-            train_valid   <= 1'b0;
-            train_pc      <= '0;
-            train_taken   <= 1'b0;
-            train_target  <= '0;
-            train_counter <= 2'b01;
-            train_bht_index <= '0;
+            train_pkt     <= '0;
             invalidate    <= 1'b0;
         end
     endtask
@@ -90,13 +91,34 @@ module ydrasil_branch_predictor_tb
     );
         begin
             predict_pc    <= pc;
-            train_valid   <= 1'b1;
-            train_pc      <= pc;
-            train_taken   <= taken;
-            train_target  <= target;
-            train_counter <= counter;
-            train_bht_index <= predict_bht_index;
+            train_pkt.valid <= 1'b1;
+            train_pkt.conditional <= 1'b1;
+            train_pkt.pc <= pc;
+            train_pkt.taken <= taken;
+            train_pkt.target <= target;
+            train_pkt.counter <= counter;
+            // USE_GSHARE=0 in this test, so the branch's carried BHT index is
+            // the word address index of the branch being trained.
+            train_pkt.bht_index <= pc >> 2;
             invalidate    <= 1'b0;
+        end
+    endtask
+
+    task automatic drive_jump(
+        input logic [31:0] pc,
+        input logic [31:0] target
+    );
+        begin
+            predict_pc <= pc;
+            train_pkt <= '0;
+            train_pkt.valid <= 1'b1;
+            train_pkt.conditional <= 1'b0;
+            train_pkt.pc <= pc;
+            train_pkt.taken <= 1'b1;
+            train_pkt.target <= target;
+            train_pkt.counter <= 2'b00;
+            train_pkt.bht_index <= pc >> 2;
+            invalidate <= 1'b0;
         end
     endtask
 
@@ -140,11 +162,7 @@ module ydrasil_branch_predictor_tb
         if (!rst_n) begin
             step          <= 0;
             predict_pc    <= PC_A;
-            train_valid   <= 1'b0;
-            train_pc      <= '0;
-            train_taken   <= 1'b0;
-            train_target  <= '0;
-            train_counter <= 2'b01;
+            train_pkt     <= '0;
             invalidate    <= 1'b0;
         end else begin
             case (step)
@@ -251,11 +269,13 @@ module ydrasil_branch_predictor_tb
                 20: begin
                     check_predict(1'b1, 1'b1, TARGET_B1, 2'b11);
                     predict_pc    <= PC_B;
-                    train_valid   <= 1'b1;
-                    train_pc      <= PC_B;
-                    train_taken   <= 1'b1;
-                    train_target  <= TARGET_B0;
-                    train_counter <= predict_counter;
+                    train_pkt.valid <= 1'b1;
+                    train_pkt.conditional <= 1'b1;
+                    train_pkt.pc <= PC_B;
+                    train_pkt.taken <= 1'b1;
+                    train_pkt.target <= TARGET_B0;
+                    train_pkt.counter <= predict_counter;
+                    train_pkt.bht_index <= PC_B >> 2;
                     invalidate    <= 1'b1;
                     step <= step + 1;
                 end
@@ -265,7 +285,31 @@ module ydrasil_branch_predictor_tb
                     step <= step + 1;
                 end
                 22: begin
+                    check_predict(1'b0, 1'b0, '0, 2'b11);
+                    predict_pc <= PC_B;
+                    train_pkt <= '0;
+                    invalidate <= 1'b1;
+                    step <= step + 1;
+                end
+                23: begin
                     check_predict(1'b0, 1'b0, '0, 2'b01);
+                    drive_idle(PC_B);
+                    step <= step + 1;
+                end
+                24: begin
+                    check_predict(1'b0, 1'b0, '0, 2'b11);
+                    drive_jump(PC_C, TARGET_C0);
+                    step <= step + 1;
+                end
+                25: begin
+                    check_predict(1'b0, 1'b0, '0, 2'b01);
+                    drive_idle(PC_C);
+                    step <= step + 1;
+                end
+                26: begin
+                    // An unconditional BTB entry is taken even though its BHT
+                    // counter remains at weak-not-taken.
+                    check_predict(1'b1, 1'b1, TARGET_C0, 2'b01);
                     $display("TEST_PASS");
                     $finish;
                 end

@@ -1,7 +1,8 @@
 module ydrmem_1r1w_ram #(
     parameter int DEPTH = 256,
     parameter int DATA_WIDTH = 32,
-    parameter int ADDR_WIDTH = (DEPTH > 1) ? $clog2(DEPTH) : 1
+    parameter int ADDR_WIDTH = (DEPTH > 1) ? $clog2(DEPTH) : 1,
+    parameter logic [DATA_WIDTH-1:0] INIT_VALUE = '0
 ) (
     input  wire                  clk,
 
@@ -15,6 +16,14 @@ module ydrmem_1r1w_ram #(
 );
 
     (* ram_style = "block" *) logic [DATA_WIDTH-1:0] mem [0:DEPTH-1];
+
+    // Keep predictor state in BRAM from reset.  This is deliberately an
+    // initialization of the RAM itself, not a wide FF valid side-array.
+    integer init_idx;
+    initial begin
+        for (init_idx = 0; init_idx < DEPTH; init_idx = init_idx + 1)
+            mem[init_idx] = INIT_VALUE;
+    end
 
     always_ff @(posedge clk) begin
         if (ren_i) begin

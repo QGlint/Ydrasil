@@ -40,6 +40,8 @@ VerilatedVcdC *tfp = new VerilatedVcdC;
 // #define DOUBLE_TICK
 
 vluint64_t MAX_TIME = 10000; // 默认
+vluint64_t TRACE_START = 0;
+vluint64_t TRACE_STOP = ~vluint64_t{0};
 
 
 // ------------------------------------------------
@@ -60,6 +62,10 @@ int main(int argc, char **argv) {
             trace_en = 1;
         if (sscanf(argv[i], "+cpp_timeout=%lu", &MAX_TIME) == 1)
             printf("C++ timeout set to %lu\n", MAX_TIME);
+        if (sscanf(argv[i], "+trace_start=%lu", &TRACE_START) == 1)
+            printf("Trace start set to %lu\n", TRACE_START);
+        if (sscanf(argv[i], "+trace_stop=%lu", &TRACE_STOP) == 1)
+            printf("Trace stop set to %lu\n", TRACE_STOP);
         if (strncmp(argv[i], "+coverage_file=", 15) == 0)
             coverage_file = argv[i] + 15;
     }
@@ -74,6 +80,7 @@ int main(int argc, char **argv) {
     }
 
 #ifdef VERILATOR_TRACE
+    if (trace_en) {
         Verilated::traceEverOn(true);
         tb->trace(tfp, 99);
 #if CONFIG_FST_WAVE_TRACE
@@ -81,6 +88,7 @@ int main(int argc, char **argv) {
 #else
         tfp->open("tb_top.vcd");
 #endif
+    }
 #endif
 
     // ---------------- Reset phase ----------------
@@ -92,14 +100,18 @@ int main(int argc, char **argv) {
         tb->eval();
 
 #ifdef VERILATOR_TRACE
-        tfp->dump(Verilated::time());
+        if (trace_en && Verilated::time() >= TRACE_START &&
+            Verilated::time() <= TRACE_STOP)
+            tfp->dump(Verilated::time());
 #endif     
         Verilated::timeInc(1);
 
 #ifdef DOUBLE_TICK
 
 #ifdef VERILATOR_TRACE
-            tfp->dump(Verilated::time());
+            if (trace_en && Verilated::time() >= TRACE_START &&
+                Verilated::time() <= TRACE_STOP)
+                tfp->dump(Verilated::time());
 #endif
         Verilated::timeInc(1);
 #endif
@@ -112,7 +124,9 @@ int main(int argc, char **argv) {
         tb->clk = !tb->clk;   
         tb->eval();
 #ifdef VERILATOR_TRACE
-            tfp->dump(Verilated::time());
+            if (trace_en && Verilated::time() >= TRACE_START &&
+                Verilated::time() <= TRACE_STOP)
+                tfp->dump(Verilated::time());
 #endif
         Verilated::timeInc(1);
 
@@ -120,7 +134,9 @@ int main(int argc, char **argv) {
         tb->eval();
 
 #ifdef VERILATOR_TRACE
-            tfp->dump(Verilated::time());
+            if (trace_en && Verilated::time() >= TRACE_START &&
+                Verilated::time() <= TRACE_STOP)
+                tfp->dump(Verilated::time());
 #endif
         Verilated::timeInc(1);
 #endif
@@ -135,7 +151,9 @@ int main(int argc, char **argv) {
     std::cout << "Coverage data written to " << coverage_file << "\n";
 #endif
     #ifdef VERILATOR_TRACE
+    if (trace_en) {
         tfp->close();
+    }
     delete tfp;
     #endif
     delete tb;

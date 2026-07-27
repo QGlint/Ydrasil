@@ -15,13 +15,13 @@ module tpdram_wrapper #(
     input  wire                      ena_i,
     input  wire [ADDR_WIDTH_A-1:0]   addra_i,
     input  wire [DATA_WIDTH-1:0]     dina_i,
-    input  wire                      wea_i,
+    input  wire [(DATA_WIDTH/8)-1:0] wea_i,
     output wire [DATA_WIDTH-1:0]     douta_o,
 
     input  wire                      enb_i,
     input  wire [ADDR_WIDTH_B-1:0]   addrb_i,
     input  wire [DATA_WIDTH-1:0]     dinb_i,
-    input  wire                      web_i,
+    input  wire [(DATA_WIDTH/8)-1:0] web_i,
     output wire [DATA_WIDTH-1:0]     doutb_o
 );
 
@@ -34,8 +34,8 @@ module tpdram_wrapper #(
         .ADDR_WIDTH_A            (ADDR_WIDTH_A),
         .ADDR_WIDTH_B            (ADDR_WIDTH_B),
         .AUTO_SLEEP_TIME         (0),
-        .BYTE_WRITE_WIDTH_A      (DATA_WIDTH),
-        .BYTE_WRITE_WIDTH_B      (DATA_WIDTH),
+        .BYTE_WRITE_WIDTH_A      (8),
+        .BYTE_WRITE_WIDTH_B      (8),
         .CASCADE_HEIGHT          (0),
         .CLOCKING_MODE           ("common_clock"),
         .ECC_BIT_RANGE           ("7:0"),

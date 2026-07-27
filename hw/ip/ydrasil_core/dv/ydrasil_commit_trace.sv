@@ -21,6 +21,10 @@ import ydrasil_pkg::*;
     input  wire [REGS_ADDR_WIDTH-1:0] dual_alu_waddr_i,
     input  wire [REGS_DATA_WIDTH-1:0] dual_alu_wdata_i,
 
+    input  wire dual_lsu_issue_valid_i,
+    input  wire [INST_ADDR_WIDTH-1:0] dual_lsu_issue_pc_i,
+    input  wire [INST_DATA_WIDTH-1:0] dual_lsu_issue_instr_i,
+
     input  wire lsu_issue_valid_i,
     input  wire [INST_ADDR_WIDTH-1:0] lsu_issue_pc_i,
     input  wire [INST_DATA_WIDTH-1:0] lsu_issue_instr_i,
@@ -44,6 +48,10 @@ import ydrasil_pkg::*;
     ,input wire fpu_result_fpr_i
     ,input wire [REGS_ADDR_WIDTH-1:0] fpu_waddr_i
     ,input wire [REGS_DATA_WIDTH-1:0] fpu_wdata_i
+    ,input ydrasil_commit_pkt_t retire_i
+    ,input wire [INST_DATA_WIDTH-1:0] retire_instr_i
+    ,input ydrasil_commit_pkt_t retire1_i
+    ,input wire [INST_DATA_WIDTH-1:0] retire1_instr_i
 );
 
     localparam [1:0] COMMIT_ALU = 2'd0;
@@ -138,7 +146,7 @@ import ydrasil_pkg::*;
                 mul_commit_idx_q[i] = '0;
                 fpu_commit_idx_q[i] = '0;
             end
-        end else begin
+        end else if (1'b0) begin
             if (alu_valid_i &&
                 !(div_pending_q && div_active_seen_q && !div_active && div_result_valid)) begin
                 commit_kind_q[commit_wptr_q] = COMMIT_ALU;
@@ -159,6 +167,19 @@ import ydrasil_pkg::*;
                 commit_wdata_q[commit_wptr_q] = dual_alu_wdata_i;
                 commit_ready_q[commit_wptr_q] = 1'b1;
                 commit_is_fpr_q[commit_wptr_q] = 1'b0;
+                commit_wptr_q = commit_wptr_q + FIFO_PTR_WIDTH'(1);
+            end
+
+            if (dual_lsu_issue_valid_i) begin
+                commit_kind_q[commit_wptr_q] = COMMIT_LSU;
+                commit_pc_q[commit_wptr_q] = dual_lsu_issue_pc_i;
+                commit_instr_q[commit_wptr_q] = dual_lsu_issue_instr_i;
+                commit_waddr_q[commit_wptr_q] = '0;
+                commit_wdata_q[commit_wptr_q] = '0;
+                commit_ready_q[commit_wptr_q] = 1'b0;
+                commit_is_fpr_q[commit_wptr_q] = 1'b0;
+                lsu_commit_idx_q[lsu_wptr_q] = commit_wptr_q;
+                lsu_wptr_q = lsu_wptr_q + FIFO_PTR_WIDTH'(1);
                 commit_wptr_q = commit_wptr_q + FIFO_PTR_WIDTH'(1);
             end
 
@@ -256,6 +277,20 @@ import ydrasil_pkg::*;
                     commit_rptr_q = commit_rptr_q + FIFO_PTR_WIDTH'(1);
                 end
             end
+        end
+    end
+
+    // Architectural trace follows the retirement ROB. The legacy issue FIFO
+    // above cannot stay aligned when an execution result moves across a stage
+    // boundary, and it also observes instructions later removed by a redirect.
+    always @(posedge clk) begin
+        if (rst_n) begin
+            if (retire_i.valid && retire_i.writes_gpr)
+                print_register_commit(retire_i.pc, retire_instr_i,
+                    retire_i.rd_addr, retire_i.value, 1'b0);
+            if (retire1_i.valid && retire1_i.writes_gpr)
+                print_register_commit(retire1_i.pc, retire1_instr_i,
+                    retire1_i.rd_addr, retire1_i.value, 1'b0);
         end
     end
 

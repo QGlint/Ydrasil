@@ -30,9 +30,6 @@ import ydrasil_pkg::*;
     input  wire                            id_ex_jalr_i,
     input  wire                            id_ex_alu_bypass_rs1_i,
     input  wire                            id_ex_alu_bypass_rs2_i,
-    input  wire                            id_ex_load_bypass_rs1_i,
-    input  wire                            id_ex_load_bypass_rs2_i,
-    input  wire [DATA_WIDTH-1:0]           load_bypass_data_i,
     input  wire [DATA_WIDTH-1:0]           id_ex_branch_target_i,
     input  wire [DATA_WIDTH-1:0]           id_ex_branch_next_pc_i,
     input  wire                            id_ex_branch_eq_i,
@@ -63,12 +60,7 @@ import ydrasil_pkg::*;
     output wire [DATA_WIDTH-1:0]           ex_branch_target_o,
     output wire                            ex_pc_redirect_o,
     output wire [DATA_WIDTH-1:0]           ex_pc_redirect_target_o,
-    output wire                            ex_bp_train_valid_o,
-    output wire [DATA_WIDTH-1:0]           ex_bp_train_pc_o,
-    output wire                            ex_bp_train_taken_o,
-    output wire [DATA_WIDTH-1:0]           ex_bp_train_target_o,
-    output wire [1:0]                      ex_bp_train_counter_o,
-    output wire [DATA_WIDTH-1:0]           ex_bp_train_bht_index_o,
+    output ydrasil_bp_train_pkt_t          ex_bp_train_o,
     output wire                            ex_branch_mispredict_o,
     output wire [BUS_ADDR_WIDTH-1:0]       ex_lsu_mem_addr_o,
 
@@ -78,6 +70,7 @@ import ydrasil_pkg::*;
     output wire                            alu_rf_wen_rd_o,
     output wire [REGS_ADDR_WIDTH-1:0]      alu_rf_waddr_rd_o,
     output producer_id_t                   alu_producer_id_o,
+    output ydrasil_gpr_fwd_pkt_t           completion_o,
 
     output wire                            mul_issue_o,
     output wire [REGS_ADDR_WIDTH-1:0]      mul_issue_waddr_o,
@@ -166,25 +159,23 @@ import ydrasil_pkg::*;
     wire [31:0] lsu_bypass_add_result;
     wire        lsu_addr_alu_bypass;
 
-    assign bt_a_operand =
-        (id_ex_jalr_i & id_ex_load_bypass_rs1_i) ? load_bypass_data_i :
-        (id_ex_jalr_i & id_ex_alu_bypass_rs1_i & alu_bypass_valid_q) ?
+	assign bt_a_operand =
+		(id_ex_jalr_i & id_ex_alu_bypass_rs1_i & alu_bypass_valid_q) ?
         alu_bypass_data_q : bt_a_operand_i;
     assign bt_b_operand = bt_b_operand_i;
 
     // JALR uses rs1 only for the BRU target. Its architectural rd value is
     // always PC+4, so the ALU link operand must remain the registered PC.
-    assign operand_a = id_ex_jalr_i ? alu_operand_a_i :
-        id_ex_load_bypass_rs1_i ? load_bypass_data_i :
-        (id_ex_alu_bypass_rs1_i & alu_bypass_valid_q) ? alu_bypass_data_q : alu_operand_a_i;
-    assign operand_b = id_ex_load_bypass_rs2_i ? load_bypass_data_i :
-        (id_ex_alu_bypass_rs2_i & alu_bypass_valid_q) ? alu_bypass_data_q : alu_operand_b_i;
+	assign operand_a = id_ex_jalr_i ? alu_operand_a_i :
+		(id_ex_alu_bypass_rs1_i & alu_bypass_valid_q) ? alu_bypass_data_q : alu_operand_a_i;
+	assign operand_b = (id_ex_alu_bypass_rs2_i & alu_bypass_valid_q) ?
+		alu_bypass_data_q : alu_operand_b_i;
     assign bitmanip_operand_a = alu_operand_a_i;
     assign bitmanip_operand_b = alu_operand_b_i;
-    assign bru_operand_a = id_ex_load_bypass_rs1_i ? load_bypass_data_i :
-        (id_ex_alu_bypass_rs1_i & alu_bypass_valid_q) ? alu_bypass_data_q : bru_operand_a_i;
-    assign bru_operand_b = id_ex_load_bypass_rs2_i ? load_bypass_data_i :
-        (id_ex_alu_bypass_rs2_i & alu_bypass_valid_q) ? alu_bypass_data_q : bru_operand_b_i;
+	assign bru_operand_a = (id_ex_alu_bypass_rs1_i & alu_bypass_valid_q) ?
+		alu_bypass_data_q : bru_operand_a_i;
+	assign bru_operand_b = (id_ex_alu_bypass_rs2_i & alu_bypass_valid_q) ?
+		alu_bypass_data_q : bru_operand_b_i;
     // LSU consumers are held by the scoreboard until load data is registered.
     // Keep branch/ALU load replay out of the otherwise inactive AGU cone.
     assign lsu_addr_alu_bypass =
@@ -239,12 +230,7 @@ import ydrasil_pkg::*;
         .ex_branch_target_o          (ex_branch_target_o),
         .ex_pc_redirect_o            (ex_pc_redirect_o),
         .ex_pc_redirect_target_o     (ex_pc_redirect_target_o),
-        .ex_bp_train_valid_o         (ex_bp_train_valid_o),
-        .ex_bp_train_pc_o            (ex_bp_train_pc_o),
-        .ex_bp_train_taken_o         (ex_bp_train_taken_o),
-        .ex_bp_train_target_o        (ex_bp_train_target_o),
-        .ex_bp_train_counter_o       (ex_bp_train_counter_o),
-        .ex_bp_train_bht_index_o     (ex_bp_train_bht_index_o),
+        .ex_bp_train_o               (ex_bp_train_o),
         .ex_branch_mispredict_o      (ex_branch_mispredict_o)
 `ifndef SYNTHESIS
         ,.dbg_bp_resolve_valid_o     (dbg_bp_resolve_valid_o)
@@ -351,7 +337,7 @@ import ydrasil_pkg::*;
         !op_m_unit & !op_bitmanip & !flush_ex_i;
     assign ex_rf_wen_rd =
         div_rf_wen_rd | bitmanip_rf_wen_rd | fast_bitmanip_rf_wen_rd |
-        normal_alu_rf_wen_rd | csr_wen;
+        normal_alu_rf_wen_rd | op_csr;
     assign mul_result_valid_o = mul_result_valid;
     assign ex_instret_inc_o =
         (id_ex_valid_i & !trap_redirect_i & !flush_ex_i & !op_load & !op_mul & !op_div &
@@ -500,7 +486,8 @@ import ydrasil_pkg::*;
         ({REGS_DATA_WIDTH{csr_csrrw}} & csr_operand_a) |
         ({REGS_DATA_WIDTH{csr_csrrs}} & (csr_operand_a | csr_ex_rdata_i)) |
         ({REGS_DATA_WIDTH{csr_csrrc}} & (csr_ex_rdata_i & (~csr_operand_a)));
-    assign csr_wen = op_csr;
+    // CSRRS/CSRRC with rs1 (or zimm) equal to zero are reads only.
+    assign csr_wen = op_csr & id_op_csr_info_i[OP_CSR_WRITE];
 
     assign alu_result_o = bitmanip_result_valid_ff ? bitmanip_result_ff : alu_result_ff;
     assign alu_rf_wen_rd_o = alu_rf_wen_rd_ff;
@@ -578,18 +565,20 @@ import ydrasil_pkg::*;
     assign ex_csr_mstatus_wen_o = ex_csr_mstatus_wen_o_ff;
     assign ex_csr_wen_o = ex_csr_wen_o_ff;
     assign ex_csr_waddr_o = ex_csr_waddr_o_ff;
-    assign slow_result_wen = div_rf_wen_rd | csr_wen;
+    assign slow_result_wen = div_rf_wen_rd | op_csr;
     assign slow_result =
         ({32{div_rf_wen_rd}}        & div_result) |
-        ({32{csr_wen}}              & csr_reg_wdata);
+        ({32{op_csr}}               & csr_reg_wdata);
 
-`ifndef SYNTHESIS
-    always_ff @(posedge clk) begin
-        if (rst_n && id_ex_valid_i && (op_load || op_store)) begin
-            assert (!id_ex_load_bypass_rs1_i && !id_ex_load_bypass_rs2_i)
-                else $fatal(1, "LSU instruction entered EX with load replay enabled");
-        end
-    end
-`endif
+    assign completion_o.valid = ex_rf_wen_rd &&
+        ((div_rf_wen_rd ? div_waddr_q : id_rf_waddr_rd_i) != '0);
+    assign completion_o.producer_id = id_ex_producer_id_i;
+    assign completion_o.producer_tracked = completion_o.valid;
+    assign completion_o.addr = div_rf_wen_rd ?
+        div_waddr_q : id_rf_waddr_rd_i;
+    assign completion_o.data = fast_bitmanip_rf_wen_rd ?
+        fast_bitmanip_result : bitmanip_rf_wen_rd ?
+        bitmanip_result : slow_result_wen ? slow_result :
+        fast_result_wen ? fast_result : alu_result;
 
 endmodule

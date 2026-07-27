@@ -8,7 +8,7 @@ spec
 __pycache__/
 *.log
 *.jou
-
+ref/
 !sw/rt-thread-5.2.2/tools/
 
 # Generated software images and disassembly must stay under build/.

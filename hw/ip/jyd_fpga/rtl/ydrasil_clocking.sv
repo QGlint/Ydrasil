@@ -134,3 +134,31 @@ module ydrasil_clocking (
 `endif
 
 endmodule
+
+// The peripheral clock is always derived from the CPU clock. This keeps the
+// production APB ratio fixed at 200 MHz / 4 = 50 MHz and makes the CDC
+// boundary identical in FPGA and RTL simulation builds.
+module ydrasil_clk_div4 (
+    input  wire clk_i,
+    input  wire rst_n_i,
+    output wire clk_div4_o
+);
+    logic [1:0] div_q;
+    always_ff @(posedge clk_i or negedge rst_n_i) begin
+        if (!rst_n_i)
+            div_q <= '0;
+        else
+            div_q <= div_q + 1'b1;
+    end
+
+`ifdef SYNTHESIS
+    // BUFGCE_DIV is not available on 7-series devices. Divide in fabric and
+    // use the supported global buffer for the 50 MHz APB clock tree.
+    BUFG u_apb_bufg (
+        .I(div_q[1]),
+        .O(clk_div4_o)
+    );
+`else
+    assign clk_div4_o = div_q[1];
+`endif
+endmodule

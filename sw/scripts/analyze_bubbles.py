@@ -98,7 +98,7 @@ def main() -> None:
         ("wrong_dir_flush", "PERF_FRONTEND", "WRONG_DIR_FLUSH"),
         ("btb_miss_taken", "PERF_FRONTEND", "BTB_MISS_TAKEN"),
         ("branches", "PERF_BRANCH", "BRANCHES"), ("mispred", "PERF_BRANCH", "MISPRED"),
-        ("hot_lookup", "PERF_LSU_HOT", "LOOKUP"), ("hot_hit", "PERF_LSU_HOT", "HIT"),
+        ("stb_lookup", "PERF_LSU_STB", "LOOKUP"), ("stb_hit", "PERF_LSU_STB", "HIT"),
         ("occ2", "PERF_PRODUCER_STATE", "OCC2"), ("both_wait", "PERF_PRODUCER_STATE", "BOTH_WAIT"),
     ]
     with detailed_csv.open("w", newline="") as stream:
@@ -124,7 +124,7 @@ def main() -> None:
         stream.write("- producer-to-consumer cells are subsets of their producer-use row; two source operands can make producer-kind rows overlap in one cycle.\n")
         stream.write("- pending producer kinds are selected by an `if/else` chain and are mutually exclusive with each other. Pending-tail explicitly excludes same-cycle issue hazards.\n")
         stream.write("- `ready but stalled`, complete-visible, and registered-visible are cross-cutting state observations, not additional lost cycles.\n")
-        stream.write("- branch mispredicts are a subset of resolved branches; hot hits are a subset of hot lookups.\n")
+        stream.write("- branch mispredicts are a subset of resolved branches; store-buffer hits are a subset of store-buffer lookups.\n")
         stream.write("- the legacy cause histogram has exact SB/LSU/PF intersections only when WB and CLINT are both low. `WB_ANY` and `CLINT_ANY` are overlapping marginals.\n\n")
         for program, records in focus:
             cycles = value(records, "PERF_METRIC", "CYCLES")
@@ -255,11 +255,11 @@ def main() -> None:
                 stream.write(f"| {producer} | {' | '.join(map(str, vals))} |\n")
             branches = value(records, "PERF_BRANCH", "BRANCHES")
             mispred = value(records, "PERF_BRANCH", "MISPRED")
-            lookup = value(records, "PERF_LSU_HOT", "LOOKUP")
-            hit = value(records, "PERF_LSU_HOT", "HIT")
+            lookup = value(records, "PERF_LSU_STB", "LOOKUP")
+            hit = value(records, "PERF_LSU_STB", "HIT")
             stream.write(f"\nFront end: {int(mispred)}/{int(branches)} branch mispredicts ({pct(mispred, branches)}), ")
             stream.write(f"{int(value(records, 'PERF_FRONTEND', 'BTB_MISS_TAKEN'))} taken BTB misses. ")
-            stream.write(f"LSU hot-buffer hit rate: {int(hit)}/{int(lookup)} ({pct(hit, lookup)}).\n\n")
+            stream.write(f"LSU store-buffer forwarding hit rate: {int(hit)}/{int(lookup)} ({pct(hit, lookup)}).\n\n")
 
     print(f"[PPA] Detailed bubble CSV: {detailed_csv}")
     print(f"[PPA] Bubble analysis: {report}")

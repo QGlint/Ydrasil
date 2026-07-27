@@ -31,6 +31,7 @@ module jyd_fpga(
 );
 
     wire w_clk_50Mhz, cpu_clk;
+    wire pll_clk_50_unused;
     wire w_clk_rst;
 
     wire [7:0] virtual_key;
@@ -47,7 +48,7 @@ module jyd_fpga(
     pll pll_inst(
         .clk_in1_p(i_sys_clk_p),
         .clk_in1_n(i_sys_clk_n),
-        .clk_out1(w_clk_50Mhz),
+        .clk_out1(pll_clk_50_unused),
         .clk_out2(cpu_clk),
         .locked(w_clk_rst)
     );
@@ -55,7 +56,7 @@ module jyd_fpga(
     ydrasil_clocking clocking_inst(
         .clk_in1_p(i_sys_clk_p),
         .clk_in1_n(i_sys_clk_n),
-        .clk_50mhz(w_clk_50Mhz),
+        .clk_50mhz(pll_clk_50_unused),
         .cpu_clk(cpu_clk),
         .locked(w_clk_rst)
     );
@@ -65,7 +66,7 @@ module jyd_fpga(
     pll pll_inst(
         .clk_in1_p(i_sys_clk_p),
         .clk_in1_n(i_sys_clk_n),
-        .clk_out1(w_clk_50Mhz),
+        .clk_out1(pll_clk_50_unused),
         .clk_out2(cpu_clk),
         .locked(w_clk_rst)
     );
@@ -73,19 +74,13 @@ module jyd_fpga(
     ydrasil_clocking clocking_inst(
         .clk_in1_p(i_sys_clk_p),
         .clk_in1_n(i_sys_clk_n),
-        .clk_50mhz(w_clk_50Mhz),
+        .clk_50mhz(pll_clk_50_unused),
         .cpu_clk(cpu_clk),
         .locked(w_clk_rst)
     );
 `endif
 `else
 //else
-    logic [2:0]cnt = 0;
-
-    always_ff @(posedge i_sys_clk_p) begin
-        cnt <= cnt + 1;
-    end
-
     logic rst_n = 0;
 
     logic [16:0] rst_cnt = 0;
@@ -104,11 +99,16 @@ module jyd_fpga(
         end
     end
 
-    assign w_clk_50Mhz = cnt[2];  // 直接使用输入时钟，假设它是50MHz
     assign cpu_clk = i_sys_clk_p;      // 直接使用输入时钟，
     assign w_clk_rst = rst_n;          // 永远不复位，假设系统上电后一直正常工作
 
 `endif
+
+    ydrasil_clk_div4 u_apb_clk_div4 (
+        .clk_i(cpu_clk),
+        .rst_n_i(w_clk_rst),
+        .clk_div4_o(w_clk_50Mhz)
+    );
 
 
 

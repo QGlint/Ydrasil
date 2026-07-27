@@ -59,7 +59,16 @@ end
 		wire        perip_wen;
 		wire [3:0]  perip_mask;
 		wire [31:0] perip_wdata;
-		wire [31:0] perip_rdata;
+			wire [31:0] perip_rdata;
+			logic [1:0] apb_div_q;
+			wire apb_clk = apb_div_q[1];
+
+			always_ff @(posedge clk or negedge rst_n) begin
+				if (!rst_n)
+					apb_div_q <= '0;
+				else
+					apb_div_q <= apb_div_q + 1'b1;
+			end
 
     // 通用寄存器访问 - 仅用于错误信息显示
     wire [31:0] x3 = u_dut.u_ydrasil_registers.registers[3];
@@ -249,6 +258,13 @@ end
     reg [31:0] retire_three_count;
     reg [31:0] retire_four_count;
     reg [31:0] dual_issue_count;
+    reg [31:0] dual_alu_alu_count;
+    reg [31:0] dual_alu_load_count;
+    reg [31:0] dual_alu_store_count;
+    reg [31:0] dual_alu_bmlite_count;
+    reg [31:0] l0_lookup_count;
+    reg [31:0] l0_hit_count;
+    reg [31:0] l0_correction_count;
     reg [31:0] bubble_cause_hist [0:31];
     reg [31:0] producer_occ_zero_count;
     reg [31:0] producer_occ_one_count;
@@ -362,9 +378,8 @@ end
             assert (!u_dut.gpr_pending_q[0])
                 else $fatal(1, "ASSERT_SCOREBOARD_TRACKS_X0 pending=0x%08h",
                             u_dut.gpr_pending_q);
-            assert (!(u_dut.dtcm_req && u_dut.mmio_req))
-                else $fatal(1, "ASSERT_DUAL_DATA_TARGET addr=0x%08h",
-                            u_dut.ex_lsu_mem_addr);
+            // The LSU has independent registered DTCM and MMIO backends.
+            // Concurrent requests are legal; validate each side below.
             assert (!u_dut.dtcm_we || (u_dut.dtcm_req && (|u_dut.dtcm_wmask)))
                 else $fatal(1, "ASSERT_BAD_DTCM_WRITE req=%0b mask=0x%01h addr=0x%08h",
                             u_dut.dtcm_req, u_dut.dtcm_wmask, u_dut.dtcm_addr);
@@ -409,6 +424,9 @@ end
                                 u_dut.completion_bus[completion_assert_lane].producer_id] ||
                             (u_dut.u_ctrl.producer_alloc_ex &&
                              (u_dut.ex_hzd_pkt.producer_id ==
+                              u_dut.completion_bus[completion_assert_lane].producer_id)) ||
+                            (u_dut.u_ctrl.producer_alloc_ex1 &&
+                             (u_dut.ex_hzd_pkt1.producer_id ==
                               u_dut.completion_bus[completion_assert_lane].producer_id)))
                         else $fatal(1,
                             "ASSERT_COMPLETION_FOR_FREE_TOKEN lane=%0d id=%0d rd=%0d data=0x%08h",
@@ -625,6 +643,13 @@ end
             retire_three_count <= 32'b0;
             retire_four_count <= 32'b0;
             dual_issue_count <= 32'b0;
+            dual_alu_alu_count <= 32'b0;
+            dual_alu_load_count <= 32'b0;
+            dual_alu_store_count <= 32'b0;
+            dual_alu_bmlite_count <= 32'b0;
+            l0_lookup_count <= 32'b0;
+            l0_hit_count <= 32'b0;
+            l0_correction_count <= 32'b0;
             for (perf_stat_idx = 0; perf_stat_idx < 32; perf_stat_idx = perf_stat_idx + 1)
                 bubble_cause_hist[perf_stat_idx] <= 32'b0;
             producer_occ_zero_count <= 32'b0;
@@ -1005,8 +1030,26 @@ end
                 3'd3: retire_three_count <= retire_three_count + 1'b1;
                 3'd4: retire_four_count <= retire_four_count + 1'b1;
             endcase
-            if (u_dut.issue_consume_two)
+            if (u_dut.issue_consume_two) begin
                 dual_issue_count <= dual_issue_count + 1'b1;
+                if (u_dut.issue_pkt1.decode.operator_type[OPERATOR_TYPE_LOAD])
+                    dual_alu_load_count <= dual_alu_load_count + 1'b1;
+                else if (u_dut.issue_pkt1.decode.operator_type[OPERATOR_TYPE_STORE])
+                    dual_alu_store_count <= dual_alu_store_count + 1'b1;
+                else if (u_dut.issue_pkt1.decode.operator_type[OPERATOR_TYPE_BITMANIP])
+                    dual_alu_bmlite_count <= dual_alu_bmlite_count + 1'b1;
+                else
+                    dual_alu_alu_count <= dual_alu_alu_count + 1'b1;
+            end
+            if (u_dut.u_ydrasil_if_stage.fetch_issue) begin
+                l0_lookup_count <= l0_lookup_count +
+                    (u_dut.u_ydrasil_if_stage.fetch_two ? 2'd2 : 2'd1);
+                l0_hit_count <= l0_hit_count + u_dut.l0_hit +
+                    (u_dut.u_ydrasil_if_stage.fetch_two ? u_dut.l0_hit1 : 1'b0);
+            end
+            if (u_dut.u_ydrasil_if_stage.predict_redirect_resp) begin
+                l0_correction_count <= l0_correction_count + 1'b1;
+            end
 
             bubble_cause_hist[{u_dut.clint_stall, u_dut.wb_backpressure,
                 u_dut.u_ctrl.producer_full_stall, u_dut.lsu_struct_stall,
@@ -1060,7 +1103,7 @@ end
             if (u_dut.lsu_struct_stall) begin
                 if (u_dut.u_ydrasil_load_store_unit.mmio_busy)
                     lsu_struct_mmio_count <= lsu_struct_mmio_count + 1'b1;
-                else if (u_dut.u_ydrasil_load_store_unit.active_is_store &&
+                else if (u_dut.u_ydrasil_load_store_unit.active_pkt.is_store &&
                          !u_dut.u_ydrasil_load_store_unit.active_store_data_valid)
                     lsu_struct_pending_store_count <= lsu_struct_pending_store_count + 1'b1;
                 else if (u_dut.u_ydrasil_load_store_unit.queue_enqueue)
@@ -1192,6 +1235,7 @@ end
 	bit finish_on_tohost;
 	bit perip_debug_en;
 	logic [31:0] finish_pc;
+	logic perip_req_q;
 
 	wire [31:0] virtual_led_output;
 	wire [39:0] virtual_seg_output;
@@ -1199,6 +1243,7 @@ end
 	wire [7:0]  virtual_key_input = 0;
 	wire        perip_req = u_mmio_subsystem.apb_req.psel &&
 		u_mmio_subsystem.apb_req.penable;
+	wire        perip_transfer = perip_req && !perip_req_q;
 	assign perip_addr = u_mmio_subsystem.apb_req.paddr;
 	assign perip_wen = perip_req && u_mmio_subsystem.apb_req.pwrite;
 	assign perip_mask = u_mmio_subsystem.apb_req.pstrb;
@@ -1216,7 +1261,7 @@ end
 
 	ydrasil_mmio_subsystem u_mmio_subsystem (
 		.axi_clk            (clk),
-		.apb_clk            (clk),
+		.apb_clk            (apb_clk),
 		.rst_n              (rst_n),
 		.axi_m2s_i          (axi_m2s),
 		.axi_s2m_o          (axi_s2m),
@@ -1230,12 +1275,18 @@ end
 
 	assign LED = virtual_led_output;
 	assign seg_wdata = u_mmio_subsystem.u_perip_bridge.seg_wdata_q;
+	always_ff @(posedge clk) begin
+		if (rst)
+			perip_req_q <= 1'b0;
+		else
+			perip_req_q <= perip_req;
+	end
 
 	always_ff @(posedge clk) begin
 		if (rst) begin
 			sim_done <= 1'b0;
 			perf_terminal_printed_q <= 1'b0;
-		end else if (perip_wen && (perip_addr == LED_ADDR) &&
+		end else if (perip_transfer && perip_wen && (perip_addr == LED_ADDR) &&
 		             ((finish_on_led && (perip_wdata != 32'h0)) ||
 		              (finish_on_terminal_led &&
 		               ((perip_wdata == 32'h078b7323) ||
@@ -1243,17 +1294,19 @@ end
 			sim_done <= 1'b1;
 		end
 
-		if (!rst && !perf_terminal_printed_q && perip_wen && (perip_addr == LED_ADDR) &&
+		if (!rst && !perf_terminal_printed_q && perip_transfer && perip_wen &&
+		    (perip_addr == LED_ADDR) &&
 		    ((perip_wdata == 32'h078b7323) || (perip_wdata == 32'h00504f53))) begin
 			perf_terminal_printed_q <= 1'b1;
 			print_perf_metrics();
 		end
 
-		if (!rst && perip_req && perip_wen && (perip_addr == SIM_STDOUT_ADDR)) begin
+		if (!rst && perip_transfer && perip_wen &&
+		    (perip_addr == SIM_STDOUT_ADDR)) begin
 			$write("%c", perip_wdata[7:0]);
 		end
 
-		if (!rst && perip_debug_en && perip_req) begin
+		if (!rst && perip_debug_en && perip_transfer) begin
 			if (perip_wen) begin
 				case (perip_addr)
 					LED_ADDR: $display("[PERIP] time=%0t LED write 0x%08h", $time, perip_wdata);
@@ -1430,7 +1483,11 @@ end
                 retire_two_count,
                 retire_three_count,
                 retire_four_count);
-            $display("PERF_DUAL_ISSUE: PAIRS=%-d", dual_issue_count);
+            $display("PERF_DUAL_ISSUE: PAIRS=%-d ALU_ALU=%-d ALU_LOAD=%-d ALU_STORE=%-d ALU_BMLITE=%-d",
+                dual_issue_count, dual_alu_alu_count, dual_alu_load_count,
+                dual_alu_store_count, dual_alu_bmlite_count);
+            $display("PERF_L0_BTB: LOOKUP=%-d HIT=%-d CORRECTION=%-d",
+                l0_lookup_count, l0_hit_count, l0_correction_count);
             $display("PERF_CAUSE_HIST: NONE=%-d SB=%-d LSU=%-d LSU_SB=%-d PF=%-d PF_SB=%-d PF_LSU=%-d PF_LSU_SB=%-d WB_ANY=%-d CLINT_ANY=%-d",
                 bubble_cause_hist[0], bubble_cause_hist[1], bubble_cause_hist[2],
                 bubble_cause_hist[3], bubble_cause_hist[4], bubble_cause_hist[5],
@@ -1491,11 +1548,11 @@ end
                 bp_btb_miss_taken_count,
                 bp_correct_taken_count,
                 bp_correct_not_taken_count);
-            $display("PERF_LSU_HOT: LOOKUP=%-d HIT=%-d FILL=%-d STORE_UPDATE=%-d",
-                u_dut.u_ydrasil_load_store_unit.perf_hot_lookup_q,
-                u_dut.u_ydrasil_load_store_unit.perf_hot_hit_q,
-                u_dut.u_ydrasil_load_store_unit.perf_hot_fill_q,
-                u_dut.u_ydrasil_load_store_unit.perf_hot_store_update_q);
+            $display("PERF_LSU_STB: LOOKUP=%-d HIT=%-d BLOCK=%-d DRAIN=%-d",
+                u_dut.u_ydrasil_load_store_unit.perf_stb_lookup_q,
+                u_dut.u_ydrasil_load_store_unit.perf_stb_hit_q,
+                u_dut.u_ydrasil_load_store_unit.perf_stb_block_q,
+                u_dut.u_ydrasil_load_store_unit.perf_stb_drain_q);
             $display("EARLY_ALU_COVER: ARITH=%-d LOGIC=%-d SHIFT=%-d PASS=%-d NON_EARLY=%-d",
                 early_arith_count, early_logic_count, early_shift_count,
                 early_pass_count, non_early_alu_count);

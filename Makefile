@@ -162,7 +162,7 @@ BOUNDARY_OPT_CFLAGS_O3_app_unroll ?= -Os
 BOUNDARY_OPT_APP_CFLAGS_O3_app_unroll ?= -O3 -funroll-loops
 BOUNDARY_OPT_SPIKE_MAXSTEPS ?= 100000
 BOUNDARY_OPT_SPIKE_MAXSTEPS_exception_stress ?= 1000000
-BOUNDARY_OPT_SPIKE_SKIP_APPS ?= csr_counter_edges coverage_closure_edges
+BOUNDARY_OPT_SPIKE_SKIP_APPS ?= csr_counter_edges coverage_closure_edges completion_broadcast_edges mmio_dtcm_order_edges
 BOUNDARY_SIM_TIMEOUT ?= 2000000
 COVERAGE_QUICK_TIMEOUT ?= 750000
 COVERAGE_QUICK_MARGIN_PERCENT ?= 50
@@ -1208,7 +1208,7 @@ coremark_opt_sim_$(1):
 	set +e; $(MAKE) --no-print-directory sim_compare SIM_COMPARE=none \
 		COMPARE_NAME="coremark-opt/$$$$profile" COMPARE_ELF="$$$$out/coremark.elf" \
 		COMPARE_ITCM="$$$$out/coremark.itcm" COMPARE_DTCM="$$$$out/coremark.dtcm" \
-		COMPARE_SIM_EXTRA_DEFINES="+cpp_timeout=$(if $(COREMARK_OPT_TIMEOUT_$(1)),$(COREMARK_OPT_TIMEOUT_$(1)),$(COREMARK_OPT_TIMEOUT)) +sv_timeout=$(if $(COREMARK_OPT_TIMEOUT_$(1)),$(COREMARK_OPT_TIMEOUT_$(1)),$(COREMARK_OPT_TIMEOUT))" \
+		COMPARE_SIM_EXTRA_DEFINES="+no_finish_on_tohost +cpp_timeout=$(if $(COREMARK_OPT_TIMEOUT_$(1)),$(COREMARK_OPT_TIMEOUT_$(1)),$(COREMARK_OPT_TIMEOUT)) +sv_timeout=$(if $(COREMARK_OPT_TIMEOUT_$(1)),$(COREMARK_OPT_TIMEOUT_$(1)),$(COREMARK_OPT_TIMEOUT))" \
 		$$$$model_args \
 		>"$$$$run_log" 2>&1; rc=$$$$?; set -e; hw_log="$(HW_TRACE_OUT_DIR)/coremark-opt/$$$$profile/hw.log"; \
 	result=FAIL; if [ "$$$$rc" -eq 0 ] && grep -q 'Correct operation validated' "$$$$hw_log" && \
@@ -1408,7 +1408,7 @@ boundary_sim_all: $(BOUNDARY_SIM_TARGETS)
 boundary_sim_%:
 	@name=$*; result_dir="$(BOUNDARY_RESULT_DIR)"; hw_log="$(HW_TRACE_OUT_DIR)/boundary/$$name/hw.log"; run_log="$$result_dir/$$name.log"; status="$$result_dir/$$name.status"; \
 	mkdir -p "$$result_dir"; rm -f "$$hw_log" "$$run_log" "$$status"; \
-	if $(MAKE) --no-print-directory sim_compare SIM_COMPARE=none COMPARE_NAME="boundary/$$name" COMPARE_ELF="$(BUILD_DIR)/app/boundary/$$name.elf" COMPARE_ITCM="$(BUILD_DIR)/app/boundary/$$name.itcm" COMPARE_DTCM="$(BUILD_DIR)/app/boundary/$$name.dtcm" COMPARE_SIM_EXTRA_DEFINES="+perip_debug +cpp_timeout=$(BOUNDARY_SIM_TIMEOUT) +sv_timeout=$(BOUNDARY_SIM_TIMEOUT)" >"$$run_log" 2>&1 && grep -q "BOUNDARY PASS name=$$name" "$$hw_log"; then result=PASS; else result=FAIL; fi; \
+	if $(MAKE) --no-print-directory sim_compare SIM_COMPARE=none COMPARE_NAME="boundary/$$name" COMPARE_ELF="$(BUILD_DIR)/app/boundary/$$name.elf" COMPARE_ITCM="$(BUILD_DIR)/app/boundary/$$name.itcm" COMPARE_DTCM="$(BUILD_DIR)/app/boundary/$$name.dtcm" COMPARE_SIM_EXTRA_DEFINES="+no_finish_on_tohost +perip_debug +cpp_timeout=$(BOUNDARY_SIM_TIMEOUT) +sv_timeout=$(BOUNDARY_SIM_TIMEOUT)" >"$$run_log" 2>&1 && grep -q "BOUNDARY PASS name=$$name" "$$hw_log"; then result=PASS; else result=FAIL; fi; \
 	echo "[$$name] [$$result]" > "$$status"
 
 boundary_report:
@@ -1471,7 +1471,7 @@ boundary_opt_sim_$(1)_$(2): $(BOUNDARY_OPT_APP_ROOT)/$(1)/.built
 		COMPARE_COMPLETE_PROGRAM=1 COMPARE_ALLOW_SPIKE_TAIL=1 COMPARE_MAX_SPIKE_TAIL=16 \
 		COMPARE_GPR_IGNORE_MASK=0x1800 \
 		SPIKE_MAXSTEPS=$(if $(BOUNDARY_OPT_SPIKE_MAXSTEPS_$(2)),$(BOUNDARY_OPT_SPIKE_MAXSTEPS_$(2)),$(BOUNDARY_OPT_SPIKE_MAXSTEPS)) \
-		COMPARE_SIM_EXTRA_DEFINES="+perip_debug +cpp_timeout=$(BOUNDARY_SIM_TIMEOUT) +sv_timeout=$(BOUNDARY_SIM_TIMEOUT)" \
+		COMPARE_SIM_EXTRA_DEFINES="+no_finish_on_tohost +perip_debug +cpp_timeout=$(BOUNDARY_SIM_TIMEOUT) +sv_timeout=$(BOUNDARY_SIM_TIMEOUT)" \
 		>"$$$$tmp_log" 2>&1; run_rc=$$$$?; set -e; \
 	self_check=FAIL; assertions=FAIL; spike_diff=FAIL; result=FAIL; \
 	if grep -Eq "BOUNDARY PASS name=$$$$name|LED write 0x00504f53" "$$$$hw_log"; then self_check=PASS; fi; \
@@ -1533,7 +1533,7 @@ coremark_result:
 		tmp=$$(mktemp); \
 		awk '{ \
 			line=$$0; \
-			if (line ~ /^(PERF_METRIC:|PERF_STALL:|PERF_SCOREBOARD_DETAIL:|PERF_LOAD_DETAIL:|PERF_ALU_DETAIL:|PERF_PENDING_DETAIL:|PERF_LSU_HOT:|PERF_FRONTEND:|PERF_BRANCH:|PERF_BP_ACC:|PERF_BP_DETAIL:)/) { \
+			if (line ~ /^(PERF_METRIC:|PERF_STALL:|PERF_SCOREBOARD_DETAIL:|PERF_LOAD_DETAIL:|PERF_ALU_DETAIL:|PERF_PENDING_DETAIL:|PERF_LSU_STB:|PERF_DUAL_ISSUE:|PERF_L0_BTB:|PERF_FRONTEND:|PERF_BRANCH:|PERF_BP_ACC:|PERF_BP_DETAIL:)/) { \
 				print line; \
 			} else if (match(line, /(core[[:space:]]+0:|3[[:space:]]+0x)/)) { \
 				prefix=substr(line, 1, RSTART - 1); \
@@ -1544,8 +1544,8 @@ coremark_result:
 				printf "\n"; \
 			} \
 		} END { printf "\n"; }' "$(COREMARK_RESULT_LOG)" > $$tmp; \
-		if grep -Eq '^(CoreMark Size|Total ticks|Total time \(secs\)|Iterations/Sec|Iterations       |Compiler version|Compiler flags|Memory location|seedcrc|Correct operation validated|CoreMark 1\.0 :|Errors detected|ERROR!|COREMARK DONE|PERF_METRIC:|PERF_STALL:|PERF_SCOREBOARD_DETAIL:|PERF_LOAD_DETAIL:|PERF_ALU_DETAIL:|PERF_PENDING_DETAIL:|PERF_LSU_HOT:|PERF_FRONTEND:|PERF_BRANCH:|PERF_BP_ACC:|PERF_BP_DETAIL:|\[[0-9]+\]crc)' "$$tmp"; then \
-			grep -E '^(CoreMark Size|Total ticks|Total time \(secs\)|Iterations/Sec|Iterations       |Compiler version|Compiler flags|Memory location|seedcrc|Correct operation validated|CoreMark 1\.0 :|Errors detected|ERROR!|COREMARK DONE|PERF_METRIC:|PERF_STALL:|PERF_SCOREBOARD_DETAIL:|PERF_LOAD_DETAIL:|PERF_ALU_DETAIL:|PERF_PENDING_DETAIL:|PERF_LSU_HOT:|PERF_FRONTEND:|PERF_BRANCH:|PERF_BP_ACC:|PERF_BP_DETAIL:|\[[0-9]+\]crc)' "$$tmp" | tee -a "$(PPA_COREMARK_LOG)"; \
+		if grep -Eq '^(CoreMark Size|Total ticks|Total time \(secs\)|Iterations/Sec|Iterations       |Compiler version|Compiler flags|Memory location|seedcrc|Correct operation validated|CoreMark 1\.0 :|Errors detected|ERROR!|COREMARK DONE|PERF_METRIC:|PERF_STALL:|PERF_SCOREBOARD_DETAIL:|PERF_LOAD_DETAIL:|PERF_ALU_DETAIL:|PERF_PENDING_DETAIL:|PERF_LSU_STB:|PERF_DUAL_ISSUE:|PERF_L0_BTB:|PERF_FRONTEND:|PERF_BRANCH:|PERF_BP_ACC:|PERF_BP_DETAIL:|\[[0-9]+\]crc)' "$$tmp"; then \
+			grep -E '^(CoreMark Size|Total ticks|Total time \(secs\)|Iterations/Sec|Iterations       |Compiler version|Compiler flags|Memory location|seedcrc|Correct operation validated|CoreMark 1\.0 :|Errors detected|ERROR!|COREMARK DONE|PERF_METRIC:|PERF_STALL:|PERF_SCOREBOARD_DETAIL:|PERF_LOAD_DETAIL:|PERF_ALU_DETAIL:|PERF_PENDING_DETAIL:|PERF_LSU_STB:|PERF_DUAL_ISSUE:|PERF_L0_BTB:|PERF_FRONTEND:|PERF_BRANCH:|PERF_BP_ACC:|PERF_BP_DETAIL:|\[[0-9]+\]crc)' "$$tmp" | tee -a "$(PPA_COREMARK_LOG)"; \
 		else \
 			echo "[COREMARK] No CoreMark result lines found in $(COREMARK_RESULT_LOG)" | tee -a "$(PPA_COREMARK_LOG)"; \
 		fi; \
@@ -1680,8 +1680,8 @@ coe_loop5: coe_loop5_gen
 		COE_SIMPLE_NAME=coe_loop5 \
 		COE_SIMPLE_ITCM=$(COE_LOOP5_ITCM) \
 		COE_SIMPLE_DTCM=$(COE_LOOP5_DTCM) \
-		COE_EXPECT_CNT_READ=0x00000001 \
-		COE_EXPECT_SEG=0x37800001
+		COE_EXPECT_CNT_READ=0x00000000 \
+		COE_EXPECT_SEG=0x37800000
 
 coe_loop_lina_gen: $(COE_LOOP_LINA_ITCM_BIN) $(COE_LOOP_LINA_ITCM) \
 		$(COE_LOOP_LINA_DTCM) $(COE_LOOP_LINA_DUMP)

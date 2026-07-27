@@ -20,7 +20,7 @@ import ydrasil_apb_pkg::*;
     end
     initial begin
         apb_clk = 1'b0;
-        forever #3 apb_clk = ~apb_clk;
+        forever #4 apb_clk = ~apb_clk;
     end
     initial begin
         rst_n = 1'b0;
@@ -30,12 +30,14 @@ import ydrasil_apb_pkg::*;
 `endif
 `ifdef VERILATOR_CC
     logic apb_clk;
-    always_ff @(negedge clk or negedge rst_n) begin
+    logic [1:0] apb_div_q;
+    always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n)
-            apb_clk <= 1'b0;
+            apb_div_q <= '0;
         else
-            apb_clk <= ~apb_clk;
+            apb_div_q <= apb_div_q + 1'b1;
     end
+    assign apb_clk = apb_div_q[1];
 `endif
 
     ydrasil_axi_lite_m2s_pkt_t axi_m2s;
@@ -48,6 +50,19 @@ import ydrasil_apb_pkg::*;
     logic [31:0] model_rdata_q;
     logic setup_seen_q;
     logic [31:0] held_addr_q;
+    logic expected_req_valid_q;
+    logic expected_req_write_q;
+    logic [31:0] expected_req_addr_q;
+    logic [31:0] expected_req_wdata_q;
+    logic [3:0] expected_req_wstrb_q;
+    logic req_toggle_axi_seen_q;
+    integer axi_request_count;
+    integer apb_setup_count;
+    integer apb_complete_count;
+    integer axi_response_count;
+    integer cpu_edge_count;
+    integer last_apb_cpu_edge;
+    logic apb_edge_seen_q;
 
     ydrasil_axi_to_apb u_bridge (
         .axi_clk_i(clk),
@@ -72,11 +87,21 @@ import ydrasil_apb_pkg::*;
             wait_count_q <= '0;
             setup_seen_q <= 1'b0;
             held_addr_q <= '0;
+            apb_setup_count <= 0;
+            apb_complete_count <= 0;
         end else begin
             if (bridge_apb_req.psel && !bridge_apb_req.penable) begin
+                if (!expected_req_valid_q)
+                    $fatal(1, "APB observed a duplicated or unexpected request");
+                if ((bridge_apb_req.pwrite != expected_req_write_q) ||
+                    (bridge_apb_req.paddr != expected_req_addr_q) ||
+                    (bridge_apb_req.pwdata != expected_req_wdata_q) ||
+                    (bridge_apb_req.pstrb != expected_req_wstrb_q))
+                    $fatal(1, "APB bundled request changed across CDC");
                 wait_count_q <= configured_wait_q;
                 setup_seen_q <= 1'b1;
                 held_addr_q <= bridge_apb_req.paddr;
+                apb_setup_count <= apb_setup_count + 1;
             end else if (bridge_apb_req.psel && bridge_apb_req.penable &&
                          (wait_count_q != 0)) begin
                 wait_count_q <= wait_count_q - 1'b1;
@@ -88,8 +113,45 @@ import ydrasil_apb_pkg::*;
                     $fatal(1, "APB address changed while transfer was active");
             end
             if (bridge_apb_req.psel && bridge_apb_req.penable &&
-                bridge_apb_rsp.pready)
+                bridge_apb_rsp.pready) begin
                 setup_seen_q <= 1'b0;
+                expected_req_valid_q <= 1'b0;
+                apb_complete_count <= apb_complete_count + 1;
+            end
+        end
+    end
+
+    // The production peripheral clock is CPU/4. Check the same relationship
+    // in both event-driven and Verilator simulations after the first edge.
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            cpu_edge_count <= 0;
+            req_toggle_axi_seen_q <= 1'b0;
+            axi_request_count <= 0;
+            axi_response_count <= 0;
+        end else begin
+            cpu_edge_count <= cpu_edge_count + 1;
+            if (u_bridge.req_toggle_axi_q != req_toggle_axi_seen_q) begin
+                req_toggle_axi_seen_q <= u_bridge.req_toggle_axi_q;
+                axi_request_count <= axi_request_count + 1;
+            end
+            if ((axi_s2m.bvalid && axi_m2s.bready) ||
+                (axi_s2m.rvalid && axi_m2s.rready))
+                axi_response_count <= axi_response_count + 1;
+        end
+    end
+
+    always_ff @(posedge apb_clk or negedge rst_n) begin
+        if (!rst_n) begin
+            last_apb_cpu_edge <= 0;
+            apb_edge_seen_q <= 1'b0;
+        end else begin
+            if (apb_edge_seen_q &&
+                ((cpu_edge_count - last_apb_cpu_edge) != 4))
+                $fatal(1, "APB clock is not CPU/4: CPU edges=%0d",
+                    cpu_edge_count - last_apb_cpu_edge);
+            last_apb_cpu_edge <= cpu_edge_count;
+            apb_edge_seen_q <= 1'b1;
         end
     end
 
@@ -101,6 +163,13 @@ import ydrasil_apb_pkg::*;
         output [1:0] response
     );
         begin
+            if (expected_req_valid_q)
+                $fatal(1, "new AXI write started before prior APB completion");
+            expected_req_valid_q = 1'b1;
+            expected_req_write_q = 1'b1;
+            expected_req_addr_q = addr;
+            expected_req_wdata_q = data;
+            expected_req_wstrb_q = strb;
             @(negedge clk);
             axi_m2s.bready = 1'b1;
             if (data_first) begin
@@ -145,6 +214,13 @@ import ydrasil_apb_pkg::*;
         output [1:0] response
     );
         begin
+            if (expected_req_valid_q)
+                $fatal(1, "new AXI read started before prior APB completion");
+            expected_req_valid_q = 1'b1;
+            expected_req_write_q = 1'b0;
+            expected_req_addr_q = addr;
+            expected_req_wdata_q = '0;
+            expected_req_wstrb_q = '0;
             @(negedge clk);
             axi_m2s.araddr = addr;
             axi_m2s.arvalid = 1'b1;
@@ -329,6 +405,11 @@ import ydrasil_apb_pkg::*;
         configured_wait_q = '0;
         model_error_q = 1'b0;
         model_rdata_q = 32'h1234_5678;
+        expected_req_valid_q = 1'b0;
+        expected_req_write_q = 1'b0;
+        expected_req_addr_q = '0;
+        expected_req_wdata_q = '0;
+        expected_req_wstrb_q = '0;
         clint_apb_req = '0;
         instret_inc_count = '0;
         ex_csr_wen = 1'b0;
@@ -363,6 +444,13 @@ import ydrasil_apb_pkg::*;
         if (response != 2'b10)
             $fatal(1, "APB PSLVERR was not converted to AXI SLVERR");
         model_error_q = 1'b0;
+
+        repeat (4) @(posedge clk);
+        if ((axi_request_count != 4) || (apb_setup_count != 4) ||
+            (apb_complete_count != 4) || (axi_response_count != 4))
+            $fatal(1, "AXI/APB CDC transaction mismatch req=%0d setup=%0d complete=%0d rsp=%0d",
+                axi_request_count, apb_setup_count, apb_complete_count,
+                axi_response_count);
 
         clint_write(32'h0200_0000, 32'h1, 4'b0001);
         if (!clint_software_irq)

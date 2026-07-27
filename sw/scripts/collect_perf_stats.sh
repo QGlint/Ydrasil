@@ -14,7 +14,7 @@ field() {
     fi
 }
 
-header="program,cycles,insts,ipc,scoreboard,lsu_struct,producer_full,multi,flush,no_if_valid,other,raw_only,waw_only,raw_waw,load_use,alu_use,pending_tail,pf_sb,pf_lsu,pf_lsu_sb,occ0,occ1,occ2,both_wait,wait_ready,both_ready,hot_lookup,hot_hit,coremark_score"
+header="program,cycles,insts,ipc,scoreboard,lsu_struct,producer_full,multi,flush,no_if_valid,other,raw_only,waw_only,raw_waw,load_use,alu_use,pending_tail,pf_sb,pf_lsu,pf_lsu_sb,occ0,occ1,occ2,both_wait,wait_ready,both_ready,stb_lookup,stb_hit,coremark_score"
 echo "$header" > "$csv"
 
 mapfile -t logs < <(find "$root" -type f -name hw.log \( \
@@ -39,7 +39,7 @@ for log in "${logs[@]}"; do
     hazard=$(grep '^PERF_HAZARD_ACCOUNT:' "$log" | tail -1)
     cause=$(grep '^PERF_CAUSE_HIST:' "$log" | tail -1 || true)
     producer=$(grep '^PERF_PRODUCER_STATE:' "$log" | tail -1 || true)
-    hot=$(grep '^PERF_LSU_HOT:' "$log" | tail -1)
+    stb=$(grep '^PERF_LSU_STB:' "$log" | tail -1 || true)
     coremark=$(grep '^CoreMark 1\.0 :' "$log" | tail -1 || true)
     score=
     if [[ $coremark =~ CoreMark[[:space:]]+1\.0[[:space:]]*:[[:space:]]*([0-9.]+) ]]; then
@@ -58,8 +58,8 @@ for log in "${logs[@]}"; do
         "$(field "$cause" PF_LSU_SB)" "$(field "$producer" OCC0)" \
         "$(field "$producer" OCC1)" "$(field "$producer" OCC2)" \
         "$(field "$producer" BOTH_WAIT)" "$(field "$producer" WAIT_READY)" \
-        "$(field "$producer" BOTH_READY)" "$(field "$hot" LOOKUP)" \
-        "$(field "$hot" HIT)" "$score" >> "$csv"
+        "$(field "$producer" BOTH_READY)" "$(field "$stb" LOOKUP)" \
+        "$(field "$stb" HIT)" "$score" >> "$csv"
 done
 
 {

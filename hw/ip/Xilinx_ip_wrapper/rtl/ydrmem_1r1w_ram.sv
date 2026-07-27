@@ -1,7 +1,11 @@
 module ydrmem_1r1w_ram #(
     parameter int DEPTH = 256,
     parameter int DATA_WIDTH = 32,
-    parameter int ADDR_WIDTH = (DEPTH > 1) ? $clog2(DEPTH) : 1
+    parameter int ADDR_WIDTH = (DEPTH > 1) ? $clog2(DEPTH) : 1,
+    // Kept in the wrapper interface so the BRAM-backed synthesis model has
+    // the same contract as the simulation RAM.  XPM memory contents are
+    // supplied by the surrounding memory configuration in this path.
+    parameter logic [DATA_WIDTH-1:0] INIT_VALUE = '0
 ) (
     input  wire                   clk,
 
@@ -35,13 +39,13 @@ module ydrmem_1r1w_ram #(
         .ena_i   (ren_i),
         .addra_i (raddr_i),
         .dina_i  ({DATA_WIDTH{1'b0}}),
-        .wea_i   (1'b0),
+        .wea_i   ('0),
         .douta_o (rdata),
 
         .enb_i   (wen_i),
         .addrb_i (waddr_i),
         .dinb_i  (wdata_i),
-        .web_i   (wen_i),
+        .web_i   ({(DATA_WIDTH/8){wen_i}}),
         .doutb_o (wport_rdata_unused)
     );
 

@@ -1,7 +1,7 @@
 
 package ydrasil_pkg;
 	// Memory and address configuration
-	localparam int ITCM_ADDR_WIDTH = 12; // 16KB
+	localparam int ITCM_ADDR_WIDTH = 13; // 32KB target for expanded images
 	localparam int DTCM_ADDR_WIDTH = 16; // 256KB
 
 	localparam logic [31:0] ITCM_BASE_ADDR = 32'h8000_0000;
@@ -203,10 +203,11 @@ package ydrasil_pkg;
 	localparam int OP_LSU_SH  = 6;
 	localparam int OP_LSU_SW  = 7;
 
-	localparam int OP_CSR_INFO_WIDTH = 3;
+	localparam int OP_CSR_INFO_WIDTH = 4;
 	localparam int OP_CSR_CSRRW = 0;
 	localparam int OP_CSR_CSRRS = 1;
 	localparam int OP_CSR_CSRRC = 2;
+	localparam int OP_CSR_WRITE = 3;
 
 	localparam int OP_SYS_INFO_WIDTH = 3;
 	localparam int OP_SYS_ECALL  = 0;
@@ -281,7 +282,9 @@ package ydrasil_pkg;
 
 	localparam int BP_BTB_ENTRIES = 512;
 	localparam int BP_BHT_ENTRIES = 512;
-	localparam int PRODUCER_NUM = 6;
+	// Future File: each producer carries its value independently of the two
+	// architectural writeback ports.
+	localparam int PRODUCER_NUM = 16;
 	localparam int PRODUCER_SLOT_WIDTH = $clog2(PRODUCER_NUM);
 	localparam int PRODUCER_ID_WIDTH = PRODUCER_SLOT_WIDTH + 1;
 	typedef logic [PRODUCER_SLOT_WIDTH-1:0] producer_slot_t;
@@ -337,6 +340,31 @@ package ydrasil_pkg;
 
 	typedef struct packed {
 		logic                                valid;
+		logic                                conditional;
+		logic [INST_ADDR_WIDTH-1:0]          pc;
+		logic                                taken;
+		logic [INST_ADDR_WIDTH-1:0]          target;
+		logic [1:0]                          counter;
+		logic [INST_ADDR_WIDTH-1:0]          bht_index;
+	} ydrasil_bp_train_pkt_t;
+
+	typedef struct packed {
+		logic                                valid;
+		logic [REGS_ADDR_WIDTH-1:0]          rs1_addr;
+		logic [REGS_ADDR_WIDTH-1:0]          rs2_addr;
+		logic [REGS_ADDR_WIDTH-1:0]          rd_addr;
+		logic                                rs1_ren;
+		logic                                rs2_ren;
+		logic                                rd_wen;
+		logic                                lsu_req;
+		logic                                store_req;
+		logic                                prev_alu_bypass_ok;
+		logic                                serialize_before;
+		logic                                checkpoint_req;
+	} ydrasil_id_ctrl_pkt_t;
+
+	typedef struct packed {
+		logic                                valid;
 		logic                                illegal;
 		ydrasil_fpu_op_t                     op;
 		logic [2:0]                          rm;
@@ -363,18 +391,12 @@ package ydrasil_pkg;
 	typedef ydrasil_gpr_fwd_pkt_t ydrasil_completion_bus_t [COMPLETION_LANES];
 
 	typedef struct packed {
-		logic [REGS_ADDR_WIDTH-1:0]          rs1_addr;
-		logic [REGS_ADDR_WIDTH-1:0]          rs2_addr;
+		logic                                valid;
+		logic                                writes_gpr;
 		logic [REGS_ADDR_WIDTH-1:0]          rd_addr;
-		logic                                rs1_ren;
-		logic                                rs2_ren;
-		logic                                rd_wen;
-		logic                                lsu_req;
-		logic                                store_req;
-		logic                                prev_alu_bypass_ok;
-		logic                                load_bypass_ok;
-		logic                                serialize_before;
-	} ydrasil_id_ctrl_pkt_t;
+		logic [REGS_DATA_WIDTH-1:0]          value;
+		logic [INST_ADDR_WIDTH-1:0]          pc;
+	} ydrasil_commit_pkt_t;
 
 	typedef struct packed {
 		logic                                valid;
@@ -400,8 +422,6 @@ package ydrasil_pkg;
 		logic [BUS_DATA_WIDTH-1:0]           store_data;
 		logic [3:0]                          store_mask;
 		logic                                store_data_valid;
-		producer_id_t                        store_data_producer_id;
-		logic                                store_data_producer_tracked;
 		logic                                fp_load;
 		logic [REGS_ADDR_WIDTH-1:0]          fp_rd_addr;
 	} ydrasil_lsu_req_pkt_t;
@@ -413,6 +433,11 @@ package ydrasil_pkg;
 		logic [BUS_DATA_WIDTH-1:0]           wdata;
 		logic [3:0]                          wmask;
 	} ydrasil_mem_req_pkt_t;
+
+	typedef struct packed {
+		ydrasil_mem_req_pkt_t                load;
+		ydrasil_mem_req_pkt_t                store;
+	} ydrasil_dtcm_req_pkt_t;
 
 	typedef struct packed {
 		logic                                valid;
@@ -452,6 +477,7 @@ package ydrasil_pkg;
 
 	typedef struct packed {
 		logic                                stall;
+		logic                                retire;
 		logic                                redirect;
 		logic [INST_ADDR_WIDTH-1:0]          redirect_addr;
 	} ydrasil_trap_ctrl_pkt_t;
@@ -465,14 +491,8 @@ package ydrasil_pkg;
 	typedef struct packed {
 		logic                                scoreboard_stall;
 		logic                                lsu_struct_stall;
-		logic                                issue_store_data_ready;
-		producer_id_t                        store_data_producer_id;
-		logic                                store_data_producer_tracked;
 		logic                                prev_alu_bypass_rs1;
 		logic                                prev_alu_bypass_rs2;
-		logic                                prev_load_bypass_rs1;
-		logic                                prev_load_bypass_rs2;
-		producer_id_t                        prev_load_producer_id;
 		logic                                rs1_pending_stall;
 		logic                                rs2_pending_stall;
 		logic                                rd_waw_stall;
@@ -489,5 +509,31 @@ package ydrasil_pkg;
 		logic [REGS_NUM-1:0]                 gpr_pending_issue_mask;
 		logic [REGS_NUM-1:0]                 gpr_pending_for_hazard;
 	} ydrasil_hzd_status_pkt_t;
+
+	// Rename/scoreboard results are part of the registered D-to-R contract.
+	// Issue does not reach back into ctrl through independent sideband ports.
+	typedef struct packed {
+		ydrasil_hzd_status_pkt_t              hazard;
+		ydrasil_gpr_fwd_pkt_t                 src1;
+		ydrasil_gpr_fwd_pkt_t                 src2;
+		producer_id_t                          producer_id;
+		logic                                  producer_tracked;
+	} ydrasil_issue_schedule_pkt_t;
+
+	typedef struct packed {
+		logic                                  valid;
+		logic                                  lane1;
+		logic                                  dual_capable;
+		logic                                  pair_eligible;
+		logic                                  memory_op;
+		ydrasil_id_ctrl_pkt_t                  ctrl;
+		ydrasil_decode_pkt_t                   decode;
+		ydrasil_issue_schedule_pkt_t           schedule;
+	} ydrasil_issue_pkt_t;
+
+	typedef struct packed {
+		ydrasil_gpr_fwd_pkt_t                 wb0;
+		ydrasil_gpr_fwd_pkt_t                 wb1;
+	} ydrasil_issue_wb_pkt_t;
 
 endpackage
