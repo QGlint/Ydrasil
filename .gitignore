@@ -10,6 +10,9 @@ __pycache__/
 *.jou
 ref/
 !sw/rt-thread-5.2.2/tools/
+.Xil/
+.claude/
+
 
 # Generated software images and disassembly must stay under build/.
 *.elf

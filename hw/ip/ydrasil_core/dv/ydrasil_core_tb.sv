@@ -235,6 +235,19 @@ end
     reg [31:0] acct_issue_count;
     reg [31:0] acct_other_count;
     reg [31:0] perf_sample_cycle_count;
+    reg [31:0] perf_productive_slot_count;
+    reg [31:0] perf_lost_flush_slot_count;
+    reg [31:0] perf_lost_mul_hold_slot_count;
+    reg [31:0] perf_lost_scoreboard_slot_count;
+    reg [31:0] perf_lost_lsu_struct_slot_count;
+    reg [31:0] perf_lost_lsu_serialize_slot_count;
+    reg [31:0] perf_lost_producer_full_slot_count;
+    reg [31:0] perf_lost_wb_slot_count;
+    reg [31:0] perf_lost_clint_slot_count;
+    reg [31:0] perf_lost_multi_slot_count;
+    reg [31:0] perf_lost_no_if_valid_slot_count;
+    reg [31:0] perf_lost_issue_slot_count;
+    reg [31:0] perf_lost_other_slot_count;
     reg [31:0] noif_control_redirect_count;
     reg [31:0] noif_predict_redirect_count;
     reg [31:0] noif_fence_refill_count;
@@ -314,6 +327,20 @@ end
     reg [31:0] fe_pred_taken_bubble_count;
     reg [31:0] fe_wrong_dir_flush_count;
     reg        bp_predict_redirect_q;
+    reg [31:0] issue_fence_count;
+    reg [31:0] issue_slot1_replay_count;
+    reg [31:0] issue_slot1_sb_replay_count;
+    reg [31:0] issue_slot1_lsu_replay_count;
+    reg [31:0] issue_serialize_wait_count;
+    reg [31:0] dispatchq_occ_count [0:4];
+
+    // Two issue slots are available on every sampled execution cycle.  These
+    // signals intentionally count accepted EX instructions, rather than
+    // retirement, so a stall/flush is charged to the cycle in which it
+    // consumed capacity.
+    wire [1:0] perf_executed_slots =
+        {1'b0, u_dut.ex_accept_valid} + {1'b0, u_dut.ex_accept_valid1};
+    wire [2:0] perf_lost_slots = 3'd2 - {1'b0, perf_executed_slots};
 
 	ydrasil_core u_dut (
 		.clk      (clk),
@@ -623,6 +650,19 @@ end
             acct_issue_count <= 32'b0;
             acct_other_count <= 32'b0;
             perf_sample_cycle_count <= 32'b0;
+            perf_productive_slot_count <= 32'b0;
+            perf_lost_flush_slot_count <= 32'b0;
+            perf_lost_mul_hold_slot_count <= 32'b0;
+            perf_lost_scoreboard_slot_count <= 32'b0;
+            perf_lost_lsu_struct_slot_count <= 32'b0;
+            perf_lost_lsu_serialize_slot_count <= 32'b0;
+            perf_lost_producer_full_slot_count <= 32'b0;
+            perf_lost_wb_slot_count <= 32'b0;
+            perf_lost_clint_slot_count <= 32'b0;
+            perf_lost_multi_slot_count <= 32'b0;
+            perf_lost_no_if_valid_slot_count <= 32'b0;
+            perf_lost_issue_slot_count <= 32'b0;
+            perf_lost_other_slot_count <= 32'b0;
             noif_control_redirect_count <= 32'b0;
             noif_predict_redirect_count <= 32'b0;
             noif_fence_refill_count <= 32'b0;
@@ -702,8 +742,28 @@ end
             fe_pred_taken_bubble_count <= 32'b0;
             fe_wrong_dir_flush_count <= 32'b0;
             bp_predict_redirect_q <= 1'b0;
+            issue_fence_count <= 32'b0;
+            issue_slot1_replay_count <= 32'b0;
+            issue_slot1_sb_replay_count <= 32'b0;
+            issue_slot1_lsu_replay_count <= 32'b0;
+            issue_serialize_wait_count <= 32'b0;
+            for (perf_stat_idx = 0; perf_stat_idx < 5; perf_stat_idx = perf_stat_idx + 1)
+                dispatchq_occ_count[perf_stat_idx] <= 32'b0;
         end else begin
             perf_sample_cycle_count <= perf_sample_cycle_count + 1'b1;
+            perf_productive_slot_count <= perf_productive_slot_count +
+                {30'b0, perf_executed_slots};
+            issue_fence_count <= issue_fence_count + u_dut.id_fence_i;
+            issue_slot1_replay_count <= issue_slot1_replay_count +
+                u_dut.issue_slot1_replay;
+            issue_slot1_sb_replay_count <= issue_slot1_sb_replay_count +
+                (u_dut.issue_slot1_replay && u_dut.issue_scoreboard_stall1);
+            issue_slot1_lsu_replay_count <= issue_slot1_lsu_replay_count +
+                (u_dut.issue_slot1_replay && u_dut.issue_lsu_struct_stall1);
+            issue_serialize_wait_count <= issue_serialize_wait_count +
+                u_dut.issue_serialize_stall;
+            dispatchq_occ_count[u_dut.issue_pipe_count_q] <=
+                dispatchq_occ_count[u_dut.issue_pipe_count_q] + 1'b1;
             bp_predict_redirect_q <= u_dut.u_ydrasil_if_stage.bp_predict_redirect;
             if (u_dut.branch_jump)
                 control_refill_active_q <= 1'b1;
@@ -923,14 +983,14 @@ end
                     u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL])) ? 32'd1 : 32'd0);
             if ((u_dut.rs1_pending_stall | u_dut.rs2_pending_stall) &&
                 !(u_dut.rs1_issue_hzd | u_dut.rs2_issue_hzd)) begin
-                if ((u_dut.rs1_pending_stall && u_dut.u_ctrl.dbg_rs1_producer_kind == u_dut.u_ctrl.DBG_PRODUCER_LOAD) ||
-                    (u_dut.rs2_pending_stall && u_dut.u_ctrl.dbg_rs2_producer_kind == u_dut.u_ctrl.DBG_PRODUCER_LOAD))
+                if ((u_dut.rs1_pending_stall && u_dut.issue_pkt.src0.producer_class == ydrasil_pkg::RESULT_LSU) ||
+                    (u_dut.rs2_pending_stall && u_dut.issue_pkt.src1.producer_class == ydrasil_pkg::RESULT_LSU))
                     sb_pending_load_count <= sb_pending_load_count + 1'b1;
-                else if ((u_dut.rs1_pending_stall && u_dut.u_ctrl.dbg_rs1_producer_kind == u_dut.u_ctrl.DBG_PRODUCER_MUL) ||
-                         (u_dut.rs2_pending_stall && u_dut.u_ctrl.dbg_rs2_producer_kind == u_dut.u_ctrl.DBG_PRODUCER_MUL))
+                else if ((u_dut.rs1_pending_stall && u_dut.issue_pkt.src0.producer_class == ydrasil_pkg::RESULT_MDU) ||
+                         (u_dut.rs2_pending_stall && u_dut.issue_pkt.src1.producer_class == ydrasil_pkg::RESULT_MDU))
                     sb_pending_mul_count <= sb_pending_mul_count + 1'b1;
-                else if ((u_dut.rs1_pending_stall && u_dut.u_ctrl.dbg_rs1_producer_kind == u_dut.u_ctrl.DBG_PRODUCER_ALU) ||
-                         (u_dut.rs2_pending_stall && u_dut.u_ctrl.dbg_rs2_producer_kind == u_dut.u_ctrl.DBG_PRODUCER_ALU))
+                else if ((u_dut.rs1_pending_stall && u_dut.issue_pkt.src0.producer_class == ydrasil_pkg::RESULT_ALU) ||
+                         (u_dut.rs2_pending_stall && u_dut.issue_pkt.src1.producer_class == ydrasil_pkg::RESULT_ALU))
                     sb_pending_alu_count <= sb_pending_alu_count + 1'b1;
                 else
                     sb_pending_other_count <= sb_pending_other_count + 1'b1;
@@ -973,8 +1033,10 @@ end
             // Mutually exclusive cycle accounting. Keep this TB-only so it cannot affect RTL.
             if (u_dut.flush_ex) begin
                 acct_flush_count <= acct_flush_count + 1'b1;
+                perf_lost_flush_slot_count <= perf_lost_flush_slot_count + perf_lost_slots;
             end else if (u_dut.ex_mul_stall) begin
                 acct_mul_hold_count <= acct_mul_hold_count + 1'b1;
+                perf_lost_mul_hold_slot_count <= perf_lost_mul_hold_slot_count + perf_lost_slots;
             end else if ((u_dut.scoreboard_stall &
                           (u_dut.lsu_struct_stall | u_dut.u_ctrl.producer_full_stall |
                            u_dut.wb_backpressure | u_dut.clint_stall)) |
@@ -985,20 +1047,28 @@ end
                           (u_dut.wb_backpressure | u_dut.clint_stall)) |
                          (u_dut.wb_backpressure & u_dut.clint_stall)) begin
                 acct_multi_cause_count <= acct_multi_cause_count + 1'b1;
+                perf_lost_multi_slot_count <= perf_lost_multi_slot_count + perf_lost_slots;
             end else if (u_dut.scoreboard_stall) begin
                 acct_scoreboard_count <= acct_scoreboard_count + 1'b1;
+                perf_lost_scoreboard_slot_count <= perf_lost_scoreboard_slot_count + perf_lost_slots;
             end else if (u_dut.lsu_struct_stall) begin
                 acct_lsu_struct_count <= acct_lsu_struct_count + 1'b1;
+                perf_lost_lsu_struct_slot_count <= perf_lost_lsu_struct_slot_count + perf_lost_slots;
             end else if (u_dut.u_ctrl.producer_full_stall) begin
                 acct_producer_full_count <= acct_producer_full_count + 1'b1;
+                perf_lost_producer_full_slot_count <= perf_lost_producer_full_slot_count + perf_lost_slots;
             end else if (u_dut.wb_backpressure) begin
                 acct_wb_count <= acct_wb_count + 1'b1;
+                perf_lost_wb_slot_count <= perf_lost_wb_slot_count + perf_lost_slots;
             end else if (u_dut.clint_stall) begin
                 acct_clint_count <= acct_clint_count + 1'b1;
-            end else if (u_dut.u_ctrl.lsu_serialize_stall) begin
+                perf_lost_clint_slot_count <= perf_lost_clint_slot_count + perf_lost_slots;
+            end else if (u_dut.issue_serialize_stall) begin
                 acct_lsu_serialize_count <= acct_lsu_serialize_count + 1'b1;
+                perf_lost_lsu_serialize_slot_count <= perf_lost_lsu_serialize_slot_count + perf_lost_slots;
             end else if (!u_dut.if_id_valid) begin
                 acct_no_if_valid_count <= acct_no_if_valid_count + 1'b1;
+                perf_lost_no_if_valid_slot_count <= perf_lost_no_if_valid_slot_count + perf_lost_slots;
                 if (control_refill_active_q)
                     noif_control_redirect_count <= noif_control_redirect_count + 1'b1;
                 else if (predict_refill_active_q)
@@ -1016,8 +1086,10 @@ end
             end else if (u_dut.u_ydrasil_issue_stage.issue_valid_ff &&
                          u_dut.u_ydrasil_issue_stage.id_advance) begin
                 acct_issue_count <= acct_issue_count + 1'b1;
+                perf_lost_issue_slot_count <= perf_lost_issue_slot_count + perf_lost_slots;
             end else begin
                 acct_other_count <= acct_other_count + 1'b1;
+                perf_lost_other_slot_count <= perf_lost_other_slot_count + perf_lost_slots;
                 if (!u_dut.u_ydrasil_issue_stage.issue_valid_ff && u_dut.decode_valid)
                     other_issue_refill_count <= other_issue_refill_count + 1'b1;
                 else if (!u_dut.u_ydrasil_issue_stage.issue_valid_ff &&
@@ -1498,6 +1570,27 @@ end
                     acct_issue_count + acct_other_count,
                 perf_sample_cycle_count,
                 cycle_count - perf_sample_cycle_count);
+            $display("PERF_SLOT_ACCOUNT: CAPACITY_SLOTS=%-d PRODUCTIVE_SLOTS=%-d LOST_SLOTS=%-d ACCOUNTED_SLOTS=%-d EXECUTION_CYCLES=%-d SLOT_IPC=%.4f",
+                (perf_sample_cycle_count << 1),
+                perf_productive_slot_count,
+                (perf_sample_cycle_count << 1) - perf_productive_slot_count,
+                (perf_sample_cycle_count << 1),
+                perf_sample_cycle_count,
+                (perf_sample_cycle_count > 0) ?
+                    (perf_productive_slot_count * 1.0) / (perf_sample_cycle_count << 1) : 0.0);
+            $display("PERF_SLOT_LOSS: FLUSH=%-d MUL_HOLD=%-d SCOREBOARD=%-d LSU_STRUCT=%-d LSU_SERIALIZE=%-d PRODUCER_FULL=%-d WB=%-d CLINT=%-d MULTI=%-d NO_IF_VALID=%-d ISSUE=%-d OTHER=%-d",
+                perf_lost_flush_slot_count,
+                perf_lost_mul_hold_slot_count,
+                perf_lost_scoreboard_slot_count,
+                perf_lost_lsu_struct_slot_count,
+                perf_lost_lsu_serialize_slot_count,
+                perf_lost_producer_full_slot_count,
+                perf_lost_wb_slot_count,
+                perf_lost_clint_slot_count,
+                perf_lost_multi_slot_count,
+                perf_lost_no_if_valid_slot_count,
+                perf_lost_issue_slot_count,
+                perf_lost_other_slot_count);
             $display("PERF_NOIF_DETAIL: CONTROL_REDIRECT=%-d PREDICT_REDIRECT=%-d FENCE_REFILL=%-d MEM_RESPONSE=%-d FETCH_LAUNCH=%-d PENDING_REDIRECT=%-d OTHER=%-d",
                 noif_control_redirect_count,
                 noif_predict_redirect_count,
@@ -1530,6 +1623,17 @@ end
                 dual_lsu_alu_count, dual_muldiv_alu_count, dual_other_count);
             $display("PERF_L0_BTB: LOOKUP=%-d HIT=%-d CORRECTION=%-d",
                 l0_lookup_count, l0_hit_count, l0_correction_count);
+            $display("PERF_ISSUE_STAGE: FENCE=%-d SLOT1_REPLAY=%-d SLOT1_SB_REPLAY=%-d SLOT1_LSU_REPLAY=%-d SERIALIZE_WAIT=%-d DQ0=%-d DQ1=%-d DQ2=%-d DQ3=%-d DQ4=%-d",
+                issue_fence_count,
+                issue_slot1_replay_count,
+                issue_slot1_sb_replay_count,
+                issue_slot1_lsu_replay_count,
+                issue_serialize_wait_count,
+                dispatchq_occ_count[0],
+                dispatchq_occ_count[1],
+                dispatchq_occ_count[2],
+                dispatchq_occ_count[3],
+                dispatchq_occ_count[4]);
             $display("PERF_CAUSE_HIST: NONE=%-d SB=%-d LSU=%-d LSU_SB=%-d PF=%-d PF_SB=%-d PF_LSU=%-d PF_LSU_SB=%-d WB_ANY=%-d CLINT_ANY=%-d",
                 bubble_cause_hist[0], bubble_cause_hist[1], bubble_cause_hist[2],
                 bubble_cause_hist[3], bubble_cause_hist[4], bubble_cause_hist[5],

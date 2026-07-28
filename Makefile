@@ -292,6 +292,8 @@ SYN_IMPL_MODE ?= sweep
 SYN_RUN_TO ?= route
 SYN_FORCE ?= 1
 SYN_SYNC_SOURCES ?= 1
+SYN_FULL_REPORTS ?= 0
+SYN_POST_ROUTE_PHYSOPT ?= 0
 VIVADO ?= vivado
 VIVADO_SETTINGS ?= /opt/Xilinx/Vitis/2024.2/settings64.sh
 VIVADO_LICENSE_FILE ?= $(firstword $(wildcard $(HOME)/opt/vivado_2037.lic $(HOME)/*.lic $(HOME)/.Xilinx/*.lic))
@@ -976,16 +978,18 @@ syn-vivado: syn-prep syn-stage-xpr syn-stage-memory
 		-enable_ila $(SYN_ENABLE_ILA) \
 		-irom_coe "$(SYN_STAGED_IROM_COE)" \
 		-dram_coe "$(SYN_STAGED_DRAM_COE)" \
+		-full_reports $(SYN_FULL_REPORTS) \
+		-post_route_physopt $(SYN_POST_ROUTE_PHYSOPT) \
 		-force $(SYN_FORCE)
 
 syn-analyze: syn-venv
 	$(SYN_PYTHON) $(SYN_DIR)/analyze_timing.py \
 		--report-dir $(SYN_REPORT_DIR) \
 		--violation-report $(SYN_REPORT_DIR)/post_route_timing_violations.rpt
-	@if [ -f "$(SYN_REPORT_DIR)/cpu$(subst .,p,$(SYN_PLL_FREQ_MHZ))_timing_paths.rpt" ]; then \
+	@if [ -f "$(SYN_REPORT_DIR)/cpu$(subst .,p,$(SYN_PLL_FREQ_MHZ))_timing_violations.rpt" ]; then \
 		$(SYN_PYTHON) $(SYN_DIR)/analyze_timing.py \
 			--report-dir $(SYN_REPORT_DIR) \
-			--timing-report $(SYN_REPORT_DIR)/cpu$(subst .,p,$(SYN_PLL_FREQ_MHZ))_timing_paths.rpt \
+			--timing-report $(SYN_REPORT_DIR)/cpu$(subst .,p,$(SYN_PLL_FREQ_MHZ))_timing_violations.rpt \
 			--violation-report $(SYN_REPORT_DIR)/cpu$(subst .,p,$(SYN_PLL_FREQ_MHZ))_timing_violations.rpt \
 			--csv $(SYN_REPORT_DIR)/cpu$(subst .,p,$(SYN_PLL_FREQ_MHZ))_timing_groups.csv \
 			--paths-csv $(SYN_REPORT_DIR)/cpu$(subst .,p,$(SYN_PLL_FREQ_MHZ))_timing_paths.csv \

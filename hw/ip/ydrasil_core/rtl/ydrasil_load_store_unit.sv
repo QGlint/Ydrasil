@@ -42,8 +42,12 @@ import ydrasil_pkg::*;
 
     ydrasil_lsu_req_pkt_t queue_q [0:QUEUE_DEPTH-1];
     reg [QUEUE_COUNT_WIDTH-1:0] queue_count_q;
+    reg [$clog2(QUEUE_DEPTH)-1:0] queue_head_q;
+    reg [$clog2(QUEUE_DEPTH)-1:0] queue_tail_q;
     ydrasil_lsu_req_pkt_t store_buf_q [0:STORE_BUFFER_DEPTH-1];
     reg [STORE_COUNT_WIDTH-1:0] store_buf_count_q;
+    reg [$clog2(STORE_BUFFER_DEPTH)-1:0] store_head_q;
+    reg [$clog2(STORE_BUFFER_DEPTH)-1:0] store_tail_q;
 
     wire queue_empty = queue_count_q == '0;
     wire queue_full = queue_count_q == QUEUE_COUNT_WIDTH'(QUEUE_DEPTH);
@@ -51,18 +55,13 @@ import ydrasil_pkg::*;
     wire store_buf_full =
         store_buf_count_q == STORE_COUNT_WIDTH'(STORE_BUFFER_DEPTH);
 
-    // Completion data first lands in the store buffer.  Draining or forwarding
-    // it in the wakeup cycle would put tag matching, data selection and store
-    // alignment on the DTCM write path in one 200 MHz cycle.
     wire store_head_data_valid = !store_buf_empty &&
-        store_buf_q[0].store_data_valid;
-    wire [31:0] store_head_raw_data = store_buf_q[0].store_data;
-    wire [31:0] store_head_wdata = align_store_data(
-        store_buf_q[0].op, store_buf_q[0].addr[1:0], store_head_raw_data);
+        store_buf_q[store_head_q].store_data_valid;
+    wire [31:0] store_head_wdata = store_buf_q[store_head_q].store_data;
     wire store_buf_dequeue = store_head_data_valid;
 
 	ydrasil_lsu_req_pkt_t active_pkt;
-	assign active_pkt = queue_empty ? req_i : queue_q[0];
+	assign active_pkt = queue_empty ? req_i : queue_q[queue_head_q];
 
     wire active_from_queue = !queue_empty;
     wire active_valid = active_pkt.valid;
@@ -72,35 +71,26 @@ import ydrasil_pkg::*;
         active_pkt.is_store;
     wire active_mmio = active_valid && !active_pkt.addr_is_dtcm;
 
-    reg load_store_pending;
     reg [3:0] load_forward_mask;
     reg [31:0] load_forward_data;
-    reg [31:0] store_aligned_data [0:STORE_BUFFER_DEPTH-1];
     integer store_scan;
     integer byte_scan;
+    integer store_scan_slot;
     always_comb begin
-        load_store_pending = 1'b0;
         load_forward_mask = '0;
         load_forward_data = '0;
         for (store_scan = 0; store_scan < STORE_BUFFER_DEPTH; store_scan++) begin
-            store_aligned_data[store_scan] = align_store_data(
-                store_buf_q[store_scan].op,
-                store_buf_q[store_scan].addr[1:0],
-                store_buf_q[store_scan].store_data);
+            store_scan_slot = (store_head_q + store_scan) % STORE_BUFFER_DEPTH;
             if ((store_scan < store_buf_count_q) &&
-                store_buf_q[store_scan].valid &&
-                (store_buf_q[store_scan].addr[BUS_ADDR_WIDTH-1:2] ==
+                store_buf_q[store_scan_slot].valid &&
+                (store_buf_q[store_scan_slot].addr[BUS_ADDR_WIDTH-1:2] ==
                  active_pkt.addr[BUS_ADDR_WIDTH-1:2])) begin
-                if (!store_buf_q[store_scan].store_data_valid) begin
-                    load_store_pending = 1'b1;
-                end else begin
-                    for (byte_scan = 0; byte_scan < 4; byte_scan++) begin
-                        if (store_buf_q[store_scan].store_mask[byte_scan]) begin
-                            load_forward_mask[byte_scan] = 1'b1;
-                            load_forward_data[byte_scan*8 +: 8] =
-                                store_aligned_data[store_scan]
-                                    [byte_scan*8 +: 8];
-                        end
+                for (byte_scan = 0; byte_scan < 4; byte_scan++) begin
+                    if (store_buf_q[store_scan_slot].store_mask[byte_scan]) begin
+                        load_forward_mask[byte_scan] = 1'b1;
+                        load_forward_data[byte_scan*8 +: 8] =
+                            store_buf_q[store_scan_slot].store_data
+                                [byte_scan*8 +: 8];
                     end
                 end
             end
@@ -146,9 +136,7 @@ import ydrasil_pkg::*;
     // The request interface is a full FF boundary. Every E-stage request first
     // enters the two-entry queue; CAM lookup and DTCM launch only consume queue
     // registers on the following cycle.
-    wire active_load_ready = !load_store_pending;
-    wire dtcm_load_fire = active_dtcm_load && active_load_ready &&
-        !load_issue_hold;
+    wire dtcm_load_fire = active_dtcm_load && !load_issue_hold;
     wire store_buf_has_room = !store_buf_full || store_buf_dequeue;
     wire dtcm_store_fire = active_dtcm_store && store_buf_has_room;
     // MMIO observes all older buffered stores before it starts. Once launched,
@@ -164,12 +152,7 @@ import ydrasil_pkg::*;
     wire queue_enqueue = req_i.valid && !input_direct_fire &&
         (queue_post_dequeue_count < QUEUE_COUNT_WIDTH'(QUEUE_DEPTH));
     wire store_buf_enqueue = dtcm_store_fire;
-    wire [STORE_COUNT_WIDTH-1:0] store_post_dequeue_count =
-        store_buf_count_q - (store_buf_dequeue ? STORE_COUNT_WIDTH'(1) : '0);
-
 `ifndef SYNTHESIS
-    wire [1:0] queue_head_q = 2'b00;
-    wire [1:0] queue_tail_q = 2'(queue_post_dequeue_count);
     reg [31:0] perf_stb_lookup_q;
     reg [31:0] perf_stb_hit_q;
     reg [31:0] perf_stb_block_q;
@@ -192,9 +175,9 @@ import ydrasil_pkg::*;
         dtcm_req_o.load.addr = active_pkt.addr;
         dtcm_req_o.store.valid = store_buf_dequeue;
         dtcm_req_o.store.write = store_buf_dequeue;
-        dtcm_req_o.store.addr = store_buf_q[0].addr;
+        dtcm_req_o.store.addr = store_buf_q[store_head_q].addr;
         dtcm_req_o.store.wdata = store_head_wdata;
-        dtcm_req_o.store.wmask = store_buf_q[0].store_mask;
+        dtcm_req_o.store.wmask = store_buf_q[store_head_q].store_mask;
     end
 
     assign mmio_req_o.valid = mmio_req_valid_q;
@@ -277,7 +260,11 @@ import ydrasil_pkg::*;
 	always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             queue_count_q <= '0;
+            queue_head_q <= '0;
+            queue_tail_q <= '0;
             store_buf_count_q <= '0;
+            store_head_q <= '0;
+            store_tail_q <= '0;
             for (queue_idx = 0; queue_idx < QUEUE_DEPTH; queue_idx++)
                 queue_q[queue_idx] <= '0;
             for (store_idx = 0; store_idx < STORE_BUFFER_DEPTH; store_idx++)
@@ -318,12 +305,13 @@ import ydrasil_pkg::*;
             perf_stb_drain_q <= '0;
 `endif
         end else begin
-			if (queue_dequeue) begin
-				queue_q[0] <= queue_q[1];
-				queue_q[1] <= '0;
-			end
+            if (queue_dequeue) begin
+                queue_q[queue_head_q] <= '0;
+                queue_head_q <= queue_head_q + 1'b1;
+            end
             if (queue_enqueue) begin
-                queue_q[queue_post_dequeue_count] <= enqueue_pkt;
+                queue_q[queue_tail_q] <= enqueue_pkt;
+                queue_tail_q <= queue_tail_q + 1'b1;
             end
             unique case ({queue_enqueue, queue_dequeue})
                 2'b10: queue_count_q <= queue_count_q + 1'b1;
@@ -332,14 +320,16 @@ import ydrasil_pkg::*;
             endcase
 
             if (store_buf_dequeue) begin
-                for (store_idx = 0; store_idx < STORE_BUFFER_DEPTH-1; store_idx++) begin
-                    store_buf_q[store_idx] <= store_buf_q[store_idx+1];
-				end
-				store_buf_q[STORE_BUFFER_DEPTH-1] <= '0;
-			end
+                store_buf_q[store_head_q] <= '0;
+                store_head_q <= store_head_q + 1'b1;
+            end
             if (store_buf_enqueue) begin
-                store_buf_q[store_post_dequeue_count] <= active_pkt;
-                store_buf_q[store_post_dequeue_count].valid <= 1'b1;
+                store_buf_q[store_tail_q] <= active_pkt;
+                store_buf_q[store_tail_q].valid <= 1'b1;
+                store_buf_q[store_tail_q].store_data <= align_store_data(
+                    active_pkt.op, active_pkt.addr[1:0], active_pkt.store_data);
+                store_buf_q[store_tail_q].store_data_valid <= 1'b1;
+                store_tail_q <= store_tail_q + 1'b1;
             end
             unique case ({store_buf_enqueue, store_buf_dequeue})
                 2'b10: store_buf_count_q <= store_buf_count_q + 1'b1;
@@ -395,8 +385,6 @@ import ydrasil_pkg::*;
                 if (|load_forward_mask)
                     perf_stb_hit_q <= perf_stb_hit_q + 1'b1;
             end
-            if (active_dtcm_load && load_store_pending)
-                perf_stb_block_q <= perf_stb_block_q + 1'b1;
             if (store_buf_dequeue)
                 perf_stb_drain_q <= perf_stb_drain_q + 1'b1;
             if (req_i.valid && !queue_enqueue && !input_direct_fire &&

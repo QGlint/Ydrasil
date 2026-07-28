@@ -94,8 +94,10 @@ import ydrasil_pkg::*;
 
     always_comb begin
         trap_ctrl_o = '0;
-        trap_ctrl_o.stall = (state_q != S_IDLE) || irq_pending ||
-            exception_req_i.valid;
+        // Requests enter the registered drain state at the next edge. Keeping
+        // request detection out of stall prevents CSR/IRQ state from feeding
+        // combinationally back into Issue and the fetch controls.
+        trap_ctrl_o.stall = (state_q != S_IDLE);
         trap_ctrl_o.retire = (state_q == S_MRET_REDIRECT);
         if (state_q == S_REDIRECT) begin
             trap_ctrl_o.redirect = 1'b1;

@@ -60,6 +60,10 @@ def main() -> None:
     columns = [
         ("cycles", "PERF_METRIC", "CYCLES"), ("insts", "PERF_METRIC", "INSTS"),
         ("ipc", "PERF_METRIC", "IPC"), ("issue", "PERF_CYCLE_ACCOUNT", "ISSUE"),
+        ("capacity_slots", "PERF_SLOT_ACCOUNT", "CAPACITY_SLOTS"),
+        ("productive_slots", "PERF_SLOT_ACCOUNT", "PRODUCTIVE_SLOTS"),
+        ("lost_slots", "PERF_SLOT_ACCOUNT", "LOST_SLOTS"),
+        ("slot_ipc", "PERF_SLOT_ACCOUNT", "SLOT_IPC"),
         ("flush", "PERF_CYCLE_ACCOUNT", "FLUSH"), ("mul_hold", "PERF_CYCLE_ACCOUNT", "MUL_HOLD"),
         ("scoreboard", "PERF_CYCLE_ACCOUNT", "SCOREBOARD"), ("lsu_struct", "PERF_CYCLE_ACCOUNT", "LSU_STRUCT"),
         ("lsu_serialize", "PERF_CYCLE_ACCOUNT", "LSU_SERIALIZE"),
@@ -130,7 +134,15 @@ def main() -> None:
             cycles = value(records, "PERF_METRIC", "CYCLES")
             insts = value(records, "PERF_METRIC", "INSTS")
             ipc = value(records, "PERF_METRIC", "IPC")
-            stream.write(f"## {program}\n\n{int(cycles)} cycles, {int(insts)} retired instructions, IPC {ipc:.4f}.\n\n")
+            capacity = value(records, "PERF_SLOT_ACCOUNT", "CAPACITY_SLOTS")
+            productive = value(records, "PERF_SLOT_ACCOUNT", "PRODUCTIVE_SLOTS")
+            lost = value(records, "PERF_SLOT_ACCOUNT", "LOST_SLOTS")
+            slot_ipc = value(records, "PERF_SLOT_ACCOUNT", "SLOT_IPC")
+            stream.write(f"## {program}\n\n{int(cycles)} cycles, {int(insts)} retired instructions, IPC {ipc:.4f}. ")
+            if capacity:
+                stream.write(f"Dual-slot capacity={int(capacity)}, productive slots={int(productive)}, lost slots={int(lost)}, slot utilization={slot_ipc:.4f}.\n\n")
+            else:
+                stream.write("Dual-slot accounting is unavailable in this log.\n\n")
             partition = [(label, value(records, "PERF_CYCLE_ACCOUNT", key)) for label, key in (
                 ("scoreboard dependency", "SCOREBOARD"), ("front-end invalid", "NO_IF_VALID"),
                 ("unclassified/issue gap", "OTHER"), ("control flush", "FLUSH"),

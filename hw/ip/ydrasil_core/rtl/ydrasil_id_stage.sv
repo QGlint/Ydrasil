@@ -238,9 +238,7 @@ endmodule
 
 module ydrasil_id_stage
 import ydrasil_pkg::*;
-#(
-    parameter int DECODE_FIFO_DEPTH = 8
-) (
+(
     input  wire                  clk,
     input  wire                  rst_n,
     input  wire                  flush_i,
@@ -267,12 +265,6 @@ import ydrasil_pkg::*;
     output ydrasil_issue_pkt_t   issue_pkt_o,
     output ydrasil_issue_pkt_t   issue_pkt1_o
 );
-    localparam int COUNT_WIDTH = $clog2(DECODE_FIFO_DEPTH + 1);
-    localparam int PTR_WIDTH = $clog2(DECODE_FIFO_DEPTH);
-    reg [COUNT_WIDTH-1:0] decode_count_q;
-    (* max_fanout = 64 *) reg [PTR_WIDTH-1:0] decode_rptr_q;
-    reg [PTR_WIDTH-1:0] decode_wptr_q;
-    ydrasil_decode_pkt_t decode_fifo_q [0:DECODE_FIFO_DEPTH-1];
     ydrasil_decode_pkt_t decoded0;
     ydrasil_decode_pkt_t decoded1;
 
@@ -289,157 +281,138 @@ import ydrasil_pkg::*;
         .pred_bht_index_i(if_id1_pred_bht_index_i), .decode_pkt_o(decoded1)
     );
 
-    wire has_room_one = decode_count_q < COUNT_WIDTH'(DECODE_FIFO_DEPTH);
-    wire has_room_two = decode_count_q <= COUNT_WIDTH'(DECODE_FIFO_DEPTH - 2);
-    wire [1:0] pop_count = (issue_ready_i && decode_count_q != '0) ?
-        ((issue_consume_two_i && decode_count_q > COUNT_WIDTH'(1)) ? 2'd2 : 2'd1) : 2'd0;
-    wire push0 = if_id_valid_i && has_room_one;
-    wire push1 = if_id1_valid_i && has_room_two;
-    wire [1:0] push_count = push1 ? 2'd2 : (push0 ? 2'd1 : 2'd0);
-    wire [COUNT_WIDTH-1:0] post_pop_count = decode_count_q - COUNT_WIDTH'(pop_count);
-    wire [PTR_WIDTH-1:0] decode_rptr1 = decode_rptr_q + PTR_WIDTH'(1);
-    wire [PTR_WIDTH-1:0] decode_wptr1 = decode_wptr_q + PTR_WIDTH'(1);
-
-    assign if_id_ready_o = has_room_one;
-    assign if_id_consume_two_o = push1;
-    wire decode_valid = decode_count_q != '0;
-    wire decode_valid1 = decode_count_q > COUNT_WIDTH'(1);
-    ydrasil_decode_pkt_t decode_pkt;
-    ydrasil_decode_pkt_t decode_pkt1;
-    assign decode_pkt = decode_fifo_q[decode_rptr_q];
-    assign decode_pkt1 = decode_fifo_q[decode_rptr1];
-
-    wire slot1_lane1_capable = decode_valid1 &&
-        !decode_pkt1.resources[RESOURCE_BRU] &&
-        !decode_pkt1.resources[RESOURCE_MULDIV] &&
-        !decode_pkt1.resources[RESOURCE_SERIAL] &&
-        !decode_pkt1.operator_type[OPERATOR_TYPE_FPU];
-    wire slot0_writes = (decode_pkt.rd_addr != '0) &&
-        (decode_pkt.rd_wen ||
-         (decode_pkt.operator_type[OPERATOR_TYPE_LOAD] &&
-          !decode_pkt.operator_type[OPERATOR_TYPE_FPU]));
-    wire slot1_writes = (decode_pkt1.rd_addr != '0) &&
-        (decode_pkt1.rd_wen ||
-         (decode_pkt1.operator_type[OPERATOR_TYPE_LOAD] &&
-          !decode_pkt1.operator_type[OPERATOR_TYPE_FPU]));
+    wire decode_valid = if_id_valid_i;
+    wire decode_valid1 = if_id1_valid_i;
+    wire slot0_writes = (decoded0.rd_addr != '0) &&
+        (decoded0.rd_wen ||
+         (decoded0.operator_type[OPERATOR_TYPE_LOAD] &&
+          !decoded0.operator_type[OPERATOR_TYPE_FPU]));
+    wire slot1_writes = (decoded1.rd_addr != '0) &&
+        (decoded1.rd_wen ||
+         (decoded1.operator_type[OPERATOR_TYPE_LOAD] &&
+          !decoded1.operator_type[OPERATOR_TYPE_FPU]));
     wire pair_raw = slot0_writes &&
-        ((decode_pkt1.rs1_ren && (decode_pkt1.rs1_addr == decode_pkt.rd_addr)) ||
-         ((decode_pkt1.rs2_ren ||
-           (decode_pkt1.operator_type[OPERATOR_TYPE_STORE] &&
-            !decode_pkt1.operator_type[OPERATOR_TYPE_FPU])) &&
-          (decode_pkt1.rs2_addr == decode_pkt.rd_addr)));
+        ((decoded1.rs1_ren && (decoded1.rs1_addr == decoded0.rd_addr)) ||
+         ((decoded1.rs2_ren ||
+           (decoded1.operator_type[OPERATOR_TYPE_STORE] &&
+            !decoded1.operator_type[OPERATOR_TYPE_FPU])) &&
+          (decoded1.rs2_addr == decoded0.rd_addr)));
     wire pair_waw = slot0_writes && slot1_writes &&
-        (decode_pkt.rd_addr == decode_pkt1.rd_addr);
+        (decoded0.rd_addr == decoded1.rd_addr);
     wire pair_resource_conflict =
-        |(decode_pkt.resources & decode_pkt1.resources & RESOURCE_EXCLUSIVE_MASK);
-    wire pair_serialize = decode_pkt.resources[RESOURCE_SERIAL] ||
-        decode_pkt1.resources[RESOURCE_SERIAL];
-    // A younger integer result can be squashed by branch recovery, but an LSU
-    // request may already have changed memory or observed MMIO.  Keep memory
-    // out of the speculative lane behind a control-flow instruction.
+        |(decoded0.resources & decoded1.resources & RESOURCE_EXCLUSIVE_MASK);
+    wire pair_serialize = decoded0.resources[RESOURCE_SERIAL] ||
+        decoded1.resources[RESOURCE_SERIAL];
     wire pair_control_memory =
-        decode_pkt.resources[RESOURCE_BRU] &&
-        decode_pkt1.resources[RESOURCE_LSU];
-    wire pair_eligible = decode_valid && slot1_lane1_capable &&
+        decoded0.resources[RESOURCE_BRU] && decoded1.resources[RESOURCE_LSU];
+    wire slot0_a_capable = !decoded0.resources[RESOURCE_BRU] &&
+        !decoded0.resources[RESOURCE_LSU];
+    wire slot0_b_capable = !decoded0.resources[RESOURCE_MULDIV] &&
+        !decoded0.resources[RESOURCE_FULL_BITMANIP] &&
+        !decoded0.resources[RESOURCE_SERIAL] &&
+        !decoded0.operator_type[OPERATOR_TYPE_FPU];
+    wire slot1_a_capable = !decoded1.resources[RESOURCE_BRU] &&
+        !decoded1.resources[RESOURCE_LSU];
+    wire slot1_b_capable = !decoded1.resources[RESOURCE_MULDIV] &&
+        !decoded1.resources[RESOURCE_FULL_BITMANIP] &&
+        !decoded1.resources[RESOURCE_SERIAL] &&
+        !decoded1.operator_type[OPERATOR_TYPE_FPU];
+    wire pair_lane_assignable =
+        (slot0_a_capable && slot1_b_capable) ||
+        (slot0_b_capable && slot1_a_capable);
+    wire pair_eligible = decode_valid && decode_valid1 && pair_lane_assignable &&
         !pair_resource_conflict && !pair_raw && !pair_waw && !pair_serialize &&
         !pair_control_memory;
 
-    // ID owns the registered decode FIFO and emits a fixed packed dispatch
-    // contract.  Issue consumes this packet without reaching back into the
-    // decoder's internal state.
+    assign if_id_ready_o = issue_ready_i;
+    assign if_id_consume_two_o = issue_ready_i && pair_eligible;
+
     always_comb begin
         issue_pkt_o = '0;
         issue_pkt_o.valid = decode_valid;
-        issue_pkt_o.decode = decode_pkt;
+        issue_pkt_o.decode = decoded0;
         issue_pkt_o.dual_capable = decode_valid &&
-            !decode_pkt.resources[RESOURCE_SERIAL];
+            (slot0_a_capable || slot0_b_capable);
         issue_pkt_o.pair_eligible = pair_eligible;
+        issue_pkt_o.static_pair = pair_eligible;
+        issue_pkt_o.lane_mask = {slot0_b_capable, slot0_a_capable};
         issue_pkt_o.memory_op = decode_valid &&
-            (decode_pkt.operator_type[OPERATOR_TYPE_LOAD] ||
-             decode_pkt.operator_type[OPERATOR_TYPE_STORE]);
-        issue_pkt_o.ctrl.rs1_addr = decode_pkt.rs1_addr;
+            (decoded0.operator_type[OPERATOR_TYPE_LOAD] ||
+             decoded0.operator_type[OPERATOR_TYPE_STORE]);
+        issue_pkt_o.target = decoded0.pc + decoded0.imm;
+        issue_pkt_o.next_pc = decoded0.pc + 32'd4;
+        issue_pkt_o.src0.used = decode_valid && decoded0.rs1_ren;
+        issue_pkt_o.src0.arch_addr = decoded0.rs1_addr;
+        issue_pkt_o.src1.used = decode_valid &&
+            (decoded0.rs2_ren ||
+             (decoded0.operator_type[OPERATOR_TYPE_STORE] &&
+              !decoded0.operator_type[OPERATOR_TYPE_FPU]));
+        issue_pkt_o.src1.arch_addr = decoded0.rs2_addr;
+        issue_pkt_o.dst.writes_gpr = decode_valid && slot0_writes;
+        issue_pkt_o.dst.rd_addr = decoded0.rd_addr;
+        issue_pkt_o.ctrl.rs1_addr = decoded0.rs1_addr;
         issue_pkt_o.ctrl.valid = decode_valid;
-        issue_pkt_o.ctrl.rs2_addr = decode_pkt.rs2_addr;
-        issue_pkt_o.ctrl.rd_addr = decode_pkt.rd_addr;
-        issue_pkt_o.ctrl.rs1_ren = decode_valid && decode_pkt.rs1_ren;
+        issue_pkt_o.ctrl.rs2_addr = decoded0.rs2_addr;
+        issue_pkt_o.ctrl.rd_addr = decoded0.rd_addr;
+        issue_pkt_o.ctrl.rs1_ren = decode_valid && decoded0.rs1_ren;
         issue_pkt_o.ctrl.rs2_ren = decode_valid &&
-            (decode_pkt.rs2_ren ||
-             (decode_pkt.operator_type[OPERATOR_TYPE_STORE] &&
-              !decode_pkt.operator_type[OPERATOR_TYPE_FPU]));
-        issue_pkt_o.ctrl.rd_wen = decode_valid && (decode_pkt.rd_addr != '0) &&
-            (decode_pkt.rd_wen ||
-             (decode_pkt.operator_type[OPERATOR_TYPE_LOAD] &&
-              !decode_pkt.operator_type[OPERATOR_TYPE_FPU]));
+            (decoded0.rs2_ren ||
+             (decoded0.operator_type[OPERATOR_TYPE_STORE] &&
+              !decoded0.operator_type[OPERATOR_TYPE_FPU]));
+        issue_pkt_o.ctrl.rd_wen = decode_valid && slot0_writes;
         issue_pkt_o.ctrl.lsu_req = decode_valid &&
-            (decode_pkt.operator_type[OPERATOR_TYPE_LOAD] ||
-             decode_pkt.operator_type[OPERATOR_TYPE_STORE]);
+            (decoded0.operator_type[OPERATOR_TYPE_LOAD] ||
+             decoded0.operator_type[OPERATOR_TYPE_STORE]);
         issue_pkt_o.ctrl.store_req = decode_valid &&
-            decode_pkt.operator_type[OPERATOR_TYPE_STORE];
-        issue_pkt_o.ctrl.prev_alu_bypass_ok = decode_valid &&
-            !decode_pkt.operator_type[OPERATOR_TYPE_FPU] &&
-            !decode_pkt.operator_type[OPERATOR_TYPE_CSR] &&
-            !decode_pkt.operator_type[OPERATOR_TYPE_SYS];
-		issue_pkt_o.ctrl.serialize_before = decode_valid &&
-            (decode_pkt.operator_type[OPERATOR_TYPE_CSR] ||
-             decode_pkt.operator_type[OPERATOR_TYPE_SYS] || decode_pkt.fence_i);
+            decoded0.operator_type[OPERATOR_TYPE_STORE];
+        issue_pkt_o.ctrl.serialize_before = decode_valid &&
+            (decoded0.operator_type[OPERATOR_TYPE_CSR] ||
+             decoded0.operator_type[OPERATOR_TYPE_SYS] || decoded0.fence_i);
         issue_pkt_o.ctrl.checkpoint_req = decode_valid &&
-            decode_pkt.operator_type[OPERATOR_TYPE_BJP];
+            decoded0.operator_type[OPERATOR_TYPE_BJP];
+
         issue_pkt1_o = '0;
         issue_pkt1_o.valid = decode_valid1;
         issue_pkt1_o.lane1 = 1'b1;
-        issue_pkt1_o.decode = decode_pkt1;
+        issue_pkt1_o.decode = decoded1;
         issue_pkt1_o.dual_capable = decode_valid1 &&
-            (decode_pkt1.operator_type[OPERATOR_TYPE_ALU] ||
-             decode_pkt1.operator_type[OPERATOR_TYPE_BITMANIP]);
+            (slot1_a_capable || slot1_b_capable);
+        issue_pkt1_o.lane_mask = {slot1_b_capable, slot1_a_capable};
         issue_pkt1_o.memory_op = decode_valid1 &&
-            (decode_pkt1.operator_type[OPERATOR_TYPE_LOAD] ||
-             decode_pkt1.operator_type[OPERATOR_TYPE_STORE]);
-        issue_pkt1_o.ctrl.rs1_addr = decode_pkt1.rs1_addr;
+            (decoded1.operator_type[OPERATOR_TYPE_LOAD] ||
+             decoded1.operator_type[OPERATOR_TYPE_STORE]);
+        issue_pkt1_o.target = decoded1.pc + decoded1.imm;
+        issue_pkt1_o.next_pc = decoded1.pc + 32'd4;
+        issue_pkt1_o.src0.used = decode_valid1 && decoded1.rs1_ren;
+        issue_pkt1_o.src0.arch_addr = decoded1.rs1_addr;
+        issue_pkt1_o.src1.used = decode_valid1 &&
+            (decoded1.rs2_ren ||
+             (decoded1.operator_type[OPERATOR_TYPE_STORE] &&
+              !decoded1.operator_type[OPERATOR_TYPE_FPU]));
+        issue_pkt1_o.src1.arch_addr = decoded1.rs2_addr;
+        issue_pkt1_o.dst.writes_gpr = decode_valid1 && slot1_writes;
+        issue_pkt1_o.dst.rd_addr = decoded1.rd_addr;
+        issue_pkt1_o.ctrl.rs1_addr = decoded1.rs1_addr;
         issue_pkt1_o.ctrl.valid = decode_valid1;
-        issue_pkt1_o.ctrl.rs2_addr = decode_pkt1.rs2_addr;
-        issue_pkt1_o.ctrl.rd_addr = decode_pkt1.rd_addr;
-        issue_pkt1_o.ctrl.rs1_ren = decode_valid1 && decode_pkt1.rs1_ren;
+        issue_pkt1_o.ctrl.rs2_addr = decoded1.rs2_addr;
+        issue_pkt1_o.ctrl.rd_addr = decoded1.rd_addr;
+        issue_pkt1_o.ctrl.rs1_ren = decode_valid1 && decoded1.rs1_ren;
         issue_pkt1_o.ctrl.rs2_ren = decode_valid1 &&
-            (decode_pkt1.rs2_ren ||
-             (decode_pkt1.operator_type[OPERATOR_TYPE_STORE] &&
-              !decode_pkt1.operator_type[OPERATOR_TYPE_FPU]));
-        issue_pkt1_o.ctrl.rd_wen = decode_valid1 &&
-            (decode_pkt1.rd_addr != '0) &&
-            (decode_pkt1.rd_wen ||
-             (decode_pkt1.operator_type[OPERATOR_TYPE_LOAD] &&
-              !decode_pkt1.operator_type[OPERATOR_TYPE_FPU]));
+            (decoded1.rs2_ren ||
+             (decoded1.operator_type[OPERATOR_TYPE_STORE] &&
+              !decoded1.operator_type[OPERATOR_TYPE_FPU]));
+        issue_pkt1_o.ctrl.rd_wen = decode_valid1 && slot1_writes;
         issue_pkt1_o.ctrl.lsu_req = decode_valid1 &&
-            (decode_pkt1.operator_type[OPERATOR_TYPE_LOAD] ||
-             decode_pkt1.operator_type[OPERATOR_TYPE_STORE]);
+            (decoded1.operator_type[OPERATOR_TYPE_LOAD] ||
+             decoded1.operator_type[OPERATOR_TYPE_STORE]);
         issue_pkt1_o.ctrl.store_req = decode_valid1 &&
-            decode_pkt1.operator_type[OPERATOR_TYPE_STORE];
+            decoded1.operator_type[OPERATOR_TYPE_STORE];
+        issue_pkt1_o.ctrl.serialize_before = decode_valid1 &&
+            (decoded1.operator_type[OPERATOR_TYPE_CSR] ||
+             decoded1.operator_type[OPERATOR_TYPE_SYS] || decoded1.fence_i);
+        issue_pkt1_o.ctrl.checkpoint_req = decode_valid1 &&
+            decoded1.operator_type[OPERATOR_TYPE_BJP];
     end
 
-    always_ff @(posedge clk) begin
-        if (!rst_n) begin
-            decode_count_q <= '0;
-            decode_rptr_q <= '0;
-            decode_wptr_q <= '0;
-        end else if (flush_i) begin
-            decode_count_q <= '0;
-            decode_rptr_q <= '0;
-            decode_wptr_q <= '0;
-        end else begin
-            decode_rptr_q <= decode_rptr_q + PTR_WIDTH'(pop_count);
-            decode_wptr_q <= decode_wptr_q + PTR_WIDTH'(push_count);
-            if (push0)
-                decode_fifo_q[decode_wptr_q] <= decoded0;
-            if (push1)
-                decode_fifo_q[decode_wptr1] <= decoded1;
-            decode_count_q <= post_pop_count + COUNT_WIDTH'(push_count);
-        end
-    end
-
-`ifndef SYNTHESIS
-    always_ff @(posedge clk) begin
-        if (rst_n && !flush_i)
-            assert (post_pop_count + COUNT_WIDTH'(push_count) <= COUNT_WIDTH'(DECODE_FIFO_DEPTH))
-                else $fatal(1, "decode FIFO overflow");
-    end
-`endif
+    wire unused = &{1'b0, clk, rst_n, flush_i, issue_consume_two_i};
 endmodule

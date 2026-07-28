@@ -15,8 +15,6 @@ import ydrasil_pkg::*;
     input  wire [OPERATOR_TYPE_WIDTH-1:0]  operator_type_i,
     input  wire                            id_ex_valid_i,
     input  wire                            id_ex_jalr_i,
-    input  wire                            id_ex_alu_bypass_rs1_i,
-    input  wire                            id_ex_alu_bypass_rs2_i,
     input  wire [DATA_WIDTH-1:0]           id_ex_branch_target_i,
     input  wire [DATA_WIDTH-1:0]           id_ex_branch_next_pc_i,
     input  wire                            id_ex_branch_eq_i,
@@ -27,6 +25,7 @@ import ydrasil_pkg::*;
     input  wire [DATA_WIDTH-1:0]           id_ex_pred_target_i,
     input  wire [1:0]                      id_ex_pred_counter_i,
     input  wire [DATA_WIDTH-1:0]           id_ex_pred_bht_index_i,
+    input  producer_id_t                   id_ex_producer_id_i,
     input  wire                            trap_redirect_i,
     input  wire [INST_ADDR_WIDTH-1:0]      trap_redirect_addr_i,
 
@@ -52,8 +51,8 @@ import ydrasil_pkg::*;
 );
 
     wire [DATA_WIDTH-1:0] bt_alu_result = bt_a_operand_i + bt_b_operand_i;
-    wire [DATA_WIDTH-1:0] ex_jump_target =
-        id_ex_jalr_i ? {bt_alu_result[DATA_WIDTH-1:1], 1'b0} : bt_alu_result;
+    wire [DATA_WIDTH-1:0] ex_jump_target = id_ex_jalr_i ?
+        {bt_alu_result[DATA_WIDTH-1:1], 1'b0} : id_ex_branch_target_i;
     wire [DATA_WIDTH-1:0] ex_branch_target = id_ex_branch_target_i;
     wire [DATA_WIDTH-1:0] ex_branch_pc = id_ex_branch_next_pc_i - DATA_WIDTH'(4);
     wire [DATA_WIDTH-1:0] ex_branch_next_pc = id_ex_branch_next_pc_i;
@@ -77,8 +76,8 @@ import ydrasil_pkg::*;
          ex_bjp_bltu |
          ex_bjp_bgeu);
 
-    // Compare the registered EX operands locally. This preserves the existing
-    // previous-ALU bypass without pulling the compare into the decode/issue path.
+    // Compare only the registered Lane B operands. All bypass selection ended
+    // at the Issue/EX boundary.
     wire ex_branch_eq = (operand_a_i == operand_b_i);
     wire ex_branch_ge_signed = ($signed(operand_a_i) >= $signed(operand_b_i));
     wire ex_branch_ge_unsigned = (operand_a_i >= operand_b_i);
@@ -114,6 +113,7 @@ import ydrasil_pkg::*;
     always_comb begin
         ex_bp_train = '0;
         ex_bp_train.valid = (ex_is_branch | ex_is_jump) & !trap_redirect_i;
+        ex_bp_train.producer_id = id_ex_producer_id_i;
         ex_bp_train.conditional = ex_is_branch;
         ex_bp_train.pc = ex_branch_pc;
         ex_bp_train.taken = ex_is_jump | ex_branch_taken;

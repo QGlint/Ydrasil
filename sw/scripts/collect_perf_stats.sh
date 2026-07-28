@@ -14,7 +14,7 @@ field() {
     fi
 }
 
-header="program,cycles,insts,ipc,scoreboard,lsu_struct,producer_full,multi,flush,no_if_valid,other,raw_only,waw_only,raw_waw,load_use,alu_use,pending_tail,pf_sb,pf_lsu,pf_lsu_sb,occ0,occ1,occ2,both_wait,wait_ready,both_ready,stb_lookup,stb_hit,coremark_score"
+header="program,cycles,insts,ipc,scoreboard,lsu_struct,producer_full,multi,flush,no_if_valid,other,raw_only,waw_only,raw_waw,load_use,alu_use,pending_tail,pf_sb,pf_lsu,pf_lsu_sb,occ0,occ1,occ2,both_wait,wait_ready,both_ready,stb_lookup,stb_hit,coremark_score,capacity_slots,productive_slots,lost_slots,slot_ipc,loss_flush,loss_mul_hold,loss_scoreboard,loss_lsu_struct,loss_lsu_serialize,loss_producer_full,loss_wb,loss_clint,loss_multi,loss_no_if_valid,loss_issue,loss_other,issue_fence,slot1_replay,slot1_sb_replay,slot1_lsu_replay,serialize_wait,dq0,dq1,dq2,dq3,dq4"
 echo "$header" > "$csv"
 
 mapfile -t logs < <(find "$root" -type f -name hw.log \( \
@@ -40,12 +40,15 @@ for log in "${logs[@]}"; do
     cause=$(grep '^PERF_CAUSE_HIST:' "$log" | tail -1 || true)
     producer=$(grep '^PERF_PRODUCER_STATE:' "$log" | tail -1 || true)
     stb=$(grep '^PERF_LSU_STB:' "$log" | tail -1 || true)
+    slots=$(grep '^PERF_SLOT_ACCOUNT:' "$log" | tail -1 || true)
+    slot_loss=$(grep '^PERF_SLOT_LOSS:' "$log" | tail -1 || true)
+    issue_stage=$(grep '^PERF_ISSUE_STAGE:' "$log" | tail -1 || true)
     coremark=$(grep '^CoreMark 1\.0 :' "$log" | tail -1 || true)
     score=
     if [[ $coremark =~ CoreMark[[:space:]]+1\.0[[:space:]]*:[[:space:]]*([0-9.]+) ]]; then
         score=${BASH_REMATCH[1]}
     fi
-    printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
+    printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
         "$program" "$(field "$metric" CYCLES)" "$(field "$metric" INSTS)" \
         "$(field "$metric" IPC)" "$(field "$stall" SCOREBOARD)" \
         "$(field "$stall" LSU_STRUCT)" "$(field "$acct" PRODUCER_FULL)" \
@@ -59,7 +62,20 @@ for log in "${logs[@]}"; do
         "$(field "$producer" OCC1)" "$(field "$producer" OCC2)" \
         "$(field "$producer" BOTH_WAIT)" "$(field "$producer" WAIT_READY)" \
         "$(field "$producer" BOTH_READY)" "$(field "$stb" LOOKUP)" \
-        "$(field "$stb" HIT)" "$score" >> "$csv"
+        "$(field "$stb" HIT)" "$score" \
+        "$(field "$slots" CAPACITY_SLOTS)" "$(field "$slots" PRODUCTIVE_SLOTS)" \
+        "$(field "$slots" LOST_SLOTS)" "$(field "$slots" SLOT_IPC)" \
+        "$(field "$slot_loss" FLUSH)" "$(field "$slot_loss" MUL_HOLD)" \
+        "$(field "$slot_loss" SCOREBOARD)" "$(field "$slot_loss" LSU_STRUCT)" \
+        "$(field "$slot_loss" LSU_SERIALIZE)" "$(field "$slot_loss" PRODUCER_FULL)" \
+        "$(field "$slot_loss" WB)" "$(field "$slot_loss" CLINT)" \
+        "$(field "$slot_loss" MULTI)" "$(field "$slot_loss" NO_IF_VALID)" \
+        "$(field "$slot_loss" ISSUE)" "$(field "$slot_loss" OTHER)" \
+        "$(field "$issue_stage" FENCE)" "$(field "$issue_stage" SLOT1_REPLAY)" \
+        "$(field "$issue_stage" SLOT1_SB_REPLAY)" "$(field "$issue_stage" SLOT1_LSU_REPLAY)" \
+        "$(field "$issue_stage" SERIALIZE_WAIT)" "$(field "$issue_stage" DQ0)" \
+        "$(field "$issue_stage" DQ1)" "$(field "$issue_stage" DQ2)" \
+        "$(field "$issue_stage" DQ3)" "$(field "$issue_stage" DQ4)" >> "$csv"
 done
 
 {

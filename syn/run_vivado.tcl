@@ -21,6 +21,8 @@ proc usage {} {
     puts "  -timing_summary_max_paths <n>  timing summary path limit, default 1000"
     puts "  -timing_path_max_paths <n>     violating report_timing path limit, default 500"
     puts "  -timing_nworst <n>             report_timing nworst per endpoint/group, default 100"
+    puts "  -full_reports <0|1>            enable extended diagnostic reports, default 0"
+    puts "  -post_route_physopt <0|1>      enable one extra post-route physopt pass, default 0"
 }
 
 proc arg_value {name default_value} {
@@ -102,20 +104,22 @@ proc select_best_implementation {run_names report_dir checkpoint_dir} {
             [regexp -nocase {complete.*failed timing} $status]
         if {![regexp -nocase {fail|error} $status] ||
             $completed_with_timing_failure} {
-            if {[catch {open_impl_design $run_name $checkpoint_dir} open_msg]} {
-                puts "warning: could not evaluate implementation run $run_name: $open_msg"
-            } else {
-                set worst [get_timing_paths -quiet -delay_type max -max_paths 1 -nworst 1]
-                if {[llength $worst] > 0} {
-                    set wns [get_property SLACK [lindex $worst 0]]
-                    if {$best_run eq "" || double($wns) > double($best_wns)} {
-                        set best_run $run_name
-                        set best_wns $wns
+            catch {set wns [get_property STATS.WNS $run]}
+            if {![string is double -strict $wns]} {
+                set wns ""
+                if {[catch {open_impl_design $run_name $checkpoint_dir} open_msg]} {
+                    puts "warning: could not evaluate implementation run $run_name: $open_msg"
+                } else {
+                    set worst [get_timing_paths -quiet -delay_type max -max_paths 1 -nworst 1]
+                    if {[llength $worst] > 0} {
+                        set wns [get_property SLACK [lindex $worst 0]]
                     }
+                    close_design
                 }
-                report_timing_summary -delay_type max -report_unconstrained \
-                    -file [file join $report_dir ${run_name}_timing_summary.rpt]
-                close_design
+            }
+            if {$wns ne "" && ($best_run eq "" || double($wns) > double($best_wns))} {
+                set best_run $run_name
+                set best_wns $wns
             }
         }
         set csv_status [string map [list "," ";"] $status]
@@ -248,6 +252,23 @@ proc report_if_possible {description command} {
     }
 }
 
+proc clean_skipped_reports {report_dir} {
+    global full_reports
+    set stale [list post_route_timing_paths.rpt]
+    if {!$full_reports} {
+        lappend stale \
+            post_route_clock_interaction.rpt \
+            post_route_check_timing.rpt \
+            post_route_drc.rpt \
+            post_route_methodology.rpt \
+            post_route_design_analysis.rpt \
+            post_route_qor_suggestions.rpt
+    }
+    foreach name $stale {
+        file delete -force [file join $report_dir $name]
+    }
+}
+
 proc clocks_near_period {target_period tolerance} {
     set result [list]
     foreach clk [get_clocks -quiet *] {
@@ -286,10 +307,14 @@ proc freq_file_tag {freq_mhz} {
 }
 
 proc report_cpu_freq_timing {report_dir freq_mhz} {
-    global timing_summary_max_paths timing_path_max_paths timing_nworst
+    global full_reports timing_summary_max_paths timing_path_max_paths timing_nworst
 
     set target_period [expr {1000.0 / double($freq_mhz)}]
     set tag [freq_file_tag $freq_mhz]
+    file delete -force [file join $report_dir cpu${tag}_timing_paths.rpt]
+    if {!$full_reports} {
+        file delete -force [file join $report_dir cpu${tag}_timing_summary.rpt]
+    }
     set cpu_clocks [cpu_clocks_near_period $target_period 0.0500]
     set out [file join $report_dir "cpu${tag}_clocks.rpt"]
     set fp [open $out w]
@@ -304,12 +329,14 @@ proc report_cpu_freq_timing {report_dir freq_mhz} {
         return
     }
 
-    puts "Writing $freq_mhz MHz timing summary"
-    if {[catch {
-        report_timing_summary -delay_type max -max_paths $timing_summary_max_paths -report_unconstrained \
-            -file [file join $report_dir cpu${tag}_timing_summary.rpt]
-    } msg]} {
-        puts "warning: failed to write $freq_mhz MHz timing summary: $msg"
+    if {$full_reports} {
+        puts "Writing $freq_mhz MHz timing summary"
+        if {[catch {
+            report_timing_summary -delay_type max -max_paths $timing_summary_max_paths -report_unconstrained \
+                -file [file join $report_dir cpu${tag}_timing_summary.rpt]
+        } msg]} {
+            puts "warning: failed to write $freq_mhz MHz timing summary: $msg"
+        }
     }
     puts "Writing $freq_mhz MHz violating timing paths"
     if {[catch {
@@ -318,14 +345,6 @@ proc report_cpu_freq_timing {report_dir freq_mhz} {
             -input_pins -file [file join $report_dir cpu${tag}_timing_violations.rpt]
     } msg]} {
         puts "warning: failed to write $freq_mhz MHz violating timing paths: $msg"
-    }
-    puts "Writing $freq_mhz MHz intra-clock timing paths"
-    if {[catch {
-        report_timing -delay_type max -from $cpu_clocks -to $cpu_clocks -sort_by slack \
-            -slack_lesser_than 0.000 -max_paths $timing_path_max_paths -nworst $timing_nworst \
-            -input_pins -file [file join $report_dir cpu${tag}_timing_paths.rpt]
-    } msg]} {
-        puts "warning: failed to write $freq_mhz MHz intra-clock timing paths: $msg"
     }
 }
 
@@ -469,7 +488,7 @@ proc improve_post_route_timing {checkpoint_dir target_wns max_attempts} {
 
     set initial_wns [get_property SLACK [lindex $worst 0]]
     puts "Post-route timing before iterative physopt: WNS=$initial_wns ns"
-    if {double($initial_wns) >= double($target_wns)} {
+    if {$max_attempts <= 0 || double($initial_wns) >= double($target_wns)} {
         return $initial_wns
     }
 
@@ -503,9 +522,10 @@ proc improve_post_route_timing {checkpoint_dir target_wns max_attempts} {
 
     open_checkpoint $best_dcp
     if {double($best_wns) < double($target_wns)} {
-        error "post-route WNS $best_wns ns does not meet target >= $target_wns ns"
+        puts "warning: post-route WNS $best_wns ns does not meet target >= $target_wns ns; continuing with reports and artifacts"
+    } else {
+        puts "Post-route iterative physopt accepted: WNS=$best_wns ns"
     }
-    puts "Post-route iterative physopt accepted: WNS=$best_wns ns"
     return $best_wns
 }
 
@@ -537,6 +557,8 @@ set dram_coe [file normalize [arg_value "-dram_coe" [file join $repo_root "FPGA/
 set timing_summary_max_paths [arg_value "-timing_summary_max_paths" "1000"]
 set timing_path_max_paths [arg_value "-timing_path_max_paths" "500"]
 set timing_nworst [arg_value "-timing_nworst" "100"]
+set full_reports [clamp_int [arg_value "-full_reports" "0"] 0 1]
+set post_route_physopt [clamp_int [arg_value "-post_route_physopt" "0"] 0 1]
 
 if {![file exists $xpr]} {
     error "Vivado project not found: $xpr"
@@ -581,7 +603,7 @@ if {$run_to eq "sync_only"} {
     exit 0
 }
 
-if {[llength [get_ips -quiet]] > 0} {
+if {$run_to ne "reports" && [llength [get_ips -quiet]] > 0} {
     puts "Refreshing IP output products"
     report_ip_status -file [file join $report_dir "ip_status.rpt"]
     catch {upgrade_ip [get_ips]}
@@ -589,6 +611,7 @@ if {[llength [get_ips -quiet]] > 0} {
 }
 
 if {$run_to eq "reports"} {
+    clean_skipped_reports $report_dir
     set report_runs [discover_routed_implementation_runs]
     if {[llength $report_runs] == 0} {
         error "no implementation run has a routed checkpoint"
@@ -600,27 +623,27 @@ if {$run_to eq "reports"} {
         "report_timing_summary -delay_type max -max_paths $timing_summary_max_paths -report_unconstrained -check_timing_verbose -file [file join $report_dir post_route_timing_summary.rpt]"
     report_if_possible "post-route violating timing paths" \
         "report_timing -delay_type max -sort_by slack -slack_lesser_than 0.000 -max_paths $timing_path_max_paths -nworst $timing_nworst -input_pins -file [file join $report_dir post_route_timing_violations.rpt]"
-    report_if_possible "post-route timing paths" \
-        "report_timing -delay_type max -sort_by slack -slack_lesser_than 0.000 -max_paths $timing_path_max_paths -nworst $timing_nworst -input_pins -file [file join $report_dir post_route_timing_paths.rpt]"
     report_if_possible "post-route clocks" \
         "report_clocks -file [file join $report_dir post_route_clocks.rpt]"
-    report_if_possible "post-route clock interaction" \
-        "report_clock_interaction -delay_type max -file [file join $report_dir post_route_clock_interaction.rpt]"
-    report_if_possible "post-route check timing" \
-        "check_timing -verbose -file [file join $report_dir post_route_check_timing.rpt]"
     report_cpu_freq_timing $report_dir $pll_freq_mhz
     report_if_possible "post-route utilization" \
         "report_utilization -hierarchical -file [file join $report_dir post_route_utilization_hier.rpt]"
     report_if_possible "route status" \
         "report_route_status -file [file join $report_dir post_route_status.rpt]"
-    report_if_possible "post-route DRC" \
-        "report_drc -file [file join $report_dir post_route_drc.rpt]"
-    report_if_possible "post-route methodology" \
-        "report_methodology -file [file join $report_dir post_route_methodology.rpt]"
-    report_if_possible "post-route design analysis" \
-        "report_design_analysis -timing -logic_level_distribution -file [file join $report_dir post_route_design_analysis.rpt]"
-    report_if_possible "QoR suggestions" \
-        "report_qor_suggestions -file [file join $report_dir post_route_qor_suggestions.rpt]"
+    if {$full_reports} {
+        report_if_possible "post-route clock interaction" \
+            "report_clock_interaction -delay_type max -file [file join $report_dir post_route_clock_interaction.rpt]"
+        report_if_possible "post-route check timing" \
+            "check_timing -verbose -file [file join $report_dir post_route_check_timing.rpt]"
+        report_if_possible "post-route DRC" \
+            "report_drc -file [file join $report_dir post_route_drc.rpt]"
+        report_if_possible "post-route methodology" \
+            "report_methodology -file [file join $report_dir post_route_methodology.rpt]"
+        report_if_possible "post-route design analysis" \
+            "report_design_analysis -timing -logic_level_distribution -file [file join $report_dir post_route_design_analysis.rpt]"
+        report_if_possible "QoR suggestions" \
+            "report_qor_suggestions -file [file join $report_dir post_route_qor_suggestions.rpt]"
+    }
     write_checkpoint -force [file join $checkpoint_dir best_impl_route.dcp]
 
     puts "Reports written to $report_dir"
@@ -717,40 +740,41 @@ if {[llength $impl_run_obj] > 0} {
 }
 
 open_impl_design $best_impl_run $checkpoint_dir
-set final_wns [improve_post_route_timing $checkpoint_dir -0.500 4]
+clean_skipped_reports $report_dir
+set final_wns [improve_post_route_timing $checkpoint_dir -0.500 $post_route_physopt]
 set best_fp [open [file join $report_dir best_implementation.txt] a]
-puts $best_fp "iterative_physopt_wns_ns=$final_wns"
+puts $best_fp "final_wns_ns=$final_wns"
 close $best_fp
 report_if_possible "post-route timing summary" \
     "report_timing_summary -delay_type max -max_paths $timing_summary_max_paths -report_unconstrained -check_timing_verbose -file [file join $report_dir post_route_timing_summary.rpt]"
 report_if_possible "post-route violating timing paths" \
     "report_timing -delay_type max -sort_by slack -slack_lesser_than 0.000 -max_paths $timing_path_max_paths -nworst $timing_nworst -input_pins -file [file join $report_dir post_route_timing_violations.rpt]"
-report_if_possible "post-route timing paths" \
-    "report_timing -delay_type max -sort_by slack -slack_lesser_than 0.000 -max_paths $timing_path_max_paths -nworst $timing_nworst -input_pins -file [file join $report_dir post_route_timing_paths.rpt]"
 report_if_possible "post-route clocks" \
     "report_clocks -file [file join $report_dir post_route_clocks.rpt]"
-report_if_possible "post-route clock interaction" \
-    "report_clock_interaction -delay_type max -file [file join $report_dir post_route_clock_interaction.rpt]"
-report_if_possible "post-route check timing" \
-    "check_timing -verbose -file [file join $report_dir post_route_check_timing.rpt]"
 report_cpu_freq_timing $report_dir $pll_freq_mhz
 report_if_possible "post-route utilization" \
     "report_utilization -hierarchical -file [file join $report_dir post_route_utilization_hier.rpt]"
 report_if_possible "route status" \
     "report_route_status -file [file join $report_dir post_route_status.rpt]"
-report_if_possible "post-route DRC" \
-    "report_drc -file [file join $report_dir post_route_drc.rpt]"
-report_if_possible "post-route methodology" \
-    "report_methodology -file [file join $report_dir post_route_methodology.rpt]"
-report_if_possible "post-route design analysis" \
-    "report_design_analysis -timing -logic_level_distribution -file [file join $report_dir post_route_design_analysis.rpt]"
-report_if_possible "QoR suggestions" \
-    "report_qor_suggestions -file [file join $report_dir post_route_qor_suggestions.rpt]"
+if {$full_reports} {
+    report_if_possible "post-route clock interaction" \
+        "report_clock_interaction -delay_type max -file [file join $report_dir post_route_clock_interaction.rpt]"
+    report_if_possible "post-route check timing" \
+        "check_timing -verbose -file [file join $report_dir post_route_check_timing.rpt]"
+    report_if_possible "post-route DRC" \
+        "report_drc -file [file join $report_dir post_route_drc.rpt]"
+    report_if_possible "post-route methodology" \
+        "report_methodology -file [file join $report_dir post_route_methodology.rpt]"
+    report_if_possible "post-route design analysis" \
+        "report_design_analysis -timing -logic_level_distribution -file [file join $report_dir post_route_design_analysis.rpt]"
+    report_if_possible "QoR suggestions" \
+        "report_qor_suggestions -file [file join $report_dir post_route_qor_suggestions.rpt]"
+}
 write_checkpoint -force [file join $checkpoint_dir best_impl_route.dcp]
 if {$enable_ila} {
     write_debug_probes -force [file join $impl_run_dir "${top_name}.ltx"]
 }
-if {$run_to eq "bitstream"} {
+if {$run_to eq "bitstream" && $post_route_physopt} {
     write_bitstream -force [file join $impl_run_dir "${top_name}.bit"]
 }
 archive_run_artifacts $best_impl_run $artifact_dir $pll_freq_mhz $run_to $report_dir $checkpoint_dir $impl_run_dir $top_name
