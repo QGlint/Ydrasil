@@ -1,193 +1,233 @@
 module ydrasil_fpu
-import ydrasil_pkg::*;
+    import ydrasil_pkg::*;
+    import ydrasil_fpu_math_pkg::*;
 (
-	input  wire                       clk,
-	input  wire                       rst_n,
-	input  ydrasil_fpu_req_pkt_t      req_i,
-	output wire                       req_ready_o,
-	input  wire [2:0]                 frm_i,
-	input  wire                       result_ready_i,
-	output wire                       busy_o,
-	output wire                       result_valid_o,
-	output wire [REGS_DATA_WIDTH-1:0] result_o,
-	output wire [REGS_ADDR_WIDTH-1:0] result_addr_o,
-	output wire                       result_fpr_o,
-	output wire                       result_gpr_o,
-	output producer_id_t              result_producer_id_o,
-	output wire                       result_producer_tracked_o,
-	output wire [4:0]                 result_fflags_o,
-	output wire [INST_ADDR_WIDTH-1:0] result_pc_o,
-	output wire [INST_DATA_WIDTH-1:0] result_instr_o
+    input  wire                        clk,
+    input  wire                        rst_n,
+    input  ydrasil_fpu_req_pkt_t       req_i,
+    output wire                        req_ready_o,
+    input  wire [2:0]                  frm_i,
+    input  wire                        result_ready_i,
+    output wire                        busy_o,
+    output wire                        result_valid_o,
+    output wire [FPU_DATA_WIDTH-1:0]   result_o,
+    output wire [REGS_ADDR_WIDTH-1:0]  result_addr_o,
+    output wire                        result_fpr_o,
+    output wire                        result_gpr_o,
+    output producer_id_t               result_producer_id_o,
+    output wire                        result_producer_tracked_o,
+    output wire [4:0]                  result_fflags_o,
+    output wire [INST_ADDR_WIDTH-1:0]  result_pc_o,
+    output wire [INST_DATA_WIDTH-1:0]  result_instr_o
 );
-	localparam fpnew_pkg::fpu_implementation_t FPU_IMPLEMENTATION = '{
-		PipeRegs: '{
-			fpnew_pkg::ADDMUL:  '{default: 10},
-			fpnew_pkg::DIVSQRT: '{default: 1},
-			fpnew_pkg::NONCOMP: '{default: 2},
-			fpnew_pkg::CONV:    '{default: 6}
-		},
-		UnitTypes: '{
-			fpnew_pkg::ADDMUL:  '{default: fpnew_pkg::PARALLEL},
-			fpnew_pkg::DIVSQRT: '{default: fpnew_pkg::MERGED},
-			fpnew_pkg::NONCOMP: '{default: fpnew_pkg::PARALLEL},
-			fpnew_pkg::CONV:    '{default: fpnew_pkg::MERGED}
-		},
-		PipeConfig: fpnew_pkg::DISTRIBUTED
-	};
+    ydrasil_fpu_req_pkt_t request_q;
+    reg [2:0] round_mode_q;
+    reg execute_q;
+    reg div_wait_q;
+    reg fma_wait_q;
+    reg int_wait_q;
+    reg result_valid_q;
+    reg [63:0] result_data_q;
+    reg [4:0] result_flags_q;
+`ifdef YDRASIL_FPU_DOUBLE
+    localparam integer BASIC_LATENCY = 9;
+`else
+    localparam integer BASIC_LATENCY = 6;
+`endif
+    (* retiming_backward = 1 *)
+    reg [63:0] basic_data_pipe [0:BASIC_LATENCY-1];
+    (* retiming_backward = 1 *)
+    reg [4:0] basic_flags_pipe [0:BASIC_LATENCY-1];
+    reg [BASIC_LATENCY-1:0] basic_valid_pipe;
+    integer control_stage;
+    integer data_stage;
 
-	logic [2:0][REGS_DATA_WIDTH-1:0] fp_operands;
-	fpnew_pkg::roundmode_e fp_roundmode;
-	fpnew_pkg::operation_e fp_operation;
-	logic fp_op_mod;
-	logic fp_in_valid;
-	logic fp_in_ready;
-	logic [REGS_DATA_WIDTH-1:0] fp_result;
-	fpnew_pkg::status_t fp_status;
-	logic fp_out_valid;
-	logic fp_out_ready;
-	logic fp_busy;
-	logic fp_tag_unused;
+    wire accepted = req_i.valid && req_ready_o;
+    wire output_consumed = result_valid_q && result_ready_i;
+    wire iterative_op = (request_q.op == FPU_OP_DIV) ||
+        (request_q.op == FPU_OP_SQRT);
+    wire arithmetic_op = (request_q.op == FPU_OP_ADD) ||
+        (request_q.op == FPU_OP_SUB) ||
+        (request_q.op == FPU_OP_MUL) ||
+        (request_q.op == FPU_OP_FMADD) ||
+        (request_q.op == FPU_OP_FMSUB) ||
+        (request_q.op == FPU_OP_FNMSUB) ||
+        (request_q.op == FPU_OP_FNMADD);
+    wire pack_conversion_op =
+        (request_q.op == FPU_OP_CVT_S_W) ||
+        (request_q.op == FPU_OP_CVT_S_WU) ||
+        (request_q.op == FPU_OP_CVT_D_W) ||
+        (request_q.op == FPU_OP_CVT_D_WU) ||
+        (request_q.op == FPU_OP_CVT_S_D) ||
+        (request_q.op == FPU_OP_CVT_D_S);
+    wire int_conversion_op =
+        (request_q.op == FPU_OP_CVT_W_S) ||
+        (request_q.op == FPU_OP_CVT_WU_S) ||
+        (request_q.op == FPU_OP_CVT_W_D) ||
+        (request_q.op == FPU_OP_CVT_WU_D);
+    wire fma_pipeline_op = arithmetic_op || pack_conversion_op;
+    wire div_start = execute_q && iterative_op;
+    wire fma_start = execute_q && fma_pipeline_op;
+    wire int_start = execute_q && int_conversion_op;
+    wire div_done;
+    wire [63:0] div_result;
+    wire [4:0] div_flags;
+    wire fma_done;
+    wire [63:0] fma_result;
+    wire [4:0] fma_flags;
+    wire int_done;
+    wire [63:0] int_result;
+    wire [4:0] int_flags;
+    wire basic_busy = |basic_valid_pipe;
+    wire [63:0] operand_a64 =
+        {{(64-FPU_DATA_WIDTH){1'b1}}, request_q.operand_a};
+    wire [63:0] operand_b64 =
+        {{(64-FPU_DATA_WIDTH){1'b1}}, request_q.operand_b};
+    wire [63:0] operand_c64 =
+        {{(64-FPU_DATA_WIDTH){1'b1}}, request_q.operand_c};
+`ifdef YDRASIL_FPU_DOUBLE
+    wire effective_fmt = request_q.fmt;
+    wire effective_dst_fmt = request_q.dst_fmt;
+`else
+    wire effective_fmt = 1'b0;
+    wire effective_dst_fmt = 1'b0;
+`endif
+    wire fp_result_t basic_comb = execute_basic(request_q.op, effective_fmt,
+        effective_dst_fmt, round_mode_q,
+        operand_a64, operand_b64, operand_c64);
 
-	ydrasil_fpu_req_pkt_t input_q;
-	reg [2:0] frm_q;
-	reg input_valid_q;
-	reg pending_q;
-	reg result_valid_q;
-	reg [REGS_DATA_WIDTH-1:0] result_data_q;
-	reg [4:0] result_fflags_q;
-	reg [REGS_ADDR_WIDTH-1:0] result_addr_q;
-	reg result_fpr_q;
-	reg result_gpr_q;
-	producer_id_t result_producer_id_q;
-	reg result_producer_tracked_q;
-	reg [INST_ADDR_WIDTH-1:0] result_pc_q;
-	reg [INST_DATA_WIDTH-1:0] result_instr_q;
+    ydrasil_fpu_divsqrt u_divsqrt (
+        .clk(clk),
+        .rst_n(rst_n),
+        .start_i(div_start),
+        .sqrt_i(request_q.op == FPU_OP_SQRT),
+        .fmt_i(effective_fmt),
+        .rm_i(round_mode_q),
+        .operand_a_i(operand_a64),
+        .operand_b_i(operand_b64),
+        .busy_o(),
+        .done_o(div_done),
+        .result_o(div_result),
+        .flags_o(div_flags)
+    );
 
-	wire special_request = (req_i.op == FPU_OP_MV_X_W) ||
-		(req_i.op == FPU_OP_MV_W_X);
-	wire accepted = req_i.valid && req_ready_o;
-	wire input_consumed = fp_in_valid && fp_in_ready;
-	wire fp_output_captured = fp_out_valid && fp_out_ready;
-	wire output_consumed = result_valid_q && result_ready_i;
+    ydrasil_fpu_fma u_fma (
+        .clk(clk),
+        .rst_n(rst_n),
+        .start_i(fma_start),
+        .op_i(request_q.op),
+        .fmt_i(effective_fmt),
+        .dst_fmt_i(effective_dst_fmt),
+        .rm_i(round_mode_q),
+        .operand_a_i(operand_a64),
+        .operand_b_i(operand_b64),
+        .operand_c_i(operand_c64),
+        .busy_o(),
+        .done_o(fma_done),
+        .result_o(fma_result),
+        .flags_o(fma_flags)
+    );
 
-	always_comb begin
-		fp_operands = {input_q.operand_c, input_q.operand_b, input_q.operand_a};
-		fp_roundmode = (input_q.rm == 3'b111) ? fpnew_pkg::roundmode_e'(frm_q) :
-			fpnew_pkg::roundmode_e'(input_q.rm);
-		fp_operation = fpnew_pkg::FMADD;
-		fp_op_mod = 1'b0;
-		case (input_q.op)
-			FPU_OP_FMADD:  fp_operation = fpnew_pkg::FMADD;
-			FPU_OP_FMSUB:  begin fp_operation = fpnew_pkg::FMADD;  fp_op_mod = 1'b1; end
-			FPU_OP_FNMSUB: fp_operation = fpnew_pkg::FNMSUB;
-			FPU_OP_FNMADD: begin fp_operation = fpnew_pkg::FNMSUB; fp_op_mod = 1'b1; end
-			FPU_OP_ADD:    fp_operation = fpnew_pkg::ADD;
-			FPU_OP_SUB:    begin fp_operation = fpnew_pkg::ADD; fp_op_mod = 1'b1; end
-			FPU_OP_MUL:    fp_operation = fpnew_pkg::MUL;
-			FPU_OP_DIV:    fp_operation = fpnew_pkg::DIV;
-			FPU_OP_SQRT:   fp_operation = fpnew_pkg::SQRT;
-			FPU_OP_SGNJ:   begin fp_operation = fpnew_pkg::SGNJ; fp_roundmode = fpnew_pkg::RNE; end
-			FPU_OP_SGNJN:  begin fp_operation = fpnew_pkg::SGNJ; fp_roundmode = fpnew_pkg::RTZ; end
-			FPU_OP_SGNJX:  begin fp_operation = fpnew_pkg::SGNJ; fp_roundmode = fpnew_pkg::RDN; end
-			FPU_OP_MIN:    begin fp_operation = fpnew_pkg::MINMAX; fp_roundmode = fpnew_pkg::RNE; end
-			FPU_OP_MAX:    begin fp_operation = fpnew_pkg::MINMAX; fp_roundmode = fpnew_pkg::RTZ; end
-			FPU_OP_LE:     begin fp_operation = fpnew_pkg::CMP; fp_roundmode = fpnew_pkg::RNE; end
-			FPU_OP_LT:     begin fp_operation = fpnew_pkg::CMP; fp_roundmode = fpnew_pkg::RTZ; end
-			FPU_OP_EQ:     begin fp_operation = fpnew_pkg::CMP; fp_roundmode = fpnew_pkg::RDN; end
-			FPU_OP_CLASS:  fp_operation = fpnew_pkg::CLASSIFY;
-			FPU_OP_CVT_W_S:  fp_operation = fpnew_pkg::F2I;
-			FPU_OP_CVT_WU_S: begin fp_operation = fpnew_pkg::F2I; fp_op_mod = 1'b1; end
-			FPU_OP_CVT_S_W:  fp_operation = fpnew_pkg::I2F;
-			FPU_OP_CVT_S_WU: begin fp_operation = fpnew_pkg::I2F; fp_op_mod = 1'b1; end
-			default: fp_operation = fpnew_pkg::FMADD;
-		endcase
-		if ((input_q.op == FPU_OP_ADD) || (input_q.op == FPU_OP_SUB)) begin
-			fp_operands[1] = input_q.operand_a;
-			fp_operands[2] = input_q.operand_b;
-		end
-	end
+    ydrasil_fpu_to_int u_to_int (
+        .clk(clk),
+        .rst_n(rst_n),
+        .start_i(int_start),
+        .op_i(request_q.op),
+        .fmt_i(effective_fmt),
+        .rm_i(round_mode_q),
+        .operand_i(operand_a64),
+        .busy_o(),
+        .done_o(int_done),
+        .result_o(int_result),
+        .flags_o(int_flags)
+    );
 
-	// 输入边界寄存后再驱动 FPnew，ready 只依赖本地状态，避免 FPnew 的
-	// 组合反压路径穿过 issue/decode。
-	assign fp_in_valid = input_valid_q;
-	assign req_ready_o = !pending_q && !input_valid_q && !result_valid_q;
-	// 独立的一项输出缓冲切断核心写回反压到 FPnew 内部状态的组合路径。
-	assign fp_out_ready = pending_q && !result_valid_q;
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            request_q <= '0;
+            round_mode_q <= '0;
+            execute_q <= 1'b0;
+            div_wait_q <= 1'b0;
+            fma_wait_q <= 1'b0;
+            int_wait_q <= 1'b0;
+            result_valid_q <= 1'b0;
+            result_data_q <= '0;
+            result_flags_q <= '0;
+            basic_valid_pipe <= '0;
+        end else begin
+            basic_valid_pipe[0] <= 1'b0;
+            for (control_stage = 1; control_stage < BASIC_LATENCY;
+                 control_stage = control_stage + 1) begin
+                basic_valid_pipe[control_stage] <=
+                    basic_valid_pipe[control_stage-1];
+            end
+            if (output_consumed)
+                result_valid_q <= 1'b0;
+            if (accepted) begin
+                request_q <= req_i;
+                round_mode_q <= req_i.rm == 3'b111 ? frm_i : req_i.rm;
+                execute_q <= 1'b1;
+            end
+            if (execute_q) begin
+                execute_q <= 1'b0;
+                if (iterative_op) begin
+                    div_wait_q <= 1'b1;
+                end else if (fma_pipeline_op) begin
+                    fma_wait_q <= 1'b1;
+                end else if (int_conversion_op) begin
+                    int_wait_q <= 1'b1;
+                end else begin
+                    basic_valid_pipe[0] <= 1'b1;
+                end
+            end
+            if (basic_valid_pipe[BASIC_LATENCY-1]) begin
+                result_data_q <= basic_data_pipe[BASIC_LATENCY-1];
+                result_flags_q <= basic_flags_pipe[BASIC_LATENCY-1];
+                result_valid_q <= 1'b1;
+            end
+            if (div_done && div_wait_q) begin
+                div_wait_q <= 1'b0;
+                result_data_q <= div_result;
+                result_flags_q <= div_flags;
+                result_valid_q <= 1'b1;
+            end
+            if (fma_done && fma_wait_q) begin
+                fma_wait_q <= 1'b0;
+                result_data_q <= fma_result;
+                result_flags_q <= fma_flags;
+                result_valid_q <= 1'b1;
+            end
+            if (int_done && int_wait_q) begin
+                int_wait_q <= 1'b0;
+                result_data_q <= int_result;
+                result_flags_q <= int_flags;
+                result_valid_q <= 1'b1;
+            end
+        end
+    end
 
-	fpnew_top #(
-		.Features(fpnew_pkg::RV32F),
-		.Implementation(FPU_IMPLEMENTATION),
-		.PulpDivsqrt(1'b0),
-		.TagType(logic)
-	) u_fpnew (
-		.clk_i(clk), .rst_ni(rst_n), .operands_i(fp_operands),
-		.rnd_mode_i(fp_roundmode), .op_i(fp_operation), .op_mod_i(fp_op_mod),
-		.src_fmt_i(fpnew_pkg::FP32), .dst_fmt_i(fpnew_pkg::FP32),
-		.int_fmt_i(fpnew_pkg::INT32), .vectorial_op_i(1'b0), .tag_i(1'b0),
-		.simd_mask_i(1'b1), .in_valid_i(fp_in_valid), .in_ready_o(fp_in_ready),
-		.flush_i(1'b0), .result_o(fp_result), .status_o(fp_status),
-		.tag_o(fp_tag_unused), .out_valid_o(fp_out_valid),
-		.out_ready_i(fp_out_ready), .busy_o(fp_busy)
-	);
+    always_ff @(posedge clk) begin
+        basic_data_pipe[0] <= basic_comb.data;
+        basic_flags_pipe[0] <= basic_comb.flags;
+        for (data_stage = 1; data_stage < BASIC_LATENCY;
+             data_stage = data_stage + 1) begin
+            basic_data_pipe[data_stage] <= basic_data_pipe[data_stage-1];
+            basic_flags_pipe[data_stage] <= basic_flags_pipe[data_stage-1];
+        end
+    end
 
-	always_ff @(posedge clk or negedge rst_n) begin
-		if (!rst_n) begin
-			input_q <= '0;
-			frm_q <= '0;
-			input_valid_q <= 1'b0;
-			pending_q <= 1'b0;
-			result_valid_q <= 1'b0;
-			result_data_q <= '0;
-			result_fflags_q <= '0;
-			result_addr_q <= '0;
-			result_fpr_q <= 1'b0;
-			result_gpr_q <= 1'b0;
-			result_producer_id_q <= '0;
-			result_producer_tracked_q <= 1'b0;
-			result_pc_q <= '0;
-			result_instr_q <= '0;
-		end else begin
-			if (input_consumed)
-				input_valid_q <= 1'b0;
-			if (output_consumed)
-				result_valid_q <= 1'b0;
-			if (fp_output_captured) begin
-				pending_q <= 1'b0;
-				result_valid_q <= 1'b1;
-				result_data_q <= fp_result;
-				result_fflags_q <=
-					{fp_status.NV, fp_status.DZ, fp_status.OF, fp_status.UF, fp_status.NX};
-			end
-			if (accepted) begin
-				input_q <= req_i;
-				frm_q <= frm_i;
-				input_valid_q <= !special_request;
-				pending_q <= !special_request;
-				if (special_request) begin
-					result_valid_q <= 1'b1;
-					result_data_q <= req_i.operand_a;
-					result_fflags_q <= '0;
-				end
-				result_addr_q <= req_i.rd_addr;
-				result_fpr_q <= req_i.rd_fpr;
-				result_gpr_q <= req_i.rd_gpr;
-				result_producer_id_q <= req_i.producer_id;
-				result_producer_tracked_q <= req_i.producer_tracked;
-				result_pc_q <= req_i.pc;
-				result_instr_q <= req_i.instr;
-			end
-		end
-	end
-
-	assign busy_o = pending_q || input_valid_q || result_valid_q || fp_busy;
-	assign result_valid_o = result_valid_q;
-	assign result_o = result_data_q;
-	assign result_addr_o = result_addr_q;
-	assign result_fpr_o = result_fpr_q;
-	assign result_gpr_o = result_gpr_q;
-	assign result_producer_id_o = result_producer_id_q;
-	assign result_producer_tracked_o = result_producer_tracked_q;
-	assign result_fflags_o = result_fflags_q;
-	assign result_pc_o = result_pc_q;
-	assign result_instr_o = result_instr_q;
+    assign req_ready_o = !execute_q && !basic_busy && !div_wait_q &&
+        !fma_wait_q && !int_wait_q && !result_valid_q;
+    assign busy_o = execute_q || basic_busy || div_wait_q ||
+        fma_wait_q || int_wait_q || result_valid_q;
+    assign result_valid_o = result_valid_q;
+    assign result_o = result_data_q[FPU_DATA_WIDTH-1:0];
+    assign result_addr_o = request_q.rd_addr;
+    assign result_fpr_o = request_q.rd_fpr;
+    assign result_gpr_o = request_q.rd_gpr;
+    assign result_producer_id_o = request_q.producer_id;
+    assign result_producer_tracked_o = request_q.producer_tracked;
+    assign result_fflags_o = result_flags_q;
+    assign result_pc_o = request_q.pc;
+    assign result_instr_o = request_q.instr;
 endmodule

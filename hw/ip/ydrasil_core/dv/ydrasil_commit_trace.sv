@@ -29,7 +29,7 @@ import ydrasil_pkg::*;
     input  wire [REGS_DATA_WIDTH-1:0] lsu_wdata_i,
     input  wire lsu_fp_valid_i,
     input  wire [REGS_ADDR_WIDTH-1:0] lsu_fp_waddr_i,
-    input  wire [REGS_DATA_WIDTH-1:0] lsu_fp_wdata_i,
+    input  wire [FPU_DATA_WIDTH-1:0] lsu_fp_wdata_i,
 
     input  wire mul_issue_valid_i,
     input  wire [INST_ADDR_WIDTH-1:0] mul_issue_pc_i,
@@ -43,7 +43,7 @@ import ydrasil_pkg::*;
     ,input wire fpu_valid_i
     ,input wire fpu_result_fpr_i
     ,input wire [REGS_ADDR_WIDTH-1:0] fpu_waddr_i
-    ,input wire [REGS_DATA_WIDTH-1:0] fpu_wdata_i
+    ,input wire [FPU_DATA_WIDTH-1:0] fpu_wdata_i
 );
 
     localparam [1:0] COMMIT_ALU = 2'd0;
@@ -55,7 +55,7 @@ import ydrasil_pkg::*;
     reg [INST_ADDR_WIDTH-1:0] commit_pc_q    [0:FIFO_DEPTH-1];
     reg [INST_DATA_WIDTH-1:0] commit_instr_q [0:FIFO_DEPTH-1];
     reg [REGS_ADDR_WIDTH-1:0] commit_waddr_q [0:FIFO_DEPTH-1];
-    reg [REGS_DATA_WIDTH-1:0] commit_wdata_q [0:FIFO_DEPTH-1];
+    reg [FPU_DATA_WIDTH-1:0]  commit_wdata_q [0:FIFO_DEPTH-1];
     reg                       commit_ready_q [0:FIFO_DEPTH-1];
     reg                       commit_is_fpr_q[0:FIFO_DEPTH-1];
     reg [FIFO_PTR_WIDTH-1:0]  commit_rptr_q;
@@ -99,15 +99,15 @@ import ydrasil_pkg::*;
         input [INST_ADDR_WIDTH-1:0] pc;
         input [INST_DATA_WIDTH-1:0] instr;
         input [REGS_ADDR_WIDTH-1:0] waddr;
-        input [REGS_DATA_WIDTH-1:0] wdata;
+        input [FPU_DATA_WIDTH-1:0] wdata;
         input is_fpr;
         begin
             if (trace_en && (is_fpr || (waddr != '0))) begin
                 $display("core   0: 0x%08h (0x%08h) unknown", pc, instr);
                 if (is_fpr)
-                    $display("3 0x%08h (0x%08h) f%0d 0x%08h", pc, instr, waddr, wdata);
+                    $display("3 0x%08h (0x%08h) f%0d 0x%016h", pc, instr, waddr, wdata);
                 else
-                    $display("3 0x%08h (0x%08h) x%0d 0x%08h", pc, instr, waddr, wdata);
+                    $display("3 0x%08h (0x%08h) x%0d 0x%08h", pc, instr, waddr, wdata[31:0]);
             end
         end
     endtask

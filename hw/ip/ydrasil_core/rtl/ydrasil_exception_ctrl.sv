@@ -94,8 +94,8 @@ import ydrasil_pkg::*;
 
     always_comb begin
         trap_ctrl_o = '0;
-        trap_ctrl_o.stall = (state_q != S_IDLE) || irq_pending ||
-            exception_req_i.valid;
+        trap_ctrl_o.active = state_q != S_IDLE;
+        trap_ctrl_o.stall = trap_ctrl_o.active || irq_pending;
         if (state_q == S_REDIRECT) begin
             trap_ctrl_o.redirect = 1'b1;
             trap_ctrl_o.redirect_addr = trap_target;

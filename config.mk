@@ -12,6 +12,10 @@ BENDER ?= bender
 VERILATOR_TRACE ?= 1
 DIV_IMPL ?= lzc
 FPU ?= 0
+FPU_PRECISION ?= single
+FPU_PROFILE_SUFFIX := $(if $(filter 1,$(FPU)),-fpu-$(FPU_PRECISION))
+WAVE_DIR := $(BUILD_DIR)/wave$(FPU_PROFILE_SUFFIX)
+LOG_DIR := $(BUILD_DIR)/log$(FPU_PROFILE_SUFFIX)
 PYTHON ?= python3
 TRACE_TO_CSV ?= $(PROJECT_ROOT)/verif/sim/riscv_trace_csv.py
 TRACE_COMPARE ?= $(PROJECT_ROOT)/verif/sim/ydrasil_sim.py
@@ -73,7 +77,7 @@ SPIKE ?= $(SPIKE_INSTALL_DIR)/bin/spike
 SPIKE_RUN_ENV ?= LD_LIBRARY_PATH=$(SPIKE_INSTALL_DIR)/lib:$(LD_LIBRARY_PATH)
 SPIKE_CHECK_ARGS ?= --help
 SPIKE_ELF ?= $(RVTESTS_OUT_ROOT)/rv32ui/elf/rv32ui_lh.elf
-SIM_OUT_DIR ?= $(BUILD_DIR)/sim
+SIM_OUT_DIR ?= $(BUILD_DIR)/sim$(FPU_PROFILE_SUFFIX)
 SPIKE_OUT_DIR ?= $(SIM_OUT_DIR)/spike
 SPIKE_LOG ?= rv32ui_lh
 SPIKE_MAXSTEPS ?= 1000000
@@ -86,7 +90,7 @@ SPIKE_MEM_BASE ?= $(patsubst %/elf/,%/mem/,$(dir $(SPIKE_ELF)))$(basename $(notd
 HW_TRACE_OUT_DIR ?= $(SIM_OUT_DIR)/hw
 HW_TRACE_LOG ?= $(HW_TRACE_OUT_DIR)/$(SPIKE_LOG)/hw.log
 HW_TRACE_CSV ?= $(HW_TRACE_OUT_DIR)/$(SPIKE_LOG)/hw.csv
-COVERAGE_DIR ?= $(BUILD_DIR)/coverage
+COVERAGE_DIR ?= $(BUILD_DIR)/coverage$(FPU_PROFILE_SUFFIX)
 COVERAGE_DATA_DIR ?= $(COVERAGE_DIR)/data
 COVERAGE_MERGED ?= $(COVERAGE_DIR)/merged.dat
 COVERAGE_INFO ?= $(COVERAGE_DIR)/coverage.info
@@ -94,9 +98,9 @@ COVERAGE_SUMMARY ?= $(COVERAGE_DIR)/summary.log
 COVERAGE_ANNOTATE_DIR ?= $(COVERAGE_DIR)/annotated
 COVERAGE ?= 0
 VERILATOR_COVERAGE ?= $(COVERAGE)
-SW_TEST_OUT_ROOT ?= $(BUILD_DIR)/sw_tests
-SW_BOUNDARY_DIR ?= $(BUILD_DIR)/sw_boundary
-SW_COVERAGE_DIR ?= $(BUILD_DIR)/coverage
+SW_TEST_OUT_ROOT ?= $(BUILD_DIR)/sw_tests$(FPU_PROFILE_SUFFIX)
+SW_BOUNDARY_DIR ?= $(BUILD_DIR)/sw_boundary$(FPU_PROFILE_SUFFIX)
+SW_COVERAGE_DIR ?= $(BUILD_DIR)/coverage$(FPU_PROFILE_SUFFIX)
 SW_COVERAGE_DATA_DIR ?= $(SW_COVERAGE_DIR)/data
 SW_COVERAGE_MERGED ?= $(SW_COVERAGE_DIR)/merged.dat
 SW_COVERAGE_INFO ?= $(SW_COVERAGE_DIR)/coverage.info
@@ -200,8 +204,15 @@ OBJCOPY ?= $(RISCV_PREFIX)-objcopy
 OBJDUMP ?= $(RISCV_PREFIX)-objdump
 
 ifeq ($(FPU),1)
+ifeq ($(FPU_PRECISION),double)
+ARCH := rv32imfd_zicsr_zifencei_zba_zbb_zbc_zbkb_zbkx_zbs
+ABI  := ilp32d
+else ifeq ($(FPU_PRECISION),single)
 ARCH := rv32imf_zicsr_zifencei_zba_zbb_zbc_zbkb_zbkx_zbs
 ABI  := ilp32f
+else
+$(error Unsupported FPU_PRECISION '$(FPU_PRECISION)'. Use single or double)
+endif
 else ifeq ($(FPU),0)
 ARCH := rv32im_zicsr_zifencei_zba_zbb_zbc_zbkb_zbkx_zbs
 ABI  := ilp32
@@ -221,13 +232,16 @@ RISCV_CFLAGS := \
 RVTESTS_TYPE := rv32ui rv32um rv32uzba rv32uzbb rv32uzbc rv32uzbkb rv32uzbkx rv32uzbs rv32mi
 ifeq ($(FPU),1)
 RVTESTS_TYPE += rv32uf
+ifeq ($(FPU_PRECISION),double)
+RVTESTS_TYPE += rv32ud
+endif
 endif
 RV32MI_TESTS ?= csr mcsr
 RVTESTS_EXCLUDE ?= rv32ui/ma_data
 
-RVTESTS_OUT_ROOT := $(BUILD_DIR)/riscv_tests
+RVTESTS_OUT_ROOT := $(BUILD_DIR)/riscv_tests$(FPU_PROFILE_SUFFIX)
 
-RVTESTS_RESULT_DIR := $(BUILD_DIR)/rvtest_results
+RVTESTS_RESULT_DIR := $(BUILD_DIR)/rvtest_results$(FPU_PROFILE_SUFFIX)
 
 SPIKE_FLAGS := \
 	--isa=$(ARCH) \

@@ -82,9 +82,9 @@ import ydrasil_axi_pkg::*;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] fpr_raddr_rs1;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] fpr_raddr_rs2;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] fpr_raddr_rs3;
-	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] fpr_rdata_rs1;
-	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] fpr_rdata_rs2;
-	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] fpr_rdata_rs3;
+	wire [ydrasil_pkg::FPU_DATA_WIDTH-1:0] fpr_rdata_rs1;
+	wire [ydrasil_pkg::FPU_DATA_WIDTH-1:0] fpr_rdata_rs2;
+	wire [ydrasil_pkg::FPU_DATA_WIDTH-1:0] fpr_rdata_rs3;
 
 	// ID -> EX
 	wire [31:0]                    operand_a;
@@ -143,6 +143,7 @@ import ydrasil_axi_pkg::*;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] slow_rf_waddr_rd;
 	producer_id_t               slow_producer_id;
 	wire                        ex_instret_inc;
+	wire                        ex_instret_inc_raw;
 	wire                        ex_pc_redirect;
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] ex_pc_redirect_target;
 	wire                        ex_bp_train_valid;
@@ -213,12 +214,12 @@ import ydrasil_axi_pkg::*;
 	wire                        lsu_producer_tracked;
 	wire                        lsu_fp_completion_valid;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] lsu_fp_completion_addr;
-	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] lsu_fp_completion_data;
+	wire [ydrasil_pkg::FPU_DATA_WIDTH-1:0] lsu_fp_completion_data;
 
 	wire                        fpu_busy;
 	wire                        fpu_req_ready;
 	wire                        fpu_result_valid;
-	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] fpu_result;
+	wire [ydrasil_pkg::FPU_DATA_WIDTH-1:0] fpu_result;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] fpu_result_addr;
 	wire                        fpu_result_fpr;
 	wire                        fpu_result_gpr;
@@ -231,7 +232,7 @@ import ydrasil_axi_pkg::*;
 	wire                        fpu_result_consumed;
 	wire                        fpr_write_valid;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] fpr_write_addr;
-	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] fpr_write_data;
+	wire [ydrasil_pkg::FPU_DATA_WIDTH-1:0] fpr_write_data;
 	wire [2:0]                  csr_frm;
 	wire                        csr_fp_enabled;
 	wire                        fpu_illegal_ex;
@@ -302,6 +303,7 @@ import ydrasil_axi_pkg::*;
 	ydrasil_decode_pkt_t            decode_pkt1;
 	wire                            decode_valid;
 	wire                            decode_valid1;
+	wire                            decode_pair_eligible;
 	wire                            decode_if_ready;
 	wire                            issue_ready;
 	wire                            issue_consume_two;
@@ -379,6 +381,7 @@ import ydrasil_axi_pkg::*;
 	producer_id_t                    dual_id_ex_producer_id;
 	wire                             dual_id_ex_producer_tracked;
 	wire                             dual_id_ex_valid;
+	wire                             dual_id_ex_issue_valid;
 	wire [31:0]                      dual_id_ex_pc;
 	wire [31:0]                      dual_id_ex_instr;
 	wire [31:0]                      dual_commit_pc;
@@ -457,12 +460,17 @@ import ydrasil_axi_pkg::*;
 	end
 `endif
 
+`ifdef YDRASIL_ENABLE_FPU
+	assign load_bypass_completion_ready = 1'b0;
+	assign load_replay_stall = 1'b0;
+`else
 	assign load_bypass_completion_ready = lsu_wb_fwd_pkt.valid &&
 		lsu_wb_fwd_pkt.producer_tracked &&
 		(lsu_wb_fwd_pkt.producer_id == id_ex_load_bypass_producer_id);
 	assign load_replay_stall = id_ex_valid &&
 		(id_ex_load_bypass_rs1 || id_ex_load_bypass_rs2) &&
 		!load_bypass_completion_ready;
+`endif
 	wire fpu_csr_ex = id_ex_valid && operator_type[OPERATOR_TYPE_CSR] &&
 		!operator_type[OPERATOR_TYPE_SYS] &&
 		((id_ex_csr_waddr == CSR_FFLAGS) || (id_ex_csr_waddr == CSR_FRM) ||
@@ -476,8 +484,14 @@ import ydrasil_axi_pkg::*;
 		(fpu_csr_ex && !csr_fp_enabled_ex);
 	// 非法浮点指令仍从 issue 队列消费并交给 CLINT 触发 trap；只屏蔽执行副作用。
 	// 这样可避免 FS/CSR 判定组合反馈到前端 decode/issue 关键路径。
-	assign id_ex_issue_valid = id_ex_valid && !load_replay_stall;
-	assign id_ex_execute_valid = id_ex_issue_valid && !fpu_illegal_ex;
+	assign id_ex_issue_valid = id_ex_valid && !load_replay_stall &&
+		!trap_ctrl_pkt.active;
+	assign id_ex_execute_valid = id_ex_issue_valid && !fpu_illegal_ex &&
+		(!operator_type[OPERATOR_TYPE_SYS] ||
+		 id_op_sys_info[ydrasil_pkg::OP_SYS_MRET]);
+	assign ex_instret_inc = ex_instret_inc_raw && !fpu_illegal_ex &&
+		(!operator_type[OPERATOR_TYPE_SYS] ||
+		 id_op_sys_info[ydrasil_pkg::OP_SYS_MRET]);
 	assign ex_backend_stall = ex_mul_stall | load_replay_stall | fpu_backend_stall;
 
 	assign ex_hzd_pkt.valid = id_ex_issue_valid;
@@ -488,7 +502,9 @@ import ydrasil_axi_pkg::*;
 	assign ex_hzd_pkt.alu_rf_wen = id_alu_rf_wen_rd;
 	assign ex_hzd_pkt.operator_type = operator_type;
 	assign ex_hzd_pkt.operator_info = operator;
-	assign ex_hzd_pkt1.valid = dual_id_ex_valid;
+	assign dual_id_ex_issue_valid = dual_id_ex_valid &&
+		!trap_ctrl_pkt.active;
+	assign ex_hzd_pkt1.valid = dual_id_ex_issue_valid;
 	assign ex_hzd_pkt1.interrupt = interrupt;
 	assign ex_hzd_pkt1.producer_id = dual_id_ex_producer_id;
 	assign ex_hzd_pkt1.producer_tracked = dual_id_ex_producer_tracked;
@@ -501,7 +517,7 @@ import ydrasil_axi_pkg::*;
 	assign alu_fwd_pkt.producer_tracked = alu_fwd_pkt.valid && (alu_fwd_pkt.addr != '0);
 	assign alu_fwd_pkt.addr = alu_rf_waddr_rd;
 	assign alu_fwd_pkt.data = alu_result;
-	assign slow_wb_result = mul_rf_wen_rd ? mul_wb_result : fpu_result;
+	assign slow_wb_result = mul_rf_wen_rd ? mul_wb_result : fpu_result[31:0];
 	assign slow_rf_wen_rd = mul_rf_wen_rd | (fpu_result_consumed & fpu_result_gpr);
 	assign slow_rf_waddr_rd = mul_rf_wen_rd ? mul_rf_waddr_rd : fpu_result_addr;
 	assign slow_producer_id = mul_rf_wen_rd ? mul_producer_id : fpu_result_producer_id;
@@ -902,6 +918,7 @@ import ydrasil_axi_pkg::*;
 		.if_id_consume_two_o (decode_consume_two),
 		.decode_valid_o      (decode_valid),
 		.decode_valid1_o     (decode_valid1),
+		.decode_pair_eligible_o(decode_pair_eligible),
 		.decode_pkt_o        (decode_pkt),
 		.decode_pkt1_o       (decode_pkt1)
 	);
@@ -916,6 +933,7 @@ import ydrasil_axi_pkg::*;
 		.decode_pkt_i        (decode_pkt),
 		.decode_valid1_i     (decode_valid1),
 		.decode_pkt1_i       (decode_pkt1),
+		.decode_pair_eligible_i(decode_pair_eligible),
 		.issue_ready_o       (issue_ready),
 		.issue_consume_two_o (issue_consume_two),
 		.rf_addr_rs1_o       (rf_raddr_rs1),
@@ -1025,7 +1043,8 @@ import ydrasil_axi_pkg::*;
 		.csr_operand_b_i    (csr_operand_b),
 		.operator_i         (operator),
 		.operator_type_i    (operator_type),
-		.id_ex_valid_i      (id_ex_execute_valid),
+		.id_ex_valid_i      (id_ex_issue_valid),
+		.id_ex_side_effect_valid_i(id_ex_execute_valid),
 		.id_ex_jalr_i       (id_ex_jalr),
 		.id_ex_alu_bypass_rs1_i(id_ex_alu_bypass_rs1),
 		.id_ex_alu_bypass_rs2_i(id_ex_alu_bypass_rs2),
@@ -1079,7 +1098,7 @@ import ydrasil_axi_pkg::*;
 		.mul_rf_waddr_rd_o  (mul_rf_waddr_rd),
 		.mul_producer_id_o  (mul_producer_id),
 		.mul_result_valid_o (mul_result_valid),
-		.ex_instret_inc_o   (ex_instret_inc),
+		.ex_instret_inc_o   (ex_instret_inc_raw),
 		.ex_mul_stall_o     (ex_mul_stall)
 `ifndef SYNTHESIS
 		,.dbg_bp_resolve_valid_o(dbg_bp_resolve_valid)
@@ -1101,7 +1120,7 @@ import ydrasil_axi_pkg::*;
 		.rst_n               (rst_n),
 		.flush_i             (flush_ex),
 		.interrupt_i         (interrupt),
-		.valid_i             (dual_id_ex_valid && !stall_id),
+		.valid_i             (dual_id_ex_issue_valid && !stall_id),
 		.operand_a_i         (dual_operand_a),
 		.operand_b_i         (dual_operand_b),
 		.operator_i          (dual_operator),

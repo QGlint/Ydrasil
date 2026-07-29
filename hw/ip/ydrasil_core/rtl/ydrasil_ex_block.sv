@@ -27,6 +27,7 @@ import ydrasil_pkg::*;
     input  wire [OPERATOR_WIDTH-1:0]       operator_i,
     input  wire [OPERATOR_TYPE_WIDTH-1:0]  operator_type_i,
     input  wire                            id_ex_valid_i,
+    input  wire                            id_ex_side_effect_valid_i,
     input  wire                            id_ex_jalr_i,
     input  wire                            id_ex_alu_bypass_rs1_i,
     input  wire                            id_ex_alu_bypass_rs2_i,
@@ -481,7 +482,8 @@ import ydrasil_pkg::*;
 
     wire [31:0] slow_result;
     wire        slow_result_wen;
-    wire op_csr = id_ex_valid_i & operator_type_i[OPERATOR_TYPE_CSR] & !trap_redirect_i & !flush_ex_i;
+    wire op_csr = id_ex_side_effect_valid_i &
+        operator_type_i[OPERATOR_TYPE_CSR] & !trap_redirect_i & !flush_ex_i;
     wire csr_csrrw = op_csr & id_op_csr_info_i[OP_CSR_CSRRW];
     wire csr_csrrs = op_csr & id_op_csr_info_i[OP_CSR_CSRRS];
     wire csr_csrrc = op_csr & id_op_csr_info_i[OP_CSR_CSRRC];

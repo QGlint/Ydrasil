@@ -14,6 +14,7 @@ import ydrasil_pkg::*;
     input  ydrasil_decode_pkt_t            decode_pkt_i,
     input  wire                            decode_valid1_i,
     input  ydrasil_decode_pkt_t            decode_pkt1_i,
+    input  wire                            decode_pair_eligible_i,
     output wire                            issue_ready_o,
     output wire                            issue_consume_two_o,
 
@@ -29,9 +30,9 @@ import ydrasil_pkg::*;
     output wire [4:0]                      fpr_addr_rs1_o,
     output wire [4:0]                      fpr_addr_rs2_o,
     output wire [4:0]                      fpr_addr_rs3_o,
-    input  wire [DATA_WIDTH-1:0]           fpr_rdata_rs1_i,
-    input  wire [DATA_WIDTH-1:0]           fpr_rdata_rs2_i,
-    input  wire [DATA_WIDTH-1:0]           fpr_rdata_rs3_i,
+    input  wire [FPU_DATA_WIDTH-1:0]       fpr_rdata_rs1_i,
+    input  wire [FPU_DATA_WIDTH-1:0]       fpr_rdata_rs2_i,
+    input  wire [FPU_DATA_WIDTH-1:0]       fpr_rdata_rs3_i,
     input  ydrasil_gpr_fwd_pkt_t           wb_fwd_i,
     input  ydrasil_gpr_fwd_pkt_t           wb_fwd1_i,
     input  ydrasil_gpr_fwd_pkt_t           producer_rs1_fwd_i,
@@ -122,6 +123,7 @@ import ydrasil_pkg::*;
     reg                                 producer_tracked_ff;
 
     reg [DATA_WIDTH-1:0]                id_lsu_store_data_ff;
+    reg [FPU_DATA_WIDTH-1:0]            id_lsu_fp_store_data_ff;
     reg                                 id_lsu_store_data_valid_ff;
     producer_id_t                       id_lsu_store_data_producer_id_ff;
     reg                                 id_lsu_store_data_producer_tracked_ff;
@@ -146,13 +148,15 @@ import ydrasil_pkg::*;
 
     reg [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0]         operator_lsu_ff;
     ydrasil_fpu_op_t                                 fpu_op_ff;
+    reg                                              fpu_fmt_ff;
+    reg                                              fpu_dst_fmt_ff;
     reg [2:0]                                        fpu_rm_ff;
     reg                                              fpu_illegal_ff;
     reg                                              fpu_rd_fpr_ff;
     reg                                              fpu_rd_gpr_ff;
-    reg [DATA_WIDTH-1:0]                             fpu_operand_a_ff;
-    reg [DATA_WIDTH-1:0]                             fpu_operand_b_ff;
-    reg [DATA_WIDTH-1:0]                             fpu_operand_c_ff;
+    reg [FPU_DATA_WIDTH-1:0]                         fpu_operand_a_ff;
+    reg [FPU_DATA_WIDTH-1:0]                         fpu_operand_b_ff;
+    reg [FPU_DATA_WIDTH-1:0]                         fpu_operand_c_ff;
     reg [INST_DATA_WIDTH-1:0]                        fpu_instr_ff;
 
     wire [DATA_WIDTH-1:0]                bt_a_operand;
@@ -225,32 +229,8 @@ import ydrasil_pkg::*;
     wire issue1_rs1_ren = decode_pkt1_i.rs1_ren;
     wire issue1_rs2_ren = decode_pkt1_i.rs2_ren;
     wire issue1_rd_wen = decode_pkt1_i.rd_wen && (decode_pkt1_i.rd_addr != '0);
-    wire slot0_simple_int = decode_valid_i &&
-        (decode_pkt_i.operator_type[OPERATOR_TYPE_ALU] ||
-         decode_pkt_i.operator_type[OPERATOR_TYPE_BITMANIP]) &&
-        !decode_pkt_i.operator_type[OPERATOR_TYPE_BJP] &&
-        !decode_pkt_i.operator_type[OPERATOR_TYPE_LOAD] &&
-        !decode_pkt_i.operator_type[OPERATOR_TYPE_STORE] &&
-        !decode_pkt_i.operator_type[OPERATOR_TYPE_MUL] &&
-        !decode_pkt_i.operator_type[OPERATOR_TYPE_CSR] &&
-        !decode_pkt_i.operator_type[OPERATOR_TYPE_SYS] && !decode_pkt_i.fence_i;
-    wire slot1_simple_int = decode_valid1_i &&
-        (decode_pkt1_i.operator_type[OPERATOR_TYPE_ALU] ||
-         decode_pkt1_i.operator_type[OPERATOR_TYPE_BITMANIP]) &&
-        !decode_pkt1_i.operator_type[OPERATOR_TYPE_BJP] &&
-        !decode_pkt1_i.operator_type[OPERATOR_TYPE_LOAD] &&
-        !decode_pkt1_i.operator_type[OPERATOR_TYPE_STORE] &&
-        !decode_pkt1_i.operator_type[OPERATOR_TYPE_MUL] &&
-        !decode_pkt1_i.operator_type[OPERATOR_TYPE_CSR] &&
-        !decode_pkt1_i.operator_type[OPERATOR_TYPE_SYS] && !decode_pkt1_i.fence_i;
-    wire slot0_writes = decode_pkt_i.rd_wen && (decode_pkt_i.rd_addr != '0);
-    wire pair_raw = slot0_writes &&
-        ((issue1_rs1_ren && (issue1_rs1_addr == decode_pkt_i.rd_addr)) ||
-         (issue1_rs2_ren && (issue1_rs2_addr == decode_pkt_i.rd_addr)));
-    wire pair_waw = slot0_writes && issue1_rd_wen &&
-        (decode_pkt_i.rd_addr == decode_pkt1_i.rd_addr);
-    wire pair_eligible = slot0_simple_int && slot1_simple_int &&
-        !pair_raw && !pair_waw && !hzd_status1_i.scoreboard_stall;
+    wire pair_eligible =
+        decode_pair_eligible_i && !hzd_status1_i.scoreboard_stall;
 `ifndef SYNTHESIS
     // Retain zero-valued observability points used by the coverage testbench.
     // The former issue-stage early ALU is intentionally removed from hardware.
@@ -404,6 +384,8 @@ import ydrasil_pkg::*;
             producer_tracked_ff <= 1'b0;
             operator_lsu_ff     <= '0;
             fpu_op_ff           <= FPU_OP_ADD;
+            fpu_fmt_ff          <= 1'b0;
+            fpu_dst_fmt_ff      <= 1'b0;
             fpu_rm_ff           <= '0;
             fpu_illegal_ff      <= 1'b0;
             fpu_rd_fpr_ff       <= 1'b0;
@@ -413,6 +395,7 @@ import ydrasil_pkg::*;
             fpu_operand_c_ff    <= '0;
             fpu_instr_ff        <= '0;
             id_lsu_store_data_ff <= '0;
+            id_lsu_fp_store_data_ff <= '0;
             id_lsu_store_data_valid_ff <= 1'b0;
             id_lsu_store_data_producer_id_ff <= '0;
             id_lsu_store_data_producer_tracked_ff <= 1'b0;
@@ -471,19 +454,24 @@ import ydrasil_pkg::*;
                 producer_tracked_ff <= producer_alloc_tracked_i;
                 operator_lsu_ff     <= issue_operator_lsu_ff;
                 fpu_op_ff           <= decode_pkt_i.fp_op;
+                fpu_fmt_ff          <= decode_pkt_i.fp_fmt;
+                fpu_dst_fmt_ff      <= decode_pkt_i.fp_dst_fmt;
                 fpu_rm_ff           <= decode_pkt_i.fp_rm;
                 fpu_illegal_ff      <= decode_pkt_i.fp_illegal;
                 fpu_rd_fpr_ff       <= decode_pkt_i.fp_rd_fpr;
                 fpu_rd_gpr_ff       <= decode_pkt_i.fp_rd_gpr;
-                fpu_operand_a_ff    <= decode_pkt_i.fp_rs1_fpr ? fpr_rdata_rs1_i : issue_rs1_data;
+                fpu_operand_a_ff    <= decode_pkt_i.fp_rs1_fpr ? fpr_rdata_rs1_i :
+                    {{(FPU_DATA_WIDTH-DATA_WIDTH){1'b0}}, issue_rs1_data};
                 fpu_operand_b_ff    <= fpr_rdata_rs2_i;
                 fpu_operand_c_ff    <= fpr_rdata_rs3_i;
-                fpu_instr_ff        <= decode_pkt_i.instr;
+                if (decode_pkt_i.fp_valid)
+                    fpu_instr_ff <= decode_pkt_i.instr;
                 // Register raw store data here; lane alignment belongs after the
                 // ID/LSU boundary so the RF read path does not also include the
                 // LSU address adder and byte-lane mux.
                 id_lsu_store_data_ff <= decode_pkt_i.fp_valid &&
-                    decode_pkt_i.fp_rs2_fpr ? fpr_rdata_rs2_i : issue_rs2_data;
+                    decode_pkt_i.fp_rs2_fpr ? fpr_rdata_rs2_i[31:0] : issue_rs2_data;
+                id_lsu_fp_store_data_ff <= fpr_rdata_rs2_i;
                 id_lsu_store_data_valid_ff <=
                     !issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] |
                     issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_FPU] |
@@ -594,6 +582,7 @@ import ydrasil_pkg::*;
     assign lsu_req_o.producer_id = producer_id_ff;
     assign lsu_req_o.producer_tracked = producer_tracked_ff;
     assign lsu_req_o.store_data = id_lsu_store_data_ff;
+    assign lsu_req_o.fp_store_data = id_lsu_fp_store_data_ff;
     assign lsu_req_o.store_mask = '0;
     assign lsu_req_o.store_data_valid = id_lsu_store_data_valid_ff;
     assign lsu_req_o.store_data_producer_id = id_lsu_store_data_producer_id_ff;
@@ -601,6 +590,8 @@ import ydrasil_pkg::*;
         id_lsu_store_data_producer_tracked_ff;
     assign lsu_req_o.fp_load = operator_type_ff[OPERATOR_TYPE_FPU] &&
         operator_type_ff[OPERATOR_TYPE_LOAD];
+    assign lsu_req_o.fp_double = operator_type_ff[OPERATOR_TYPE_FPU] &&
+        fpu_fmt_ff;
     assign lsu_req_o.fp_rd_addr = rf_waddr_rd_ff;
     assign fpu_req_o.valid = id_ex_valid_ff &&
         operator_type_ff[OPERATOR_TYPE_FPU] &&
@@ -608,6 +599,8 @@ import ydrasil_pkg::*;
         !operator_type_ff[OPERATOR_TYPE_STORE];
     assign fpu_req_o.illegal = fpu_illegal_ff;
     assign fpu_req_o.op = fpu_op_ff;
+    assign fpu_req_o.fmt = fpu_fmt_ff;
+    assign fpu_req_o.dst_fmt = fpu_dst_fmt_ff;
     assign fpu_req_o.rm = fpu_rm_ff;
     assign fpu_req_o.operand_a = fpu_operand_a_ff;
     assign fpu_req_o.operand_b = fpu_operand_b_ff;
@@ -733,7 +726,6 @@ import ydrasil_pkg::*;
     output wire [INST_DATA_WIDTH-1:0]     commit_instr_o
 );
     wire [REGS_DATA_WIDTH-1:0] alu_result;
-    wire [REGS_DATA_WIDTH-1:0] bitmanip_result;
     wire [4:0] fast_b_shamt = operand_b_i[4:0];
     wire [REGS_DATA_WIDTH-1:0] fast_b_mask = REGS_DATA_WIDTH'(1) << fast_b_shamt;
     wire [REGS_DATA_WIDTH-1:0] fast_b_shadd_result =
@@ -774,18 +766,9 @@ import ydrasil_pkg::*;
          {{16{operand_a_i[15]}}, operand_a_i[15:0]}) |
         ({REGS_DATA_WIDTH{operator_i[OP_B_ZEXT_H]}} &
          {16'b0, operand_a_i[15:0]});
-    wire fast_bitmanip_op = operator_type_i[OPERATOR_TYPE_BITMANIP] &&
-        (operator_i[OP_B_SH1ADD] | operator_i[OP_B_SH2ADD] | operator_i[OP_B_SH3ADD] |
-         operator_i[OP_B_ANDN]   | operator_i[OP_B_ORN]    | operator_i[OP_B_XNOR]   |
-         operator_i[OP_B_BCLR]   | operator_i[OP_B_BCLRI]  | operator_i[OP_B_BEXT]   |
-         operator_i[OP_B_BEXTI]  | operator_i[OP_B_BINV]   | operator_i[OP_B_BINVI]  |
-         operator_i[OP_B_BSET]   | operator_i[OP_B_BSETI]  | operator_i[OP_B_PACK]   |
-         operator_i[OP_B_PACKH]  | operator_i[OP_B_REV8]   | operator_i[OP_B_SEXT_B] |
-         operator_i[OP_B_SEXT_H] | operator_i[OP_B_ZEXT_H]);
     wire [REGS_DATA_WIDTH-1:0] fast_bitmanip_result =
         fast_b_shadd_result | fast_b_logic_result | fast_b_bit_result |
         fast_b_pack_result | fast_b_extend_result;
-    logic [OPERATOR_WIDTH-1:0] slow_bitmanip_operator;
     wire alu_unused_comp;
     wire alu_unused_wen;
     wire [REGS_ADDR_WIDTH-1:0] alu_unused_waddr;
@@ -797,30 +780,6 @@ import ydrasil_pkg::*;
     reg [INST_ADDR_WIDTH-1:0] pc_q;
     reg [INST_DATA_WIDTH-1:0] instr_q;
 
-    always_comb begin
-        slow_bitmanip_operator = operator_i;
-        slow_bitmanip_operator[OP_B_SH1ADD] = 1'b0;
-        slow_bitmanip_operator[OP_B_SH2ADD] = 1'b0;
-        slow_bitmanip_operator[OP_B_SH3ADD] = 1'b0;
-        slow_bitmanip_operator[OP_B_ANDN]   = 1'b0;
-        slow_bitmanip_operator[OP_B_ORN]    = 1'b0;
-        slow_bitmanip_operator[OP_B_REV8]   = 1'b0;
-        slow_bitmanip_operator[OP_B_SEXT_B] = 1'b0;
-        slow_bitmanip_operator[OP_B_SEXT_H] = 1'b0;
-        slow_bitmanip_operator[OP_B_XNOR]   = 1'b0;
-        slow_bitmanip_operator[OP_B_ZEXT_H] = 1'b0;
-        slow_bitmanip_operator[OP_B_BCLR]   = 1'b0;
-        slow_bitmanip_operator[OP_B_BCLRI]  = 1'b0;
-        slow_bitmanip_operator[OP_B_BEXT]   = 1'b0;
-        slow_bitmanip_operator[OP_B_BEXTI]  = 1'b0;
-        slow_bitmanip_operator[OP_B_BINV]   = 1'b0;
-        slow_bitmanip_operator[OP_B_BINVI]  = 1'b0;
-        slow_bitmanip_operator[OP_B_BSET]   = 1'b0;
-        slow_bitmanip_operator[OP_B_BSETI]  = 1'b0;
-        slow_bitmanip_operator[OP_B_PACK]   = 1'b0;
-        slow_bitmanip_operator[OP_B_PACKH]  = 1'b0;
-    end
-
     ydrasil_alu u_dual_alu (
         .operand_a_i(operand_a_i), .operand_b_i(operand_b_i),
         .operator_i(operator_i), .operator_type_i(operator_type_i),
@@ -829,12 +788,6 @@ import ydrasil_pkg::*;
         .alu_result_o(alu_result), .alu_rf_wen_rd_o(alu_unused_wen),
         .alu_rf_waddr_rd_o(alu_unused_waddr)
     );
-    ydrasil_bitmanip u_dual_bitmanip (
-        .operand_a_i(operand_a_i), .operand_b_i(operand_b_i),
-        .operator_i(slow_bitmanip_operator), .operator_type_i(operator_type_i),
-        .result_o(bitmanip_result)
-    );
-
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n || flush_i) begin
             valid_q <= 1'b0;
@@ -847,7 +800,7 @@ import ydrasil_pkg::*;
         end else begin
             valid_q <= valid_i && !interrupt_i;
             result_q <= operator_type_i[OPERATOR_TYPE_BITMANIP] ?
-                (fast_bitmanip_op ? fast_bitmanip_result : bitmanip_result) :
+                fast_bitmanip_result :
                 alu_result;
             rd_addr_q <= rd_addr_i;
             producer_id_q <= producer_id_i;

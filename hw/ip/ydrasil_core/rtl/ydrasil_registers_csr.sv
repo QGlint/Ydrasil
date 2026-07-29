@@ -37,7 +37,11 @@ import ydrasil_pkg::*;
     wire [REGS_DATA_WIDTH-1:0] clint_csr_data_i = trap_csr_write_i.data;
 
 `ifdef YDRASIL_ENABLE_FPU
+`ifdef YDRASIL_FPU_DOUBLE
+    localparam logic [31:0] MISA_VALUE = 32'h4000_1128;
+`else
     localparam logic [31:0] MISA_VALUE = 32'h4000_1120;
+`endif
 `else
     localparam logic [31:0] MISA_VALUE = 32'h4000_1100;
 `endif

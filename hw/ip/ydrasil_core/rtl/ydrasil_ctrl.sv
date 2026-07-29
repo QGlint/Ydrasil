@@ -123,12 +123,17 @@ import ydrasil_pkg::*;
     // Let an immediate load consumer enter EX without feeding the LSU hit
     // decision back through the hazard unit. EX holds a miss until the
     // matching completion arrives; a hot hit still executes without a bubble.
+`ifdef YDRASIL_ENABLE_FPU
+    wire prev_load_bypass_rs1 = 1'b0;
+    wire prev_load_bypass_rs2 = 1'b0;
+`else
     wire prev_load_bypass_rs1 = id_ex_rd_issue && ex_is_load &&
         id_ctrl_i.load_bypass_ok && id_ctrl_i.rs1_ren &&
         (id_ctrl_i.rs1_addr == ex_hzd_i.rd_addr);
     wire prev_load_bypass_rs2 = id_ex_rd_issue && ex_is_load &&
         id_ctrl_i.load_bypass_ok && id_ctrl_i.rs2_ren &&
         (id_ctrl_i.rs2_addr == ex_hzd_i.rd_addr);
+`endif
 
     wire [PRODUCER_NUM-1:0] producer_complete_mask;
     wire [REGS_DATA_WIDTH-1:0] producer_completion_data [0:PRODUCER_NUM-1];
@@ -347,67 +352,6 @@ import ydrasil_pkg::*;
         (latest_ready_rs2_q[id_ctrl_i.rs2_addr] |
          rs2_completion_hit);
 
-    wire rs3_has_producer = id_ctrl1_i.rs1_ren &&
-        latest_valid_rs1_q[id_ctrl1_i.rs1_addr];
-    wire rs4_has_producer = id_ctrl1_i.rs2_ren &&
-        latest_valid_rs2_q[id_ctrl1_i.rs2_addr];
-    producer_id_t rs3_producer_id;
-    producer_id_t rs4_producer_id;
-    producer_slot_t rs3_producer_slot;
-    producer_slot_t rs4_producer_slot;
-    assign rs3_producer_id = latest_id_rs1_q[id_ctrl1_i.rs1_addr];
-    assign rs4_producer_id = latest_id_rs2_q[id_ctrl1_i.rs2_addr];
-    assign rs3_producer_slot = rs3_producer_id[PRODUCER_SLOT_WIDTH-1:0];
-    assign rs4_producer_slot = rs4_producer_id[PRODUCER_SLOT_WIDTH-1:0];
-    wire [REGS_DATA_WIDTH-1:0] rs3_completion_data =
-        (completion_bus_i[0].valid && completion_bus_i[0].producer_tracked &&
-         (completion_bus_i[0].producer_id == rs3_producer_id)) ?
-            completion_bus_i[0].data :
-        (completion_bus_i[1].valid && completion_bus_i[1].producer_tracked &&
-         (completion_bus_i[1].producer_id == rs3_producer_id)) ?
-            completion_bus_i[1].data :
-        (completion_bus_i[2].valid && completion_bus_i[2].producer_tracked &&
-         (completion_bus_i[2].producer_id == rs3_producer_id)) ?
-            completion_bus_i[2].data :
-        (completion_bus_i[3].valid && completion_bus_i[3].producer_tracked &&
-         (completion_bus_i[3].producer_id == rs3_producer_id)) ?
-            completion_bus_i[3].data : '0;
-    wire [REGS_DATA_WIDTH-1:0] rs4_completion_data =
-        (completion_bus_i[0].valid && completion_bus_i[0].producer_tracked &&
-         (completion_bus_i[0].producer_id == rs4_producer_id)) ?
-            completion_bus_i[0].data :
-        (completion_bus_i[1].valid && completion_bus_i[1].producer_tracked &&
-         (completion_bus_i[1].producer_id == rs4_producer_id)) ?
-            completion_bus_i[1].data :
-        (completion_bus_i[2].valid && completion_bus_i[2].producer_tracked &&
-         (completion_bus_i[2].producer_id == rs4_producer_id)) ?
-            completion_bus_i[2].data :
-        (completion_bus_i[3].valid && completion_bus_i[3].producer_tracked &&
-         (completion_bus_i[3].producer_id == rs4_producer_id)) ?
-            completion_bus_i[3].data : '0;
-    wire rs3_completion_hit =
-        (completion_bus_i[0].valid && completion_bus_i[0].producer_tracked &&
-         (completion_bus_i[0].producer_id == rs3_producer_id)) |
-        (completion_bus_i[1].valid && completion_bus_i[1].producer_tracked &&
-         (completion_bus_i[1].producer_id == rs3_producer_id)) |
-        (completion_bus_i[2].valid && completion_bus_i[2].producer_tracked &&
-         (completion_bus_i[2].producer_id == rs3_producer_id)) |
-        (completion_bus_i[3].valid && completion_bus_i[3].producer_tracked &&
-         (completion_bus_i[3].producer_id == rs3_producer_id));
-    wire rs4_completion_hit =
-        (completion_bus_i[0].valid && completion_bus_i[0].producer_tracked &&
-         (completion_bus_i[0].producer_id == rs4_producer_id)) |
-        (completion_bus_i[1].valid && completion_bus_i[1].producer_tracked &&
-         (completion_bus_i[1].producer_id == rs4_producer_id)) |
-        (completion_bus_i[2].valid && completion_bus_i[2].producer_tracked &&
-         (completion_bus_i[2].producer_id == rs4_producer_id)) |
-        (completion_bus_i[3].valid && completion_bus_i[3].producer_tracked &&
-         (completion_bus_i[3].producer_id == rs4_producer_id));
-    wire rs3_producer_ready = rs3_has_producer &&
-        (latest_ready_rs1_q[id_ctrl1_i.rs1_addr] | rs3_completion_hit);
-    wire rs4_producer_ready = rs4_has_producer &&
-        (latest_ready_rs2_q[id_ctrl1_i.rs2_addr] | rs4_completion_hit);
-
     wire rs1_issue_hzd0 = id_ex_rd_issue && id_ctrl_i.rs1_ren &&
         (id_ctrl_i.rs1_addr == ex_hzd_i.rd_addr) &&
         !prev_alu_bypass_rs1 && !prev_load_bypass_rs1;
@@ -446,10 +390,10 @@ import ydrasil_pkg::*;
     wire rs4_issue_hzd = id_ctrl1_i.rs2_ren &&
         ((id_ex_rd_issue && (id_ctrl1_i.rs2_addr == ex_hzd_i.rd_addr)) ||
          (id_ex1_rd_issue && (id_ctrl1_i.rs2_addr == ex_hzd1_i.rd_addr)));
-    wire rs3_pending_stall = rs3_has_producer && !rs3_producer_ready;
-    wire rs4_pending_stall = rs4_has_producer && !rs4_producer_ready;
-    wire scoreboard_stall1 = rs3_issue_hzd | rs4_issue_hzd |
-        rs3_pending_stall | rs4_pending_stall;
+    // 第二发射槽仅在没有历史 GPR 生产者时启用，因此无需复制一套
+    // 动态 producer-id 查找和数据旁路。当前 EX 槽的直接相关仍单独检查。
+    wire scoreboard_stall1 = (|latest_valid_q) |
+        rs3_issue_hzd | rs4_issue_hzd;
     wire lsu_struct_stall = id_ctrl_i.lsu_req && lsu_status_i.busy;
     wire lsu_serialize_stall = id_ctrl_i.serialize_before && !lsu_status_i.idle;
     wire decode_bubble_stall = scoreboard_stall | lsu_struct_stall |
@@ -520,20 +464,8 @@ import ydrasil_pkg::*;
     assign producer_rs2_fwd_o.addr = id_ctrl_i.rs2_addr;
     assign producer_rs2_fwd_o.data = rs2_completion_hit ?
         rs2_completion_data : producer_value_q[rs2_producer_slot];
-    assign producer_rs3_fwd_o.valid = rs3_has_producer &&
-        (latest_ready_rs1_q[id_ctrl1_i.rs1_addr] | rs3_completion_hit);
-    assign producer_rs3_fwd_o.producer_id = rs3_producer_id;
-    assign producer_rs3_fwd_o.producer_tracked = rs3_has_producer;
-    assign producer_rs3_fwd_o.addr = id_ctrl1_i.rs1_addr;
-    assign producer_rs3_fwd_o.data = rs3_completion_hit ?
-        rs3_completion_data : producer_value_q[rs3_producer_slot];
-    assign producer_rs4_fwd_o.valid = rs4_has_producer &&
-        (latest_ready_rs2_q[id_ctrl1_i.rs2_addr] | rs4_completion_hit);
-    assign producer_rs4_fwd_o.producer_id = rs4_producer_id;
-    assign producer_rs4_fwd_o.producer_tracked = rs4_has_producer;
-    assign producer_rs4_fwd_o.addr = id_ctrl1_i.rs2_addr;
-    assign producer_rs4_fwd_o.data = rs4_completion_hit ?
-        rs4_completion_data : producer_value_q[rs4_producer_slot];
+    assign producer_rs3_fwd_o = '0;
+    assign producer_rs4_fwd_o = '0;
     assign gpr_pending_o = latest_valid_q;
 
     wire [REGS_NUM-1:0] gpr_pending_clear_mask =
@@ -578,8 +510,6 @@ import ydrasil_pkg::*;
         hzd_status1_o = '0;
         hzd_status1_o.scoreboard_stall = scoreboard_stall1 |
             producer_pair_stall;
-        hzd_status1_o.rs1_pending_stall = rs3_pending_stall;
-        hzd_status1_o.rs2_pending_stall = rs4_pending_stall;
         hzd_status1_o.rs1_issue_hzd = rs3_issue_hzd;
         hzd_status1_o.rs2_issue_hzd = rs4_issue_hzd;
         hzd_status1_o.issue_src_hzd = rs3_issue_hzd | rs4_issue_hzd;

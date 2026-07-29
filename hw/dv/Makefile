@@ -17,11 +17,15 @@ BENDER_INCLUDE_TB ?= 1
 BENDER_TB_TARGET ?= ip_tb
 DIV_IMPL ?= lzc
 FPU ?= 0
+FPU_PRECISION ?= single
 ITCM_ADDR_WIDTH_OVERRIDE ?=
 
 BENDER_TARGET_ARGS := -t $(SIM_TOOL)
 ifeq ($(FPU),1)
 BENDER_TARGET_ARGS += -t fpu
+ifneq ($(filter $(FPU_PRECISION),single double),$(FPU_PRECISION))
+$(error Unsupported FPU_PRECISION '$(FPU_PRECISION)'. Use single or double)
+endif
 else ifneq ($(FPU),0)
 $(error Unsupported FPU '$(FPU)'. Use FPU=0 or FPU=1)
 endif
@@ -39,7 +43,7 @@ endif
 # Paths
 ##################################
 
-DEFAULT_OBJ_DIR := $(BUILD_DIR)/$(TOP)
+DEFAULT_OBJ_DIR := $(BUILD_DIR)/$(TOP)$(if $(filter 1,$(FPU)),-fpu-$(FPU_PRECISION))
 OBJ_DIR ?= $(DEFAULT_OBJ_DIR)
 ifneq ($(strip $(ITCM_ADDR_WIDTH_OVERRIDE)),)
 ifeq ($(abspath $(OBJ_DIR)),$(abspath $(DEFAULT_OBJ_DIR)))
@@ -88,6 +92,9 @@ DEFINES := RANDOM_SEED=$(RANDOM_SEED)
 
 ifeq ($(FPU),1)
 DEFINES += YDRASIL_ENABLE_FPU
+ifeq ($(FPU_PRECISION),double)
+DEFINES += YDRASIL_FPU_DOUBLE
+endif
 endif
 
 ifeq ($(DIV_IMPL),lzc)

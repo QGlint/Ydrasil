@@ -4,6 +4,10 @@ RVTESTSISA_DIR := $(RVTESTS_DIR)/isa
 TESTS += coremark
 
 RVTESTS_EXCLUDE ?= rv32ui/ma_data
+ifeq ($(FPU_PRECISION),double)
+# rv32ud/move 复用了 RV64 专属的 FMV.X.D/FMV.D.X，RV32FD 不具备这些指令。
+RVTESTS_EXCLUDE += rv32ud/move
+endif
 
 RVTESTS_DISCOVERED := $(foreach t,$(filter-out rv32mi,$(RVTESTS_TYPE)), \
                $(addprefix $(t)/,$(basename $(notdir $(wildcard $(RVTESTSISA_DIR)/$(t)/*.S)))) )
@@ -18,6 +22,7 @@ RVTESTS_INCLUDES := -I$(PROJECT_ROOT)/sw/include -I$(RVTESTS_DIR)/env -I$(RVTEST
 
 YDRASIL_TESTS_DIR := $(PROJECT_ROOT)/verif/tests/ydrasil-tests/rv32ui
 YDRASIL_FPU_TESTS_DIR := $(PROJECT_ROOT)/verif/tests/ydrasil-tests/rv32uf
+YDRASIL_FPU_DOUBLE_TESTS_DIR := $(PROJECT_ROOT)/verif/tests/ydrasil-tests/rv32ud
 SW_ALIGNED_TESTS := \
     sw_data_boundary \
     sw_immediate_boundary \
@@ -66,6 +71,9 @@ YDRASIL_TESTS := $(filter-out $(YDRASIL_TEST_EXCLUDE),\
     $(sort $(basename $(notdir $(wildcard $(YDRASIL_TESTS_DIR)/*.S)))))
 ifeq ($(FPU),1)
 YDRASIL_TESTS += $(sort $(basename $(notdir $(wildcard $(YDRASIL_FPU_TESTS_DIR)/*.S))))
+ifeq ($(FPU_PRECISION),double)
+YDRASIL_TESTS += $(sort $(basename $(notdir $(wildcard $(YDRASIL_FPU_DOUBLE_TESTS_DIR)/*.S))))
+endif
 endif
 YDRASIL_TEST_SPIKE_SKIP_TESTS := $(filter $(SW_NEW_ONLY_TESTS),$(YDRASIL_TESTS))
 YDRASIL_TEST_SPIKE_SKIP_TESTS += sw_fpu_fs_off_illegal
@@ -76,7 +84,7 @@ YDRASIL_TEST_JOBS ?= $(shell nproc)
 YDRASIL_TEST_REUSE_MODEL ?= 0
 PPA_YDRASIL_TEST_LOG ?= $(PPA_DIR)/ydrasil_tests_summary.log
 SW_TEST_TARGETS := $(addprefix sw_comp_,$(SW_FORMAL_TESTS))
-SW_TEST_INCLUDES := $(RVTESTS_INCLUDES) -I$(YDRASIL_TESTS_DIR) -I$(YDRASIL_FPU_TESTS_DIR)
+SW_TEST_INCLUDES := $(RVTESTS_INCLUDES) -I$(YDRASIL_TESTS_DIR) -I$(YDRASIL_FPU_TESTS_DIR) -I$(YDRASIL_FPU_DOUBLE_TESTS_DIR)
 SW_SINGLE_DB_COUNT := $(shell expr 1 + $(words $(SW_FORMAL_TESTS)))
 
 RVBENCH_DIR := $(PROJECT_ROOT)/verif/tests/riscv-tests/benchmarks
@@ -189,7 +197,7 @@ sw_comp_%:
 		ARCH=$(ARCH) \
 		ABI=$(ABI) \
 		NAME=$* \
-		SRC=$(firstword $(wildcard $(YDRASIL_TESTS_DIR)/$*.S $(YDRASIL_FPU_TESTS_DIR)/$*.S)) \
+		SRC=$(firstword $(wildcard $(YDRASIL_TESTS_DIR)/$*.S $(YDRASIL_FPU_TESTS_DIR)/$*.S $(YDRASIL_FPU_DOUBLE_TESTS_DIR)/$*.S)) \
 		OUT_DIR=$(SW_TEST_OUT_ROOT) \
 		COMP_MODE=rvtest \
 		INCLUDES="$(SW_TEST_INCLUDES)"
