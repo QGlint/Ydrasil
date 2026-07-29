@@ -25,7 +25,16 @@ import ydrasil_pkg::*;
     input wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]  rf_raddr_rs3_i,
     output wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] rf_rdata_rs3_o,
     input wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]  rf_raddr_rs4_i,
-    output wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] rf_rdata_rs4_o
+    output wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] rf_rdata_rs4_o,
+
+    input wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]  dispatch_rf_raddr_rs1_i,
+    output wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] dispatch_rf_rdata_rs1_o,
+    input wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]  dispatch_rf_raddr_rs2_i,
+    output wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] dispatch_rf_rdata_rs2_o,
+    input wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]  dispatch_rf_raddr_rs3_i,
+    output wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] dispatch_rf_rdata_rs3_o,
+    input wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]  dispatch_rf_raddr_rs4_i,
+    output wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] dispatch_rf_rdata_rs4_o
 
 );
 
@@ -55,5 +64,9 @@ import ydrasil_pkg::*;
     assign rf_rdata_rs2_o = (rf_raddr_rs2_i == '0) ? '0 : registers[rf_raddr_rs2_i];
     assign rf_rdata_rs3_o = (rf_raddr_rs3_i == '0) ? '0 : registers[rf_raddr_rs3_i];
     assign rf_rdata_rs4_o = (rf_raddr_rs4_i == '0) ? '0 : registers[rf_raddr_rs4_i];
+    assign dispatch_rf_rdata_rs1_o = (dispatch_rf_raddr_rs1_i == '0) ? '0 : registers[dispatch_rf_raddr_rs1_i];
+    assign dispatch_rf_rdata_rs2_o = (dispatch_rf_raddr_rs2_i == '0) ? '0 : registers[dispatch_rf_raddr_rs2_i];
+    assign dispatch_rf_rdata_rs3_o = (dispatch_rf_raddr_rs3_i == '0) ? '0 : registers[dispatch_rf_raddr_rs3_i];
+    assign dispatch_rf_rdata_rs4_o = (dispatch_rf_raddr_rs4_i == '0) ? '0 : registers[dispatch_rf_raddr_rs4_i];
 
 endmodule

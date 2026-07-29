@@ -333,6 +333,181 @@ end
     reg [31:0] issue_slot1_lsu_replay_count;
     reg [31:0] issue_serialize_wait_count;
     reg [31:0] dispatchq_occ_count [0:4];
+    reg [31:0] issue_window_dispatch_count;
+    reg [31:0] issue_window_dispatch_two_count;
+    reg [31:0] issue_window_raw_pair_admit_count;
+    reg [31:0] issue_window_select_count;
+    reg [31:0] issue_window_select_two_count;
+    reg [31:0] issue_window_bypass_count;
+    reg [31:0] issue_window_nonadj_pair_count;
+    reg [31:0] issue_window_wakeup_issue_count;
+    reg [31:0] issue_window_full_drain_count;
+
+    // Primary-cycle taxonomy.  This is intentionally separate from the
+    // diagnostic counters below: exactly one primary code is selected for
+    // every sampled cycle, while dependency/resource observations may overlap.
+    localparam logic [4:0] PERF_PC_ISSUE2 = 5'd0;
+    localparam logic [4:0] PERF_PC_ISSUE1 = 5'd1;
+    localparam logic [4:0] PERF_PC_FLUSH = 5'd2;
+    localparam logic [4:0] PERF_PC_MUL_HOLD = 5'd3;
+    localparam logic [4:0] PERF_PC_MULTI = 5'd4;
+    localparam logic [4:0] PERF_PC_SCOREBOARD = 5'd5;
+    localparam logic [4:0] PERF_PC_LSU_STRUCT = 5'd6;
+    localparam logic [4:0] PERF_PC_PRODUCER_FULL = 5'd7;
+    localparam logic [4:0] PERF_PC_WB = 5'd8;
+    localparam logic [4:0] PERF_PC_CLINT = 5'd9;
+    localparam logic [4:0] PERF_PC_SERIALIZE = 5'd10;
+    localparam logic [4:0] PERF_PC_IF_CONTROL = 5'd11;
+    localparam logic [4:0] PERF_PC_IF_PREDICT = 5'd12;
+    localparam logic [4:0] PERF_PC_IF_FENCE = 5'd13;
+    localparam logic [4:0] PERF_PC_IF_RESPONSE = 5'd14;
+    localparam logic [4:0] PERF_PC_IF_LAUNCH = 5'd15;
+    localparam logic [4:0] PERF_PC_IF_PENDING = 5'd16;
+    localparam logic [4:0] PERF_PC_IF_OTHER = 5'd17;
+    localparam logic [4:0] PERF_PC_ISSUE_REFILL = 5'd18;
+    localparam logic [4:0] PERF_PC_DECODE_REFILL = 5'd19;
+    localparam logic [4:0] PERF_PC_ISSUE_BLOCKED = 5'd20;
+    localparam logic [4:0] PERF_PC_ISSUE_ADVANCE = 5'd21;
+    localparam logic [4:0] PERF_PC_OTHER = 5'd22;
+    reg [31:0] perf_primary_hist [0:22];
+    reg [31:0] perf_decode_exact_hist [0:31];
+    reg [31:0] perf_decode_stall_cycle_count;
+    reg [31:0] perf_primary_closure_error;
+    reg [31:0] perf_decode_closure_error;
+    reg [31:0] perf_slot0_exec_count;
+    reg [31:0] perf_slot1_exec_count;
+    reg [31:0] perf_slot1_no_pair_count;
+    reg [31:0] perf_pair_candidate_count;
+    reg [31:0] perf_pair_eligible_count;
+    reg [31:0] perf_pair_reject_lane_count;
+    reg [31:0] perf_pair_reject_raw_count;
+    reg [31:0] perf_pair_reject_waw_count;
+    reg [31:0] perf_pair_reject_resource_count;
+    reg [31:0] perf_pair_reject_serial_count;
+    reg [31:0] perf_pair_reject_control_memory_count;
+    reg [31:0] perf_pair_reject_other_count;
+
+    // Count a candidate once, when ID can consume it.  Without the ready
+    // qualification, the same blocked pair would be counted on every cycle.
+    wire perf_pair_candidate = u_dut.decode_if_ready &&
+        u_dut.id_issue_pkt.valid && u_dut.id_issue_pkt1.valid;
+    wire perf_pair_reject_lane = perf_pair_candidate &&
+        !u_dut.u_ydrasil_id_stage.pair_lane_assignable;
+    wire perf_pair_reject_raw = perf_pair_candidate &&
+        u_dut.u_ydrasil_id_stage.pair_raw;
+    wire perf_pair_reject_waw = perf_pair_candidate &&
+        u_dut.u_ydrasil_id_stage.pair_waw;
+    wire perf_pair_reject_resource = perf_pair_candidate &&
+        u_dut.u_ydrasil_id_stage.pair_resource_conflict;
+    wire perf_pair_reject_serial = perf_pair_candidate &&
+        u_dut.u_ydrasil_id_stage.pair_serialize;
+    wire perf_pair_reject_control_memory = perf_pair_candidate &&
+        u_dut.u_ydrasil_id_stage.pair_control_memory;
+    wire [2:0] perf_issue_window_occupancy =
+        $countones(u_dut.u_ydrasil_issue_stage.entry_valid_q);
+    wire perf_issue_window_dispatch = u_dut.issue_pipe_push;
+    wire perf_issue_window_dispatch_two = u_dut.issue_pipe_push_two;
+    wire perf_issue_window_select =
+        u_dut.u_ydrasil_issue_stage.selected_valid;
+    wire perf_issue_window_select_two =
+        u_dut.u_ydrasil_issue_stage.selected_pair;
+    wire perf_issue_window_raw_pair_admit = perf_issue_window_dispatch_two &&
+        u_dut.u_ydrasil_id_stage.pair_raw;
+    wire perf_issue_window_nonadj_pair = perf_issue_window_select_two &&
+        (u_dut.u_ydrasil_issue_stage.selected_uop1.dst.rob_tag !=
+         (u_dut.u_ydrasil_issue_stage.selected_uop0.dst.rob_tag + 1'b1));
+    wire perf_issue_window_wakeup_issue = perf_issue_window_select &&
+        (u_dut.u_ydrasil_issue_stage.rs1_completion_fwd ||
+         u_dut.u_ydrasil_issue_stage.rs2_completion_fwd);
+    wire perf_issue_window_full_drain =
+        (perf_issue_window_occupancy == 3'd4) && perf_issue_window_select &&
+        !perf_issue_window_dispatch;
+    reg perf_issue_window_bypass;
+    integer issue_obs_i;
+    integer issue_obs_j;
+    always_comb begin
+        perf_issue_window_bypass = 1'b0;
+        for (issue_obs_i = 0; issue_obs_i < 4; issue_obs_i = issue_obs_i + 1)
+            if (u_dut.u_ydrasil_issue_stage.select0[issue_obs_i])
+                for (issue_obs_j = 0; issue_obs_j < 4; issue_obs_j = issue_obs_j + 1)
+                    if (u_dut.u_ydrasil_issue_stage.entry_valid_q[issue_obs_j] &&
+                        u_dut.u_ydrasil_issue_stage.older_q[issue_obs_j][issue_obs_i] &&
+                        !u_dut.u_ydrasil_issue_stage.select0[issue_obs_j] &&
+                        !u_dut.u_ydrasil_issue_stage.select1[issue_obs_j])
+                        perf_issue_window_bypass = 1'b1;
+    end
+    wire [4:0] perf_decode_stall_mask = {
+        u_dut.clint_stall,
+        u_dut.wb_backpressure,
+        u_dut.u_ctrl.producer_full_stall,
+        u_dut.lsu_struct_stall,
+        u_dut.scoreboard_stall
+    };
+    wire perf_issue_admit = u_dut.ex_accept_valid || u_dut.ex_accept_valid1;
+    wire perf_issue_pair = u_dut.ex_accept_valid && u_dut.ex_accept_valid1;
+    wire perf_issue_advance =
+        u_dut.u_ydrasil_issue_stage.issue_valid_ff &&
+        u_dut.u_ydrasil_issue_stage.id_advance;
+    wire perf_if_empty = !u_dut.if_id_valid;
+    wire perf_issue_refill = !u_dut.u_ydrasil_issue_stage.issue_valid_ff &&
+        u_dut.decode_valid;
+    wire perf_decode_refill = !u_dut.u_ydrasil_issue_stage.issue_valid_ff &&
+        !u_dut.decode_valid && u_dut.decode_if_ready;
+    wire perf_issue_blocked =
+        u_dut.u_ydrasil_issue_stage.issue_valid_ff &&
+        !u_dut.u_ydrasil_issue_stage.id_advance;
+    reg [4:0] perf_primary_code;
+    always_comb begin
+        // The ordering is the architectural attribution policy.  It is
+        // deliberately identical for cycle and slot reports.
+        perf_primary_code = PERF_PC_OTHER;
+        if (perf_issue_pair)
+            perf_primary_code = PERF_PC_ISSUE2;
+        else if (perf_issue_admit)
+            perf_primary_code = PERF_PC_ISSUE1;
+        else if (u_dut.flush_ex)
+            perf_primary_code = PERF_PC_FLUSH;
+        else if (u_dut.ex_mul_stall)
+            perf_primary_code = PERF_PC_MUL_HOLD;
+        else if ((|perf_decode_stall_mask) &&
+                 ($countones(perf_decode_stall_mask) > 1))
+            perf_primary_code = PERF_PC_MULTI;
+        else if (u_dut.scoreboard_stall)
+            perf_primary_code = PERF_PC_SCOREBOARD;
+        else if (u_dut.lsu_struct_stall)
+            perf_primary_code = PERF_PC_LSU_STRUCT;
+        else if (u_dut.u_ctrl.producer_full_stall)
+            perf_primary_code = PERF_PC_PRODUCER_FULL;
+        else if (u_dut.wb_backpressure)
+            perf_primary_code = PERF_PC_WB;
+        else if (u_dut.clint_stall)
+            perf_primary_code = PERF_PC_CLINT;
+        else if (u_dut.issue_serialize_stall)
+            perf_primary_code = PERF_PC_SERIALIZE;
+        else if (perf_issue_advance)
+            perf_primary_code = PERF_PC_ISSUE_ADVANCE;
+        else if (perf_if_empty && control_refill_active_q)
+            perf_primary_code = PERF_PC_IF_CONTROL;
+        else if (perf_if_empty && predict_refill_active_q)
+            perf_primary_code = PERF_PC_IF_PREDICT;
+        else if (perf_if_empty && fence_refill_active_q)
+            perf_primary_code = PERF_PC_IF_FENCE;
+        else if (perf_if_empty && u_dut.u_ydrasil_if_stage.mem_req_valid_ff)
+            perf_primary_code = PERF_PC_IF_RESPONSE;
+        else if (perf_if_empty && u_dut.u_ydrasil_if_stage.fetch_issue)
+            perf_primary_code = PERF_PC_IF_LAUNCH;
+        else if (perf_if_empty &&
+                 u_dut.u_ydrasil_if_stage.pending_redirect_valid_ff)
+            perf_primary_code = PERF_PC_IF_PENDING;
+        else if (perf_if_empty)
+            perf_primary_code = PERF_PC_IF_OTHER;
+        else if (perf_issue_refill)
+            perf_primary_code = PERF_PC_ISSUE_REFILL;
+        else if (perf_decode_refill)
+            perf_primary_code = PERF_PC_DECODE_REFILL;
+        else if (perf_issue_blocked)
+            perf_primary_code = PERF_PC_ISSUE_BLOCKED;
+    end
 
     // Two issue slots are available on every sampled execution cycle.  These
     // signals intentionally count accepted EX instructions, rather than
@@ -700,6 +875,25 @@ end
             l0_correction_count <= 32'b0;
             for (perf_stat_idx = 0; perf_stat_idx < 32; perf_stat_idx = perf_stat_idx + 1)
                 bubble_cause_hist[perf_stat_idx] <= 32'b0;
+            for (perf_stat_idx = 0; perf_stat_idx < 23; perf_stat_idx = perf_stat_idx + 1)
+                perf_primary_hist[perf_stat_idx] <= 32'b0;
+            for (perf_stat_idx = 0; perf_stat_idx < 32; perf_stat_idx = perf_stat_idx + 1)
+                perf_decode_exact_hist[perf_stat_idx] <= 32'b0;
+            perf_decode_stall_cycle_count <= 32'b0;
+            perf_primary_closure_error <= 32'b0;
+            perf_decode_closure_error <= 32'b0;
+            perf_slot0_exec_count <= 32'b0;
+            perf_slot1_exec_count <= 32'b0;
+            perf_slot1_no_pair_count <= 32'b0;
+            perf_pair_candidate_count <= 32'b0;
+            perf_pair_eligible_count <= 32'b0;
+            perf_pair_reject_lane_count <= 32'b0;
+            perf_pair_reject_raw_count <= 32'b0;
+            perf_pair_reject_waw_count <= 32'b0;
+            perf_pair_reject_resource_count <= 32'b0;
+            perf_pair_reject_serial_count <= 32'b0;
+            perf_pair_reject_control_memory_count <= 32'b0;
+            perf_pair_reject_other_count <= 32'b0;
             producer_occ_zero_count <= 32'b0;
             producer_occ_one_count <= 32'b0;
             producer_occ_two_count <= 32'b0;
@@ -747,12 +941,65 @@ end
             issue_slot1_sb_replay_count <= 32'b0;
             issue_slot1_lsu_replay_count <= 32'b0;
             issue_serialize_wait_count <= 32'b0;
+            issue_window_dispatch_count <= 32'b0;
+            issue_window_dispatch_two_count <= 32'b0;
+            issue_window_raw_pair_admit_count <= 32'b0;
+            issue_window_select_count <= 32'b0;
+            issue_window_select_two_count <= 32'b0;
+            issue_window_bypass_count <= 32'b0;
+            issue_window_nonadj_pair_count <= 32'b0;
+            issue_window_wakeup_issue_count <= 32'b0;
+            issue_window_full_drain_count <= 32'b0;
             for (perf_stat_idx = 0; perf_stat_idx < 5; perf_stat_idx = perf_stat_idx + 1)
                 dispatchq_occ_count[perf_stat_idx] <= 32'b0;
         end else begin
             perf_sample_cycle_count <= perf_sample_cycle_count + 1'b1;
             perf_productive_slot_count <= perf_productive_slot_count +
                 {30'b0, perf_executed_slots};
+            if (!$isunknown(perf_primary_code) &&
+                (perf_primary_code <= PERF_PC_OTHER))
+                perf_primary_hist[perf_primary_code] <=
+                    perf_primary_hist[perf_primary_code] + 1'b1;
+            else
+                perf_primary_closure_error <= perf_primary_closure_error + 1'b1;
+            if (!$isunknown(perf_decode_stall_mask)) begin
+                if (|perf_decode_stall_mask) begin
+                    perf_decode_exact_hist[perf_decode_stall_mask] <=
+                        perf_decode_exact_hist[perf_decode_stall_mask] + 1'b1;
+                    perf_decode_stall_cycle_count <=
+                        perf_decode_stall_cycle_count + 1'b1;
+                end
+            end else begin
+                perf_decode_closure_error <= perf_decode_closure_error + 1'b1;
+            end
+            // Logical slots are age ordered; physical Lane B may execute a
+            // single B-only instruction, so it is not itself logical slot 1.
+            perf_slot0_exec_count <= perf_slot0_exec_count + perf_issue_admit;
+            perf_slot1_exec_count <= perf_slot1_exec_count + perf_issue_pair;
+            perf_slot1_no_pair_count <= perf_slot1_no_pair_count +
+                (perf_issue_admit && !perf_issue_pair);
+            if (perf_pair_candidate) begin
+                perf_pair_candidate_count <= perf_pair_candidate_count + 1'b1;
+                // Primary rejection reason.  These buckets are mutually
+                // exclusive; raw reason wires remain overlapping diagnostics.
+                if (u_dut.u_ydrasil_id_stage.pair_eligible)
+                    perf_pair_eligible_count <= perf_pair_eligible_count + 1'b1;
+                else if (perf_pair_reject_raw)
+                    perf_pair_reject_raw_count <= perf_pair_reject_raw_count + 1'b1;
+                else if (perf_pair_reject_waw)
+                    perf_pair_reject_waw_count <= perf_pair_reject_waw_count + 1'b1;
+                else if (perf_pair_reject_resource)
+                    perf_pair_reject_resource_count <= perf_pair_reject_resource_count + 1'b1;
+                else if (perf_pair_reject_serial)
+                    perf_pair_reject_serial_count <= perf_pair_reject_serial_count + 1'b1;
+                else if (perf_pair_reject_control_memory)
+                    perf_pair_reject_control_memory_count <=
+                        perf_pair_reject_control_memory_count + 1'b1;
+                else if (perf_pair_reject_lane)
+                    perf_pair_reject_lane_count <= perf_pair_reject_lane_count + 1'b1;
+                else
+                    perf_pair_reject_other_count <= perf_pair_reject_other_count + 1'b1;
+            end
             issue_fence_count <= issue_fence_count + u_dut.id_fence_i;
             issue_slot1_replay_count <= issue_slot1_replay_count +
                 u_dut.issue_slot1_replay;
@@ -762,8 +1009,26 @@ end
                 (u_dut.issue_slot1_replay && u_dut.issue_lsu_struct_stall1);
             issue_serialize_wait_count <= issue_serialize_wait_count +
                 u_dut.issue_serialize_stall;
-            dispatchq_occ_count[u_dut.issue_pipe_count_q] <=
-                dispatchq_occ_count[u_dut.issue_pipe_count_q] + 1'b1;
+            issue_window_dispatch_count <= issue_window_dispatch_count +
+                perf_issue_window_dispatch;
+            issue_window_dispatch_two_count <= issue_window_dispatch_two_count +
+                perf_issue_window_dispatch_two;
+            issue_window_raw_pair_admit_count <= issue_window_raw_pair_admit_count +
+                perf_issue_window_raw_pair_admit;
+            issue_window_select_count <= issue_window_select_count +
+                perf_issue_window_select;
+            issue_window_select_two_count <= issue_window_select_two_count +
+                perf_issue_window_select_two;
+            issue_window_bypass_count <= issue_window_bypass_count +
+                perf_issue_window_bypass;
+            issue_window_nonadj_pair_count <= issue_window_nonadj_pair_count +
+                perf_issue_window_nonadj_pair;
+            issue_window_wakeup_issue_count <= issue_window_wakeup_issue_count +
+                perf_issue_window_wakeup_issue;
+            issue_window_full_drain_count <= issue_window_full_drain_count +
+                perf_issue_window_full_drain;
+            dispatchq_occ_count[perf_issue_window_occupancy] <=
+                dispatchq_occ_count[perf_issue_window_occupancy] + 1'b1;
             bp_predict_redirect_q <= u_dut.u_ydrasil_if_stage.bp_predict_redirect;
             if (u_dut.branch_jump)
                 control_refill_active_q <= 1'b1;
@@ -1129,7 +1394,7 @@ end
                 3'd3: retire_three_count <= retire_three_count + 1'b1;
                 3'd4: retire_four_count <= retire_four_count + 1'b1;
             endcase
-            if (u_dut.issue_pair_execute) begin
+            if (u_dut.issue_consume_two) begin
                 dual_issue_count <= dual_issue_count + 1'b1;
                 if (u_dut.issue_pkt.decode.resources[RESOURCE_BRU])
                     dual_bru_alu_count <= dual_bru_alu_count + 1'b1;
@@ -1495,14 +1760,94 @@ end
     task automatic print_perf_metrics;
         real perf_ipc;
         real perf_bp_accuracy;
+        integer perf_print_idx;
+        reg [31:0] perf_primary_sum;
+        reg [31:0] perf_decode_exact_sum;
+        reg [31:0] perf_pair_accounted;
         begin
             perf_ipc = (instruction_count > 0 && cycle_count > 0) ?
                 (instruction_count * 1.0) / cycle_count : 0.0;
             perf_bp_accuracy = (bp_branch_count > 0) ?
                 ((bp_branch_count - bp_mispredict_count) * 100.0) / bp_branch_count : 0.0;
+            perf_primary_sum = 32'b0;
+            for (perf_print_idx = 0; perf_print_idx < 23;
+                 perf_print_idx = perf_print_idx + 1)
+                perf_primary_sum = perf_primary_sum +
+                    perf_primary_hist[perf_print_idx];
+            perf_decode_exact_sum = 32'b0;
+            for (perf_print_idx = 1; perf_print_idx < 32;
+                 perf_print_idx = perf_print_idx + 1)
+                perf_decode_exact_sum = perf_decode_exact_sum +
+                    perf_decode_exact_hist[perf_print_idx];
+            perf_pair_accounted = perf_pair_eligible_count +
+                perf_pair_reject_raw_count + perf_pair_reject_waw_count +
+                perf_pair_reject_resource_count + perf_pair_reject_serial_count +
+                perf_pair_reject_control_memory_count +
+                perf_pair_reject_lane_count + perf_pair_reject_other_count;
 
             $display("PERF_METRIC: CYCLES=%-d INSTS=%-d IPC=%.4f",
                 cycle_count, instruction_count, perf_ipc);
+            $display("PERF_PRIMARY_CYCLE: POLICY=2 ISSUE2=%-d ISSUE1=%-d FLUSH=%-d MUL_HOLD=%-d MULTI=%-d SCOREBOARD=%-d LSU_STRUCT=%-d PRODUCER_FULL=%-d WB=%-d CLINT=%-d SERIALIZE=%-d ISSUE_ADVANCE=%-d IF_CONTROL=%-d IF_PREDICT=%-d IF_FENCE=%-d IF_RESPONSE=%-d IF_LAUNCH=%-d IF_PENDING=%-d IF_OTHER=%-d ISSUE_REFILL=%-d DECODE_REFILL=%-d ISSUE_BLOCKED=%-d OTHER=%-d ACCOUNTED=%-d SAMPLE_CYCLES=%-d CLOSURE_ERRORS=%-d",
+                perf_primary_hist[PERF_PC_ISSUE2],
+                perf_primary_hist[PERF_PC_ISSUE1],
+                perf_primary_hist[PERF_PC_FLUSH],
+                perf_primary_hist[PERF_PC_MUL_HOLD],
+                perf_primary_hist[PERF_PC_MULTI],
+                perf_primary_hist[PERF_PC_SCOREBOARD],
+                perf_primary_hist[PERF_PC_LSU_STRUCT],
+                perf_primary_hist[PERF_PC_PRODUCER_FULL],
+                perf_primary_hist[PERF_PC_WB],
+                perf_primary_hist[PERF_PC_CLINT],
+                perf_primary_hist[PERF_PC_SERIALIZE],
+                perf_primary_hist[PERF_PC_ISSUE_ADVANCE],
+                perf_primary_hist[PERF_PC_IF_CONTROL],
+                perf_primary_hist[PERF_PC_IF_PREDICT],
+                perf_primary_hist[PERF_PC_IF_FENCE],
+                perf_primary_hist[PERF_PC_IF_RESPONSE],
+                perf_primary_hist[PERF_PC_IF_LAUNCH],
+                perf_primary_hist[PERF_PC_IF_PENDING],
+                perf_primary_hist[PERF_PC_IF_OTHER],
+                perf_primary_hist[PERF_PC_ISSUE_REFILL],
+                perf_primary_hist[PERF_PC_DECODE_REFILL],
+                perf_primary_hist[PERF_PC_ISSUE_BLOCKED],
+                perf_primary_hist[PERF_PC_OTHER],
+                perf_primary_sum,
+                perf_sample_cycle_count,
+                perf_primary_closure_error);
+            $display("PERF_DECODE_STALL_EXACT: H01=%-d H02=%-d H03=%-d H04=%-d H05=%-d H06=%-d H07=%-d H08=%-d H09=%-d H10=%-d H11=%-d H12=%-d H13=%-d H14=%-d H15=%-d H16=%-d H17=%-d H18=%-d H19=%-d H20=%-d H21=%-d H22=%-d H23=%-d H24=%-d H25=%-d H26=%-d H27=%-d H28=%-d H29=%-d H30=%-d H31=%-d STALL_CYCLES=%-d EXACT_SUM=%-d CLOSURE_ERRORS=%-d",
+                perf_decode_exact_hist[1], perf_decode_exact_hist[2],
+                perf_decode_exact_hist[3], perf_decode_exact_hist[4],
+                perf_decode_exact_hist[5], perf_decode_exact_hist[6],
+                perf_decode_exact_hist[7], perf_decode_exact_hist[8],
+                perf_decode_exact_hist[9], perf_decode_exact_hist[10],
+                perf_decode_exact_hist[11], perf_decode_exact_hist[12],
+                perf_decode_exact_hist[13], perf_decode_exact_hist[14],
+                perf_decode_exact_hist[15], perf_decode_exact_hist[16],
+                perf_decode_exact_hist[17], perf_decode_exact_hist[18],
+                perf_decode_exact_hist[19], perf_decode_exact_hist[20],
+                perf_decode_exact_hist[21], perf_decode_exact_hist[22],
+                perf_decode_exact_hist[23], perf_decode_exact_hist[24],
+                perf_decode_exact_hist[25], perf_decode_exact_hist[26],
+                perf_decode_exact_hist[27], perf_decode_exact_hist[28],
+                perf_decode_exact_hist[29], perf_decode_exact_hist[30],
+                perf_decode_exact_hist[31], perf_decode_stall_cycle_count,
+                perf_decode_exact_sum, perf_decode_closure_error);
+            $display("PERF_PAIR_DETAIL: CANDIDATE=%-d ELIGIBLE=%-d REJECT_RAW=%-d REJECT_WAW=%-d REJECT_RESOURCE=%-d REJECT_SERIAL=%-d REJECT_CONTROL_MEMORY=%-d REJECT_LANE=%-d REJECT_OTHER=%-d ACCOUNTED=%-d CLOSURE_ERRORS=%-d",
+                perf_pair_candidate_count, perf_pair_eligible_count,
+                perf_pair_reject_raw_count, perf_pair_reject_waw_count,
+                perf_pair_reject_resource_count, perf_pair_reject_serial_count,
+                perf_pair_reject_control_memory_count,
+                perf_pair_reject_lane_count, perf_pair_reject_other_count,
+                perf_pair_accounted,
+                (perf_pair_accounted == perf_pair_candidate_count) ? 0 : 1);
+            $display("PERF_SLOT_DETAIL: SLOT0_EXEC=%-d SLOT1_EXEC=%-d PAIR_EXEC=%-d SLOT1_NO_PAIR=%-d SLOT1_SCOREBOARD_REPLAY=%-d SLOT1_LSU_REPLAY=%-d PRODUCTIVE_SLOT_SUM=%-d PRODUCTIVE_SLOTS=%-d CLOSURE_ERRORS=%-d",
+                perf_slot0_exec_count, perf_slot1_exec_count,
+                perf_slot1_exec_count, perf_slot1_no_pair_count,
+                issue_slot1_sb_replay_count, issue_slot1_lsu_replay_count,
+                perf_slot0_exec_count + perf_slot1_exec_count,
+                perf_productive_slot_count,
+                ((perf_slot0_exec_count + perf_slot1_exec_count) ==
+                 perf_productive_slot_count) ? 0 : 1);
             $display("PERF_STALL: SCOREBOARD=%-d LSU_STRUCT=%-d WB_BACKPRESSURE=%-d CLINT=%-d MUL_DIV=%-d",
                 stall_scoreboard_count,
                 stall_lsu_struct_count,
@@ -1634,6 +1979,16 @@ end
                 dispatchq_occ_count[2],
                 dispatchq_occ_count[3],
                 dispatchq_occ_count[4]);
+            $display("PERF_ISSUE_WINDOW: DISPATCH=%-d DISPATCH_TWO=%-d RAW_PAIR_ADMIT=%-d SELECT=%-d SELECT_TWO=%-d BYPASS_OLDER=%-d NONADJ_PAIR=%-d WAKEUP_ISSUE=%-d FULL_DRAIN_NO_REFILL=%-d",
+                issue_window_dispatch_count,
+                issue_window_dispatch_two_count,
+                issue_window_raw_pair_admit_count,
+                issue_window_select_count,
+                issue_window_select_two_count,
+                issue_window_bypass_count,
+                issue_window_nonadj_pair_count,
+                issue_window_wakeup_issue_count,
+                issue_window_full_drain_count);
             $display("PERF_CAUSE_HIST: NONE=%-d SB=%-d LSU=%-d LSU_SB=%-d PF=%-d PF_SB=%-d PF_LSU=%-d PF_LSU_SB=%-d WB_ANY=%-d CLINT_ANY=%-d",
                 bubble_cause_hist[0], bubble_cause_hist[1], bubble_cause_hist[2],
                 bubble_cause_hist[3], bubble_cause_hist[4], bubble_cause_hist[5],

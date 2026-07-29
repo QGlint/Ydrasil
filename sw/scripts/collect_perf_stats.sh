@@ -4,6 +4,7 @@ set -euo pipefail
 root=${1:-build/sim/hw}
 out_dir=${2:-build/PPA}
 csv="$out_dir/perf_stats.csv"
+primary_csv="$out_dir/perf_primary_stats.csv"
 summary="$out_dir/perf_stats_summary.log"
 mkdir -p "$out_dir"
 
@@ -16,6 +17,27 @@ field() {
 
 header="program,cycles,insts,ipc,scoreboard,lsu_struct,producer_full,multi,flush,no_if_valid,other,raw_only,waw_only,raw_waw,load_use,alu_use,pending_tail,pf_sb,pf_lsu,pf_lsu_sb,occ0,occ1,occ2,both_wait,wait_ready,both_ready,stb_lookup,stb_hit,coremark_score,capacity_slots,productive_slots,lost_slots,slot_ipc,loss_flush,loss_mul_hold,loss_scoreboard,loss_lsu_struct,loss_lsu_serialize,loss_producer_full,loss_wb,loss_clint,loss_multi,loss_no_if_valid,loss_issue,loss_other,issue_fence,slot1_replay,slot1_sb_replay,slot1_lsu_replay,serialize_wait,dq0,dq1,dq2,dq3,dq4"
 echo "$header" > "$csv"
+
+primary_fields=(POLICY ISSUE2 ISSUE1 FLUSH MUL_HOLD MULTI SCOREBOARD LSU_STRUCT
+    PRODUCER_FULL WB CLINT SERIALIZE ISSUE_ADVANCE IF_CONTROL IF_PREDICT IF_FENCE IF_RESPONSE
+    IF_LAUNCH IF_PENDING IF_OTHER ISSUE_REFILL DECODE_REFILL ISSUE_BLOCKED OTHER
+    ACCOUNTED SAMPLE_CYCLES CLOSURE_ERRORS)
+decode_fields=()
+for mask in $(seq -w 1 31); do
+    decode_fields+=("H$mask")
+done
+decode_fields+=(STALL_CYCLES EXACT_SUM CLOSURE_ERRORS)
+pair_fields=(CANDIDATE ELIGIBLE REJECT_RAW REJECT_WAW REJECT_RESOURCE REJECT_SERIAL
+    REJECT_CONTROL_MEMORY REJECT_LANE REJECT_OTHER ACCOUNTED CLOSURE_ERRORS)
+slot_fields=(SLOT0_EXEC SLOT1_EXEC PAIR_EXEC SLOT1_NO_PAIR SLOT1_SCOREBOARD_REPLAY
+    SLOT1_LSU_REPLAY PRODUCTIVE_SLOT_SUM PRODUCTIVE_SLOTS CLOSURE_ERRORS)
+
+primary_header=(program cycles insts ipc)
+for key in "${primary_fields[@]}"; do primary_header+=("primary_${key,,}"); done
+for key in "${decode_fields[@]}"; do primary_header+=("decode_${key,,}"); done
+for key in "${pair_fields[@]}"; do primary_header+=("pair_${key,,}"); done
+for key in "${slot_fields[@]}"; do primary_header+=("slot_${key,,}"); done
+(IFS=,; echo "${primary_header[*]}") > "$primary_csv"
 
 mapfile -t logs < <(find "$root" -type f -name hw.log \( \
     -path '*/coe_loop5/hw.log' -o -path '*/coe_loop_lina/hw.log' -o \
@@ -43,6 +65,10 @@ for log in "${logs[@]}"; do
     slots=$(grep '^PERF_SLOT_ACCOUNT:' "$log" | tail -1 || true)
     slot_loss=$(grep '^PERF_SLOT_LOSS:' "$log" | tail -1 || true)
     issue_stage=$(grep '^PERF_ISSUE_STAGE:' "$log" | tail -1 || true)
+    primary=$(grep '^PERF_PRIMARY_CYCLE:' "$log" | tail -1 || true)
+    decode_exact=$(grep '^PERF_DECODE_STALL_EXACT:' "$log" | tail -1 || true)
+    pair_detail=$(grep '^PERF_PAIR_DETAIL:' "$log" | tail -1 || true)
+    slot_detail=$(grep '^PERF_SLOT_DETAIL:' "$log" | tail -1 || true)
     coremark=$(grep '^CoreMark 1\.0 :' "$log" | tail -1 || true)
     score=
     if [[ $coremark =~ CoreMark[[:space:]]+1\.0[[:space:]]*:[[:space:]]*([0-9.]+) ]]; then
@@ -76,15 +102,33 @@ for log in "${logs[@]}"; do
         "$(field "$issue_stage" SERIALIZE_WAIT)" "$(field "$issue_stage" DQ0)" \
         "$(field "$issue_stage" DQ1)" "$(field "$issue_stage" DQ2)" \
         "$(field "$issue_stage" DQ3)" "$(field "$issue_stage" DQ4)" >> "$csv"
+
+    primary_row=("$program" "$(field "$metric" CYCLES)"
+        "$(field "$metric" INSTS)" "$(field "$metric" IPC)")
+    for key in "${primary_fields[@]}"; do
+        primary_row+=("$(field "$primary" "$key")")
+    done
+    for key in "${decode_fields[@]}"; do
+        primary_row+=("$(field "$decode_exact" "$key")")
+    done
+    for key in "${pair_fields[@]}"; do
+        primary_row+=("$(field "$pair_detail" "$key")")
+    done
+    for key in "${slot_fields[@]}"; do
+        primary_row+=("$(field "$slot_detail" "$key")")
+    done
+    (IFS=,; echo "${primary_row[*]}") >> "$primary_csv"
 done
 
 {
     echo "PPA performance statistics"
     echo "CSV: $csv"
+    echo "Exclusive/detail CSV: $primary_csv"
     echo
     awk -F, 'NR==1 {next} {score=($29 == "" ? "-" : $29); printf "%-34s IPC=%-7s cycles=%-9s SB=%-8s LSU=%-7s PF=%-7s multi=%-7s score=%s\n", $1,$4,$2,$5,$6,$7,$8,score}' "$csv"
 } > "$summary"
 
 echo "[PPA] Performance CSV: $csv"
+echo "[PPA] Exclusive/detail CSV: $primary_csv"
 echo "[PPA] Performance summary: $summary"
 python3 "$(dirname "$0")/analyze_bubbles.py" "$root" "$out_dir"

@@ -546,12 +546,8 @@ package ydrasil_pkg;
 
 	typedef struct packed {
 		logic                                  valid;
-		logic                                  lane1;
-		logic                                  dual_capable;
-		logic                                  pair_eligible;
 		logic                                  memory_op;
 		logic [1:0]                            lane_mask;
-		logic                                  static_pair;
 		ydrasil_source_desc_t                  src0;
 		ydrasil_source_desc_t                  src1;
 		ydrasil_dest_desc_t                    dst;

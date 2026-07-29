@@ -12,6 +12,51 @@ from pathlib import Path
 PERF_RE = re.compile(r"^([A-Z][A-Z0-9_]*):\s*(.*)$")
 FIELD_RE = re.compile(r"([A-Z][A-Z0-9_]*)=\s*([0-9]+(?:\.[0-9]+)?)")
 
+PRIMARY_BUCKETS = (
+    ("dual issue", "ISSUE2"),
+    ("single issue", "ISSUE1"),
+    ("control flush", "FLUSH"),
+    ("multicycle EX hold", "MUL_HOLD"),
+    ("multiple decode blockers", "MULTI"),
+    ("scoreboard dependency", "SCOREBOARD"),
+    ("LSU structural", "LSU_STRUCT"),
+    ("producer slots full", "PRODUCER_FULL"),
+    ("writeback backpressure", "WB"),
+    ("CLINT serialization", "CLINT"),
+    ("LSU/CSR serialization", "SERIALIZE"),
+    ("issue-to-EX pipeline advance", "ISSUE_ADVANCE"),
+    ("IF empty after resolved control", "IF_CONTROL"),
+    ("IF empty after prediction", "IF_PREDICT"),
+    ("IF empty after FENCE.I", "IF_FENCE"),
+    ("IF empty awaiting response", "IF_RESPONSE"),
+    ("IF empty at request launch", "IF_LAUNCH"),
+    ("IF empty with pending redirect", "IF_PENDING"),
+    ("IF empty fallback", "IF_OTHER"),
+    ("issue register refill", "ISSUE_REFILL"),
+    ("decode/front-end refill", "DECODE_REFILL"),
+    ("issue blocked fallback", "ISSUE_BLOCKED"),
+    ("unclassified fallback", "OTHER"),
+)
+
+DECODE_STALL_BITS = (
+    (0, "scoreboard"),
+    (1, "LSU structural"),
+    (2, "producer full"),
+    (3, "writeback"),
+    (4, "CLINT"),
+)
+
+PAIR_BUCKETS = (
+    ("eligible", "ELIGIBLE"),
+    ("RAW dependency", "REJECT_RAW"),
+    ("WAW dependency", "REJECT_WAW"),
+    ("exclusive resource", "REJECT_RESOURCE"),
+    ("serializing instruction", "REJECT_SERIAL"),
+    ("branch plus memory", "REJECT_CONTROL_MEMORY"),
+    ("lane assignment", "REJECT_LANE"),
+    ("fallback", "REJECT_OTHER"),
+)
+
 
 def parse_log(path: Path) -> dict[str, dict[str, float]]:
     records: dict[str, dict[str, float]] = {}
@@ -38,6 +83,10 @@ def signed_counter(value_: float, bits: int = 32) -> int:
     return raw - (1 << bits) if raw >= (1 << (bits - 1)) else raw
 
 
+def decode_mask_label(mask: int) -> str:
+    return " + ".join(label for bit, label in DECODE_STALL_BITS if mask & (1 << bit))
+
+
 def selected_logs(root: Path) -> list[Path]:
     suites = ("coe_loop5", "coe_loop_lina", "coremark", "sort", "boundary", "rv32ui", "rv32um", "rv32uz", "rv32mi")
     return sorted(path for path in root.rglob("hw.log") if any(part.startswith(suites) for part in path.parts))
@@ -59,7 +108,29 @@ def main() -> None:
     detailed_csv = args.out_dir / "perf_bubble_detail.csv"
     columns = [
         ("cycles", "PERF_METRIC", "CYCLES"), ("insts", "PERF_METRIC", "INSTS"),
-        ("ipc", "PERF_METRIC", "IPC"), ("issue", "PERF_CYCLE_ACCOUNT", "ISSUE"),
+        ("ipc", "PERF_METRIC", "IPC"),
+        *[(f"primary_{key.lower()}", "PERF_PRIMARY_CYCLE", key)
+          for _, key in PRIMARY_BUCKETS],
+        ("primary_accounted", "PERF_PRIMARY_CYCLE", "ACCOUNTED"),
+        ("primary_sample_cycles", "PERF_PRIMARY_CYCLE", "SAMPLE_CYCLES"),
+        ("primary_closure_errors", "PERF_PRIMARY_CYCLE", "CLOSURE_ERRORS"),
+        *[(f"decode_h{mask:02d}", "PERF_DECODE_STALL_EXACT", f"H{mask:02d}")
+          for mask in range(1, 32)],
+        ("decode_stall_cycles", "PERF_DECODE_STALL_EXACT", "STALL_CYCLES"),
+        ("decode_exact_sum", "PERF_DECODE_STALL_EXACT", "EXACT_SUM"),
+        ("decode_closure_errors", "PERF_DECODE_STALL_EXACT", "CLOSURE_ERRORS"),
+        ("pair_candidate", "PERF_PAIR_DETAIL", "CANDIDATE"),
+        *[(f"pair_{key.lower()}", "PERF_PAIR_DETAIL", key)
+          for _, key in PAIR_BUCKETS],
+        ("pair_accounted", "PERF_PAIR_DETAIL", "ACCOUNTED"),
+        ("pair_closure_errors", "PERF_PAIR_DETAIL", "CLOSURE_ERRORS"),
+        ("slot0_exec", "PERF_SLOT_DETAIL", "SLOT0_EXEC"),
+        ("slot1_exec", "PERF_SLOT_DETAIL", "SLOT1_EXEC"),
+        ("slot1_no_pair", "PERF_SLOT_DETAIL", "SLOT1_NO_PAIR"),
+        ("slot1_scoreboard_replay", "PERF_SLOT_DETAIL", "SLOT1_SCOREBOARD_REPLAY"),
+        ("slot1_lsu_replay", "PERF_SLOT_DETAIL", "SLOT1_LSU_REPLAY"),
+        ("slot_closure_errors", "PERF_SLOT_DETAIL", "CLOSURE_ERRORS"),
+        ("issue", "PERF_CYCLE_ACCOUNT", "ISSUE"),
         ("capacity_slots", "PERF_SLOT_ACCOUNT", "CAPACITY_SLOTS"),
         ("productive_slots", "PERF_SLOT_ACCOUNT", "PRODUCTIVE_SLOTS"),
         ("lost_slots", "PERF_SLOT_ACCOUNT", "LOST_SLOTS"),
@@ -120,16 +191,18 @@ def main() -> None:
         stream.write("The top-level cycle partition is mutually exclusive and checked for closure. ")
         stream.write("Diagnostic event families overlap and must not be summed.\n\n")
         stream.write("## Counting model\n\n")
-        stream.write("The primary-cause priority is `flush > multicycle hold > multi-cause decode stall > scoreboard > LSU structural > producer full > WB > CLINT > LSU serialize > no IF valid > issue > other`. ")
-        stream.write("This makes the partition exclusive, but a higher-priority cause masks lower-priority causes in that table. ")
-        stream.write("`ISSUE` is productive admission, not a bubble; `OTHER` and `NO_IF_VALID` are complete buckets but not complete root-cause classifications.\n\n")
+        stream.write("Policy 2 first records productive execution as `ISSUE2` or `ISSUE1`; only cycles with no accepted instruction are attributed to a blocking or refill reason. ")
+        stream.write("The no-EX-accept priority is `flush > multicycle hold > exact multi-signal decode block > single decode block > serialize > issue-stage advance > IF-empty detail > issue/decode refill > blocked fallback > other`. ")
+        stream.write("Exactly one primary bucket is selected per sampled cycle. Fallback buckets preserve accounting closure but a nonzero fallback means semantic root-cause coverage is partial.\n\n")
         stream.write("Subset/overlap rules used below:\n\n")
         stream.write("- `branch/store wait` are consumer-role subsets of scoreboard cycles and may overlap producer-kind counters.\n")
         stream.write("- producer-to-consumer cells are subsets of their producer-use row; two source operands can make producer-kind rows overlap in one cycle.\n")
         stream.write("- pending producer kinds are selected by an `if/else` chain and are mutually exclusive with each other. Pending-tail explicitly excludes same-cycle issue hazards.\n")
         stream.write("- `ready but stalled`, complete-visible, and registered-visible are cross-cutting state observations, not additional lost cycles.\n")
         stream.write("- branch mispredicts are a subset of resolved branches; store-buffer hits are a subset of store-buffer lookups.\n")
-        stream.write("- the legacy cause histogram has exact SB/LSU/PF intersections only when WB and CLINT are both low. `WB_ANY` and `CLINT_ANY` are overlapping marginals.\n\n")
+        stream.write("- exact decode masks are mutually exclusive combinations; marginals derived from them overlap and are explicitly diagnostic.\n")
+        stream.write("- pair rejection buckets are priority-attributed and mutually exclusive for each ready ID decision.\n")
+        stream.write("- legacy `PERF_CAUSE_HIST*` records are diagnostic compatibility data and never participate in primary closure.\n\n")
         for program, records in focus:
             cycles = value(records, "PERF_METRIC", "CYCLES")
             insts = value(records, "PERF_METRIC", "INSTS")
@@ -143,22 +216,35 @@ def main() -> None:
                 stream.write(f"Dual-slot capacity={int(capacity)}, productive slots={int(productive)}, lost slots={int(lost)}, slot utilization={slot_ipc:.4f}.\n\n")
             else:
                 stream.write("Dual-slot accounting is unavailable in this log.\n\n")
-            partition = [(label, value(records, "PERF_CYCLE_ACCOUNT", key)) for label, key in (
-                ("scoreboard dependency", "SCOREBOARD"), ("front-end invalid", "NO_IF_VALID"),
-                ("unclassified/issue gap", "OTHER"), ("control flush", "FLUSH"),
-                ("multicycle EX hold", "MUL_HOLD"), ("LSU structural", "LSU_STRUCT"),
-                ("LSU serialization", "LSU_SERIALIZE"),
-                ("producer slots full", "PRODUCER_FULL"), ("overlapping causes", "MULTI"),
-                ("WB backpressure", "WB"), ("CLINT serialization", "CLINT"),
-                ("productive issue", "ISSUE"))]
-            accounted = value(records, "PERF_CYCLE_ACCOUNT", "ACCOUNTED")
-            sample_cycles = value(records, "PERF_CYCLE_ACCOUNT", "SAMPLE_CYCLES") or cycles
-            arch_delta_field = ("ARCH_CYCLE_DELTA" if "ARCH_CYCLE_DELTA" in records.get("PERF_CYCLE_ACCOUNT", {})
-                                else "CYCLE_DELTA")
-            arch_delta = signed_counter(value(records, "PERF_CYCLE_ACCOUNT", arch_delta_field))
-            closed = accounted == sample_cycles and sum(count for _, count in partition) == sample_cycles
+            has_primary = "PERF_PRIMARY_CYCLE" in records
+            if has_primary:
+                partition = [(label, value(records, "PERF_PRIMARY_CYCLE", key))
+                             for label, key in PRIMARY_BUCKETS]
+                accounted = value(records, "PERF_PRIMARY_CYCLE", "ACCOUNTED")
+                sample_cycles = value(records, "PERF_PRIMARY_CYCLE", "SAMPLE_CYCLES") or cycles
+                closure_errors = value(records, "PERF_PRIMARY_CYCLE", "CLOSURE_ERRORS")
+                arch_delta = int(cycles - sample_cycles)
+                closed = (closure_errors == 0 and accounted == sample_cycles and
+                          sum(count for _, count in partition) == sample_cycles)
+            else:
+                partition = [(label, value(records, "PERF_CYCLE_ACCOUNT", key)) for label, key in (
+                    ("scoreboard dependency", "SCOREBOARD"), ("front-end invalid", "NO_IF_VALID"),
+                    ("unclassified/issue gap", "OTHER"), ("control flush", "FLUSH"),
+                    ("multicycle EX hold", "MUL_HOLD"), ("LSU structural", "LSU_STRUCT"),
+                    ("LSU serialization", "LSU_SERIALIZE"),
+                    ("producer slots full", "PRODUCER_FULL"), ("overlapping causes", "MULTI"),
+                    ("WB backpressure", "WB"), ("CLINT serialization", "CLINT"),
+                    ("productive issue", "ISSUE"))]
+                accounted = value(records, "PERF_CYCLE_ACCOUNT", "ACCOUNTED")
+                sample_cycles = value(records, "PERF_CYCLE_ACCOUNT", "SAMPLE_CYCLES") or cycles
+                arch_delta_field = ("ARCH_CYCLE_DELTA" if "ARCH_CYCLE_DELTA" in records.get("PERF_CYCLE_ACCOUNT", {})
+                                    else "CYCLE_DELTA")
+                arch_delta = signed_counter(value(records, "PERF_CYCLE_ACCOUNT", arch_delta_field))
+                closure_errors = 0
+                closed = accounted == sample_cycles and sum(count for _, count in partition) == sample_cycles
             stream.write("### Complete exclusive cycle partition\n\n")
-            stream.write(f"Closure: **{'PASS' if closed else 'FAIL'}**, accounted={int(accounted)}, sample_cycles={int(sample_cycles)}. ")
+            stream.write(f"Source: `{'PERF_PRIMARY_CYCLE' if has_primary else 'PERF_CYCLE_ACCOUNT (legacy)'}`. ")
+            stream.write(f"Closure: **{'PASS' if closed else 'FAIL'}**, accounted={int(accounted)}, sample_cycles={int(sample_cycles)}, errors={int(closure_errors)}. ")
             stream.write(f"Architectural mcycle={int(cycles)}, mcycle-sample delta={int(arch_delta)}.\n\n")
             stream.write("| Primary bucket | Cycles | Total cycles |\n|---|---:|---:|\n")
             for label, count in sorted(partition, key=lambda item: item[1], reverse=True):
@@ -166,16 +252,23 @@ def main() -> None:
             stream.write("\nThis table is exhaustive for sampled cycles, but it is priority-attributed rather than causally independent. ")
             stream.write("A mechanism's removable-cycle upper bound is its exclusive bucket plus only overlapping buckets proven to contain that mechanism.\n")
             has_supply_detail = "PERF_NOIF_DETAIL" in records and "PERF_OTHER_DETAIL" in records
-            supply_unclassified = (value(records, "PERF_NOIF_DETAIL", "OTHER") +
-                                   value(records, "PERF_OTHER_DETAIL", "OTHER"))
-            root_status = "COMPLETE" if closed and has_supply_detail and supply_unclassified == 0 else "PARTIAL"
-            stream.write(f"\nDefined-taxonomy completeness: **{root_status}**. `NO_IF_VALID`={int(value(records, 'PERF_CYCLE_ACCOUNT', 'NO_IF_VALID'))}, ")
-            stream.write(f"`OTHER`={int(value(records, 'PERF_CYCLE_ACCOUNT', 'OTHER'))}, unclassified children={int(supply_unclassified)}.\n")
+            if has_primary:
+                fallback = (value(records, "PERF_PRIMARY_CYCLE", "IF_OTHER") +
+                            value(records, "PERF_PRIMARY_CYCLE", "ISSUE_BLOCKED") +
+                            value(records, "PERF_PRIMARY_CYCLE", "OTHER"))
+            else:
+                fallback = (value(records, "PERF_NOIF_DETAIL", "OTHER") +
+                            value(records, "PERF_OTHER_DETAIL", "OTHER"))
+            root_status = "COMPLETE" if closed and fallback == 0 else "PARTIAL"
+            stream.write(f"\nDefined-taxonomy completeness: **{root_status}**; fallback-attributed cycles={int(fallback)}.\n")
 
             stream.write("\n### Front-end and pipeline-supply gaps\n\n")
             noif_parent = value(records, "PERF_CYCLE_ACCOUNT", "NO_IF_VALID")
             other_parent = value(records, "PERF_CYCLE_ACCOUNT", "OTHER")
-            if not has_supply_detail:
+            if has_primary:
+                stream.write("Front-end and refill causes are already first-class exclusive rows in the primary table. ")
+                stream.write("The legacy detail records below are retained only for sequence diagnostics and use the older attribution priority.\n")
+            elif not has_supply_detail:
                 stream.write("The current log predates the sub-cause counters. Rerun simulation to split these parent buckets.\n")
             else:
                 noif_parts = [("resolved control redirect refill", "CONTROL_REDIRECT"),
@@ -216,33 +309,69 @@ def main() -> None:
                 stream.write("\nRedirect refill has priority over request-state labels, so those rows are exclusive attributions. ")
                 stream.write("A redirect-refill cycle can physically also contain a fetch launch or memory response.\n")
 
-            hist = records.get("PERF_CAUSE_HIST", {})
             stream.write("\n### Decode-stall intersections\n\n")
-            stream.write("The 32-bin bitmap covers SB/LSU structural/PF/WB/CLINT. LSU serialization is independently primary-attributed and is not a bitmap dimension.\n\n")
-            stream.write("| Exact combination (WB=0, CLINT=0) | Cycles | Relation |\n|---|---:|---|\n")
-            for label, key, relation in (
-                ("SB only", "SB", "exclusive bin"), ("LSU only", "LSU", "exclusive bin"),
-                ("LSU & SB", "LSU_SB", "intersection"), ("PF only", "PF", "exclusive bin"),
-                ("PF & SB", "PF_SB", "intersection"), ("PF & LSU", "PF_LSU", "intersection"),
-                ("PF & LSU & SB", "PF_LSU_SB", "three-way intersection")):
-                stream.write(f"| {label} | {int(hist.get(key, 0.0))} | {relation} |\n")
-            stream.write(f"\nAggregated overlapping marginals: WB_ANY={int(hist.get('WB_ANY', 0.0))}, ")
-            stream.write(f"CLINT_ANY={int(hist.get('CLINT_ANY', 0.0))}. ")
-            if "PERF_CAUSE_HIST_FULL" in records:
-                stream.write("The log contains all 32 raw bitmask bins. Pairwise intersections (including higher-order intersections) are:\n\n")
-                full_hist = records["PERF_CAUSE_HIST_FULL"]
-                signals = (("SB", 0), ("LSU", 1), ("PF", 2), ("WB", 3), ("CLINT", 4))
-                stream.write("| A | B | A & B cycles |\n|---|---|---:|\n")
-                for left_index, (left_name, left_bit) in enumerate(signals):
-                    for right_name, right_bit in signals[left_index + 1:]:
-                        intersection = sum(
-                            full_hist.get(f"H{mask:02d}", 0.0)
-                            for mask in range(32)
-                            if mask & (1 << left_bit) and mask & (1 << right_bit)
-                        )
-                        stream.write(f"| {left_name} | {right_name} | {int(intersection)} |\n")
+            exact = records.get("PERF_DECODE_STALL_EXACT", {})
+            if exact:
+                exact_sum = sum(exact.get(f"H{mask:02d}", 0.0) for mask in range(1, 32))
+                stall_cycles = exact.get("STALL_CYCLES", 0.0)
+                exact_errors = exact.get("CLOSURE_ERRORS", 0.0)
+                exact_closed = (exact_sum == stall_cycles == exact.get("EXACT_SUM", exact_sum)
+                                and exact_errors == 0)
+                stream.write("Each row is one exact, mutually exclusive combination of SB/LSU/PF/WB/CLINT. ")
+                stream.write(f"Closure: **{'PASS' if exact_closed else 'FAIL'}**, exact_sum={int(exact_sum)}, stall_cycles={int(stall_cycles)}, errors={int(exact_errors)}.\n\n")
+                stream.write("| Mask | Exact combination | Cycles | Stall cycles |\n|---:|---|---:|---:|\n")
+                for mask in range(1, 32):
+                    count = exact.get(f"H{mask:02d}", 0.0)
+                    if count:
+                        stream.write(f"| {mask:02d} | {decode_mask_label(mask)} | {int(count)} | {pct(count, stall_cycles)} |\n")
+                stream.write("\nDerived marginals below overlap and are diagnostic only:\n\n")
+                stream.write("| Signal | Cycles with signal | Decode-stall cycles |\n|---|---:|---:|\n")
+                for bit, label in DECODE_STALL_BITS:
+                    marginal = sum(exact.get(f"H{mask:02d}", 0.0)
+                                   for mask in range(1, 32) if mask & (1 << bit))
+                    stream.write(f"| {label} | {int(marginal)} | {pct(marginal, stall_cycles)} |\n")
             else:
-                stream.write("This legacy log does not contain all 32 raw bins, so WB/CLINT intersections cannot be reconstructed exactly; rerun simulation with the updated testbench.\n")
+                hist = records.get("PERF_CAUSE_HIST_FULL", {})
+                stream.write("This legacy log has no nonzero-mask closure record. `PERF_CAUSE_HIST_FULL` is shown only as compatibility diagnostic data; its H00 bin includes all non-stall cycles.\n\n")
+                stream.write("| Mask | Exact combination | Cycles |\n|---:|---|---:|\n")
+                for mask in range(1, 32):
+                    count = hist.get(f"H{mask:02d}", 0.0)
+                    if count:
+                        stream.write(f"| {mask:02d} | {decode_mask_label(mask)} | {int(count)} |\n")
+
+            stream.write("\n### Static-pair decisions\n\n")
+            pair = records.get("PERF_PAIR_DETAIL", {})
+            if pair:
+                candidate = pair.get("CANDIDATE", 0.0)
+                pair_sum = sum(pair.get(key, 0.0) for _, key in PAIR_BUCKETS)
+                pair_closed = (pair_sum == candidate == pair.get("ACCOUNTED", pair_sum)
+                               and pair.get("CLOSURE_ERRORS", 0.0) == 0)
+                stream.write(f"Closure: **{'PASS' if pair_closed else 'FAIL'}**, candidates={int(candidate)}, accounted={int(pair_sum)}. ")
+                stream.write("A candidate is sampled once when ID is ready, so downstream stall residency does not multiply the count.\n\n")
+                stream.write("| Primary decision | Pairs | Candidates |\n|---|---:|---:|\n")
+                for label, key in PAIR_BUCKETS:
+                    count = pair.get(key, 0.0)
+                    stream.write(f"| {label} | {int(count)} | {pct(count, candidate)} |\n")
+            else:
+                stream.write("Pair-decision instrumentation is unavailable in this legacy log.\n")
+
+            stream.write("\n### Execute-slot detail\n\n")
+            slot = records.get("PERF_SLOT_DETAIL", {})
+            if slot:
+                slot_sum = slot.get("SLOT0_EXEC", 0.0) + slot.get("SLOT1_EXEC", 0.0)
+                slot_closed = (slot_sum == slot.get("PRODUCTIVE_SLOTS", slot_sum)
+                               and slot.get("CLOSURE_ERRORS", 0.0) == 0)
+                stream.write(f"Closure: **{'PASS' if slot_closed else 'FAIL'}**, slot0={int(slot.get('SLOT0_EXEC', 0.0))}, slot1={int(slot.get('SLOT1_EXEC', 0.0))}, productive={int(slot.get('PRODUCTIVE_SLOTS', 0.0))}.\n\n")
+                stream.write("| Observation | Events | Sample cycles |\n|---|---:|---:|\n")
+                for label, key in (("slot 0 accepted", "SLOT0_EXEC"),
+                                   ("slot 1 accepted / pair executed", "SLOT1_EXEC"),
+                                   ("slot 0 accepted without slot 1", "SLOT1_NO_PAIR"),
+                                   ("slot 1 scoreboard replay", "SLOT1_SCOREBOARD_REPLAY"),
+                                   ("slot 1 LSU replay", "SLOT1_LSU_REPLAY")):
+                    count = slot.get(key, 0.0)
+                    stream.write(f"| {label} | {int(count)} | {pct(count, sample_cycles)} |\n")
+            else:
+                stream.write("Execute-slot detail is unavailable in this legacy log.\n")
             stream.write("\n### Scoreboard diagnosis\n\n| Signal | Cycles/events | Scoreboard cycles |\n|---|---:|---:|\n")
             scoreboard = value(records, "PERF_STALL", "SCOREBOARD")
             details = [("load producer use", "PERF_SCOREBOARD_DETAIL", "LOAD_USE"),

@@ -36,11 +36,17 @@ import ydrasil_pkg::*;
     output ydrasil_issue_pkt_t          dispatch_pkt_o,
     output ydrasil_issue_pkt_t          dispatch_pkt1_o,
     output wire                         dispatch_ready_o,
+    output wire                         dispatch_two_ready_o,
     output ydrasil_rob_source_state_t   issue_src0_state_o,
     output ydrasil_rob_source_state_t   issue_src1_state_o,
     output ydrasil_rob_source_state_t   issue_src2_state_o,
     output ydrasil_rob_source_state_t   issue_src3_state_o,
+    output ydrasil_rob_source_state_t   dispatch_src0_state_o,
+    output ydrasil_rob_source_state_t   dispatch_src1_state_o,
+    output ydrasil_rob_source_state_t   dispatch_src2_state_o,
+    output ydrasil_rob_source_state_t   dispatch_src3_state_o,
     output wire                         issue_at_rob_head_o,
+    output producer_id_t                rob_head_tag_o,
     output wire [REGS_NUM-1:0]          gpr_pending_o,
     output wire                         ex_accept_valid_o,
     output wire                         ex_accept_valid1_o,
@@ -67,6 +73,7 @@ import ydrasil_pkg::*;
 
     reg [PRODUCER_NUM-1:0] producer_valid_q;
     reg [PRODUCER_NUM-1:0] producer_ready_q;
+    reg [PRODUCER_NUM-1:0] producer_value_ready_q;
     reg [PRODUCER_NUM-1:0] producer_writes_gpr_q;
     reg [REGS_ADDR_WIDTH-1:0] producer_rd_q [0:PRODUCER_NUM-1];
     producer_id_t producer_tag_q [0:PRODUCER_NUM-1];
@@ -149,7 +156,10 @@ import ydrasil_pkg::*;
             slot = src.producer_tag[PRODUCER_SLOT_WIDTH-1:0];
             rob_source_state = '0;
             rob_source_state.live = source_live(src);
-            rob_source_state.done = producer_ready_q[slot];
+            // Operand availability is independent of in-order retirement.
+            // In particular, a JAL/JALR link value is produced one cycle
+            // before branch resolution permits the ROB entry to retire.
+            rob_source_state.done = producer_value_ready_q[slot];
             unique case (src.producer_class)
                 RESULT_LSU: rob_source_state.result = lsu_result_q[slot];
                 RESULT_MDU: rob_source_state.result = mdu_result_q[slot];
@@ -194,10 +204,14 @@ import ydrasil_pkg::*;
     assign retire_commit1_o.value = result_for_slot(queue_head1);
     assign retire_commit1_o.pc = producer_pc_q[queue_head1];
 
+    wire producer_has_one_free = queue_count_q <=
+        QUEUE_COUNT_WIDTH'(PRODUCER_NUM - 1);
     wire producer_has_two_free = queue_count_q <=
         QUEUE_COUNT_WIDTH'(PRODUCER_NUM - 2);
     wire branch_has_room = branch_count_q < 3'(BRANCH_DEPTH);
-    assign dispatch_ready_o = producer_has_two_free && branch_has_room &&
+    assign dispatch_ready_o = producer_has_one_free && branch_has_room &&
+        !serial_pending_q && !trap_stall_i && !ex_branch_jump_i;
+    assign dispatch_two_ready_o = producer_has_two_free && branch_has_room &&
         !serial_pending_q && !trap_stall_i && !ex_branch_jump_i;
     wire queue_alloc0 = dispatch_accept_i && dispatch_pkt_i.valid;
     wire queue_alloc1 = dispatch_accept1_i && dispatch_pkt1_i.valid;
@@ -205,8 +219,8 @@ import ydrasil_pkg::*;
         {1'b0, queue_alloc1};
     wire producer_full_stall = dispatch_pkt_i.valid && !producer_has_two_free;
     wire producer_pair_stall = dispatch_pkt1_i.valid && !producer_has_two_free;
-    wire serial_alloc = queue_alloc0 &&
-        dispatch_pkt_i.ctrl.serialize_before;
+    wire serial_alloc = (queue_alloc0 && dispatch_pkt_i.ctrl.serialize_before) ||
+        (queue_alloc1 && dispatch_pkt1_i.ctrl.serialize_before);
     wire serial_accept = issue_fence_i ||
         (ex_accept_valid_o &&
          (ex_hzd_i.operator_type[OPERATOR_TYPE_CSR] &&
@@ -261,6 +275,26 @@ import ydrasil_pkg::*;
             latest_id_q[dispatch_pkt1_i.src1.arch_addr];
         dispatch_pkt1_o.src1.producer_class =
             latest_class_q[dispatch_pkt1_i.src1.arch_addr];
+
+        // The second instruction observes the first instruction's producer
+        // allocation in the same dispatch bundle.  This is required now that
+        // dispatch bandwidth is independent of same-cycle issue pairing.
+        if (dispatch_pkt_i.valid && dispatch_pkt_i.dst.writes_gpr &&
+            dispatch_pkt1_i.src0.used &&
+            (dispatch_pkt1_i.src0.arch_addr == dispatch_pkt_i.dst.rd_addr)) begin
+            dispatch_pkt1_o.src0.tag_valid = 1'b1;
+            dispatch_pkt1_o.src0.producer_tag = producer_alloc_id;
+            dispatch_pkt1_o.src0.producer_class =
+                result_class_for(dispatch_pkt_i.decode);
+        end
+        if (dispatch_pkt_i.valid && dispatch_pkt_i.dst.writes_gpr &&
+            dispatch_pkt1_i.src1.used &&
+            (dispatch_pkt1_i.src1.arch_addr == dispatch_pkt_i.dst.rd_addr)) begin
+            dispatch_pkt1_o.src1.tag_valid = 1'b1;
+            dispatch_pkt1_o.src1.producer_tag = producer_alloc_id;
+            dispatch_pkt1_o.src1.producer_class =
+                result_class_for(dispatch_pkt_i.decode);
+        end
         dispatch_pkt1_o.dst.rob_tag = producer_alloc_id1;
         dispatch_pkt1_o.dst.result_class =
             result_class_for(dispatch_pkt1_i.decode);
@@ -269,10 +303,15 @@ import ydrasil_pkg::*;
     wire issue_at_rob_head = issue_pkt_i.dst.rob_tag ==
         producer_tag_q[queue_head_q];
     assign issue_at_rob_head_o = issue_at_rob_head;
+    assign rob_head_tag_o = producer_tag_q[queue_head_q];
     assign issue_src0_state_o = rob_source_state(issue_pkt_i.src0);
     assign issue_src1_state_o = rob_source_state(issue_pkt_i.src1);
     assign issue_src2_state_o = rob_source_state(issue_pkt1_i.src0);
     assign issue_src3_state_o = rob_source_state(issue_pkt1_i.src1);
+    assign dispatch_src0_state_o = rob_source_state(dispatch_pkt_o.src0);
+    assign dispatch_src1_state_o = rob_source_state(dispatch_pkt_o.src1);
+    assign dispatch_src2_state_o = rob_source_state(dispatch_pkt1_o.src0);
+    assign dispatch_src3_state_o = rob_source_state(dispatch_pkt1_o.src1);
     wire decode_bubble_stall = trap_stall_i || wb_backpressure_i;
 
     assign ex_accept_valid_o = ex_hzd_i.valid && !ex_branch_jump_i &&
@@ -435,6 +474,7 @@ import ydrasil_pkg::*;
         if (!rst_n || ex_hzd_i.interrupt) begin
             producer_valid_q <= '0;
             producer_ready_q <= '0;
+            producer_value_ready_q <= '0;
             producer_writes_gpr_q <= '0;
             latest_valid_q <= '0;
             queue_head_q <= '0;
@@ -493,33 +533,39 @@ import ydrasil_pkg::*;
             if (queue_commit0) begin
                 producer_valid_q[queue_head_q] <= 1'b0;
                 producer_ready_q[queue_head_q] <= 1'b0;
+                producer_value_ready_q[queue_head_q] <= 1'b0;
                 producer_writes_gpr_q[queue_head_q] <= 1'b0;
             end
             if (queue_commit1) begin
                 producer_valid_q[queue_head1] <= 1'b0;
                 producer_ready_q[queue_head1] <= 1'b0;
+                producer_value_ready_q[queue_head1] <= 1'b0;
                 producer_writes_gpr_q[queue_head1] <= 1'b0;
             end
 
             if (completion_hit0) begin
                 alu_result_q[completion_slot0] <=
                     completion_bus_i[COMPLETION_ALU].data;
+                producer_value_ready_q[completion_slot0] <= 1'b1;
                 if (!producer_op_class_q[completion_slot0][2])
                     producer_ready_q[completion_slot0] <= 1'b1;
             end
             if (completion_hit1) begin
                 lsu_result_q[completion_slot1] <=
                     completion_bus_i[COMPLETION_LSU].data;
+                producer_value_ready_q[completion_slot1] <= 1'b1;
                 producer_ready_q[completion_slot1] <= 1'b1;
             end
             if (completion_hit2) begin
                 mdu_result_q[completion_slot2] <=
                     completion_bus_i[COMPLETION_MUL].data;
+                producer_value_ready_q[completion_slot2] <= 1'b1;
                 producer_ready_q[completion_slot2] <= 1'b1;
             end
             if (completion_hit3) begin
                 alu_result_q[completion_slot3] <=
                     completion_bus_i[COMPLETION_DUAL_ALU].data;
+                producer_value_ready_q[completion_slot3] <= 1'b1;
                 if (!producer_op_class_q[completion_slot3][2])
                     producer_ready_q[completion_slot3] <= 1'b1;
             end
@@ -546,6 +592,7 @@ import ydrasil_pkg::*;
             if (queue_alloc0) begin
                 producer_valid_q[alloc_slot0] <= 1'b1;
                 producer_ready_q[alloc_slot0] <= 1'b0;
+                producer_value_ready_q[alloc_slot0] <= 1'b0;
                 producer_writes_gpr_q[alloc_slot0] <=
                     dispatch_pkt_i.dst.writes_gpr;
                 producer_rd_q[alloc_slot0] <= dispatch_pkt_i.dst.rd_addr;
@@ -577,6 +624,7 @@ import ydrasil_pkg::*;
             if (queue_alloc1) begin
                 producer_valid_q[alloc_slot1] <= 1'b1;
                 producer_ready_q[alloc_slot1] <= 1'b0;
+                producer_value_ready_q[alloc_slot1] <= 1'b0;
                 producer_writes_gpr_q[alloc_slot1] <=
                     dispatch_pkt1_i.dst.writes_gpr;
                 producer_rd_q[alloc_slot1] <= dispatch_pkt1_i.dst.rd_addr;
@@ -648,6 +696,8 @@ import ydrasil_pkg::*;
             if (ex_branch_jump_i && ex_branch_resolve_i &&
                 resolved_branch_live) begin
                 producer_valid_q <= recovery_live_mask;
+                producer_value_ready_q <= producer_value_ready_q &
+                    recovery_live_mask;
                 queue_head_q <= queue_head_after_commit;
                 queue_tail_q <= resolved_branch_next;
                 queue_count_q <= recovery_count;

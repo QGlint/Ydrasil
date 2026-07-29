@@ -325,16 +325,17 @@ import ydrasil_pkg::*;
         !pair_control_memory;
 
     assign if_id_ready_o = issue_ready_i;
-    assign if_id_consume_two_o = issue_ready_i && pair_eligible;
+    // Dispatch bandwidth is independent of whether the pair can issue in the
+    // same cycle.  Dependency/resource checks remain diagnostic metadata for
+    // the issue window, but no longer hold the second decoded instruction in
+    // the fetch queue.
+    assign if_id_consume_two_o = issue_ready_i && issue_consume_two_i &&
+        decode_valid && decode_valid1;
 
     always_comb begin
         issue_pkt_o = '0;
         issue_pkt_o.valid = decode_valid;
         issue_pkt_o.decode = decoded0;
-        issue_pkt_o.dual_capable = decode_valid &&
-            (slot0_a_capable || slot0_b_capable);
-        issue_pkt_o.pair_eligible = pair_eligible;
-        issue_pkt_o.static_pair = pair_eligible;
         issue_pkt_o.lane_mask = {slot0_b_capable, slot0_a_capable};
         issue_pkt_o.memory_op = decode_valid &&
             (decoded0.operator_type[OPERATOR_TYPE_LOAD] ||
@@ -373,10 +374,7 @@ import ydrasil_pkg::*;
 
         issue_pkt1_o = '0;
         issue_pkt1_o.valid = decode_valid1;
-        issue_pkt1_o.lane1 = 1'b1;
         issue_pkt1_o.decode = decoded1;
-        issue_pkt1_o.dual_capable = decode_valid1 &&
-            (slot1_a_capable || slot1_b_capable);
         issue_pkt1_o.lane_mask = {slot1_b_capable, slot1_a_capable};
         issue_pkt1_o.memory_op = decode_valid1 &&
             (decoded1.operator_type[OPERATOR_TYPE_LOAD] ||

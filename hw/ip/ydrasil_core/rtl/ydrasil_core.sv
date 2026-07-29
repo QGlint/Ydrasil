@@ -79,6 +79,14 @@ import ydrasil_axi_pkg::*;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] rf_raddr_rs4;
 	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] rf_rdata_rs3;
 	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] rf_rdata_rs4;
+	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] dispatch_rf_raddr_rs1;
+	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] dispatch_rf_raddr_rs2;
+	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] dispatch_rf_raddr_rs3;
+	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] dispatch_rf_raddr_rs4;
+	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] dispatch_rf_rdata_rs1;
+	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] dispatch_rf_rdata_rs2;
+	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] dispatch_rf_rdata_rs3;
+	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] dispatch_rf_rdata_rs4;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] fpr_raddr_rs1;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] fpr_raddr_rs2;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] fpr_raddr_rs3;
@@ -311,7 +319,12 @@ import ydrasil_axi_pkg::*;
 	ydrasil_rob_source_state_t      issue_src1_state;
 	ydrasil_rob_source_state_t      issue_src2_state;
 	ydrasil_rob_source_state_t      issue_src3_state;
+	ydrasil_rob_source_state_t      dispatch_src0_state;
+	ydrasil_rob_source_state_t      dispatch_src1_state;
+	ydrasil_rob_source_state_t      dispatch_src2_state;
+	ydrasil_rob_source_state_t      dispatch_src3_state;
 	wire                            issue_at_rob_head;
+	producer_id_t                   rob_head_tag;
 	wire [ydrasil_pkg::PRODUCER_NUM-1:0]
 	                                branch_recovery_keep_mask;
 	ydrasil_issue_ex_pkt_t          issue_ex_pkt;
@@ -321,15 +334,8 @@ import ydrasil_axi_pkg::*;
 	ydrasil_issue_pkt_t             dispatch_issue_pkt1;
 	ydrasil_issue_pkt_t             issue_pkt;
 	ydrasil_issue_pkt_t             issue_pkt1;
-	// ID and issue are separated by a packed, four-entry elastic pipeline.
-	// Its input-ready signal comes only from registered occupancy, never from
-	// the current scoreboard result, so decode FIFO state is off the EX->ID
-	// combinational path.
-	ydrasil_issue_pkt_t             issue_pipe_q [0:3];
-	reg [1:0]                       issue_pipe_head_q;
-	reg [1:0]                       issue_pipe_tail_q;
-	reg [2:0]                       issue_pipe_count_q;
 	wire                            issue_ready;
+	wire                            issue_dispatch_two_ready;
 	wire                            issue_consume_two;
 	wire                            issue_slot1_replay;
 	wire                            issue_scoreboard_stall;
@@ -342,60 +348,21 @@ import ydrasil_axi_pkg::*;
 	wire                            issue_src2_wait;
 	wire                            issue_src3_wait;
 	wire                            dispatch_ready;
-	wire                            issue_pair_execute = issue_consume_two &&
-		!issue_slot1_replay;
-	// Reserve space for the largest (two instruction) ID transfer. The ready
-	// decision is entirely registered-state based.
-	wire                            issue_pipe_has_room =
-		(issue_pipe_count_q <= 3'd2) && dispatch_ready;
-	wire                            issue_pipe_push_two = issue_pipe_has_room &&
-		id_issue_pkt.valid && id_issue_pkt.pair_eligible;
+	wire                            dispatch_two_ready;
+	wire                            issue_pipe_has_room = issue_ready && dispatch_ready;
 	wire                            issue_pipe_push = issue_pipe_has_room &&
 		id_issue_pkt.valid;
-	wire [1:0]                      issue_pipe_push_count = issue_pipe_push ?
-		(issue_pipe_push_two ? 2'd2 : 2'd1) : '0;
-	wire [1:0]                      issue_pipe_pop_count =
-		(issue_ready && (issue_pipe_count_q != '0)) ?
-		(issue_pair_execute ? 2'd2 : 2'd1) : '0;
-	wire [1:0]                      issue_pipe_head1 = issue_pipe_head_q + 2'd1;
-	wire [1:0]                      issue_pipe_tail1 = issue_pipe_tail_q + 2'd1;
-	always_comb begin
-		issue_pkt = issue_pipe_q[issue_pipe_head_q];
-		if (issue_pipe_count_q == '0)
-			issue_pkt = '0;
-		issue_pkt1 = issue_pipe_q[issue_pipe_head1];
-		if ((issue_pipe_count_q < 3'd2) || !issue_pkt.pair_eligible)
-			issue_pkt1 = '0;
-	end
-	always_ff @(posedge clk) begin
-		if (!rst_n) begin
-			issue_pipe_head_q <= '0;
-			issue_pipe_tail_q <= '0;
-			issue_pipe_count_q <= '0;
-			issue_pipe_q[0] <= '0;
-			issue_pipe_q[1] <= '0;
-			issue_pipe_q[2] <= '0;
-			issue_pipe_q[3] <= '0;
-		end else if (pipeline_flush) begin
-			issue_pipe_head_q <= '0;
-			issue_pipe_tail_q <= '0;
-			issue_pipe_count_q <= '0;
-		end else begin
-			if (issue_pipe_push) begin
-					issue_pipe_q[issue_pipe_tail_q] <= dispatch_issue_pkt;
-					if (issue_pipe_push_two)
-						issue_pipe_q[issue_pipe_tail1] <= dispatch_issue_pkt1;
-				issue_pipe_tail_q <= issue_pipe_tail_q + issue_pipe_push_count;
-			end
-			if (issue_pipe_pop_count != '0)
-				issue_pipe_head_q <= issue_pipe_head_q + issue_pipe_pop_count;
-			issue_pipe_count_q <= issue_pipe_count_q + issue_pipe_push_count -
-				issue_pipe_pop_count;
-		end
-	end
+	wire                            issue_pipe_push_two = issue_pipe_push &&
+		issue_dispatch_two_ready && dispatch_two_ready && id_issue_pkt1.valid &&
+		!id_issue_pkt.ctrl.serialize_before &&
+		!(id_issue_pkt.ctrl.checkpoint_req && id_issue_pkt1.ctrl.checkpoint_req);
 	wire                            decode_valid = issue_pkt.valid;
 	assign fence_resume_pc = issue_fence_next_pc;
-	assign pipeline_flush = flush_id | id_fence_i;
+	// A trap/mret redirect is an architectural recovery boundary too.  The
+	// exception controller waits for the backend to drain, but younger
+	// no-write entries can still reside in the issue window and must not issue
+	// after the redirect has been accepted.
+	assign pipeline_flush = flush_id | interrupt | id_fence_i;
 	ydrasil_decode_pkt_t            decode_pkt;
 	assign decode_pkt = issue_pkt.decode;
 	wire                            decode_if_ready;
@@ -706,7 +673,8 @@ import ydrasil_axi_pkg::*;
 	assign id_ctrl_store_req = id_ctrl_pkt.store_req;
 	always_comb begin
 		main_lsu_req_pkt = id_lsu_req_pkt;
-		main_lsu_req_pkt.valid = id_lsu_req_pkt.valid & ex_accept_valid & id_ex_execute_valid;
+		main_lsu_req_pkt.valid = id_lsu_req_pkt.valid & ex_accept_valid &
+			id_ex_execute_valid & !interrupt & !flush_ex;
 		main_lsu_req_pkt.addr = ex_lsu_mem_addr;
 		main_lsu_req_pkt.store_data = ex_lsu_result;
 		main_lsu_req_pkt.addr_is_dtcm =
@@ -722,6 +690,11 @@ import ydrasil_axi_pkg::*;
 				main_lsu_req_pkt.store_mask = 4'b0000;
 		lsu_req_pkt = dual_lsu_req_pkt.valid ? dual_lsu_req_pkt :
 			main_lsu_req_pkt;
+		// The dual lane request is generated directly from issue_ex_q, so gate
+		// it at the common LSU boundary as well.  This prevents a younger store
+		// from entering the LSU on the same cycle as branch/trap recovery.
+		if (interrupt || flush_ex)
+			lsu_req_pkt.valid = 1'b0;
 	end
 `ifdef YDRASIL_ENABLE_FPU
 	always_comb begin
@@ -1044,7 +1017,7 @@ import ydrasil_axi_pkg::*;
 		.rst_n               (rst_n),
 		.flush_i             (pipeline_flush),
 		.issue_ready_i       (issue_pipe_has_room),
-		.issue_consume_two_i (issue_pipe_has_room && id_issue_pkt.pair_eligible),
+		.issue_consume_two_i (issue_pipe_push_two),
 		.if_id_pc_i          (if_id_pc),
 		.if_id_instr_i       (if_id_instr),
 		.if_id_pred_hit_i    (if_id_pred_hit),
@@ -1073,16 +1046,21 @@ import ydrasil_axi_pkg::*;
 		.stall_id_i          (stall_id),
 		.bubble_id_i         (bubble_id | fpu_decode_block),
 		.flush_id_i          (pipeline_flush),
-		.issue_pkt_i         (issue_pkt),
-		.issue_pkt1_i        (issue_pkt1),
-		.issue_src0_state_i  (issue_src0_state),
-		.issue_src1_state_i  (issue_src1_state),
-		.issue_src2_state_i  (issue_src2_state),
-		.issue_src3_state_i  (issue_src3_state),
+		.dispatch_pkt_i     (dispatch_issue_pkt),
+		.dispatch_pkt1_i    (dispatch_issue_pkt1),
+		.dispatch_src0_state_i(dispatch_src0_state),
+		.dispatch_src1_state_i(dispatch_src1_state),
+		.dispatch_src2_state_i(dispatch_src2_state),
+		.dispatch_src3_state_i(dispatch_src3_state),
+		.dispatch_accept_i  (issue_pipe_push),
+		.dispatch_accept1_i (issue_pipe_push_two),
 		.completion_bus_i    (completion_bus),
 		.lsu_status_i        (lsu_status_pkt),
-		.issue_at_rob_head_i (issue_at_rob_head),
+		.rob_head_tag_i     (rob_head_tag),
+		.issue_pkt_o        (issue_pkt),
+		.issue_pkt1_o       (issue_pkt1),
 		.issue_ready_o       (issue_ready),
+		.issue_dispatch_two_ready_o(issue_dispatch_two_ready),
 		.issue_consume_two_o (issue_consume_two),
 		.issue_slot1_replay_o(issue_slot1_replay),
 		.issue_fence_o       (id_fence_i),
@@ -1106,6 +1084,14 @@ import ydrasil_axi_pkg::*;
 		.rf_rdata_rs2_i     (rf_rdata_rs2),
 		.rf_rdata_rs3_i     (rf_rdata_rs3),
 		.rf_rdata_rs4_i     (rf_rdata_rs4),
+		.dispatch_rf_addr_rs1_o(dispatch_rf_raddr_rs1),
+		.dispatch_rf_addr_rs2_o(dispatch_rf_raddr_rs2),
+		.dispatch_rf_addr_rs3_o(dispatch_rf_raddr_rs3),
+		.dispatch_rf_addr_rs4_o(dispatch_rf_raddr_rs4),
+		.dispatch_rf_rdata_rs1_i(dispatch_rf_rdata_rs1),
+		.dispatch_rf_rdata_rs2_i(dispatch_rf_rdata_rs2),
+		.dispatch_rf_rdata_rs3_i(dispatch_rf_rdata_rs3),
+		.dispatch_rf_rdata_rs4_i(dispatch_rf_rdata_rs4),
 		.fpr_addr_rs1_o     (fpr_raddr_rs1),
 		.fpr_addr_rs2_o     (fpr_raddr_rs2),
 		.fpr_addr_rs3_o     (fpr_raddr_rs3),
@@ -1310,9 +1296,17 @@ import ydrasil_axi_pkg::*;
 		.rf_rdata_rs2_o(rf_rdata_rs2)
 		,.rf_raddr_rs3_i(rf_raddr_rs3)
 		,.rf_rdata_rs3_o(rf_rdata_rs3)
-		,.rf_raddr_rs4_i(rf_raddr_rs4)
-		,.rf_rdata_rs4_o(rf_rdata_rs4)
-	);
+			,.rf_raddr_rs4_i(rf_raddr_rs4)
+			,.rf_rdata_rs4_o(rf_rdata_rs4)
+			,.dispatch_rf_raddr_rs1_i(dispatch_rf_raddr_rs1)
+			,.dispatch_rf_rdata_rs1_o(dispatch_rf_rdata_rs1)
+			,.dispatch_rf_raddr_rs2_i(dispatch_rf_raddr_rs2)
+			,.dispatch_rf_rdata_rs2_o(dispatch_rf_rdata_rs2)
+			,.dispatch_rf_raddr_rs3_i(dispatch_rf_raddr_rs3)
+			,.dispatch_rf_rdata_rs3_o(dispatch_rf_rdata_rs3)
+			,.dispatch_rf_raddr_rs4_i(dispatch_rf_raddr_rs4)
+			,.dispatch_rf_rdata_rs4_o(dispatch_rf_rdata_rs4)
+		);
 
 		ydrasil_ctrl u_ctrl (
 			.clk               (clk),
@@ -1349,11 +1343,17 @@ import ydrasil_axi_pkg::*;
 			.dispatch_pkt_o    (dispatch_issue_pkt),
 			.dispatch_pkt1_o   (dispatch_issue_pkt1),
 			.dispatch_ready_o  (dispatch_ready),
+			.dispatch_two_ready_o(dispatch_two_ready),
 			.issue_src0_state_o(issue_src0_state),
 			.issue_src1_state_o(issue_src1_state),
 			.issue_src2_state_o(issue_src2_state),
 			.issue_src3_state_o(issue_src3_state),
+			.dispatch_src0_state_o(dispatch_src0_state),
+			.dispatch_src1_state_o(dispatch_src1_state),
+			.dispatch_src2_state_o(dispatch_src2_state),
+			.dispatch_src3_state_o(dispatch_src3_state),
 			.issue_at_rob_head_o(issue_at_rob_head),
+			.rob_head_tag_o   (rob_head_tag),
 			.gpr_pending_o     (gpr_pending_q),
 			.ex_accept_valid_o (ex_accept_valid),
 			.ex_accept_valid1_o(ex_accept_valid1),

@@ -1,3 +1,5 @@
+// Four-entry, operand-capturing issue window.  The window is the existing
+// Issue stage boundary; issue_ex_q below remains the only register before EX.
 module ydrasil_issue_stage
 import ydrasil_pkg::*;
 #(
@@ -8,21 +10,26 @@ import ydrasil_pkg::*;
     input  wire                        stall_id_i,
     input  wire                        bubble_id_i,
     input  wire                        flush_id_i,
-    input  ydrasil_issue_pkt_t         issue_pkt_i,
-    input  ydrasil_issue_pkt_t         issue_pkt1_i,
-    input  ydrasil_rob_source_state_t  issue_src0_state_i,
-    input  ydrasil_rob_source_state_t  issue_src1_state_i,
-    input  ydrasil_rob_source_state_t  issue_src2_state_i,
-    input  ydrasil_rob_source_state_t  issue_src3_state_i,
+    input  ydrasil_issue_pkt_t         dispatch_pkt_i,
+    input  ydrasil_issue_pkt_t         dispatch_pkt1_i,
+    input  ydrasil_rob_source_state_t  dispatch_src0_state_i,
+    input  ydrasil_rob_source_state_t  dispatch_src1_state_i,
+    input  ydrasil_rob_source_state_t  dispatch_src2_state_i,
+    input  ydrasil_rob_source_state_t  dispatch_src3_state_i,
+    input  wire                        dispatch_accept_i,
+    input  wire                        dispatch_accept1_i,
     input  ydrasil_completion_bus_t    completion_bus_i,
     input  ydrasil_lsu_status_pkt_t    lsu_status_i,
-    input  wire                        issue_at_rob_head_i,
+    input  producer_id_t               rob_head_tag_i,
+    output ydrasil_issue_pkt_t         issue_pkt_o,
+    output ydrasil_issue_pkt_t         issue_pkt1_o,
     output wire                        issue_ready_o,
+    output wire                        issue_dispatch_two_ready_o,
     output wire                        issue_consume_two_o,
     output wire                        issue_slot1_replay_o,
     output wire                        issue_fence_o,
     output producer_id_t               issue_fence_tag_o,
-    output wire [INST_ADDR_WIDTH-1:0]  issue_fence_next_pc_o,
+    output wire [INST_ADDR_WIDTH-1:0] issue_fence_next_pc_o,
     output wire                        scoreboard_stall_o,
     output wire                        scoreboard_stall1_o,
     output wire                        lsu_struct_stall_o,
@@ -32,226 +39,419 @@ import ydrasil_pkg::*;
     output wire                        src1_wait_o,
     output wire                        src2_wait_o,
     output wire                        src3_wait_o,
-    output ydrasil_issue_ex_pkt_t      issue_ex_o,
-    output wire [4:0]                  rf_addr_rs1_o,
-    output wire [4:0]                  rf_addr_rs2_o,
-    output wire [4:0]                  rf_addr_rs3_o,
-    output wire [4:0]                  rf_addr_rs4_o,
-    input  wire [DATA_WIDTH-1:0]       rf_rdata_rs1_i,
-    input  wire [DATA_WIDTH-1:0]       rf_rdata_rs2_i,
-    input  wire [DATA_WIDTH-1:0]       rf_rdata_rs3_i,
-    input  wire [DATA_WIDTH-1:0]       rf_rdata_rs4_i,
-    output wire [4:0]                  fpr_addr_rs1_o,
-    output wire [4:0]                  fpr_addr_rs2_o,
-    output wire [4:0]                  fpr_addr_rs3_o,
-    input  wire [DATA_WIDTH-1:0]       fpr_rdata_rs1_i,
-    input  wire [DATA_WIDTH-1:0]       fpr_rdata_rs2_i,
-    input  wire [DATA_WIDTH-1:0]       fpr_rdata_rs3_i
+    output ydrasil_issue_ex_pkt_t     issue_ex_o,
+    output wire [4:0]                 rf_addr_rs1_o,
+    output wire [4:0]                 rf_addr_rs2_o,
+    output wire [4:0]                 rf_addr_rs3_o,
+    output wire [4:0]                 rf_addr_rs4_o,
+    input  wire [DATA_WIDTH-1:0]      rf_rdata_rs1_i,
+    input  wire [DATA_WIDTH-1:0]      rf_rdata_rs2_i,
+    input  wire [DATA_WIDTH-1:0]      rf_rdata_rs3_i,
+    input  wire [DATA_WIDTH-1:0]      rf_rdata_rs4_i,
+    output wire [4:0]                 dispatch_rf_addr_rs1_o,
+    output wire [4:0]                 dispatch_rf_addr_rs2_o,
+    output wire [4:0]                 dispatch_rf_addr_rs3_o,
+    output wire [4:0]                 dispatch_rf_addr_rs4_o,
+    input  wire [DATA_WIDTH-1:0]      dispatch_rf_rdata_rs1_i,
+    input  wire [DATA_WIDTH-1:0]      dispatch_rf_rdata_rs2_i,
+    input  wire [DATA_WIDTH-1:0]      dispatch_rf_rdata_rs3_i,
+    input  wire [DATA_WIDTH-1:0]      dispatch_rf_rdata_rs4_i,
+    output wire [4:0]                 fpr_addr_rs1_o,
+    output wire [4:0]                 fpr_addr_rs2_o,
+    output wire [4:0]                 fpr_addr_rs3_o,
+    input  wire [DATA_WIDTH-1:0]      fpr_rdata_rs1_i,
+    input  wire [DATA_WIDTH-1:0]      fpr_rdata_rs2_i,
+    input  wire [DATA_WIDTH-1:0]      fpr_rdata_rs3_i
 );
+    localparam int N = 4;
+
     function automatic logic completion_hit(
-        input ydrasil_source_desc_t src,
-        input integer lane
+        input ydrasil_source_desc_t src, input integer lane
     );
-        begin
-            completion_hit = src.used && (src.arch_addr != '0) &&
-                src.tag_valid && completion_bus_i[lane].valid &&
-                completion_bus_i[lane].producer_tracked &&
-                (completion_bus_i[lane].producer_id == src.producer_tag);
-        end
+        completion_hit = src.used && src.tag_valid &&
+            completion_bus_i[lane].valid &&
+            completion_bus_i[lane].producer_tracked &&
+            (completion_bus_i[lane].producer_id == src.producer_tag);
     endfunction
 
     function automatic logic typed_completion_hit(
         input ydrasil_source_desc_t src
     );
-        begin
-            unique case (src.producer_class)
-                RESULT_LSU: typed_completion_hit =
-                    completion_hit(src, COMPLETION_LSU);
-                RESULT_MDU: typed_completion_hit =
-                    completion_hit(src, COMPLETION_MUL);
-                default: typed_completion_hit =
-                    completion_hit(src, COMPLETION_ALU) ||
-                    completion_hit(src, COMPLETION_DUAL_ALU);
-            endcase
-        end
+        case (src.producer_class)
+            RESULT_LSU: typed_completion_hit = completion_hit(src, COMPLETION_LSU);
+            RESULT_MDU: typed_completion_hit = completion_hit(src, COMPLETION_MUL);
+            default: typed_completion_hit = completion_hit(src, COMPLETION_ALU) ||
+                completion_hit(src, COMPLETION_DUAL_ALU);
+        endcase
     endfunction
 
     function automatic [DATA_WIDTH-1:0] typed_completion_data(
         input ydrasil_source_desc_t src
     );
-        begin
-            unique case (src.producer_class)
-                RESULT_LSU:
-                    typed_completion_data = completion_bus_i[COMPLETION_LSU].data;
-                RESULT_MDU:
-                    typed_completion_data = completion_bus_i[COMPLETION_MUL].data;
-                default:
-                    typed_completion_data =
-                        completion_hit(src, COMPLETION_ALU) ?
-                        completion_bus_i[COMPLETION_ALU].data :
-                        completion_bus_i[COMPLETION_DUAL_ALU].data;
-            endcase
-        end
+        case (src.producer_class)
+            RESULT_LSU: typed_completion_data = completion_bus_i[COMPLETION_LSU].data;
+            RESULT_MDU: typed_completion_data = completion_bus_i[COMPLETION_MUL].data;
+            default: typed_completion_data = completion_hit(src, COMPLETION_ALU) ?
+                completion_bus_i[COMPLETION_ALU].data :
+                completion_bus_i[COMPLETION_DUAL_ALU].data;
+        endcase
     endfunction
 
-    function automatic logic source_ready(
+    function automatic logic init_ready(
         input ydrasil_source_desc_t src,
         input ydrasil_rob_source_state_t state
     );
-        begin
-            source_ready = !src.used || (src.arch_addr == '0) ||
-                !state.live || state.done || typed_completion_hit(src);
-        end
+        // A valid tag with state.live=0 is the intra-bundle producer allocated
+        // by slot0, which is not visible in the ROB until this clock edge.
+        // It must remain asleep rather than being mistaken for an architectural
+        // register with no pending producer.
+        init_ready = !src.used || !src.tag_valid ||
+            (state.live && state.done) || typed_completion_hit(src);
     endfunction
 
-    function automatic [DATA_WIDTH-1:0] source_data(
+    function automatic [DATA_WIDTH-1:0] init_value(
         input ydrasil_source_desc_t src,
         input ydrasil_rob_source_state_t state,
-        input logic [DATA_WIDTH-1:0] arf_data
+        input logic [DATA_WIDTH-1:0] rf_value
     );
-        begin
-            source_data = arf_data;
-            if (src.used && (src.arch_addr != '0) && state.live)
-                source_data = state.result;
-            if (src.used && (src.arch_addr != '0) &&
-                typed_completion_hit(src))
-                source_data = typed_completion_data(src);
-        end
+        init_value = rf_value;
+        if (src.used && src.tag_valid && state.live && state.done)
+            init_value = state.result;
+        if (src.used && src.tag_valid && typed_completion_hit(src))
+            init_value = typed_completion_data(src);
     endfunction
 
-    wire src0_ready = source_ready(issue_pkt_i.src0, issue_src0_state_i);
-    wire src1_ready = source_ready(issue_pkt_i.src1, issue_src1_state_i);
-    wire src2_ready = source_ready(issue_pkt1_i.src0, issue_src2_state_i);
-    wire src3_ready = source_ready(issue_pkt1_i.src1, issue_src3_state_i);
-    wire slot0_scoreboard_stall = issue_pkt_i.valid &&
-        (!src0_ready || !src1_ready);
-    wire slot1_scoreboard_stall = issue_pkt1_i.valid &&
-        (!src2_ready || !src3_ready);
-    wire slot0_lsu_stall = issue_pkt_i.ctrl.lsu_req && lsu_status_i.busy;
-    wire slot1_lsu_stall = issue_pkt1_i.ctrl.lsu_req && lsu_status_i.busy;
-    wire serialize_stall = issue_pkt_i.ctrl.serialize_before &&
-        (!lsu_status_i.idle || !issue_at_rob_head_i);
-    wire local_issue_stall = slot0_scoreboard_stall || slot0_lsu_stall ||
-        serialize_stall;
-    wire id_advance = !stall_id_i && !bubble_id_i && !local_issue_stall;
-    wire pair_eligible = issue_pkt_i.pair_eligible && issue_pkt1_i.valid;
-    wire slot1_blocked = slot1_scoreboard_stall || slot1_lsu_stall;
-    wire pair_issue = pair_eligible && !slot1_blocked;
-    wire swap_pair = pair_issue &&
-        !(issue_pkt_i.lane_mask[0] && issue_pkt1_i.lane_mask[1]);
-    wire head0_b_only = issue_pkt_i.lane_mask[1] &&
-        !issue_pkt_i.lane_mask[0];
+    function automatic logic a_capable(input ydrasil_issue_pkt_t p);
+        a_capable = !p.decode.resources[RESOURCE_BRU] &&
+            !p.decode.resources[RESOURCE_LSU];
+    endfunction
 
-    assign issue_ready_o = id_advance;
-    assign issue_consume_two_o = id_advance && pair_eligible;
-    assign issue_slot1_replay_o = id_advance && pair_eligible && slot1_blocked;
-    reg issue_fence_q;
-    producer_id_t issue_fence_tag_q;
-    reg [INST_ADDR_WIDTH-1:0] issue_fence_next_pc_q;
-    wire issue_fence_accept = id_advance && issue_pkt_i.valid &&
-        issue_pkt_i.decode.fence_i;
+    function automatic logic b_capable(input ydrasil_issue_pkt_t p);
+        b_capable = !p.decode.resources[RESOURCE_MULDIV] &&
+            !p.decode.resources[RESOURCE_FULL_BITMANIP] &&
+            !p.decode.resources[RESOURCE_SERIAL] &&
+            !p.decode.operator_type[OPERATOR_TYPE_FPU];
+    endfunction
 
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            issue_fence_q <= 1'b0;
-            issue_fence_tag_q <= '0;
-            issue_fence_next_pc_q <= '0;
-        end else if (flush_id_i) begin
-            issue_fence_q <= 1'b0;
-            issue_fence_tag_q <= '0;
-            issue_fence_next_pc_q <= '0;
-        end else begin
-            issue_fence_q <= issue_fence_accept;
-            if (issue_fence_accept) begin
-                issue_fence_tag_q <= issue_pkt_i.dst.rob_tag;
-                issue_fence_next_pc_q <= issue_pkt_i.next_pc;
-            end
-        end
-    end
+    function automatic logic raw_dep(
+        input ydrasil_issue_pkt_t older,
+        input ydrasil_issue_pkt_t younger
+    );
+        raw_dep = older.dst.writes_gpr && younger.valid &&
+            ((younger.src0.used && younger.src0.tag_valid &&
+              older.dst.rob_tag == younger.src0.producer_tag) ||
+             (younger.src1.used && younger.src1.tag_valid &&
+              older.dst.rob_tag == younger.src1.producer_tag));
+    endfunction
 
-    assign issue_fence_o = issue_fence_q;
-    assign issue_fence_tag_o = issue_fence_tag_q;
-    assign issue_fence_next_pc_o = issue_fence_next_pc_q;
-    assign scoreboard_stall_o = slot0_scoreboard_stall;
-    assign scoreboard_stall1_o = slot1_scoreboard_stall;
-    assign lsu_struct_stall_o = slot0_lsu_stall;
-    assign lsu_struct_stall1_o = slot1_lsu_stall;
-    assign serialize_stall_o = serialize_stall;
-    assign src0_wait_o = issue_pkt_i.valid && issue_pkt_i.src0.used &&
-        !src0_ready;
-    assign src1_wait_o = issue_pkt_i.valid && issue_pkt_i.src1.used &&
-        !src1_ready;
-    assign src2_wait_o = issue_pkt1_i.valid && issue_pkt1_i.src0.used &&
-        !src2_ready;
-    assign src3_wait_o = issue_pkt1_i.valid && issue_pkt1_i.src1.used &&
-        !src3_ready;
-    ydrasil_issue_pkt_t lane_a_uop;
-    ydrasil_issue_pkt_t lane_b_uop;
-    reg lane_a_valid;
-    reg lane_b_valid;
+    function automatic logic pair_compatible(
+        input ydrasil_issue_pkt_t older,
+        input ydrasil_issue_pkt_t younger
+    );
+        logic resource_conflict;
+        logic branch_memory;
+        resource_conflict = |(older.decode.resources & younger.decode.resources &
+            RESOURCE_EXCLUSIVE_MASK);
+        branch_memory = (older.decode.resources[RESOURCE_BRU] &&
+            younger.decode.resources[RESOURCE_LSU]) ||
+            (younger.decode.resources[RESOURCE_BRU] &&
+             older.decode.resources[RESOURCE_LSU]);
+        pair_compatible = older.valid && younger.valid &&
+            !raw_dep(older, younger) && !resource_conflict &&
+            !older.ctrl.serialize_before && !younger.ctrl.serialize_before &&
+            !branch_memory && (a_capable(older) && b_capable(younger) ||
+                               b_capable(older) && a_capable(younger));
+    endfunction
+
+    function automatic logic pair_swap(
+        input ydrasil_issue_pkt_t older,
+        input ydrasil_issue_pkt_t younger
+    );
+        pair_swap = !(a_capable(older) && b_capable(younger));
+    endfunction
+
+    // Only side-effect-free operations may cross an older unissued entry.
+    // Branches may be crossed by such operations because the producer/branch
+    // recovery mask discards them on a redirect.
+    function automatic logic spec_safe(input ydrasil_issue_pkt_t p);
+        spec_safe = p.valid && !p.memory_op &&
+            !p.decode.resources[RESOURCE_BRU] &&
+            !p.decode.resources[RESOURCE_SERIAL] &&
+            !p.decode.operator_type[OPERATOR_TYPE_FPU] &&
+            !(p.decode.operator_type[OPERATOR_TYPE_MUL] &&
+              (p.decode.operator_info[OP_MUL_DIV] ||
+               p.decode.operator_info[OP_MUL_DIVU] ||
+               p.decode.operator_info[OP_MUL_REM] ||
+               p.decode.operator_info[OP_MUL_REMU]));
+    endfunction
+
+    function automatic logic cross_allowed(
+        input ydrasil_issue_pkt_t older,
+        input ydrasil_issue_pkt_t younger
+    );
+        cross_allowed = spec_safe(younger) && !older.ctrl.serialize_before &&
+            !raw_dep(older, younger);
+    endfunction
+
+    function automatic logic runtime_legal(input ydrasil_issue_pkt_t p);
+        runtime_legal = !(p.memory_op && lsu_status_i.busy);
+    endfunction
+
+    ydrasil_issue_pkt_t entry_pkt_q [0:N-1];
+    ydrasil_issue_pkt_t entry_pkt_d [0:N-1];
+    reg [N-1:0] entry_valid_q, entry_valid_d;
+    reg [1:0] entry_ready_q [0:N-1];
+    reg [1:0] entry_ready_d [0:N-1];
+    reg [DATA_WIDTH-1:0] entry_value_q [0:N-1][0:1];
+    reg [DATA_WIDTH-1:0] entry_value_d [0:N-1][0:1];
+    reg [N-1:0] older_q [0:N-1];
+    reg [N-1:0] older_d [0:N-1];
+    reg [N-1:0] pair_q [0:N-1];
+    reg [N-1:0] pair_d [0:N-1];
+    reg [N-1:0] swap_q [0:N-1];
+    reg [N-1:0] swap_d [0:N-1];
+    reg [N-1:0] cross_q [0:N-1];
+    reg [N-1:0] cross_d [0:N-1];
+    // A control instruction is removed from the window when it is selected,
+    // while BRU produces its redirect one cycle later.  Retain that fact for
+    // exactly the intervening cycle so younger side-effecting operations
+    // cannot enter LSU/CSR before the control decision is known.
+    reg control_barrier_q;
+    // Serial/system instructions need a stricter one-cycle handoff barrier:
+    // no younger producer may execute before trap/CSR control takes over.
+    reg serial_barrier_q;
+
+    wire [N-1:0] free_vec = ~entry_valid_q;
+    reg [N-1:0] alloc_sel0, alloc_sel1;
+    integer ai;
     always_comb begin
-        lane_a_uop = issue_pkt_i;
-        lane_b_uop = issue_pkt1_i;
-        lane_a_valid = issue_pkt_i.valid && !head0_b_only;
-        lane_b_valid = issue_pkt_i.valid && head0_b_only;
-        if (pair_issue) begin
-            lane_a_valid = 1'b1;
-            lane_b_valid = 1'b1;
-            if (swap_pair) begin
-                lane_a_uop = issue_pkt1_i;
-                lane_b_uop = issue_pkt_i;
-            end
-        end else if (head0_b_only) begin
-            lane_b_uop = issue_pkt_i;
+        alloc_sel0 = '0;
+        alloc_sel1 = '0;
+        if (dispatch_accept_i && dispatch_pkt_i.valid) begin
+            for (ai = 0; ai < N; ai = ai + 1)
+                if (!entry_valid_q[ai] && (alloc_sel0 == '0))
+                    alloc_sel0[ai] = 1'b1;
+        end
+        if (dispatch_accept1_i && dispatch_pkt1_i.valid) begin
+            for (ai = 0; ai < N; ai = ai + 1)
+                if (!entry_valid_q[ai] && (alloc_sel0[ai] == 1'b0) &&
+                    (alloc_sel1 == '0))
+                    alloc_sel1[ai] = 1'b1;
         end
     end
 
-    wire [DATA_WIDTH-1:0] slot0_src0 = source_data(
-        issue_pkt_i.src0, issue_src0_state_i, rf_rdata_rs1_i);
-    wire [DATA_WIDTH-1:0] slot0_src1 = source_data(
-        issue_pkt_i.src1, issue_src1_state_i, rf_rdata_rs2_i);
-    wire [DATA_WIDTH-1:0] slot1_src0 = source_data(
-        issue_pkt1_i.src0, issue_src2_state_i, rf_rdata_rs3_i);
-    wire [DATA_WIDTH-1:0] slot1_src1 = source_data(
-        issue_pkt1_i.src1, issue_src3_state_i, rf_rdata_rs4_i);
-    wire [DATA_WIDTH-1:0] lane_a_src0 = swap_pair ? slot1_src0 : slot0_src0;
-    wire [DATA_WIDTH-1:0] lane_a_src1 = swap_pair ? slot1_src1 : slot0_src1;
-    wire lane_b_uses_slot0 = head0_b_only || swap_pair;
-    wire [DATA_WIDTH-1:0] lane_b_src0 = lane_b_uses_slot0 ?
-        slot0_src0 : slot1_src0;
-    wire [DATA_WIDTH-1:0] lane_b_src1 = lane_b_uses_slot0 ?
-        slot0_src1 : slot1_src1;
+    integer wi;
+    reg [N-1:0] src_ready0_now, src_ready1_now;
+    reg [DATA_WIDTH-1:0] src_value0_now [0:N-1];
+    reg [DATA_WIDTH-1:0] src_value1_now [0:N-1];
+    always_comb begin
+        for (wi = 0; wi < N; wi = wi + 1) begin
+            src_ready0_now[wi] = entry_ready_q[wi][0] ||
+                typed_completion_hit(entry_pkt_q[wi].src0);
+            src_ready1_now[wi] = entry_ready_q[wi][1] ||
+                typed_completion_hit(entry_pkt_q[wi].src1);
+            src_value0_now[wi] = entry_value_q[wi][0];
+            src_value1_now[wi] = entry_value_q[wi][1];
+            if (typed_completion_hit(entry_pkt_q[wi].src0))
+                src_value0_now[wi] = typed_completion_data(entry_pkt_q[wi].src0);
+            if (typed_completion_hit(entry_pkt_q[wi].src1))
+                src_value1_now[wi] = typed_completion_data(entry_pkt_q[wi].src1);
+        end
+    end
 
-    assign rf_addr_rs1_o = issue_pkt_i.src0.arch_addr;
-    assign rf_addr_rs2_o = issue_pkt_i.src1.arch_addr;
-    assign rf_addr_rs3_o = issue_pkt1_i.src0.arch_addr;
-    assign rf_addr_rs4_o = issue_pkt1_i.src1.arch_addr;
-    assign fpr_addr_rs1_o = lane_a_uop.decode.fp_rs1_addr;
-    assign fpr_addr_rs2_o = lane_a_uop.decode.fp_rs2_addr;
-    assign fpr_addr_rs3_o = lane_a_uop.decode.fp_rs3_addr;
+    reg [N-1:0] eligible0, select0, eligible1, select1;
+    reg [N-1:0] hard_block0, hard_block1;
+    integer sel_i, sel_j;
+    wire select_enable = !stall_id_i && !bubble_id_i && !flush_id_i;
+    always_comb begin
+        eligible0 = '0;
+        select0 = '0;
+        eligible1 = '0;
+        select1 = '0;
+        hard_block0 = '0;
+        hard_block1 = '0;
+        for (sel_i = 0; sel_i < N; sel_i = sel_i + 1) begin
+            for (sel_j = 0; sel_j < N; sel_j = sel_j + 1) begin
+            if (entry_valid_q[sel_j] && older_q[sel_j][sel_i] && !cross_q[sel_j][sel_i])
+                    hard_block0[sel_i] = 1'b1;
+            end
+            if (entry_valid_q[sel_i] && src_ready0_now[sel_i] && src_ready1_now[sel_i] &&
+                !hard_block0[sel_i] &&
+                !serial_barrier_q &&
+                !(control_barrier_q && !spec_safe(entry_pkt_q[sel_i])) &&
+                runtime_legal(entry_pkt_q[sel_i]) &&
+                !(entry_pkt_q[sel_i].ctrl.serialize_before &&
+                  ((entry_pkt_q[sel_i].dst.rob_tag != rob_head_tag_i) ||
+                   !lsu_status_i.idle)))
+                eligible0[sel_i] = 1'b1;
+        end
+        for (sel_i = 0; sel_i < N; sel_i = sel_i + 1) begin
+            if (eligible0[sel_i]) begin
+                select0[sel_i] = 1'b1;
+                for (sel_j = 0; sel_j < N; sel_j = sel_j + 1)
+                    if (eligible0[sel_j] && older_q[sel_j][sel_i])
+                        select0[sel_i] = 1'b0;
+            end
+        end
+        // Compute the second candidate after the first one.  A hard older
+        // entry is allowed only when it is the selected first instruction.
+        for (sel_i = 0; sel_i < N; sel_i = sel_i + 1) begin
+            for (sel_j = 0; sel_j < N; sel_j = sel_j + 1) begin
+                if (entry_valid_q[sel_j] && older_q[sel_j][sel_i] && !cross_q[sel_j][sel_i] &&
+                    !select0[sel_j])
+                    hard_block1[sel_i] = 1'b1;
+            end
+            for (sel_j = 0; sel_j < N; sel_j = sel_j + 1)
+                if (select0[sel_j] && pair_q[sel_j][sel_i])
+                    eligible1[sel_i] = 1'b1;
+            eligible1[sel_i] = eligible1[sel_i] && entry_valid_q[sel_i] &&
+                !select0[sel_i] && src_ready0_now[sel_i] && src_ready1_now[sel_i] &&
+                !hard_block1[sel_i] &&
+                !serial_barrier_q &&
+                !(control_barrier_q && !spec_safe(entry_pkt_q[sel_i])) &&
+                runtime_legal(entry_pkt_q[sel_i]);
+        end
+        for (sel_i = 0; sel_i < N; sel_i = sel_i + 1) begin
+            if (eligible1[sel_i]) begin
+                select1[sel_i] = 1'b1;
+                for (sel_j = 0; sel_j < N; sel_j = sel_j + 1)
+                    if (eligible1[sel_j] && older_q[sel_j][sel_i])
+                        select1[sel_i] = 1'b0;
+            end
+        end
+        if (!select_enable) begin
+            select0 = '0;
+            select1 = '0;
+        end
+    end
+
+    wire selected_valid = |select0;
+    wire selected_pair = |select1;
+    wire [N-1:0] selected_remove = select0 | select1;
+    ydrasil_issue_pkt_t selected_uop0, selected_uop1;
+    reg [DATA_WIDTH-1:0] selected_src00, selected_src01;
+    reg [DATA_WIDTH-1:0] selected_src10, selected_src11;
+    reg selected_swap;
+    integer chosen_i, chosen_j;
+    always_comb begin
+        selected_uop0 = '0;
+        selected_uop1 = '0;
+        selected_src00 = '0;
+        selected_src01 = '0;
+        selected_src10 = '0;
+        selected_src11 = '0;
+        selected_swap = 1'b0;
+        for (chosen_i = 0; chosen_i < N; chosen_i = chosen_i + 1) begin
+            if (select0[chosen_i]) begin
+                selected_uop0 = entry_pkt_q[chosen_i];
+                selected_src00 = src_value0_now[chosen_i];
+                selected_src01 = src_value1_now[chosen_i];
+            end
+            if (select1[chosen_i]) begin
+                selected_uop1 = entry_pkt_q[chosen_i];
+                selected_src10 = src_value0_now[chosen_i];
+                selected_src11 = src_value1_now[chosen_i];
+            end
+        end
+        for (chosen_i = 0; chosen_i < N; chosen_i = chosen_i + 1)
+            for (chosen_j = 0; chosen_j < N; chosen_j = chosen_j + 1)
+                if (select0[chosen_i] && select1[chosen_j])
+                    selected_swap = swap_q[chosen_i][chosen_j];
+    end
+
+    assign issue_pkt_o = selected_uop0;
+    assign issue_pkt1_o = selected_uop1;
+    assign issue_ready_o = !flush_id_i && !bubble_id_i &&
+        (|free_vec);
+    assign issue_dispatch_two_ready_o = !flush_id_i && !bubble_id_i &&
+        (free_vec != '0) && ((free_vec & (free_vec - 1'b1)) != '0);
+    assign issue_consume_two_o = selected_pair;
+    assign issue_slot1_replay_o = 1'b0;
+    assign lsu_struct_stall_o = selected_uop0.memory_op && lsu_status_i.busy;
+    assign lsu_struct_stall1_o = selected_uop1.memory_op && lsu_status_i.busy;
+    assign serialize_stall_o = selected_uop0.ctrl.serialize_before &&
+        ((selected_uop0.dst.rob_tag != rob_head_tag_i) || !lsu_status_i.idle);
+
+    // Diagnostics describe the oldest live entry; selection itself may bypass
+    // it when it is a dependency-blocked non-serial operation.
+    reg [1:0] oldest_idx;
+    integer oldest_i, oldest_j;
+    always_comb begin
+        oldest_idx = '0;
+        for (oldest_i = 0; oldest_i < N; oldest_i = oldest_i + 1)
+            if (entry_valid_q[oldest_i]) begin
+                oldest_idx = oldest_i[1:0];
+                for (oldest_j = 0; oldest_j < N; oldest_j = oldest_j + 1)
+                    if (entry_valid_q[oldest_j] && older_q[oldest_j][oldest_i])
+                        oldest_idx = oldest_i[1:0];
+            end
+    end
+    assign scoreboard_stall_o = entry_valid_q[oldest_idx] &&
+        (!src_ready0_now[oldest_idx] || !src_ready1_now[oldest_idx]);
+    assign scoreboard_stall1_o = selected_pair &&
+        (!src_ready0_now[0] || !src_ready1_now[0]);
+    assign src0_wait_o = entry_valid_q[oldest_idx] &&
+        entry_pkt_q[oldest_idx].src0.used && !src_ready0_now[oldest_idx];
+    assign src1_wait_o = entry_valid_q[oldest_idx] &&
+        entry_pkt_q[oldest_idx].src1.used && !src_ready1_now[oldest_idx];
+    assign src2_wait_o = selected_pair && !src_ready0_now[0];
+    assign src3_wait_o = selected_pair && !src_ready1_now[0];
+
+    assign rf_addr_rs1_o = selected_uop0.src0.arch_addr;
+    assign rf_addr_rs2_o = selected_uop0.src1.arch_addr;
+    assign rf_addr_rs3_o = selected_uop1.src0.arch_addr;
+    assign rf_addr_rs4_o = selected_uop1.src1.arch_addr;
+    assign dispatch_rf_addr_rs1_o = dispatch_pkt_i.src0.arch_addr;
+    assign dispatch_rf_addr_rs2_o = dispatch_pkt_i.src1.arch_addr;
+    assign dispatch_rf_addr_rs3_o = dispatch_pkt1_i.src0.arch_addr;
+    assign dispatch_rf_addr_rs4_o = dispatch_pkt1_i.src1.arch_addr;
 
     function automatic [DATA_WIDTH-1:0] operand_a_for(
-        input ydrasil_issue_pkt_t uop,
-        input logic [DATA_WIDTH-1:0] src0
+        input ydrasil_issue_pkt_t uop, input logic [DATA_WIDTH-1:0] src0
     );
-        begin
-            operand_a_for = uop.decode.operand_a_pc_sel ? uop.decode.pc :
-                uop.decode.operand_a_imm_sel ? uop.decode.imm : src0;
-        end
+        operand_a_for = uop.decode.operand_a_pc_sel ? uop.decode.pc :
+            uop.decode.operand_a_imm_sel ? uop.decode.imm : src0;
     endfunction
-
     function automatic [DATA_WIDTH-1:0] operand_b_for(
-        input ydrasil_issue_pkt_t uop,
-        input logic [DATA_WIDTH-1:0] src1
+        input ydrasil_issue_pkt_t uop, input logic [DATA_WIDTH-1:0] src1
     );
-        begin
-            operand_b_for = uop.decode.operand_b_jump_sel ? 32'd4 :
-                uop.decode.operand_b_rs_sel ? src1 : uop.decode.imm;
-        end
+        operand_b_for = uop.decode.operand_b_jump_sel ? 32'd4 :
+            uop.decode.operand_b_rs_sel ? src1 : uop.decode.imm;
     endfunction
 
-    ydrasil_issue_ex_pkt_t issue_ex_d;
-    ydrasil_issue_ex_pkt_t issue_ex_q;
+    ydrasil_issue_pkt_t lane_a_uop, lane_b_uop;
+    reg lane_a_valid, lane_b_valid;
+    reg [DATA_WIDTH-1:0] lane_a_src0, lane_a_src1;
+    reg [DATA_WIDTH-1:0] lane_b_src0, lane_b_src1;
+    always_comb begin
+        lane_a_uop = selected_uop0;
+        lane_b_uop = selected_uop1;
+        lane_a_src0 = selected_src00;
+        lane_a_src1 = selected_src01;
+        lane_b_src0 = selected_src10;
+        lane_b_src1 = selected_src11;
+        lane_a_valid = selected_valid;
+        lane_b_valid = selected_pair;
+        if (selected_pair) begin
+            lane_b_valid = 1'b1;
+            if (selected_swap) begin
+                lane_a_uop = selected_uop1;
+                lane_b_uop = selected_uop0;
+                lane_a_src0 = selected_src10;
+                lane_a_src1 = selected_src11;
+                lane_b_src0 = selected_src00;
+                lane_b_src1 = selected_src01;
+            end
+        end else if (selected_valid && !a_capable(selected_uop0)) begin
+            lane_a_valid = 1'b0;
+            lane_b_valid = 1'b1;
+            lane_b_uop = selected_uop0;
+            lane_b_src0 = selected_src00;
+            lane_b_src1 = selected_src01;
+        end
+    end
+
+    ydrasil_issue_ex_pkt_t issue_ex_d, issue_ex_q;
     always_comb begin
         issue_ex_d = '0;
         issue_ex_d.valid = lane_a_valid;
@@ -275,7 +475,6 @@ import ydrasil_pkg::*;
         issue_ex_d.csr_op_info = lane_a_uop.decode.csr_op_info;
         issue_ex_d.sys_op_info = lane_a_uop.decode.sys_op_info;
         issue_ex_d.pc = lane_a_uop.decode.pc;
-        // fence.i completes at the Issue boundary and never occupies Lane A.
         if (lane_a_uop.decode.fence_i) begin
             issue_ex_d.valid = 1'b0;
             issue_ex_d.producer_tracked = 1'b0;
@@ -285,10 +484,8 @@ import ydrasil_pkg::*;
         issue_ex_d.producer_id = lane_a_uop.dst.rob_tag;
         issue_ex_d.producer_tracked = lane_a_valid;
         issue_ex_d.lsu_req.valid = lane_a_valid && lane_a_uop.memory_op;
-        issue_ex_d.lsu_req.is_load =
-            lane_a_uop.decode.operator_type[OPERATOR_TYPE_LOAD];
-        issue_ex_d.lsu_req.is_store =
-            lane_a_uop.decode.operator_type[OPERATOR_TYPE_STORE];
+        issue_ex_d.lsu_req.is_load = lane_a_uop.decode.operator_type[OPERATOR_TYPE_LOAD];
+        issue_ex_d.lsu_req.is_store = lane_a_uop.decode.operator_type[OPERATOR_TYPE_STORE];
         issue_ex_d.lsu_req.op = lane_a_uop.decode.operator_lsu;
         issue_ex_d.lsu_req.rd_addr = lane_a_uop.dst.rd_addr;
         issue_ex_d.lsu_req.producer_id = lane_a_uop.dst.rob_tag;
@@ -315,7 +512,6 @@ import ydrasil_pkg::*;
         issue_ex_d.fpu_req.producer_tracked = lane_a_valid;
         issue_ex_d.fpu_req.pc = lane_a_uop.decode.pc;
         issue_ex_d.fpu_req.instr = lane_a_uop.decode.instr;
-
         issue_ex_d.lane1_valid = lane_b_valid;
         issue_ex_d.lane1_operand_a = operand_a_for(lane_b_uop, lane_b_src0);
         issue_ex_d.lane1_operand_b = operand_b_for(lane_b_uop, lane_b_src1);
@@ -341,33 +537,173 @@ import ydrasil_pkg::*;
         issue_ex_d.lane1_pred_target = lane_b_uop.decode.pred_target;
         issue_ex_d.lane1_pred_counter = lane_b_uop.decode.pred_counter;
         issue_ex_d.lane1_pred_bht_index = lane_b_uop.decode.pred_bht_index;
-
-        // A blocked DispatchQ head owns no EX state. This is the registered
-        // Issue/EX boundary: operands and tags advance only with the queue pop.
-        if (!id_advance)
+        if (!select_enable)
             issue_ex_d = '0;
+    end
+
+    assign rf_addr_rs1_o = selected_uop0.src0.arch_addr;
+    assign rf_addr_rs2_o = selected_uop0.src1.arch_addr;
+    assign rf_addr_rs3_o = selected_uop1.src0.arch_addr;
+    assign rf_addr_rs4_o = selected_uop1.src1.arch_addr;
+    assign fpr_addr_rs1_o = lane_a_uop.decode.fp_rs1_addr;
+    assign fpr_addr_rs2_o = lane_a_uop.decode.fp_rs2_addr;
+    assign fpr_addr_rs3_o = lane_a_uop.decode.fp_rs3_addr;
+
+    reg issue_fence_q;
+    producer_id_t issue_fence_tag_q;
+    reg [INST_ADDR_WIDTH-1:0] issue_fence_next_pc_q;
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n || flush_id_i) begin
+            issue_fence_q <= 1'b0;
+            issue_fence_tag_q <= '0;
+            issue_fence_next_pc_q <= '0;
+        end else begin
+            issue_fence_q <= selected_valid && select_enable &&
+                selected_uop0.decode.fence_i;
+            if (selected_valid && select_enable && selected_uop0.decode.fence_i) begin
+                issue_fence_tag_q <= selected_uop0.dst.rob_tag;
+                issue_fence_next_pc_q <= selected_uop0.next_pc;
+            end
+        end
+    end
+    assign issue_fence_o = issue_fence_q;
+    assign issue_fence_tag_o = issue_fence_tag_q;
+    assign issue_fence_next_pc_o = issue_fence_next_pc_q;
+
+    integer di, dj;
+    always_comb begin
+        entry_valid_d = entry_valid_q;
+        for (di = 0; di < N; di = di + 1) begin
+            entry_pkt_d[di] = entry_pkt_q[di];
+            entry_ready_d[di] = entry_ready_q[di];
+            entry_value_d[di][0] = entry_value_q[di][0];
+            entry_value_d[di][1] = entry_value_q[di][1];
+            older_d[di] = older_q[di];
+            pair_d[di] = pair_q[di];
+            swap_d[di] = swap_q[di];
+            cross_d[di] = cross_q[di];
+            if (entry_valid_q[di]) begin
+                if (typed_completion_hit(entry_pkt_q[di].src0)) begin
+                    entry_ready_d[di][0] = 1'b1;
+                    entry_value_d[di][0] = typed_completion_data(entry_pkt_q[di].src0);
+                end
+                if (typed_completion_hit(entry_pkt_q[di].src1)) begin
+                    entry_ready_d[di][1] = 1'b1;
+                    entry_value_d[di][1] = typed_completion_data(entry_pkt_q[di].src1);
+                end
+            end
+            if (selected_remove[di]) begin
+                entry_valid_d[di] = 1'b0;
+                older_d[di] = '0;
+                pair_d[di] = '0;
+                swap_d[di] = '0;
+                cross_d[di] = '0;
+            end
+            for (dj = 0; dj < N; dj = dj + 1)
+                if (selected_remove[di] || selected_remove[dj]) begin
+                    older_d[di][dj] = 1'b0;
+                    pair_d[di][dj] = 1'b0;
+                    swap_d[di][dj] = 1'b0;
+                    cross_d[di][dj] = 1'b0;
+                end
+        end
+        for (di = 0; di < N; di = di + 1) begin
+            if (alloc_sel0[di]) begin
+                entry_valid_d[di] = 1'b1;
+                entry_pkt_d[di] = dispatch_pkt_i;
+                entry_ready_d[di][0] = init_ready(dispatch_pkt_i.src0, dispatch_src0_state_i);
+                entry_ready_d[di][1] = init_ready(dispatch_pkt_i.src1, dispatch_src1_state_i);
+                entry_value_d[di][0] = init_value(dispatch_pkt_i.src0, dispatch_src0_state_i, dispatch_rf_rdata_rs1_i);
+                entry_value_d[di][1] = init_value(dispatch_pkt_i.src1, dispatch_src1_state_i, dispatch_rf_rdata_rs2_i);
+            end
+            if (alloc_sel1[di]) begin
+                entry_valid_d[di] = 1'b1;
+                entry_pkt_d[di] = dispatch_pkt1_i;
+                entry_ready_d[di][0] = init_ready(dispatch_pkt1_i.src0, dispatch_src2_state_i);
+                entry_ready_d[di][1] = init_ready(dispatch_pkt1_i.src1, dispatch_src3_state_i);
+                entry_value_d[di][0] = init_value(dispatch_pkt1_i.src0, dispatch_src2_state_i, dispatch_rf_rdata_rs3_i);
+                entry_value_d[di][1] = init_value(dispatch_pkt1_i.src1, dispatch_src3_state_i, dispatch_rf_rdata_rs4_i);
+            end
+        end
+        for (di = 0; di < N; di = di + 1) begin
+            for (dj = 0; dj < N; dj = dj + 1) begin
+                if (entry_valid_q[di] && !selected_remove[di] && alloc_sel0[dj]) begin
+                    older_d[di][dj] = 1'b1;
+                    pair_d[di][dj] = pair_compatible(entry_pkt_q[di], dispatch_pkt_i);
+                    swap_d[di][dj] = pair_swap(entry_pkt_q[di], dispatch_pkt_i);
+                    cross_d[di][dj] = cross_allowed(entry_pkt_q[di], dispatch_pkt_i);
+                end
+                if (entry_valid_q[di] && !selected_remove[di] && alloc_sel1[dj]) begin
+                    older_d[di][dj] = 1'b1;
+                    pair_d[di][dj] = pair_compatible(entry_pkt_q[di], dispatch_pkt1_i);
+                    swap_d[di][dj] = pair_swap(entry_pkt_q[di], dispatch_pkt1_i);
+                    cross_d[di][dj] = cross_allowed(entry_pkt_q[di], dispatch_pkt1_i);
+                end
+            end
+        end
+        for (di = 0; di < N; di = di + 1)
+            for (dj = 0; dj < N; dj = dj + 1)
+                if (alloc_sel0[di] && alloc_sel1[dj]) begin
+                    older_d[di][dj] = 1'b1;
+                    pair_d[di][dj] = pair_compatible(dispatch_pkt_i, dispatch_pkt1_i);
+                    swap_d[di][dj] = pair_swap(dispatch_pkt_i, dispatch_pkt1_i);
+                    cross_d[di][dj] = cross_allowed(dispatch_pkt_i, dispatch_pkt1_i);
+                end
+    end
+
+    integer qi;
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n || flush_id_i) begin
+            entry_valid_q <= '0;
+            for (qi = 0; qi < N; qi = qi + 1) begin
+                entry_pkt_q[qi] <= '0;
+                entry_ready_q[qi] <= '0;
+                entry_value_q[qi][0] <= '0;
+                entry_value_q[qi][1] <= '0;
+                older_q[qi] <= '0;
+                pair_q[qi] <= '0;
+                swap_q[qi] <= '0;
+                cross_q[qi] <= '0;
+            end
+            control_barrier_q <= 1'b0;
+            serial_barrier_q <= 1'b0;
+        end else begin
+            entry_valid_q <= entry_valid_d;
+            for (qi = 0; qi < N; qi = qi + 1) begin
+                entry_pkt_q[qi] <= entry_pkt_d[qi];
+                entry_ready_q[qi] <= entry_ready_d[qi];
+                entry_value_q[qi][0] <= entry_value_d[qi][0];
+                entry_value_q[qi][1] <= entry_value_d[qi][1];
+                older_q[qi] <= older_d[qi];
+                pair_q[qi] <= pair_d[qi];
+                swap_q[qi] <= swap_d[qi];
+                cross_q[qi] <= cross_d[qi];
+            end
+            control_barrier_q <= select_enable && selected_valid &&
+                (selected_uop0.decode.resources[RESOURCE_BRU] ||
+                 (selected_pair && selected_uop1.decode.resources[RESOURCE_BRU]));
+            serial_barrier_q <= select_enable && selected_valid &&
+                (selected_uop0.ctrl.serialize_before ||
+                 (selected_pair && selected_uop1.ctrl.serialize_before));
+        end
     end
 
     always_ff @(posedge clk) begin
         if (!rst_n || flush_id_i)
             issue_ex_q <= '0;
-        else if (!stall_id_i) begin
-            if (bubble_id_i)
-                issue_ex_q <= '0;
-            else
-                issue_ex_q <= issue_ex_d;
-        end
+        else if (!stall_id_i)
+            issue_ex_q <= bubble_id_i ? '0 : issue_ex_d;
     end
     assign issue_ex_o = issue_ex_q;
 
 `ifndef SYNTHESIS
-    wire issue_valid_ff = issue_pkt_i.valid;
+    wire issue_valid_ff = selected_valid;
+    wire id_advance = selected_valid && select_enable;
     wire [OPERATOR_TYPE_WIDTH-1:0] issue_operator_type_ff =
-        issue_pkt_i.decode.operator_type;
-    wire rs1_completion_fwd = typed_completion_hit(issue_pkt_i.src0);
-    wire rs2_completion_fwd = typed_completion_hit(issue_pkt_i.src1);
-    wire issue_plain_alu_op =
-        issue_operator_type_ff[OPERATOR_TYPE_ALU] &&
+        selected_uop0.decode.operator_type;
+    wire rs1_completion_fwd = typed_completion_hit(selected_uop0.src0);
+    wire rs2_completion_fwd = typed_completion_hit(selected_uop0.src1);
+    wire issue_plain_alu_op = issue_operator_type_ff[OPERATOR_TYPE_ALU] &&
         !issue_operator_type_ff[OPERATOR_TYPE_BITMANIP];
     wire issue_early_alu_valid_ff = 1'b0;
     wire [5:0] issue_early_kind_ff = '0;
@@ -377,7 +713,6 @@ import ydrasil_pkg::*;
     wire issue_simple_alu_op = issue_plain_alu_op;
 `endif
 endmodule
-
 
 // 第二槽位仅执行无异常的单周期整数/位操作。输入与输出各打一拍，
 // 使其完成时序与主 ALU 完成总线保持一致。

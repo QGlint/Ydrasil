@@ -1217,9 +1217,9 @@ coremark_opt_sim_$(1):
 		>"$$$$run_log" 2>&1; rc=$$$$?; set -e; hw_log="$(HW_TRACE_OUT_DIR)/coremark-opt/$$$$profile/hw.log"; \
 	result=FAIL; if [ "$$$$rc" -eq 0 ] && grep -q 'Correct operation validated' "$$$$hw_log" && \
 		grep -q 'COREMARK DONE' "$$$$hw_log"; then result=PASS; fi; \
-	cycles=$$$$(grep -o 'CYCLES=[0-9]*' "$$$$hw_log" 2>/dev/null | tail -1 | cut -d= -f2); \
-	insts=$$$$(grep -o 'INSTS=[0-9]*' "$$$$hw_log" 2>/dev/null | tail -1 | cut -d= -f2); \
-	ipc=$$$$(grep -o 'IPC=[0-9.]*' "$$$$hw_log" 2>/dev/null | tail -1 | cut -d= -f2); \
+	cycles=$$$$(sed -n 's/^PERF_METRIC: CYCLES= *\([0-9]*\).*/\1/p' "$$$$hw_log" 2>/dev/null | tail -1); \
+	insts=$$$$(sed -n 's/^PERF_METRIC:.* INSTS= *\([0-9]*\).*/\1/p' "$$$$hw_log" 2>/dev/null | tail -1); \
+	ipc=$$$$(sed -n 's/^PERF_METRIC:.* IPC= *\([0-9.]*\).*/\1/p' "$$$$hw_log" 2>/dev/null | tail -1); \
 	score=$$$$(sed -n 's/^CoreMark 1\.0 : *\([0-9.]*\).*/\1/p' "$$$$hw_log" 2>/dev/null | tail -1); \
 	echo "[$$$$profile] [$$$$result] itcm_bytes=$$$$bytes itcm_capacity=$$$$capacity expanded_itcm=$$$$expanded cycles=$$$${cycles:-N/A} insts=$$$${insts:-N/A} ipc=$$$${ipc:-N/A} score=$$$${score:-N/A}" > "$$$$status"
 endef
@@ -1229,10 +1229,15 @@ coremark_opt_report:
 	@mkdir -p "$(PPA_DIR)"; rm -f "$(PPA_COREMARK_OPT_LOG)"; failed=0; pass=0; skip=0; expanded_count=0; \
 	for profile in $(APP_OPT_PROFILES); do status="$(COREMARK_OPT_RESULT_DIR)/$$profile.status"; \
 		if [ ! -f "$$status" ]; then echo "[$$profile] [FAIL] missing status" | tee -a "$(PPA_COREMARK_OPT_LOG)"; failed=1; continue; fi; \
-		line=$$(cat "$$status"); if ! echo "$$line" | grep -q ' score='; then \
-			score=$$(sed -n 's/^CoreMark 1\.0 : *\([0-9.]*\).*/\1/p' "$(HW_TRACE_OUT_DIR)/coremark-opt/$$profile/hw.log" 2>/dev/null | tail -1); \
+		line=$$(cat "$$status"); hw_log="$(HW_TRACE_OUT_DIR)/coremark-opt/$$profile/hw.log"; \
+		cycles=$$(sed -n 's/^PERF_METRIC: CYCLES= *\([0-9]*\).*/\1/p' "$$hw_log" 2>/dev/null | tail -1); \
+		insts=$$(sed -n 's/^PERF_METRIC:.* INSTS= *\([0-9]*\).*/\1/p' "$$hw_log" 2>/dev/null | tail -1); \
+		ipc=$$(sed -n 's/^PERF_METRIC:.* IPC= *\([0-9.]*\).*/\1/p' "$$hw_log" 2>/dev/null | tail -1); \
+		if [ -n "$$ipc" ]; then line=$$(echo "$$line" | sed -E "s/ cycles=[^ ]*/ cycles=$$cycles/; s/ insts=[^ ]*/ insts=$$insts/; s/ ipc=[^ ]*/ ipc=$$ipc/"); fi; \
+		if ! echo "$$line" | grep -q ' score='; then \
+			score=$$(sed -n 's/^CoreMark 1\.0 : *\([0-9.]*\).*/\1/p' "$$hw_log" 2>/dev/null | tail -1); \
 			line="$$line score=$${score:-N/A}"; \
-		fi; echo "$$line" | tee -a "$(PPA_COREMARK_OPT_LOG)"; \
+		fi; echo "$$line" > "$$status"; echo "$$line" | tee -a "$(PPA_COREMARK_OPT_LOG)"; \
 		if echo "$$line" | grep -q 'expanded_itcm=YES'; then expanded_count=$$((expanded_count+1)); fi; \
 		if echo "$$line" | grep -q '\[PASS\]'; then pass=$$((pass+1)); elif echo "$$line" | grep -q '\[SKIP\]'; then skip=$$((skip+1)); else failed=1; fi; \
 	done; overall=PASS; if [ "$$failed" -ne 0 ]; then overall=FAIL; fi; \
@@ -1282,9 +1287,9 @@ sort_sim_%:
 	else \
 		result=FAIL; \
 	fi; \
-	cycles=$$(grep -o 'CYCLES=[0-9]*' "$$hw_log" 2>/dev/null | tail -1 | cut -d= -f2); \
-	insts=$$(grep -o 'INSTS=[0-9]*' "$$hw_log" 2>/dev/null | tail -1 | cut -d= -f2); \
-	ipc=$$(grep -o 'IPC=[0-9.]*' "$$hw_log" 2>/dev/null | tail -1 | cut -d= -f2); \
+	cycles=$$(sed -n 's/^PERF_METRIC: CYCLES= *\([0-9]*\).*/\1/p' "$$hw_log" 2>/dev/null | tail -1); \
+	insts=$$(sed -n 's/^PERF_METRIC:.* INSTS= *\([0-9]*\).*/\1/p' "$$hw_log" 2>/dev/null | tail -1); \
+	ipc=$$(sed -n 's/^PERF_METRIC:.* IPC= *\([0-9.]*\).*/\1/p' "$$hw_log" 2>/dev/null | tail -1); \
 	[ -n "$$cycles" ] || cycles=N/A; \
 	[ -n "$$insts" ] || insts=N/A; \
 	[ -n "$$ipc" ] || ipc=N/A; \
@@ -1370,9 +1375,9 @@ sort_opt_sim_$(1)_$(2):
 	result=FAIL; if [ "$$$$rc" -eq 0 ] \
 		&& [ "$$$$(grep -Ec "^SORT SUITE PASS name=$$$$name cases=$(SORT_EXPECT_CASES) checks=$(SORT_EXPECT_CHECKS) signature=0x$(SORT_EXPECT_SIGNATURE)$$$$" "$$$$hw_log")" -eq 1 ] \
 		&& ! grep -q "^SORT FAIL name=$$$$name " "$$$$hw_log"; then result=PASS; fi; \
-	cycles=$$$$(grep -o 'CYCLES=[0-9]*' "$$$$hw_log" 2>/dev/null | tail -1 | cut -d= -f2); \
-	insts=$$$$(grep -o 'INSTS=[0-9]*' "$$$$hw_log" 2>/dev/null | tail -1 | cut -d= -f2); \
-	ipc=$$$$(grep -o 'IPC=[0-9.]*' "$$$$hw_log" 2>/dev/null | tail -1 | cut -d= -f2); \
+	cycles=$$$$(sed -n 's/^PERF_METRIC: CYCLES= *\([0-9]*\).*/\1/p' "$$$$hw_log" 2>/dev/null | tail -1); \
+	insts=$$$$(sed -n 's/^PERF_METRIC:.* INSTS= *\([0-9]*\).*/\1/p' "$$$$hw_log" 2>/dev/null | tail -1); \
+	ipc=$$$$(sed -n 's/^PERF_METRIC:.* IPC= *\([0-9.]*\).*/\1/p' "$$$$hw_log" 2>/dev/null | tail -1); \
 	echo "[$$$$profile/$$$$name] [$$$$result] itcm_bytes=$$$$bytes itcm_capacity=$$$$capacity expanded_itcm=$$$$expanded cycles=$$$${cycles:-N/A} insts=$$$${insts:-N/A} ipc=$$$${ipc:-N/A}" > "$$$$status"
 endef
 $(foreach profile,$(APP_OPT_PROFILES),$(foreach app,$(SORT_APP_NAMES),$(eval $(call SORT_OPT_template,$(profile),$(app)))))
