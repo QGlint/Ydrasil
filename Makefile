@@ -170,7 +170,10 @@ COVERAGE_QUICK_TIMEOUT_PAD ?= 10000
 COVERAGE_QUICK_TICKS_PER_CYCLE ?= 2
 COVERAGE_QUICK_BOUNDARY_MIN ?= 200000
 COVERAGE_QUICK_ISA_MIN ?= 50000
-COVERAGE_QUICK_COREMARK_MIN ?= 550000
+# The Verilator harness advances one full core cycle in two simulation ticks.
+# A single CoreMark O2 run currently needs about 0.91M ticks, so the quick
+# floor must exceed that even before a prior PPA record is available.
+COVERAGE_QUICK_COREMARK_MIN ?= 1000000
 COVERAGE_QUICK_COE_MIN ?= 300000
 COREMARK_SIM_TIMEOUT ?= 10000000
 COE_SIM_TIMEOUT ?= 2000000
@@ -1131,6 +1134,12 @@ coremark_sim: coremark comp
 		COMPARE_SIM_EXTRA_DEFINES="+cpp_timeout=$(COREMARK_SIM_TIMEOUT) +sv_timeout=$(COREMARK_SIM_TIMEOUT)"; \
 	rc=$$?; \
 	$(MAKE) --no-print-directory coremark_result; \
+	if [ "$$rc" -eq 0 ] && \
+	   (! grep -q 'Correct operation validated' "$(COREMARK_RESULT_LOG)" || \
+	    ! grep -q 'COREMARK DONE' "$(COREMARK_RESULT_LOG)"); then \
+		echo "[COREMARK] FAIL missing completion marker in $(COREMARK_RESULT_LOG)"; \
+		rc=1; \
+	fi; \
 	exit $$rc
 
 coremark_run: coremark_sim
@@ -1542,7 +1551,7 @@ coremark_result:
 		tmp=$$(mktemp); \
 		awk '{ \
 			line=$$0; \
-			if (line ~ /^(PERF_METRIC:|PERF_STALL:|PERF_SCOREBOARD_DETAIL:|PERF_LOAD_DETAIL:|PERF_ALU_DETAIL:|PERF_PENDING_DETAIL:|PERF_LSU_STB:|PERF_DUAL_ISSUE:|PERF_L0_BTB:|PERF_FRONTEND:|PERF_BRANCH:|PERF_BP_ACC:|PERF_BP_DETAIL:)/) { \
+			if (line ~ /^PERF_[A-Z0-9_]+:/) { \
 				print line; \
 			} else if (match(line, /(core[[:space:]]+0:|3[[:space:]]+0x)/)) { \
 				prefix=substr(line, 1, RSTART - 1); \
@@ -1553,8 +1562,8 @@ coremark_result:
 				printf "\n"; \
 			} \
 		} END { printf "\n"; }' "$(COREMARK_RESULT_LOG)" > $$tmp; \
-		if grep -Eq '^(CoreMark Size|Total ticks|Total time \(secs\)|Iterations/Sec|Iterations       |Compiler version|Compiler flags|Memory location|seedcrc|Correct operation validated|CoreMark 1\.0 :|Errors detected|ERROR!|COREMARK DONE|PERF_METRIC:|PERF_STALL:|PERF_SCOREBOARD_DETAIL:|PERF_LOAD_DETAIL:|PERF_ALU_DETAIL:|PERF_PENDING_DETAIL:|PERF_LSU_STB:|PERF_DUAL_ISSUE:|PERF_L0_BTB:|PERF_FRONTEND:|PERF_BRANCH:|PERF_BP_ACC:|PERF_BP_DETAIL:|\[[0-9]+\]crc)' "$$tmp"; then \
-			grep -E '^(CoreMark Size|Total ticks|Total time \(secs\)|Iterations/Sec|Iterations       |Compiler version|Compiler flags|Memory location|seedcrc|Correct operation validated|CoreMark 1\.0 :|Errors detected|ERROR!|COREMARK DONE|PERF_METRIC:|PERF_STALL:|PERF_SCOREBOARD_DETAIL:|PERF_LOAD_DETAIL:|PERF_ALU_DETAIL:|PERF_PENDING_DETAIL:|PERF_LSU_STB:|PERF_DUAL_ISSUE:|PERF_L0_BTB:|PERF_FRONTEND:|PERF_BRANCH:|PERF_BP_ACC:|PERF_BP_DETAIL:|\[[0-9]+\]crc)' "$$tmp" | tee -a "$(PPA_COREMARK_LOG)"; \
+		if grep -Eq '^(CoreMark Size|Total ticks|Total time \(secs\)|Iterations/Sec|Iterations       |Compiler version|Compiler flags|Memory location|seedcrc|Correct operation validated|CoreMark 1\.0 :|Errors detected|ERROR!|COREMARK DONE|PERF_[A-Z0-9_]+:|\[[0-9]+\]crc)' "$$tmp"; then \
+			grep -E '^(CoreMark Size|Total ticks|Total time \(secs\)|Iterations/Sec|Iterations       |Compiler version|Compiler flags|Memory location|seedcrc|Correct operation validated|CoreMark 1\.0 :|Errors detected|ERROR!|COREMARK DONE|PERF_[A-Z0-9_]+:|\[[0-9]+\]crc)' "$$tmp" | tee -a "$(PPA_COREMARK_LOG)"; \
 		else \
 			echo "[COREMARK] No CoreMark result lines found in $(COREMARK_RESULT_LOG)" | tee -a "$(PPA_COREMARK_LOG)"; \
 		fi; \

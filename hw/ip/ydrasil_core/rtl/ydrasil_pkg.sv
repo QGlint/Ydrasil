@@ -143,6 +143,7 @@ package ydrasil_pkg;
 	localparam logic [31:0] RV32I_INS_NOP     = 32'h00000013;
 	localparam logic [31:0] RV32I_INS_ECALL   = 32'h00000073;
 	localparam logic [31:0] RV32I_INS_EBREAK  = 32'h00100073;
+	localparam logic [31:0] RV32I_INS_WFI     = 32'h10500073;
 	localparam logic [31:0] RV32I_INS_MRET    = 32'h30200073;
 	localparam logic [31:0] RV32I_INS_DRET    = 32'h7b200073;
 	localparam logic [31:0] RESET_INS         = 32'h8000_0000;
@@ -220,10 +221,11 @@ package ydrasil_pkg;
 	localparam int OP_CSR_CSRRC = 2;
 	localparam int OP_CSR_WRITE = 3;
 
-	localparam int OP_SYS_INFO_WIDTH = 3;
+	localparam int OP_SYS_INFO_WIDTH = 4;
 	localparam int OP_SYS_ECALL  = 0;
 	localparam int OP_SYS_EBREAK = 1;
 	localparam int OP_SYS_MRET   = 2;
+	localparam int OP_SYS_WFI    = 3;
 
 	localparam int OP_MUL_INFO_WIDTH = 8;
 	localparam int OP_MUL_MUL    = 0;

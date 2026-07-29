@@ -334,7 +334,9 @@ import ydrasil_axi_pkg::*;
 	ydrasil_issue_pkt_t             dispatch_issue_pkt1;
 	ydrasil_issue_pkt_t             issue_pkt;
 	ydrasil_issue_pkt_t             issue_pkt1;
-	wire                            issue_ready;
+		wire                            issue_ready;
+		wire                            issue_dispatch_ready_q;
+		wire                            issue_dispatch_two_ready_q;
 	wire                            issue_dispatch_two_ready;
 	wire                            issue_consume_two;
 	wire                            issue_slot1_replay;
@@ -349,8 +351,11 @@ import ydrasil_axi_pkg::*;
 	wire                            issue_src3_wait;
 	wire                            dispatch_ready;
 	wire                            dispatch_two_ready;
+		// Issue capacity is a registered station-credit boundary.  It depends on
+		// neither this cycle's selection nor EX completion, which keeps the
+		// ID/RAT -> issue admission path independent of issue arbitration.
 	wire                            issue_pipe_has_room = issue_ready && dispatch_ready;
-	wire                            issue_pipe_push = issue_pipe_has_room &&
+		wire                            issue_pipe_push = issue_pipe_has_room &&
 		id_issue_pkt.valid;
 	wire                            issue_pipe_push_two = issue_pipe_push &&
 		issue_dispatch_two_ready && dispatch_two_ready && id_issue_pkt1.valid &&
@@ -413,6 +418,9 @@ import ydrasil_axi_pkg::*;
 	// Trap control packets.  Compatibility aliases remain visible to the
 	// existing coverage testbench while new RTL uses the precise names.
 	ydrasil_exception_req_pkt_t  exception_req_pkt;
+	ydrasil_exception_req_pkt_t  issue_sys_req_pkt;
+	wire                           issue_sys_complete;
+	producer_id_t                 issue_sys_tag;
 	ydrasil_csr_trap_state_pkt_t trap_csr_state_pkt;
 	ydrasil_csr_write_pkt_t      trap_csr_write_pkt;
 	ydrasil_trap_ctrl_pkt_t      trap_ctrl_pkt;
@@ -444,8 +452,6 @@ import ydrasil_axi_pkg::*;
 
 	wire [ydrasil_pkg::BUS_ADDR_WIDTH-1:0] id_instr_addr;
 
-	wire [ydrasil_pkg::OP_SYS_INFO_WIDTH-1:0] id_op_sys_info;
-
 	assign operand_a = issue_ex_pkt.operand_a;
 	assign operand_b = issue_ex_pkt.operand_b;
 	assign alu_operand_a = issue_ex_pkt.operand_a;
@@ -473,7 +479,6 @@ import ydrasil_axi_pkg::*;
 	assign id_csr_raddr = issue_ex_pkt.csr_raddr;
 	assign id_ex_csr_waddr = issue_ex_pkt.csr_waddr;
 	assign id_op_csr_info = issue_ex_pkt.csr_op_info;
-	assign id_op_sys_info = issue_ex_pkt.sys_op_info;
 	assign id_instr_addr = issue_ex_pkt.pc;
 	assign id_ex_pred_hit = issue_ex_pkt.pred_hit;
 	assign id_ex_pred_taken = issue_ex_pkt.pred_taken;
@@ -869,8 +874,10 @@ import ydrasil_axi_pkg::*;
 	assign clint_csr_we = trap_csr_write_pkt.valid;
 	assign clint_csr_waddr = trap_csr_write_pkt.addr;
 	assign clint_csr_wdata = trap_csr_write_pkt.data;
+	// ECALL, EBREAK and illegal SYSTEM encodings trap without retiring. MRET
+	// retires only after its status update and redirect have completed.
 	assign instret_inc_count = {2'b0, commit_pkt.valid} +
-		{2'b0, commit_pkt1.valid};
+		{2'b0, commit_pkt1.valid} + {2'b0, trap_ctrl_pkt.retire};
 
 	ydrasil_load_store_unit u_ydrasil_load_store_unit (
 		.clk               (clk),
@@ -1061,11 +1068,16 @@ import ydrasil_axi_pkg::*;
 		.issue_pkt1_o       (issue_pkt1),
 		.issue_ready_o       (issue_ready),
 		.issue_dispatch_two_ready_o(issue_dispatch_two_ready),
+		.issue_dispatch_ready_q_o(issue_dispatch_ready_q),
+		.issue_dispatch_two_ready_q_o(issue_dispatch_two_ready_q),
 		.issue_consume_two_o (issue_consume_two),
 		.issue_slot1_replay_o(issue_slot1_replay),
 		.issue_fence_o       (id_fence_i),
 		.issue_fence_tag_o   (issue_fence_tag),
 		.issue_fence_next_pc_o(issue_fence_next_pc),
+		.issue_sys_req_o     (issue_sys_req_pkt),
+		.issue_sys_complete_o(issue_sys_complete),
+		.issue_sys_tag_o     (issue_sys_tag),
 		.scoreboard_stall_o  (issue_scoreboard_stall),
 		.scoreboard_stall1_o (issue_scoreboard_stall1),
 		.lsu_struct_stall_o  (issue_lsu_struct_stall),
@@ -1185,7 +1197,7 @@ import ydrasil_axi_pkg::*;
 `endif
 	);
 
-	ydrasil_dual_alu u_ydrasil_dual_alu (
+	ydrasil_ex_lane1 u_ydrasil_ex_lane1 (
 		.clk                 (clk),
 		.rst_n               (rst_n),
 		.flush_i             (flush_ex),
@@ -1324,8 +1336,11 @@ import ydrasil_axi_pkg::*;
 			.dispatch_accept1_i(issue_pipe_push_two),
 			.issue_pkt_i       (issue_pkt),
 			.issue_pkt1_i      (issue_pkt1),
-				.issue_fence_i     (id_fence_i),
+			.issue_fence_i     (id_fence_i),
 			.issue_fence_tag_i (issue_fence_tag),
+			.issue_sys_i       (issue_sys_req_pkt.valid),
+			.issue_sys_complete_i(issue_sys_complete),
+			.issue_sys_tag_i   (issue_sys_tag),
 			.completion_bus_i  (completion_bus),
 				.trap_stall_i      (trap_stall),
 			.ex_mul_stall_i     (ex_backend_stall),
@@ -1396,15 +1411,18 @@ import ydrasil_axi_pkg::*;
 			.csr_ex_data_o     (csr_ex_rdata)
 		);
 
-	assign exception_req_pkt.valid =
-		(ex_accept_valid && operator_type[ydrasil_pkg::OPERATOR_TYPE_SYS]) ||
-		fpu_illegal_ex;
-	assign exception_req_pkt.ecall = id_op_sys_info[ydrasil_pkg::OP_SYS_ECALL];
-	assign exception_req_pkt.ebreak = id_op_sys_info[ydrasil_pkg::OP_SYS_EBREAK];
-	assign exception_req_pkt.mret = id_op_sys_info[ydrasil_pkg::OP_SYS_MRET];
-	assign exception_req_pkt.illegal = fpu_illegal_ex;
-	assign exception_req_pkt.pc = id_instr_addr;
-	assign exception_req_pkt.tval = fpu_illegal_ex ? id_fpu_req_pkt.instr : 32'b0;
+	always_comb begin
+		exception_req_pkt = issue_sys_req_pkt;
+		if (fpu_illegal_ex) begin
+			exception_req_pkt.valid = 1'b1;
+			exception_req_pkt.ecall = 1'b0;
+			exception_req_pkt.ebreak = 1'b0;
+			exception_req_pkt.mret = 1'b0;
+			exception_req_pkt.illegal = 1'b1;
+			exception_req_pkt.pc = id_instr_addr;
+			exception_req_pkt.tval = id_fpu_req_pkt.instr;
+		end
+	end
 
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] async_resume_pc =
 		dual_id_ex_valid ? (dual_id_ex_pc + 32'd4) :

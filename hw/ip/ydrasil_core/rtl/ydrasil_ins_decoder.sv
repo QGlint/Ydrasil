@@ -130,6 +130,8 @@ import ydrasil_pkg::*;
 	wire is_auipc    ;
 	wire is_csr	  ;
 	wire is_sys		;
+	wire is_system_opcode;
+	wire csr_funct3_valid;
 
 	assign is_op_imm   = (opcode == ydrasil_pkg::RV32I_INS_TYPE_I);
 	assign is_op_r_m   = (opcode == ydrasil_pkg::RV32I_INS_TYPE_R_M);
@@ -140,7 +142,7 @@ import ydrasil_pkg::*;
 	assign is_jalr     = (opcode == ydrasil_pkg::RV32I_INS_JALR) & funct3_is_000;
 	assign is_lui      = (opcode == ydrasil_pkg::RV32I_INS_LUI);
 	assign is_auipc    = (opcode == ydrasil_pkg::RV32I_INS_AUIPC);
-	assign is_csr      = (opcode == ydrasil_pkg::RV32I_INS_CSR);
+	assign is_system_opcode = (opcode == ydrasil_pkg::RV32I_INS_CSR);
 
 	wire is_beq      ;
 	wire is_bne      ;
@@ -339,14 +341,28 @@ import ydrasil_pkg::*;
 	wire is_nop    ;
 	wire is_ecall  ;
 	wire is_ebreak ;
-	wire is_mret    ;
+	wire is_wfi    ;
+	wire is_mret   ;
 
 	assign is_nop    = (instr_i == ydrasil_pkg::RV32I_INS_NOP);
 	assign is_ecall  = (instr_i == ydrasil_pkg::RV32I_INS_ECALL);
 	assign is_ebreak = (instr_i == ydrasil_pkg::RV32I_INS_EBREAK);
-	assign is_mret    = (instr_i == ydrasil_pkg::RV32I_INS_MRET);
+	assign is_wfi    = (instr_i == ydrasil_pkg::RV32I_INS_WFI);
+	assign is_mret   = (instr_i == ydrasil_pkg::RV32I_INS_MRET);
 
-	assign is_sys = is_ecall | is_ebreak | is_mret;
+	// Split the SYSTEM opcode at decode.  Only architecturally supported CSR
+	// forms enter the CSR read/modify/write boundary.  Function-0 operations,
+	// and unsupported SYSTEM subfunctions, are serialized through the issue
+	// exception path; unsupported forms then report an illegal-instruction
+	// trap rather than becoming an accidental no-op.
+	assign csr_funct3_valid = (funct3 == ydrasil_pkg::RV32I_INS_CSRRW) ||
+		(funct3 == ydrasil_pkg::RV32I_INS_CSRRS) ||
+		(funct3 == ydrasil_pkg::RV32I_INS_CSRRC) ||
+		(funct3 == ydrasil_pkg::RV32I_INS_CSRRWI) ||
+		(funct3 == ydrasil_pkg::RV32I_INS_CSRRSI) ||
+		(funct3 == ydrasil_pkg::RV32I_INS_CSRRCI);
+	assign is_csr = is_system_opcode && csr_funct3_valid;
+	assign is_sys = is_system_opcode && !csr_funct3_valid;
 
 	wire is_csrrw ;
     wire is_csrrs ;
@@ -406,6 +422,7 @@ import ydrasil_pkg::*;
 	assign sys_op_info[ydrasil_pkg::OP_SYS_ECALL]  = is_ecall;
 	assign sys_op_info[ydrasil_pkg::OP_SYS_EBREAK] = is_ebreak;
 	assign sys_op_info[ydrasil_pkg::OP_SYS_MRET]   = is_mret;
+	assign sys_op_info[ydrasil_pkg::OP_SYS_WFI]    = is_wfi;
 
 	assign mul_op_info[ydrasil_pkg::OP_MUL_MUL]    = is_mul;
 	assign mul_op_info[ydrasil_pkg::OP_MUL_MULH]   = is_mulh;
@@ -458,7 +475,7 @@ import ydrasil_pkg::*;
 
 
 	wire rf_ren_rs1 =	(~is_lui) 	& (~is_auipc) 	& (~is_jal) &
-						(~is_ecall) & (~is_ebreak) & (~is_fence) &
+						(~is_sys) & (~is_fence) &
 						(~is_nop) 	& (~is_fence_i) & (~csr_imm);// U类型指令不需要rs1
 	wire rf_ren_rs2 = is_r_alu_use | is_mul_use | is_branch | is_bitmanip_rs2_use; // R类型和分支指令需要rs2
 

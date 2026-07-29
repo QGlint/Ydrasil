@@ -88,6 +88,9 @@ def decode_mask_label(mask: int) -> str:
 
 
 def selected_logs(root: Path) -> list[Path]:
+    # A caller may scope analysis to one simulation result directory.
+    if (root / "hw.log").is_file():
+        return [root / "hw.log"]
     suites = ("coe_loop5", "coe_loop_lina", "coremark", "sort", "boundary", "rv32ui", "rv32um", "rv32uz", "rv32mi")
     return sorted(path for path in root.rglob("hw.log") if any(part.startswith(suites) for part in path.parts))
 
@@ -103,7 +106,9 @@ def main() -> None:
     for log in selected_logs(args.root):
         records = parse_log(log)
         if "PERF_CYCLE_ACCOUNT" in records:
-            programs.append((str(log.relative_to(args.root).parent), records))
+            relative_parent = log.relative_to(args.root).parent
+            name = args.root.name if str(relative_parent) == "." else str(relative_parent)
+            programs.append((name, records))
 
     detailed_csv = args.out_dir / "perf_bubble_detail.csv"
     columns = [
@@ -130,6 +135,28 @@ def main() -> None:
         ("slot1_scoreboard_replay", "PERF_SLOT_DETAIL", "SLOT1_SCOREBOARD_REPLAY"),
         ("slot1_lsu_replay", "PERF_SLOT_DETAIL", "SLOT1_LSU_REPLAY"),
         ("slot_closure_errors", "PERF_SLOT_DETAIL", "CLOSURE_ERRORS"),
+        ("window_dispatch", "PERF_ISSUE_WINDOW", "DISPATCH"),
+        ("window_select", "PERF_ISSUE_WINDOW", "SELECT"),
+        ("window_select_two", "PERF_ISSUE_WINDOW", "SELECT_TWO"),
+        ("window_nonadj_pair", "PERF_ISSUE_WINDOW", "NONADJ_PAIR"),
+        ("window_bypass_consumed", "PERF_ISSUE_WINDOW", "BYPASS_CONSUMED"),
+        ("window_scheduled_bypass", "PERF_ISSUE_WINDOW", "SCHEDULED_BYPASS"),
+        ("window_registered_wakeup", "PERF_ISSUE_WINDOW", "REGISTERED_WAKEUP"),
+        ("window_registered_alu_wakeup", "PERF_ISSUE_WINDOW", "REGISTERED_ALU_WAKEUP"),
+        ("window_registered_lsu_wakeup", "PERF_ISSUE_WINDOW", "REGISTERED_LSU_WAKEUP"),
+        ("window_registered_mdu_wakeup", "PERF_ISSUE_WINDOW", "REGISTERED_MDU_WAKEUP"),
+        ("window_reserved_bypass_plan", "PERF_ISSUE_WINDOW", "RESERVED_BYPASS_PLAN"),
+        ("window_reserved_bypass_issue", "PERF_ISSUE_WINDOW", "RESERVED_BYPASS_ISSUE"),
+        ("window_reserved_bypass_cancel", "PERF_ISSUE_WINDOW", "RESERVED_BYPASS_CANCEL"),
+        ("window_ingress_occ0", "PERF_ISSUE_WINDOW", "INGRESS_OCC0"),
+        ("window_ingress_occ1", "PERF_ISSUE_WINDOW", "INGRESS_OCC1"),
+        ("window_ingress_occ2", "PERF_ISSUE_WINDOW", "INGRESS_OCC2"),
+        ("window_ingress_credit_admit", "PERF_ISSUE_WINDOW", "INGRESS_CREDIT_ADMIT"),
+        ("window_ingress_to_station", "PERF_ISSUE_WINDOW", "INGRESS_TO_STATION"),
+        ("window_full_station_refill", "PERF_ISSUE_WINDOW", "FULL_STATION_REFILL"),
+        ("window_admission_backpressure", "PERF_ISSUE_WINDOW", "ADMISSION_BACKPRESSURE"),
+        ("window_ingress_flush_drain", "PERF_ISSUE_WINDOW", "INGRESS_FLUSH_DRAIN"),
+        ("window_completion_latency", "PERF_ISSUE_WINDOW", "COMPLETION_LATENCY"),
         ("issue", "PERF_CYCLE_ACCOUNT", "ISSUE"),
         ("capacity_slots", "PERF_SLOT_ACCOUNT", "CAPACITY_SLOTS"),
         ("productive_slots", "PERF_SLOT_ACCOUNT", "PRODUCTIVE_SLOTS"),
@@ -182,8 +209,14 @@ def main() -> None:
         for program, records in programs:
             writer.writerow([program, *[value(records, record, field) for _, record, field in columns]])
 
-    focus = [(name, records) for name, records in programs
-             if name in {"coe_loop5", "coe_loop_lina", "coremark"}]
+    # The architectural comparison uses the optimized CoreMark image.  Keep
+    # legacy coremark only when an optimized result is unavailable.
+    focus_names = {"coe_loop5", "coe_loop_lina", "coremark-opt/O2"}
+    if not any(name == "coremark-opt/O2" for name, _ in programs):
+        focus_names.add("coremark")
+    focus = [(name, records) for name, records in programs if name in focus_names]
+    if not focus and len(programs) == 1:
+        focus = programs
     report = args.out_dir / "perf_bubble_analysis.md"
     with report.open("w") as stream:
         stream.write("# Pipeline bubble analysis\n\n")
@@ -372,6 +405,43 @@ def main() -> None:
                     stream.write(f"| {label} | {int(count)} | {pct(count, sample_cycles)} |\n")
             else:
                 stream.write("Execute-slot detail is unavailable in this legacy log.\n")
+
+            window = records.get("PERF_ISSUE_WINDOW", {})
+            stream.write("\n### Issue-window architecture observations\n\n")
+            if window:
+                sample = sample_cycles or 1.0
+                stream.write("| Observation | Events | Sample cycles |\n|---|---:|---:|\n")
+                for label, key in (
+                    ("ingress empty occupancy cycles", "INGRESS_OCC0"),
+                    ("ingress one-entry occupancy cycles", "INGRESS_OCC1"),
+                    ("ingress full occupancy cycles", "INGRESS_OCC2"),
+                    ("dispatch admitted under full-station ingress credit", "INGRESS_CREDIT_ADMIT"),
+                    ("older ingress uops transferred into station", "INGRESS_TO_STATION"),
+                    ("new uops refilling a selected full-station slot", "FULL_STATION_REFILL"),
+                    ("frontend cycles blocked by full station and ingress", "ADMISSION_BACKPRESSURE"),
+                    ("ingress uops discarded by flush/trap boundary", "INGRESS_FLUSH_DRAIN"),
+                    ("preplanned local bypass", "SCHEDULED_BYPASS"),
+                    ("preplanned bypass consumed by issue", "BYPASS_CONSUMED"),
+                    ("registered completion wakeup", "REGISTERED_WAKEUP"),
+                    ("registered ALU wakeup", "REGISTERED_ALU_WAKEUP"),
+                    ("registered LSU wakeup", "REGISTERED_LSU_WAKEUP"),
+                    ("registered MDU wakeup", "REGISTERED_MDU_WAKEUP"),
+                    ("registered local-bypass reservation", "RESERVED_BYPASS_PLAN"),
+                    ("reserved local bypass issued", "RESERVED_BYPASS_ISSUE"),
+                    ("reserved local bypass cancelled", "RESERVED_BYPASS_CANCEL"),
+                    ("oldest entry completion captured for next-cycle visibility", "COMPLETION_LATENCY"),
+                    ("non-adjacent pair", "NONADJ_PAIR"),
+                ):
+                    count = window.get(key, 0.0)
+                    stream.write(f"| {label} | {int(count)} | {pct(count, sample)} |\n")
+                backpressure = window.get("ADMISSION_BACKPRESSURE", 0.0)
+                stream.write("\nIngress admission pressure: ")
+                stream.write(f"full station+ingress backpressure={int(backpressure)} ")
+                stream.write(f"({pct(backpressure, sample)} of sampled cycles). ")
+                stream.write("Ingress occupancy and transfer counters describe the registered ")
+                stream.write("admission boundary; they are not themselves lost cycles or part of the mutually exclusive primary-cycle partition.\n")
+            else:
+                stream.write("Issue-window architecture counters are unavailable in this legacy log.\n")
             stream.write("\n### Scoreboard diagnosis\n\n| Signal | Cycles/events | Scoreboard cycles |\n|---|---:|---:|\n")
             scoreboard = value(records, "PERF_STALL", "SCOREBOARD")
             details = [("load producer use", "PERF_SCOREBOARD_DETAIL", "LOAD_USE"),

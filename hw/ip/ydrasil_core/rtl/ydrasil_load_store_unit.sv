@@ -162,10 +162,13 @@ import ydrasil_pkg::*;
     // Backpressure reflects request-queue capacity. Store-buffer pressure is
     // absorbed behind this FF boundary and only stops the queue head when all
     // four entries are actually occupied.
-    assign status_o.busy = queue_full ||
-        (req_i.valid &&
-         (queue_count_q >= QUEUE_COUNT_WIDTH'(QUEUE_DEPTH-1)));
-    assign status_o.idle = queue_empty && !req_i.valid && store_buf_empty &&
+    // Resource availability is a registered queue property.  Do not include
+    // the current EX request in this status: doing so creates an EX -> LSU ->
+    // issue feedback path, while delaying this signal would permit one extra
+    // request and overflow the queue.  Keeping one entry of headroom matches
+    // the request/queue boundary and makes the token conservative.
+    assign status_o.busy = queue_count_q >= QUEUE_COUNT_WIDTH'(QUEUE_DEPTH-1);
+    assign status_o.idle = queue_empty && store_buf_empty &&
         !mmio_busy && !load_s1_valid_q;
     assign status_o.fast_load = 1'b0;
 

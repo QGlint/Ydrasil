@@ -18,6 +18,9 @@ import ydrasil_pkg::*;
     input  ydrasil_issue_pkt_t          issue_pkt1_i,
     input  wire                         issue_fence_i,
     input  producer_id_t                issue_fence_tag_i,
+    input  wire                         issue_sys_i,
+    input  wire                         issue_sys_complete_i,
+    input  producer_id_t                issue_sys_tag_i,
     input  ydrasil_completion_bus_t     completion_bus_i,
     input  wire                         trap_stall_i,
     input  wire                         ex_mul_stall_i,
@@ -221,7 +224,7 @@ import ydrasil_pkg::*;
     wire producer_pair_stall = dispatch_pkt1_i.valid && !producer_has_two_free;
     wire serial_alloc = (queue_alloc0 && dispatch_pkt_i.ctrl.serialize_before) ||
         (queue_alloc1 && dispatch_pkt1_i.ctrl.serialize_before);
-    wire serial_accept = issue_fence_i ||
+    wire serial_accept = issue_fence_i || issue_sys_i || issue_sys_complete_i ||
         (ex_accept_valid_o &&
          (ex_hzd_i.operator_type[OPERATOR_TYPE_CSR] &&
           !ex_hzd_i.operator_type[OPERATOR_TYPE_SYS]));
@@ -588,6 +591,14 @@ import ydrasil_pkg::*;
                  issue_fence_tag_i))
                 producer_ready_q[issue_fence_tag_i[PRODUCER_SLOT_WIDTH-1:0]] <=
                     1'b1;
+            // Trap-causing SYSTEM instructions are removed by redirect and
+            // must not retire through this queue. WFI is the sole local
+            // issue-side completion and may release its producer here.
+            if (issue_sys_complete_i &&
+                producer_valid_q[issue_sys_tag_i[PRODUCER_SLOT_WIDTH-1:0]] &&
+                (producer_tag_q[issue_sys_tag_i[PRODUCER_SLOT_WIDTH-1:0]] ==
+                 issue_sys_tag_i))
+                producer_ready_q[issue_sys_tag_i[PRODUCER_SLOT_WIDTH-1:0]] <= 1'b1;
 
             if (queue_alloc0) begin
                 producer_valid_q[alloc_slot0] <= 1'b1;
@@ -719,4 +730,13 @@ import ydrasil_pkg::*;
         rf_wdata_rd_i, rf_producer_id_i, rf_producer_tracked_i,
         rf_wdata_rd1_i, rf_producer_id1_i, rf_producer_tracked1_i,
         producer_pair_stall};
+
+`ifndef SYNTHESIS
+    always_ff @(posedge clk) begin
+        if (rst_n && issue_sys_i)
+            assert (!queue_commit0 && !queue_commit1)
+                else $fatal(1,
+                    "trap-causing SYSTEM instruction must not retire");
+    end
+`endif
 endmodule

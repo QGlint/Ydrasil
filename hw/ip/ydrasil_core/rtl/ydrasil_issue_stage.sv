@@ -1,6 +1,6 @@
 // Four-entry, operand-capturing issue window.  The window is the existing
 // Issue stage boundary; issue_ex_q below remains the only register before EX.
-module ydrasil_issue_stage
+module ydrasil_issue_stage_legacy
 import ydrasil_pkg::*;
 #(
     parameter int DATA_WIDTH = 32
@@ -65,13 +65,34 @@ import ydrasil_pkg::*;
 );
     localparam int N = 4;
 
+    // Completion is an event from EX/WB, not a same-cycle issue select input.
+    // Registering it here removes the EX -> completion -> wakeup -> issue_ex
+    // combinational feedback loop.  The station still wakes in one issue
+    // cycle; only the unsafe same-cycle visibility is removed.
+    ydrasil_completion_bus_t completion_bus_q;
+    integer completion_lane_i;
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n || flush_id_i) begin
+            for (completion_lane_i = 0;
+                 completion_lane_i < COMPLETION_LANES;
+                 completion_lane_i = completion_lane_i + 1)
+                completion_bus_q[completion_lane_i] <= '0;
+        end else begin
+            for (completion_lane_i = 0;
+                 completion_lane_i < COMPLETION_LANES;
+                 completion_lane_i = completion_lane_i + 1)
+                completion_bus_q[completion_lane_i] <=
+                    completion_bus_i[completion_lane_i];
+        end
+    end
+
     function automatic logic completion_hit(
         input ydrasil_source_desc_t src, input integer lane
     );
         completion_hit = src.used && src.tag_valid &&
-            completion_bus_i[lane].valid &&
-            completion_bus_i[lane].producer_tracked &&
-            (completion_bus_i[lane].producer_id == src.producer_tag);
+            completion_bus_q[lane].valid &&
+            completion_bus_q[lane].producer_tracked &&
+            (completion_bus_q[lane].producer_id == src.producer_tag);
     endfunction
 
     function automatic logic typed_completion_hit(
@@ -85,16 +106,87 @@ import ydrasil_pkg::*;
         endcase
     endfunction
 
+    function automatic logic completion_current_hit(
+        input ydrasil_source_desc_t src, input integer lane
+    );
+        completion_current_hit = src.used && src.tag_valid &&
+            completion_bus_i[lane].valid &&
+            completion_bus_i[lane].producer_tracked &&
+            (completion_bus_i[lane].producer_id == src.producer_tag);
+    endfunction
+
+    function automatic logic typed_completion_current_hit(
+        input ydrasil_source_desc_t src
+    );
+        case (src.producer_class)
+            RESULT_LSU: typed_completion_current_hit =
+                completion_current_hit(src, COMPLETION_LSU);
+            RESULT_MDU: typed_completion_current_hit =
+                completion_current_hit(src, COMPLETION_MUL);
+            default: typed_completion_current_hit =
+                completion_current_hit(src, COMPLETION_ALU) ||
+                completion_current_hit(src, COMPLETION_DUAL_ALU);
+        endcase
+    endfunction
+
+    function automatic [DATA_WIDTH-1:0] typed_completion_current_data(
+        input ydrasil_source_desc_t src
+    );
+        case (src.producer_class)
+            RESULT_LSU: typed_completion_current_data =
+                completion_bus_i[COMPLETION_LSU].data;
+            RESULT_MDU: typed_completion_current_data =
+                completion_bus_i[COMPLETION_MUL].data;
+            default: typed_completion_current_data =
+                completion_current_hit(src, COMPLETION_ALU) ?
+                    completion_bus_i[COMPLETION_ALU].data :
+                    completion_bus_i[COMPLETION_DUAL_ALU].data;
+        endcase
+    endfunction
+
     function automatic [DATA_WIDTH-1:0] typed_completion_data(
         input ydrasil_source_desc_t src
     );
         case (src.producer_class)
-            RESULT_LSU: typed_completion_data = completion_bus_i[COMPLETION_LSU].data;
-            RESULT_MDU: typed_completion_data = completion_bus_i[COMPLETION_MUL].data;
+            RESULT_LSU: typed_completion_data = completion_bus_q[COMPLETION_LSU].data;
+            RESULT_MDU: typed_completion_data = completion_bus_q[COMPLETION_MUL].data;
             default: typed_completion_data = completion_hit(src, COMPLETION_ALU) ?
+                completion_bus_q[COMPLETION_ALU].data :
+                completion_bus_q[COMPLETION_DUAL_ALU].data;
+        endcase
+    endfunction
+
+    // A deliberately narrow local bypass is retained for single-cycle ALU
+    // producers.  LSU/MUL/FPU completion still uses completion_bus_q and can
+    // never create a wide EX -> window -> EX feedback path.
+    function automatic logic fast_alu_consumer(input ydrasil_issue_pkt_t p);
+        fast_alu_consumer = p.valid &&
+            !p.decode.resources[RESOURCE_MULDIV] &&
+            !p.decode.resources[RESOURCE_SERIAL] &&
+            !p.decode.operator_type[OPERATOR_TYPE_FPU];
+    endfunction
+
+    function automatic logic fast_alu_completion_hit(
+        input ydrasil_source_desc_t src
+    );
+        fast_alu_completion_hit = src.used && src.tag_valid &&
+            ((completion_bus_i[COMPLETION_ALU].valid &&
+              completion_bus_i[COMPLETION_ALU].producer_tracked &&
+              completion_bus_i[COMPLETION_ALU].producer_id == src.producer_tag) ||
+             (completion_bus_i[COMPLETION_DUAL_ALU].valid &&
+              completion_bus_i[COMPLETION_DUAL_ALU].producer_tracked &&
+              completion_bus_i[COMPLETION_DUAL_ALU].producer_id == src.producer_tag));
+    endfunction
+
+    function automatic [DATA_WIDTH-1:0] fast_alu_completion_data(
+        input ydrasil_source_desc_t src
+    );
+        fast_alu_completion_data =
+            (completion_bus_i[COMPLETION_ALU].valid &&
+             completion_bus_i[COMPLETION_ALU].producer_tracked &&
+             completion_bus_i[COMPLETION_ALU].producer_id == src.producer_tag) ?
                 completion_bus_i[COMPLETION_ALU].data :
                 completion_bus_i[COMPLETION_DUAL_ALU].data;
-        endcase
     endfunction
 
     function automatic logic init_ready(
@@ -106,7 +198,8 @@ import ydrasil_pkg::*;
         // It must remain asleep rather than being mistaken for an architectural
         // register with no pending producer.
         init_ready = !src.used || !src.tag_valid ||
-            (state.live && state.done) || typed_completion_hit(src);
+            (state.live && state.done) || typed_completion_hit(src) ||
+            typed_completion_current_hit(src);
     endfunction
 
     function automatic [DATA_WIDTH-1:0] init_value(
@@ -119,6 +212,8 @@ import ydrasil_pkg::*;
             init_value = state.result;
         if (src.used && src.tag_valid && typed_completion_hit(src))
             init_value = typed_completion_data(src);
+        if (src.used && src.tag_valid && typed_completion_current_hit(src))
+            init_value = typed_completion_current_data(src);
     endfunction
 
     function automatic logic a_capable(input ydrasil_issue_pkt_t p);
@@ -197,8 +292,77 @@ import ydrasil_pkg::*;
         runtime_legal = !(p.memory_op && lsu_status_i.busy);
     endfunction
 
+    // The window stores only the execution station payload.  ctrl is derived
+    // from decode/source/destination fields at the output boundary instead of
+    // being replicated in every slot.  This removes the four full packet
+    // register banks from the issue critical cone.
+    typedef struct packed {
+        logic                         valid;
+        logic                         memory_op;
+        logic [1:0]                   lane_mask;
+        ydrasil_source_desc_t         src0;
+        ydrasil_source_desc_t         src1;
+        ydrasil_dest_desc_t           dst;
+        logic [INST_ADDR_WIDTH-1:0]   target;
+        logic [INST_ADDR_WIDTH-1:0]   next_pc;
+        ydrasil_decode_pkt_t          decode;
+    } issue_station_t;
+    issue_station_t entry_station_q [0:N-1];
+    issue_station_t entry_station_d [0:N-1];
+    // Combinational views exist only at the selected/output boundary and are
+    // not stored per slot.
     ydrasil_issue_pkt_t entry_pkt_q [0:N-1];
-    ydrasil_issue_pkt_t entry_pkt_d [0:N-1];
+
+    function automatic issue_station_t station_from_pkt(
+        input ydrasil_issue_pkt_t p
+    );
+        station_from_pkt.valid = p.valid;
+        station_from_pkt.memory_op = p.memory_op;
+        station_from_pkt.lane_mask = p.lane_mask;
+        station_from_pkt.src0 = p.src0;
+        station_from_pkt.src1 = p.src1;
+        station_from_pkt.dst = p.dst;
+        station_from_pkt.target = p.target;
+        station_from_pkt.next_pc = p.next_pc;
+        station_from_pkt.decode = p.decode;
+    endfunction
+
+    function automatic ydrasil_issue_pkt_t pkt_from_station(
+        input issue_station_t s
+    );
+        ydrasil_issue_pkt_t p;
+        p = '0;
+        p.valid = s.valid;
+        p.memory_op = s.memory_op;
+        p.lane_mask = s.lane_mask;
+        p.src0 = s.src0;
+        p.src1 = s.src1;
+        p.dst = s.dst;
+        p.target = s.target;
+        p.next_pc = s.next_pc;
+        p.decode = s.decode;
+        p.ctrl.valid = s.valid;
+        p.ctrl.rs1_addr = s.decode.rs1_addr;
+        p.ctrl.rs2_addr = s.decode.rs2_addr;
+        p.ctrl.rd_addr = s.dst.rd_addr;
+        p.ctrl.rs1_ren = s.src0.used;
+        p.ctrl.rs2_ren = s.src1.used;
+        p.ctrl.rd_wen = s.dst.writes_gpr;
+        p.ctrl.lsu_req = s.memory_op;
+        p.ctrl.store_req = s.decode.operator_type[OPERATOR_TYPE_STORE];
+        p.ctrl.serialize_before = s.decode.operator_type[OPERATOR_TYPE_CSR] ||
+            s.decode.operator_type[OPERATOR_TYPE_SYS] || s.decode.fence_i;
+        p.ctrl.checkpoint_req = s.decode.operator_type[OPERATOR_TYPE_BJP];
+        pkt_from_station = p;
+    endfunction
+
+    integer station_view_i;
+    always_comb begin
+        for (station_view_i = 0; station_view_i < N;
+             station_view_i = station_view_i + 1)
+            entry_pkt_q[station_view_i] =
+                pkt_from_station(entry_station_q[station_view_i]);
+    end
     reg [N-1:0] entry_valid_q, entry_valid_d;
     reg [1:0] entry_ready_q [0:N-1];
     reg [1:0] entry_ready_d [0:N-1];
@@ -221,7 +385,9 @@ import ydrasil_pkg::*;
     // no younger producer may execute before trap/CSR control takes over.
     reg serial_barrier_q;
 
-    wire [N-1:0] free_vec = ~entry_valid_q;
+    // A selected slot is free for same-cycle dispatch.  This is deliberately
+    // derived from the issue decision, not only from the registered valid bit.
+    wire [N-1:0] free_vec = ~entry_valid_q | selected_remove;
     reg [N-1:0] alloc_sel0, alloc_sel1;
     integer ai;
     always_comb begin
@@ -229,12 +395,14 @@ import ydrasil_pkg::*;
         alloc_sel1 = '0;
         if (dispatch_accept_i && dispatch_pkt_i.valid) begin
             for (ai = 0; ai < N; ai = ai + 1)
-                if (!entry_valid_q[ai] && (alloc_sel0 == '0))
+                if ((!entry_valid_q[ai] || selected_remove[ai]) &&
+                    (alloc_sel0 == '0))
                     alloc_sel0[ai] = 1'b1;
         end
         if (dispatch_accept1_i && dispatch_pkt1_i.valid) begin
             for (ai = 0; ai < N; ai = ai + 1)
-                if (!entry_valid_q[ai] && (alloc_sel0[ai] == 1'b0) &&
+                if ((!entry_valid_q[ai] || selected_remove[ai]) &&
+                    (alloc_sel0[ai] == 1'b0) &&
                     (alloc_sel1 == '0))
                     alloc_sel1[ai] = 1'b1;
         end
@@ -247,20 +415,34 @@ import ydrasil_pkg::*;
     always_comb begin
         for (wi = 0; wi < N; wi = wi + 1) begin
             src_ready0_now[wi] = entry_ready_q[wi][0] ||
-                typed_completion_hit(entry_pkt_q[wi].src0);
+                typed_completion_hit(entry_pkt_q[wi].src0) ||
+                (fast_alu_consumer(entry_pkt_q[wi]) &&
+                 fast_alu_completion_hit(entry_pkt_q[wi].src0));
             src_ready1_now[wi] = entry_ready_q[wi][1] ||
-                typed_completion_hit(entry_pkt_q[wi].src1);
+                typed_completion_hit(entry_pkt_q[wi].src1) ||
+                (fast_alu_consumer(entry_pkt_q[wi]) &&
+                 fast_alu_completion_hit(entry_pkt_q[wi].src1));
             src_value0_now[wi] = entry_value_q[wi][0];
             src_value1_now[wi] = entry_value_q[wi][1];
             if (typed_completion_hit(entry_pkt_q[wi].src0))
                 src_value0_now[wi] = typed_completion_data(entry_pkt_q[wi].src0);
+            else if (fast_alu_consumer(entry_pkt_q[wi]) &&
+                     fast_alu_completion_hit(entry_pkt_q[wi].src0))
+                src_value0_now[wi] = fast_alu_completion_data(entry_pkt_q[wi].src0);
             if (typed_completion_hit(entry_pkt_q[wi].src1))
                 src_value1_now[wi] = typed_completion_data(entry_pkt_q[wi].src1);
+            else if (fast_alu_consumer(entry_pkt_q[wi]) &&
+                     fast_alu_completion_hit(entry_pkt_q[wi].src1))
+                src_value1_now[wi] = fast_alu_completion_data(entry_pkt_q[wi].src1);
         end
     end
 
     reg [N-1:0] eligible0, select0, eligible1, select1;
     reg [N-1:0] hard_block0, hard_block1;
+    reg [N-1:0] lane_a_eligible, lane_b_eligible;
+    reg [N-1:0] lane_a_pick, lane_b_pick;
+    reg independent_pair;
+    reg pair_accept;
     integer sel_i, sel_j;
     wire select_enable = !stall_id_i && !bubble_id_i && !flush_id_i;
     always_comb begin
@@ -270,9 +452,19 @@ import ydrasil_pkg::*;
         select1 = '0;
         hard_block0 = '0;
         hard_block1 = '0;
+        lane_a_eligible = '0;
+        lane_b_eligible = '0;
+        lane_a_pick = '0;
+        lane_b_pick = '0;
+        independent_pair = 1'b0;
+        pair_accept = 1'b0;
+
+        // Candidate 0 is the oldest independently executable station entry.
+        // No lane assignment or pair dependency participates in this pass.
         for (sel_i = 0; sel_i < N; sel_i = sel_i + 1) begin
             for (sel_j = 0; sel_j < N; sel_j = sel_j + 1) begin
-            if (entry_valid_q[sel_j] && older_q[sel_j][sel_i] && !cross_q[sel_j][sel_i])
+                if (entry_valid_q[sel_j] && older_q[sel_j][sel_i] &&
+                    !cross_q[sel_j][sel_i])
                     hard_block0[sel_i] = 1'b1;
             end
             if (entry_valid_q[sel_i] && src_ready0_now[sel_i] && src_ready1_now[sel_i] &&
@@ -293,18 +485,18 @@ import ydrasil_pkg::*;
                         select0[sel_i] = 1'b0;
             end
         end
-        // Compute the second candidate after the first one.  A hard older
-        // entry is allowed only when it is the selected first instruction.
+
+        // Candidate 1 is selected from the remaining executable entries.  It
+        // has its own ready/runtime/age decision.  Candidate 0 only releases
+        // an older-order barrier; pair compatibility is checked afterwards.
         for (sel_i = 0; sel_i < N; sel_i = sel_i + 1) begin
             for (sel_j = 0; sel_j < N; sel_j = sel_j + 1) begin
-                if (entry_valid_q[sel_j] && older_q[sel_j][sel_i] && !cross_q[sel_j][sel_i] &&
+                if (entry_valid_q[sel_j] && older_q[sel_j][sel_i] &&
+                    !cross_q[sel_j][sel_i] &&
                     !select0[sel_j])
                     hard_block1[sel_i] = 1'b1;
             end
-            for (sel_j = 0; sel_j < N; sel_j = sel_j + 1)
-                if (select0[sel_j] && pair_q[sel_j][sel_i])
-                    eligible1[sel_i] = 1'b1;
-            eligible1[sel_i] = eligible1[sel_i] && entry_valid_q[sel_i] &&
+            eligible1[sel_i] = entry_valid_q[sel_i] &&
                 !select0[sel_i] && src_ready0_now[sel_i] && src_ready1_now[sel_i] &&
                 !hard_block1[sel_i] &&
                 !serial_barrier_q &&
@@ -319,6 +511,63 @@ import ydrasil_pkg::*;
                         select1[sel_i] = 1'b0;
             end
         end
+
+        // Physical lanes choose independently.  The common issue window is
+        // only consulted for the final pair legality check; lane B does not
+        // consume lane A's operand state or producer id.
+        for (sel_i = 0; sel_i < N; sel_i = sel_i + 1) begin
+            lane_a_eligible[sel_i] = eligible0[sel_i] &&
+                a_capable(entry_pkt_q[sel_i]);
+            lane_b_eligible[sel_i] = eligible0[sel_i] &&
+                b_capable(entry_pkt_q[sel_i]);
+        end
+        for (sel_i = 0; sel_i < N; sel_i = sel_i + 1) begin
+            if (lane_a_eligible[sel_i]) begin
+                lane_a_pick[sel_i] = 1'b1;
+                for (sel_j = 0; sel_j < N; sel_j = sel_j + 1)
+                    if (lane_a_eligible[sel_j] && older_q[sel_j][sel_i])
+                        lane_a_pick[sel_i] = 1'b0;
+            end
+            if (lane_b_eligible[sel_i]) begin
+                lane_b_pick[sel_i] = 1'b1;
+                for (sel_j = 0; sel_j < N; sel_j = sel_j + 1)
+                    if (lane_b_eligible[sel_j] && older_q[sel_j][sel_i])
+                        lane_b_pick[sel_i] = 1'b0;
+            end
+        end
+        // If both lane classes point at the same entry, choose the next B
+        // candidate independently rather than making slot1 a child of slot0.
+        lane_b_pick = '0;
+        for (sel_i = 0; sel_i < N; sel_i = sel_i + 1)
+            if (lane_b_eligible[sel_i] && !lane_a_pick[sel_i] &&
+                (lane_b_pick == '0)) begin
+                lane_b_pick[sel_i] = 1'b1;
+                for (sel_j = 0; sel_j < N; sel_j = sel_j + 1)
+                    if (lane_b_eligible[sel_j] && !lane_a_pick[sel_j] &&
+                        older_q[sel_j][sel_i])
+                        lane_b_pick[sel_i] = 1'b0;
+            end
+        for (sel_i = 0; sel_i < N; sel_i = sel_i + 1)
+            for (sel_j = 0; sel_j < N; sel_j = sel_j + 1)
+                if (lane_a_pick[sel_i] && lane_b_pick[sel_j] &&
+                    (pair_compatible(entry_pkt_q[sel_i], entry_pkt_q[sel_j]) ||
+                     pair_compatible(entry_pkt_q[sel_j], entry_pkt_q[sel_i])))
+                    independent_pair = 1'b1;
+        if (independent_pair) begin
+            select0 = lane_a_pick;
+            select1 = lane_b_pick;
+        end
+
+        // The two independently chosen program entries may execute together
+        // only when their static resource/RAW relation permits it.  This is a
+        // final accept gate; lane B does not inherit lane A's source state.
+        for (sel_i = 0; sel_i < N; sel_i = sel_i + 1)
+            for (sel_j = 0; sel_j < N; sel_j = sel_j + 1)
+                if (select0[sel_i] && select1[sel_j] && pair_q[sel_i][sel_j])
+                    pair_accept = 1'b1;
+        if (!pair_accept)
+            select1 = '0;
+
         if (!select_enable) begin
             select0 = '0;
             select1 = '0;
@@ -331,6 +580,9 @@ import ydrasil_pkg::*;
     ydrasil_issue_pkt_t selected_uop0, selected_uop1;
     reg [DATA_WIDTH-1:0] selected_src00, selected_src01;
     reg [DATA_WIDTH-1:0] selected_src10, selected_src11;
+    reg selected_ready00, selected_ready01;
+    reg selected_ready10, selected_ready11;
+    reg [1:0] selected_idx0, selected_idx1;
     reg selected_swap;
     integer chosen_i, chosen_j;
     always_comb begin
@@ -340,23 +592,36 @@ import ydrasil_pkg::*;
         selected_src01 = '0;
         selected_src10 = '0;
         selected_src11 = '0;
+        selected_ready00 = 1'b0;
+        selected_ready01 = 1'b0;
+        selected_ready10 = 1'b0;
+        selected_ready11 = 1'b0;
+        selected_idx0 = '0;
+        selected_idx1 = '0;
         selected_swap = 1'b0;
         for (chosen_i = 0; chosen_i < N; chosen_i = chosen_i + 1) begin
             if (select0[chosen_i]) begin
+                selected_idx0 = chosen_i[1:0];
                 selected_uop0 = entry_pkt_q[chosen_i];
                 selected_src00 = src_value0_now[chosen_i];
                 selected_src01 = src_value1_now[chosen_i];
+                selected_ready00 = src_ready0_now[chosen_i];
+                selected_ready01 = src_ready1_now[chosen_i];
             end
             if (select1[chosen_i]) begin
+                selected_idx1 = chosen_i[1:0];
                 selected_uop1 = entry_pkt_q[chosen_i];
                 selected_src10 = src_value0_now[chosen_i];
                 selected_src11 = src_value1_now[chosen_i];
+                selected_ready10 = src_ready0_now[chosen_i];
+                selected_ready11 = src_ready1_now[chosen_i];
             end
         end
-        for (chosen_i = 0; chosen_i < N; chosen_i = chosen_i + 1)
-            for (chosen_j = 0; chosen_j < N; chosen_j = chosen_j + 1)
-                if (select0[chosen_i] && select1[chosen_j])
-                    selected_swap = swap_q[chosen_i][chosen_j];
+        if (!independent_pair)
+            for (chosen_i = 0; chosen_i < N; chosen_i = chosen_i + 1)
+                for (chosen_j = 0; chosen_j < N; chosen_j = chosen_j + 1)
+                    if (select0[chosen_i] && select1[chosen_j])
+                        selected_swap = swap_q[chosen_i][chosen_j];
     end
 
     assign issue_pkt_o = selected_uop0;
@@ -375,27 +640,32 @@ import ydrasil_pkg::*;
     // Diagnostics describe the oldest live entry; selection itself may bypass
     // it when it is a dependency-blocked non-serial operation.
     reg [1:0] oldest_idx;
+    reg oldest_found;
     integer oldest_i, oldest_j;
     always_comb begin
         oldest_idx = '0;
-        for (oldest_i = 0; oldest_i < N; oldest_i = oldest_i + 1)
-            if (entry_valid_q[oldest_i]) begin
-                oldest_idx = oldest_i[1:0];
+        oldest_found = 1'b0;
+        for (oldest_i = 0; oldest_i < N; oldest_i = oldest_i + 1) begin
+            if (entry_valid_q[oldest_i] && !oldest_found) begin
+                oldest_found = 1'b1;
                 for (oldest_j = 0; oldest_j < N; oldest_j = oldest_j + 1)
                     if (entry_valid_q[oldest_j] && older_q[oldest_j][oldest_i])
-                        oldest_idx = oldest_i[1:0];
+                        oldest_found = 1'b0;
+                if (oldest_found)
+                    oldest_idx = oldest_i[1:0];
             end
+        end
     end
     assign scoreboard_stall_o = entry_valid_q[oldest_idx] &&
         (!src_ready0_now[oldest_idx] || !src_ready1_now[oldest_idx]);
     assign scoreboard_stall1_o = selected_pair &&
-        (!src_ready0_now[0] || !src_ready1_now[0]);
+        (!selected_ready10 || !selected_ready11);
     assign src0_wait_o = entry_valid_q[oldest_idx] &&
         entry_pkt_q[oldest_idx].src0.used && !src_ready0_now[oldest_idx];
     assign src1_wait_o = entry_valid_q[oldest_idx] &&
         entry_pkt_q[oldest_idx].src1.used && !src_ready1_now[oldest_idx];
-    assign src2_wait_o = selected_pair && !src_ready0_now[0];
-    assign src3_wait_o = selected_pair && !src_ready1_now[0];
+    assign src2_wait_o = selected_pair && !selected_ready10;
+    assign src3_wait_o = selected_pair && !selected_ready11;
 
     assign rf_addr_rs1_o = selected_uop0.src0.arch_addr;
     assign rf_addr_rs2_o = selected_uop0.src1.arch_addr;
@@ -574,7 +844,7 @@ import ydrasil_pkg::*;
     always_comb begin
         entry_valid_d = entry_valid_q;
         for (di = 0; di < N; di = di + 1) begin
-            entry_pkt_d[di] = entry_pkt_q[di];
+            entry_station_d[di] = entry_station_q[di];
             entry_ready_d[di] = entry_ready_q[di];
             entry_value_d[di][0] = entry_value_q[di][0];
             entry_value_d[di][1] = entry_value_q[di][1];
@@ -610,7 +880,7 @@ import ydrasil_pkg::*;
         for (di = 0; di < N; di = di + 1) begin
             if (alloc_sel0[di]) begin
                 entry_valid_d[di] = 1'b1;
-                entry_pkt_d[di] = dispatch_pkt_i;
+                entry_station_d[di] = station_from_pkt(dispatch_pkt_i);
                 entry_ready_d[di][0] = init_ready(dispatch_pkt_i.src0, dispatch_src0_state_i);
                 entry_ready_d[di][1] = init_ready(dispatch_pkt_i.src1, dispatch_src1_state_i);
                 entry_value_d[di][0] = init_value(dispatch_pkt_i.src0, dispatch_src0_state_i, dispatch_rf_rdata_rs1_i);
@@ -618,7 +888,7 @@ import ydrasil_pkg::*;
             end
             if (alloc_sel1[di]) begin
                 entry_valid_d[di] = 1'b1;
-                entry_pkt_d[di] = dispatch_pkt1_i;
+                entry_station_d[di] = station_from_pkt(dispatch_pkt1_i);
                 entry_ready_d[di][0] = init_ready(dispatch_pkt1_i.src0, dispatch_src2_state_i);
                 entry_ready_d[di][1] = init_ready(dispatch_pkt1_i.src1, dispatch_src3_state_i);
                 entry_value_d[di][0] = init_value(dispatch_pkt1_i.src0, dispatch_src2_state_i, dispatch_rf_rdata_rs3_i);
@@ -656,7 +926,7 @@ import ydrasil_pkg::*;
         if (!rst_n || flush_id_i) begin
             entry_valid_q <= '0;
             for (qi = 0; qi < N; qi = qi + 1) begin
-                entry_pkt_q[qi] <= '0;
+                entry_station_q[qi] <= '0;
                 entry_ready_q[qi] <= '0;
                 entry_value_q[qi][0] <= '0;
                 entry_value_q[qi][1] <= '0;
@@ -670,7 +940,7 @@ import ydrasil_pkg::*;
         end else begin
             entry_valid_q <= entry_valid_d;
             for (qi = 0; qi < N; qi = qi + 1) begin
-                entry_pkt_q[qi] <= entry_pkt_d[qi];
+                entry_station_q[qi] <= entry_station_d[qi];
                 entry_ready_q[qi] <= entry_ready_d[qi];
                 entry_value_q[qi][0] <= entry_value_d[qi][0];
                 entry_value_q[qi][1] <= entry_value_d[qi][1];
@@ -703,6 +973,47 @@ import ydrasil_pkg::*;
         selected_uop0.decode.operator_type;
     wire rs1_completion_fwd = typed_completion_hit(selected_uop0.src0);
     wire rs2_completion_fwd = typed_completion_hit(selected_uop0.src1);
+    function automatic logic completion_input_hit(
+        input ydrasil_source_desc_t src, input integer lane
+    );
+        completion_input_hit = src.used && src.tag_valid &&
+            completion_bus_i[lane].valid &&
+            completion_bus_i[lane].producer_tracked &&
+            (completion_bus_i[lane].producer_id == src.producer_tag);
+    endfunction
+    function automatic logic typed_completion_input_hit(
+        input ydrasil_source_desc_t src
+    );
+        case (src.producer_class)
+            RESULT_LSU: typed_completion_input_hit =
+                completion_input_hit(src, COMPLETION_LSU);
+            RESULT_MDU: typed_completion_input_hit =
+                completion_input_hit(src, COMPLETION_MUL);
+            default: typed_completion_input_hit =
+                completion_input_hit(src, COMPLETION_ALU) ||
+                completion_input_hit(src, COMPLETION_DUAL_ALU);
+        endcase
+    endfunction
+    reg completion_direct_event;
+    reg completion_registered_event;
+    integer completion_obs_i;
+    always_comb begin
+        completion_direct_event = 1'b0;
+        completion_registered_event = 1'b0;
+        for (completion_obs_i = 0; completion_obs_i < N;
+             completion_obs_i = completion_obs_i + 1) begin
+            if (entry_valid_q[completion_obs_i]) begin
+                completion_direct_event = completion_direct_event ||
+                    typed_completion_input_hit(entry_pkt_q[completion_obs_i].src0) ||
+                    typed_completion_input_hit(entry_pkt_q[completion_obs_i].src1);
+                completion_registered_event = completion_registered_event ||
+                    typed_completion_hit(entry_pkt_q[completion_obs_i].src0) ||
+                    typed_completion_hit(entry_pkt_q[completion_obs_i].src1);
+            end
+        end
+    end
+    wire completion_latency_event = completion_direct_event &&
+        !completion_registered_event;
     wire issue_plain_alu_op = issue_operator_type_ff[OPERATOR_TYPE_ALU] &&
         !issue_operator_type_ff[OPERATOR_TYPE_BITMANIP];
     wire issue_early_alu_valid_ff = 1'b0;

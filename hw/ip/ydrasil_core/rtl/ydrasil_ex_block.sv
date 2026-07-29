@@ -593,3 +593,199 @@ import ydrasil_pkg::*;
         fast_result_wen ? fast_result : alu_result;
 
 endmodule
+
+// Lane 1 is an EX resource, paired with the main ALU/MUL/DIV block above.
+// Its only inputs are the lane-1 fields of the registered Issue/EX packet.
+// It provides a separate ALU, BRU, and AGU/LSU-request path.
+module ydrasil_ex_lane1
+import ydrasil_pkg::*;
+(
+    input  wire                           clk,
+    input  wire                           rst_n,
+    input  wire                           flush_i,
+    input  wire                           interrupt_i,
+    input  wire                           valid_i,
+    input  wire [REGS_DATA_WIDTH-1:0]     operand_a_i,
+    input  wire [REGS_DATA_WIDTH-1:0]     operand_b_i,
+    input  wire [REGS_DATA_WIDTH-1:0]     branch_operand_a_i,
+    input  wire [REGS_DATA_WIDTH-1:0]     branch_operand_b_i,
+    input  wire [REGS_DATA_WIDTH-1:0]     branch_imm_i,
+    input  wire [OPERATOR_WIDTH-1:0]      operator_i,
+    input  wire [OPERATOR_TYPE_WIDTH-1:0] operator_type_i,
+    input  wire [OP_LSU_INFO_WIDTH-1:0]   operator_lsu_i,
+    input  wire [REGS_DATA_WIDTH-1:0]     store_data_i,
+    input  wire                           store_data_valid_i,
+    input  wire [REGS_ADDR_WIDTH-1:0]     rd_addr_i,
+    input  wire                           rd_wen_i,
+    input  producer_id_t                  producer_id_i,
+    input  wire                           producer_tracked_i,
+    input  wire [INST_ADDR_WIDTH-1:0]     pc_i,
+    input  wire [INST_DATA_WIDTH-1:0]     instr_i,
+    input  wire                           jalr_i,
+    input  wire [INST_ADDR_WIDTH-1:0]     branch_target_i,
+    input  wire [INST_ADDR_WIDTH-1:0]     branch_next_pc_i,
+    input  wire                           pred_hit_i,
+    input  wire                           pred_taken_i,
+    input  wire [INST_ADDR_WIDTH-1:0]     pred_target_i,
+    input  wire [1:0]                     pred_counter_i,
+    input  wire [INST_ADDR_WIDTH-1:0]     pred_bht_index_i,
+    input  wire [INST_ADDR_WIDTH-1:0]     trap_redirect_addr_i,
+    output ydrasil_gpr_fwd_pkt_t          completion_o,
+    output ydrasil_lsu_req_pkt_t          lsu_req_o,
+    output wire                           ex_branch_jump_o,
+    output wire [INST_ADDR_WIDTH-1:0]     ex_branch_target_o,
+    output wire                           ex_pc_redirect_o,
+    output wire [INST_ADDR_WIDTH-1:0]     ex_pc_redirect_target_o,
+    output ydrasil_bp_train_pkt_t         ex_bp_train_o,
+    output wire                           ex_branch_mispredict_o,
+    output wire                           instret_valid_o,
+    output wire [INST_ADDR_WIDTH-1:0]     commit_pc_o,
+    output wire [INST_DATA_WIDTH-1:0]     commit_instr_o
+`ifndef SYNTHESIS
+    ,output wire                          dbg_bp_resolve_valid_o
+    ,output wire [INST_ADDR_WIDTH-1:0]    dbg_bp_resolve_pc_o
+    ,output wire                          dbg_bp_actual_taken_o
+    ,output wire                          dbg_bp_actual_target_o
+    ,output wire [INST_ADDR_WIDTH-1:0]    dbg_bp_actual_next_pc_o
+    ,output wire                          dbg_bp_pred_hit_o
+    ,output wire                          dbg_bp_pred_taken_o
+    ,output wire [INST_ADDR_WIDTH-1:0]    dbg_bp_pred_target_o
+    ,output wire [1:0]                    dbg_bp_pred_counter_o
+    ,output wire [INST_ADDR_WIDTH-1:0]    dbg_bp_pred_next_pc_o
+    ,output wire                          dbg_bp_mispredict_o
+`endif
+);
+    reg valid_q;
+    reg [INST_ADDR_WIDTH-1:0] pc_q;
+    reg [INST_DATA_WIDTH-1:0] instr_q;
+    reg load_q;
+    wire [REGS_DATA_WIDTH-1:0] alu_result;
+    wire [REGS_DATA_WIDTH-1:0] fast_b_shadd_result =
+        ({REGS_DATA_WIDTH{operator_i[OP_B_SH1ADD]}} & ((operand_a_i << 1) + operand_b_i)) |
+        ({REGS_DATA_WIDTH{operator_i[OP_B_SH2ADD]}} & ((operand_a_i << 2) + operand_b_i)) |
+        ({REGS_DATA_WIDTH{operator_i[OP_B_SH3ADD]}} & ((operand_a_i << 3) + operand_b_i));
+    wire [REGS_DATA_WIDTH-1:0] fast_b_logic_result =
+        ({REGS_DATA_WIDTH{operator_i[OP_B_ANDN]}} & (operand_a_i & ~operand_b_i)) |
+        ({REGS_DATA_WIDTH{operator_i[OP_B_ORN]}} & (operand_a_i | ~operand_b_i)) |
+        ({REGS_DATA_WIDTH{operator_i[OP_B_XNOR]}} & ~(operand_a_i ^ operand_b_i));
+    wire signed [REGS_DATA_WIDTH-1:0] signed_operand_a = operand_a_i;
+    wire signed [REGS_DATA_WIDTH-1:0] signed_operand_b = operand_b_i;
+    wire [REGS_DATA_WIDTH-1:0] fast_b_minmax_result =
+        ({REGS_DATA_WIDTH{operator_i[OP_B_MIN]}} &
+         ((signed_operand_a <= signed_operand_b) ? operand_a_i : operand_b_i)) |
+        ({REGS_DATA_WIDTH{operator_i[OP_B_MAX]}} &
+         ((signed_operand_a >= signed_operand_b) ? operand_a_i : operand_b_i)) |
+        ({REGS_DATA_WIDTH{operator_i[OP_B_MINU]}} &
+         ((operand_a_i <= operand_b_i) ? operand_a_i : operand_b_i)) |
+        ({REGS_DATA_WIDTH{operator_i[OP_B_MAXU]}} &
+         ((operand_a_i >= operand_b_i) ? operand_a_i : operand_b_i));
+    wire [REGS_DATA_WIDTH-1:0] fast_b_extend_result =
+        ({REGS_DATA_WIDTH{operator_i[OP_B_REV8]}} &
+         {operand_a_i[7:0], operand_a_i[15:8], operand_a_i[23:16], operand_a_i[31:24]}) |
+        ({REGS_DATA_WIDTH{operator_i[OP_B_SEXT_B]}} & {{24{operand_a_i[7]}}, operand_a_i[7:0]}) |
+        ({REGS_DATA_WIDTH{operator_i[OP_B_SEXT_H]}} & {{16{operand_a_i[15]}}, operand_a_i[15:0]}) |
+        ({REGS_DATA_WIDTH{operator_i[OP_B_ZEXT_H]}} & {16'b0, operand_a_i[15:0]});
+    wire fast_bitmanip_op = operator_type_i[OPERATOR_TYPE_BITMANIP] &&
+        (operator_i[OP_B_SH1ADD] | operator_i[OP_B_SH2ADD] | operator_i[OP_B_SH3ADD] |
+         operator_i[OP_B_ANDN] | operator_i[OP_B_ORN] | operator_i[OP_B_XNOR] |
+         operator_i[OP_B_MIN] | operator_i[OP_B_MAX] | operator_i[OP_B_MINU] |
+         operator_i[OP_B_MAXU] | operator_i[OP_B_REV8] | operator_i[OP_B_SEXT_B] |
+         operator_i[OP_B_SEXT_H] | operator_i[OP_B_ZEXT_H]);
+    wire [REGS_DATA_WIDTH-1:0] fast_bitmanip_result =
+        fast_b_shadd_result | fast_b_logic_result | fast_b_minmax_result | fast_b_extend_result;
+    wire memory_op = operator_type_i[OPERATOR_TYPE_LOAD] ||
+        operator_type_i[OPERATOR_TYPE_STORE];
+    wire [BUS_ADDR_WIDTH-1:0] agu_addr = operand_a_i + operand_b_i;
+    wire alu_unused_comp;
+    wire alu_unused_wen;
+    wire [REGS_ADDR_WIDTH-1:0] alu_unused_waddr;
+
+    always_comb begin
+        lsu_req_o = '0;
+        lsu_req_o.valid = valid_i && memory_op && !interrupt_i;
+        lsu_req_o.is_load = operator_type_i[OPERATOR_TYPE_LOAD];
+        lsu_req_o.is_store = operator_type_i[OPERATOR_TYPE_STORE];
+        lsu_req_o.op = operator_lsu_i;
+        lsu_req_o.addr = agu_addr;
+        lsu_req_o.addr_is_dtcm =
+            (agu_addr[31:DTCM_ADDR_WIDTH+2] == DTCM_BASE_ADDR[31:DTCM_ADDR_WIDTH+2]);
+        lsu_req_o.rd_addr = rd_addr_i;
+        lsu_req_o.producer_id = producer_id_i;
+        lsu_req_o.producer_tracked = producer_tracked_i;
+        lsu_req_o.store_data = store_data_i;
+        lsu_req_o.store_data_valid = store_data_valid_i;
+        lsu_req_o.fp_load = 1'b0;
+        lsu_req_o.fp_rd_addr = '0;
+        if (operator_lsu_i[OP_LSU_SB])
+            lsu_req_o.store_mask = 4'b0001 << agu_addr[1:0];
+        else if (operator_lsu_i[OP_LSU_SH])
+            lsu_req_o.store_mask = agu_addr[1] ? 4'b1100 : 4'b0011;
+        else if (operator_lsu_i[OP_LSU_SW])
+            lsu_req_o.store_mask = 4'b1111;
+    end
+
+    ydrasil_alu u_alu (
+        .operand_a_i(operand_a_i), .operand_b_i(operand_b_i),
+        .operator_i(operator_i), .operator_type_i(operator_type_i),
+        .id_rf_waddr_rd_i(rd_addr_i), .id_alu_rf_wen_rd_i(rd_wen_i),
+        .interrupt_i(interrupt_i), .comp_result_o(alu_unused_comp),
+        .alu_result_o(alu_result), .alu_rf_wen_rd_o(alu_unused_wen),
+        .alu_rf_waddr_rd_o(alu_unused_waddr)
+    );
+
+    ydrasil_bru u_bru (
+        .clk(clk), .rst_n(rst_n), .flush_i(flush_i),
+        .operand_a_i(branch_operand_a_i), .operand_b_i(branch_operand_b_i),
+        .bt_a_operand_i(jalr_i ? branch_operand_a_i : pc_i),
+        .bt_b_operand_i(branch_imm_i), .operator_i(operator_i),
+        .operator_type_i(operator_type_i), .id_ex_valid_i(valid_i),
+        .id_ex_jalr_i(jalr_i), .id_ex_branch_target_i(branch_target_i),
+        .id_ex_branch_next_pc_i(branch_next_pc_i), .id_ex_branch_eq_i(1'b0),
+        .id_ex_branch_ge_signed_i(1'b0), .id_ex_branch_ge_unsigned_i(1'b0),
+        .id_ex_pred_hit_i(pred_hit_i), .id_ex_pred_taken_i(pred_taken_i),
+        .id_ex_pred_target_i(pred_target_i), .id_ex_pred_counter_i(pred_counter_i),
+        .id_ex_pred_bht_index_i(pred_bht_index_i), .id_ex_producer_id_i(producer_id_i),
+        .trap_redirect_i(interrupt_i), .trap_redirect_addr_i(trap_redirect_addr_i),
+        .ex_branch_jump_o(ex_branch_jump_o), .ex_branch_target_o(ex_branch_target_o),
+        .ex_pc_redirect_o(ex_pc_redirect_o),
+        .ex_pc_redirect_target_o(ex_pc_redirect_target_o), .ex_bp_train_o(ex_bp_train_o),
+        .ex_branch_mispredict_o(ex_branch_mispredict_o)
+`ifndef SYNTHESIS
+        ,.dbg_bp_resolve_valid_o(dbg_bp_resolve_valid_o)
+        ,.dbg_bp_resolve_pc_o(dbg_bp_resolve_pc_o)
+        ,.dbg_bp_actual_taken_o(dbg_bp_actual_taken_o)
+        ,.dbg_bp_actual_target_o(dbg_bp_actual_target_o)
+        ,.dbg_bp_actual_next_pc_o(dbg_bp_actual_next_pc_o)
+        ,.dbg_bp_pred_hit_o(dbg_bp_pred_hit_o)
+        ,.dbg_bp_pred_taken_o(dbg_bp_pred_taken_o)
+        ,.dbg_bp_pred_target_o(dbg_bp_pred_target_o)
+        ,.dbg_bp_pred_counter_o(dbg_bp_pred_counter_o)
+        ,.dbg_bp_pred_next_pc_o(dbg_bp_pred_next_pc_o)
+        ,.dbg_bp_mispredict_o(dbg_bp_mispredict_o)
+`endif
+    );
+
+    always_ff @(posedge clk) begin
+        if (!rst_n || flush_i) begin
+            valid_q <= 1'b0;
+            pc_q <= '0;
+            instr_q <= RV32I_INS_NOP;
+            load_q <= 1'b0;
+        end else begin
+            valid_q <= valid_i && !interrupt_i;
+            pc_q <= pc_i;
+            instr_q <= instr_i;
+            load_q <= operator_type_i[OPERATOR_TYPE_LOAD];
+        end
+    end
+
+    assign completion_o.valid = valid_i && rd_wen_i && !memory_op && !interrupt_i &&
+        (rd_addr_i != '0);
+    assign completion_o.producer_id = producer_id_i;
+    assign completion_o.producer_tracked = producer_tracked_i;
+    assign completion_o.addr = rd_addr_i;
+    assign completion_o.data = fast_bitmanip_op ? fast_bitmanip_result : alu_result;
+    assign instret_valid_o = valid_q && !load_q;
+    assign commit_pc_o = pc_q;
+    assign commit_instr_o = instr_q;
+endmodule
