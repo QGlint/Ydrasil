@@ -564,6 +564,11 @@ package ydrasil_pkg;
 	typedef struct packed {
 		logic [REGS_DATA_WIDTH-1:0]           operand_a;
 		logic [REGS_DATA_WIDTH-1:0]           operand_b;
+		// EX owns the one-hop ALU forwarding data mux.  Issue records only
+		// the producing EX lane, so an EX result can never feed back through
+		// station selection or the Issue/EX input mux in the same cycle.
+		logic [1:0]                            operand_a_forward_sel;
+		logic [1:0]                            operand_b_forward_sel;
 		logic [OPERATOR_WIDTH-1:0]            operator_info;
 		logic [OPERATOR_TYPE_WIDTH-1:0]       operator_type;
 		logic                                valid;
@@ -593,6 +598,8 @@ package ydrasil_pkg;
 		ydrasil_fpu_req_pkt_t                fpu_req;
 		logic [REGS_DATA_WIDTH-1:0]           lane1_operand_a;
 		logic [REGS_DATA_WIDTH-1:0]           lane1_operand_b;
+		logic [1:0]                            lane1_operand_a_forward_sel;
+		logic [1:0]                            lane1_operand_b_forward_sel;
 		logic [REGS_DATA_WIDTH-1:0]           lane1_branch_operand_a;
 		logic [REGS_DATA_WIDTH-1:0]           lane1_branch_operand_b;
 		logic [REGS_DATA_WIDTH-1:0]           lane1_branch_imm;

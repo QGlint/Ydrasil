@@ -162,7 +162,10 @@ BOUNDARY_OPT_CFLAGS_O3_app_unroll ?= -Os
 BOUNDARY_OPT_APP_CFLAGS_O3_app_unroll ?= -O3 -funroll-loops
 BOUNDARY_OPT_SPIKE_MAXSTEPS ?= 100000
 BOUNDARY_OPT_SPIKE_MAXSTEPS_exception_stress ?= 1000000
-BOUNDARY_OPT_SPIKE_SKIP_APPS ?= csr_counter_edges coverage_closure_edges completion_broadcast_edges mmio_dtcm_order_edges
+# Spike blocks at WFI while this M-mode implementation legally completes WFI
+# as a no-sleep hint.  system_illegal_edges retains its hardware self-check
+# and assertions, but cannot use a complete-program retirement comparison.
+BOUNDARY_OPT_SPIKE_SKIP_APPS ?= csr_counter_edges coverage_closure_edges completion_broadcast_edges mmio_dtcm_order_edges system_illegal_edges
 BOUNDARY_SIM_TIMEOUT ?= 2000000
 COVERAGE_QUICK_TIMEOUT ?= 750000
 COVERAGE_QUICK_MARGIN_PERCENT ?= 50

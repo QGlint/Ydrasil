@@ -336,6 +336,9 @@ end
     reg [31:0] producer_wait_ready_count;
     reg [31:0] producer_both_ready_count;
     reg [31:0] producer_retire_held_count;
+    reg [31:0] producer_single_block_count;
+    reg [31:0] producer_pair_degrade_count;
+    reg [31:0] order_head_wait_count;
     reg [31:0] producer_normal_drain_count;
     reg [31:0] producer_flush_drain_count;
     reg [31:0] producer_trap_free_count;
@@ -394,13 +397,16 @@ end
     reg [31:0] issue_window_reserved_bypass_plan_count;
     reg [31:0] issue_window_reserved_bypass_issue_count;
     reg [31:0] issue_window_reserved_bypass_cancel_count;
-    reg [31:0] issue_window_ingress_occ_count [0:2];
+    reg [31:0] issue_window_ingress_occ_count [0:4];
     reg [31:0] issue_window_ingress_credit_admit_count;
     reg [31:0] issue_window_ingress_to_station_count;
     reg [31:0] issue_window_full_station_refill_count;
     reg [31:0] issue_window_admission_backpressure_count;
     reg [31:0] issue_window_ingress_flush_drain_count;
     reg [31:0] issue_window_completion_latency_count;
+    reg [31:0] issue_credit_reclaim_count;
+    reg [31:0] issue_credit_reclaim_accept_count;
+    reg [31:0] issue_credit_backpressure_count;
 
     // Primary-cycle taxonomy.  This is intentionally separate from the
     // diagnostic counters below: exactly one primary code is selected for
@@ -464,8 +470,11 @@ end
         u_dut.u_ydrasil_id_stage.pair_control_memory;
     wire [2:0] perf_issue_window_occupancy =
         $countones(u_dut.u_ydrasil_issue_stage.entry_valid_q);
-    wire [1:0] perf_issue_ingress_occupancy =
-        $countones(u_dut.u_ydrasil_issue_stage.ingress_valid_q);
+    // Ingress is a compact four-record ring. It separates dispatch capture
+    // from station mutation; this histogram makes that buffering visible
+    // rather than misreporting all station admits as direct ID refills.
+    wire [2:0] perf_issue_ingress_occupancy =
+        u_dut.u_ydrasil_issue_stage.ingress_count_q;
     wire perf_issue_window_dispatch = u_dut.issue_pipe_push;
     wire perf_issue_window_dispatch_two = u_dut.issue_pipe_push_two;
     wire perf_issue_window_select =
@@ -479,9 +488,8 @@ end
          (u_dut.u_ydrasil_issue_stage.selected_uop0.dst.rob_tag + 1'b1));
     // A local bypass consumes a control plan made during the prior select;
     // this is not a completion-driven wakeup into the current arbitration.
-    wire perf_issue_window_bypass_consumed = perf_issue_window_select &&
-        (u_dut.u_ydrasil_issue_stage.rs1_completion_fwd ||
-         u_dut.u_ydrasil_issue_stage.rs2_completion_fwd);
+    wire perf_issue_window_bypass_consumed =
+        u_dut.u_ydrasil_issue_stage.bypass_consumed_event;
     wire [2:0] perf_issue_window_selected_count =
         {2'b0, u_dut.u_ydrasil_issue_stage.selected_a_valid} +
         {2'b0, u_dut.u_ydrasil_issue_stage.selected_b_valid};
@@ -492,30 +500,29 @@ end
     wire [2:0] perf_issue_window_station_admit_count =
         perf_issue_window_station_next_occupancy -
         perf_issue_window_station_post_select;
-    // Ingress arrivals are ordered ahead of this cycle's dispatch pair, so
-    // any station allocation consumes ingress entries before new dispatch.
     wire [2:0] perf_issue_window_ingress_to_station =
-        (perf_issue_window_station_admit_count <= perf_issue_ingress_occupancy) ?
-        perf_issue_window_station_admit_count : perf_issue_ingress_occupancy;
-    wire [2:0] perf_issue_window_dispatch_to_station =
-        perf_issue_window_station_admit_count -
-        perf_issue_window_ingress_to_station;
+        perf_issue_window_station_admit_count;
+    wire [2:0] perf_issue_window_dispatch_to_station = '0;
     wire perf_issue_window_frontend_valid = u_dut.id_issue_pkt.valid ||
         u_dut.id_issue_pkt1.valid;
     wire [2:0] perf_issue_window_ingress_credit_admit =
-        !u_dut.pipeline_flush && (perf_issue_window_occupancy == 3'd4) &&
-        (perf_issue_ingress_occupancy < 2'd2) ?
-        ({2'b0, perf_issue_window_dispatch} +
-         {2'b0, perf_issue_window_dispatch_two}) : '0;
+        perf_issue_window_ingress_to_station;
     wire [2:0] perf_issue_window_full_station_refill =
         !u_dut.pipeline_flush && (perf_issue_window_occupancy == 3'd4) ?
-        perf_issue_window_dispatch_to_station : '0;
+        perf_issue_window_ingress_to_station : '0;
     wire perf_issue_window_admission_backpressure = !u_dut.pipeline_flush &&
         perf_issue_window_frontend_valid &&
         (perf_issue_window_occupancy == 3'd4) &&
-        (perf_issue_ingress_occupancy == 2'd2);
-    wire [1:0] perf_issue_window_ingress_flush_drain = u_dut.pipeline_flush ?
-        perf_issue_ingress_occupancy : '0;
+        (u_dut.u_ydrasil_issue_stage.ingress_count_q == 3'd4);
+    wire perf_issue_credit_reclaim =
+        u_dut.u_ydrasil_issue_stage.issue_credit_reclaim;
+    wire [1:0] perf_issue_credit_reclaim_accept = perf_issue_credit_reclaim ?
+        ({1'b0, perf_issue_window_dispatch} +
+         {1'b0, perf_issue_window_dispatch_two}) : '0;
+    wire perf_issue_credit_backpressure =
+        u_dut.u_ydrasil_issue_stage.issue_credit_backpressure;
+    wire [2:0] perf_issue_window_ingress_flush_drain = u_dut.pipeline_flush ?
+        u_dut.u_ydrasil_issue_stage.ingress_count_q : '0;
     wire perf_issue_window_completion_latency =
         u_dut.u_ydrasil_issue_stage.completion_latency_event;
     wire perf_issue_window_scheduled_bypass =
@@ -543,7 +550,10 @@ end
             if (u_dut.u_ydrasil_issue_stage.select0[issue_obs_i])
                 for (issue_obs_j = 0; issue_obs_j < 4; issue_obs_j = issue_obs_j + 1)
                     if (u_dut.u_ydrasil_issue_stage.entry_valid_q[issue_obs_j] &&
-                        u_dut.u_ydrasil_issue_stage.older_q[issue_obs_j][issue_obs_i] &&
+                        (u_dut.u_ydrasil_issue_stage.age_q[issue_obs_j] !=
+                         u_dut.u_ydrasil_issue_stage.age_q[issue_obs_i]) &&
+                        ((u_dut.u_ydrasil_issue_stage.age_q[issue_obs_i] -
+                          u_dut.u_ydrasil_issue_stage.age_q[issue_obs_j]) < 4'd8) &&
                         !u_dut.u_ydrasil_issue_stage.select0[issue_obs_j] &&
                         !u_dut.u_ydrasil_issue_stage.select1[issue_obs_j])
                         perf_issue_window_bypass = 1'b1;
@@ -1013,6 +1023,9 @@ end
             producer_wait_ready_count <= 32'b0;
             producer_both_ready_count <= 32'b0;
             producer_retire_held_count <= 32'b0;
+            producer_single_block_count <= 32'b0;
+            producer_pair_degrade_count <= 32'b0;
+            order_head_wait_count <= 32'b0;
             producer_normal_drain_count <= 32'b0;
             producer_flush_drain_count <= 32'b0;
             producer_trap_free_count <= 32'b0;
@@ -1075,9 +1088,12 @@ end
             issue_window_admission_backpressure_count <= 32'b0;
             issue_window_ingress_flush_drain_count <= 32'b0;
             issue_window_completion_latency_count <= 32'b0;
+            issue_credit_reclaim_count <= 32'b0;
+            issue_credit_reclaim_accept_count <= 32'b0;
+            issue_credit_backpressure_count <= 32'b0;
             for (perf_stat_idx = 0; perf_stat_idx < 5; perf_stat_idx = perf_stat_idx + 1)
                 dispatchq_occ_count[perf_stat_idx] <= 32'b0;
-            for (perf_stat_idx = 0; perf_stat_idx < 3; perf_stat_idx = perf_stat_idx + 1)
+            for (perf_stat_idx = 0; perf_stat_idx < 5; perf_stat_idx = perf_stat_idx + 1)
                 issue_window_ingress_occ_count[perf_stat_idx] <= 32'b0;
         end else begin
             perf_sample_cycle_count <= perf_sample_cycle_count + 1'b1;
@@ -1192,6 +1208,12 @@ end
             issue_window_completion_latency_count <=
                 issue_window_completion_latency_count +
                 perf_issue_window_completion_latency;
+            issue_credit_reclaim_count <= issue_credit_reclaim_count +
+                perf_issue_credit_reclaim;
+            issue_credit_reclaim_accept_count <= issue_credit_reclaim_accept_count +
+                perf_issue_credit_reclaim_accept;
+            issue_credit_backpressure_count <= issue_credit_backpressure_count +
+                perf_issue_credit_backpressure;
             dispatchq_occ_count[perf_issue_window_occupancy] <=
                 dispatchq_occ_count[perf_issue_window_occupancy] + 1'b1;
             issue_window_ingress_occ_count[perf_issue_ingress_occupancy] <=
@@ -1614,6 +1636,12 @@ end
             end
             if (|u_dut.u_ctrl.producer_retire_q)
                 producer_retire_held_count <= producer_retire_held_count + 1'b1;
+            producer_single_block_count <= producer_single_block_count +
+                u_dut.u_ctrl.producer_single_block;
+            producer_pair_degrade_count <= producer_pair_degrade_count +
+                u_dut.u_ctrl.producer_pair_degrade;
+            order_head_wait_count <= order_head_wait_count +
+                u_dut.u_ctrl.order_head_wait;
             producer_nonempty_q <= |u_dut.u_ctrl.producer_valid_q;
             producer_flush_q <= u_dut.flush_ex;
             if (producer_nonempty_q && !(|u_dut.u_ctrl.producer_valid_q)) begin
@@ -2146,7 +2174,7 @@ end
                 dispatchq_occ_count[2],
                 dispatchq_occ_count[3],
                 dispatchq_occ_count[4]);
-            $display("PERF_ISSUE_WINDOW: DISPATCH=%-d DISPATCH_TWO=%-d RAW_PAIR_ADMIT=%-d SELECT=%-d SELECT_TWO=%-d BYPASS_OLDER=%-d NONADJ_PAIR=%-d BYPASS_CONSUMED=%-d SCHEDULED_BYPASS=%-d REGISTERED_WAKEUP=%-d REGISTERED_ALU_WAKEUP=%-d REGISTERED_LSU_WAKEUP=%-d REGISTERED_MDU_WAKEUP=%-d RESERVED_BYPASS_PLAN=%-d RESERVED_BYPASS_ISSUE=%-d RESERVED_BYPASS_CANCEL=%-d INGRESS_OCC0=%-d INGRESS_OCC1=%-d INGRESS_OCC2=%-d INGRESS_CREDIT_ADMIT=%-d INGRESS_TO_STATION=%-d FULL_STATION_REFILL=%-d ADMISSION_BACKPRESSURE=%-d INGRESS_FLUSH_DRAIN=%-d COMPLETION_LATENCY=%-d",
+            $display("PERF_ISSUE_WINDOW: DISPATCH=%-d DISPATCH_TWO=%-d RAW_PAIR_ADMIT=%-d SELECT=%-d SELECT_TWO=%-d BYPASS_OLDER=%-d NONADJ_PAIR=%-d BYPASS_CONSUMED=%-d SCHEDULED_BYPASS=%-d REGISTERED_WAKEUP=%-d REGISTERED_ALU_WAKEUP=%-d REGISTERED_LSU_WAKEUP=%-d REGISTERED_MDU_WAKEUP=%-d RESERVED_BYPASS_PLAN=%-d RESERVED_BYPASS_ISSUE=%-d RESERVED_BYPASS_CANCEL=%-d COMPLETION_LATENCY=%-d",
                 issue_window_dispatch_count,
                 issue_window_dispatch_two_count,
                 issue_window_raw_pair_admit_count,
@@ -2163,15 +2191,23 @@ end
                 issue_window_reserved_bypass_plan_count,
                 issue_window_reserved_bypass_issue_count,
                 issue_window_reserved_bypass_cancel_count,
+                issue_window_completion_latency_count);
+            $display("PERF_ISSUE_DIRECT_REFILL: FULL_WINDOW=%-d BACKPRESSURE=%-d",
+                issue_window_full_station_refill_count,
+                issue_window_admission_backpressure_count);
+            $display("PERF_ISSUE_INGRESS: OCC0=%-d OCC1=%-d OCC2=%-d OCC3=%-d OCC4=%-d TO_STATION=%-d CREDIT_ADMIT=%-d FLUSH_DRAIN=%-d",
                 issue_window_ingress_occ_count[0],
                 issue_window_ingress_occ_count[1],
                 issue_window_ingress_occ_count[2],
-                issue_window_ingress_credit_admit_count,
+                issue_window_ingress_occ_count[3],
+                issue_window_ingress_occ_count[4],
                 issue_window_ingress_to_station_count,
-                issue_window_full_station_refill_count,
-                issue_window_admission_backpressure_count,
-                issue_window_ingress_flush_drain_count,
-                issue_window_completion_latency_count);
+                issue_window_ingress_credit_admit_count,
+                issue_window_ingress_flush_drain_count);
+            $display("PERF_ISSUE_CREDIT: RECYCLE_OPEN=%-d RECYCLE_ACCEPT=%-d CREDIT_BLOCK=%-d",
+                issue_credit_reclaim_count,
+                issue_credit_reclaim_accept_count,
+                issue_credit_backpressure_count);
             $display("PERF_CAUSE_HIST: NONE=%-d SB=%-d LSU=%-d LSU_SB=%-d PF=%-d PF_SB=%-d PF_LSU=%-d PF_LSU_SB=%-d WB_ANY=%-d CLINT_ANY=%-d",
                 bubble_cause_hist[0], bubble_cause_hist[1], bubble_cause_hist[2],
                 bubble_cause_hist[3], bubble_cause_hist[4], bubble_cause_hist[5],
@@ -2210,6 +2246,10 @@ end
                 producer_wait_ready_count,
                 producer_both_ready_count,
                 producer_retire_held_count);
+            $display("PERF_TOKEN_CAPACITY: SINGLE_BLOCK=%-d PAIR_DEGRADE=%-d ORDER_HEAD_WAIT=%-d",
+                producer_single_block_count,
+                producer_pair_degrade_count,
+                order_head_wait_count);
             $display("PERF_LSU_STRUCT_DETAIL: MMIO=%-d PENDING_STORE=%-d STORE_CAPTURE=%-d OTHER=%-d",
                 lsu_struct_mmio_count,
                 lsu_struct_pending_store_count,

@@ -220,8 +220,16 @@ import ydrasil_pkg::*;
     wire queue_alloc1 = dispatch_accept1_i && dispatch_pkt1_i.valid;
     wire [1:0] queue_alloc_count = {1'b0, queue_alloc0} +
         {1'b0, queue_alloc1};
-    wire producer_full_stall = dispatch_pkt_i.valid && !producer_has_two_free;
-    wire producer_pair_stall = dispatch_pkt1_i.valid && !producer_has_two_free;
+    // Token capacity must distinguish a true single-dispatch stop from a
+    // legal single dispatch that merely degrades a pair. The old combined
+    // metric treated both as "producer full", overstating lost cycles.
+    wire producer_single_block = dispatch_pkt_i.valid && !producer_has_one_free;
+    wire producer_pair_degrade = dispatch_pkt_i.valid && dispatch_pkt1_i.valid &&
+        producer_has_one_free && !producer_has_two_free;
+    wire producer_full_stall = producer_single_block;
+    wire producer_pair_stall = producer_pair_degrade;
+    wire order_head_wait = (queue_count_q != '0) &&
+        producer_valid_q[queue_head_q] && !producer_ready_q[queue_head_q];
     wire serial_alloc = (queue_alloc0 && dispatch_pkt_i.ctrl.serialize_before) ||
         (queue_alloc1 && dispatch_pkt1_i.ctrl.serialize_before);
     wire serial_accept = issue_fence_i || issue_sys_i || issue_sys_complete_i ||

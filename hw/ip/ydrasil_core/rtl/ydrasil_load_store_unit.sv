@@ -14,7 +14,11 @@ import ydrasil_pkg::*;
     output wire [REGS_ADDR_WIDTH-1:0]      fp_completion_addr_o,
     output wire [REGS_DATA_WIDTH-1:0]      fp_completion_data_o
 );
-    localparam int QUEUE_DEPTH = 2;
+    // Issue samples structural status through a registered boundary while a
+    // selected memory uop is still travelling through Issue/EX and the AGU.
+    // Four request slots retain one observable backlog plus the bounded
+    // three-request flight window without feeding live LSU state into issue.
+    localparam int QUEUE_DEPTH = 4;
     localparam int STORE_BUFFER_DEPTH = 4;
     localparam int QUEUE_COUNT_WIDTH = $clog2(QUEUE_DEPTH + 1);
     localparam int STORE_COUNT_WIDTH = $clog2(STORE_BUFFER_DEPTH + 1);
@@ -162,12 +166,11 @@ import ydrasil_pkg::*;
     // Backpressure reflects request-queue capacity. Store-buffer pressure is
     // absorbed behind this FF boundary and only stops the queue head when all
     // four entries are actually occupied.
-    // Resource availability is a registered queue property.  Do not include
-    // the current EX request in this status: doing so creates an EX -> LSU ->
-    // issue feedback path, while delaying this signal would permit one extra
-    // request and overflow the queue.  Keeping one entry of headroom matches
-    // the request/queue boundary and makes the token conservative.
-    assign status_o.busy = queue_count_q >= QUEUE_COUNT_WIDTH'(QUEUE_DEPTH-1);
+    // `busy` becomes visible to issue only through issue's registered status
+    // snapshot.  Assert at the first queued request so ordinary DTCM traffic
+    // remains one request per cycle while MMIO/store-buffer backpressure is
+    // stopped before the queue consumes its bounded in-flight headroom.
+    assign status_o.busy = !queue_empty || mmio_busy;
     assign status_o.idle = queue_empty && store_buf_empty &&
         !mmio_busy && !load_s1_valid_q;
     assign status_o.fast_load = 1'b0;

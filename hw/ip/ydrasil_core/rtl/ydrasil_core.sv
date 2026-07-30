@@ -351,14 +351,15 @@ import ydrasil_axi_pkg::*;
 	wire                            issue_src3_wait;
 	wire                            dispatch_ready;
 	wire                            dispatch_two_ready;
-		// Issue capacity is a registered station-credit boundary.  It depends on
-		// neither this cycle's selection nor EX completion, which keeps the
-		// ID/RAT -> issue admission path independent of issue arbitration.
-	wire                            issue_pipe_has_room = issue_ready && dispatch_ready;
+	// Admission crosses the ID/issue boundary only through credits sampled
+	// from registered station state.  `issue_ready` may include a slot being
+	// selected this cycle for local physical reuse; it must not feed IF/ID or
+	// RAT allocation, otherwise selection closes a same-cycle feedback loop.
+	wire                            issue_pipe_has_room = issue_dispatch_ready_q && dispatch_ready;
 		wire                            issue_pipe_push = issue_pipe_has_room &&
 		id_issue_pkt.valid;
 	wire                            issue_pipe_push_two = issue_pipe_push &&
-		issue_dispatch_two_ready && dispatch_two_ready && id_issue_pkt1.valid &&
+		issue_dispatch_two_ready_q && dispatch_two_ready && id_issue_pkt1.valid &&
 		!id_issue_pkt.ctrl.serialize_before &&
 		!(id_issue_pkt.ctrl.checkpoint_req && id_issue_pkt1.ctrl.checkpoint_req);
 	wire                            decode_valid = issue_pkt.valid;
@@ -452,16 +453,37 @@ import ydrasil_axi_pkg::*;
 
 	wire [ydrasil_pkg::BUS_ADDR_WIDTH-1:0] id_instr_addr;
 
-	assign operand_a = issue_ex_pkt.operand_a;
-	assign operand_b = issue_ex_pkt.operand_b;
-	assign alu_operand_a = issue_ex_pkt.operand_a;
-	assign alu_operand_b = issue_ex_pkt.operand_b;
+	function automatic [ydrasil_pkg::REGS_DATA_WIDTH-1:0] ex_forward_value(
+		input logic [1:0] select_i,
+		input logic [ydrasil_pkg::REGS_DATA_WIDTH-1:0] original_i
+	);
+		begin
+			case (select_i)
+				2'd1: ex_forward_value = alu_fwd_pkt.data;
+				2'd2: ex_forward_value = dual_alu_fwd_pkt.data;
+				default: ex_forward_value = original_i;
+			endcase
+		end
+	endfunction
+
+	// The forwarding sources are EX result registers.  Issue sends only a
+	// registered lane reservation, never a completion value.
+	assign operand_a = ex_forward_value(issue_ex_pkt.operand_a_forward_sel,
+		issue_ex_pkt.operand_a);
+	assign operand_b = ex_forward_value(issue_ex_pkt.operand_b_forward_sel,
+		issue_ex_pkt.operand_b);
+	assign alu_operand_a = operand_a;
+	assign alu_operand_b = operand_b;
 	assign bru_operand_a = issue_ex_pkt.operand_a;
 	assign bru_operand_b = issue_ex_pkt.operand_b;
 	assign lsu_operand_a = issue_ex_pkt.operand_a;
 	assign lsu_operand_b = issue_ex_pkt.operand_b;
-	assign mul_operand_a = issue_ex_pkt.operand_a;
-	assign mul_operand_b = issue_ex_pkt.operand_b;
+	// Lane 0 ALU, MUL and DIV share the Issue/EX operand contract.  The
+	// selector was armed in the previous issue cycle and its sources are EX
+	// result flops, so this remains entirely within the EX timing boundary.
+	// BRU and AGU intentionally retain their own registered-completion path.
+	assign mul_operand_a = operand_a;
+	assign mul_operand_b = operand_b;
 	assign csr_operand_a = issue_ex_pkt.operand_a;
 	assign csr_operand_b = issue_ex_pkt.operand_b;
 	assign operator = issue_ex_pkt.operator_info;
@@ -490,8 +512,12 @@ import ydrasil_axi_pkg::*;
 	assign id_ex_producer_tracked = issue_ex_pkt.producer_tracked;
 	assign id_alu_rf_wen_rd = issue_ex_pkt.rd_wen;
 	assign id_rf_waddr_rd = issue_ex_pkt.rd_addr;
-	assign dual_operand_a = issue_ex_pkt.lane1_operand_a;
-	assign dual_operand_b = issue_ex_pkt.lane1_operand_b;
+	assign dual_operand_a = ex_forward_value(
+		issue_ex_pkt.lane1_operand_a_forward_sel,
+		issue_ex_pkt.lane1_operand_a);
+	assign dual_operand_b = ex_forward_value(
+		issue_ex_pkt.lane1_operand_b_forward_sel,
+		issue_ex_pkt.lane1_operand_b);
 	assign dual_operator = issue_ex_pkt.lane1_operator_info;
 	assign dual_operator_type = issue_ex_pkt.lane1_operator_type;
 	assign dual_operator_lsu = issue_ex_pkt.lane1_operator_lsu;
@@ -1220,8 +1246,11 @@ import ydrasil_axi_pkg::*;
 		.pc_i                (dual_id_ex_pc),
 		.instr_i             (dual_id_ex_instr),
 		.jalr_i              (issue_ex_pkt.lane1_jalr),
-		.branch_target_i     (issue_ex_pkt.lane1_branch_target),
-		.branch_next_pc_i    (issue_ex_pkt.lane1_branch_next_pc),
+		// The lane-1 BRU owns target/fall-through arithmetic.  Issue/EX
+		// transports only registered PC and branch immediate so an adder never
+		// sits on the issue selection-to-register path.
+		.branch_target_i     (dual_id_ex_pc + issue_ex_pkt.lane1_branch_imm),
+		.branch_next_pc_i    (dual_id_ex_pc + 32'd4),
 		.pred_hit_i          (issue_ex_pkt.lane1_pred_hit),
 		.pred_taken_i        (issue_ex_pkt.lane1_pred_taken),
 		.pred_target_i       (issue_ex_pkt.lane1_pred_target),

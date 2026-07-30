@@ -150,6 +150,7 @@ import ydrasil_pkg::*;
     reg                       alu_rf_wen_rd_ff;
     producer_id_t             alu_producer_id_ff;
     (* max_fanout = 8 *) reg [REGS_ADDR_WIDTH-1:0] alu_rf_waddr_rd_ff;
+    ydrasil_gpr_fwd_pkt_t     completion_q;
 
     wire [31:0] operand_a;
     wire [31:0] operand_b;
@@ -507,6 +508,7 @@ import ydrasil_pkg::*;
             alu_rf_wen_rd_ff    <= 1'b0;
             alu_rf_waddr_rd_ff  <= '0;
             alu_producer_id_ff  <= '0;
+            completion_q         <= '0;
             ex_csr_wdata_o_ff   <= '0;
             ex_csr_fs_wdata_o_ff <= '0;
             ex_csr_mstatus_wen_o_ff <= 1'b0;
@@ -519,6 +521,7 @@ import ydrasil_pkg::*;
             alu_rf_wen_rd_ff    <= 1'b0;
             alu_rf_waddr_rd_ff  <= '0;
             alu_producer_id_ff  <= '0;
+            completion_q         <= '0;
             ex_csr_wdata_o_ff   <= '0;
             ex_csr_fs_wdata_o_ff <= '0;
             ex_csr_mstatus_wen_o_ff <= 1'b0;
@@ -534,6 +537,15 @@ import ydrasil_pkg::*;
             alu_rf_wen_rd_ff   <= ex_rf_wen_rd;
             alu_rf_waddr_rd_ff <= alu_rf_waddr_rd;
             alu_producer_id_ff <= id_ex_producer_id_i;
+            completion_q.valid <= ex_rf_wen_rd && (id_rf_waddr_rd_i != '0);
+            completion_q.producer_id <= id_ex_producer_id_i;
+            completion_q.producer_tracked <= ex_rf_wen_rd &&
+                (id_rf_waddr_rd_i != '0);
+            completion_q.addr <= id_rf_waddr_rd_i;
+            completion_q.data <= fast_bitmanip_rf_wen_rd ?
+                fast_bitmanip_result : bitmanip_rf_wen_rd ?
+                bitmanip_result : slow_result_wen ? slow_result :
+                fast_result_wen ? fast_result : alu_result;
             ex_csr_wdata_o_ff  <= csr_wdata;
             ex_csr_fs_wdata_o_ff <= csr_wdata[14:13];
             ex_csr_mstatus_wen_o_ff <= csr_wen && (id_ex_csr_waddr_i == CSR_MSTATUS);
@@ -583,14 +595,7 @@ import ydrasil_pkg::*;
     assign slow_result_wen = op_csr;
     assign slow_result = ({32{op_csr}} & csr_reg_wdata);
 
-    assign completion_o.valid = ex_rf_wen_rd && (id_rf_waddr_rd_i != '0);
-    assign completion_o.producer_id = id_ex_producer_id_i;
-    assign completion_o.producer_tracked = completion_o.valid;
-    assign completion_o.addr = id_rf_waddr_rd_i;
-    assign completion_o.data = fast_bitmanip_rf_wen_rd ?
-        fast_bitmanip_result : bitmanip_rf_wen_rd ?
-        bitmanip_result : slow_result_wen ? slow_result :
-        fast_result_wen ? fast_result : alu_result;
+    assign completion_o = completion_q;
 
 endmodule
 
@@ -659,6 +664,10 @@ import ydrasil_pkg::*;
     reg [INST_ADDR_WIDTH-1:0] pc_q;
     reg [INST_DATA_WIDTH-1:0] instr_q;
     reg load_q;
+    ydrasil_gpr_fwd_pkt_t completion_q;
+    ydrasil_gpr_fwd_pkt_t completion_d;
+    ydrasil_lsu_req_pkt_t agu_req_q;
+    ydrasil_lsu_req_pkt_t agu_req_d;
     wire [REGS_DATA_WIDTH-1:0] alu_result;
     wire [REGS_DATA_WIDTH-1:0] fast_b_shadd_result =
         ({REGS_DATA_WIDTH{operator_i[OP_B_SH1ADD]}} & ((operand_a_i << 1) + operand_b_i)) |
@@ -701,27 +710,27 @@ import ydrasil_pkg::*;
     wire [REGS_ADDR_WIDTH-1:0] alu_unused_waddr;
 
     always_comb begin
-        lsu_req_o = '0;
-        lsu_req_o.valid = valid_i && memory_op && !interrupt_i;
-        lsu_req_o.is_load = operator_type_i[OPERATOR_TYPE_LOAD];
-        lsu_req_o.is_store = operator_type_i[OPERATOR_TYPE_STORE];
-        lsu_req_o.op = operator_lsu_i;
-        lsu_req_o.addr = agu_addr;
-        lsu_req_o.addr_is_dtcm =
+        agu_req_d = '0;
+        agu_req_d.valid = valid_i && memory_op && !interrupt_i;
+        agu_req_d.is_load = operator_type_i[OPERATOR_TYPE_LOAD];
+        agu_req_d.is_store = operator_type_i[OPERATOR_TYPE_STORE];
+        agu_req_d.op = operator_lsu_i;
+        agu_req_d.addr = agu_addr;
+        agu_req_d.addr_is_dtcm =
             (agu_addr[31:DTCM_ADDR_WIDTH+2] == DTCM_BASE_ADDR[31:DTCM_ADDR_WIDTH+2]);
-        lsu_req_o.rd_addr = rd_addr_i;
-        lsu_req_o.producer_id = producer_id_i;
-        lsu_req_o.producer_tracked = producer_tracked_i;
-        lsu_req_o.store_data = store_data_i;
-        lsu_req_o.store_data_valid = store_data_valid_i;
-        lsu_req_o.fp_load = 1'b0;
-        lsu_req_o.fp_rd_addr = '0;
+        agu_req_d.rd_addr = rd_addr_i;
+        agu_req_d.producer_id = producer_id_i;
+        agu_req_d.producer_tracked = producer_tracked_i;
+        agu_req_d.store_data = store_data_i;
+        agu_req_d.store_data_valid = store_data_valid_i;
+        agu_req_d.fp_load = 1'b0;
+        agu_req_d.fp_rd_addr = '0;
         if (operator_lsu_i[OP_LSU_SB])
-            lsu_req_o.store_mask = 4'b0001 << agu_addr[1:0];
+            agu_req_d.store_mask = 4'b0001 << agu_addr[1:0];
         else if (operator_lsu_i[OP_LSU_SH])
-            lsu_req_o.store_mask = agu_addr[1] ? 4'b1100 : 4'b0011;
+            agu_req_d.store_mask = agu_addr[1] ? 4'b1100 : 4'b0011;
         else if (operator_lsu_i[OP_LSU_SW])
-            lsu_req_o.store_mask = 4'b1111;
+            agu_req_d.store_mask = 4'b1111;
     end
 
     ydrasil_alu u_alu (
@@ -765,26 +774,39 @@ import ydrasil_pkg::*;
 `endif
     );
 
+    always_comb begin
+        completion_d = '0;
+        completion_d.valid = valid_i && rd_wen_i && !memory_op && !interrupt_i &&
+            (rd_addr_i != '0);
+        completion_d.producer_id = producer_id_i;
+        completion_d.producer_tracked = completion_d.valid;
+        completion_d.addr = rd_addr_i;
+        completion_d.data = fast_bitmanip_op ? fast_bitmanip_result : alu_result;
+    end
+
+    // Lane 1 owns its AGU and ALU result boundaries.  The LSU and the
+    // completion fabric see only this registered contract, never Issue/EX
+    // payload or an ALU combinational result directly.
     always_ff @(posedge clk) begin
         if (!rst_n || flush_i) begin
             valid_q <= 1'b0;
             pc_q <= '0;
             instr_q <= RV32I_INS_NOP;
             load_q <= 1'b0;
+            completion_q <= '0;
+            agu_req_q <= '0;
         end else begin
             valid_q <= valid_i && !interrupt_i;
             pc_q <= pc_i;
             instr_q <= instr_i;
             load_q <= operator_type_i[OPERATOR_TYPE_LOAD];
+            completion_q <= completion_d;
+            agu_req_q <= agu_req_d;
         end
     end
 
-    assign completion_o.valid = valid_i && rd_wen_i && !memory_op && !interrupt_i &&
-        (rd_addr_i != '0);
-    assign completion_o.producer_id = producer_id_i;
-    assign completion_o.producer_tracked = producer_tracked_i;
-    assign completion_o.addr = rd_addr_i;
-    assign completion_o.data = fast_bitmanip_op ? fast_bitmanip_result : alu_result;
+    assign completion_o = completion_q;
+    assign lsu_req_o = agu_req_q;
     assign instret_valid_o = valid_q && !load_q;
     assign commit_pc_o = pc_q;
     assign commit_instr_o = instr_q;
