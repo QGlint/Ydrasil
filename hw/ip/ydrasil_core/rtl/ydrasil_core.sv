@@ -291,9 +291,10 @@ import ydrasil_axi_pkg::*;
 	ydrasil_gpr_fwd_pkt_t           producer_rs3_fwd_pkt;
 	ydrasil_gpr_fwd_pkt_t           producer_rs4_fwd_pkt;
 	ydrasil_gpr_fwd_pkt_t           lsu_fwd_pkt;
+	ydrasil_gpr_fwd_pkt_t           lsu_completion_fwd_pkt;
 	ydrasil_gpr_fwd_pkt_t           lsu_wb_fwd_pkt;
 `ifdef YDRASIL_ENABLE_FPU
-	ydrasil_gpr_fwd_pkt_t           lsu_completion_q;
+	ydrasil_gpr_fwd_pkt_t           lsu_wb_q;
 `endif
 	ydrasil_gpr_fwd_pkt_t           alu_fwd_pkt;
 	ydrasil_gpr_fwd_pkt_t           mul_fwd_pkt;
@@ -460,17 +461,12 @@ import ydrasil_axi_pkg::*;
 	end
 `endif
 
-`ifdef YDRASIL_ENABLE_FPU
-	assign load_bypass_completion_ready = 1'b0;
-	assign load_replay_stall = 1'b0;
-`else
-	assign load_bypass_completion_ready = lsu_wb_fwd_pkt.valid &&
-		lsu_wb_fwd_pkt.producer_tracked &&
-		(lsu_wb_fwd_pkt.producer_id == id_ex_load_bypass_producer_id);
+	assign load_bypass_completion_ready = lsu_completion_fwd_pkt.valid &&
+		lsu_completion_fwd_pkt.producer_tracked &&
+		(lsu_completion_fwd_pkt.producer_id == id_ex_load_bypass_producer_id);
 	assign load_replay_stall = id_ex_valid &&
 		(id_ex_load_bypass_rs1 || id_ex_load_bypass_rs2) &&
 		!load_bypass_completion_ready;
-`endif
 	wire fpu_csr_ex = id_ex_valid && operator_type[OPERATOR_TYPE_CSR] &&
 		!operator_type[OPERATOR_TYPE_SYS] &&
 		((id_ex_csr_waddr == CSR_FFLAGS) || (id_ex_csr_waddr == CSR_FRM) ||
@@ -527,20 +523,22 @@ import ydrasil_axi_pkg::*;
 	assign mul_fwd_pkt.addr = slow_rf_waddr_rd;
 	assign mul_fwd_pkt.data = slow_wb_result;
 	assign completion_bus[ydrasil_pkg::COMPLETION_ALU] = alu_fwd_pkt;
+	// producer 唤醒和立即 load-use 重放直接使用 LSU 本地完成事件；
+	// 架构寄存器写回仍保留下方的流水级。
+	assign lsu_completion_fwd_pkt = lsu_fwd_pkt;
 `ifdef YDRASIL_ENABLE_FPU
-	// FPU 配置增加了布局压力；仅延迟 producer 唤醒一拍，使 LSU 返回到
-	// decode/scoreboard 的长控制链从靠近 decode 的寄存边界起步。
+	// FPU 配置保留写回寄存级，隔离 LSU 返回与 RF 写回仲裁的布局压力。
 	always_ff @(posedge clk or negedge rst_n) begin
 		if (!rst_n)
-			lsu_completion_q <= '0;
+			lsu_wb_q <= '0;
 		else
-			lsu_completion_q <= lsu_fwd_pkt;
+			lsu_wb_q <= lsu_fwd_pkt;
 	end
-	assign lsu_wb_fwd_pkt = lsu_completion_q;
+	assign lsu_wb_fwd_pkt = lsu_wb_q;
 `else
 	assign lsu_wb_fwd_pkt = lsu_fwd_pkt;
 `endif
-	assign completion_bus[ydrasil_pkg::COMPLETION_LSU] = lsu_wb_fwd_pkt;
+	assign completion_bus[ydrasil_pkg::COMPLETION_LSU] = lsu_completion_fwd_pkt;
 	assign completion_bus[ydrasil_pkg::COMPLETION_MUL] = mul_fwd_pkt;
 	assign completion_bus[ydrasil_pkg::COMPLETION_DUAL_ALU] = dual_alu_fwd_pkt;
 	assign wb_hzd_valid_q = wb_fwd_pkt.valid;
@@ -1050,7 +1048,7 @@ import ydrasil_axi_pkg::*;
 		.id_ex_alu_bypass_rs2_i(id_ex_alu_bypass_rs2),
 		.id_ex_load_bypass_rs1_i(id_ex_load_bypass_rs1),
 		.id_ex_load_bypass_rs2_i(id_ex_load_bypass_rs2),
-		.load_bypass_data_i(lsu_wb_result),
+		.load_bypass_data_i(lsu_completion_fwd_pkt.data),
 		.id_ex_branch_target_i(id_ex_branch_target),
 		.id_ex_branch_next_pc_i(id_ex_branch_next_pc),
 		.id_ex_branch_eq_i  (id_ex_branch_eq),

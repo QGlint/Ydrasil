@@ -127,17 +127,12 @@ import ydrasil_pkg::*;
     // Let an immediate load consumer enter EX without feeding the LSU hit
     // decision back through the hazard unit. EX holds a miss until the
     // matching completion arrives; a hot hit still executes without a bubble.
-`ifdef YDRASIL_ENABLE_FPU
-    wire prev_load_bypass_rs1 = 1'b0;
-    wire prev_load_bypass_rs2 = 1'b0;
-`else
     wire prev_load_bypass_rs1 = id_ex_rd_issue && ex_is_load &&
         id_ctrl_i.load_bypass_ok && id_ctrl_i.rs1_ren &&
         (id_ctrl_i.rs1_addr == ex_hzd_i.rd_addr);
     wire prev_load_bypass_rs2 = id_ex_rd_issue && ex_is_load &&
         id_ctrl_i.load_bypass_ok && id_ctrl_i.rs2_ren &&
         (id_ctrl_i.rs2_addr == ex_hzd_i.rd_addr);
-`endif
 
     wire [PRODUCER_NUM-1:0] producer_complete_mask;
     wire [REGS_DATA_WIDTH-1:0] producer_completion_data [0:PRODUCER_NUM-1];
