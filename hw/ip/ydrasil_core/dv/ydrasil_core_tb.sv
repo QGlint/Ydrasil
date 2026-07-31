@@ -249,6 +249,7 @@ end
     reg [31:0] retire_three_count;
     reg [31:0] retire_four_count;
     reg [31:0] dual_issue_count;
+    reg [31:0] dual_issue_with_pending_count;
     reg [31:0] bubble_cause_hist [0:31];
     reg [31:0] producer_occ_zero_count;
     reg [31:0] producer_occ_one_count;
@@ -625,6 +626,7 @@ end
             retire_three_count <= 32'b0;
             retire_four_count <= 32'b0;
             dual_issue_count <= 32'b0;
+            dual_issue_with_pending_count <= 32'b0;
             for (perf_stat_idx = 0; perf_stat_idx < 32; perf_stat_idx = perf_stat_idx + 1)
                 bubble_cause_hist[perf_stat_idx] <= 32'b0;
             producer_occ_zero_count <= 32'b0;
@@ -1005,8 +1007,11 @@ end
                 3'd3: retire_three_count <= retire_three_count + 1'b1;
                 3'd4: retire_four_count <= retire_four_count + 1'b1;
             endcase
-            if (u_dut.issue_consume_two)
+            if (u_dut.issue_consume_two) begin
                 dual_issue_count <= dual_issue_count + 1'b1;
+                if (|u_dut.u_ctrl.latest_valid_q)
+                    dual_issue_with_pending_count <= dual_issue_with_pending_count + 1'b1;
+            end
 
             bubble_cause_hist[{u_dut.clint_stall, u_dut.wb_backpressure,
                 u_dut.u_ctrl.producer_full_stall, u_dut.lsu_struct_stall,
@@ -1430,7 +1435,8 @@ end
                 retire_two_count,
                 retire_three_count,
                 retire_four_count);
-            $display("PERF_DUAL_ISSUE: PAIRS=%-d", dual_issue_count);
+            $display("PERF_DUAL_ISSUE: PAIRS=%-d WITH_PENDING=%-d",
+                dual_issue_count, dual_issue_with_pending_count);
             $display("PERF_CAUSE_HIST: NONE=%-d SB=%-d LSU=%-d LSU_SB=%-d PF=%-d PF_SB=%-d PF_LSU=%-d PF_LSU_SB=%-d WB_ANY=%-d CLINT_ANY=%-d",
                 bubble_cause_hist[0], bubble_cause_hist[1], bubble_cause_hist[2],
                 bubble_cause_hist[3], bubble_cause_hist[4], bubble_cause_hist[5],

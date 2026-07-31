@@ -17,10 +17,33 @@ RVTEST_CODE_BEGIN
   CHECK_EQ_IMM(4, t4, 9)
   CHECK_EQ_IMM(5, t5, 14)
 
+  # 历史 load producer 未退休时，无关的简单整数指令仍可进入第二槽。
+  la s2, dual_issue_data
+  lw s3, 0(s2)
+  addi t0, zero, 17
+  addi t1, zero, 29
+  CHECK_EQ_IMM(6, t0, 17)
+  CHECK_EQ_IMM(7, t1, 29)
+
+  # 第二槽真实依赖必须等待 load completion，并使用转发值而非旧 RF 值。
+  lw s4, 4(s2)
+  addi t2, zero, 3
+  add t3, s4, t2
+  li t4, 0x13579be2
+  bne t3, t4, fail
+
+  # 连续 producer 分配/回收后，第二槽仍应读取最新 producer。
+  lw s5, 8(s2)
+  addi s5, s5, 1
+  addi t5, zero, 5
+  xor t6, s5, t5
+  li t4, 0x2468acea
+  bne t6, t4, fail
+
   # 相邻 WAW：禁止成对写同一个体系结构寄存器。
   li a0, 11
   li a0, 22
-  CHECK_EQ_IMM(6, a0, 22)
+  CHECK_EQ_IMM(8, a0, 22)
 
   # 独立位操作可以进入第二槽位。
   li a1, 0x55aa55aa
@@ -39,11 +62,16 @@ RVTEST_CODE_BEGIN
   addi s0, s0, 1
   addi s0, s0, 2
 1:
-  CHECK_EQ_IMM(7, s0, 0)
+  CHECK_EQ_IMM(9, s0, 0)
 
   SW_TEST_PASSFAIL
 RVTEST_CODE_END
 
   .data
 RVTEST_DATA_BEGIN
+  .align 2
+dual_issue_data:
+  .word 0x13579bdf
+  .word 0x13579bdf
+  .word 0x2468acee
 RVTEST_DATA_END
