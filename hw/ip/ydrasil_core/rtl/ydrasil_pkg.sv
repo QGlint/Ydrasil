@@ -295,9 +295,13 @@ package ydrasil_pkg;
 
 	localparam int BP_BTB_ENTRIES = 512;
 	localparam int BP_BHT_ENTRIES = 512;
-	// Future File: each producer carries its value independently of the two
-	// architectural writeback ports.
-	localparam int PRODUCER_NUM = 8;
+	// The first banked backend implementation uses one physical tag per ROB
+	// entry.  Keep these as package parameters so the 32/48-entry evaluations
+	// do not change packet layouts or module contracts.
+	localparam int BACKEND_WINDOW_DEPTH = 16;
+	localparam int ISSUE_WINDOW_DEPTH = 16;
+	localparam int ISSUE_BANK_COUNT = 4;
+	localparam int PRODUCER_NUM = BACKEND_WINDOW_DEPTH;
 	localparam int PRODUCER_SLOT_WIDTH = $clog2(PRODUCER_NUM);
 	localparam int PRODUCER_ID_WIDTH = PRODUCER_SLOT_WIDTH + 1;
 	typedef logic [PRODUCER_SLOT_WIDTH-1:0] producer_slot_t;
@@ -484,6 +488,15 @@ package ydrasil_pkg;
 		logic [REGS_ADDR_WIDTH-1:0]          fp_rd_addr;
 	} ydrasil_lsu_req_pkt_t;
 
+	// A reservation is emitted when Issue consumes a memory uop.  It crosses
+	// the Issue/EX-to-AGU gap ahead of the address request, so LSU admission is
+	// based on concrete slots instead of an execution-busy indication.
+	typedef struct packed {
+		logic                                valid;
+		producer_id_t                        producer_id;
+		logic                                producer_tracked;
+	} ydrasil_lsu_reserve_pkt_t;
+
 	typedef struct packed {
 		logic                                valid;
 		logic                                write;
@@ -544,6 +557,11 @@ package ydrasil_pkg;
 		logic                                busy;
 		logic                                idle;
 		logic                                fast_load;
+		logic                                accept_ready;
+		// A full speculative request station still admits the current ROB-head
+		// memory operation through LSU's dedicated head ingress.  This is the
+		// progress credit that a decode-allocated LSQ obtains implicitly.
+		logic                                head_accept_ready;
 	} ydrasil_lsu_status_pkt_t;
 
 	typedef struct packed {
@@ -559,9 +577,105 @@ package ydrasil_pkg;
 		ydrasil_decode_pkt_t                   decode;
 	} ydrasil_issue_pkt_t;
 
-	// Registered Issue/EX contract. Operand selection, typed result lookup and
-	// final lane steering terminate before this packet is produced.
+	// Each execution resource owns a distinct Issue/EX request register.  The
+	// scheduler may select two instructions, but it never fans one composite
+	// packet into every functional unit.  A request is valid only for its named
+	// resource, which keeps ALU, BIT, BRU, AGU and MDU operand cones separate.
 	typedef struct packed {
+		logic                                valid;
+		logic [REGS_DATA_WIDTH-1:0]          operand_a;
+		logic [REGS_DATA_WIDTH-1:0]          operand_b;
+		logic [OPERATOR_WIDTH-1:0]           operator_info;
+		logic [OPERATOR_TYPE_WIDTH-1:0]      operator_type;
+		logic                                rd_wen;
+		logic [REGS_ADDR_WIDTH-1:0]          rd_addr;
+		producer_id_t                        producer_id;
+		logic                                producer_tracked;
+	} ydrasil_alu_issue_req_t;
+
+	typedef struct packed {
+		logic                                valid;
+		logic [REGS_DATA_WIDTH-1:0]          operand_a;
+		logic [REGS_DATA_WIDTH-1:0]          operand_b;
+		logic [OPERATOR_WIDTH-1:0]           operator_info;
+		logic [OPERATOR_TYPE_WIDTH-1:0]      operator_type;
+		logic                                rd_wen;
+		logic [REGS_ADDR_WIDTH-1:0]          rd_addr;
+		producer_id_t                        producer_id;
+		logic                                producer_tracked;
+	} ydrasil_bit_issue_req_t;
+
+	typedef struct packed {
+		logic                                valid;
+		logic [REGS_DATA_WIDTH-1:0]          operand_a;
+		logic [REGS_DATA_WIDTH-1:0]          operand_b;
+		logic [OPERATOR_WIDTH-1:0]           operator_info;
+		logic                                rd_wen;
+		logic [REGS_ADDR_WIDTH-1:0]          rd_addr;
+		producer_id_t                        producer_id;
+		logic                                producer_tracked;
+	} ydrasil_mdu_issue_req_t;
+
+	typedef struct packed {
+		logic                                valid;
+		logic [REGS_DATA_WIDTH-1:0]          operand_a;
+		logic [OP_CSR_INFO_WIDTH-1:0]        op_info;
+		logic [CSR_ADDR_WIDTH-1:0]           waddr;
+		logic                                rd_wen;
+		logic [REGS_ADDR_WIDTH-1:0]          rd_addr;
+		producer_id_t                        producer_id;
+		logic                                producer_tracked;
+	} ydrasil_csr_issue_req_t;
+
+	typedef struct packed {
+		logic                                valid;
+		logic [REGS_DATA_WIDTH-1:0]          operand_a;
+		logic [REGS_DATA_WIDTH-1:0]          operand_b;
+		logic [REGS_DATA_WIDTH-1:0]          bt_a_operand;
+		logic [REGS_DATA_WIDTH-1:0]          bt_b_operand;
+		logic [OPERATOR_WIDTH-1:0]           operator_info;
+		logic [OPERATOR_TYPE_WIDTH-1:0]      operator_type;
+		// JAL/JALR produces branch_next_pc through the BRU completion path.
+		// Conditional branches keep rd_wen low and therefore consume no
+		// writeback bandwidth.
+		logic                                rd_wen;
+		logic [REGS_ADDR_WIDTH-1:0]          rd_addr;
+		logic                                jalr;
+		logic [INST_ADDR_WIDTH-1:0]          branch_target;
+		logic [INST_ADDR_WIDTH-1:0]          branch_next_pc;
+		logic                                pred_hit;
+		logic                                pred_taken;
+		logic [INST_ADDR_WIDTH-1:0]          pred_target;
+		logic [1:0]                          pred_counter;
+		logic [INST_ADDR_WIDTH-1:0]          pred_bht_index;
+		producer_id_t                        producer_id;
+		logic                                producer_tracked;
+	} ydrasil_bru_issue_req_t;
+
+	typedef struct packed {
+		logic                                valid;
+		logic                                is_load;
+		logic                                is_store;
+		logic [REGS_DATA_WIDTH-1:0]          operand_a;
+		logic [REGS_DATA_WIDTH-1:0]          operand_b;
+		logic [OP_LSU_INFO_WIDTH-1:0]        op;
+		logic [BUS_DATA_WIDTH-1:0]           store_data;
+		logic                                store_data_valid;
+		logic [REGS_ADDR_WIDTH-1:0]          rd_addr;
+		producer_id_t                        producer_id;
+		logic                                producer_tracked;
+	} ydrasil_agu_issue_req_t;
+
+	// Registered Issue/EX control contract. Operand selection, typed result
+	// lookup and final lane steering terminate before this packet is produced.
+	typedef struct packed {
+		ydrasil_alu_issue_req_t               alu0_req;
+		ydrasil_bit_issue_req_t               bit_req;
+		ydrasil_mdu_issue_req_t               mdu_req;
+		ydrasil_csr_issue_req_t               csr_req;
+		ydrasil_alu_issue_req_t               alu1_req;
+		ydrasil_bru_issue_req_t               bru_req;
+		ydrasil_agu_issue_req_t               agu_req;
 		logic [REGS_DATA_WIDTH-1:0]           operand_a;
 		logic [REGS_DATA_WIDTH-1:0]           operand_b;
 		// EX owns the one-hop ALU forwarding data mux.  Issue records only

@@ -1,4 +1,9 @@
-
+// FPGA execution backend.
+//
+// Issue owns one registered request per functional unit.  This file keeps the
+// execution cones disjoint: ALU0, BIT, MDU and CSR on lane 0; ALU1, BRU and
+// AGU on lane 1.  No fast-path copy of an ALU or bit operation is allowed in
+// the dispatch/completion glue.
 module ydrasil_ex_block
 import ydrasil_pkg::*;
 #(
@@ -8,63 +13,21 @@ import ydrasil_pkg::*;
     input  wire                            rst_n,
     input  wire                            flush_ex_i,
 
-    input  wire [DATA_WIDTH-1:0]           bt_a_operand_i,
-    input  wire [DATA_WIDTH-1:0]           bt_b_operand_i,
-
-    input  wire [DATA_WIDTH-1:0]           operand_a_i,
-    input  wire [DATA_WIDTH-1:0]           operand_b_i,
-    input  wire [DATA_WIDTH-1:0]           alu_operand_a_i,
-    input  wire [DATA_WIDTH-1:0]           alu_operand_b_i,
-    input  wire [DATA_WIDTH-1:0]           bru_operand_a_i,
-    input  wire [DATA_WIDTH-1:0]           bru_operand_b_i,
-    input  wire [DATA_WIDTH-1:0]           lsu_operand_a_i,
-    input  wire [DATA_WIDTH-1:0]           lsu_operand_b_i,
-    input  wire [DATA_WIDTH-1:0]           lsu_store_data_i,
-    input  wire [DATA_WIDTH-1:0]           mul_operand_a_i,
-    input  wire [DATA_WIDTH-1:0]           mul_operand_b_i,
-    input  wire [DATA_WIDTH-1:0]           csr_operand_a_i,
-    input  wire [DATA_WIDTH-1:0]           csr_operand_b_i,
-    input  wire [OPERATOR_WIDTH-1:0]       operator_i,
-    input  wire [OPERATOR_TYPE_WIDTH-1:0]  operator_type_i,
-    input  wire                            id_ex_valid_i,
-    input  wire                            id_ex_jalr_i,
-    input  wire [DATA_WIDTH-1:0]           id_ex_branch_target_i,
-    input  wire [DATA_WIDTH-1:0]           id_ex_branch_next_pc_i,
-    input  wire                            id_ex_branch_eq_i,
-    input  wire                            id_ex_branch_ge_signed_i,
-    input  wire                            id_ex_branch_ge_unsigned_i,
-    input  wire                            id_ex_pred_hit_i,
-    input  wire                            id_ex_pred_taken_i,
-    input  wire [DATA_WIDTH-1:0]           id_ex_pred_target_i,
-    input  wire [1:0]                      id_ex_pred_counter_i,
-    input  wire [DATA_WIDTH-1:0]           id_ex_pred_bht_index_i,
-    input  wire [REGS_ADDR_WIDTH-1:0]      id_rf_waddr_rd_i,
-    input  wire                            id_alu_rf_wen_rd_i,
-    input  producer_id_t                   id_ex_producer_id_i,
-    input  wire                            redirect_valid_i,
-    input  wire [PRODUCER_NUM-1:0]         redirect_keep_mask_i,
+    input  wire [PRODUCER_NUM-1:0]         producer_live_mask_i,
+    input  wire [PRODUCER_NUM-1:0]         producer_live_epoch_i,
     input  wire                            trap_redirect_i,
-    input  wire [INST_ADDR_WIDTH-1:0]      trap_redirect_addr_i,
-
-    input  wire [CSR_ADDR_WIDTH-1:0]       id_ex_csr_waddr_i,
-    input  wire [OP_CSR_INFO_WIDTH-1:0]    id_op_csr_info_i,
     input  wire [DATA_WIDTH-1:0]           csr_ex_rdata_i,
+
+    input  ydrasil_alu_issue_req_t         alu0_req_i,
+    input  ydrasil_bit_issue_req_t         bit_req_i,
+    input  ydrasil_mdu_issue_req_t         mdu_req_i,
+    input  ydrasil_csr_issue_req_t         csr_req_i,
 
     output wire                            ex_csr_wen_o,
     output wire [DATA_WIDTH-1:0]           ex_csr_wdata_o,
     output wire [1:0]                      ex_csr_fs_wdata_o,
     output wire                            ex_csr_mstatus_wen_o,
     output wire [CSR_ADDR_WIDTH-1:0]       ex_csr_waddr_o,
-
-    output wire                            ex_branch_jump_o,
-    output wire [DATA_WIDTH-1:0]           ex_branch_target_o,
-    output wire                            ex_pc_redirect_o,
-    output wire [DATA_WIDTH-1:0]           ex_pc_redirect_target_o,
-    output ydrasil_bp_train_pkt_t          ex_bp_train_o,
-    output wire                            ex_branch_mispredict_o,
-    output wire [BUS_ADDR_WIDTH-1:0]       ex_lsu_mem_addr_o,
-
-    output wire [DATA_WIDTH-1:0]           ex_lsu_result_o,
 
     output wire [REGS_DATA_WIDTH-1:0]      alu_result_o,
     output wire                            alu_rf_wen_rd_o,
@@ -82,498 +45,243 @@ import ydrasil_pkg::*;
 
     output wire                            ex_instret_inc_o,
     output wire                            ex_mul_stall_o
-`ifndef SYNTHESIS
-    ,output wire                           dbg_bp_resolve_valid_o
-    ,output wire [DATA_WIDTH-1:0]          dbg_bp_resolve_pc_o
-    ,output wire                           dbg_bp_actual_taken_o
-    ,output wire [DATA_WIDTH-1:0]          dbg_bp_actual_target_o
-    ,output wire [DATA_WIDTH-1:0]          dbg_bp_actual_next_pc_o
-    ,output wire                           dbg_bp_pred_hit_o
-    ,output wire                           dbg_bp_pred_taken_o
-    ,output wire [DATA_WIDTH-1:0]          dbg_bp_pred_target_o
-    ,output wire [1:0]                     dbg_bp_pred_counter_o
-    ,output wire [DATA_WIDTH-1:0]          dbg_bp_pred_next_pc_o
-    ,output wire                           dbg_bp_mispredict_o
-`endif
 );
 
-    wire [REGS_DATA_WIDTH-1:0] alu_result;
-    wire                       alu_rf_wen_rd;
-    wire [REGS_ADDR_WIDTH-1:0] alu_rf_waddr_rd;
-    wire                       alu_comp_result;
-
-    wire op_m_unit;
-    wire op_bitmanip;
-    wire op_load;
-    wire op_store;
-    wire op_bjp;
-    wire op_mul;
-    wire op_div;
-
-    wire div_start;
-    wire div_busy;
-    wire div_done;
-    wire [REGS_DATA_WIDTH-1:0] div_result;
-
-    wire mul_issue_ready;
-    wire mul_issue_valid;
-    wire mul_issue_wen;
-    wire mul_result_valid;
-    wire [REGS_DATA_WIDTH-1:0] mul_pipe_wdata;
-    wire                       mul_pipe_wen;
-    wire [REGS_ADDR_WIDTH-1:0] mul_pipe_waddr;
-    producer_id_t              mul_pipe_producer_id;
-
-    wire [REGS_DATA_WIDTH-1:0] bitmanip_result;
-    wire                       bitmanip_rf_wen_rd;
-    wire                       normal_alu_rf_wen_rd;
-    wire                       div_rf_wen_rd;
-    wire                       div_complete;
-    wire                       ex_rf_wen_rd;
-    wire                       csr_wen;
-    reg                        div_active_q;
-    reg                        div_pending_q;
-    reg                        div_wen_q;
-    reg [REGS_ADDR_WIDTH-1:0]  div_waddr_q;
-    producer_id_t              div_producer_id_q;
-    reg [OPERATOR_WIDTH-1:0]   div_operator_q;
-    reg [REGS_DATA_WIDTH-1:0]  div_result_q;
-
-    wire div_kill = trap_redirect_i ||
-        (flush_ex_i && redirect_valid_i &&
-         !redirect_keep_mask_i[
-             div_producer_id_q[PRODUCER_SLOT_WIDTH-1:0]]);
-
-    reg [REGS_DATA_WIDTH-1:0] alu_result_ff;
-    reg [REGS_DATA_WIDTH-1:0] bitmanip_result_ff;
-    reg                       bitmanip_result_valid_ff;
-    reg                       alu_rf_wen_rd_ff;
-    producer_id_t             alu_producer_id_ff;
-    (* max_fanout = 8 *) reg [REGS_ADDR_WIDTH-1:0] alu_rf_waddr_rd_ff;
-    ydrasil_gpr_fwd_pkt_t     completion_q;
-
-    wire [31:0] operand_a;
-    wire [31:0] operand_b;
-    wire [31:0] bitmanip_operand_a;
-    wire [31:0] bitmanip_operand_b;
-    wire [31:0] bru_operand_a;
-    wire [31:0] bru_operand_b;
-    wire [31:0] lsu_operand_b;
-    wire [31:0] lsu_store_data;
-    wire [31:0] mul_operand_a;
-    wire [31:0] mul_operand_b;
-    wire [31:0] csr_operand_a;
-    wire [31:0] bt_a_operand;
-    wire [31:0] bt_b_operand;
-    wire [31:0] fast_add_result;
-    wire [31:0] lsu_fast_add_result;
-    wire [31:0] lsu_base_add_result;
-    assign bt_a_operand = bt_a_operand_i;
-    assign bt_b_operand = bt_b_operand_i;
-
-    // JALR uses rs1 only for the BRU target. Its architectural rd value is
-    // always PC+4, so the ALU link operand must remain the registered PC.
-    assign operand_a = alu_operand_a_i;
-    assign operand_b = alu_operand_b_i;
-    assign bitmanip_operand_a = alu_operand_a_i;
-    assign bitmanip_operand_b = alu_operand_b_i;
-    assign bru_operand_a = bru_operand_a_i;
-    assign bru_operand_b = bru_operand_b_i;
-    assign lsu_operand_b = lsu_operand_b_i;
-    assign lsu_store_data = lsu_store_data_i;
-    assign mul_operand_a = mul_operand_a_i;
-    assign mul_operand_b = mul_operand_b_i;
-    assign csr_operand_a = csr_operand_a_i;
-
-    assign lsu_base_add_result = lsu_operand_a_i + lsu_operand_b;
-    assign lsu_fast_add_result = lsu_base_add_result;
-    assign ex_lsu_mem_addr_o = lsu_fast_add_result;
-    assign ex_lsu_result_o = lsu_store_data;
-
-    ydrasil_bru #(
-        .DATA_WIDTH(DATA_WIDTH)
-    ) u_ydrasil_bru (
-        .clk                         (clk),
-        .rst_n                       (rst_n),
-        .flush_i                     (flush_ex_i),
-        .operand_a_i                 (bru_operand_a),
-        .operand_b_i                 (bru_operand_b),
-        .bt_a_operand_i              (bt_a_operand),
-        .bt_b_operand_i              (bt_b_operand),
-        .operator_i                  (operator_i),
-        .operator_type_i             (operator_type_i),
-        .id_ex_valid_i               (id_ex_valid_i),
-        .id_ex_jalr_i                (id_ex_jalr_i),
-        .id_ex_branch_target_i       (id_ex_branch_target_i),
-        .id_ex_branch_next_pc_i      (id_ex_branch_next_pc_i),
-        .id_ex_branch_eq_i           (id_ex_branch_eq_i),
-        .id_ex_branch_ge_signed_i    (id_ex_branch_ge_signed_i),
-        .id_ex_branch_ge_unsigned_i  (id_ex_branch_ge_unsigned_i),
-        .id_ex_pred_hit_i            (id_ex_pred_hit_i),
-        .id_ex_pred_taken_i          (id_ex_pred_taken_i),
-        .id_ex_pred_target_i         (id_ex_pred_target_i),
-        .id_ex_pred_counter_i        (id_ex_pred_counter_i),
-        .id_ex_pred_bht_index_i      (id_ex_pred_bht_index_i),
-        .id_ex_producer_id_i         (id_ex_producer_id_i),
-        .trap_redirect_i             (trap_redirect_i),
-        .trap_redirect_addr_i        (trap_redirect_addr_i),
-        .ex_branch_jump_o            (ex_branch_jump_o),
-        .ex_branch_target_o          (ex_branch_target_o),
-        .ex_pc_redirect_o            (ex_pc_redirect_o),
-        .ex_pc_redirect_target_o     (ex_pc_redirect_target_o),
-        .ex_bp_train_o               (ex_bp_train_o),
-        .ex_branch_mispredict_o      (ex_branch_mispredict_o)
-`ifndef SYNTHESIS
-        ,.dbg_bp_resolve_valid_o     (dbg_bp_resolve_valid_o)
-        ,.dbg_bp_resolve_pc_o        (dbg_bp_resolve_pc_o)
-        ,.dbg_bp_actual_taken_o      (dbg_bp_actual_taken_o)
-        ,.dbg_bp_actual_target_o     (dbg_bp_actual_target_o)
-        ,.dbg_bp_actual_next_pc_o    (dbg_bp_actual_next_pc_o)
-        ,.dbg_bp_pred_hit_o          (dbg_bp_pred_hit_o)
-        ,.dbg_bp_pred_taken_o        (dbg_bp_pred_taken_o)
-        ,.dbg_bp_pred_target_o       (dbg_bp_pred_target_o)
-        ,.dbg_bp_pred_counter_o      (dbg_bp_pred_counter_o)
-        ,.dbg_bp_pred_next_pc_o      (dbg_bp_pred_next_pc_o)
-        ,.dbg_bp_mispredict_o        (dbg_bp_mispredict_o)
-`endif
-    );
-
-    assign op_m_unit = operator_type_i[OPERATOR_TYPE_MUL];
-    assign op_bitmanip = operator_type_i[OPERATOR_TYPE_BITMANIP];
-    assign op_load = operator_type_i[OPERATOR_TYPE_LOAD];
-    assign op_store = operator_type_i[OPERATOR_TYPE_STORE];
-    assign op_bjp = operator_type_i[OPERATOR_TYPE_BJP];
-    assign op_mul =
-        op_m_unit &
-        (operator_i[OP_MUL_MUL]    |
-         operator_i[OP_MUL_MULH]   |
-         operator_i[OP_MUL_MULHSU] |
-         operator_i[OP_MUL_MULHU]);
-    assign op_div =
-        op_m_unit &
-        (operator_i[OP_MUL_DIV]  |
-         operator_i[OP_MUL_DIVU] |
-         operator_i[OP_MUL_REM]  |
-         operator_i[OP_MUL_REMU]);
-
-    assign mul_issue_valid = id_ex_valid_i & op_mul & mul_issue_ready & !trap_redirect_i & !flush_ex_i;
-    assign mul_issue_wen = id_alu_rf_wen_rd_i & (id_rf_waddr_rd_i != '0);
-    assign mul_issue_o = mul_issue_valid & mul_issue_wen;
-    assign mul_issue_waddr_o = id_rf_waddr_rd_i;
-
-    assign div_start = id_ex_valid_i & op_div & !div_active_q &
-        !div_pending_q & !div_busy & !div_done & !trap_redirect_i &
-        !flush_ex_i;
-    // A multiply result cannot be backpressured. Hold DIV completion state
-    // until the single typed MDU result port is available.
-    assign div_complete = div_pending_q & !mul_pipe_wen &
-        !trap_redirect_i & !flush_ex_i;
-    assign div_rf_wen_rd = div_complete & div_wen_q;
-    assign ex_mul_stall_o = id_ex_valid_i & op_div &
-        (div_active_q | div_pending_q | div_busy | div_done) & !flush_ex_i;
-
-    wire [4:0] fast_b_shamt = bitmanip_operand_b[4:0];
-    wire [31:0] fast_b_mask = 32'h1 << fast_b_shamt;
-    wire [31:0] fast_b_shadd_result =
-        ({32{operator_i[OP_B_SH1ADD]}} &
-         ((bitmanip_operand_a << 1) + bitmanip_operand_b)) |
-        ({32{operator_i[OP_B_SH2ADD]}} &
-         ((bitmanip_operand_a << 2) + bitmanip_operand_b)) |
-        ({32{operator_i[OP_B_SH3ADD]}} &
-         ((bitmanip_operand_a << 3) + bitmanip_operand_b));
-    wire [31:0] fast_b_logic_result =
-        ({32{operator_i[OP_B_ANDN]}} &
-         (bitmanip_operand_a & ~bitmanip_operand_b)) |
-        ({32{operator_i[OP_B_ORN]}} &
-         (bitmanip_operand_a | ~bitmanip_operand_b)) |
-        ({32{operator_i[OP_B_XNOR]}} &
-         ~(bitmanip_operand_a ^ bitmanip_operand_b));
-    wire [31:0] fast_b_bit_result =
-        ({32{operator_i[OP_B_BCLR] | operator_i[OP_B_BCLRI]}} &
-         (bitmanip_operand_a & ~fast_b_mask)) |
-        ({32{operator_i[OP_B_BEXT] | operator_i[OP_B_BEXTI]}} &
-         {31'b0, |(bitmanip_operand_a & fast_b_mask)}) |
-        ({32{operator_i[OP_B_BINV] | operator_i[OP_B_BINVI]}} &
-         (bitmanip_operand_a ^ fast_b_mask)) |
-        ({32{operator_i[OP_B_BSET] | operator_i[OP_B_BSETI]}} &
-         (bitmanip_operand_a | fast_b_mask));
-    wire [31:0] fast_b_pack_result =
-        ({32{operator_i[OP_B_PACK]}} &
-         {bitmanip_operand_b[15:0], bitmanip_operand_a[15:0]}) |
-        ({32{operator_i[OP_B_PACKH]}} &
-         {16'b0, bitmanip_operand_b[7:0], bitmanip_operand_a[7:0]});
-    wire [31:0] fast_b_extend_result =
-        ({32{operator_i[OP_B_REV8]}} &
-         {bitmanip_operand_a[7:0], bitmanip_operand_a[15:8],
-          bitmanip_operand_a[23:16], bitmanip_operand_a[31:24]}) |
-        ({32{operator_i[OP_B_SEXT_B]}} &
-         {{24{bitmanip_operand_a[7]}}, bitmanip_operand_a[7:0]}) |
-        ({32{operator_i[OP_B_SEXT_H]}} &
-         {{16{bitmanip_operand_a[15]}}, bitmanip_operand_a[15:0]}) |
-        ({32{operator_i[OP_B_ZEXT_H]}} &
-         {16'b0, bitmanip_operand_a[15:0]});
-    wire fast_bitmanip_op = op_bitmanip &
-        (operator_i[OP_B_SH1ADD] | operator_i[OP_B_SH2ADD] | operator_i[OP_B_SH3ADD] |
-         operator_i[OP_B_ANDN]   | operator_i[OP_B_ORN]    | operator_i[OP_B_XNOR]   |
-         operator_i[OP_B_BCLR]   | operator_i[OP_B_BCLRI]  | operator_i[OP_B_BEXT]   |
-         operator_i[OP_B_BEXTI]  | operator_i[OP_B_BINV]   | operator_i[OP_B_BINVI]  |
-         operator_i[OP_B_BSET]   | operator_i[OP_B_BSETI]  | operator_i[OP_B_PACK]   |
-         operator_i[OP_B_PACKH]  | operator_i[OP_B_REV8]   | operator_i[OP_B_SEXT_B] |
-         operator_i[OP_B_SEXT_H] | operator_i[OP_B_ZEXT_H]);
-    wire [31:0] fast_bitmanip_result =
-        fast_b_shadd_result | fast_b_logic_result | fast_b_bit_result |
-        fast_b_pack_result | fast_b_extend_result;
-    wire fast_bitmanip_rf_wen_rd =
-        id_ex_valid_i & fast_bitmanip_op & id_alu_rf_wen_rd_i & !trap_redirect_i & !flush_ex_i;
-    wire op_csr = id_ex_valid_i & operator_type_i[OPERATOR_TYPE_CSR] &
-        !trap_redirect_i & !flush_ex_i;
-
-    assign bitmanip_rf_wen_rd =
-        id_ex_valid_i & op_bitmanip & !fast_bitmanip_op & id_alu_rf_wen_rd_i &
-        !trap_redirect_i & !flush_ex_i;
-    assign normal_alu_rf_wen_rd = id_ex_valid_i & alu_rf_wen_rd &
-        (operator_type_i[OPERATOR_TYPE_ALU] | operator_type_i[OPERATOR_TYPE_BJP]) &
-        !op_m_unit & !op_bitmanip & !flush_ex_i;
-    assign ex_rf_wen_rd =
-        bitmanip_rf_wen_rd | fast_bitmanip_rf_wen_rd |
-        normal_alu_rf_wen_rd | op_csr;
-    assign mul_result_valid_o = mul_result_valid | div_complete;
-    assign ex_instret_inc_o =
-        (id_ex_valid_i & !trap_redirect_i & !flush_ex_i & !op_load & !op_mul & !op_div &
-         !operator_type_i[OPERATOR_TYPE_FPU]) |
-        div_complete;
-
-    wire fast_alu_op =
-        operator_type_i[OPERATOR_TYPE_ALU] & !op_m_unit & !op_bitmanip &
-        (operator_i[OP_ALU_ADD]  |
-         operator_i[OP_ALU_SUB]  |
-         operator_i[OP_ALU_SLT]  |
-         operator_i[OP_ALU_SLTU] |
-         operator_i[OP_ALU_XOR]  |
-         operator_i[OP_ALU_OR]   |
-         operator_i[OP_ALU_AND]  |
-         operator_i[OP_ALU_LUI]  |
-         operator_i[OP_ALU_AUIPC]);
-    wire shift_alu_op =
-        operator_type_i[OPERATOR_TYPE_ALU] & !op_m_unit & !op_bitmanip &
-        (operator_i[OP_ALU_SLL] | operator_i[OP_ALU_SRL] | operator_i[OP_ALU_SRA]);
-    wire bypassable_alu_op =
-        id_ex_valid_i & id_alu_rf_wen_rd_i & (id_rf_waddr_rd_i != '0) &
-        (fast_alu_op | shift_alu_op) & !trap_redirect_i & !flush_ex_i;
-    wire fast_result_wen =
-        (id_ex_valid_i & !trap_redirect_i & !flush_ex_i & !op_m_unit &
-         !op_bitmanip & (fast_alu_op | op_load | op_store | op_bjp));
-    assign fast_add_result = operand_a + operand_b;
-    wire [32:0] fast_sub_result_ext = {1'b0, operand_a} + {1'b0, ~operand_b} + 33'd1;
-    wire        fast_signs_differ = operand_a[31] ^ operand_b[31];
-    wire        fast_slt_signed = fast_signs_differ ? operand_a[31] : fast_sub_result_ext[31];
-    wire        fast_slt_unsigned = ~fast_sub_result_ext[32];
-    wire [31:0] fast_logic_result =
-        ({32{operator_i[OP_ALU_XOR]}} & (operand_a ^ operand_b)) |
-        ({32{operator_i[OP_ALU_OR]}}  & (operand_a | operand_b)) |
-        ({32{operator_i[OP_ALU_AND]}} & (operand_a & operand_b));
-    wire [31:0] fast_alu_result =
-        ({32{operator_i[OP_ALU_SUB]}}  & fast_sub_result_ext[31:0]) |
-        ({32{operator_i[OP_ALU_SLT]}}  & {31'b0, fast_slt_signed}) |
-        ({32{operator_i[OP_ALU_SLTU]}} & {31'b0, fast_slt_unsigned}) |
-        ({32{operator_i[OP_ALU_XOR] | operator_i[OP_ALU_OR] | operator_i[OP_ALU_AND]}} & fast_logic_result) |
-        ({32{operator_i[OP_ALU_LUI]}}  & operand_b) |
-        ({32{operator_i[OP_ALU_ADD] | operator_i[OP_ALU_AUIPC]}} & fast_add_result);
-    wire [31:0] fast_result =
-        fast_alu_op ? fast_alu_result : fast_add_result;
-
-    ydrasil_alu #(
-        .DATAWIDTH(DATA_WIDTH)
-    ) u_ydrasil_alu (
-        .operand_a_i          (operand_a),
-        .operand_b_i          (operand_b),
-        .operator_i           (operator_i),
-        .operator_type_i      (operator_type_i),
-        .interrupt_i          (trap_redirect_i),
-        .id_rf_waddr_rd_i     (id_rf_waddr_rd_i),
-        .id_alu_rf_wen_rd_i   (id_alu_rf_wen_rd_i),
-        .comp_result_o        (alu_comp_result),
-        .alu_result_o         (alu_result),
-        .alu_rf_wen_rd_o      (alu_rf_wen_rd),
-        .alu_rf_waddr_rd_o    (alu_rf_waddr_rd)
-    );
-
-    ydrasil_div u_ydrasil_div (
-        .clk             (clk),
-        .rst_n           (rst_n),
-        .flush_i         (div_kill),
-        .start_i         (div_start),
-        .operand_a_i     (mul_operand_a),
-        .operand_b_i     (mul_operand_b),
-        .operator_i      (div_active_q ? div_operator_q : operator_i),
-        .busy_o          (div_busy),
-        .done_o          (div_done),
-        .result_o        (div_result)
-    );
-
-    ydrasil_mul u_ydrasil_mul (
-        .clk             (clk),
-        .rst_n           (rst_n),
-        .flush_i         (trap_redirect_i),
-        .redirect_i      (flush_ex_i && redirect_valid_i),
-        .redirect_keep_mask_i(redirect_keep_mask_i),
-        .issue_valid_i   (mul_issue_valid),
-        .issue_ready_o   (mul_issue_ready),
-        .operand_a_i     (mul_operand_a),
-        .operand_b_i     (mul_operand_b),
-        .operator_i      (operator_i),
-        .issue_wen_i     (mul_issue_wen),
-        .issue_waddr_i   (id_rf_waddr_rd_i),
-        .issue_producer_id_i(id_ex_producer_id_i),
-        .result_valid_o  (mul_result_valid),
-        .result_wen_o    (mul_pipe_wen),
-        .result_waddr_o  (mul_pipe_waddr),
-        .result_producer_id_o(mul_pipe_producer_id),
-        .result_wdata_o  (mul_pipe_wdata)
-    );
-
-    assign mul_rf_wen_rd_o = mul_pipe_wen | div_rf_wen_rd;
-    assign mul_rf_waddr_rd_o = div_rf_wen_rd ? div_waddr_q : mul_pipe_waddr;
-    assign mul_producer_id_o = div_rf_wen_rd ?
-        div_producer_id_q : mul_pipe_producer_id;
-    assign mul_wdata_rd_o = div_rf_wen_rd ? div_result_q : mul_pipe_wdata;
-
-    logic [OPERATOR_WIDTH-1:0] slow_bitmanip_operator;
-
+    wire alu0_live = alu0_req_i.valid;
+    wire bit_live = bit_req_i.valid;
+    wire mdu_live = mdu_req_i.valid;
+    wire csr_live = csr_req_i.valid;
+    producer_id_t main_producer_id;
+    logic main_producer_tracked;
     always_comb begin
-        slow_bitmanip_operator = operator_i;
-        slow_bitmanip_operator[OP_B_SH1ADD] = 1'b0;
-        slow_bitmanip_operator[OP_B_SH2ADD] = 1'b0;
-        slow_bitmanip_operator[OP_B_SH3ADD] = 1'b0;
-        slow_bitmanip_operator[OP_B_ANDN]   = 1'b0;
-        slow_bitmanip_operator[OP_B_ORN]    = 1'b0;
-        slow_bitmanip_operator[OP_B_REV8]   = 1'b0;
-        slow_bitmanip_operator[OP_B_SEXT_B] = 1'b0;
-        slow_bitmanip_operator[OP_B_SEXT_H] = 1'b0;
-        slow_bitmanip_operator[OP_B_XNOR]   = 1'b0;
-        slow_bitmanip_operator[OP_B_ZEXT_H] = 1'b0;
-        slow_bitmanip_operator[OP_B_BCLR]   = 1'b0;
-        slow_bitmanip_operator[OP_B_BCLRI]  = 1'b0;
-        slow_bitmanip_operator[OP_B_BEXT]   = 1'b0;
-        slow_bitmanip_operator[OP_B_BEXTI]  = 1'b0;
-        slow_bitmanip_operator[OP_B_BINV]   = 1'b0;
-        slow_bitmanip_operator[OP_B_BINVI]  = 1'b0;
-        slow_bitmanip_operator[OP_B_BSET]   = 1'b0;
-        slow_bitmanip_operator[OP_B_BSETI]  = 1'b0;
-        slow_bitmanip_operator[OP_B_PACK]   = 1'b0;
-        slow_bitmanip_operator[OP_B_PACKH]  = 1'b0;
-    end
-
-    ydrasil_bitmanip u_ydrasil_bitmanip (
-        .operand_a_i     (bitmanip_operand_a),
-        .operand_b_i     (bitmanip_operand_b),
-        .operator_i      (slow_bitmanip_operator),
-        .operator_type_i (operator_type_i),
-        .result_o        (bitmanip_result)
-    );
-
-    wire [31:0] slow_result;
-    wire        slow_result_wen;
-    wire csr_csrrw = op_csr & id_op_csr_info_i[OP_CSR_CSRRW];
-    wire csr_csrrs = op_csr & id_op_csr_info_i[OP_CSR_CSRRS];
-    wire csr_csrrc = op_csr & id_op_csr_info_i[OP_CSR_CSRRC];
-    wire [31:0] csr_reg_wdata;
-    wire [31:0] csr_wdata;
-
-    reg [REGS_DATA_WIDTH-1:0] ex_csr_wdata_o_ff;
-    (* dont_touch = "yes" *) reg [1:0] ex_csr_fs_wdata_o_ff;
-    (* dont_touch = "yes" *) reg ex_csr_mstatus_wen_o_ff;
-    reg                       ex_csr_wen_o_ff;
-    reg [CSR_ADDR_WIDTH-1:0]  ex_csr_waddr_o_ff;
-
-    assign csr_reg_wdata = trap_redirect_i ? '0 : csr_ex_rdata_i;
-    assign csr_wdata =
-        trap_redirect_i ? '0 :
-        ({REGS_DATA_WIDTH{csr_csrrw}} & csr_operand_a) |
-        ({REGS_DATA_WIDTH{csr_csrrs}} & (csr_operand_a | csr_ex_rdata_i)) |
-        ({REGS_DATA_WIDTH{csr_csrrc}} & (csr_ex_rdata_i & (~csr_operand_a)));
-    // CSRRS/CSRRC with rs1 (or zimm) equal to zero are reads only.
-    assign csr_wen = op_csr & id_op_csr_info_i[OP_CSR_WRITE];
-
-    assign alu_result_o = bitmanip_result_valid_ff ? bitmanip_result_ff : alu_result_ff;
-    assign alu_rf_wen_rd_o = alu_rf_wen_rd_ff;
-    assign alu_rf_waddr_rd_o = alu_rf_waddr_rd_ff;
-    assign alu_producer_id_o = alu_producer_id_ff;
-
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            alu_result_ff       <= '0;
-            bitmanip_result_ff  <= '0;
-            bitmanip_result_valid_ff <= 1'b0;
-            alu_rf_wen_rd_ff    <= 1'b0;
-            alu_rf_waddr_rd_ff  <= '0;
-            alu_producer_id_ff  <= '0;
-            completion_q         <= '0;
-            ex_csr_wdata_o_ff   <= '0;
-            ex_csr_fs_wdata_o_ff <= '0;
-            ex_csr_mstatus_wen_o_ff <= 1'b0;
-            ex_csr_wen_o_ff     <= 1'b0;
-            ex_csr_waddr_o_ff   <= '0;
-        end else if (flush_ex_i) begin
-            alu_result_ff       <= '0;
-            bitmanip_result_ff  <= '0;
-            bitmanip_result_valid_ff <= 1'b0;
-            alu_rf_wen_rd_ff    <= 1'b0;
-            alu_rf_waddr_rd_ff  <= '0;
-            alu_producer_id_ff  <= '0;
-            completion_q         <= '0;
-            ex_csr_wdata_o_ff   <= '0;
-            ex_csr_fs_wdata_o_ff <= '0;
-            ex_csr_mstatus_wen_o_ff <= 1'b0;
-            ex_csr_wen_o_ff     <= 1'b0;
-            ex_csr_waddr_o_ff   <= '0;
-        end else begin
-            alu_result_ff      <= fast_result_wen ? fast_result :
-                                  slow_result_wen ? slow_result : alu_result;
-            bitmanip_result_ff <= fast_bitmanip_rf_wen_rd ?
-                                  fast_bitmanip_result : bitmanip_result;
-            bitmanip_result_valid_ff <=
-                bitmanip_rf_wen_rd | fast_bitmanip_rf_wen_rd;
-            alu_rf_wen_rd_ff   <= ex_rf_wen_rd;
-            alu_rf_waddr_rd_ff <= alu_rf_waddr_rd;
-            alu_producer_id_ff <= id_ex_producer_id_i;
-            completion_q.valid <= ex_rf_wen_rd && (id_rf_waddr_rd_i != '0);
-            completion_q.producer_id <= id_ex_producer_id_i;
-            completion_q.producer_tracked <= ex_rf_wen_rd &&
-                (id_rf_waddr_rd_i != '0);
-            completion_q.addr <= id_rf_waddr_rd_i;
-            completion_q.data <= fast_bitmanip_rf_wen_rd ?
-                fast_bitmanip_result : bitmanip_rf_wen_rd ?
-                bitmanip_result : slow_result_wen ? slow_result :
-                fast_result_wen ? fast_result : alu_result;
-            ex_csr_wdata_o_ff  <= csr_wdata;
-            ex_csr_fs_wdata_o_ff <= csr_wdata[14:13];
-            ex_csr_mstatus_wen_o_ff <= csr_wen && (id_ex_csr_waddr_i == CSR_MSTATUS);
-            ex_csr_wen_o_ff    <= csr_wen;
-            ex_csr_waddr_o_ff  <= id_ex_csr_waddr_i;
-
+        main_producer_id = '0;
+        main_producer_tracked = 1'b0;
+        if (alu0_live) begin
+            main_producer_id = alu0_req_i.producer_id;
+            main_producer_tracked = alu0_req_i.producer_tracked;
+        end else if (bit_live) begin
+            main_producer_id = bit_req_i.producer_id;
+            main_producer_tracked = bit_req_i.producer_tracked;
+        end else if (mdu_live) begin
+            main_producer_id = mdu_req_i.producer_id;
+            main_producer_tracked = mdu_req_i.producer_tracked;
+        end else if (csr_live) begin
+            main_producer_id = csr_req_i.producer_id;
+            main_producer_tracked = csr_req_i.producer_tracked;
         end
     end
 
-    // Long-latency MDU state is older than subsequently issued branches and
-    // therefore survives their redirects. A paired younger DIV is identified
-    // by its circular allocation tag and is cancelled precisely.
-    always_ff @(posedge clk or negedge rst_n) begin
+    wire main_producer_live = !main_producer_tracked ||
+        producer_live_mask_i[main_producer_id[PRODUCER_SLOT_WIDTH-1:0]] &&
+        producer_live_epoch_i[main_producer_id[PRODUCER_SLOT_WIDTH-1:0]] ==
+            main_producer_id[PRODUCER_ID_WIDTH-1];
+    wire execution_kill = trap_redirect_i ||
+        !main_producer_live;
+
+    wire op_mul = mdu_live &&
+        (mdu_req_i.operator_info[OP_MUL_MUL] ||
+         mdu_req_i.operator_info[OP_MUL_MULH] ||
+         mdu_req_i.operator_info[OP_MUL_MULHSU] ||
+         mdu_req_i.operator_info[OP_MUL_MULHU]);
+    wire op_div = mdu_live &&
+        (mdu_req_i.operator_info[OP_MUL_DIV] ||
+         mdu_req_i.operator_info[OP_MUL_DIVU] ||
+         mdu_req_i.operator_info[OP_MUL_REM] ||
+         mdu_req_i.operator_info[OP_MUL_REMU]);
+
+    wire [REGS_DATA_WIDTH-1:0] alu0_result;
+    wire alu0_unused_comp;
+    wire alu0_wen;
+    wire [REGS_ADDR_WIDTH-1:0] alu0_waddr;
+    ydrasil_alu #(.DATAWIDTH(DATA_WIDTH)) u_alu0 (
+        .operand_a_i(alu0_req_i.operand_a),
+        .operand_b_i(alu0_req_i.operand_b),
+        .operator_i(alu0_req_i.operator_info),
+        .operator_type_i(alu0_req_i.operator_type),
+        .id_rf_waddr_rd_i(alu0_req_i.rd_addr),
+        .id_alu_rf_wen_rd_i(alu0_req_i.rd_wen),
+        .interrupt_i(execution_kill),
+        .comp_result_o(alu0_unused_comp),
+        .alu_result_o(alu0_result),
+        .alu_rf_wen_rd_o(alu0_wen),
+        .alu_rf_waddr_rd_o(alu0_waddr)
+    );
+
+    wire [REGS_DATA_WIDTH-1:0] bit_result;
+    ydrasil_bitmanip u_bit (
+        .operand_a_i(bit_req_i.operand_a),
+        .operand_b_i(bit_req_i.operand_b),
+        .operator_i(bit_req_i.operator_info),
+        .operator_type_i(bit_req_i.operator_type),
+        .result_o(bit_result)
+    );
+
+    wire mul_issue_ready;
+    wire mul_issue_valid = op_mul && mul_issue_ready && !execution_kill;
+    wire mul_issue_wen = mdu_req_i.rd_wen && (mdu_req_i.rd_addr != '0);
+    wire mul_result_valid;
+    wire mul_pipe_wen;
+    wire [REGS_DATA_WIDTH-1:0] mul_pipe_wdata;
+    wire [REGS_ADDR_WIDTH-1:0] mul_pipe_waddr;
+    producer_id_t mul_pipe_producer_id;
+
+    reg div_active_q;
+    reg div_pending_q;
+    reg div_wen_q;
+    reg [REGS_ADDR_WIDTH-1:0] div_waddr_q;
+    producer_id_t div_producer_id_q;
+    reg [OPERATOR_WIDTH-1:0] div_operator_q;
+    reg [REGS_DATA_WIDTH-1:0] div_result_q;
+    wire div_busy;
+    wire div_done;
+    wire [REGS_DATA_WIDTH-1:0] div_result;
+    wire div_inflight = div_active_q || div_pending_q || div_busy || div_done;
+    wire div_redirect_keep =
+        producer_live_mask_i[div_producer_id_q[PRODUCER_SLOT_WIDTH-1:0]] &&
+        producer_live_epoch_i[div_producer_id_q[PRODUCER_SLOT_WIDTH-1:0]] ==
+            div_producer_id_q[PRODUCER_ID_WIDTH-1];
+    wire div_kill = trap_redirect_i ||
+        (div_inflight && !div_redirect_keep);
+    wire div_start = op_div && !div_active_q && !div_pending_q && !div_busy &&
+        !div_done && !execution_kill;
+    wire div_complete = div_pending_q && !mul_pipe_wen && !div_kill;
+    wire div_rf_wen = div_complete && div_wen_q;
+
+    ydrasil_div u_div (
+        .clk(clk), .rst_n(rst_n), .flush_i(div_kill), .start_i(div_start),
+        .operand_a_i(mdu_req_i.operand_a), .operand_b_i(mdu_req_i.operand_b),
+        .operator_i(div_active_q ? div_operator_q : mdu_req_i.operator_info),
+        .busy_o(div_busy), .done_o(div_done), .result_o(div_result)
+    );
+
+    ydrasil_mul u_mul (
+        .clk(clk), .rst_n(rst_n), .flush_i(trap_redirect_i),
+        .producer_live_mask_i(producer_live_mask_i),
+        .producer_live_epoch_i(producer_live_epoch_i),
+        .issue_valid_i(mul_issue_valid), .issue_ready_o(mul_issue_ready),
+        .operand_a_i(mdu_req_i.operand_a), .operand_b_i(mdu_req_i.operand_b),
+        .operator_i(mdu_req_i.operator_info), .issue_wen_i(mul_issue_wen),
+        .issue_waddr_i(mdu_req_i.rd_addr),
+        .issue_producer_id_i(mdu_req_i.producer_id),
+        .result_valid_o(mul_result_valid), .result_wen_o(mul_pipe_wen),
+        .result_waddr_o(mul_pipe_waddr),
+        .result_producer_id_o(mul_pipe_producer_id),
+        .result_wdata_o(mul_pipe_wdata)
+    );
+
+    wire csr_csrrw = csr_live && csr_req_i.op_info[OP_CSR_CSRRW];
+    wire csr_csrrs = csr_live && csr_req_i.op_info[OP_CSR_CSRRS];
+    wire csr_csrrc = csr_live && csr_req_i.op_info[OP_CSR_CSRRC];
+    wire csr_wen = csr_live && csr_req_i.op_info[OP_CSR_WRITE] && !execution_kill;
+    wire [REGS_DATA_WIDTH-1:0] csr_wdata = trap_redirect_i ? '0 :
+        ({REGS_DATA_WIDTH{csr_csrrw}} & csr_req_i.operand_a) |
+        ({REGS_DATA_WIDTH{csr_csrrs}} & (csr_req_i.operand_a | csr_ex_rdata_i)) |
+        ({REGS_DATA_WIDTH{csr_csrrc}} & (csr_ex_rdata_i & ~csr_req_i.operand_a));
+
+    wire alu_complete = alu0_live && alu0_req_i.rd_wen &&
+        (alu0_req_i.rd_addr != '0) && !execution_kill;
+    wire bit_complete = bit_live && bit_req_i.rd_wen &&
+        (bit_req_i.rd_addr != '0) && !execution_kill;
+    wire csr_complete = csr_live && csr_req_i.rd_wen &&
+        (csr_req_i.rd_addr != '0) && !execution_kill;
+
+    reg [REGS_DATA_WIDTH-1:0] result_q;
+    reg result_wen_q;
+    reg [REGS_ADDR_WIDTH-1:0] result_waddr_q;
+    producer_id_t result_producer_q;
+    ydrasil_gpr_fwd_pkt_t completion_q;
+    reg [REGS_DATA_WIDTH-1:0] csr_wdata_q;
+    reg [1:0] csr_fs_wdata_q;
+    reg csr_mstatus_wen_q;
+    reg csr_wen_q;
+    reg [CSR_ADDR_WIDTH-1:0] csr_waddr_q;
+    producer_id_t csr_producer_id_q;
+    reg csr_producer_tracked_q;
+
+    wire completion_tag_live = !completion_q.producer_tracked ||
+        (producer_live_mask_i[
+            completion_q.producer_id[PRODUCER_SLOT_WIDTH-1:0]] &&
+         producer_live_epoch_i[
+            completion_q.producer_id[PRODUCER_SLOT_WIDTH-1:0]] ==
+            completion_q.producer_id[PRODUCER_ID_WIDTH-1]);
+    wire csr_tag_live = !csr_producer_tracked_q ||
+        (producer_live_mask_i[
+            csr_producer_id_q[PRODUCER_SLOT_WIDTH-1:0]] &&
+         producer_live_epoch_i[
+            csr_producer_id_q[PRODUCER_SLOT_WIDTH-1:0]] ==
+            csr_producer_id_q[PRODUCER_ID_WIDTH-1]);
+    wire mul_pipe_tag_live =
+        producer_live_mask_i[
+            mul_pipe_producer_id[PRODUCER_SLOT_WIDTH-1:0]] &&
+        producer_live_epoch_i[
+            mul_pipe_producer_id[PRODUCER_SLOT_WIDTH-1:0]] ==
+            mul_pipe_producer_id[PRODUCER_ID_WIDTH-1];
+
+`ifndef SYNTHESIS
+    // Commit trace observes the lane-0 completion register by these stable
+    // names.  They are aliases only; execution has no legacy data path.
+    wire alu_rf_wen_rd_ff = result_wen_q;
+    wire [REGS_ADDR_WIDTH-1:0] alu_rf_waddr_rd_ff = result_waddr_q;
+    wire [REGS_DATA_WIDTH-1:0] alu_result_ff = result_q;
+`endif
+
+    always_ff @(posedge clk) begin
+        if (!rst_n || execution_kill) begin
+            result_q <= '0;
+            result_wen_q <= 1'b0;
+            result_waddr_q <= '0;
+            result_producer_q <= '0;
+            completion_q <= '0;
+            csr_wdata_q <= '0;
+            csr_fs_wdata_q <= '0;
+            csr_mstatus_wen_q <= 1'b0;
+            csr_wen_q <= 1'b0;
+            csr_waddr_q <= '0;
+            csr_producer_id_q <= '0;
+            csr_producer_tracked_q <= 1'b0;
+        end else begin
+            result_wen_q <= alu_complete | bit_complete | csr_complete;
+            result_waddr_q <= bit_complete ? bit_req_i.rd_addr :
+                csr_complete ? csr_req_i.rd_addr : alu0_req_i.rd_addr;
+            result_producer_q <= bit_complete ? bit_req_i.producer_id :
+                csr_complete ? csr_req_i.producer_id : alu0_req_i.producer_id;
+            result_q <= bit_complete ? bit_result :
+                csr_complete ? csr_ex_rdata_i : alu0_result;
+            completion_q.valid <= alu_complete | bit_complete | csr_complete;
+            completion_q.producer_id <= bit_complete ? bit_req_i.producer_id :
+                csr_complete ? csr_req_i.producer_id : alu0_req_i.producer_id;
+            completion_q.producer_tracked <= alu_complete ? alu0_req_i.producer_tracked :
+                bit_complete ? bit_req_i.producer_tracked : csr_req_i.producer_tracked;
+            completion_q.addr <= bit_complete ? bit_req_i.rd_addr :
+                csr_complete ? csr_req_i.rd_addr : alu0_req_i.rd_addr;
+            completion_q.data <= bit_complete ? bit_result :
+                csr_complete ? csr_ex_rdata_i : alu0_result;
+            csr_wdata_q <= csr_wdata;
+            csr_fs_wdata_q <= csr_wdata[14:13];
+            csr_mstatus_wen_q <= csr_wen && (csr_req_i.waddr == CSR_MSTATUS);
+            csr_wen_q <= csr_wen;
+            csr_waddr_q <= csr_req_i.waddr;
+            csr_producer_id_q <= csr_req_i.producer_id;
+            csr_producer_tracked_q <= csr_req_i.producer_tracked;
+        end
+    end
+
+    always_ff @(posedge clk) begin
         if (!rst_n || div_kill) begin
-            div_active_q      <= 1'b0;
-            div_pending_q     <= 1'b0;
-            div_wen_q         <= 1'b0;
-            div_waddr_q       <= '0;
+            div_active_q <= 1'b0;
+            div_pending_q <= 1'b0;
+            div_wen_q <= 1'b0;
+            div_waddr_q <= '0;
             div_producer_id_q <= '0;
-            div_operator_q    <= '0;
-            div_result_q      <= '0;
+            div_operator_q <= '0;
+            div_result_q <= '0;
         end else begin
             if (div_start) begin
                 div_active_q <= 1'b1;
-                div_wen_q    <= id_alu_rf_wen_rd_i & (id_rf_waddr_rd_i != '0);
-                div_waddr_q  <= id_rf_waddr_rd_i;
-                div_producer_id_q <= id_ex_producer_id_i;
-                div_operator_q <= operator_i;
+                div_wen_q <= mdu_req_i.rd_wen && (mdu_req_i.rd_addr != '0);
+                div_waddr_q <= mdu_req_i.rd_addr;
+                div_producer_id_q <= mdu_req_i.producer_id;
+                div_operator_q <= mdu_req_i.operator_info;
             end
             if (div_done && div_active_q) begin
                 div_active_q <= 1'b0;
@@ -587,176 +295,166 @@ import ydrasil_pkg::*;
         end
     end
 
-    assign ex_csr_wdata_o = ex_csr_wdata_o_ff;
-    assign ex_csr_fs_wdata_o = ex_csr_fs_wdata_o_ff;
-    assign ex_csr_mstatus_wen_o = ex_csr_mstatus_wen_o_ff;
-    assign ex_csr_wen_o = ex_csr_wen_o_ff;
-    assign ex_csr_waddr_o = ex_csr_waddr_o_ff;
-    assign slow_result_wen = op_csr;
-    assign slow_result = ({32{op_csr}} & csr_reg_wdata);
-
-    assign completion_o = completion_q;
+    assign alu_result_o = result_q;
+    assign alu_rf_wen_rd_o = result_wen_q && completion_tag_live;
+    assign alu_rf_waddr_rd_o = result_waddr_q;
+    assign alu_producer_id_o = result_producer_q;
+    always_comb begin
+        completion_o = completion_q;
+        completion_o.valid = completion_q.valid && completion_tag_live;
+    end
+    assign mul_issue_o = mul_issue_valid && mul_issue_wen;
+    assign mul_issue_waddr_o = mdu_req_i.rd_addr;
+    assign mul_wdata_rd_o = div_rf_wen ? div_result_q : mul_pipe_wdata;
+    assign mul_rf_wen_rd_o = (mul_pipe_wen && mul_pipe_tag_live) | div_rf_wen;
+    assign mul_rf_waddr_rd_o = div_rf_wen ? div_waddr_q : mul_pipe_waddr;
+    assign mul_producer_id_o = div_rf_wen ? div_producer_id_q : mul_pipe_producer_id;
+    assign mul_result_valid_o = (mul_result_valid && mul_pipe_tag_live) |
+        div_complete;
+    assign ex_mul_stall_o = op_div &&
+        (div_active_q | div_pending_q | div_busy | div_done) && !execution_kill;
+    assign ex_instret_inc_o = (alu0_live | bit_live | csr_live) && !execution_kill ||
+        div_complete;
+    assign ex_csr_wen_o = csr_wen_q && csr_tag_live;
+    assign ex_csr_wdata_o = csr_wdata_q;
+    assign ex_csr_fs_wdata_o = csr_fs_wdata_q;
+    assign ex_csr_mstatus_wen_o = csr_mstatus_wen_q && csr_tag_live;
+    assign ex_csr_waddr_o = csr_waddr_q;
 
 endmodule
 
-// Lane 1 is an EX resource, paired with the main ALU/MUL/DIV block above.
-// Its only inputs are the lane-1 fields of the registered Issue/EX packet.
-// It provides a separate ALU, BRU, and AGU/LSU-request path.
+// Lane 1 contains the second ALU, the single architectural BRU and the AGU.
+// BIT and MDU never enter this lane, so their operand/result fanout cannot
+// couple to branch prediction or DTCM address generation.
 module ydrasil_ex_lane1
 import ydrasil_pkg::*;
 (
-    input  wire                           clk,
-    input  wire                           rst_n,
-    input  wire                           flush_i,
-    input  wire                           interrupt_i,
-    input  wire                           valid_i,
-    input  wire [REGS_DATA_WIDTH-1:0]     operand_a_i,
-    input  wire [REGS_DATA_WIDTH-1:0]     operand_b_i,
-    input  wire [REGS_DATA_WIDTH-1:0]     branch_operand_a_i,
-    input  wire [REGS_DATA_WIDTH-1:0]     branch_operand_b_i,
-    input  wire [REGS_DATA_WIDTH-1:0]     branch_imm_i,
-    input  wire [OPERATOR_WIDTH-1:0]      operator_i,
-    input  wire [OPERATOR_TYPE_WIDTH-1:0] operator_type_i,
-    input  wire [OP_LSU_INFO_WIDTH-1:0]   operator_lsu_i,
-    input  wire [REGS_DATA_WIDTH-1:0]     store_data_i,
-    input  wire                           store_data_valid_i,
-    input  wire [REGS_ADDR_WIDTH-1:0]     rd_addr_i,
-    input  wire                           rd_wen_i,
-    input  producer_id_t                  producer_id_i,
-    input  wire                           producer_tracked_i,
-    input  wire [INST_ADDR_WIDTH-1:0]     pc_i,
-    input  wire [INST_DATA_WIDTH-1:0]     instr_i,
-    input  wire                           jalr_i,
-    input  wire [INST_ADDR_WIDTH-1:0]     branch_target_i,
-    input  wire [INST_ADDR_WIDTH-1:0]     branch_next_pc_i,
-    input  wire                           pred_hit_i,
-    input  wire                           pred_taken_i,
-    input  wire [INST_ADDR_WIDTH-1:0]     pred_target_i,
-    input  wire [1:0]                     pred_counter_i,
-    input  wire [INST_ADDR_WIDTH-1:0]     pred_bht_index_i,
-    input  wire [INST_ADDR_WIDTH-1:0]     trap_redirect_addr_i,
-    output ydrasil_gpr_fwd_pkt_t          completion_o,
-    output ydrasil_lsu_req_pkt_t          lsu_req_o,
-    output wire                           ex_branch_jump_o,
-    output wire [INST_ADDR_WIDTH-1:0]     ex_branch_target_o,
-    output wire                           ex_pc_redirect_o,
-    output wire [INST_ADDR_WIDTH-1:0]     ex_pc_redirect_target_o,
-    output ydrasil_bp_train_pkt_t         ex_bp_train_o,
-    output wire                           ex_branch_mispredict_o,
-    output wire                           instret_valid_o,
-    output wire [INST_ADDR_WIDTH-1:0]     commit_pc_o,
-    output wire [INST_DATA_WIDTH-1:0]     commit_instr_o
+    input wire clk,
+    input wire rst_n,
+    input wire flush_i,
+    input wire execute_i,
+    input wire redirect_i,
+    input wire [PRODUCER_NUM-1:0] redirect_keep_mask_i,
+    input wire [PRODUCER_NUM-1:0] redirect_keep_epoch_i,
+    input wire [PRODUCER_NUM-1:0] producer_live_mask_i,
+    input wire [PRODUCER_NUM-1:0] producer_live_epoch_i,
+    input wire interrupt_i,
+    input ydrasil_alu_issue_req_t alu1_req_i,
+    input ydrasil_bru_issue_req_t bru_req_i,
+    input ydrasil_agu_issue_req_t agu_req_i,
+    input wire [INST_ADDR_WIDTH-1:0] trap_redirect_addr_i,
+    output ydrasil_gpr_fwd_pkt_t completion_o,
+    output ydrasil_lsu_req_pkt_t lsu_req_o,
+    output wire ex_branch_jump_o,
+    output wire [INST_ADDR_WIDTH-1:0] ex_branch_target_o,
+    output wire ex_pc_redirect_o,
+    output wire [INST_ADDR_WIDTH-1:0] ex_pc_redirect_target_o,
+    output ydrasil_bp_train_pkt_t ex_bp_train_o,
+    output wire ex_branch_mispredict_o,
+    output wire instret_valid_o,
+    output wire [INST_ADDR_WIDTH-1:0] commit_pc_o,
+    output wire [INST_DATA_WIDTH-1:0] commit_instr_o
 `ifndef SYNTHESIS
-    ,output wire                          dbg_bp_resolve_valid_o
-    ,output wire [INST_ADDR_WIDTH-1:0]    dbg_bp_resolve_pc_o
-    ,output wire                          dbg_bp_actual_taken_o
-    ,output wire                          dbg_bp_actual_target_o
-    ,output wire [INST_ADDR_WIDTH-1:0]    dbg_bp_actual_next_pc_o
-    ,output wire                          dbg_bp_pred_hit_o
-    ,output wire                          dbg_bp_pred_taken_o
-    ,output wire [INST_ADDR_WIDTH-1:0]    dbg_bp_pred_target_o
-    ,output wire [1:0]                    dbg_bp_pred_counter_o
-    ,output wire [INST_ADDR_WIDTH-1:0]    dbg_bp_pred_next_pc_o
-    ,output wire                          dbg_bp_mispredict_o
+    ,output wire dbg_bp_resolve_valid_o
+    ,output wire [INST_ADDR_WIDTH-1:0] dbg_bp_resolve_pc_o
+    ,output wire dbg_bp_actual_taken_o
+    ,output wire [INST_ADDR_WIDTH-1:0] dbg_bp_actual_target_o
+    ,output wire [INST_ADDR_WIDTH-1:0] dbg_bp_actual_next_pc_o
+    ,output wire dbg_bp_pred_hit_o
+    ,output wire dbg_bp_pred_taken_o
+    ,output wire [INST_ADDR_WIDTH-1:0] dbg_bp_pred_target_o
+    ,output wire [1:0] dbg_bp_pred_counter_o
+    ,output wire [INST_ADDR_WIDTH-1:0] dbg_bp_pred_next_pc_o
+    ,output wire dbg_bp_mispredict_o
 `endif
 );
-    reg valid_q;
-    reg [INST_ADDR_WIDTH-1:0] pc_q;
-    reg [INST_DATA_WIDTH-1:0] instr_q;
-    reg load_q;
-    ydrasil_gpr_fwd_pkt_t completion_q;
-    ydrasil_gpr_fwd_pkt_t completion_d;
-    ydrasil_lsu_req_pkt_t agu_req_q;
-    ydrasil_lsu_req_pkt_t agu_req_d;
-    wire [REGS_DATA_WIDTH-1:0] alu_result;
-    wire [REGS_DATA_WIDTH-1:0] fast_b_shadd_result =
-        ({REGS_DATA_WIDTH{operator_i[OP_B_SH1ADD]}} & ((operand_a_i << 1) + operand_b_i)) |
-        ({REGS_DATA_WIDTH{operator_i[OP_B_SH2ADD]}} & ((operand_a_i << 2) + operand_b_i)) |
-        ({REGS_DATA_WIDTH{operator_i[OP_B_SH3ADD]}} & ((operand_a_i << 3) + operand_b_i));
-    wire [REGS_DATA_WIDTH-1:0] fast_b_logic_result =
-        ({REGS_DATA_WIDTH{operator_i[OP_B_ANDN]}} & (operand_a_i & ~operand_b_i)) |
-        ({REGS_DATA_WIDTH{operator_i[OP_B_ORN]}} & (operand_a_i | ~operand_b_i)) |
-        ({REGS_DATA_WIDTH{operator_i[OP_B_XNOR]}} & ~(operand_a_i ^ operand_b_i));
-    wire signed [REGS_DATA_WIDTH-1:0] signed_operand_a = operand_a_i;
-    wire signed [REGS_DATA_WIDTH-1:0] signed_operand_b = operand_b_i;
-    wire [REGS_DATA_WIDTH-1:0] fast_b_minmax_result =
-        ({REGS_DATA_WIDTH{operator_i[OP_B_MIN]}} &
-         ((signed_operand_a <= signed_operand_b) ? operand_a_i : operand_b_i)) |
-        ({REGS_DATA_WIDTH{operator_i[OP_B_MAX]}} &
-         ((signed_operand_a >= signed_operand_b) ? operand_a_i : operand_b_i)) |
-        ({REGS_DATA_WIDTH{operator_i[OP_B_MINU]}} &
-         ((operand_a_i <= operand_b_i) ? operand_a_i : operand_b_i)) |
-        ({REGS_DATA_WIDTH{operator_i[OP_B_MAXU]}} &
-         ((operand_a_i >= operand_b_i) ? operand_a_i : operand_b_i));
-    wire [REGS_DATA_WIDTH-1:0] fast_b_extend_result =
-        ({REGS_DATA_WIDTH{operator_i[OP_B_REV8]}} &
-         {operand_a_i[7:0], operand_a_i[15:8], operand_a_i[23:16], operand_a_i[31:24]}) |
-        ({REGS_DATA_WIDTH{operator_i[OP_B_SEXT_B]}} & {{24{operand_a_i[7]}}, operand_a_i[7:0]}) |
-        ({REGS_DATA_WIDTH{operator_i[OP_B_SEXT_H]}} & {{16{operand_a_i[15]}}, operand_a_i[15:0]}) |
-        ({REGS_DATA_WIDTH{operator_i[OP_B_ZEXT_H]}} & {16'b0, operand_a_i[15:0]});
-    wire fast_bitmanip_op = operator_type_i[OPERATOR_TYPE_BITMANIP] &&
-        (operator_i[OP_B_SH1ADD] | operator_i[OP_B_SH2ADD] | operator_i[OP_B_SH3ADD] |
-         operator_i[OP_B_ANDN] | operator_i[OP_B_ORN] | operator_i[OP_B_XNOR] |
-         operator_i[OP_B_MIN] | operator_i[OP_B_MAX] | operator_i[OP_B_MINU] |
-         operator_i[OP_B_MAXU] | operator_i[OP_B_REV8] | operator_i[OP_B_SEXT_B] |
-         operator_i[OP_B_SEXT_H] | operator_i[OP_B_ZEXT_H]);
-    wire [REGS_DATA_WIDTH-1:0] fast_bitmanip_result =
-        fast_b_shadd_result | fast_b_logic_result | fast_b_minmax_result | fast_b_extend_result;
-    wire memory_op = operator_type_i[OPERATOR_TYPE_LOAD] ||
-        operator_type_i[OPERATOR_TYPE_STORE];
-    wire [BUS_ADDR_WIDTH-1:0] agu_addr = operand_a_i + operand_b_i;
-    wire alu_unused_comp;
-    wire alu_unused_wen;
-    wire [REGS_ADDR_WIDTH-1:0] alu_unused_waddr;
+    wire agu_req_live = agu_req_i.producer_tracked &&
+        producer_live_mask_i[agu_req_i.producer_id[PRODUCER_SLOT_WIDTH-1:0]] &&
+        producer_live_epoch_i[agu_req_i.producer_id[PRODUCER_SLOT_WIDTH-1:0]] ==
+            agu_req_i.producer_id[PRODUCER_ID_WIDTH-1];
+    wire alu1_req_live = alu1_req_i.producer_tracked &&
+        producer_live_mask_i[alu1_req_i.producer_id[PRODUCER_SLOT_WIDTH-1:0]] &&
+        producer_live_epoch_i[alu1_req_i.producer_id[PRODUCER_SLOT_WIDTH-1:0]] ==
+            alu1_req_i.producer_id[PRODUCER_ID_WIDTH-1];
+    wire bru_req_live = bru_req_i.producer_tracked &&
+        producer_live_mask_i[bru_req_i.producer_id[PRODUCER_SLOT_WIDTH-1:0]] &&
+        producer_live_epoch_i[bru_req_i.producer_id[PRODUCER_SLOT_WIDTH-1:0]] ==
+            bru_req_i.producer_id[PRODUCER_ID_WIDTH-1];
+    // producer_live_* is updated at the redirect edge.  Requests already in
+    // the Issue/EX registers still see the old directory during that cycle,
+    // so recovery must explicitly retain their tag before they can execute.
+    wire agu_req_recovery_kept =
+        redirect_keep_mask_i[agu_req_i.producer_id[PRODUCER_SLOT_WIDTH-1:0]] &&
+        redirect_keep_epoch_i[agu_req_i.producer_id[PRODUCER_SLOT_WIDTH-1:0]] ==
+            agu_req_i.producer_id[PRODUCER_ID_WIDTH-1];
+    wire alu1_req_recovery_kept =
+        redirect_keep_mask_i[alu1_req_i.producer_id[PRODUCER_SLOT_WIDTH-1:0]] &&
+        redirect_keep_epoch_i[alu1_req_i.producer_id[PRODUCER_SLOT_WIDTH-1:0]] ==
+            alu1_req_i.producer_id[PRODUCER_ID_WIDTH-1];
+    wire bru_req_recovery_kept =
+        redirect_keep_mask_i[bru_req_i.producer_id[PRODUCER_SLOT_WIDTH-1:0]] &&
+        redirect_keep_epoch_i[bru_req_i.producer_id[PRODUCER_SLOT_WIDTH-1:0]] ==
+            bru_req_i.producer_id[PRODUCER_ID_WIDTH-1];
+    wire agu_req_survives_redirect = !redirect_i || agu_req_recovery_kept;
+    wire alu1_req_survives_redirect = !redirect_i || alu1_req_recovery_kept;
+    wire bru_req_survives_redirect = !redirect_i || bru_req_recovery_kept;
 
+    wire [REGS_DATA_WIDTH-1:0] alu1_result;
+    wire alu1_unused_comp;
+    wire alu1_wen;
+    wire [REGS_ADDR_WIDTH-1:0] alu1_waddr;
+    ydrasil_alu u_alu1 (
+        .operand_a_i(alu1_req_i.operand_a), .operand_b_i(alu1_req_i.operand_b),
+        .operator_i(alu1_req_i.operator_info),
+        .operator_type_i(alu1_req_i.operator_type),
+        .id_rf_waddr_rd_i(alu1_req_i.rd_addr), .id_alu_rf_wen_rd_i(alu1_req_i.rd_wen),
+        .interrupt_i(interrupt_i || !alu1_req_live || !alu1_req_survives_redirect), .comp_result_o(alu1_unused_comp),
+        .alu_result_o(alu1_result), .alu_rf_wen_rd_o(alu1_wen),
+        .alu_rf_waddr_rd_o(alu1_waddr)
+    );
+
+    wire [BUS_ADDR_WIDTH-1:0] agu_addr = agu_req_i.operand_a + agu_req_i.operand_b;
+    ydrasil_lsu_req_pkt_t agu_req_d, agu_req_q;
     always_comb begin
         agu_req_d = '0;
-        agu_req_d.valid = valid_i && memory_op && !interrupt_i;
-        agu_req_d.is_load = operator_type_i[OPERATOR_TYPE_LOAD];
-        agu_req_d.is_store = operator_type_i[OPERATOR_TYPE_STORE];
-        agu_req_d.op = operator_lsu_i;
+        agu_req_d.valid = execute_i && agu_req_i.valid && !interrupt_i && !flush_i &&
+            agu_req_live && agu_req_survives_redirect;
+        agu_req_d.is_load = agu_req_i.is_load;
+        agu_req_d.is_store = agu_req_i.is_store;
+        agu_req_d.op = agu_req_i.op;
         agu_req_d.addr = agu_addr;
         agu_req_d.addr_is_dtcm =
-            (agu_addr[31:DTCM_ADDR_WIDTH+2] == DTCM_BASE_ADDR[31:DTCM_ADDR_WIDTH+2]);
-        agu_req_d.rd_addr = rd_addr_i;
-        agu_req_d.producer_id = producer_id_i;
-        agu_req_d.producer_tracked = producer_tracked_i;
-        agu_req_d.store_data = store_data_i;
-        agu_req_d.store_data_valid = store_data_valid_i;
-        agu_req_d.fp_load = 1'b0;
-        agu_req_d.fp_rd_addr = '0;
-        if (operator_lsu_i[OP_LSU_SB])
+            agu_addr[31:DTCM_ADDR_WIDTH+2] == DTCM_BASE_ADDR[31:DTCM_ADDR_WIDTH+2];
+        agu_req_d.rd_addr = agu_req_i.rd_addr;
+        agu_req_d.producer_id = agu_req_i.producer_id;
+        agu_req_d.producer_tracked = agu_req_i.producer_tracked;
+        agu_req_d.store_data = agu_req_i.store_data;
+        agu_req_d.store_data_valid = agu_req_i.store_data_valid;
+        if (agu_req_i.op[OP_LSU_SB])
             agu_req_d.store_mask = 4'b0001 << agu_addr[1:0];
-        else if (operator_lsu_i[OP_LSU_SH])
+        else if (agu_req_i.op[OP_LSU_SH])
             agu_req_d.store_mask = agu_addr[1] ? 4'b1100 : 4'b0011;
-        else if (operator_lsu_i[OP_LSU_SW])
+        else if (agu_req_i.op[OP_LSU_SW])
             agu_req_d.store_mask = 4'b1111;
     end
 
-    ydrasil_alu u_alu (
-        .operand_a_i(operand_a_i), .operand_b_i(operand_b_i),
-        .operator_i(operator_i), .operator_type_i(operator_type_i),
-        .id_rf_waddr_rd_i(rd_addr_i), .id_alu_rf_wen_rd_i(rd_wen_i),
-        .interrupt_i(interrupt_i), .comp_result_o(alu_unused_comp),
-        .alu_result_o(alu_result), .alu_rf_wen_rd_o(alu_unused_wen),
-        .alu_rf_waddr_rd_o(alu_unused_waddr)
-    );
-
     ydrasil_bru u_bru (
         .clk(clk), .rst_n(rst_n), .flush_i(flush_i),
-        .operand_a_i(branch_operand_a_i), .operand_b_i(branch_operand_b_i),
-        .bt_a_operand_i(jalr_i ? branch_operand_a_i : pc_i),
-        .bt_b_operand_i(branch_imm_i), .operator_i(operator_i),
-        .operator_type_i(operator_type_i), .id_ex_valid_i(valid_i),
-        .id_ex_jalr_i(jalr_i), .id_ex_branch_target_i(branch_target_i),
-        .id_ex_branch_next_pc_i(branch_next_pc_i), .id_ex_branch_eq_i(1'b0),
-        .id_ex_branch_ge_signed_i(1'b0), .id_ex_branch_ge_unsigned_i(1'b0),
-        .id_ex_pred_hit_i(pred_hit_i), .id_ex_pred_taken_i(pred_taken_i),
-        .id_ex_pred_target_i(pred_target_i), .id_ex_pred_counter_i(pred_counter_i),
-        .id_ex_pred_bht_index_i(pred_bht_index_i), .id_ex_producer_id_i(producer_id_i),
-        .trap_redirect_i(interrupt_i), .trap_redirect_addr_i(trap_redirect_addr_i),
-        .ex_branch_jump_o(ex_branch_jump_o), .ex_branch_target_o(ex_branch_target_o),
-        .ex_pc_redirect_o(ex_pc_redirect_o),
+        .operand_a_i(bru_req_i.operand_a), .operand_b_i(bru_req_i.operand_b),
+        .bt_a_operand_i(bru_req_i.bt_a_operand), .bt_b_operand_i(bru_req_i.bt_b_operand),
+        .operator_i(bru_req_i.operator_info), .operator_type_i(bru_req_i.operator_type),
+        .id_ex_valid_i(bru_req_i.valid && bru_req_live && bru_req_survives_redirect),
+        .id_ex_jalr_i(bru_req_i.jalr),
+        .id_ex_branch_target_i(bru_req_i.branch_target),
+        .id_ex_branch_next_pc_i(bru_req_i.branch_next_pc),
+        .id_ex_branch_eq_i(1'b0), .id_ex_branch_ge_signed_i(1'b0),
+        .id_ex_branch_ge_unsigned_i(1'b0), .id_ex_pred_hit_i(bru_req_i.pred_hit),
+        .id_ex_pred_taken_i(bru_req_i.pred_taken), .id_ex_pred_target_i(bru_req_i.pred_target),
+        .id_ex_pred_counter_i(bru_req_i.pred_counter),
+        .id_ex_pred_bht_index_i(bru_req_i.pred_bht_index),
+        .id_ex_producer_id_i(bru_req_i.producer_id), .trap_redirect_i(interrupt_i),
+        .trap_redirect_addr_i(trap_redirect_addr_i), .ex_branch_jump_o(ex_branch_jump_o),
+        .ex_branch_target_o(ex_branch_target_o), .ex_pc_redirect_o(ex_pc_redirect_o),
         .ex_pc_redirect_target_o(ex_pc_redirect_target_o), .ex_bp_train_o(ex_bp_train_o),
         .ex_branch_mispredict_o(ex_branch_mispredict_o)
 `ifndef SYNTHESIS
@@ -774,40 +472,55 @@ import ydrasil_pkg::*;
 `endif
     );
 
-    always_comb begin
-        completion_d = '0;
-        completion_d.valid = valid_i && rd_wen_i && !memory_op && !interrupt_i &&
-            (rd_addr_i != '0);
-        completion_d.producer_id = producer_id_i;
-        completion_d.producer_tracked = completion_d.valid;
-        completion_d.addr = rd_addr_i;
-        completion_d.data = fast_bitmanip_op ? fast_bitmanip_result : alu_result;
-    end
-
-    // Lane 1 owns its AGU and ALU result boundaries.  The LSU and the
-    // completion fabric see only this registered contract, never Issue/EX
-    // payload or an ALU combinational result directly.
+    // Lane 1 owns both ALU1 and BRU, so it has one registered completion
+    // token.  JAL/JALR writes the architectural link value (PC + 4) through
+    // this token; conditional branches only use the BRU redirect path.
+    wire alu1_completion = alu1_req_i.valid && alu1_req_i.rd_wen &&
+        (alu1_req_i.rd_addr != '0) && !interrupt_i && alu1_req_live &&
+        alu1_req_survives_redirect;
+    wire bru_link_completion = bru_req_i.valid && bru_req_i.rd_wen &&
+        (bru_req_i.rd_addr != '0) && !interrupt_i && bru_req_live &&
+        bru_req_survives_redirect;
+    ydrasil_gpr_fwd_pkt_t completion_q;
     always_ff @(posedge clk) begin
         if (!rst_n || flush_i) begin
-            valid_q <= 1'b0;
-            pc_q <= '0;
-            instr_q <= RV32I_INS_NOP;
-            load_q <= 1'b0;
             completion_q <= '0;
             agu_req_q <= '0;
         end else begin
-            valid_q <= valid_i && !interrupt_i;
-            pc_q <= pc_i;
-            instr_q <= instr_i;
-            load_q <= operator_type_i[OPERATOR_TYPE_LOAD];
-            completion_q <= completion_d;
+            completion_q <= '0;
+            if (alu1_completion) begin
+                completion_q.valid <= 1'b1;
+                completion_q.producer_id <= alu1_req_i.producer_id;
+                completion_q.producer_tracked <= alu1_req_i.producer_tracked;
+                completion_q.addr <= alu1_req_i.rd_addr;
+                completion_q.data <= alu1_result;
+            end else if (bru_link_completion) begin
+                completion_q.valid <= 1'b1;
+                completion_q.producer_id <= bru_req_i.producer_id;
+                completion_q.producer_tracked <= bru_req_i.producer_tracked;
+                completion_q.addr <= bru_req_i.rd_addr;
+                completion_q.data <= bru_req_i.branch_next_pc;
+            end
             agu_req_q <= agu_req_d;
         end
     end
-
-    assign completion_o = completion_q;
-    assign lsu_req_o = agu_req_q;
-    assign instret_valid_o = valid_q && !load_q;
-    assign commit_pc_o = pc_q;
-    assign commit_instr_o = instr_q;
+    wire completion_q_live = completion_q.producer_tracked &&
+        producer_live_mask_i[completion_q.producer_id[PRODUCER_SLOT_WIDTH-1:0]] &&
+        producer_live_epoch_i[completion_q.producer_id[PRODUCER_SLOT_WIDTH-1:0]] ==
+            completion_q.producer_id[PRODUCER_ID_WIDTH-1];
+    wire agu_req_q_live = agu_req_q.producer_tracked &&
+        producer_live_mask_i[agu_req_q.producer_id[PRODUCER_SLOT_WIDTH-1:0]] &&
+        producer_live_epoch_i[agu_req_q.producer_id[PRODUCER_SLOT_WIDTH-1:0]] ==
+            agu_req_q.producer_id[PRODUCER_ID_WIDTH-1];
+    always_comb begin
+        completion_o = completion_q;
+        completion_o.valid = completion_q.valid && completion_q_live;
+        lsu_req_o = agu_req_q;
+        lsu_req_o.valid = agu_req_q.valid && agu_req_q_live;
+    end
+    assign instret_valid_o = (alu1_req_i.valid && alu1_req_live &&
+        alu1_req_survives_redirect || bru_req_i.valid && bru_req_live &&
+        bru_req_survives_redirect) && !interrupt_i;
+    assign commit_pc_o = '0;
+    assign commit_instr_o = RV32I_INS_NOP;
 endmodule

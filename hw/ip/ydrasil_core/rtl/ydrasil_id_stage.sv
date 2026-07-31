@@ -243,6 +243,7 @@ import ydrasil_pkg::*;
     input  wire                  rst_n,
     input  wire                  flush_i,
     input  wire                  issue_ready_i,
+    input  wire                  issue_consume_i,
     input  wire                  issue_consume_two_i,
     input  wire [31:0]           if_id_pc_i,
     input  wire [31:0]           if_id_instr_i,
@@ -324,93 +325,153 @@ import ydrasil_pkg::*;
         !pair_resource_conflict && !pair_raw && !pair_waw && !pair_serialize &&
         !pair_control_memory;
 
-    assign if_id_ready_o = issue_ready_i;
+    ydrasil_issue_pkt_t issue_pkt_d;
+    ydrasil_issue_pkt_t issue_pkt1_d;
+    ydrasil_issue_pkt_t issue_pkt_q;
+    ydrasil_issue_pkt_t issue_pkt1_q;
+    ydrasil_issue_pkt_t issue_pkt_q_d;
+    ydrasil_issue_pkt_t issue_pkt1_q_d;
+    wire skid_valid = issue_pkt_q.valid;
+    wire skid_valid1 = issue_pkt1_q.valid;
+    wire [1:0] skid_count_q = {1'b0, skid_valid} +
+        {1'b0, skid_valid1};
+    wire [1:0] skid_pop_count = issue_consume_i ?
+        (issue_consume_two_i ? 2'd2 : 2'd1) : 2'd0;
+    wire [2:0] skid_slots = 3'd2 - {1'b0, skid_count_q} +
+        {1'b0, skid_pop_count};
+    assign if_id_ready_o = (skid_slots != 0);
     // Dispatch bandwidth is independent of whether the pair can issue in the
     // same cycle.  Dependency/resource checks remain diagnostic metadata for
     // the issue window, but no longer hold the second decoded instruction in
     // the fetch queue.
-    assign if_id_consume_two_o = issue_ready_i && issue_consume_two_i &&
+    assign if_id_consume_two_o = if_id_ready_o && (skid_slots > 1) &&
         decode_valid && decode_valid1;
 
+    assign issue_pkt_o = issue_pkt_q;
+    assign issue_pkt1_o = issue_pkt1_q;
+
     always_comb begin
-        issue_pkt_o = '0;
-        issue_pkt_o.valid = decode_valid;
-        issue_pkt_o.decode = decoded0;
-        issue_pkt_o.lane_mask = {slot0_b_capable, slot0_a_capable};
-        issue_pkt_o.memory_op = decode_valid &&
+        issue_pkt_d = '0;
+        issue_pkt_d.valid = decode_valid;
+        issue_pkt_d.decode = decoded0;
+        issue_pkt_d.lane_mask = {slot0_b_capable, slot0_a_capable};
+        issue_pkt_d.memory_op = decode_valid &&
             (decoded0.operator_type[OPERATOR_TYPE_LOAD] ||
              decoded0.operator_type[OPERATOR_TYPE_STORE]);
-        issue_pkt_o.target = decoded0.pc + decoded0.imm;
-        issue_pkt_o.next_pc = decoded0.pc + 32'd4;
-        issue_pkt_o.src0.used = decode_valid && decoded0.rs1_ren;
-        issue_pkt_o.src0.arch_addr = decoded0.rs1_addr;
-        issue_pkt_o.src1.used = decode_valid &&
+        issue_pkt_d.target = decoded0.pc + decoded0.imm;
+        issue_pkt_d.next_pc = decoded0.pc + 32'd4;
+        issue_pkt_d.src0.used = decode_valid && decoded0.rs1_ren;
+        issue_pkt_d.src0.arch_addr = decoded0.rs1_addr;
+        issue_pkt_d.src1.used = decode_valid &&
             (decoded0.rs2_ren ||
              (decoded0.operator_type[OPERATOR_TYPE_STORE] &&
               !decoded0.operator_type[OPERATOR_TYPE_FPU]));
-        issue_pkt_o.src1.arch_addr = decoded0.rs2_addr;
-        issue_pkt_o.dst.writes_gpr = decode_valid && slot0_writes;
-        issue_pkt_o.dst.rd_addr = decoded0.rd_addr;
-        issue_pkt_o.ctrl.rs1_addr = decoded0.rs1_addr;
-        issue_pkt_o.ctrl.valid = decode_valid;
-        issue_pkt_o.ctrl.rs2_addr = decoded0.rs2_addr;
-        issue_pkt_o.ctrl.rd_addr = decoded0.rd_addr;
-        issue_pkt_o.ctrl.rs1_ren = decode_valid && decoded0.rs1_ren;
-        issue_pkt_o.ctrl.rs2_ren = decode_valid &&
+        issue_pkt_d.src1.arch_addr = decoded0.rs2_addr;
+        issue_pkt_d.dst.writes_gpr = decode_valid && slot0_writes;
+        issue_pkt_d.dst.rd_addr = decoded0.rd_addr;
+        issue_pkt_d.ctrl.rs1_addr = decoded0.rs1_addr;
+        issue_pkt_d.ctrl.valid = decode_valid;
+        issue_pkt_d.ctrl.rs2_addr = decoded0.rs2_addr;
+        issue_pkt_d.ctrl.rd_addr = decoded0.rd_addr;
+        issue_pkt_d.ctrl.rs1_ren = decode_valid && decoded0.rs1_ren;
+        issue_pkt_d.ctrl.rs2_ren = decode_valid &&
             (decoded0.rs2_ren ||
              (decoded0.operator_type[OPERATOR_TYPE_STORE] &&
               !decoded0.operator_type[OPERATOR_TYPE_FPU]));
-        issue_pkt_o.ctrl.rd_wen = decode_valid && slot0_writes;
-        issue_pkt_o.ctrl.lsu_req = decode_valid &&
+        issue_pkt_d.ctrl.rd_wen = decode_valid && slot0_writes;
+        issue_pkt_d.ctrl.lsu_req = decode_valid &&
             (decoded0.operator_type[OPERATOR_TYPE_LOAD] ||
              decoded0.operator_type[OPERATOR_TYPE_STORE]);
-        issue_pkt_o.ctrl.store_req = decode_valid &&
+        issue_pkt_d.ctrl.store_req = decode_valid &&
             decoded0.operator_type[OPERATOR_TYPE_STORE];
-        issue_pkt_o.ctrl.serialize_before = decode_valid &&
+        issue_pkt_d.ctrl.serialize_before = decode_valid &&
             (decoded0.operator_type[OPERATOR_TYPE_CSR] ||
              decoded0.operator_type[OPERATOR_TYPE_SYS] || decoded0.fence_i);
-        issue_pkt_o.ctrl.checkpoint_req = decode_valid &&
+        issue_pkt_d.ctrl.checkpoint_req = decode_valid &&
             decoded0.operator_type[OPERATOR_TYPE_BJP];
 
-        issue_pkt1_o = '0;
-        issue_pkt1_o.valid = decode_valid1;
-        issue_pkt1_o.decode = decoded1;
-        issue_pkt1_o.lane_mask = {slot1_b_capable, slot1_a_capable};
-        issue_pkt1_o.memory_op = decode_valid1 &&
+        issue_pkt1_d = '0;
+        issue_pkt1_d.valid = decode_valid1;
+        issue_pkt1_d.decode = decoded1;
+        issue_pkt1_d.lane_mask = {slot1_b_capable, slot1_a_capable};
+        issue_pkt1_d.memory_op = decode_valid1 &&
             (decoded1.operator_type[OPERATOR_TYPE_LOAD] ||
              decoded1.operator_type[OPERATOR_TYPE_STORE]);
-        issue_pkt1_o.target = decoded1.pc + decoded1.imm;
-        issue_pkt1_o.next_pc = decoded1.pc + 32'd4;
-        issue_pkt1_o.src0.used = decode_valid1 && decoded1.rs1_ren;
-        issue_pkt1_o.src0.arch_addr = decoded1.rs1_addr;
-        issue_pkt1_o.src1.used = decode_valid1 &&
+        issue_pkt1_d.target = decoded1.pc + decoded1.imm;
+        issue_pkt1_d.next_pc = decoded1.pc + 32'd4;
+        issue_pkt1_d.src0.used = decode_valid1 && decoded1.rs1_ren;
+        issue_pkt1_d.src0.arch_addr = decoded1.rs1_addr;
+        issue_pkt1_d.src1.used = decode_valid1 &&
             (decoded1.rs2_ren ||
              (decoded1.operator_type[OPERATOR_TYPE_STORE] &&
               !decoded1.operator_type[OPERATOR_TYPE_FPU]));
-        issue_pkt1_o.src1.arch_addr = decoded1.rs2_addr;
-        issue_pkt1_o.dst.writes_gpr = decode_valid1 && slot1_writes;
-        issue_pkt1_o.dst.rd_addr = decoded1.rd_addr;
-        issue_pkt1_o.ctrl.rs1_addr = decoded1.rs1_addr;
-        issue_pkt1_o.ctrl.valid = decode_valid1;
-        issue_pkt1_o.ctrl.rs2_addr = decoded1.rs2_addr;
-        issue_pkt1_o.ctrl.rd_addr = decoded1.rd_addr;
-        issue_pkt1_o.ctrl.rs1_ren = decode_valid1 && decoded1.rs1_ren;
-        issue_pkt1_o.ctrl.rs2_ren = decode_valid1 &&
+        issue_pkt1_d.src1.arch_addr = decoded1.rs2_addr;
+        issue_pkt1_d.dst.writes_gpr = decode_valid1 && slot1_writes;
+        issue_pkt1_d.dst.rd_addr = decoded1.rd_addr;
+        issue_pkt1_d.ctrl.rs1_addr = decoded1.rs1_addr;
+        issue_pkt1_d.ctrl.valid = decode_valid1;
+        issue_pkt1_d.ctrl.rs2_addr = decoded1.rs2_addr;
+        issue_pkt1_d.ctrl.rd_addr = decoded1.rd_addr;
+        issue_pkt1_d.ctrl.rs1_ren = decode_valid1 && decoded1.rs1_ren;
+        issue_pkt1_d.ctrl.rs2_ren = decode_valid1 &&
             (decoded1.rs2_ren ||
              (decoded1.operator_type[OPERATOR_TYPE_STORE] &&
               !decoded1.operator_type[OPERATOR_TYPE_FPU]));
-        issue_pkt1_o.ctrl.rd_wen = decode_valid1 && slot1_writes;
-        issue_pkt1_o.ctrl.lsu_req = decode_valid1 &&
+        issue_pkt1_d.ctrl.rd_wen = decode_valid1 && slot1_writes;
+        issue_pkt1_d.ctrl.lsu_req = decode_valid1 &&
             (decoded1.operator_type[OPERATOR_TYPE_LOAD] ||
              decoded1.operator_type[OPERATOR_TYPE_STORE]);
-        issue_pkt1_o.ctrl.store_req = decode_valid1 &&
+        issue_pkt1_d.ctrl.store_req = decode_valid1 &&
             decoded1.operator_type[OPERATOR_TYPE_STORE];
-        issue_pkt1_o.ctrl.serialize_before = decode_valid1 &&
+        issue_pkt1_d.ctrl.serialize_before = decode_valid1 &&
             (decoded1.operator_type[OPERATOR_TYPE_CSR] ||
              decoded1.operator_type[OPERATOR_TYPE_SYS] || decoded1.fence_i);
-        issue_pkt1_o.ctrl.checkpoint_req = decode_valid1 &&
+        issue_pkt1_d.ctrl.checkpoint_req = decode_valid1 &&
             decoded1.operator_type[OPERATOR_TYPE_BJP];
     end
 
-    wire unused = &{1'b0, clk, rst_n, flush_i, issue_consume_two_i};
+    // The skid buffer is a two-entry FIFO.  Pop first, then append the IF
+    // transaction, so every legal 0/1/2 pop x 0/1/2 push combination has one
+    // owner for each next-state register.  In particular, this retains a
+    // single fetch entry behind a dual dispatch pop.
+    always_comb begin
+        issue_pkt_q_d = issue_pkt_q;
+        issue_pkt1_q_d = issue_pkt1_q;
+
+        case (skid_pop_count)
+            2'd2: begin
+                issue_pkt_q_d = '0;
+                issue_pkt1_q_d = '0;
+            end
+            2'd1: begin
+                issue_pkt_q_d = issue_pkt1_q;
+                issue_pkt1_q_d = '0;
+            end
+            default: begin
+            end
+        endcase
+
+        if (if_id_ready_o && decode_valid) begin
+            if (if_id_consume_two_o) begin
+                issue_pkt_q_d = issue_pkt_d;
+                issue_pkt1_q_d = issue_pkt1_d;
+            end else if (!issue_pkt_q_d.valid) begin
+                issue_pkt_q_d = issue_pkt_d;
+            end else begin
+                issue_pkt1_q_d = issue_pkt_d;
+            end
+        end
+    end
+
+    always_ff @(posedge clk) begin
+        if (!rst_n || flush_i) begin
+            issue_pkt_q <= '0;
+            issue_pkt1_q <= '0;
+        end else begin
+            issue_pkt_q <= issue_pkt_q_d;
+            issue_pkt1_q <= issue_pkt1_q_d;
+        end
+    end
+
+    wire unused = &{1'b0, clk, issue_ready_i};
 endmodule

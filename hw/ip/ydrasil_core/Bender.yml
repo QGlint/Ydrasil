@@ -14,6 +14,7 @@ sources:
       - rtl
     files:
       - rtl/ydrasil_pkg.sv
+      - ../Xilinx_ip_wrapper/rtl/xpm_lutram_1r1w.sv
       - rtl/ydrasil_branch_predictor.sv
       - rtl/ydrasil_alu.sv
       - rtl/ydrasil_if_stage.sv
@@ -33,6 +34,7 @@ sources:
       - rtl/ydrasil_registers_csr.sv
       - rtl/ydrasil_exception_ctrl.sv
       - rtl/ydrasil_ctrl.sv
+      - rtl/ydrasil_rename_rob.sv
       - rtl/ydrasil_core.sv
 
 
@@ -44,6 +46,7 @@ sources:
       - ../jyd_fpga/rtl/perip_bridge.sv
       - ../jyd_fpga/rtl/ydrasil_mmio_subsystem.sv
       - dv/ydrasil_commit_trace.sv
+      - dv/ydrasil_mmio_subsystem_tb.sv
       - dv/ydrasil_core_tb.sv
       - dv/ydrasil_branch_predictor_tb.sv
       - dv/ydrasil_bus_irq_tb.sv

@@ -69,11 +69,25 @@ import ydrasil_pkg::*;
     reg [31:0] pending_redirect_target_q;
 
     localparam int TARGET_FF_ENTRIES = 32;
-    reg [TARGET_FF_ENTRIES-1:0] target_ff_valid_q;
-    reg [TARGET_FF_ENTRIES-1:0] target_ff_taken_q;
-	reg [TARGET_FF_ENTRIES-1:0] target_ff_lane_q;
-    reg [23:0] target_ff_tag_q [0:TARGET_FF_ENTRIES-1];
-    reg [29:0] target_ff_target_q [0:TARGET_FF_ENTRIES-1];
+    localparam int TARGET_FF_ADDR_WIDTH = $clog2(TARGET_FF_ENTRIES);
+    localparam int TARGET_FF_EPOCH_WIDTH = 8;
+    localparam int TARGET_FF_DATA_WIDTH = 65;
+    localparam int TARGET_FF_EPOCH_MSB = 64;
+    localparam int TARGET_FF_EPOCH_LSB = 57;
+    localparam int TARGET_FF_VALID_BIT = 56;
+    localparam int TARGET_FF_TAKEN_BIT = 55;
+    localparam int TARGET_FF_LANE_BIT = 54;
+    localparam int TARGET_FF_TAG_MSB = 53;
+    localparam int TARGET_FF_TAG_LSB = 30;
+    localparam int TARGET_FF_TARGET_MSB = 29;
+    localparam int TARGET_FF_TARGET_LSB = 0;
+
+    // The L0 target cache requires two independent combinational lookups per
+    // fetch.  Duplicate the 1R1W LUTRAM and mirror each training write rather
+    // than allowing Vivado to flatten this table into resettable FFs.
+    reg [TARGET_FF_EPOCH_WIDTH-1:0] target_ff_epoch_q;
+    wire [TARGET_FF_DATA_WIDTH-1:0] target_ff_entry0;
+    wire [TARGET_FF_DATA_WIDTH-1:0] target_ff_entry1;
 
     reg [COUNT_WIDTH-1:0] fetchq_count_q;
     reg [31:0] fetchq_pc_q [0:FETCHQ_DEPTH-1];
@@ -123,20 +137,71 @@ import ydrasil_pkg::*;
         (fetch_addr < (DTCM_BASE_ADDR + ((32'd1 << DTCM_ADDR_WIDTH) << 2)));
     wire fetch_two = !fetch_addr_is_dtcm;
     wire [31:0] fetch_addr1 = fetch_addr + 32'd4;
-	wire [4:0] target_ff_index = fetch_addr[7:3];
-	wire [4:0] target_ff_index1 = fetch_addr1[7:3];
-    wire [31:0] target_ff_target0 =
-        {target_ff_target_q[target_ff_index], 2'b00};
-    wire [31:0] target_ff_target1 =
-        {target_ff_target_q[target_ff_index1], 2'b00};
-    wire target_ff_hit0 = target_ff_valid_q[target_ff_index] &&
-        target_ff_taken_q[target_ff_index] &&
-		(target_ff_lane_q[target_ff_index] == fetch_addr[2]) &&
-		(target_ff_tag_q[target_ff_index] == fetch_addr[31:8]);
-    wire target_ff_hit1 = target_ff_valid_q[target_ff_index1] &&
-        target_ff_taken_q[target_ff_index1] &&
-		(target_ff_lane_q[target_ff_index1] == fetch_addr1[2]) &&
-		(target_ff_tag_q[target_ff_index1] == fetch_addr1[31:8]);
+	wire [TARGET_FF_ADDR_WIDTH-1:0] target_ff_index = fetch_addr[7:3];
+	wire [TARGET_FF_ADDR_WIDTH-1:0] target_ff_index1 = fetch_addr1[7:3];
+    wire target_ff_train_we = !flush_fetch && !bp_invalidate_i &&
+        target_ff_train_i.valid && target_ff_train_i.conditional;
+    wire [TARGET_FF_DATA_WIDTH-1:0] target_ff_train_data = {
+        target_ff_epoch_q,
+        1'b1,
+        target_ff_train_i.taken,
+        target_ff_train_i.pc[2],
+        target_ff_train_i.pc[31:8],
+        target_ff_train_i.target[31:2]
+    };
+
+    xpm_lutram_1r1w #(
+        .DEPTH(TARGET_FF_ENTRIES),
+        .DATA_WIDTH(TARGET_FF_DATA_WIDTH),
+        .ADDR_WIDTH(TARGET_FF_ADDR_WIDTH),
+        .READ_LATENCY(0),
+        .INIT_VALUE('0)
+    ) u_target_ff_lutram_lane0 (
+        .clk(clk),
+        .ren_i(1'b1),
+        .raddr_i(target_ff_index),
+        .rdata_o(target_ff_entry0),
+        .wen_i(target_ff_train_we),
+        .waddr_i(target_ff_train_i.pc[7:3]),
+        .wdata_i(target_ff_train_data)
+    );
+
+    xpm_lutram_1r1w #(
+        .DEPTH(TARGET_FF_ENTRIES),
+        .DATA_WIDTH(TARGET_FF_DATA_WIDTH),
+        .ADDR_WIDTH(TARGET_FF_ADDR_WIDTH),
+        .READ_LATENCY(0),
+        .INIT_VALUE('0)
+    ) u_target_ff_lutram_lane1 (
+        .clk(clk),
+        .ren_i(1'b1),
+        .raddr_i(target_ff_index1),
+        .rdata_o(target_ff_entry1),
+        .wen_i(target_ff_train_we),
+        .waddr_i(target_ff_train_i.pc[7:3]),
+        .wdata_i(target_ff_train_data)
+    );
+
+    wire [31:0] target_ff_target0 = {
+        target_ff_entry0[TARGET_FF_TARGET_MSB:TARGET_FF_TARGET_LSB], 2'b00
+    };
+    wire [31:0] target_ff_target1 = {
+        target_ff_entry1[TARGET_FF_TARGET_MSB:TARGET_FF_TARGET_LSB], 2'b00
+    };
+    wire target_ff_hit0 =
+        target_ff_entry0[TARGET_FF_VALID_BIT] &&
+        target_ff_entry0[TARGET_FF_TAKEN_BIT] &&
+        (target_ff_entry0[TARGET_FF_EPOCH_MSB:TARGET_FF_EPOCH_LSB] ==
+         target_ff_epoch_q) &&
+		(target_ff_entry0[TARGET_FF_LANE_BIT] == fetch_addr[2]) &&
+		(target_ff_entry0[TARGET_FF_TAG_MSB:TARGET_FF_TAG_LSB] == fetch_addr[31:8]);
+    wire target_ff_hit1 =
+        target_ff_entry1[TARGET_FF_VALID_BIT] &&
+        target_ff_entry1[TARGET_FF_TAKEN_BIT] &&
+        (target_ff_entry1[TARGET_FF_EPOCH_MSB:TARGET_FF_EPOCH_LSB] ==
+         target_ff_epoch_q) &&
+		(target_ff_entry1[TARGET_FF_LANE_BIT] == fetch_addr1[2]) &&
+		(target_ff_entry1[TARGET_FF_TAG_MSB:TARGET_FF_TAG_LSB] == fetch_addr1[31:8]);
 	wire target_ff_lookup_hit = target_ff_hit0 ||
 		(fetch_two && target_ff_hit1);
     wire [31:0] target_ff_target = target_ff_hit0 ? target_ff_target0 :
@@ -184,9 +249,7 @@ import ydrasil_pkg::*;
 			mem_req_target_ff_hit_q <= 1'b0;
             pending_redirect_valid_q <= 1'b0;
             pending_redirect_target_q <= '0;
-            target_ff_valid_q <= '0;
-            target_ff_taken_q <= '0;
-			target_ff_lane_q <= '0;
+            target_ff_epoch_q <= {TARGET_FF_EPOCH_WIDTH{1'b1}};
             fetchq_count_q <= '0;
             for (idx = 0; idx < FETCHQ_DEPTH; idx = idx + 1) begin
                 fetchq_pc_q[idx] <= '0;
@@ -197,8 +260,6 @@ import ydrasil_pkg::*;
                 fetchq_pred_counter_q[idx] <= 2'b01;
                 fetchq_pred_bht_index_q[idx] <= '0;
             end
-			for (idx = 0; idx < TARGET_FF_ENTRIES; idx = idx + 1)
-				target_ff_tag_q[idx] <= '0;
         end else if (flush_fetch || bp_invalidate_i) begin
             pc_q <= flush_fetch ? flush_target : bp_invalidate_target_i;
             mem_req_valid_q <= 1'b0;
@@ -209,10 +270,8 @@ import ydrasil_pkg::*;
             pending_redirect_valid_q <= 1'b0;
             pending_redirect_target_q <= '0;
             fetchq_count_q <= '0;
-			if (bp_invalidate_i) begin
-				target_ff_valid_q <= '0;
-				target_ff_taken_q <= '0;
-			end
+			if (bp_invalidate_i)
+				target_ff_epoch_q <= target_ff_epoch_q + TARGET_FF_EPOCH_WIDTH'(1);
         end else begin
 			// On an L0 mismatch the request issued from the stale target is
 			// intentionally discarded; pending_redirect_target_q retries the
@@ -238,18 +297,6 @@ import ydrasil_pkg::*;
             // Keep direct jumps on the established BTB path.  A zero-bubble
             // early target for JAL can overtake a paired slot1 store replay;
             // conditional branches are the high-frequency L0 use case.
-            if (target_ff_train_i.valid && target_ff_train_i.conditional) begin
-				target_ff_valid_q[target_ff_train_i.pc[7:3]] <= 1'b1;
-				target_ff_taken_q[target_ff_train_i.pc[7:3]] <=
-                    target_ff_train_i.taken;
-				target_ff_lane_q[target_ff_train_i.pc[7:3]] <=
-					target_ff_train_i.pc[2];
-				target_ff_tag_q[target_ff_train_i.pc[7:3]] <=
-                    target_ff_train_i.pc[31:8];
-				target_ff_target_q[target_ff_train_i.pc[7:3]] <=
-                    target_ff_train_i.target[31:2];
-            end
-
             if (pop_count == 2'd2) begin
                 for (idx = 0; idx < FETCHQ_DEPTH-2; idx = idx + 1) begin
                     fetchq_pc_q[idx] <= fetchq_pc_q[idx+2];

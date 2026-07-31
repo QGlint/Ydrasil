@@ -82,14 +82,17 @@ import ydrasil_pkg::*;
     wire ex_branch_ge_signed = ($signed(operand_a_i) >= $signed(operand_b_i));
     wire ex_branch_ge_unsigned = (operand_a_i >= operand_b_i);
 
-    wire ex_branch_jump =
-        ex_bjp_jump |
-        (ex_bjp_beq  &  ex_branch_eq) |
-        (ex_bjp_bne  & !ex_branch_eq) |
-        (ex_bjp_blt  & !ex_branch_ge_signed) |
-        (ex_bjp_bge  &  ex_branch_ge_signed) |
-        (ex_bjp_bltu & !ex_branch_ge_unsigned) |
-        (ex_bjp_bgeu &  ex_branch_ge_unsigned);
+    // The request register can retain an old branch opcode after its valid
+    // bit has advanced.  Gate the resolved redirect itself, otherwise that
+    // stale opcode creates a second redirect with cleared target metadata.
+    wire ex_branch_jump = id_ex_valid_i &&
+        (ex_bjp_jump |
+         (ex_bjp_beq  &  ex_branch_eq) |
+         (ex_bjp_bne  & !ex_branch_eq) |
+         (ex_bjp_blt  & !ex_branch_ge_signed) |
+         (ex_bjp_bge  &  ex_branch_ge_signed) |
+         (ex_bjp_bltu & !ex_branch_ge_unsigned) |
+         (ex_bjp_bgeu &  ex_branch_ge_unsigned));
     wire ex_branch_taken = ex_is_branch & ex_branch_jump & !trap_redirect_i;
     wire ex_pred_taken = id_ex_pred_hit_i & id_ex_pred_taken_i;
     wire [DATA_WIDTH-1:0] ex_branch_actual_next_pc =
@@ -143,7 +146,10 @@ import ydrasil_pkg::*;
     reg                       dbg_bp_mispredict_q;
 `endif
 
-    always_ff @(posedge clk or negedge rst_n) begin
+    // Branch recovery state is on the fetch redirect path.  Keep reset
+    // synchronous so these registers can use the FPGA's native CE/reset
+    // mapping instead of adding asynchronous-reset routing to the cone.
+    always_ff @(posedge clk) begin
         if (!rst_n) begin
             ex2_branch_jump_q <= 1'b0;
             ex2_branch_target_q <= '0;
