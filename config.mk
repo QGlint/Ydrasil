@@ -199,6 +199,63 @@ endif
 OBJCOPY ?= $(RISCV_PREFIX)-objcopy
 OBJDUMP ?= $(RISCV_PREFIX)-objdump
 
+# -----------------------------------------------------------------------------
+# RTL architecture quick-checks
+# -----------------------------------------------------------------------------
+# All quick-check artifacts stay below BUILD_DIR.  Tool paths and policy knobs
+# live here so the top-level Makefile only contains target recipes.
+RTL_QC_DIR ?= $(BUILD_DIR)/rtl-quickcheck
+RTL_QC_TOP ?= ydrasil_core
+RTL_QC_BENDER_DIR ?= $(PROJECT_ROOT)/hw/ip/ydrasil_core
+RTL_QC_BENDER_TARGETS ?= verilator
+RTL_QC_WRAPPER_DIR ?= $(PROJECT_ROOT)/hw/ip/Xilinx_ip_wrapper/rtl
+RTL_QC_DEFINES ?= SYNTHESIS
+RTL_QC_SOURCE_DEPS ?= $(shell find $(PROJECT_ROOT)/hw/ip -type f \( -name '*.sv' -o -name '*.svh' -o -name 'Bender.yml' -o -name 'Bender.yaml' -o -name 'Bender.lock' \) 2>/dev/null)
+RTL_QC_FLIST ?= $(RTL_QC_DIR)/$(RTL_QC_TOP).f
+RTL_QC_METADATA ?= $(RTL_QC_DIR)/$(RTL_QC_TOP).sources.json
+RTL_QC_TREE_DIR ?= $(RTL_QC_DIR)/verilator-tree
+RTL_QC_TREE_JSON ?= $(RTL_QC_TREE_DIR)/final.tree.json
+RTL_QC_STRUCTURE_JSON ?= $(RTL_QC_DIR)/$(RTL_QC_TOP).structure.json
+RTL_QC_ERROR_LIMIT ?= 50
+VERILATOR_STRICT ?= verilator
+VERILATOR_STRICT_FLAGS ?= --lint-only --sv -Wall --report-unoptflat --error-limit $(RTL_QC_ERROR_LIMIT)
+VERILATOR_STRICT_WNO ?=
+VERILATOR_XML_FLAGS ?= --lint-only --dump-tree-json -Wno-fatal
+
+YOSYS ?= yosys
+YOSYS_TOP ?= $(RTL_QC_TOP)
+YOSYS_BENDER_DIR ?= $(RTL_QC_BENDER_DIR)
+YOSYS_BENDER_TARGETS ?= $(RTL_QC_BENDER_TARGETS)
+YOSYS_FAMILY ?= xc7
+YOSYS_RUN ?= coarse:map_luts
+YOSYS_WITH_WRAPPERS ?= 0
+YOSYS_DEFINES ?= SYNTHESIS TARGET_SYNTHESIS
+YOSYS_DIR ?= $(BUILD_DIR)/yosys-slang/$(YOSYS_TOP)
+YOSYS_FLIST ?= $(YOSYS_DIR)/$(YOSYS_TOP).f
+YOSYS_METADATA ?= $(YOSYS_DIR)/sources.json
+YOSYS_SCRIPT ?= $(YOSYS_DIR)/run.ys
+YOSYS_STAT_JSON ?= $(YOSYS_DIR)/stat.json
+YOSYS_NETLIST_JSON ?= $(YOSYS_DIR)/netlist.json
+YOSYS_LOG ?= $(YOSYS_DIR)/yosys.log
+YOSYS_BASELINE_STAT ?=
+YOSYS_LUT_GROWTH_LIMIT_PERCENT ?= 15
+YOSYS_LTP_GROWTH_LIMIT_PERCENT ?= 20
+
+VIVADO_OOC ?= vivado
+VIVADO_OOC_SETTINGS ?= $(VIVADO_SETTINGS)
+VIVADO_OOC_TOP ?= $(YOSYS_TOP)
+VIVADO_OOC_PART ?= xc7k325tffg900-2
+VIVADO_OOC_DIR ?= $(BUILD_DIR)/vivado-ooc/$(VIVADO_OOC_TOP)
+VIVADO_OOC_FLIST ?= $(VIVADO_OOC_DIR)/$(VIVADO_OOC_TOP).f
+VIVADO_OOC_METADATA ?= $(VIVADO_OOC_DIR)/sources.json
+VIVADO_OOC_LOG ?= $(VIVADO_OOC_DIR)/vivado.log
+VIVADO_OOC_WITH_WRAPPERS ?= 1
+VIVADO_OOC_DEFINES ?= SYNTHESIS TARGET_SYNTHESIS TARGET_VIVADO TARGET_XILINX
+# Issue pipeline OOC is intentionally split by top.  Keep this list
+# configurable because a focused run may only need one stage.
+VIVADO_OOC_ISSUE_MODULES ?= ydrasil_id_stage ydrasil_issue_stage ydrasil_ctrl ydrasil_ex_block
+VIVADO_OOC_ISSUE_DIR ?= $(BUILD_DIR)/vivado-ooc/issue
+
 ifeq ($(FPU),1)
 ARCH := rv32imf_zicsr_zifencei_zba_zbb_zbc_zbkb_zbkx_zbs
 ABI  := ilp32f

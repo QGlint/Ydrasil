@@ -294,6 +294,7 @@ SYN_FORCE ?= 1
 SYN_SYNC_SOURCES ?= 1
 SYN_FULL_REPORTS ?= 0
 SYN_POST_ROUTE_PHYSOPT ?= 0
+SYN_SWEEP_POST_ROUTE_PHYSOPT ?= 0
 VIVADO ?= vivado
 VIVADO_SETTINGS ?= /opt/Xilinx/Vitis/2024.2/settings64.sh
 VIVADO_LICENSE_FILE ?= $(firstword $(wildcard $(HOME)/opt/vivado_2037.lic $(HOME)/*.lic $(HOME)/.Xilinx/*.lic))
@@ -311,6 +312,8 @@ endif
 .PHONY: coremark coremark_sim coremark_run coremark_result coremark-rebuild coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map coremark_opt_all coremark_opt_build_all coremark_opt_sim_all coremark_opt_report coremark_opt_clean $(COREMARK_OPT_BUILD_TARGETS) $(COREMARK_OPT_SIM_TARGETS) sort_app sort_all sort_sim_all sort_report sort_app_sim sort_app-rebuild sort_app-clean sort_opt_all sort_opt_build_all sort_opt_sim_all sort_opt_report sort_opt_clean $(SORT_OPT_BUILD_TARGETS) $(SORT_OPT_SIM_TARGETS) boundary_app boundary_all boundary_sim_all boundary_report boundary_app-rebuild boundary_app-clean boundary_opt_all boundary_opt_build_all boundary_opt_sim_all boundary_opt_report boundary_opt_clean $(BOUNDARY_OPT_BUILD_TARGETS) $(BOUNDARY_OPT_SIM_TARGETS) coe_m3_force coe_loop2_gen coe_loop5 coe_loop5_gen coe_loop_lina coe_loop_lina_gen loop_lina coe_MFlina coe_MFlina_gen coe_mflina coe_mflina_gen rtthread rtthread-build rtthread-clean rtthread-coremark rtthread-coremark-build rtthread-coremark-build-all rtthread-coremark-sim rtthread-coremark-sim-all rtthread-coremark-report rtthread-coremark-compare rtthread-coremark-clean rtthread-utest rtthread-utest-build rtthread-utest-sim rtthread-utest-report rtthread-utest-clean $(RTTHREAD_COREMARK_PROFILE_BUILD_TARGETS) $(RTTHREAD_COREMARK_PROFILE_SIM_TARGETS)
 .PHONY: riscv_dv_venv riscv_dv_model riscv_dv_prepare riscv_dv_run riscv_dv_random riscv_dv_random_status riscv_dv_regression riscv_dv_count riscv_dv_repro riscv_dv_estimate riscv_dv_stop riscv_dv_coverage_report riscv_dv_cleanup riscv_dv_distclean
 .PHONY: syn synf syn225 syn240 syn250 synf-board syn-extreme syn-venv syn-prep syn-stage-xpr syn-stage-memory syn-vivado syn-analyze syn-clean
+.PHONY: rtl-quickcheck rtl-strict rtl-xml rtl-structure verilator-strict verilator-xml slang-ast
+.PHONY: yosys-slang yosys-slang-gate yosys-slang-baseline yosys-slang-quick vivado-ooc vivado-ooc-synth vivado-ooc-issue
 
 .SECONDEXPANSION:
 
@@ -980,6 +983,7 @@ syn-vivado: syn-prep syn-stage-xpr syn-stage-memory
 		-dram_coe "$(SYN_STAGED_DRAM_COE)" \
 		-full_reports $(SYN_FULL_REPORTS) \
 		-post_route_physopt $(SYN_POST_ROUTE_PHYSOPT) \
+		-sweep_post_route_physopt $(SYN_SWEEP_POST_ROUTE_PHYSOPT) \
 		-force $(SYN_FORCE)
 
 syn-analyze: syn-venv
@@ -999,6 +1003,135 @@ syn-analyze: syn-venv
 
 syn-clean:
 	rm -rf $(SYN_BUILD_DIR)
+
+# -----------------------------------------------------------------------------
+# Architecture quick-checks
+# -----------------------------------------------------------------------------
+
+rtl-quickcheck: rtl-strict rtl-structure vivado-ooc
+
+rtl-strict: $(RTL_QC_FLIST)
+	@mkdir -p "$(RTL_QC_DIR)"
+	@echo "[RTL] Verilator strict lint: top=$(RTL_QC_TOP)"
+	$(VERILATOR_STRICT) $(VERILATOR_STRICT_FLAGS) $(addprefix -Wno-,$(VERILATOR_STRICT_WNO)) \
+		--top-module "$(RTL_QC_TOP)" -f "$(RTL_QC_FLIST)" \
+		>"$(RTL_QC_DIR)/verilator-strict.log" 2>&1
+
+rtl-xml: $(RTL_QC_FLIST)
+	@mkdir -p "$(RTL_QC_TREE_DIR)"
+	@echo "[RTL] Verilator elaboration tree: top=$(RTL_QC_TOP)"
+	@set +e; $(VERILATOR_STRICT) $(VERILATOR_XML_FLAGS) --top-module "$(RTL_QC_TOP)" \
+		-f "$(RTL_QC_FLIST)" --Mdir "$(RTL_QC_TREE_DIR)" \
+		>"$(RTL_QC_DIR)/verilator-tree.log" 2>&1; rc=$$?; \
+		final=$$(find "$(RTL_QC_TREE_DIR)" -type f -name '*_990_final.tree.json' -print -quit); \
+		module_count=$$(grep -Eo '"type"[[:space:]]*:[[:space:]]*"MODULE"' "$$final" 2>/dev/null | wc -l); \
+		if [ -n "$$final" ] && [ "$$module_count" -lt 3 ]; then \
+			for candidate in $$(find "$(RTL_QC_TREE_DIR)" -type f -name 'V*.tree.json' | sort -Vr); do \
+				module_count=$$(grep -Eo '"type"[[:space:]]*:[[:space:]]*"MODULE"' "$$candidate" 2>/dev/null | wc -l); \
+				if [ "$$module_count" -ge 3 ]; then final="$$candidate"; break; fi; \
+			done; \
+		fi; \
+		if [ -z "$$final" ]; then echo "Verilator did not produce a tree JSON (rc=$$rc)" >&2; exit $$rc; fi; \
+		cp "$$final" "$(RTL_QC_TREE_JSON)"; \
+		echo "[RTL] tree JSON: $(RTL_QC_TREE_JSON)"; exit 0
+
+rtl-structure: rtl-xml
+	$(PYTHON) "$(SYN_DIR)/analyze_rtl_structure.py" \
+		--input "$(RTL_QC_TREE_JSON)" --output "$(RTL_QC_STRUCTURE_JSON)" --top "$(RTL_QC_TOP)"
+
+verilator-strict: rtl-strict
+verilator-xml: rtl-xml
+slang-ast: rtl-structure
+
+$(RTL_QC_FLIST): $(PROJECT_ROOT)/Makefile $(PROJECT_ROOT)/config.mk $(SYN_DIR)/prepare_rtl_sources.py $(RTL_QC_SOURCE_DEPS)
+	$(PYTHON) "$(SYN_DIR)/prepare_rtl_sources.py" \
+		--repo-root "$(PROJECT_ROOT)" --bender "$(BENDER)" \
+		--bender-dir "$(RTL_QC_BENDER_DIR)" \
+		$(foreach target,$(RTL_QC_BENDER_TARGETS),--target "$(target)") \
+		$(foreach define,$(RTL_QC_DEFINES),--define "$(define)") \
+		--wrapper-dir "$(RTL_QC_WRAPPER_DIR)" --out "$@" \
+		--metadata "$(RTL_QC_METADATA)"
+
+yosys-slang: $(YOSYS_SCRIPT)
+	@command -v "$(YOSYS)" >/dev/null 2>&1 || { echo "Error: YOSYS=$(YOSYS) not found" >&2; exit 127; }
+	@mkdir -p "$(YOSYS_DIR)"
+	@echo "[YOSYS-SLANG] top=$(YOSYS_TOP) family=$(YOSYS_FAMILY)"
+	@set -o pipefail; "$(YOSYS)" -s "$(YOSYS_SCRIPT)" 2>&1 | tee "$(YOSYS_LOG)"
+	$(PYTHON) "$(SYN_DIR)/extract_yosys_stats.py" --log "$(YOSYS_LOG)" \
+		--output "$(YOSYS_STAT_JSON)" --top "$(YOSYS_TOP)"
+
+yosys-slang-quick: yosys-slang
+
+yosys-slang-gate: yosys-slang
+	@if [ -z "$(YOSYS_BASELINE_STAT)" ]; then \
+		echo "[YOSYS-SLANG] no YOSYS_BASELINE_STAT supplied; relative gate skipped"; \
+	else \
+		$(PYTHON) "$(SYN_DIR)/compare_yosys_stats.py" \
+			--baseline "$(YOSYS_BASELINE_STAT)" --candidate "$(YOSYS_STAT_JSON)" \
+			--top "$(YOSYS_TOP)" \
+			--lut-limit "$(YOSYS_LUT_GROWTH_LIMIT_PERCENT)" \
+			--ltp-limit "$(YOSYS_LTP_GROWTH_LIMIT_PERCENT)"; \
+	fi
+
+yosys-slang-baseline: yosys-slang
+	@test -n "$(YOSYS_BASELINE_STAT)" || { echo "Set YOSYS_BASELINE_STAT=/path/to/base/stat.json" >&2; exit 2; }
+	mkdir -p "$$(dirname "$(YOSYS_BASELINE_STAT)")"
+	cp "$(YOSYS_STAT_JSON)" "$(YOSYS_BASELINE_STAT)"
+
+$(YOSYS_FLIST): $(PROJECT_ROOT)/Makefile $(PROJECT_ROOT)/config.mk $(SYN_DIR)/prepare_rtl_sources.py $(RTL_QC_SOURCE_DEPS)
+	$(PYTHON) "$(SYN_DIR)/prepare_rtl_sources.py" \
+		--repo-root "$(PROJECT_ROOT)" --bender "$(BENDER)" \
+		--bender-dir "$(YOSYS_BENDER_DIR)" \
+		$(foreach target,$(YOSYS_BENDER_TARGETS),--target "$(target)") \
+		$(foreach define,$(YOSYS_DEFINES),--define "$(define)") \
+		$(if $(filter 1,$(YOSYS_WITH_WRAPPERS)),--with-wrappers,) \
+		--wrapper-dir "$(RTL_QC_WRAPPER_DIR)" --out "$@" --metadata "$(YOSYS_METADATA)"
+
+$(YOSYS_SCRIPT): $(PROJECT_ROOT)/Makefile $(PROJECT_ROOT)/config.mk $(SYN_DIR)/prepare_yosys_slang.py $(YOSYS_FLIST)
+	$(PYTHON) "$(SYN_DIR)/prepare_yosys_slang.py" \
+		--flist "$(YOSYS_FLIST)" --top "$(YOSYS_TOP)" --family "$(YOSYS_FAMILY)" --run "$(YOSYS_RUN)" \
+		--out "$@" --stat-json "$(YOSYS_STAT_JSON)" --netlist-json "$(YOSYS_NETLIST_JSON)"
+
+vivado-ooc: $(VIVADO_OOC_FLIST)
+	@command -v "$(VIVADO_OOC)" >/dev/null 2>&1 || { echo "Error: VIVADO_OOC=$(VIVADO_OOC) not found" >&2; exit 127; }
+	@mkdir -p "$(VIVADO_OOC_DIR)"
+	@echo "[VIVADO-OOC] top=$(VIVADO_OOC_TOP) part=$(VIVADO_OOC_PART) (no pins/XDC)"
+	@if [ -n "$(VIVADO_OOC_SETTINGS)" ] && [ -f "$(VIVADO_OOC_SETTINGS)" ]; then \
+		. "$(VIVADO_OOC_SETTINGS)"; \
+		"$(VIVADO_OOC)" -mode batch -nojournal -nolog -source "$(SYN_DIR)/run_vivado_ooc.tcl" \
+			-tclargs -flist "$(VIVADO_OOC_FLIST)" -top "$(VIVADO_OOC_TOP)" \
+			-part "$(VIVADO_OOC_PART)" -out_dir "$(VIVADO_OOC_DIR)" \
+			>"$(VIVADO_OOC_LOG)" 2>&1; \
+	else \
+		"$(VIVADO_OOC)" -mode batch -nojournal -nolog -source "$(SYN_DIR)/run_vivado_ooc.tcl" \
+			-tclargs -flist "$(VIVADO_OOC_FLIST)" -top "$(VIVADO_OOC_TOP)" \
+			-part "$(VIVADO_OOC_PART)" -out_dir "$(VIVADO_OOC_DIR)" \
+			>"$(VIVADO_OOC_LOG)" 2>&1; \
+	fi
+	@tail -20 "$(VIVADO_OOC_LOG)"
+
+vivado-ooc-synth: vivado-ooc
+
+# Run the current issue pipeline one top at a time.  Recursive invocations are
+# deliberate: each one gets its own generated file list and Vivado output
+# directory, so reports and checkpoints cannot overwrite another module.
+vivado-ooc-issue:
+	@test -n "$(VIVADO_OOC_ISSUE_MODULES)" || { echo "VIVADO_OOC_ISSUE_MODULES is empty" >&2; exit 2; }
+	@set -e; for module in $(VIVADO_OOC_ISSUE_MODULES); do \
+		echo "[VIVADO-OOC] issue module=$$module output=$(VIVADO_OOC_ISSUE_DIR)/$$module"; \
+		$(MAKE) --no-print-directory vivado-ooc \
+			VIVADO_OOC_TOP="$$module" \
+			VIVADO_OOC_DIR="$(VIVADO_OOC_ISSUE_DIR)/$$module"; \
+	done
+
+$(VIVADO_OOC_FLIST): $(PROJECT_ROOT)/Makefile $(PROJECT_ROOT)/config.mk $(SYN_DIR)/prepare_rtl_sources.py $(RTL_QC_SOURCE_DEPS)
+	$(PYTHON) "$(SYN_DIR)/prepare_rtl_sources.py" \
+		--repo-root "$(PROJECT_ROOT)" --bender "$(BENDER)" \
+		--bender-dir "$(YOSYS_BENDER_DIR)" \
+		$(foreach target,$(YOSYS_BENDER_TARGETS),--target "$(target)") \
+		$(foreach define,$(VIVADO_OOC_DEFINES),--define "$(define)") \
+		$(if $(filter 1,$(VIVADO_OOC_WITH_WRAPPERS)),--with-wrappers,) \
+		--wrapper-dir "$(RTL_QC_WRAPPER_DIR)" --out "$@" --metadata "$(VIVADO_OOC_METADATA)"
 
 
 init:

@@ -196,6 +196,30 @@ make syn-vivado SYN_RUN_TO=reports SYN_FORCE=0 SYN_SYNC_SOURCES=0 SYN_JOBS=40
 make syn-analyze
 ```
 
+## RTL 架构快速检查
+
+下面的目标都只在 `build/` 下生成文件，不会复用仿真编译中的宽度忽略或 `-Wno-fatal`：
+
+```sh
+# 独立严格门禁：UNOPTFLAT、LATCH、MULTIDRIVEN、WIDTH 等警告会使目标失败
+make rtl-strict
+
+# Verilator 展开树（Verilator 5.048 没有 XML 时自动使用 tree JSON）和结构报告
+make rtl-structure
+
+# Vivado pin-free OOC；主线综合检查，使用 Xilinx wrapper，不读取 hw/ip/ydrmem 仿真模型
+make vivado-ooc
+
+# 需要时再跑 Yosys/Slang 作为可选交叉检查
+make yosys-slang
+make yosys-slang-gate YOSYS_BASELINE_STAT=build/yosys-slang/base/stat.json
+```
+
+`rtl-quickcheck` 现在默认串起 `rtl-strict`、`rtl-structure` 和 `vivado-ooc`。
+Yosys 目标仍保留为可选交叉检查，可通过 `YOSYS_TOP`、`YOSYS_BENDER_DIR`、`YOSYS_RUN`
+和 `YOSYS_WITH_WRAPPERS` 覆盖。
+Vivado OOC 默认器件为 `xc7k325tffg900-2`，可用 `VIVADO_OOC_PART` 覆盖。
+
 ## Vivado 环境
 
 服务器上的 Vivado 入口应使用 batch 模式，不启动 GUI。顶层 Makefile 默认在 Vivado 目标中局部 source：
@@ -231,4 +255,5 @@ make syn VIVADO_SETTINGS=/path/to/settings64.sh VIVADO=/path/to/vivado
 
 - Bender 管理的 RTL 顺序主要用于 `hw/ip/jyd_fpga` 及其依赖的 core/mem 源码。
 - FPGA 综合脚本会保留 `hw/ip/Xilinx_ip_wrapper/rtl` 中的 FPGA wrapper，并跳过与 wrapper 同名的通用 RTL，避免 Vivado 里出现重复模块定义。
+- `xpm_lutram_1r1w.sv` 来自 `ss2/Bifurcus` 分支，Xilinx 分支固定使用 distributed RAM，非 Xilinx 分支内置仿真模型；Vivado source list 会排除全部 `hw/ip/ydrmem/rtl` 文件。
 - `FPGA/Ydrasil_FPGA.xpr` 保持 150MHz 基线；`syn` 流程会按 `SYN_PLL_FREQ_MHZ` 复制 staged 工程到 `build/syn/pllXXXm/project`，通过对应的 `SYN_PLL_FREQ_XXX` 宏选择 `ydrasil_clocking.sv` 中的 MMCM 参数。

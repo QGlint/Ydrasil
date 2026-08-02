@@ -291,12 +291,14 @@ import ydrasil_pkg::*;
 
     wire rs1_has_producer = issue_pkt_i.src0.tag_valid;
     wire rs2_has_producer = issue_pkt_i.src1.tag_valid;
-    producer_id_t rs1_producer_id = issue_pkt_i.src0.producer_tag;
-    producer_id_t rs2_producer_id = issue_pkt_i.src1.producer_tag;
-    producer_slot_t rs1_producer_slot =
-        rs1_producer_id[PRODUCER_SLOT_WIDTH-1:0];
-    producer_slot_t rs2_producer_slot =
-        rs2_producer_id[PRODUCER_SLOT_WIDTH-1:0];
+    producer_id_t rs1_producer_id;
+    producer_id_t rs2_producer_id;
+    producer_slot_t rs1_producer_slot;
+    producer_slot_t rs2_producer_slot;
+    assign rs1_producer_id = issue_pkt_i.src0.producer_tag;
+    assign rs2_producer_id = issue_pkt_i.src1.producer_tag;
+    assign rs1_producer_slot = rs1_producer_id[PRODUCER_SLOT_WIDTH-1:0];
+    assign rs2_producer_slot = rs2_producer_id[PRODUCER_SLOT_WIDTH-1:0];
 `ifndef SYNTHESIS
     localparam logic [2:0] DBG_PRODUCER_ALU = 3'd1;
     localparam logic [2:0] DBG_PRODUCER_LOAD = 3'd2;

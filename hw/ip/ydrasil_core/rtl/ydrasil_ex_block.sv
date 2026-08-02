@@ -547,7 +547,15 @@ import ydrasil_pkg::*;
     // therefore survives their redirects. A paired younger DIV is identified
     // by its circular allocation tag and is cancelled precisely.
     always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n || div_kill) begin
+        if (!rst_n) begin
+            div_active_q      <= 1'b0;
+            div_pending_q     <= 1'b0;
+            div_wen_q         <= 1'b0;
+            div_waddr_q       <= '0;
+            div_producer_id_q <= '0;
+            div_operator_q    <= '0;
+            div_result_q      <= '0;
+        end else if (div_kill) begin
             div_active_q      <= 1'b0;
             div_pending_q     <= 1'b0;
             div_wen_q         <= 1'b0;

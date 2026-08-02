@@ -59,6 +59,13 @@ checks, DRC, methodology, design-analysis, QoR, and CPU timing-summary reports.
 Set `SYN_POST_ROUTE_PHYSOPT=1` to explicitly run one additional
 `AggressiveExplore` pass and regenerate the selected bitstream.
 
+The sweep's `Performance_ExplorePostRoutePhysOpt` step is disabled by default
+because Vivado 2024.2 has a reproducible post-route `phys_opt_design` crash in
+`libxv_power.so` on this design. Use `SYN_SWEEP_POST_ROUTE_PHYSOPT=1` only when
+testing a Vivado update or a workaround. A failed implementation child is
+reported and ignored so completed sweep runs can still produce the final
+reports and artifacts.
+
 `make syn-extreme` runs only `impl_1` with the aggressive per-step directives
 stored in the checked-in GUI project. Sweep results are recorded in
 `implementation_sweep.csv`, `implementation_sweep.md`, and

@@ -9,6 +9,7 @@ proc usage {} {
     puts "  -threads_per_run <n>    max threads used by each Vivado process"
     puts "  -impl_runs <n>          parallel implementation run count, default 1"
     puts "  -impl_mode <sweep|extreme>  implementation tuning mode, default sweep"
+    puts "  -sweep_post_route_physopt <0|1>  enable sweep post-route phys_opt step, default 0"
     puts "  -run_to <synth|route|bitstream|reports|sync_only>"
     puts "  -sync_sources <0|1>     remove old hw/ip sources and add generated list"
     puts "  -force <0|1>            reset runs before launching"
@@ -55,13 +56,18 @@ proc configure_performance_implementation {run_name} {
     set_property STEPS.POST_ROUTE_PHYS_OPT_DESIGN.ARGS.DIRECTIVE AggressiveExplore $run
 }
 
-proc configure_sweep_implementation {run_name strategy} {
+proc configure_sweep_implementation {run_name strategy sweep_post_route_physopt} {
     set run [get_runs $run_name]
     set_property strategy $strategy $run
     set_property STEPS.PHYS_OPT_DESIGN.IS_ENABLED true $run
+    if {!$sweep_post_route_physopt} {
+        # Vivado 2024.2 can segfault in libxv_power.so while executing the
+        # Performance_ExplorePostRoutePhysOpt post-route path optimizer.
+        set_property STEPS.POST_ROUTE_PHYS_OPT_DESIGN.IS_ENABLED false $run
+    }
 }
 
-proc prepare_implementation_runs {count mode} {
+proc prepare_implementation_runs {count mode sweep_post_route_physopt} {
     if {$mode eq "extreme"} {
         configure_performance_implementation impl_1
         return [list impl_1]
@@ -83,7 +89,7 @@ proc prepare_implementation_runs {count mode} {
             create_run $run_name -parent_run synth_1 -flow {Vivado Implementation 2024} \
                 -strategy [lindex $strategies $idx]
         }
-        configure_sweep_implementation $run_name [lindex $strategies $idx]
+        configure_sweep_implementation $run_name [lindex $strategies $idx] $sweep_post_route_physopt
         lappend runs $run_name
         puts "Implementation sweep: $run_name strategy=[lindex $strategies $idx]"
     }
@@ -545,6 +551,7 @@ set artifact_dir [ensure_dir [arg_value "-artifact_dir" [file join $repo_root "b
 set jobs [arg_value "-jobs" "16"]
 set impl_runs [arg_value "-impl_runs" "1"]
 set impl_mode [arg_value "-impl_mode" "sweep"]
+set sweep_post_route_physopt [clamp_int [arg_value "-sweep_post_route_physopt" "0"] 0 1]
 set threads_per_run [arg_value "-threads_per_run" $jobs]
 set run_to [arg_value "-run_to" "route"]
 set sync_sources [arg_value "-sync_sources" "1"]
@@ -570,6 +577,7 @@ if {$sync_sources && ![file exists $sources_tcl]} {
 puts "Opening project: $xpr"
 puts "Vivado jobs: $jobs"
 puts "Implementation mode: $impl_mode, runs: $impl_runs"
+puts "Sweep post-route phys_opt: $sweep_post_route_physopt"
 puts "Run target: $run_to"
 open_project $xpr
 
@@ -690,7 +698,7 @@ if {$run_to eq "synth"} {
     exit 0
 }
 
-set implementation_runs [prepare_implementation_runs $impl_runs $impl_mode]
+set implementation_runs [prepare_implementation_runs $impl_runs $impl_mode $sweep_post_route_physopt]
 if {$force_runs} {
     foreach run_name $implementation_runs {
         puts "Resetting $run_name"
@@ -711,23 +719,36 @@ if {$run_to ne "bitstream" && $run_to ne "route" && $run_to ne "impl"} {
     error "unknown -run_to value: $run_to"
 }
 if {[llength $pending_implementation_runs] > 0} {
-    if {$run_to eq "bitstream"} {
-        launch_runs $pending_implementation_runs -to_step write_bitstream -jobs $jobs
-    } else {
-        launch_runs $pending_implementation_runs -to_step route_design -jobs $jobs
+    # Launch each implementation child independently.  A failed launch must
+    # not prevent the other sweep candidates from starting.
+    foreach run_name $pending_implementation_runs {
+        set launch_msg ""
+        if {[catch {
+            if {$run_to eq "bitstream"} {
+                launch_runs $run_name -to_step write_bitstream -jobs $jobs
+            } else {
+                launch_runs $run_name -to_step route_design -jobs $jobs
+            }
+        } launch_msg]} {
+            puts "INFO: implementation run $run_name could not be launched; ignoring this candidate: $launch_msg"
+        } else {
+            puts "INFO: launched implementation run $run_name"
+        }
     }
 }
 foreach run_name $implementation_runs {
     if {[lsearch -exact $pending_implementation_runs $run_name] >= 0} {
-        wait_on_run $run_name
+        if {[catch {wait_on_run $run_name} wait_msg]} {
+            puts "INFO: implementation run $run_name terminated unsuccessfully; ignoring this candidate: $wait_msg"
+        }
     }
     set status [get_property STATUS [get_runs $run_name]]
     puts "$run_name status: $status"
     if {[regexp -nocase {fail|error} $status] &&
         ![regexp -nocase {complete.*failed timing} $status]} {
-        puts "warning: implementation sweep run $run_name failed; remaining runs will still be evaluated"
+        puts "INFO: implementation sweep run $run_name failed; remaining runs will still be evaluated"
     } elseif {[regexp -nocase {failed timing} $status]} {
-        puts "warning: implementation sweep run $run_name completed with timing violations"
+        puts "INFO: implementation sweep run $run_name completed with timing violations"
     }
 }
 set best_impl_run [select_best_implementation $implementation_runs $report_dir $checkpoint_dir]

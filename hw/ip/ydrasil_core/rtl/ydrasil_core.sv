@@ -291,9 +291,14 @@ import ydrasil_axi_pkg::*;
 	wire                            lsu_ctrl_busy;
 	wire                            lsu_fast_load;
 
-    //LSU -> ID
+	//LSU -> ID
 	ydrasil_id_ctrl_pkt_t           id_ctrl_pkt;
 	ydrasil_id_ctrl_pkt_t           id_ctrl_pkt1;
+	// Declare issue packets before the compatibility assignments below.  This
+	// is accepted by simulators as a forward reference, but strict Slang
+	// elaboration correctly requires declarations before use.
+	ydrasil_issue_pkt_t             issue_pkt;
+	ydrasil_issue_pkt_t             issue_pkt1;
 	assign id_ctrl_pkt = issue_pkt.ctrl;
 	assign id_ctrl_pkt1 = issue_pkt1.ctrl;
 	ydrasil_ex_hzd_pkt_t            ex_hzd_pkt;
@@ -319,8 +324,6 @@ import ydrasil_axi_pkg::*;
 	ydrasil_issue_pkt_t             id_issue_pkt1;
 	ydrasil_issue_pkt_t             dispatch_issue_pkt;
 	ydrasil_issue_pkt_t             dispatch_issue_pkt1;
-	ydrasil_issue_pkt_t             issue_pkt;
-	ydrasil_issue_pkt_t             issue_pkt1;
 	// ID and issue are separated by a packed, four-entry elastic pipeline.
 	// Its input-ready signal comes only from registered occupancy, never from
 	// the current scoreboard result, so decode FIFO state is off the EX->ID
