@@ -121,7 +121,10 @@ import ydrasil_pkg::*;
     assign rf_producer_tracked_o = sel_lsu ? lsu_producer_tracked_i :
                                            (rf_wen_rd_o && (rf_waddr_rd_o != '0));
 
-    always_ff @(posedge clk or negedge rst_n) begin
+    // FIFO payload is deliberately not asynchronously reset: valid/count and
+    // pointers define ownership, while a synchronous reset keeps the inferred
+    // small RAMs free of reset pins and permits LUTRAM packing.
+    always_ff @(posedge clk) begin
         if (!rst_n) begin
             alu_fifo_rptr_q     <= '0;
             alu_fifo_wptr_q     <= '0;

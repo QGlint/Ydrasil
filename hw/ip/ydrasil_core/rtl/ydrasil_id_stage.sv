@@ -29,6 +29,7 @@ import ydrasil_pkg::*;
     wire [OPERATOR_WIDTH-1:0] operator_info;
     wire [OP_LSU_INFO_WIDTH-1:0] operator_lsu;
     wire [OPERATOR_TYPE_WIDTH-1:0] operator_type;
+    wire [4:0] fp_rs2 = instr_i[24:20];
 
     ydrasil_ins_decoder u_decoder (
         .instr_i(instr_i),
@@ -62,7 +63,6 @@ import ydrasil_pkg::*;
 		logic fp_rm_used;
 		logic [6:0] fp_funct7;
 		logic [2:0] fp_funct3;
-		logic [4:0] fp_rs2;
         decode_pkt_o = '0;
         decode_pkt_o.pc = pc_i;
         decode_pkt_o.instr = instr_i;
@@ -102,7 +102,6 @@ import ydrasil_pkg::*;
 		          (instr_i[6:0] == 7'b1001111)) && (instr_i[26:25] == 2'b00);
 		fp_funct7 = instr_i[31:25];
 		fp_funct3 = instr_i[14:12];
-		fp_rs2 = instr_i[24:20];
 		fp_known = fp_load || fp_store || fp_fma;
 		fp_rm_used = 1'b0;
 		decode_pkt_o.fp_op = FPU_OP_ADD;

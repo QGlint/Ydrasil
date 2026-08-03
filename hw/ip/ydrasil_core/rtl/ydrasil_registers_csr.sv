@@ -295,8 +295,8 @@ import ydrasil_pkg::*;
                 instret[31:0] <= csr_write_data;
             end else if (minstreth_we) begin
                 instret[63:32] <= csr_write_data;
-            end else if ((instret_inc_count_i != 2'b0) && !instret_inhibited) begin
-                instret <= instret + instret_inc_count_i;
+            end else if ((instret_inc_count_i != 3'b0) && !instret_inhibited) begin
+                instret <= instret + 64'(instret_inc_count_i);
             end
 
             if (csr_write_en) begin

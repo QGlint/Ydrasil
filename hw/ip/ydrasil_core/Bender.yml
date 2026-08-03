@@ -34,6 +34,7 @@ sources:
       - rtl/ydrasil_exception_ctrl.sv
       - rtl/ydrasil_ctrl.sv
       - rtl/ydrasil_core.sv
+      - ../Xilinx_ip_wrapper/rtl/xpm_lutram_1r1w.sv
 
 
   - target: ip_tb

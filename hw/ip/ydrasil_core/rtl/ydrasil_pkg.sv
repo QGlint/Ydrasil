@@ -315,6 +315,18 @@ package ydrasil_pkg;
 		ydrasil_result_class_t        producer_class;
 	} ydrasil_source_desc_t;
 
+	// A local, generation-tagged wakeup contract. Identity and valid are
+	// registered at the producer boundary; data is consumed only after the
+	// same identity and result class match.
+	typedef struct packed {
+		logic                         valid;
+		logic                         producer_tracked;
+		producer_id_t                 producer_id;
+		logic [REGS_ADDR_WIDTH-1:0]   arch_addr;
+		ydrasil_result_class_t        result_class;
+		logic [REGS_DATA_WIDTH-1:0]   predicted_data;
+	} ydrasil_reservation_pkt_t;
+
 	typedef struct packed {
 		logic                         writes_gpr;
 		logic [REGS_ADDR_WIDTH-1:0]   rd_addr;
@@ -455,7 +467,7 @@ package ydrasil_pkg;
 
 	typedef struct packed {
 		logic                                valid;
-		logic                                interrupt;
+        logic                                interrupt_pending;
 		logic                                flush_younger;
 		producer_id_t                        producer_id;
 		logic                                producer_tracked;
@@ -619,5 +631,35 @@ package ydrasil_pkg;
 		logic [1:0]                          lane1_pred_counter;
 		logic [INST_ADDR_WIDTH-1:0]           lane1_pred_bht_index;
 	} ydrasil_issue_ex_pkt_t;
+
+	// Lane-B has its own Issue/EX holding cell.  Keeping this payload separate
+	// prevents the dual ALU/branch/AGU fanout from reopening issue_ex_pkt.
+	typedef struct packed {
+		logic [REGS_DATA_WIDTH-1:0]           operand_a;
+		logic [REGS_DATA_WIDTH-1:0]           operand_b;
+		logic [REGS_DATA_WIDTH-1:0]           branch_operand_a;
+		logic [REGS_DATA_WIDTH-1:0]           branch_operand_b;
+		logic [REGS_DATA_WIDTH-1:0]           branch_imm;
+		logic [OPERATOR_WIDTH-1:0]            operator_info;
+		logic [OPERATOR_TYPE_WIDTH-1:0]       operator_type;
+		logic [OP_LSU_INFO_WIDTH-1:0]         operator_lsu;
+		logic [REGS_DATA_WIDTH-1:0]            store_data;
+		logic                                  store_data_valid;
+		logic [REGS_ADDR_WIDTH-1:0]            rd_addr;
+		logic                                  rd_wen;
+		producer_id_t                          producer_id;
+		logic                                  producer_tracked;
+		logic                                  valid;
+		logic [INST_ADDR_WIDTH-1:0]            pc;
+		logic [INST_DATA_WIDTH-1:0]            instr;
+		logic                                  jalr;
+		logic [INST_ADDR_WIDTH-1:0]            branch_target;
+		logic [INST_ADDR_WIDTH-1:0]            branch_next_pc;
+		logic                                  pred_hit;
+		logic                                  pred_taken;
+		logic [INST_ADDR_WIDTH-1:0]            pred_target;
+		logic [1:0]                            pred_counter;
+		logic [INST_ADDR_WIDTH-1:0]            pred_bht_index;
+	} ydrasil_dual_issue_pkt_t;
 
 endpackage

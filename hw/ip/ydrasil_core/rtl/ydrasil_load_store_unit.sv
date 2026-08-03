@@ -9,6 +9,8 @@ import ydrasil_pkg::*;
     input  ydrasil_mem_rsp_pkt_t           mmio_rsp_i,
     output ydrasil_mem_req_pkt_t           mmio_req_o,
     output ydrasil_lsu_status_pkt_t        status_o,
+    output wire [1:0]                     issue_credit_o,
+    output ydrasil_reservation_pkt_t      dtcm_reservation_o,
     output ydrasil_gpr_fwd_pkt_t           completion_o,
     output wire                            fp_completion_valid_o,
     output wire [REGS_ADDR_WIDTH-1:0]      fp_completion_addr_o,
@@ -42,6 +44,7 @@ import ydrasil_pkg::*;
 
     ydrasil_lsu_req_pkt_t queue_q [0:QUEUE_DEPTH-1];
     reg [QUEUE_COUNT_WIDTH-1:0] queue_count_q;
+    reg [QUEUE_COUNT_WIDTH-1:0] issue_credit_q;
     reg [$clog2(QUEUE_DEPTH)-1:0] queue_head_q;
     reg [$clog2(QUEUE_DEPTH)-1:0] queue_tail_q;
     ydrasil_lsu_req_pkt_t store_buf_q [0:STORE_BUFFER_DEPTH-1];
@@ -74,23 +77,24 @@ import ydrasil_pkg::*;
     reg [3:0] load_forward_mask;
     reg [31:0] load_forward_data;
     integer store_scan;
-    integer byte_scan;
+    integer byte_scan_fwd;
+    integer byte_scan_load;
     integer store_scan_slot;
     always_comb begin
         load_forward_mask = '0;
         load_forward_data = '0;
         for (store_scan = 0; store_scan < STORE_BUFFER_DEPTH; store_scan++) begin
-            store_scan_slot = (store_head_q + store_scan) % STORE_BUFFER_DEPTH;
+            store_scan_slot = (int'(store_head_q) + store_scan) % STORE_BUFFER_DEPTH;
             if ((store_scan < store_buf_count_q) &&
                 store_buf_q[store_scan_slot].valid &&
                 (store_buf_q[store_scan_slot].addr[BUS_ADDR_WIDTH-1:2] ==
                  active_pkt.addr[BUS_ADDR_WIDTH-1:2])) begin
-                for (byte_scan = 0; byte_scan < 4; byte_scan++) begin
-                    if (store_buf_q[store_scan_slot].store_mask[byte_scan]) begin
-                        load_forward_mask[byte_scan] = 1'b1;
-                        load_forward_data[byte_scan*8 +: 8] =
+                for (byte_scan_fwd = 0; byte_scan_fwd < 4; byte_scan_fwd++) begin
+                    if (store_buf_q[store_scan_slot].store_mask[byte_scan_fwd]) begin
+                        load_forward_mask[byte_scan_fwd] = 1'b1;
+                        load_forward_data[byte_scan_fwd*8 +: 8] =
                             store_buf_q[store_scan_slot].store_data
-                                [byte_scan*8 +: 8];
+                                [byte_scan_fwd*8 +: 8];
                     end
                 end
             end
@@ -168,6 +172,16 @@ import ydrasil_pkg::*;
     assign status_o.idle = queue_empty && !req_i.valid && store_buf_empty &&
         !mmio_busy && !load_s1_valid_q;
     assign status_o.fast_load = 1'b0;
+    // Registered request credit is the only structural signal consumed by
+    // Issue. It tracks real queue enqueue/dequeue events, so a stale status
+    // snapshot cannot over-admit a third request.
+    wire issue_credit_reserved = req_i.valid && !input_direct_fire;
+    // Reserve the currently presented E-stage request as well as the
+    // registered queue slots.  This is a one-bit look-ahead token, not the
+    // raw busy/idle status, and prevents the request pipeline from presenting
+    // a third item while the second item is entering the queue.
+    assign issue_credit_o = issue_credit_reserved ?
+        ((issue_credit_q != '0) ? issue_credit_q - 1'b1 : '0) : issue_credit_q;
 
     always_comb begin
         dtcm_req_o = '0;
@@ -184,7 +198,11 @@ import ydrasil_pkg::*;
     assign mmio_req_o.write = mmio_req_valid_q && !mmio_is_load_q;
     assign mmio_req_o.addr = mmio_addr_q;
     assign mmio_req_o.wdata = mmio_wdata_q;
-    assign mmio_req_o.wmask = mmio_req_o.write ? mmio_wmask_q : 4'b0;
+    // Keep the request packet acyclic.  Reading mmio_req_o.write here makes
+    // the lint tool treat the packed output as self-feedback even though write is
+    // another field driven by the same registered state.
+    assign mmio_req_o.wmask = (mmio_req_valid_q && !mmio_is_load_q) ?
+        mmio_wmask_q : 4'b0;
 
     reg [31:0] load_merged_word;
     reg [31:0] load_shifted;
@@ -192,10 +210,10 @@ import ydrasil_pkg::*;
     reg [31:0] mmio_load_result;
     always_comb begin
         load_merged_word = dtcm_rdata_i;
-        for (byte_scan = 0; byte_scan < 4; byte_scan++) begin
-            if (load_s1_forward_mask_q[byte_scan])
-                load_merged_word[byte_scan*8 +: 8] =
-                    load_s1_forward_data_q[byte_scan*8 +: 8];
+        for (byte_scan_load = 0; byte_scan_load < 4; byte_scan_load++) begin
+            if (load_s1_forward_mask_q[byte_scan_load])
+                load_merged_word[byte_scan_load*8 +: 8] =
+                    load_s1_forward_data_q[byte_scan_load*8 +: 8];
         end
         load_shifted = load_merged_word >>
             ({3'b000, load_s1_addr_index_q} << 3);
@@ -249,6 +267,15 @@ import ydrasil_pkg::*;
         load_s1_fp_rd_addr_q : mmio_wb_fp_rd_addr_q;
     assign fp_completion_data_o = completion_o.data;
 
+    // DTCM is fixed-latency. Its registered identity is separate from the
+    // MMIO/LSU completion stream; data is only a matched local operand bypass.
+    assign dtcm_reservation_o.valid = dtcm_wb_valid;
+    assign dtcm_reservation_o.producer_tracked = load_s1_producer_tracked_q;
+    assign dtcm_reservation_o.producer_id = load_s1_producer_id_q;
+    assign dtcm_reservation_o.arch_addr = load_s1_rd_addr_q;
+    assign dtcm_reservation_o.result_class = RESULT_LSU;
+    assign dtcm_reservation_o.predicted_data = dtcm_load_result;
+
 	ydrasil_lsu_req_pkt_t enqueue_pkt;
 	always_comb begin
 		enqueue_pkt = req_i;
@@ -260,6 +287,7 @@ import ydrasil_pkg::*;
 	always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             queue_count_q <= '0;
+            issue_credit_q <= QUEUE_COUNT_WIDTH'(QUEUE_DEPTH);
             queue_head_q <= '0;
             queue_tail_q <= '0;
             store_buf_count_q <= '0;
@@ -314,8 +342,14 @@ import ydrasil_pkg::*;
                 queue_tail_q <= queue_tail_q + 1'b1;
             end
             unique case ({queue_enqueue, queue_dequeue})
-                2'b10: queue_count_q <= queue_count_q + 1'b1;
-                2'b01: queue_count_q <= queue_count_q - 1'b1;
+                2'b10: begin
+                    queue_count_q <= queue_count_q + 1'b1;
+                    issue_credit_q <= issue_credit_q - 1'b1;
+                end
+                2'b01: begin
+                    queue_count_q <= queue_count_q - 1'b1;
+                    issue_credit_q <= issue_credit_q + 1'b1;
+                end
                 default: queue_count_q <= queue_count_q;
             endcase
 
@@ -388,8 +422,9 @@ import ydrasil_pkg::*;
             if (store_buf_dequeue)
                 perf_stb_drain_q <= perf_stb_drain_q + 1'b1;
             if (req_i.valid && !queue_enqueue && !input_direct_fire &&
-                !(queue_dequeue && queue_full))
+                !(queue_dequeue && queue_full)) begin
                 $fatal(1, "LSU two-entry load queue overflow");
+            end
             if (store_buf_enqueue && store_buf_full && !store_buf_dequeue)
                 $fatal(1, "LSU store buffer overflow");
 `endif

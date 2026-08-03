@@ -12,7 +12,7 @@ import ydrasil_pkg::*;
     wire op_bitmanip = operator_type_i[OPERATOR_TYPE_BITMANIP];
     wire [4:0] shamt = operand_b_i[4:0];
     wire [REGS_DATA_WIDTH-1:0] shamt_ext = {{(REGS_DATA_WIDTH-5){1'b0}}, shamt};
-    wire [REGS_DATA_WIDTH-1:0] rotate_inv_shamt = REGS_DATA_WIDTH'(REGS_DATA_WIDTH) - shamt_ext;
+    wire [4:0] rotate_inv_shamt = 5'd0 - shamt;
 
     wire signed [REGS_DATA_WIDTH-1:0] signed_operand_a = operand_a_i;
     wire signed [REGS_DATA_WIDTH-1:0] signed_operand_b = operand_b_i;

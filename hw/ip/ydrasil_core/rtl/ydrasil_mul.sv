@@ -95,7 +95,9 @@ import ydrasil_pkg::*;
     assign result_wdata_o = s3_high_q ? s3_product_q[63:32] :
                                         s3_product_q[31:0];
 
-    always_ff @(posedge clk or negedge rst_n) begin
+    // Keep the DSP boundary free of asynchronous reset controls. Valid and
+    // write-enable bits still provide the architectural flush contract.
+    always_ff @(posedge clk) begin
         if (!rst_n) begin
             s0_valid_q  <= 1'b0;
             s0_operand_a_q <= '0;

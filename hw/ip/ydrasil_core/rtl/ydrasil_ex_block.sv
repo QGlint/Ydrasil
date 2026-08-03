@@ -11,8 +11,6 @@ import ydrasil_pkg::*;
     input  wire [DATA_WIDTH-1:0]           bt_a_operand_i,
     input  wire [DATA_WIDTH-1:0]           bt_b_operand_i,
 
-    input  wire [DATA_WIDTH-1:0]           operand_a_i,
-    input  wire [DATA_WIDTH-1:0]           operand_b_i,
     input  wire [DATA_WIDTH-1:0]           alu_operand_a_i,
     input  wire [DATA_WIDTH-1:0]           alu_operand_b_i,
     input  wire [DATA_WIDTH-1:0]           bru_operand_a_i,
@@ -23,16 +21,23 @@ import ydrasil_pkg::*;
     input  wire [DATA_WIDTH-1:0]           mul_operand_a_i,
     input  wire [DATA_WIDTH-1:0]           mul_operand_b_i,
     input  wire [DATA_WIDTH-1:0]           csr_operand_a_i,
-    input  wire [DATA_WIDTH-1:0]           csr_operand_b_i,
     input  wire [OPERATOR_WIDTH-1:0]       operator_i,
     input  wire [OPERATOR_TYPE_WIDTH-1:0]  operator_type_i,
-    input  wire                            id_ex_valid_i,
+    input  wire                            alu_valid_i,
+    input  wire                            bru_valid_i,
+    input  wire                            lsu_valid_i,
+    input  wire                            lsu_is_load_i,
+    input  wire                            lsu_is_store_i,
+    input  wire                            mul_valid_i,
+    input  wire                            csr_valid_i,
+    input  wire [OPERATOR_WIDTH-1:0]       bru_operator_i,
+    input  wire [OPERATOR_TYPE_WIDTH-1:0]  bru_operator_type_i,
+    input  wire [OPERATOR_WIDTH-1:0]       mul_operator_i,
+    input  wire [OPERATOR_TYPE_WIDTH-1:0]  mul_operator_type_i,
+    input  wire [OPERATOR_TYPE_WIDTH-1:0]  csr_operator_type_i,
     input  wire                            id_ex_jalr_i,
     input  wire [DATA_WIDTH-1:0]           id_ex_branch_target_i,
     input  wire [DATA_WIDTH-1:0]           id_ex_branch_next_pc_i,
-    input  wire                            id_ex_branch_eq_i,
-    input  wire                            id_ex_branch_ge_signed_i,
-    input  wire                            id_ex_branch_ge_unsigned_i,
     input  wire                            id_ex_pred_hit_i,
     input  wire                            id_ex_pred_taken_i,
     input  wire [DATA_WIDTH-1:0]           id_ex_pred_target_i,
@@ -100,7 +105,6 @@ import ydrasil_pkg::*;
     wire [REGS_DATA_WIDTH-1:0] alu_result;
     wire                       alu_rf_wen_rd;
     wire [REGS_ADDR_WIDTH-1:0] alu_rf_waddr_rd;
-    wire                       alu_comp_result;
 
     wire op_m_unit;
     wire op_bitmanip;
@@ -199,15 +203,12 @@ import ydrasil_pkg::*;
         .operand_b_i                 (bru_operand_b),
         .bt_a_operand_i              (bt_a_operand),
         .bt_b_operand_i              (bt_b_operand),
-        .operator_i                  (operator_i),
-        .operator_type_i             (operator_type_i),
-        .id_ex_valid_i               (id_ex_valid_i),
+        .operator_i                  (bru_operator_i),
+        .operator_type_i             (bru_operator_type_i),
+        .id_ex_valid_i               (bru_valid_i),
         .id_ex_jalr_i                (id_ex_jalr_i),
         .id_ex_branch_target_i       (id_ex_branch_target_i),
         .id_ex_branch_next_pc_i      (id_ex_branch_next_pc_i),
-        .id_ex_branch_eq_i           (id_ex_branch_eq_i),
-        .id_ex_branch_ge_signed_i    (id_ex_branch_ge_signed_i),
-        .id_ex_branch_ge_unsigned_i  (id_ex_branch_ge_unsigned_i),
         .id_ex_pred_hit_i            (id_ex_pred_hit_i),
         .id_ex_pred_taken_i          (id_ex_pred_taken_i),
         .id_ex_pred_target_i         (id_ex_pred_target_i),
@@ -237,30 +238,30 @@ import ydrasil_pkg::*;
 `endif
     );
 
-    assign op_m_unit = operator_type_i[OPERATOR_TYPE_MUL];
+    assign op_m_unit = mul_operator_type_i[OPERATOR_TYPE_MUL];
     assign op_bitmanip = operator_type_i[OPERATOR_TYPE_BITMANIP];
-    assign op_load = operator_type_i[OPERATOR_TYPE_LOAD];
-    assign op_store = operator_type_i[OPERATOR_TYPE_STORE];
-    assign op_bjp = operator_type_i[OPERATOR_TYPE_BJP];
+    assign op_load = lsu_valid_i & lsu_is_load_i;
+    assign op_store = lsu_valid_i & lsu_is_store_i;
+    assign op_bjp = bru_operator_type_i[OPERATOR_TYPE_BJP];
     assign op_mul =
         op_m_unit &
-        (operator_i[OP_MUL_MUL]    |
-         operator_i[OP_MUL_MULH]   |
-         operator_i[OP_MUL_MULHSU] |
-         operator_i[OP_MUL_MULHU]);
+        (mul_operator_i[OP_MUL_MUL]    |
+         mul_operator_i[OP_MUL_MULH]   |
+         mul_operator_i[OP_MUL_MULHSU] |
+         mul_operator_i[OP_MUL_MULHU]);
     assign op_div =
         op_m_unit &
-        (operator_i[OP_MUL_DIV]  |
-         operator_i[OP_MUL_DIVU] |
-         operator_i[OP_MUL_REM]  |
-         operator_i[OP_MUL_REMU]);
+        (mul_operator_i[OP_MUL_DIV]  |
+         mul_operator_i[OP_MUL_DIVU] |
+         mul_operator_i[OP_MUL_REM]  |
+         mul_operator_i[OP_MUL_REMU]);
 
-    assign mul_issue_valid = id_ex_valid_i & op_mul & mul_issue_ready & !trap_redirect_i & !flush_ex_i;
+    assign mul_issue_valid = mul_valid_i & op_mul & mul_issue_ready & !trap_redirect_i & !flush_ex_i;
     assign mul_issue_wen = id_alu_rf_wen_rd_i & (id_rf_waddr_rd_i != '0);
     assign mul_issue_o = mul_issue_valid & mul_issue_wen;
     assign mul_issue_waddr_o = id_rf_waddr_rd_i;
 
-    assign div_start = id_ex_valid_i & op_div & !div_active_q &
+    assign div_start = mul_valid_i & op_div & !div_active_q &
         !div_pending_q & !div_busy & !div_done & !trap_redirect_i &
         !flush_ex_i;
     // A multiply result cannot be backpressured. Hold DIV completion state
@@ -268,7 +269,7 @@ import ydrasil_pkg::*;
     assign div_complete = div_pending_q & !mul_pipe_wen &
         !trap_redirect_i & !flush_ex_i;
     assign div_rf_wen_rd = div_complete & div_wen_q;
-    assign ex_mul_stall_o = id_ex_valid_i & op_div &
+    assign ex_mul_stall_o = mul_valid_i & op_div &
         (div_active_q | div_pending_q | div_busy | div_done) & !flush_ex_i;
 
     wire [4:0] fast_b_shamt = bitmanip_operand_b[4:0];
@@ -323,14 +324,14 @@ import ydrasil_pkg::*;
         fast_b_shadd_result | fast_b_logic_result | fast_b_bit_result |
         fast_b_pack_result | fast_b_extend_result;
     wire fast_bitmanip_rf_wen_rd =
-        id_ex_valid_i & fast_bitmanip_op & id_alu_rf_wen_rd_i & !trap_redirect_i & !flush_ex_i;
-    wire op_csr = id_ex_valid_i & operator_type_i[OPERATOR_TYPE_CSR] &
+        alu_valid_i & fast_bitmanip_op & id_alu_rf_wen_rd_i & !trap_redirect_i & !flush_ex_i;
+    wire op_csr = csr_valid_i & csr_operator_type_i[OPERATOR_TYPE_CSR] &
         !trap_redirect_i & !flush_ex_i;
 
     assign bitmanip_rf_wen_rd =
-        id_ex_valid_i & op_bitmanip & !fast_bitmanip_op & id_alu_rf_wen_rd_i &
+        alu_valid_i & op_bitmanip & !fast_bitmanip_op & id_alu_rf_wen_rd_i &
         !trap_redirect_i & !flush_ex_i;
-    assign normal_alu_rf_wen_rd = id_ex_valid_i & alu_rf_wen_rd &
+    assign normal_alu_rf_wen_rd = alu_valid_i & alu_rf_wen_rd &
         (operator_type_i[OPERATOR_TYPE_ALU] | operator_type_i[OPERATOR_TYPE_BJP]) &
         !op_m_unit & !op_bitmanip & !flush_ex_i;
     assign ex_rf_wen_rd =
@@ -338,7 +339,7 @@ import ydrasil_pkg::*;
         normal_alu_rf_wen_rd | op_csr;
     assign mul_result_valid_o = mul_result_valid | div_complete;
     assign ex_instret_inc_o =
-        (id_ex_valid_i & !trap_redirect_i & !flush_ex_i & !op_load & !op_mul & !op_div &
+        (alu_valid_i & !trap_redirect_i & !flush_ex_i & !op_load & !op_mul & !op_div &
          !operator_type_i[OPERATOR_TYPE_FPU]) |
         div_complete;
 
@@ -353,14 +354,8 @@ import ydrasil_pkg::*;
          operator_i[OP_ALU_AND]  |
          operator_i[OP_ALU_LUI]  |
          operator_i[OP_ALU_AUIPC]);
-    wire shift_alu_op =
-        operator_type_i[OPERATOR_TYPE_ALU] & !op_m_unit & !op_bitmanip &
-        (operator_i[OP_ALU_SLL] | operator_i[OP_ALU_SRL] | operator_i[OP_ALU_SRA]);
-    wire bypassable_alu_op =
-        id_ex_valid_i & id_alu_rf_wen_rd_i & (id_rf_waddr_rd_i != '0) &
-        (fast_alu_op | shift_alu_op) & !trap_redirect_i & !flush_ex_i;
     wire fast_result_wen =
-        (id_ex_valid_i & !trap_redirect_i & !flush_ex_i & !op_m_unit &
+        (alu_valid_i & !trap_redirect_i & !flush_ex_i & !op_m_unit &
          !op_bitmanip & (fast_alu_op | op_load | op_store | op_bjp));
     assign fast_add_result = operand_a + operand_b;
     wire [32:0] fast_sub_result_ext = {1'b0, operand_a} + {1'b0, ~operand_b} + 33'd1;
@@ -391,7 +386,7 @@ import ydrasil_pkg::*;
         .interrupt_i          (trap_redirect_i),
         .id_rf_waddr_rd_i     (id_rf_waddr_rd_i),
         .id_alu_rf_wen_rd_i   (id_alu_rf_wen_rd_i),
-        .comp_result_o        (alu_comp_result),
+        .comp_result_o        (),
         .alu_result_o         (alu_result),
         .alu_rf_wen_rd_o      (alu_rf_wen_rd),
         .alu_rf_waddr_rd_o    (alu_rf_waddr_rd)
@@ -404,7 +399,7 @@ import ydrasil_pkg::*;
         .start_i         (div_start),
         .operand_a_i     (mul_operand_a),
         .operand_b_i     (mul_operand_b),
-        .operator_i      (div_active_q ? div_operator_q : operator_i),
+        .operator_i      (div_active_q ? div_operator_q : mul_operator_i),
         .busy_o          (div_busy),
         .done_o          (div_done),
         .result_o        (div_result)
@@ -420,7 +415,7 @@ import ydrasil_pkg::*;
         .issue_ready_o   (mul_issue_ready),
         .operand_a_i     (mul_operand_a),
         .operand_b_i     (mul_operand_b),
-        .operator_i      (operator_i),
+        .operator_i      (mul_operator_i),
         .issue_wen_i     (mul_issue_wen),
         .issue_waddr_i   (id_rf_waddr_rd_i),
         .issue_producer_id_i(id_ex_producer_id_i),
@@ -569,7 +564,7 @@ import ydrasil_pkg::*;
                 div_wen_q    <= id_alu_rf_wen_rd_i & (id_rf_waddr_rd_i != '0);
                 div_waddr_q  <= id_rf_waddr_rd_i;
                 div_producer_id_q <= id_ex_producer_id_i;
-                div_operator_q <= operator_i;
+                div_operator_q <= mul_operator_i;
             end
             if (div_done && div_active_q) begin
                 div_active_q <= 1'b0;
@@ -593,7 +588,8 @@ import ydrasil_pkg::*;
 
     assign completion_o.valid = ex_rf_wen_rd && (id_rf_waddr_rd_i != '0);
     assign completion_o.producer_id = id_ex_producer_id_i;
-    assign completion_o.producer_tracked = completion_o.valid;
+    assign completion_o.producer_tracked = ex_rf_wen_rd &&
+        (id_rf_waddr_rd_i != '0);
     assign completion_o.addr = id_rf_waddr_rd_i;
     assign completion_o.data = fast_bitmanip_rf_wen_rd ?
         fast_bitmanip_result : bitmanip_rf_wen_rd ?

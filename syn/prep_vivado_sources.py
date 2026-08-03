@@ -88,7 +88,13 @@ def run_bender_sources(bender: str, bender_dir: Path, targets: list[str]) -> dic
 def wrapper_files(wrapper_dir: Path) -> list[Path]:
     ordered = [wrapper_dir / name for name in WRAPPER_ORDER if (wrapper_dir / name).is_file()]
     ordered_names = {path.name for path in ordered}
-    rest = sorted(path for path in wrapper_dir.glob("*.sv") if path.name not in ordered_names)
+    # The full Vivado project supplies the generated IROM module from its IP
+    # output products.  The OOC black box has the same module name and causes
+    # a duplicate-definition critical warning when both are compiled.
+    rest = sorted(
+        path for path in wrapper_dir.glob("*.sv")
+        if path.name not in ordered_names and path.name != "IROM_blackbox.sv"
+    )
     return ordered + rest
 
 

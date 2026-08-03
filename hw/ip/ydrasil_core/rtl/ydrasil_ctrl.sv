@@ -52,7 +52,6 @@ import ydrasil_pkg::*;
     output ydrasil_commit_pkt_t         retire_commit1_o,
     output wire                         stall_if_o,
     output wire                         stall_id_o,
-    output wire                         stall_pc_o,
     output wire                         bubble_id_o,
     output wire                         flush_if_o,
     output wire                         flush_id_o,
@@ -72,7 +71,6 @@ import ydrasil_pkg::*;
     producer_id_t producer_tag_q [0:PRODUCER_NUM-1];
     reg [INST_ADDR_WIDTH-1:0] producer_pc_q [0:PRODUCER_NUM-1];
     reg [2:0] producer_op_class_q [0:PRODUCER_NUM-1];
-    reg [2:0] producer_exc_code_q [0:PRODUCER_NUM-1];
     ydrasil_result_class_t producer_result_class_q [0:PRODUCER_NUM-1];
 
     reg [REGS_DATA_WIDTH-1:0] alu_result_q [0:PRODUCER_NUM-1];
@@ -101,10 +99,16 @@ import ydrasil_pkg::*;
         input producer_slot_t ptr,
         input logic [1:0] amount
     );
-        logic [PRODUCER_SLOT_WIDTH:0] sum;
+        localparam int PRODUCER_EXT_WIDTH = PRODUCER_SLOT_WIDTH + 1;
+        logic [PRODUCER_EXT_WIDTH-1:0] sum;
+        localparam logic [PRODUCER_EXT_WIDTH-1:0] PRODUCER_NUM_EXT =
+            PRODUCER_EXT_WIDTH'(PRODUCER_NUM);
         begin
-            sum = ptr + amount;
-            ptr_add = (sum >= PRODUCER_NUM) ? sum - PRODUCER_NUM : sum;
+            sum = {1'b0, ptr} +
+                {{(PRODUCER_SLOT_WIDTH-1){1'b0}}, amount};
+            ptr_add = (sum >= PRODUCER_NUM_EXT) ?
+                producer_slot_t'(sum - PRODUCER_NUM_EXT) :
+                producer_slot_t'(sum);
         end
     endfunction
 
@@ -113,8 +117,11 @@ import ydrasil_pkg::*;
         input producer_slot_t last
     );
         begin
-            queue_distance = (last == first) ? PRODUCER_NUM :
-                (last > first) ? last - first : PRODUCER_NUM - first + last;
+            queue_distance = (last == first) ? QUEUE_COUNT_WIDTH'(PRODUCER_NUM) :
+                (last > first) ?
+                    QUEUE_COUNT_WIDTH'(last) - QUEUE_COUNT_WIDTH'(first) :
+                    QUEUE_COUNT_WIDTH'(PRODUCER_NUM) -
+                    QUEUE_COUNT_WIDTH'(first) + QUEUE_COUNT_WIDTH'(last);
         end
     endfunction
 
@@ -203,7 +210,9 @@ import ydrasil_pkg::*;
     wire queue_alloc1 = dispatch_accept1_i && dispatch_pkt1_i.valid;
     wire [1:0] queue_alloc_count = {1'b0, queue_alloc0} +
         {1'b0, queue_alloc1};
+`ifndef SYNTHESIS
     wire producer_full_stall = dispatch_pkt_i.valid && !producer_has_two_free;
+`endif
     wire producer_pair_stall = dispatch_pkt1_i.valid && !producer_has_two_free;
     wire serial_alloc = queue_alloc0 &&
         dispatch_pkt_i.ctrl.serialize_before;
@@ -282,13 +291,13 @@ import ydrasil_pkg::*;
     assign stall_id_o = ex_mul_stall_i;
     assign bubble_id_o = decode_bubble_stall;
     assign stall_if_o = 1'b0;
-    assign stall_pc_o = 1'b0;
     assign branch_jump_o = ex_branch_jump_i;
     assign branch_target_o = ex_branch_target_i;
     assign flush_if_o = ex_branch_jump_i;
     assign flush_id_o = ex_branch_jump_i;
     assign flush_ex_o = ex_branch_jump_i;
 
+`ifndef SYNTHESIS
     wire rs1_has_producer = issue_pkt_i.src0.tag_valid;
     wire rs2_has_producer = issue_pkt_i.src1.tag_valid;
     producer_id_t rs1_producer_id;
@@ -299,7 +308,6 @@ import ydrasil_pkg::*;
     assign rs2_producer_id = issue_pkt_i.src1.producer_tag;
     assign rs1_producer_slot = rs1_producer_id[PRODUCER_SLOT_WIDTH-1:0];
     assign rs2_producer_slot = rs2_producer_id[PRODUCER_SLOT_WIDTH-1:0];
-`ifndef SYNTHESIS
     localparam logic [2:0] DBG_PRODUCER_ALU = 3'd1;
     localparam logic [2:0] DBG_PRODUCER_LOAD = 3'd2;
     localparam logic [2:0] DBG_PRODUCER_MUL = 3'd3;
@@ -352,35 +360,41 @@ import ydrasil_pkg::*;
     wire completion_hit0 = completion_bus_i[COMPLETION_ALU].valid &&
         completion_bus_i[COMPLETION_ALU].producer_tracked &&
         producer_valid_q[completion_slot0] &&
+        (producer_rd_q[completion_slot0] ==
+         completion_bus_i[COMPLETION_ALU].addr) &&
         (producer_tag_q[completion_slot0] ==
          completion_bus_i[COMPLETION_ALU].producer_id);
     wire completion_hit1 = completion_bus_i[COMPLETION_LSU].valid &&
         completion_bus_i[COMPLETION_LSU].producer_tracked &&
         producer_valid_q[completion_slot1] &&
+        (producer_rd_q[completion_slot1] ==
+         completion_bus_i[COMPLETION_LSU].addr) &&
         (producer_tag_q[completion_slot1] ==
          completion_bus_i[COMPLETION_LSU].producer_id);
     wire completion_hit2 = completion_bus_i[COMPLETION_MUL].valid &&
         completion_bus_i[COMPLETION_MUL].producer_tracked &&
         producer_valid_q[completion_slot2] &&
+        (producer_rd_q[completion_slot2] ==
+         completion_bus_i[COMPLETION_MUL].addr) &&
         (producer_tag_q[completion_slot2] ==
          completion_bus_i[COMPLETION_MUL].producer_id);
     wire completion_hit3 = completion_bus_i[COMPLETION_DUAL_ALU].valid &&
         completion_bus_i[COMPLETION_DUAL_ALU].producer_tracked &&
         producer_valid_q[completion_slot3] &&
+        (producer_rd_q[completion_slot3] ==
+         completion_bus_i[COMPLETION_DUAL_ALU].addr) &&
         (producer_tag_q[completion_slot3] ==
          completion_bus_i[COMPLETION_DUAL_ALU].producer_id);
-    reg [PRODUCER_NUM-1:0] producer_complete_mask;
-    always_comb begin
-        producer_complete_mask = '0;
-        if (completion_hit0) producer_complete_mask[completion_slot0] = 1'b1;
-        if (completion_hit1) producer_complete_mask[completion_slot1] = 1'b1;
-        if (completion_hit2) producer_complete_mask[completion_slot2] = 1'b1;
-        if (completion_hit3) producer_complete_mask[completion_slot3] = 1'b1;
-    end
+`ifndef SYNTHESIS
+    wire [PRODUCER_NUM-1:0] producer_complete_mask =
+        (completion_hit0 ? (PRODUCER_NUM'(1) << completion_slot0) : '0) |
+        (completion_hit1 ? (PRODUCER_NUM'(1) << completion_slot1) : '0) |
+        (completion_hit2 ? (PRODUCER_NUM'(1) << completion_slot2) : '0) |
+        (completion_hit3 ? (PRODUCER_NUM'(1) << completion_slot3) : '0);
     wire [PRODUCER_NUM-1:0] producer_retire_q =
         (queue_commit0 ? (PRODUCER_NUM'(1) << queue_head_q) : '0) |
         (queue_commit1 ? (PRODUCER_NUM'(1) << queue_head1) : '0);
-
+`endif
     wire branch_alloc0 = queue_alloc0 && dispatch_pkt_i.ctrl.checkpoint_req;
     wire branch_alloc1 = queue_alloc1 && dispatch_pkt1_i.ctrl.checkpoint_req;
     wire branch_alloc = branch_alloc0 || branch_alloc1;
@@ -412,9 +426,9 @@ import ydrasil_pkg::*;
                 recovery_live_mask[recovery_idx] = 1'b1;
         end
 
-        // A checkpoint can outlive producers that were older than its
-        // branch. Do not resurrect those mappings, or a later slot/epoch
-        // reuse can make the stale tag name an unrelated producer.
+        // A checkpoint can outlive producers that were older than its branch.
+        // Do not resurrect those mappings, or a later slot/epoch reuse can
+        // make the stale tag name an unrelated producer.
         recovery_rat_valid = '0;
         for (recovery_reg_idx = 1; recovery_reg_idx < REGS_NUM;
              recovery_reg_idx++) begin
@@ -434,7 +448,7 @@ import ydrasil_pkg::*;
     integer branch_idx;
     integer branch_reg_idx;
     always_ff @(posedge clk) begin
-        if (!rst_n || ex_hzd_i.interrupt) begin
+        if (!rst_n || ex_hzd_i.interrupt_pending) begin
             producer_valid_q <= '0;
             producer_ready_q <= '0;
             producer_writes_gpr_q <= '0;
@@ -451,7 +465,6 @@ import ydrasil_pkg::*;
                 producer_tag_q[slot_idx] <= '0;
                 producer_pc_q[slot_idx] <= '0;
                 producer_op_class_q[slot_idx] <= '0;
-                producer_exc_code_q[slot_idx] <= '0;
                 producer_result_class_q[slot_idx] <= RESULT_NONE;
                 alu_result_q[slot_idx] <= '0;
                 lsu_result_q[slot_idx] <= '0;
@@ -667,8 +680,4 @@ import ydrasil_pkg::*;
         end
     end
 
-    wire unused = &{1'b0, ex_pc_i, ex_pc1_i,
-        rf_wdata_rd_i, rf_producer_id_i, rf_producer_tracked_i,
-        rf_wdata_rd1_i, rf_producer_id1_i, rf_producer_tracked1_i,
-        producer_pair_stall};
 endmodule

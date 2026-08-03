@@ -29,8 +29,6 @@ import ydrasil_pkg::*;
     wire [31:0] mux_op1 = operand_a_i;
     wire [31:0] mux_op2 = operand_b_i;
 
-    wire        req_alu = operator_type_i[ydrasil_pkg::OPERATOR_TYPE_ALU];
-
     // ALU运算类型选择(包括R与I类型)
     wire        op_add   ;
     wire        op_sub   ;
@@ -145,7 +143,7 @@ import ydrasil_pkg::*;
     wire [31:0] adder_in1;
     wire [31:0] adder_in2;
     wire        adder_cin;
-    wire [32:0] adder_res; // 33位，包含进位信息
+    wire [31:0] adder_res;
 
 
     // 加减法操作 - 复用于加减法、比较、地址计算等
@@ -157,7 +155,9 @@ import ydrasil_pkg::*;
     assign adder_cin = (op_sub | op_compare);
 
     // 执行加法运算
-    assign adder_res = {1'b0, adder_in1} + {1'b0, adder_in2} + {{32{1'b0}}, adder_cin};
+    // Only the low 32 bits participate in the ALU result and compare.  The
+    // carry-out was never consumed, so keep the adder at architectural width.
+    assign adder_res = adder_in1 + adder_in2 + {{31{1'b0}}, adder_cin};
 
     wire [31:0] xor_res ;
     wire [31:0] or_res  ;

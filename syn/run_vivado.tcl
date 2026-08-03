@@ -581,6 +581,15 @@ puts "Sweep post-route phys_opt: $sweep_post_route_physopt"
 puts "Run target: $run_to"
 open_project $xpr
 
+# A staged project may retain an INCREMENTAL_CHECKPOINT property from a
+# previous host/build tree even when the imported DCP has been removed.  That
+# makes Vivado reject the run (or, worse, reuse an old netlist).  This build is
+# an architectural timing measurement, so always clear stale incremental
+# checkpoints before synthesis/implementation setup.
+foreach run_obj [get_runs -quiet] {
+    catch {set_property INCREMENTAL_CHECKPOINT "" $run_obj}
+}
+
 set max_threads [clamp_int $threads_per_run 1 32]
 if {$max_threads != $threads_per_run} {
     puts "Vivado general.maxThreads is limited to $max_threads; launch_runs still uses -jobs $jobs"

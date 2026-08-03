@@ -15,7 +15,9 @@ import ydrasil_pkg::*;
     input  ydrasil_rob_source_state_t  issue_src2_state_i,
     input  ydrasil_rob_source_state_t  issue_src3_state_i,
     input  ydrasil_completion_bus_t    completion_bus_i,
-    input  ydrasil_lsu_status_pkt_t    lsu_status_i,
+    input  wire                        lsu_idle_i,
+    input  wire [1:0]                  lsu_credit_i,
+    input  ydrasil_reservation_pkt_t   dtcm_reservation_i,
     input  wire                        issue_at_rob_head_i,
     output wire                        issue_ready_o,
     output wire                        issue_consume_two_o,
@@ -33,6 +35,47 @@ import ydrasil_pkg::*;
     output wire                        src2_wait_o,
     output wire                        src3_wait_o,
     output ydrasil_issue_ex_pkt_t      issue_ex_o,
+    output wire                        alu_in_valid_o,
+    output wire [DATA_WIDTH-1:0]       alu_in_operand_a_o,
+    output wire [DATA_WIDTH-1:0]       alu_in_operand_b_o,
+    output wire [OPERATOR_WIDTH-1:0]   alu_in_operator_o,
+    output wire [OPERATOR_TYPE_WIDTH-1:0] alu_in_operator_type_o,
+    output wire                        alu_in_rd_wen_o,
+    output wire [REGS_ADDR_WIDTH-1:0]  alu_in_rd_addr_o,
+    output producer_id_t               alu_in_producer_id_o,
+    output wire                        bru_in_valid_o,
+    output wire [DATA_WIDTH-1:0]       bru_in_operand_a_o,
+    output wire [DATA_WIDTH-1:0]       bru_in_operand_b_o,
+    output wire [DATA_WIDTH-1:0]       bru_in_bt_operand_a_o,
+    output wire [DATA_WIDTH-1:0]       bru_in_bt_operand_b_o,
+    output wire [OPERATOR_WIDTH-1:0]   bru_in_operator_o,
+    output wire [OPERATOR_TYPE_WIDTH-1:0] bru_in_operator_type_o,
+    output wire                        bru_in_jalr_o,
+    output wire [DATA_WIDTH-1:0]       bru_in_branch_target_o,
+    output wire [DATA_WIDTH-1:0]       bru_in_branch_next_pc_o,
+    output wire [DATA_WIDTH-1:0]       bru_in_pc_o,
+    output wire                        bru_in_pred_hit_o,
+    output wire                        bru_in_pred_taken_o,
+    output wire [DATA_WIDTH-1:0]       bru_in_pred_target_o,
+    output wire [1:0]                  bru_in_pred_counter_o,
+    output wire [DATA_WIDTH-1:0]       bru_in_pred_bht_index_o,
+    output wire                        agu_in_valid_o,
+    output wire [DATA_WIDTH-1:0]       agu_in_operand_a_o,
+    output wire [DATA_WIDTH-1:0]       agu_in_operand_b_o,
+    output ydrasil_lsu_req_pkt_t       agu_in_req_o,
+    output wire                        csr_in_valid_o,
+    output wire [DATA_WIDTH-1:0]       csr_in_operand_a_o,
+    output wire [OPERATOR_TYPE_WIDTH-1:0] csr_in_operator_type_o,
+    output wire [CSR_ADDR_WIDTH-1:0]   csr_in_raddr_o,
+    output wire [CSR_ADDR_WIDTH-1:0]   csr_in_waddr_o,
+    output wire [OP_CSR_INFO_WIDTH-1:0] csr_in_op_info_o,
+    output wire [OP_SYS_INFO_WIDTH-1:0] csr_in_sys_info_o,
+    output wire                        mul_in_valid_o,
+    output wire [DATA_WIDTH-1:0]       mul_in_operand_a_o,
+    output wire [DATA_WIDTH-1:0]       mul_in_operand_b_o,
+    output wire [OPERATOR_WIDTH-1:0]   mul_in_operator_o,
+    output wire [OPERATOR_TYPE_WIDTH-1:0] mul_in_operator_type_o,
+    output ydrasil_dual_issue_pkt_t    dual_in_o,
     output wire [4:0]                  rf_addr_rs1_o,
     output wire [4:0]                  rf_addr_rs2_o,
     output wire [4:0]                  rf_addr_rs3_o,
@@ -48,15 +91,59 @@ import ydrasil_pkg::*;
     input  wire [DATA_WIDTH-1:0]       fpr_rdata_rs2_i,
     input  wire [DATA_WIDTH-1:0]       fpr_rdata_rs3_i
 );
+    // These snapshots terminate the Issue grant control cone.  The raw
+    // producer/LSU signals only feed the D pins of these registers.
+    ydrasil_completion_bus_t completion_q;
+    reg lsu_idle_q;
+    reg issue_at_rob_head_q;
+    reg early_wakeup_valid_q [0:1];
+    producer_id_t early_wakeup_id_q [0:1];
+    reg [REGS_ADDR_WIDTH-1:0] early_wakeup_rd_q [0:1];
+
+    reg alu_in_valid_q;
+    reg [DATA_WIDTH-1:0] alu_in_operand_a_q, alu_in_operand_b_q;
+    reg [OPERATOR_WIDTH-1:0] alu_in_operator_q;
+    reg [OPERATOR_TYPE_WIDTH-1:0] alu_in_operator_type_q;
+    reg alu_in_rd_wen_q;
+    reg [REGS_ADDR_WIDTH-1:0] alu_in_rd_addr_q;
+    producer_id_t alu_in_producer_id_q;
+    reg bru_in_valid_q;
+    reg [DATA_WIDTH-1:0] bru_in_operand_a_q, bru_in_operand_b_q;
+    reg [DATA_WIDTH-1:0] bru_in_bt_operand_a_q, bru_in_bt_operand_b_q;
+    reg [OPERATOR_WIDTH-1:0] bru_in_operator_q;
+    reg [OPERATOR_TYPE_WIDTH-1:0] bru_in_operator_type_q;
+    reg bru_in_jalr_q;
+    reg [DATA_WIDTH-1:0] bru_in_branch_target_q, bru_in_branch_next_pc_q;
+    reg [DATA_WIDTH-1:0] bru_in_pc_q, bru_in_pred_target_q;
+    reg bru_in_pred_hit_q, bru_in_pred_taken_q;
+    reg [1:0] bru_in_pred_counter_q;
+    reg [DATA_WIDTH-1:0] bru_in_pred_bht_index_q;
+    reg agu_in_valid_q;
+    reg [DATA_WIDTH-1:0] agu_in_operand_a_q, agu_in_operand_b_q;
+    ydrasil_lsu_req_pkt_t agu_in_req_q;
+    reg csr_in_valid_q;
+    reg [DATA_WIDTH-1:0] csr_in_operand_a_q;
+    reg [OPERATOR_TYPE_WIDTH-1:0] csr_in_operator_type_q;
+    reg [CSR_ADDR_WIDTH-1:0] csr_in_raddr_q, csr_in_waddr_q;
+    reg [OP_CSR_INFO_WIDTH-1:0] csr_in_op_info_q;
+    reg [OP_SYS_INFO_WIDTH-1:0] csr_in_sys_info_q;
+    reg mul_in_valid_q;
+    reg [DATA_WIDTH-1:0] mul_in_operand_a_q, mul_in_operand_b_q;
+    reg [OPERATOR_WIDTH-1:0] mul_in_operator_q;
+    reg [OPERATOR_TYPE_WIDTH-1:0] mul_in_operator_type_q;
+    ydrasil_dual_issue_pkt_t dual_in_q;
+    integer completion_idx;
+
     function automatic logic completion_hit(
         input ydrasil_source_desc_t src,
         input integer lane
     );
         begin
             completion_hit = src.used && (src.arch_addr != '0) &&
-                src.tag_valid && completion_bus_i[lane].valid &&
-                completion_bus_i[lane].producer_tracked &&
-                (completion_bus_i[lane].producer_id == src.producer_tag);
+                src.tag_valid && completion_q[lane].valid &&
+                completion_q[lane].producer_tracked &&
+                (completion_q[lane].addr == src.arch_addr) &&
+                (completion_q[lane].producer_id == src.producer_tag);
         end
     endfunction
 
@@ -82,14 +169,14 @@ import ydrasil_pkg::*;
         begin
             unique case (src.producer_class)
                 RESULT_LSU:
-                    typed_completion_data = completion_bus_i[COMPLETION_LSU].data;
+                    typed_completion_data = completion_q[COMPLETION_LSU].data;
                 RESULT_MDU:
-                    typed_completion_data = completion_bus_i[COMPLETION_MUL].data;
+                    typed_completion_data = completion_q[COMPLETION_MUL].data;
                 default:
                     typed_completion_data =
                         completion_hit(src, COMPLETION_ALU) ?
-                        completion_bus_i[COMPLETION_ALU].data :
-                        completion_bus_i[COMPLETION_DUAL_ALU].data;
+                        completion_q[COMPLETION_ALU].data :
+                        completion_q[COMPLETION_DUAL_ALU].data;
             endcase
         end
     endfunction
@@ -100,7 +187,8 @@ import ydrasil_pkg::*;
     );
         begin
             source_ready = !src.used || (src.arch_addr == '0) ||
-                !state.live || state.done || typed_completion_hit(src);
+                !state.live || state.done || typed_completion_hit(src) ||
+                early_wakeup_hit(src) || dtcm_reservation_hit(src);
         end
     endfunction
 
@@ -116,6 +204,80 @@ import ydrasil_pkg::*;
             if (src.used && (src.arch_addr != '0) &&
                 typed_completion_hit(src))
                 source_data = typed_completion_data(src);
+            // A fixed-latency ALU reservation carries the value alongside
+            // its generation-tagged identity.  It is a data-only local
+            // bypass; source_ready still requires the same reservation hit.
+            if (early_wakeup_hit(src))
+                source_data = early_wakeup_data(src);
+            if (dtcm_reservation_hit(src))
+                source_data = dtcm_reservation_i.predicted_data;
+        end
+    endfunction
+
+    function automatic logic dtcm_reservation_hit(
+        input ydrasil_source_desc_t src
+    );
+        begin
+            dtcm_reservation_hit = src.used && (src.arch_addr != '0) &&
+                src.tag_valid && (src.producer_class == RESULT_LSU) &&
+                dtcm_reservation_i.valid &&
+                dtcm_reservation_i.producer_tracked &&
+                (dtcm_reservation_i.result_class == RESULT_LSU) &&
+                (dtcm_reservation_i.arch_addr == src.arch_addr) &&
+                (dtcm_reservation_i.producer_id == src.producer_tag);
+        end
+    endfunction
+
+    function automatic logic early_wakeup_hit(
+        input ydrasil_source_desc_t src
+    );
+        begin
+            early_wakeup_hit = src.used && (src.arch_addr != '0) &&
+                src.tag_valid && (src.producer_class == RESULT_ALU) &&
+                ((early_wakeup_valid_q[0] &&
+                  (early_wakeup_rd_q[0] == src.arch_addr) &&
+                  (early_wakeup_id_q[0] == src.producer_tag)) ||
+                 (early_wakeup_valid_q[1] &&
+                  (early_wakeup_rd_q[1] == src.arch_addr) &&
+                  (early_wakeup_id_q[1] == src.producer_tag)));
+        end
+    endfunction
+
+    function automatic [DATA_WIDTH-1:0] early_wakeup_data(
+        input ydrasil_source_desc_t src
+    );
+        begin
+            early_wakeup_data = '0;
+            if (early_wakeup_valid_q[0] &&
+                (early_wakeup_rd_q[0] == src.arch_addr) &&
+                (early_wakeup_id_q[0] == src.producer_tag))
+                early_wakeup_data = alu_in_operator_type_q[OPERATOR_TYPE_BJP] ?
+                    (bru_in_pc_q + 32'd4) : early_result(
+                        alu_in_operator_q, alu_in_operator_type_q,
+                        alu_in_operand_a_q, alu_in_operand_b_q);
+            else if (early_wakeup_valid_q[1] &&
+                     (early_wakeup_rd_q[1] == src.arch_addr) &&
+                     (early_wakeup_id_q[1] == src.producer_tag))
+                early_wakeup_data = dual_in_q.operator_type[OPERATOR_TYPE_BJP] ?
+                    (dual_in_q.pc + 32'd4) : early_result(
+                        dual_in_q.operator_info, dual_in_q.operator_type,
+                        dual_in_q.operand_a, dual_in_q.operand_b);
+        end
+    endfunction
+
+    function automatic [DATA_WIDTH-1:0] source_data_local_bypass(
+        input ydrasil_source_desc_t src,
+        input ydrasil_rob_source_state_t state,
+        input logic [DATA_WIDTH-1:0] arf_data
+    );
+        begin
+            source_data_local_bypass = source_data(src, state, arf_data);
+            // Completion data is consumed from completion_q, which is the
+            // registered wakeup boundary. Fixed-latency ALU/BRU/bit results
+            // still use the tagged early reservation below; no raw global
+            // completion bus is allowed back into operand generation.
+            if (dtcm_reservation_hit(src))
+                source_data_local_bypass = dtcm_reservation_i.predicted_data;
         end
     endfunction
 
@@ -125,16 +287,18 @@ import ydrasil_pkg::*;
     wire src3_ready = source_ready(issue_pkt1_i.src1, issue_src3_state_i);
     wire slot0_scoreboard_stall = issue_pkt_i.valid &&
         (!src0_ready || !src1_ready);
-    wire slot1_scoreboard_stall = issue_pkt1_i.valid &&
+    wire slot1_active = issue_pkt_i.pair_eligible && issue_pkt1_i.valid;
+    wire slot1_scoreboard_stall = slot1_active &&
         (!src2_ready || !src3_ready);
-    wire slot0_lsu_stall = issue_pkt_i.ctrl.lsu_req && lsu_status_i.busy;
-    wire slot1_lsu_stall = issue_pkt1_i.ctrl.lsu_req && lsu_status_i.busy;
+    wire slot0_lsu_stall = issue_pkt_i.ctrl.lsu_req && (lsu_credit_i == 2'd0);
+    wire slot1_lsu_stall = slot1_active && issue_pkt1_i.ctrl.lsu_req &&
+        (lsu_credit_i == 2'd0);
     wire serialize_stall = issue_pkt_i.ctrl.serialize_before &&
-        (!lsu_status_i.idle || !issue_at_rob_head_i);
+        (!lsu_idle_q || !issue_at_rob_head_q);
     wire local_issue_stall = slot0_scoreboard_stall || slot0_lsu_stall ||
         serialize_stall;
     wire id_advance = !stall_id_i && !bubble_id_i && !local_issue_stall;
-    wire pair_eligible = issue_pkt_i.pair_eligible && issue_pkt1_i.valid;
+    wire pair_eligible = slot1_active;
     wire slot1_blocked = slot1_scoreboard_stall || slot1_lsu_stall;
     wire pair_issue = pair_eligible && !slot1_blocked;
     wire swap_pair = pair_issue &&
@@ -214,6 +378,14 @@ import ydrasil_pkg::*;
         issue_pkt1_i.src0, issue_src2_state_i, rf_rdata_rs3_i);
     wire [DATA_WIDTH-1:0] slot1_src1 = source_data(
         issue_pkt1_i.src1, issue_src3_state_i, rf_rdata_rs4_i);
+    wire [DATA_WIDTH-1:0] slot0_src0_local = source_data_local_bypass(
+        issue_pkt_i.src0, issue_src0_state_i, rf_rdata_rs1_i);
+    wire [DATA_WIDTH-1:0] slot0_src1_local = source_data_local_bypass(
+        issue_pkt_i.src1, issue_src1_state_i, rf_rdata_rs2_i);
+    wire [DATA_WIDTH-1:0] slot1_src0_local = source_data_local_bypass(
+        issue_pkt1_i.src0, issue_src2_state_i, rf_rdata_rs3_i);
+    wire [DATA_WIDTH-1:0] slot1_src1_local = source_data_local_bypass(
+        issue_pkt1_i.src1, issue_src3_state_i, rf_rdata_rs4_i);
     wire [DATA_WIDTH-1:0] lane_a_src0 = swap_pair ? slot1_src0 : slot0_src0;
     wire [DATA_WIDTH-1:0] lane_a_src1 = swap_pair ? slot1_src1 : slot0_src1;
     wire lane_b_uses_slot0 = head0_b_only || swap_pair;
@@ -221,6 +393,14 @@ import ydrasil_pkg::*;
         slot0_src0 : slot1_src0;
     wire [DATA_WIDTH-1:0] lane_b_src1 = lane_b_uses_slot0 ?
         slot0_src1 : slot1_src1;
+    wire [DATA_WIDTH-1:0] lane_a_src0_local = swap_pair ?
+        slot1_src0_local : slot0_src0_local;
+    wire [DATA_WIDTH-1:0] lane_a_src1_local = swap_pair ?
+        slot1_src1_local : slot0_src1_local;
+    wire [DATA_WIDTH-1:0] lane_b_src0_local = lane_b_uses_slot0 ?
+        slot0_src0_local : slot1_src0_local;
+    wire [DATA_WIDTH-1:0] lane_b_src1_local = lane_b_uses_slot0 ?
+        slot0_src1_local : slot1_src1_local;
 
     assign rf_addr_rs1_o = issue_pkt_i.src0.arch_addr;
     assign rf_addr_rs2_o = issue_pkt_i.src1.arch_addr;
@@ -247,6 +427,102 @@ import ydrasil_pkg::*;
         begin
             operand_b_for = uop.decode.operand_b_jump_sel ? 32'd4 :
                 uop.decode.operand_b_rs_sel ? src1 : uop.decode.imm;
+        end
+    endfunction
+
+    // Fixed-latency result token for the operations whose result is available
+    // at the Issue/EX boundary. It is deliberately registered together with
+    // the producer tag, so it can participate in grant without reopening the
+    // completion bus path.
+    function automatic [DATA_WIDTH-1:0] early_result(
+        input logic [OPERATOR_WIDTH-1:0] op,
+        input logic [OPERATOR_TYPE_WIDTH-1:0] op_type,
+        input logic [DATA_WIDTH-1:0] a,
+        input logic [DATA_WIDTH-1:0] b
+    );
+        begin
+            early_result = '0;
+            if (op_type[OPERATOR_TYPE_ALU] &&
+                !op_type[OPERATOR_TYPE_BITMANIP]) begin
+                if (op[OP_ALU_SUB])
+                    early_result = a - b;
+                else if (op[OP_ALU_SLT])
+                    early_result = {31'b0, ($signed(a) < $signed(b))};
+                else if (op[OP_ALU_SLTU])
+                    early_result = {31'b0, (a < b)};
+                else if (op[OP_ALU_XOR])
+                    early_result = a ^ b;
+                else if (op[OP_ALU_OR])
+                    early_result = a | b;
+                else if (op[OP_ALU_AND])
+                    early_result = a & b;
+                else if (op[OP_ALU_SLL])
+                    early_result = a << b[4:0];
+                else if (op[OP_ALU_SRL])
+                    early_result = a >> b[4:0];
+                else if (op[OP_ALU_SRA])
+                    early_result = $signed(a) >>> b[4:0];
+                else if (op[OP_ALU_LUI])
+                    early_result = b;
+                else
+                    early_result = a + b;
+            end else if (op_type[OPERATOR_TYPE_BJP]) begin
+                // Only JAL/JALR write a GPR in this class. Their link value
+                // is PC+4, independent of the branch target operands.
+                early_result = a + b;
+            end else if (op_type[OPERATOR_TYPE_BITMANIP]) begin
+                // Keep this set identical to ex_block's fixed-latency path.
+                // The remaining bitmanip operations stay on registered
+                // completion and are not predicted here.
+                if (op[OP_B_SH1ADD])
+                    early_result = (a << 1) + b;
+                else if (op[OP_B_SH2ADD])
+                    early_result = (a << 2) + b;
+                else if (op[OP_B_SH3ADD])
+                    early_result = (a << 3) + b;
+                else if (op[OP_B_ANDN])
+                    early_result = a & ~b;
+                else if (op[OP_B_ORN])
+                    early_result = a | ~b;
+                else if (op[OP_B_XNOR])
+                    early_result = ~(a ^ b);
+                else if (op[OP_B_BCLR] || op[OP_B_BCLRI])
+                    early_result = a & ~(DATA_WIDTH'(1) << b[4:0]);
+                else if (op[OP_B_BEXT] || op[OP_B_BEXTI])
+                    early_result = {{(DATA_WIDTH-1){1'b0}},
+                        |(a & (DATA_WIDTH'(1) << b[4:0]))};
+                else if (op[OP_B_BINV] || op[OP_B_BINVI])
+                    early_result = a ^ (DATA_WIDTH'(1) << b[4:0]);
+                else if (op[OP_B_BSET] || op[OP_B_BSETI])
+                    early_result = a | (DATA_WIDTH'(1) << b[4:0]);
+                else if (op[OP_B_PACK])
+                    early_result = {b[15:0], a[15:0]};
+                else if (op[OP_B_PACKH])
+                    early_result = {16'b0, b[7:0], a[7:0]};
+                else if (op[OP_B_REV8])
+                    early_result = {a[7:0], a[15:8], a[23:16], a[31:24]};
+                else if (op[OP_B_SEXT_B])
+                    early_result = {{24{a[7]}}, a[7:0]};
+                else if (op[OP_B_SEXT_H])
+                    early_result = {{16{a[15]}}, a[15:0]};
+                else if (op[OP_B_ZEXT_H])
+                    early_result = {16'b0, a[15:0]};
+            end
+        end
+    endfunction
+
+    function automatic logic early_bitmanip_supported(
+        input logic [OPERATOR_WIDTH-1:0] op
+    );
+        begin
+            early_bitmanip_supported =
+                op[OP_B_SH1ADD] | op[OP_B_SH2ADD] | op[OP_B_SH3ADD] |
+                op[OP_B_ANDN] | op[OP_B_ORN] | op[OP_B_XNOR] |
+                op[OP_B_BCLR] | op[OP_B_BCLRI] | op[OP_B_BEXT] |
+                op[OP_B_BEXTI] | op[OP_B_BINV] | op[OP_B_BINVI] |
+                op[OP_B_BSET] | op[OP_B_BSETI] | op[OP_B_PACK] |
+                op[OP_B_PACKH] | op[OP_B_REV8] | op[OP_B_SEXT_B] |
+                op[OP_B_SEXT_H] | op[OP_B_ZEXT_H];
         end
     endfunction
 
@@ -342,23 +618,252 @@ import ydrasil_pkg::*;
         issue_ex_d.lane1_pred_counter = lane_b_uop.decode.pred_counter;
         issue_ex_d.lane1_pred_bht_index = lane_b_uop.decode.pred_bht_index;
 
-        // A blocked DispatchQ head owns no EX state. This is the registered
-        // Issue/EX boundary: operands and tags advance only with the queue pop.
-        if (!id_advance)
-            issue_ex_d = '0;
+        // Keep the payload independent from the grant/occupancy decision.
+        // Only valid bits cross the issue/EX ownership boundary.  Clearing the
+        // entire packed payload here made issue_pipe_count/pair_eligible fan
+        // out through every operand and metadata bit, reopening a long timing
+        // cone into the early-wakeup data cells.  Invalid payload is ignored
+        // by every execution unit and is overwritten on the next accepted
+        // issue, while the valid bits still enforce the exact handshake.
+        if (!id_advance) begin
+            issue_ex_d.valid = 1'b0;
+            issue_ex_d.producer_tracked = 1'b0;
+            issue_ex_d.lsu_req.valid = 1'b0;
+            issue_ex_d.lsu_req.producer_tracked = 1'b0;
+            issue_ex_d.fpu_req.valid = 1'b0;
+            issue_ex_d.fpu_req.producer_tracked = 1'b0;
+            issue_ex_d.lane1_valid = 1'b0;
+            issue_ex_d.lane1_producer_tracked = 1'b0;
+        end
     end
 
     always_ff @(posedge clk) begin
-        if (!rst_n || flush_id_i)
+        if (!rst_n || flush_id_i) begin
+            for (completion_idx = 0; completion_idx < COMPLETION_LANES;
+                 completion_idx = completion_idx + 1)
+                completion_q[completion_idx] <= '0;
+            lsu_idle_q <= 1'b1;
+            issue_at_rob_head_q <= 1'b0;
+            early_wakeup_valid_q[0] <= 1'b0;
+            early_wakeup_valid_q[1] <= 1'b0;
+            early_wakeup_id_q[0] <= '0;
+            early_wakeup_id_q[1] <= '0;
+            early_wakeup_rd_q[0] <= '0;
+            early_wakeup_rd_q[1] <= '0;
             issue_ex_q <= '0;
-        else if (!stall_id_i) begin
-            if (bubble_id_i)
-                issue_ex_q <= '0;
-            else
-                issue_ex_q <= issue_ex_d;
+            alu_in_valid_q <= 1'b0;
+            alu_in_operand_a_q <= '0;
+            alu_in_operand_b_q <= '0;
+            alu_in_operator_q <= '0;
+            alu_in_operator_type_q <= '0;
+            alu_in_rd_wen_q <= 1'b0;
+            alu_in_rd_addr_q <= '0;
+            alu_in_producer_id_q <= '0;
+            bru_in_valid_q <= 1'b0;
+            bru_in_operand_a_q <= '0;
+            bru_in_operand_b_q <= '0;
+            bru_in_bt_operand_a_q <= '0;
+            bru_in_bt_operand_b_q <= '0;
+            bru_in_operator_q <= '0;
+            bru_in_operator_type_q <= '0;
+            bru_in_jalr_q <= 1'b0;
+            bru_in_branch_target_q <= '0;
+            bru_in_branch_next_pc_q <= '0;
+            bru_in_pc_q <= '0;
+            bru_in_pred_hit_q <= 1'b0;
+            bru_in_pred_taken_q <= 1'b0;
+            bru_in_pred_target_q <= '0;
+            bru_in_pred_counter_q <= '0;
+            bru_in_pred_bht_index_q <= '0;
+            agu_in_valid_q <= 1'b0;
+            agu_in_operand_a_q <= '0;
+            agu_in_operand_b_q <= '0;
+            agu_in_req_q <= '0;
+            csr_in_valid_q <= 1'b0;
+            csr_in_operand_a_q <= '0;
+            csr_in_operator_type_q <= '0;
+            csr_in_raddr_q <= '0;
+            csr_in_waddr_q <= '0;
+            csr_in_op_info_q <= '0;
+            csr_in_sys_info_q <= '0;
+            mul_in_valid_q <= 1'b0;
+            mul_in_operand_a_q <= '0;
+            mul_in_operand_b_q <= '0;
+            mul_in_operator_q <= '0;
+            mul_in_operator_type_q <= '0;
+            dual_in_q <= '0;
+        end else begin
+            // Only these FFs see the raw completion/status/head signals.
+            completion_q <= completion_bus_i;
+            lsu_idle_q <= lsu_idle_i;
+            issue_at_rob_head_q <= issue_at_rob_head_i;
+
+            if (stall_id_i) begin
+                // A token is a one-cycle reservation. Holding it across an
+                // unrelated front-end stall could alias a recycled producer
+                // tag after the circular ROB wraps.
+                early_wakeup_valid_q[0] <= 1'b0;
+                early_wakeup_valid_q[1] <= 1'b0;
+            end else begin
+                if (bubble_id_i) begin
+                    issue_ex_q <= '0;
+                    early_wakeup_valid_q[0] <= 1'b0;
+                    early_wakeup_valid_q[1] <= 1'b0;
+                    alu_in_valid_q <= 1'b0;
+                    bru_in_valid_q <= 1'b0;
+                    agu_in_valid_q <= 1'b0;
+                    agu_in_req_q <= '0;
+                    csr_in_valid_q <= 1'b0;
+                    mul_in_valid_q <= 1'b0;
+                    dual_in_q <= '0;
+                end else begin
+                    issue_ex_q <= issue_ex_d;
+                    // Wakeup qualification is a control token, not execution
+                    // payload.  Derive it directly from the selected lane so
+                    // the LSU request/credit fields in issue_ex_d cannot
+                    // re-enter this D cone through struct packing.
+                    early_wakeup_valid_q[0] <= lane_a_valid &&
+                        lane_a_uop.dst.writes_gpr &&
+                        !lane_a_uop.memory_op &&
+                        !lane_a_uop.decode.fp_valid &&
+                        !lane_a_uop.decode.fence_i &&
+                        ((lane_a_uop.decode.operator_type[OPERATOR_TYPE_ALU] &&
+                          !lane_a_uop.decode.operator_type[OPERATOR_TYPE_BITMANIP]) ||
+                         lane_a_uop.decode.operator_type[OPERATOR_TYPE_BJP] ||
+                         (lane_a_uop.decode.operator_type[OPERATOR_TYPE_BITMANIP] &&
+                          early_bitmanip_supported(lane_a_uop.decode.operator_info)));
+                    early_wakeup_valid_q[1] <= lane_b_valid &&
+                        lane_b_uop.dst.writes_gpr &&
+                        !lane_b_uop.decode.fp_valid &&
+                        ((lane_b_uop.decode.operator_type[OPERATOR_TYPE_ALU] &&
+                          !lane_b_uop.decode.operator_type[OPERATOR_TYPE_BITMANIP]) ||
+                         lane_b_uop.decode.operator_type[OPERATOR_TYPE_BJP] ||
+                         (lane_b_uop.decode.operator_type[OPERATOR_TYPE_BITMANIP] &&
+                          early_bitmanip_supported(lane_b_uop.decode.operator_info)));
+                    early_wakeup_id_q[0] <= lane_a_uop.dst.rob_tag;
+                    early_wakeup_id_q[1] <= lane_b_uop.dst.rob_tag;
+                    early_wakeup_rd_q[0] <= lane_a_uop.dst.rd_addr;
+                    early_wakeup_rd_q[1] <= lane_b_uop.dst.rd_addr;
+                    // Each execution class has its own input cell.  The
+                    // values are captured at the same architectural boundary
+                    // as issue_ex_q.  Early data is derived from these cells
+                    // below, so current grant/status signals cannot reach a
+                    // wakeup-data D pin.
+                    alu_in_valid_q <= issue_ex_d.valid;
+                    alu_in_operand_a_q <= operand_a_for(lane_a_uop, lane_a_src0_local);
+                    alu_in_operand_b_q <= operand_b_for(lane_a_uop, lane_a_src1_local);
+                    alu_in_operator_q <= issue_ex_d.operator_info;
+                    alu_in_operator_type_q <= issue_ex_d.operator_type;
+                    alu_in_rd_wen_q <= issue_ex_d.rd_wen;
+                    alu_in_rd_addr_q <= issue_ex_d.rd_addr;
+                    alu_in_producer_id_q <= issue_ex_d.producer_id;
+                    bru_in_valid_q <= issue_ex_d.valid;
+                    bru_in_operand_a_q <= operand_a_for(lane_a_uop, lane_a_src0_local);
+                    bru_in_operand_b_q <= operand_b_for(lane_a_uop, lane_a_src1_local);
+                    bru_in_bt_operand_a_q <= lane_a_uop.decode.bt_a_rs_sel ?
+                        lane_a_src0_local : lane_a_uop.decode.pc;
+                    bru_in_bt_operand_b_q <= lane_a_src1_local;
+                    bru_in_operator_q <= issue_ex_d.operator_info;
+                    bru_in_operator_type_q <= issue_ex_d.operator_type;
+                    bru_in_jalr_q <= issue_ex_d.jalr;
+                    bru_in_branch_target_q <= issue_ex_d.branch_target;
+                    bru_in_branch_next_pc_q <= issue_ex_d.branch_next_pc;
+                    bru_in_pc_q <= issue_ex_d.pc;
+                    bru_in_pred_hit_q <= issue_ex_d.pred_hit;
+                    bru_in_pred_taken_q <= issue_ex_d.pred_taken;
+                    bru_in_pred_target_q <= issue_ex_d.pred_target;
+                    bru_in_pred_counter_q <= issue_ex_d.pred_counter;
+                    bru_in_pred_bht_index_q <= issue_ex_d.pred_bht_index;
+                    agu_in_valid_q <= issue_ex_d.lsu_req.valid;
+                    agu_in_operand_a_q <= operand_a_for(lane_a_uop, lane_a_src0_local);
+                    agu_in_operand_b_q <= operand_b_for(lane_a_uop, lane_a_src1_local);
+                    agu_in_req_q <= issue_ex_d.lsu_req;
+                    agu_in_req_q.store_data <= lane_a_src1_local;
+                    agu_in_req_q.store_data_valid <= issue_ex_d.lsu_req.valid;
+                    csr_in_valid_q <= issue_ex_d.valid;
+                    csr_in_operand_a_q <= operand_a_for(lane_a_uop, lane_a_src0_local);
+                    csr_in_operator_type_q <= issue_ex_d.operator_type;
+                    csr_in_raddr_q <= issue_ex_d.csr_raddr;
+                    csr_in_waddr_q <= issue_ex_d.csr_waddr;
+                    csr_in_op_info_q <= issue_ex_d.csr_op_info;
+                    csr_in_sys_info_q <= issue_ex_d.sys_op_info;
+                    mul_in_valid_q <= issue_ex_d.valid;
+                    mul_in_operand_a_q <= operand_a_for(lane_a_uop, lane_a_src0_local);
+                    mul_in_operand_b_q <= operand_b_for(lane_a_uop, lane_a_src1_local);
+                    mul_in_operator_q <= issue_ex_d.operator_info;
+                    mul_in_operator_type_q <= issue_ex_d.operator_type;
+                    dual_in_q <= '0;
+                    dual_in_q.operand_a <= operand_a_for(lane_b_uop, lane_b_src0_local);
+                    dual_in_q.operand_b <= operand_b_for(lane_b_uop, lane_b_src1_local);
+                    dual_in_q.branch_operand_a <= lane_b_src0_local;
+                    dual_in_q.branch_operand_b <= lane_b_src1_local;
+                    dual_in_q.branch_imm <= issue_ex_d.lane1_branch_imm;
+                    dual_in_q.operator_info <= issue_ex_d.lane1_operator_info;
+                    dual_in_q.operator_type <= issue_ex_d.lane1_operator_type;
+                    dual_in_q.operator_lsu <= issue_ex_d.lane1_operator_lsu;
+                    dual_in_q.store_data <= issue_ex_d.lane1_store_data;
+                    dual_in_q.store_data_valid <= issue_ex_d.lane1_store_data_valid;
+                    dual_in_q.rd_addr <= issue_ex_d.lane1_rd_addr;
+                    dual_in_q.rd_wen <= issue_ex_d.lane1_rd_wen;
+                    dual_in_q.producer_id <= issue_ex_d.lane1_producer_id;
+                    dual_in_q.producer_tracked <= issue_ex_d.lane1_producer_tracked;
+                    dual_in_q.valid <= issue_ex_d.lane1_valid;
+                    dual_in_q.pc <= issue_ex_d.lane1_pc;
+                    dual_in_q.instr <= issue_ex_d.lane1_instr;
+                    dual_in_q.jalr <= issue_ex_d.lane1_jalr;
+                    dual_in_q.branch_target <= issue_ex_d.lane1_branch_target;
+                    dual_in_q.branch_next_pc <= issue_ex_d.lane1_branch_next_pc;
+                    dual_in_q.pred_hit <= issue_ex_d.lane1_pred_hit;
+                    dual_in_q.pred_taken <= issue_ex_d.lane1_pred_taken;
+                    dual_in_q.pred_target <= issue_ex_d.lane1_pred_target;
+                    dual_in_q.pred_counter <= issue_ex_d.lane1_pred_counter;
+                    dual_in_q.pred_bht_index <= issue_ex_d.lane1_pred_bht_index;
+                end
+            end
         end
     end
     assign issue_ex_o = issue_ex_q;
+    assign alu_in_valid_o = alu_in_valid_q;
+    assign alu_in_operand_a_o = alu_in_operand_a_q;
+    assign alu_in_operand_b_o = alu_in_operand_b_q;
+    assign alu_in_operator_o = alu_in_operator_q;
+    assign alu_in_operator_type_o = alu_in_operator_type_q;
+    assign alu_in_rd_wen_o = alu_in_rd_wen_q;
+    assign alu_in_rd_addr_o = alu_in_rd_addr_q;
+    assign alu_in_producer_id_o = alu_in_producer_id_q;
+    assign bru_in_valid_o = bru_in_valid_q;
+    assign bru_in_operand_a_o = bru_in_operand_a_q;
+    assign bru_in_operand_b_o = bru_in_operand_b_q;
+    assign bru_in_bt_operand_a_o = bru_in_bt_operand_a_q;
+    assign bru_in_bt_operand_b_o = bru_in_bt_operand_b_q;
+    assign bru_in_operator_o = bru_in_operator_q;
+    assign bru_in_operator_type_o = bru_in_operator_type_q;
+    assign bru_in_jalr_o = bru_in_jalr_q;
+    assign bru_in_branch_target_o = bru_in_branch_target_q;
+    assign bru_in_branch_next_pc_o = bru_in_branch_next_pc_q;
+    assign bru_in_pc_o = bru_in_pc_q;
+    assign bru_in_pred_hit_o = bru_in_pred_hit_q;
+    assign bru_in_pred_taken_o = bru_in_pred_taken_q;
+    assign bru_in_pred_target_o = bru_in_pred_target_q;
+    assign bru_in_pred_counter_o = bru_in_pred_counter_q;
+    assign bru_in_pred_bht_index_o = bru_in_pred_bht_index_q;
+    assign agu_in_valid_o = agu_in_valid_q;
+    assign agu_in_operand_a_o = agu_in_operand_a_q;
+    assign agu_in_operand_b_o = agu_in_operand_b_q;
+    assign agu_in_req_o = agu_in_req_q;
+    assign csr_in_valid_o = csr_in_valid_q;
+    assign csr_in_operand_a_o = csr_in_operand_a_q;
+    assign csr_in_operator_type_o = csr_in_operator_type_q;
+    assign csr_in_raddr_o = csr_in_raddr_q;
+    assign csr_in_waddr_o = csr_in_waddr_q;
+    assign csr_in_op_info_o = csr_in_op_info_q;
+    assign csr_in_sys_info_o = csr_in_sys_info_q;
+    assign mul_in_valid_o = mul_in_valid_q;
+    assign mul_in_operand_a_o = mul_in_operand_a_q;
+    assign mul_in_operand_b_o = mul_in_operand_b_q;
+    assign mul_in_operator_o = mul_in_operator_q;
+    assign mul_in_operator_type_o = mul_in_operator_type_q;
+    assign dual_in_o = dual_in_q;
 
 `ifndef SYNTHESIS
     wire issue_valid_ff = issue_pkt_i.valid;
@@ -481,12 +986,6 @@ import ydrasil_pkg::*;
          {{16{exec_operand_a[15]}}, exec_operand_a[15:0]}) |
         ({REGS_DATA_WIDTH{operator_i[OP_B_ZEXT_H]}} &
          {16'b0, exec_operand_a[15:0]});
-    wire fast_bitmanip_op = operator_type_i[OPERATOR_TYPE_BITMANIP] &&
-        (operator_i[OP_B_SH1ADD] | operator_i[OP_B_SH2ADD] | operator_i[OP_B_SH3ADD] |
-         operator_i[OP_B_ANDN]   | operator_i[OP_B_ORN]    | operator_i[OP_B_XNOR]   |
-         operator_i[OP_B_MIN]    | operator_i[OP_B_MAX]    | operator_i[OP_B_MINU]   |
-         operator_i[OP_B_MAXU]   | operator_i[OP_B_REV8]   | operator_i[OP_B_SEXT_B] |
-         operator_i[OP_B_SEXT_H] | operator_i[OP_B_ZEXT_H]);
     wire [REGS_DATA_WIDTH-1:0] fast_bitmanip_result =
         fast_b_shadd_result | fast_b_logic_result | fast_b_minmax_result |
         fast_b_extend_result;
@@ -548,9 +1047,6 @@ import ydrasil_pkg::*;
         .id_ex_jalr_i(jalr_i),
         .id_ex_branch_target_i(branch_target_i),
         .id_ex_branch_next_pc_i(branch_next_pc_i),
-        .id_ex_branch_eq_i(1'b0),
-        .id_ex_branch_ge_signed_i(1'b0),
-        .id_ex_branch_ge_unsigned_i(1'b0),
         .id_ex_pred_hit_i(pred_hit_i),
         .id_ex_pred_taken_i(pred_taken_i),
         .id_ex_pred_target_i(pred_target_i),

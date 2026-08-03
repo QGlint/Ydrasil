@@ -341,6 +341,7 @@ end
     wire [1:0] perf_executed_slots =
         {1'b0, u_dut.ex_accept_valid} + {1'b0, u_dut.ex_accept_valid1};
     wire [2:0] perf_lost_slots = 3'd2 - {1'b0, perf_executed_slots};
+    wire [31:0] perf_lost_slots_ext = {{29{1'b0}}, perf_lost_slots};
 
 	ydrasil_core u_dut (
 		.clk      (clk),
@@ -435,7 +436,7 @@ end
                     else $fatal(1, "ASSERT_LSU_QUEUE_AFTER_INTERRUPT count=%0d",
                                 u_dut.u_ydrasil_load_store_unit.queue_count_q);
             end
-            assert (u_dut.u_ydrasil_load_store_unit.queue_count_q <= 4)
+            assert (u_dut.u_ydrasil_load_store_unit.queue_count_q <= 2'd2)
                 else $fatal(1, "ASSERT_LSU_QUEUE_COUNT count=%0d",
                             u_dut.u_ydrasil_load_store_unit.queue_count_q);
             if (u_dut.clint_csr_we) begin
@@ -453,7 +454,8 @@ end
                     u_dut.completion_bus[completion_assert_lane].producer_tracked &&
                     (u_dut.completion_bus[completion_assert_lane].addr != '0)) begin
                     assert (u_dut.u_ctrl.producer_valid_q[
-                                u_dut.completion_bus[completion_assert_lane].producer_id] ||
+                                u_dut.completion_bus[completion_assert_lane].producer_id[
+                                    ydrasil_pkg::PRODUCER_SLOT_WIDTH-1:0]] ||
                             (u_dut.u_ctrl.producer_alloc_ex &&
                              (u_dut.ex_hzd_pkt.producer_id ==
                               u_dut.completion_bus[completion_assert_lane].producer_id)) ||
@@ -874,33 +876,33 @@ end
                 ((|(u_dut.u_ctrl.producer_complete_mask &
                     ~u_dut.u_ctrl.producer_retire_q &
                     ~(u_dut.u_ctrl.producer_alloc_ex ?
-                      (ydrasil_pkg::PRODUCER_NUM'(1) << u_dut.ex_hzd_pkt.producer_id[ydrasil_pkg::PRODUCER_SLOT_WIDTH-1:0]) : '0))) ? 1'b1 : 1'b0);
+                      (ydrasil_pkg::PRODUCER_NUM'(1) << u_dut.ex_hzd_pkt.producer_id[ydrasil_pkg::PRODUCER_SLOT_WIDTH-1:0]) : '0))) ? 32'd1 : 32'd0);
             same_slot_retire_only_count <= same_slot_retire_only_count +
                 ((|(u_dut.u_ctrl.producer_retire_q &
                     ~u_dut.u_ctrl.producer_complete_mask &
                     ~(u_dut.u_ctrl.producer_alloc_ex ?
-                      (ydrasil_pkg::PRODUCER_NUM'(1) << u_dut.ex_hzd_pkt.producer_id[ydrasil_pkg::PRODUCER_SLOT_WIDTH-1:0]) : '0))) ? 1'b1 : 1'b0);
+                      (ydrasil_pkg::PRODUCER_NUM'(1) << u_dut.ex_hzd_pkt.producer_id[ydrasil_pkg::PRODUCER_SLOT_WIDTH-1:0]) : '0))) ? 32'd1 : 32'd0);
             same_slot_allocate_only_count <= same_slot_allocate_only_count +
                 ((u_dut.u_ctrl.producer_alloc_ex &&
                   !u_dut.u_ctrl.producer_complete_mask[u_dut.ex_hzd_pkt.producer_id[ydrasil_pkg::PRODUCER_SLOT_WIDTH-1:0]] &&
-                  !u_dut.u_ctrl.producer_retire_q[u_dut.ex_hzd_pkt.producer_id]) ? 1'b1 : 1'b0);
+                  !u_dut.u_ctrl.producer_retire_q[u_dut.ex_hzd_pkt.producer_id[ydrasil_pkg::PRODUCER_SLOT_WIDTH-1:0]]) ? 32'd1 : 32'd0);
             same_slot_complete_retire_count <= same_slot_complete_retire_count +
                 ((|(u_dut.u_ctrl.producer_complete_mask &
                     u_dut.u_ctrl.producer_retire_q &
                     ~(u_dut.u_ctrl.producer_alloc_ex ?
-                      (ydrasil_pkg::PRODUCER_NUM'(1) << u_dut.ex_hzd_pkt.producer_id[ydrasil_pkg::PRODUCER_SLOT_WIDTH-1:0]) : '0))) ? 1'b1 : 1'b0);
+                      (ydrasil_pkg::PRODUCER_NUM'(1) << u_dut.ex_hzd_pkt.producer_id[ydrasil_pkg::PRODUCER_SLOT_WIDTH-1:0]) : '0))) ? 32'd1 : 32'd0);
             same_slot_retire_allocate_count <= same_slot_retire_allocate_count +
                 ((u_dut.u_ctrl.producer_alloc_ex &&
-                  u_dut.u_ctrl.producer_retire_q[u_dut.ex_hzd_pkt.producer_id] &&
-                  !u_dut.u_ctrl.producer_complete_mask[u_dut.ex_hzd_pkt.producer_id[ydrasil_pkg::PRODUCER_SLOT_WIDTH-1:0]]) ? 1'b1 : 1'b0);
+                  u_dut.u_ctrl.producer_retire_q[u_dut.ex_hzd_pkt.producer_id[ydrasil_pkg::PRODUCER_SLOT_WIDTH-1:0]] &&
+                  !u_dut.u_ctrl.producer_complete_mask[u_dut.ex_hzd_pkt.producer_id[ydrasil_pkg::PRODUCER_SLOT_WIDTH-1:0]]) ? 32'd1 : 32'd0);
             same_slot_complete_allocate_count <= same_slot_complete_allocate_count +
                 ((u_dut.u_ctrl.producer_alloc_ex &&
                   u_dut.u_ctrl.producer_complete_mask[u_dut.ex_hzd_pkt.producer_id[ydrasil_pkg::PRODUCER_SLOT_WIDTH-1:0]] &&
-                  !u_dut.u_ctrl.producer_retire_q[u_dut.ex_hzd_pkt.producer_id]) ? 1'b1 : 1'b0);
+                  !u_dut.u_ctrl.producer_retire_q[u_dut.ex_hzd_pkt.producer_id[ydrasil_pkg::PRODUCER_SLOT_WIDTH-1:0]]) ? 32'd1 : 32'd0);
             same_slot_all_count <= same_slot_all_count +
                 ((u_dut.u_ctrl.producer_alloc_ex &&
                   u_dut.u_ctrl.producer_complete_mask[u_dut.ex_hzd_pkt.producer_id[ydrasil_pkg::PRODUCER_SLOT_WIDTH-1:0]] &&
-                  u_dut.u_ctrl.producer_retire_q[u_dut.ex_hzd_pkt.producer_id]) ? 1'b1 : 1'b0);
+                  u_dut.u_ctrl.producer_retire_q[u_dut.ex_hzd_pkt.producer_id[ydrasil_pkg::PRODUCER_SLOT_WIDTH-1:0]]) ? 32'd1 : 32'd0);
             sb_rs1_pending_count <= sb_rs1_pending_count +
                 (u_dut.rs1_pending_stall ? 32'd1 : 32'd0);
             sb_rs2_pending_count <= sb_rs2_pending_count +
@@ -1033,10 +1035,10 @@ end
             // Mutually exclusive cycle accounting. Keep this TB-only so it cannot affect RTL.
             if (u_dut.flush_ex) begin
                 acct_flush_count <= acct_flush_count + 1'b1;
-                perf_lost_flush_slot_count <= perf_lost_flush_slot_count + perf_lost_slots;
+                perf_lost_flush_slot_count <= perf_lost_flush_slot_count + perf_lost_slots_ext;
             end else if (u_dut.ex_mul_stall) begin
                 acct_mul_hold_count <= acct_mul_hold_count + 1'b1;
-                perf_lost_mul_hold_slot_count <= perf_lost_mul_hold_slot_count + perf_lost_slots;
+                perf_lost_mul_hold_slot_count <= perf_lost_mul_hold_slot_count + perf_lost_slots_ext;
             end else if ((u_dut.scoreboard_stall &
                           (u_dut.lsu_struct_stall | u_dut.u_ctrl.producer_full_stall |
                            u_dut.wb_backpressure | u_dut.clint_stall)) |
@@ -1047,28 +1049,28 @@ end
                           (u_dut.wb_backpressure | u_dut.clint_stall)) |
                          (u_dut.wb_backpressure & u_dut.clint_stall)) begin
                 acct_multi_cause_count <= acct_multi_cause_count + 1'b1;
-                perf_lost_multi_slot_count <= perf_lost_multi_slot_count + perf_lost_slots;
+                perf_lost_multi_slot_count <= perf_lost_multi_slot_count + perf_lost_slots_ext;
             end else if (u_dut.scoreboard_stall) begin
                 acct_scoreboard_count <= acct_scoreboard_count + 1'b1;
-                perf_lost_scoreboard_slot_count <= perf_lost_scoreboard_slot_count + perf_lost_slots;
+                perf_lost_scoreboard_slot_count <= perf_lost_scoreboard_slot_count + perf_lost_slots_ext;
             end else if (u_dut.lsu_struct_stall) begin
                 acct_lsu_struct_count <= acct_lsu_struct_count + 1'b1;
-                perf_lost_lsu_struct_slot_count <= perf_lost_lsu_struct_slot_count + perf_lost_slots;
+                perf_lost_lsu_struct_slot_count <= perf_lost_lsu_struct_slot_count + perf_lost_slots_ext;
             end else if (u_dut.u_ctrl.producer_full_stall) begin
                 acct_producer_full_count <= acct_producer_full_count + 1'b1;
-                perf_lost_producer_full_slot_count <= perf_lost_producer_full_slot_count + perf_lost_slots;
+                perf_lost_producer_full_slot_count <= perf_lost_producer_full_slot_count + perf_lost_slots_ext;
             end else if (u_dut.wb_backpressure) begin
                 acct_wb_count <= acct_wb_count + 1'b1;
-                perf_lost_wb_slot_count <= perf_lost_wb_slot_count + perf_lost_slots;
+                perf_lost_wb_slot_count <= perf_lost_wb_slot_count + perf_lost_slots_ext;
             end else if (u_dut.clint_stall) begin
                 acct_clint_count <= acct_clint_count + 1'b1;
-                perf_lost_clint_slot_count <= perf_lost_clint_slot_count + perf_lost_slots;
+                perf_lost_clint_slot_count <= perf_lost_clint_slot_count + perf_lost_slots_ext;
             end else if (u_dut.issue_serialize_stall) begin
                 acct_lsu_serialize_count <= acct_lsu_serialize_count + 1'b1;
-                perf_lost_lsu_serialize_slot_count <= perf_lost_lsu_serialize_slot_count + perf_lost_slots;
+                perf_lost_lsu_serialize_slot_count <= perf_lost_lsu_serialize_slot_count + perf_lost_slots_ext;
             end else if (!u_dut.if_id_valid) begin
                 acct_no_if_valid_count <= acct_no_if_valid_count + 1'b1;
-                perf_lost_no_if_valid_slot_count <= perf_lost_no_if_valid_slot_count + perf_lost_slots;
+                perf_lost_no_if_valid_slot_count <= perf_lost_no_if_valid_slot_count + perf_lost_slots_ext;
                 if (control_refill_active_q)
                     noif_control_redirect_count <= noif_control_redirect_count + 1'b1;
                 else if (predict_refill_active_q)
@@ -1086,10 +1088,10 @@ end
             end else if (u_dut.u_ydrasil_issue_stage.issue_valid_ff &&
                          u_dut.u_ydrasil_issue_stage.id_advance) begin
                 acct_issue_count <= acct_issue_count + 1'b1;
-                perf_lost_issue_slot_count <= perf_lost_issue_slot_count + perf_lost_slots;
+                perf_lost_issue_slot_count <= perf_lost_issue_slot_count + perf_lost_slots_ext;
             end else begin
                 acct_other_count <= acct_other_count + 1'b1;
-                perf_lost_other_slot_count <= perf_lost_other_slot_count + perf_lost_slots;
+                perf_lost_other_slot_count <= perf_lost_other_slot_count + perf_lost_slots_ext;
                 if (!u_dut.u_ydrasil_issue_stage.issue_valid_ff && u_dut.decode_valid)
                     other_issue_refill_count <= other_issue_refill_count + 1'b1;
                 else if (!u_dut.u_ydrasil_issue_stage.issue_valid_ff &&
@@ -1128,6 +1130,7 @@ end
                 3'd2: retire_two_count <= retire_two_count + 1'b1;
                 3'd3: retire_three_count <= retire_three_count + 1'b1;
                 3'd4: retire_four_count <= retire_four_count + 1'b1;
+                default: begin end
             endcase
             if (u_dut.issue_pair_execute) begin
                 dual_issue_count <= dual_issue_count + 1'b1;
@@ -1149,9 +1152,10 @@ end
 				else $fatal(1, "dual-issue resource classification lost a pair");
             if (u_dut.u_ydrasil_if_stage.fetch_issue) begin
                 l0_lookup_count <= l0_lookup_count +
-                    (u_dut.u_ydrasil_if_stage.fetch_two ? 2'd2 : 2'd1);
+                    (u_dut.u_ydrasil_if_stage.fetch_two ? 32'd2 : 32'd1);
                 l0_hit_count <= l0_hit_count + u_dut.l0_hit +
-                    (u_dut.u_ydrasil_if_stage.fetch_two ? u_dut.l0_hit1 : 1'b0);
+                    (u_dut.u_ydrasil_if_stage.fetch_two ?
+                        {31'b0, u_dut.l0_hit1} : 32'd0);
             end
             if (u_dut.u_ydrasil_if_stage.predict_correction_resp) begin
                 l0_correction_count <= l0_correction_count + 1'b1;
@@ -1193,10 +1197,10 @@ end
             if (interrupt_q && !(|u_dut.u_ctrl.producer_valid_q))
                 producer_trap_free_count <= producer_trap_free_count + 1'b1;
             if (u_dut.u_ydrasil_load_store_unit.queue_dequeue &&
-                (u_dut.u_ydrasil_load_store_unit.queue_head_q == 2'd3))
+                (u_dut.u_ydrasil_load_store_unit.queue_head_q == 1'b1))
                 lsu_head_wrap_count <= lsu_head_wrap_count + 1'b1;
             if (u_dut.u_ydrasil_load_store_unit.queue_enqueue &&
-                (u_dut.u_ydrasil_load_store_unit.queue_tail_q == 2'd3))
+                (u_dut.u_ydrasil_load_store_unit.queue_tail_q == 1'b1))
                 lsu_tail_wrap_count <= lsu_tail_wrap_count + 1'b1;
             if (u_dut.u_ydrasil_load_store_unit.queue_empty)
                 lsu_queue_empty_count <= lsu_queue_empty_count + 1'b1;
@@ -1287,7 +1291,8 @@ end
             pc_write_to_host_flag  <= 1'b0;
             pc_write_to_host_cycle <= 32'b0;
         end else if (finish_accept_count != 2'b0) begin
-            pc_write_to_host_cnt <= pc_write_to_host_cnt + finish_accept_count;
+            pc_write_to_host_cnt <= pc_write_to_host_cnt +
+                {{30{1'b0}}, finish_accept_count};
             if (!pc_write_to_host_flag) begin
                 pc_write_to_host_cycle <= cycle_count;
                 pc_write_to_host_flag  <= 1'b1;

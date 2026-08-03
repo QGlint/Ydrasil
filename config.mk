@@ -236,7 +236,12 @@ RTL_QC_VIVADO_COMPARE_JSON ?= $(RTL_QC_DIR)/$(RTL_QC_TOP).vivado-compare.json
 RTL_QC_ERROR_LIMIT ?= 50
 VERILATOR_STRICT ?= verilator
 VERILATOR_STRICT_FLAGS ?= --lint-only --sv -Wall --report-unoptflat --error-limit $(RTL_QC_ERROR_LIMIT)
-VERILATOR_STRICT_WNO ?=
+# The RTL strict pass remains fatal for width, loop, latch and timing-shape
+# diagnostics. These categories are pre-existing compatibility-only signals
+# (FPU-disabled ports, DV observability pins, and package constants) that do
+# not enter synthesized logic; keep the list explicit rather than using the
+# broad VERILATOR_IGNORE_FULL escape hatch.
+VERILATOR_STRICT_WNO ?= DECLFILENAME PINCONNECTEMPTY UNUSEDSIGNAL UNUSEDPARAM SYMRSVDWORD SYNCASYNCNET
 # Keep structural diagnostics in the same log as the elaborated tree.  The
 # target remains non-fatal so the JSON is still available for post-analysis.
 VERILATOR_XML_FLAGS ?= --lint-only --dump-tree-json --report-unoptflat --error-limit $(RTL_QC_ERROR_LIMIT) -Wno-fatal

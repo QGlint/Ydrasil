@@ -17,9 +17,6 @@ import ydrasil_pkg::*;
     input  wire                            id_ex_jalr_i,
     input  wire [DATA_WIDTH-1:0]           id_ex_branch_target_i,
     input  wire [DATA_WIDTH-1:0]           id_ex_branch_next_pc_i,
-    input  wire                            id_ex_branch_eq_i,
-    input  wire                            id_ex_branch_ge_signed_i,
-    input  wire                            id_ex_branch_ge_unsigned_i,
     input  wire                            id_ex_pred_hit_i,
     input  wire                            id_ex_pred_taken_i,
     input  wire [DATA_WIDTH-1:0]           id_ex_pred_target_i,
@@ -92,10 +89,12 @@ import ydrasil_pkg::*;
         (ex_bjp_bgeu &  ex_branch_ge_unsigned);
     wire ex_branch_taken = ex_is_branch & ex_branch_jump & !trap_redirect_i;
     wire ex_pred_taken = id_ex_pred_hit_i & id_ex_pred_taken_i;
+`ifndef SYNTHESIS
     wire [DATA_WIDTH-1:0] ex_branch_actual_next_pc =
         ex_branch_taken ? ex_branch_target : ex_branch_next_pc;
     wire [DATA_WIDTH-1:0] ex_branch_pred_next_pc =
         ex_pred_taken ? id_ex_pred_target_i : ex_branch_next_pc;
+`endif
     wire ex_branch_direction_miss = ex_branch_taken ^ ex_pred_taken;
     wire ex_branch_target_miss =
         ex_branch_taken & ex_pred_taken & (ex_branch_target != id_ex_pred_target_i);

@@ -953,6 +953,16 @@ syn-stage-xpr:
 		--exclude 'Ydrasil_FPGA.runs' \
 		--exclude 'vivado*' \
 		$(SYN_ORIG_FPGA_DIR)/ $(SYN_STAGE_FPGA_DIR)/
+	# Never carry the checked-in imported incremental checkpoint into a new
+	# architecture build.  It is from an older netlist and can make Vivado
+	# report timing for a design that is not the current RTL.
+	@rm -f "$(SYN_STAGE_FPGA_DIR)/Ydrasil_FPGA.srcs/utils_1/imports/synth_1/jyd_fpga.dcp"
+	# The checked-in XPR was created on another host.  Vivado uses its
+	# top-level Path attribute as the project root even when the file itself is
+	# staged locally, so normalize it before opening the project; otherwise IP
+	# checkpoints and run scripts are silently created under the old tree.
+	@xpr="$(SYN_XPR)"; \
+		sed -i -E 's#(<Project Product="Vivado" Version="7" Minor="68" Path=")[^"]*(">)#\1'"$$xpr"'\2#' "$$xpr"
 
 syn-stage-memory:
 	@test -f "$(IROM_COE)" || { echo "Error: IROM COE not found: $(IROM_COE)"; exit 1; }

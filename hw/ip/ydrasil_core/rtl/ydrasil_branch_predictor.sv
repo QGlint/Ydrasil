@@ -62,7 +62,7 @@ import ydrasil_pkg::*;
 
     logic [BTB_ENTRIES-1:0] btb_valid_q;
     logic [BHT_ENTRIES-1:0] bht_valid_q;
-    logic [GHR_WIDTH-1:0] ghr_q;
+    wire [GHR_WIDTH-1:0] ghr_value;
 
     wire [BTB_INDEX_WIDTH-1:0] predict_btb_index;
     wire [BHT_INDEX_WIDTH-1:0] predict_bht_index;
@@ -108,13 +108,13 @@ import ydrasil_pkg::*;
     logic predict_bht_valid1_q;
     wire [GHR_WIDTH-1:0] lane1_ghr =
         (predict0_spec_valid_i && predict0_spec_conditional_i) ?
-        {ghr_q[GHR_WIDTH-2:0], predict0_spec_taken_i} : ghr_q;
+        {ghr_value[GHR_WIDTH-2:0], predict0_spec_taken_i} : ghr_value;
     wire [BHT_INDEX_WIDTH-1:0] lane1_ghr_index_mask = USE_GSHARE ?
         {{(BHT_INDEX_WIDTH-GHR_WIDTH){1'b0}}, lane1_ghr} : '0;
 
     assign predict_btb_index = predict_pc_i[BTB_INDEX_WIDTH+1:2];
     assign predict_pc_bht_index = predict_pc_i[BHT_INDEX_WIDTH+1:2];
-    assign ghr_index_mask = USE_GSHARE ? {{(BHT_INDEX_WIDTH-GHR_WIDTH){1'b0}}, ghr_q} : '0;
+    assign ghr_index_mask = USE_GSHARE ? {{(BHT_INDEX_WIDTH-GHR_WIDTH){1'b0}}, ghr_value} : '0;
     assign predict_bht_index = predict_pc_bht_index ^ ghr_index_mask;
     assign predict_btb_tag   = predict_pc_i[ydrasil_pkg::INST_ADDR_WIDTH-1:BTB_INDEX_WIDTH+2];
     assign predict_btb_index1 = predict_pc1_i[BTB_INDEX_WIDTH+1:2];
@@ -205,7 +205,6 @@ import ydrasil_pkg::*;
             predict_bht_valid1_q <= 1'b0;
             btb_valid_q         <= '0;
             bht_valid_q         <= '0;
-            ghr_q               <= '0;
         end else if (invalidate_i) begin
             predict_btb_tag_q   <= '0;
             predict_bht_index_q <= '0;
@@ -217,7 +216,6 @@ import ydrasil_pkg::*;
             predict_bht_valid1_q <= 1'b0;
             btb_valid_q         <= '0;
             bht_valid_q         <= '0;
-            ghr_q               <= '0;
         end else begin
             predict_btb_tag_q   <= predict_btb_tag;
             predict_bht_index_q <= predict_bht_index;
@@ -232,11 +230,25 @@ import ydrasil_pkg::*;
                 btb_valid_q[train_btb_index] <= 1'b1;
                 bht_valid_q[train_bht_index] <= 1'b1;
             end
-            if (train_fire && train_i.conditional) begin
-                ghr_q <= {ghr_q[GHR_WIDTH-2:0], train_i.taken};
-            end
         end
     end
+
+    // GShare is optional. Keep its history in a separate state element so the
+    // default direct-index predictor has no dead sequential logic in the netlist.
+    generate
+        if (USE_GSHARE) begin : g_gshare_history
+            logic [GHR_WIDTH-1:0] ghr_q;
+            assign ghr_value = ghr_q;
+            always_ff @(posedge clk or negedge rst_n) begin
+                if (!rst_n || invalidate_i)
+                    ghr_q <= '0;
+                else if (train_fire && train_i.conditional)
+                    ghr_q <= {ghr_q[GHR_WIDTH-2:0], train_i.taken};
+            end
+        end else begin : g_no_gshare_history
+            assign ghr_value = '0;
+        end
+    endgenerate
 
     assign btb_hit           = predict_btb_valid_q &&
         (btb_rtag == predict_btb_tag_q);
