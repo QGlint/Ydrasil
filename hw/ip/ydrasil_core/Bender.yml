@@ -28,7 +28,6 @@ sources:
       - rtl/ydrasil_ex_block.sv
       - rtl/ydrasil_load_store_unit.sv
       - rtl/ydrasil_mems.sv
-      - rtl/ydrasil_wb_stage.sv
       - rtl/ydrasil_registers.sv
       - rtl/ydrasil_registers_csr.sv
       - rtl/ydrasil_exception_ctrl.sv

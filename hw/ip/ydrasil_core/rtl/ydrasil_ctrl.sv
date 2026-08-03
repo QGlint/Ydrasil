@@ -21,17 +21,6 @@ import ydrasil_pkg::*;
     input  ydrasil_completion_bus_t     completion_bus_i,
     input  wire                         trap_stall_i,
     input  wire                         ex_mul_stall_i,
-    input  wire                         wb_backpressure_i,
-    input  wire                         rf_wen_rd_i,
-    input  wire [REGS_ADDR_WIDTH-1:0]   rf_waddr_rd_i,
-    input  wire [REGS_DATA_WIDTH-1:0]   rf_wdata_rd_i,
-    input  producer_id_t                rf_producer_id_i,
-    input  wire                         rf_producer_tracked_i,
-    input  wire                         rf_wen_rd1_i,
-    input  wire [REGS_ADDR_WIDTH-1:0]   rf_waddr_rd1_i,
-    input  wire [REGS_DATA_WIDTH-1:0]   rf_wdata_rd1_i,
-    input  producer_id_t                rf_producer_id1_i,
-    input  wire                         rf_producer_tracked1_i,
 
     output ydrasil_issue_pkt_t          dispatch_pkt_o,
     output ydrasil_issue_pkt_t          dispatch_pkt1_o,
@@ -44,10 +33,6 @@ import ydrasil_pkg::*;
     output wire [REGS_NUM-1:0]          gpr_pending_o,
     output wire                         ex_accept_valid_o,
     output wire                         ex_accept_valid1_o,
-    output wire                         rf_write_commit_o,
-    output wire [REGS_NUM-1:0]          rf_write_wen_o,
-    output wire                         rf_write_commit1_o,
-    output wire [REGS_NUM-1:0]          rf_write_wen1_o,
     output ydrasil_commit_pkt_t         retire_commit_o,
     output ydrasil_commit_pkt_t         retire_commit1_o,
     output wire                         stall_if_o,
@@ -282,7 +267,7 @@ import ydrasil_pkg::*;
     assign issue_src1_state_o = rob_source_state(issue_pkt_i.src1);
     assign issue_src2_state_o = rob_source_state(issue_pkt1_i.src0);
     assign issue_src3_state_o = rob_source_state(issue_pkt1_i.src1);
-    wire decode_bubble_stall = trap_stall_i || wb_backpressure_i;
+    wire decode_bubble_stall = trap_stall_i;
 
     assign ex_accept_valid_o = ex_hzd_i.valid && !ex_branch_jump_i &&
         !ex_mul_stall_i;
@@ -339,12 +324,6 @@ import ydrasil_pkg::*;
         latest_valid_q[retire_rd1] &&
         (latest_id_q[retire_rd1] == producer_tag_q[queue_head1]);
     assign gpr_pending_o = latest_valid_q;
-    assign rf_write_commit_o = 1'b1;
-    assign rf_write_commit1_o = 1'b1;
-    assign rf_write_wen_o = rf_wen_rd_i ?
-        (REGS_NUM'(1) << rf_waddr_rd_i) : '0;
-    assign rf_write_wen1_o = rf_wen_rd1_i ?
-        (REGS_NUM'(1) << rf_waddr_rd1_i) : '0;
 
     producer_slot_t completion_slot0;
     producer_slot_t completion_slot1;
