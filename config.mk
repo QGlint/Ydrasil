@@ -233,7 +233,19 @@ RTL_QC_VIVADO_UTILIZATION ?= $(RTL_QC_VIVADO_REPORT_DIR)/synth_utilization_hier.
 RTL_QC_VIVADO_TIMING ?= $(RTL_QC_VIVADO_REPORT_DIR)/synth_timing_summary.rpt
 RTL_QC_VIVADO_POST_ROUTE_TIMING ?= $(RTL_QC_VIVADO_REPORT_DIR)/post_route_timing_summary.rpt
 RTL_QC_VIVADO_COMPARE_JSON ?= $(RTL_QC_DIR)/$(RTL_QC_TOP).vivado-compare.json
+RTL_QC_RELIABILITY_SUMMARY ?= $(RTL_QC_DIR)/reliability-summary.txt
 RTL_QC_ERROR_LIMIT ?= 50
+# Structural timing warning policy, calibrated against the current xc7
+# synth/post-route reports.  The BRAM reference includes both cascaded RAMB
+# propagation arcs, which Vivado reports as one logic level.
+RTL_QC_TARGET_PERIOD_NS ?= 5.0
+RTL_QC_TIMING_POSSIBLE_DEPTH ?= 9
+RTL_QC_TIMING_DEFINITE_DEPTH ?= 32
+RTL_QC_LUTRAM_POSSIBLE_DEPTH ?= 6
+RTL_QC_FANOUT_TIMING_MIN_DEPTH ?= 3
+RTL_QC_BRAM_LAUNCH_PENALTY_DEPTH ?= 6
+RTL_QC_BRAM_CLOCK_TO_OUT_NS ?= 2.45
+RTL_QC_LUTRAM_ARC_NS ?= 0.06
 VERILATOR_STRICT ?= verilator
 VERILATOR_STRICT_FLAGS ?= --lint-only --sv -Wall --report-unoptflat --error-limit $(RTL_QC_ERROR_LIMIT)
 # The RTL strict pass remains fatal for width, loop, latch and timing-shape

@@ -1049,7 +1049,15 @@ rtl-xml: $(RTL_QC_FLIST)
 
 rtl-structure: rtl-xml
 	$(PYTHON) "$(SYN_DIR)/analyze_rtl_structure.py" \
-		--input "$(RTL_QC_TREE_JSON)" --output "$(RTL_QC_STRUCTURE_JSON)" --top "$(RTL_QC_TOP)"
+		--input "$(RTL_QC_TREE_JSON)" --output "$(RTL_QC_STRUCTURE_JSON)" --top "$(RTL_QC_TOP)" \
+		--target-period-ns "$(RTL_QC_TARGET_PERIOD_NS)" \
+		--timing-possible-depth "$(RTL_QC_TIMING_POSSIBLE_DEPTH)" \
+		--timing-definite-depth "$(RTL_QC_TIMING_DEFINITE_DEPTH)" \
+		--lutram-possible-depth "$(RTL_QC_LUTRAM_POSSIBLE_DEPTH)" \
+		--fanout-timing-min-depth "$(RTL_QC_FANOUT_TIMING_MIN_DEPTH)" \
+		--bram-launch-penalty-depth "$(RTL_QC_BRAM_LAUNCH_PENALTY_DEPTH)" \
+		--bram-clock-to-out-ns "$(RTL_QC_BRAM_CLOCK_TO_OUT_NS)" \
+		--lutram-arc-ns "$(RTL_QC_LUTRAM_ARC_NS)"
 
 rtl-vivado-compare: rtl-structure
 	@test -f "$(RTL_QC_VIVADO_UTILIZATION)" || { echo "Vivado utilization report not found: $(RTL_QC_VIVADO_UTILIZATION)" >&2; exit 2; }
@@ -1058,7 +1066,8 @@ rtl-vivado-compare: rtl-structure
 		--utilization "$(RTL_QC_VIVADO_UTILIZATION)" \
 		--timing "$(RTL_QC_VIVADO_TIMING)" \
 		--timing "$(RTL_QC_VIVADO_POST_ROUTE_TIMING)" \
-		--output "$(RTL_QC_VIVADO_COMPARE_JSON)"
+		--output "$(RTL_QC_VIVADO_COMPARE_JSON)" \
+		--summary-output "$(RTL_QC_RELIABILITY_SUMMARY)"
 
 verilator-strict: rtl-strict
 verilator-xml: rtl-xml

@@ -1006,6 +1006,47 @@ def module_report(module: dict[str, Any], index: dict[str, dict[str, Any]], modu
             if selected[3]:
                 forward_endpoint_registers[current] = selected[3]
 
+    # Keep an independent longest path for every endpoint kind.  A register Q
+    # can feed both a long internal D cone and a shorter module-output cone;
+    # choosing only the globally longest terminal incorrectly reports the
+    # output branch as absent.
+    endpoint_kinds = tuple(endpoint_priority)
+    endpoint_forward_depth: dict[str, dict[int, int]] = {
+        endpoint: {number: -1 for number in range(len(components))}
+        for endpoint in endpoint_kinds
+    }
+    endpoint_forward_next: dict[str, dict[int, int]] = {
+        endpoint: {} for endpoint in endpoint_kinds
+    }
+    output_nodes = set(outputs)
+    for current in reversed(topo_order):
+        members = set(components[current])
+        terminal_kinds = set()
+        if members & output_nodes:
+            terminal_kinds.add("module_output")
+        if members & cell_inputs:
+            terminal_kinds.add("child_input")
+        if any(source in sequential_rhs_registers for source in members):
+            terminal_kinds.add("register_d")
+        if any(source in sequential_control_registers for source in members):
+            terminal_kinds.add("register_control")
+        if not dag.get(current):
+            terminal_kinds.add("combinational_sink")
+        for endpoint in endpoint_kinds:
+            best = 0 if endpoint in terminal_kinds else -1
+            best_target = None
+            for target in dag.get(current, ()):
+                target_depth = endpoint_forward_depth[endpoint][target]
+                if target_depth < 0:
+                    continue
+                candidate = component_edge_cost(current, target) + target_depth
+                if candidate > best:
+                    best = candidate
+                    best_target = target
+            endpoint_forward_depth[endpoint][current] = best
+            if best_target is not None:
+                endpoint_forward_next[endpoint][current] = best_target
+
     def bounded_internal_depth(component: int) -> int:
         """Estimate one simple lap around an SCC, never revisiting a node.
 
@@ -1307,14 +1348,41 @@ def module_report(module: dict[str, Any], index: dict[str, dict[str, Any]], modu
             "endpoint_registers": forward_endpoint_registers.get(component, []),
         }
 
+    def reconstruct_endpoint_path(addr: str, endpoint: str) -> dict[str, Any] | None:
+        component = component_of.get(addr)
+        if component is None or endpoint_forward_depth[endpoint].get(component, -1) < 0:
+            return None
+        components_path = [component]
+        next_map = endpoint_forward_next[endpoint]
+        while components_path[-1] in next_map:
+            components_path.append(next_map[components_path[-1]])
+        return {
+            "register": var_names.get(addr, addr),
+            "depth": endpoint_forward_depth[endpoint][component],
+            "signals": [
+                sorted(var_names.get(node, node) for node in components[item])[0]
+                for item in components_path
+                if components[item]
+            ],
+            "endpoint": endpoint,
+        }
+
     register_to_boundary_paths = [reconstruct_forward_path(addr) for addr in seq_lhs]
     register_to_boundary_paths.sort(key=lambda item: (-item["depth"], item["register"]))
-    register_to_boundary_by_endpoint = {
-        endpoint: max(
-            (item["depth"] for item in register_to_boundary_paths if item.get("endpoint") == endpoint),
-            default=0,
+    register_to_endpoint_paths = {
+        endpoint: sorted(
+            (
+                path
+                for addr in seq_lhs
+                if (path := reconstruct_endpoint_path(addr, endpoint)) is not None
+            ),
+            key=lambda item: (-item["depth"], item["register"]),
         )
-        for endpoint in ("register_d", "register_control", "module_output", "child_input", "combinational_sink")
+        for endpoint in endpoint_kinds
+    }
+    register_to_boundary_by_endpoint = {
+        endpoint: max((item["depth"] for item in paths), default=0)
+        for endpoint, paths in register_to_endpoint_paths.items()
     }
 
     # Output status used to walk every reverse-graph path independently.  That
@@ -1622,6 +1690,10 @@ def module_report(module: dict[str, Any], index: dict[str, dict[str, Any]], modu
         )[:20],
         "register_to_boundary_max_depth": max((item["depth"] for item in register_to_boundary_paths), default=0),
         "critical_register_to_boundary_paths": register_to_boundary_paths[:20],
+        "critical_register_to_endpoint_paths": {
+            endpoint: paths[:20]
+            for endpoint, paths in register_to_endpoint_paths.items()
+        },
         "critical_control_paths": sorted(
             control_path_details,
             key=lambda item: (-item["depth"], item["control"]),
@@ -2146,11 +2218,188 @@ def hierarchical_report(top_name: str, reports: list[dict[str, Any]]) -> dict[st
     }
 
 
+def memory_timing_profile(
+    report: dict[str, Any],
+    bram_launch_penalty_depth: int,
+    bram_clock_to_out_ns: float,
+    lutram_arc_ns: float,
+) -> dict[str, Any]:
+    """Describe memory semantics without treating simulation arrays as FFs."""
+    name = str(report.get("name", ""))
+    children = {
+        str(item.get("module", ""))
+        for item in report.get("cell_connections", [])
+        if item.get("module")
+    }
+    simulation_model = name.startswith("ydrmem")
+    contains_bram = (
+        name in {"dtcm", "itcm"}
+        or any(
+            child.startswith("ydrmem")
+            or child in {"dtcm", "itcm", "tpdram_wrapper", "IROM"}
+            for child in children
+        )
+    )
+    contains_lutram = name == "xpm_lutram_1r1w" or "xpm_lutram_1r1w" in children
+    asynchronous_lutram = contains_lutram and report.get("registration_status") != "yes"
+    if simulation_model:
+        kind = "simulation_memory_model"
+    elif contains_bram and contains_lutram:
+        kind = "mixed_fpga_memory_consumer"
+    elif contains_bram:
+        kind = "bram_wrapper_or_consumer"
+    elif contains_lutram:
+        kind = "lutram_wrapper_or_consumer"
+    else:
+        kind = "none"
+    return {
+        "kind": kind,
+        "simulation_model_excluded_from_synthesis_risk": simulation_model,
+        "contains_bram_boundary": contains_bram,
+        "contains_lutram_boundary": contains_lutram,
+        "asynchronous_lutram_boundary": asynchronous_lutram,
+        "storage_bits_interpretation": (
+            "simulation memory capacity; do not compare with Vivado FF count"
+            if simulation_model
+            else (
+                "LUTRAM capacity; do not compare with Vivado FF count"
+                if name == "xpm_lutram_1r1w"
+                else "ordinary RTL state upper bound"
+            )
+        ),
+        "bram_launch_penalty_depth": bram_launch_penalty_depth if contains_bram and not simulation_model else 0,
+        "bram_clock_to_out_reference_ns": bram_clock_to_out_ns if contains_bram else None,
+        "lutram_logic_level_reference": 1 if contains_lutram else None,
+        "lutram_primitive_arc_reference_ns": lutram_arc_ns if contains_lutram else None,
+        "timing_trust": (
+            "interface_and_register_cut_only"
+            if simulation_model
+            else ("macro_calibrated_structural_proxy" if contains_bram or contains_lutram else "structural_proxy")
+        ),
+    }
+
+
+def apply_timing_risk_policy(
+    report: dict[str, Any],
+    hierarchy: dict[str, Any] | None,
+    period_ns: float,
+    possible_depth: int,
+    definite_depth: int,
+    lutram_possible_depth: int,
+    fanout_timing_min_depth: int,
+    bram_launch_penalty_depth: int,
+    bram_clock_to_out_ns: float,
+    lutram_arc_ns: float,
+) -> None:
+    combination = report.get("combination", {})
+    memory = memory_timing_profile(
+        report,
+        bram_launch_penalty_depth,
+        bram_clock_to_out_ns,
+        lutram_arc_ns,
+    )
+    report["memory_timing"] = memory
+    base_depth = max(
+        int(combination.get("max_depth", 0)),
+        int(combination.get("cross_module_max_depth", 0)),
+        int(combination.get("input_to_register_max_depth", 0)),
+        int(combination.get("input_to_control_max_depth", 0)),
+        int(combination.get("q_to_control_path_max_depth", 0)),
+        int(combination.get("register_to_boundary_max_depth", 0)),
+    )
+    critical_path = combination.get("critical_cross_module_path") or combination.get("critical_path")
+    loop = bool(report.get("risk_flags", {}).get("combinational_loop"))
+    hierarchical_depth = 0
+    if hierarchy:
+        hierarchical_depth = int(hierarchy.get("timing_endpoint_max_depth", hierarchy.get("max_depth", 0)))
+        if hierarchical_depth >= base_depth:
+            base_depth = hierarchical_depth
+            critical_path = {
+                "depth": hierarchical_depth,
+                "signals": hierarchy.get("critical_timing_path", []),
+                "endpoint": "hierarchical_timing_endpoint",
+            }
+        loop = loop or bool(hierarchy.get("cycle_count"))
+    adjusted_depth = base_depth + int(memory.get("bram_launch_penalty_depth", 0))
+    excluded = bool(memory.get("simulation_model_excluded_from_synthesis_risk"))
+    reasons = []
+    high_fanout_timing = (
+        bool(report.get("risk_flags", {}).get("high_fanout_over_32"))
+        and base_depth >= fanout_timing_min_depth
+    )
+    if excluded:
+        reasons.append("simulation_memory_model_excluded_from_synthesis_risk")
+    else:
+        if adjusted_depth >= possible_depth:
+            reasons.append("endpoint_depth_at_or_above_possible_threshold")
+        if high_fanout_timing:
+            reasons.append("high_fanout_with_nontrivial_combination")
+        if memory.get("asynchronous_lutram_boundary") and base_depth >= lutram_possible_depth:
+            reasons.append("asynchronous_lutram_on_unregistered_path")
+        if memory.get("contains_bram_boundary"):
+            reasons.append("bram_clock_to_out_reduces_downstream_budget")
+        if loop:
+            reasons.append("combinational_loop")
+        if adjusted_depth >= definite_depth:
+            reasons.append("endpoint_depth_at_or_above_definite_threshold")
+    definite = not excluded and (loop or adjusted_depth >= definite_depth)
+    possible = (
+        not excluded
+        and (
+            definite
+            or adjusted_depth >= possible_depth
+            or high_fanout_timing
+            or memory.get("contains_bram_boundary")
+            or (
+                memory.get("asynchronous_lutram_boundary")
+                and base_depth >= lutram_possible_depth
+            )
+        )
+    )
+    risk = {
+        "target_period_ns": period_ns,
+        "classification": "definite_failure" if definite else ("possible_failure" if possible else "no_structural_flag"),
+        "possible_target_period_failure": possible,
+        "definite_target_period_failure": definite,
+        "structural_endpoint_depth": base_depth,
+        "memory_adjusted_depth": adjusted_depth,
+        "possible_depth_threshold": possible_depth,
+        "definite_depth_threshold": definite_depth,
+        "lutram_possible_depth_threshold": lutram_possible_depth,
+        "fanout_timing_min_depth": fanout_timing_min_depth,
+        "remaining_period_after_bram_reference_ns": (
+            max(0.0, period_ns - bram_clock_to_out_ns)
+            if memory.get("contains_bram_boundary") else None
+        ),
+        "reasons": reasons,
+        "critical_path": critical_path,
+        "interpretation": (
+            "Structural early-warning calibrated to the current xc7 post-route report; "
+            "possible is conservative, while definite requires a loop or the high-depth threshold."
+        ),
+    }
+    report["timing_risk"] = risk
+    flags = report.setdefault("risk_flags", {})
+    flags["possible_target_period_failure"] = possible
+    flags["definite_target_period_failure"] = definite
+    flags["possible_5ns_failure"] = possible if math.isclose(period_ns, 5.0) else False
+    flags["definite_5ns_failure"] = definite if math.isclose(period_ns, 5.0) else False
+    flags["simulation_memory_model_excluded"] = excluded
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--top", default=None)
+    parser.add_argument("--target-period-ns", type=float, default=5.0)
+    parser.add_argument("--timing-possible-depth", type=int, default=9)
+    parser.add_argument("--timing-definite-depth", type=int, default=32)
+    parser.add_argument("--lutram-possible-depth", type=int, default=6)
+    parser.add_argument("--fanout-timing-min-depth", type=int, default=3)
+    parser.add_argument("--bram-launch-penalty-depth", type=int, default=6)
+    parser.add_argument("--bram-clock-to-out-ns", type=float, default=2.45)
+    parser.add_argument("--lutram-arc-ns", type=float, default=0.06)
     args = parser.parse_args()
     try:
         tree = json.loads(args.input.read_text(encoding="utf-8"))
@@ -2177,6 +2426,19 @@ def main() -> int:
     hierarchy_top = args.top or "ydrasil_core"
     hierarchy = hierarchical_report(hierarchy_top, reports)
     for report in reports:
+        report_hierarchy = hierarchy if report.get("name") == hierarchy_top else None
+        apply_timing_risk_policy(
+            report,
+            report_hierarchy,
+            args.target_period_ns,
+            args.timing_possible_depth,
+            args.timing_definite_depth,
+            args.lutram_possible_depth,
+            args.fanout_timing_min_depth,
+            args.bram_launch_penalty_depth,
+            args.bram_clock_to_out_ns,
+            args.lutram_arc_ns,
+        )
         if report.get("name") == hierarchy_top:
             report["combination"]["hierarchical"] = hierarchy
             report["risk_flags"]["hierarchical_combinational_loop"] = bool(hierarchy.get("cycle_count"))
@@ -2187,24 +2449,35 @@ def main() -> int:
 
     if args.top:
         reports.sort(key=lambda item: (item["name"] != args.top, item["name"]))
+    synthesis_reports = [
+        item for item in reports
+        if not item["risk_flags"].get("simulation_memory_model_excluded")
+    ]
     summary = {
-        "modules_with_combinational_loops": [item["name"] for item in reports if item["risk_flags"]["combinational_loop"]],
-        "modules_with_self_feedback": [item["name"] for item in reports if item["risk_flags"]["self_feedback"]],
-        "modules_with_partial_field_feedback": [item["name"] for item in reports if item["risk_flags"]["partial_field_feedback"]],
-        "modules_with_high_fanout": [item["name"] for item in reports if item["risk_flags"]["high_fanout_over_32"]],
-        "modules_with_deep_combination": [item["name"] for item in reports if item["risk_flags"]["deep_combination_over_8"]],
-        "modules_with_long_register_to_boundary": [item["name"] for item in reports if item["risk_flags"]["long_register_to_boundary_over_8"]],
-        "modules_with_long_register_to_output": [item["name"] for item in reports if item["risk_flags"]["long_register_to_output_over_8"]],
-        "modules_with_long_input_to_control": [item["name"] for item in reports if item["risk_flags"]["long_input_to_control_over_8"]],
-        "modules_with_uncut_cross_module_combination": [item["name"] for item in reports if item["risk_flags"]["cross_module_combination_not_cut"]],
-        "modules_with_wide_mux_or_work": [item["name"] for item in reports if item["risk_flags"]["wide_mux_or_work"]],
-        "modules_with_unregistered_outputs": [item["name"] for item in reports if item["registration_status"] != "yes"],
+        "modules_with_combinational_loops": [item["name"] for item in synthesis_reports if item["risk_flags"]["combinational_loop"]],
+        "modules_with_self_feedback": [item["name"] for item in synthesis_reports if item["risk_flags"]["self_feedback"]],
+        "modules_with_partial_field_feedback": [item["name"] for item in synthesis_reports if item["risk_flags"]["partial_field_feedback"]],
+        "modules_with_high_fanout": [item["name"] for item in synthesis_reports if item["risk_flags"]["high_fanout_over_32"]],
+        "modules_with_deep_combination": [item["name"] for item in synthesis_reports if item["risk_flags"]["deep_combination_over_8"]],
+        "modules_with_long_register_to_boundary": [item["name"] for item in synthesis_reports if item["risk_flags"]["long_register_to_boundary_over_8"]],
+        "modules_with_long_register_to_output": [item["name"] for item in synthesis_reports if item["risk_flags"]["long_register_to_output_over_8"]],
+        "modules_with_long_input_to_control": [item["name"] for item in synthesis_reports if item["risk_flags"]["long_input_to_control_over_8"]],
+        "modules_with_uncut_cross_module_combination": [item["name"] for item in synthesis_reports if item["risk_flags"]["cross_module_combination_not_cut"]],
+        "modules_with_wide_mux_or_work": [item["name"] for item in synthesis_reports if item["risk_flags"]["wide_mux_or_work"]],
+        "modules_with_unregistered_outputs": [item["name"] for item in synthesis_reports if item["registration_status"] != "yes"],
+        "modules_with_possible_target_period_failure": [item["name"] for item in synthesis_reports if item["risk_flags"]["possible_target_period_failure"]],
+        "modules_with_definite_target_period_failure": [item["name"] for item in synthesis_reports if item["risk_flags"]["definite_target_period_failure"]],
+        "simulation_memory_models_excluded": [item["name"] for item in reports if item["risk_flags"]["simulation_memory_model_excluded"]],
         "hierarchical_combinational_loops": (
             hierarchy.get("meaningful_cycles", hierarchy.get("cycles", []))
             if hierarchy.get("available") else []
         ),
         "hierarchical_self_cycle_count": hierarchy.get("self_cycle_count", 0) if hierarchy.get("available") else 0,
         "hierarchical_max_depth": hierarchy.get("max_depth", 0) if hierarchy.get("available") else 0,
+        "hierarchical_timing_endpoint_max_depth": hierarchy.get("timing_endpoint_max_depth", 0) if hierarchy.get("available") else 0,
+        "target_period_ns": args.target_period_ns,
+        "timing_possible_depth_threshold": args.timing_possible_depth,
+        "timing_definite_depth_threshold": args.timing_definite_depth,
     }
     for report in reports:
         report.pop("_analysis", None)
@@ -2234,6 +2507,11 @@ def main() -> int:
                   f"q-to-output={report['combination']['register_q_to_any_boundary_max_depth']} "
                   f"ops={report['combination']['operator_count']} work={report['combination']['weighted_combination_work']} "
                   f"fanout-risk>{32}={flags['high_fanout_over_32']} self-feedback={flags['self_feedback']}")
+        if flags.get("possible_target_period_failure"):
+            risk = report["timing_risk"]
+            print(f"{report['name']}: timing-risk={risk['classification']} target={risk['target_period_ns']}ns "
+                  f"depth={risk['structural_endpoint_depth']} adjusted-depth={risk['memory_adjusted_depth']} "
+                  f"reasons={','.join(risk['reasons'])}")
         if flags.get("hierarchical_combinational_loop"):
             print(f"{report['name']}: hierarchical-depth={report['combination']['hierarchical'].get('max_depth', 0)} "
                   f"hierarchical-cycles={report['combination']['hierarchical'].get('cycle_count', 0)} "
