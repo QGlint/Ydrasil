@@ -76,26 +76,69 @@ import ydrasil_pkg::*;
 
     reg [3:0] load_forward_mask;
     reg [31:0] load_forward_data;
-    integer store_scan;
     integer byte_scan_fwd;
     integer byte_scan_load;
-    integer store_scan_slot;
+    // The store buffer is fixed at four entries.  Keep the age walk in the
+    // natural two-bit index domain instead of synthesizing an integer modulo
+    // and a variable loop index for every byte of every entry.
+    wire [1:0] store_slot0 = store_head_q;
+    wire [1:0] store_slot1 = store_head_q + 2'd1;
+    wire [1:0] store_slot2 = store_head_q + 2'd2;
+    wire [1:0] store_slot3 = store_head_q + 2'd3;
+    wire store_hit0 = (store_buf_count_q > STORE_COUNT_WIDTH'(0)) &&
+        store_buf_q[store_slot0].valid &&
+        (store_buf_q[store_slot0].addr[BUS_ADDR_WIDTH-1:2] ==
+         active_pkt.addr[BUS_ADDR_WIDTH-1:2]);
+    wire store_hit1 = (store_buf_count_q > STORE_COUNT_WIDTH'(1)) &&
+        store_buf_q[store_slot1].valid &&
+        (store_buf_q[store_slot1].addr[BUS_ADDR_WIDTH-1:2] ==
+         active_pkt.addr[BUS_ADDR_WIDTH-1:2]);
+    wire store_hit2 = (store_buf_count_q > STORE_COUNT_WIDTH'(2)) &&
+        store_buf_q[store_slot2].valid &&
+        (store_buf_q[store_slot2].addr[BUS_ADDR_WIDTH-1:2] ==
+         active_pkt.addr[BUS_ADDR_WIDTH-1:2]);
+    wire store_hit3 = (store_buf_count_q > STORE_COUNT_WIDTH'(3)) &&
+        store_buf_q[store_slot3].valid &&
+        (store_buf_q[store_slot3].addr[BUS_ADDR_WIDTH-1:2] ==
+         active_pkt.addr[BUS_ADDR_WIDTH-1:2]);
     always_comb begin
         load_forward_mask = '0;
         load_forward_data = '0;
-        for (store_scan = 0; store_scan < STORE_BUFFER_DEPTH; store_scan++) begin
-            store_scan_slot = (int'(store_head_q) + store_scan) % STORE_BUFFER_DEPTH;
-            if ((store_scan < store_buf_count_q) &&
-                store_buf_q[store_scan_slot].valid &&
-                (store_buf_q[store_scan_slot].addr[BUS_ADDR_WIDTH-1:2] ==
-                 active_pkt.addr[BUS_ADDR_WIDTH-1:2])) begin
-                for (byte_scan_fwd = 0; byte_scan_fwd < 4; byte_scan_fwd++) begin
-                    if (store_buf_q[store_scan_slot].store_mask[byte_scan_fwd]) begin
-                        load_forward_mask[byte_scan_fwd] = 1'b1;
-                        load_forward_data[byte_scan_fwd*8 +: 8] =
-                            store_buf_q[store_scan_slot].store_data
-                                [byte_scan_fwd*8 +: 8];
-                    end
+        // Walk oldest to newest so a younger partial store overwrites only
+        // the bytes it owns, matching the previous associative scan semantics.
+        if (store_hit0) begin
+            for (byte_scan_fwd = 0; byte_scan_fwd < 4; byte_scan_fwd++) begin
+                if (store_buf_q[store_slot0].store_mask[byte_scan_fwd]) begin
+                    load_forward_mask[byte_scan_fwd] = 1'b1;
+                    load_forward_data[byte_scan_fwd*8 +: 8] =
+                        store_buf_q[store_slot0].store_data[byte_scan_fwd*8 +: 8];
+                end
+            end
+        end
+        if (store_hit1) begin
+            for (byte_scan_fwd = 0; byte_scan_fwd < 4; byte_scan_fwd++) begin
+                if (store_buf_q[store_slot1].store_mask[byte_scan_fwd]) begin
+                    load_forward_mask[byte_scan_fwd] = 1'b1;
+                    load_forward_data[byte_scan_fwd*8 +: 8] =
+                        store_buf_q[store_slot1].store_data[byte_scan_fwd*8 +: 8];
+                end
+            end
+        end
+        if (store_hit2) begin
+            for (byte_scan_fwd = 0; byte_scan_fwd < 4; byte_scan_fwd++) begin
+                if (store_buf_q[store_slot2].store_mask[byte_scan_fwd]) begin
+                    load_forward_mask[byte_scan_fwd] = 1'b1;
+                    load_forward_data[byte_scan_fwd*8 +: 8] =
+                        store_buf_q[store_slot2].store_data[byte_scan_fwd*8 +: 8];
+                end
+            end
+        end
+        if (store_hit3) begin
+            for (byte_scan_fwd = 0; byte_scan_fwd < 4; byte_scan_fwd++) begin
+                if (store_buf_q[store_slot3].store_mask[byte_scan_fwd]) begin
+                    load_forward_mask[byte_scan_fwd] = 1'b1;
+                    load_forward_data[byte_scan_fwd*8 +: 8] =
+                        store_buf_q[store_slot3].store_data[byte_scan_fwd*8 +: 8];
                 end
             end
         end

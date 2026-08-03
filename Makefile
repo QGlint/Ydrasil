@@ -292,6 +292,7 @@ SYN_IMPL_RUNS ?= 1
 SYN_THREADS_PER_RUN ?= $(shell nproc)
 endif
 SYN_IMPL_MODE ?= sweep
+SYN_SYNTH_STRATEGY ?= Flow_PerfOptimized_high
 SYN_RUN_TO ?= route
 SYN_FORCE ?= 1
 SYN_SYNC_SOURCES ?= 1
@@ -861,9 +862,13 @@ syn: syn-vivado
 
 synf: SYN_PLL_FREQ_MHZ := 200
 synf: SYN_RUN_TO := bitstream
-synf: SYN_JOBS := 40
-synf: SYN_IMPL_RUNS := 5
-synf: SYN_THREADS_PER_RUN := 8
+synf: SYN_IMPL_MODE := extreme
+synf: SYN_JOBS := 1
+synf: SYN_IMPL_RUNS := 1
+# The 7-series IP generators can fork one worker per Vivado thread and exceed
+# the host memory budget before top-level synthesis starts.  Keep the final
+# timing flow serial; directives, not host parallelism, select QoR quality.
+synf: SYN_THREADS_PER_RUN := 1
 synf: syn-vivado
 	@src="$(SYN_ARTIFACT_DIR)/jyd_fpga.bit"; \
 	if [ ! -f "$$src" ]; then \
@@ -916,6 +921,8 @@ syn-extreme: SYN_PLL_FREQ_MHZ := 200
 syn-extreme: SYN_RUN_TO := bitstream
 syn-extreme: SYN_IMPL_MODE := extreme
 syn-extreme: SYN_IMPL_RUNS := 1
+syn-extreme: SYN_JOBS := 1
+syn-extreme: SYN_THREADS_PER_RUN := 1
 syn-extreme: syn-vivado
 	@$(MAKE) syn-analyze SYN_IMPL_MODE=extreme SYN_IMPL_RUNS=1
 
@@ -986,6 +993,7 @@ syn-vivado: syn-prep syn-stage-xpr syn-stage-memory
 		-threads_per_run $(SYN_THREADS_PER_RUN) \
 		-impl_runs $(SYN_IMPL_RUNS) \
 		-impl_mode $(SYN_IMPL_MODE) \
+		-synth_strategy "$(SYN_SYNTH_STRATEGY)" \
 		-run_to $(SYN_RUN_TO) \
 		-sync_sources $(SYN_SYNC_SOURCES) \
 		-pll_freq_mhz $(SYN_PLL_FREQ_MHZ) \

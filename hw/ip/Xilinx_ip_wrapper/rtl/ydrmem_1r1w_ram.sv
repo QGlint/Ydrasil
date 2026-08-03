@@ -30,7 +30,10 @@ module ydrmem_1r1w_ram #(
         .ADDR_WIDTH_B    (ADDR_WIDTH),
         .READ_LATENCY_A  (1),
         .READ_LATENCY_B  (1),
-        .MEMORY_PRIMITIVE("auto"),
+        // Predictor tables are synchronous and must map to BRAM on the
+        // Vivado path.  "auto" may select distributed RAM for the small BHT
+        // instances, putting a wide/fanout lookup back on the timing path.
+        .MEMORY_PRIMITIVE("block"),
         .WRITE_MODE_A    ("no_change"),
         .WRITE_MODE_B    ("no_change")
     ) u_ram (

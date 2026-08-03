@@ -9,6 +9,7 @@ proc usage {} {
     puts "  -threads_per_run <n>    max threads used by each Vivado process"
     puts "  -impl_runs <n>          parallel implementation run count, default 1"
     puts "  -impl_mode <sweep|extreme>  implementation tuning mode, default sweep"
+    puts "  -synth_strategy <name>  Vivado synthesis strategy, default Flow_PerfOptimized_high"
     puts "  -sweep_post_route_physopt <0|1>  enable sweep post-route phys_opt step, default 0"
     puts "  -run_to <synth|route|bitstream|reports|sync_only>"
     puts "  -sync_sources <0|1>     remove old hw/ip sources and add generated list"
@@ -236,6 +237,16 @@ proc configure_memory_coe {ip_name coe_file} {
     set_property -dict [list \
         CONFIG.Load_Init_File {true} \
         CONFIG.Coe_File $coe_file] $ip
+    set configured_property [get_property CONFIG.Coe_File $ip]
+    if {[file pathtype $configured_property] eq "relative"} {
+        set configured_coe [file normalize [file join \
+            [file dirname [get_property IP_FILE $ip]] $configured_property]]
+    } else {
+        set configured_coe [file normalize $configured_property]
+    }
+    if {$configured_coe ne $coe_file} {
+        error "$ip_name COE configuration mismatch: requested $coe_file, got $configured_coe"
+    }
 }
 
 proc assert_run_ok {run_name} {
@@ -551,6 +562,7 @@ set artifact_dir [ensure_dir [arg_value "-artifact_dir" [file join $repo_root "b
 set jobs [arg_value "-jobs" "16"]
 set impl_runs [arg_value "-impl_runs" "1"]
 set impl_mode [arg_value "-impl_mode" "sweep"]
+set synth_strategy [arg_value "-synth_strategy" "Flow_PerfOptimized_high"]
 set sweep_post_route_physopt [clamp_int [arg_value "-sweep_post_route_physopt" "0"] 0 1]
 set threads_per_run [arg_value "-threads_per_run" $jobs]
 set run_to [arg_value "-run_to" "route"]
@@ -577,6 +589,7 @@ if {$sync_sources && ![file exists $sources_tcl]} {
 puts "Opening project: $xpr"
 puts "Vivado jobs: $jobs"
 puts "Implementation mode: $impl_mode, runs: $impl_runs"
+puts "Synthesis strategy: $synth_strategy"
 puts "Sweep post-route phys_opt: $sweep_post_route_physopt"
 puts "Run target: $run_to"
 open_project $xpr
@@ -608,6 +621,13 @@ if {$sync_sources} {
 }
 
 set_property top jyd_fpga [get_filesets sources_1]
+if {$run_to ne "reports" && [llength [get_ips -quiet]] > 0} {
+    # The checked-in Block Memory Generator XCI can be locked at an older
+    # catalog revision. Upgrade before setting CONFIG.Coe_File so a requested
+    # benchmark image cannot silently fall back to the XCI's old image.
+    puts "Upgrading memory IP before initialization configuration"
+    upgrade_ip [get_ips IROM DRAM]
+}
 configure_memory_coe IROM $irom_coe
 configure_memory_coe DRAM $dram_coe
 validate_clocking_frequency $pll_freq_mhz
@@ -623,7 +643,6 @@ if {$run_to eq "sync_only"} {
 if {$run_to ne "reports" && [llength [get_ips -quiet]] > 0} {
     puts "Refreshing IP output products"
     report_ip_status -file [file join $report_dir "ip_status.rpt"]
-    catch {upgrade_ip [get_ips]}
     generate_target all [get_ips]
 }
 
@@ -678,7 +697,15 @@ if {$force_runs} {
     puts "Resetting synth_1"
     reset_run synth_1
 }
-set_property strategy Flow_AreaOptimized_high [get_runs synth_1]
+set synth_run [get_runs synth_1]
+# Reset first because an XPR may retain per-step arguments from an earlier
+# strategy. The default is the strongest supported 2024.2 timing-oriented
+# preset; exposing it lets a low-memory area-oriented trial retain the same
+# high-directive implementation stage.
+set_property strategy {Vivado Synthesis Defaults} $synth_run
+if {[catch {set_property strategy $synth_strategy $synth_run} synth_strategy_msg]} {
+    error "could not apply synthesis strategy '$synth_strategy': $synth_strategy_msg"
+}
 set synth_status [get_property STATUS [get_runs synth_1]]
 if {!$force_runs && [regexp -nocase {complete} $synth_status]} {
     puts "Reusing completed synth_1: $synth_status"

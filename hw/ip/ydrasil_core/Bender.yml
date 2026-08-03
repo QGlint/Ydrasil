@@ -47,6 +47,7 @@ sources:
       - dv/ydrasil_commit_trace.sv
       - dv/ydrasil_core_tb.sv
       - dv/ydrasil_branch_predictor_tb.sv
+      - dv/ydrasil_bht_clear_tb.sv
       - dv/ydrasil_bus_irq_tb.sv
 
   - target: fpu

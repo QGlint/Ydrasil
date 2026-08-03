@@ -99,6 +99,10 @@ import ydrasil_pkg::*;
     reg early_wakeup_valid_q [0:1];
     producer_id_t early_wakeup_id_q [0:1];
     reg [REGS_ADDR_WIDTH-1:0] early_wakeup_rd_q [0:1];
+    // The result token is data as well as identity.  Keep the ALU/bitmanip
+    // calculation on the issue-to-token register D path; consumers should
+    // only see a registered value through the wakeup mux.
+    reg [DATA_WIDTH-1:0] early_wakeup_data_q [0:1];
 
     reg alu_in_valid_q;
     reg [DATA_WIDTH-1:0] alu_in_operand_a_q, alu_in_operand_b_q;
@@ -251,17 +255,11 @@ import ydrasil_pkg::*;
             if (early_wakeup_valid_q[0] &&
                 (early_wakeup_rd_q[0] == src.arch_addr) &&
                 (early_wakeup_id_q[0] == src.producer_tag))
-                early_wakeup_data = alu_in_operator_type_q[OPERATOR_TYPE_BJP] ?
-                    (bru_in_pc_q + 32'd4) : early_result(
-                        alu_in_operator_q, alu_in_operator_type_q,
-                        alu_in_operand_a_q, alu_in_operand_b_q);
+                early_wakeup_data = early_wakeup_data_q[0];
             else if (early_wakeup_valid_q[1] &&
                      (early_wakeup_rd_q[1] == src.arch_addr) &&
                      (early_wakeup_id_q[1] == src.producer_tag))
-                early_wakeup_data = dual_in_q.operator_type[OPERATOR_TYPE_BJP] ?
-                    (dual_in_q.pc + 32'd4) : early_result(
-                        dual_in_q.operator_info, dual_in_q.operator_type,
-                        dual_in_q.operand_a, dual_in_q.operand_b);
+                early_wakeup_data = early_wakeup_data_q[1];
         end
     endfunction
 
@@ -430,101 +428,100 @@ import ydrasil_pkg::*;
         end
     endfunction
 
-    // Fixed-latency result token for the operations whose result is available
-    // at the Issue/EX boundary. It is deliberately registered together with
-    // the producer tag, so it can participate in grant without reopening the
-    // completion bus path.
-    function automatic [DATA_WIDTH-1:0] early_result(
+    // Keep only the frequently used, shallow bitmanip operations in the
+    // early-token datapath. Dynamic bit-index operations and inverted logic
+    // use the normal registered completion path.
+    function automatic [DATA_WIDTH-1:0] early_token_result(
         input logic [OPERATOR_WIDTH-1:0] op,
         input logic [OPERATOR_TYPE_WIDTH-1:0] op_type,
         input logic [DATA_WIDTH-1:0] a,
         input logic [DATA_WIDTH-1:0] b
     );
         begin
-            early_result = '0;
+            early_token_result = '0;
             if (op_type[OPERATOR_TYPE_ALU] &&
                 !op_type[OPERATOR_TYPE_BITMANIP]) begin
                 if (op[OP_ALU_SUB])
-                    early_result = a - b;
+                    early_token_result = a - b;
                 else if (op[OP_ALU_SLT])
-                    early_result = {31'b0, ($signed(a) < $signed(b))};
+                    early_token_result = {31'b0, ($signed(a) < $signed(b))};
                 else if (op[OP_ALU_SLTU])
-                    early_result = {31'b0, (a < b)};
+                    early_token_result = {31'b0, (a < b)};
                 else if (op[OP_ALU_XOR])
-                    early_result = a ^ b;
+                    early_token_result = a ^ b;
                 else if (op[OP_ALU_OR])
-                    early_result = a | b;
+                    early_token_result = a | b;
                 else if (op[OP_ALU_AND])
-                    early_result = a & b;
+                    early_token_result = a & b;
                 else if (op[OP_ALU_SLL])
-                    early_result = a << b[4:0];
+                    early_token_result = a << b[4:0];
                 else if (op[OP_ALU_SRL])
-                    early_result = a >> b[4:0];
+                    early_token_result = a >> b[4:0];
                 else if (op[OP_ALU_SRA])
-                    early_result = $signed(a) >>> b[4:0];
+                    early_token_result = $signed(a) >>> b[4:0];
                 else if (op[OP_ALU_LUI])
-                    early_result = b;
+                    early_token_result = b;
                 else
-                    early_result = a + b;
-            end else if (op_type[OPERATOR_TYPE_BJP]) begin
-                // Only JAL/JALR write a GPR in this class. Their link value
-                // is PC+4, independent of the branch target operands.
-                early_result = a + b;
+                    early_token_result = a + b;
             end else if (op_type[OPERATOR_TYPE_BITMANIP]) begin
-                // Keep this set identical to ex_block's fixed-latency path.
-                // The remaining bitmanip operations stay on registered
-                // completion and are not predicted here.
                 if (op[OP_B_SH1ADD])
-                    early_result = (a << 1) + b;
+                    early_token_result = (a << 1) + b;
                 else if (op[OP_B_SH2ADD])
-                    early_result = (a << 2) + b;
+                    early_token_result = (a << 2) + b;
                 else if (op[OP_B_SH3ADD])
-                    early_result = (a << 3) + b;
-                else if (op[OP_B_ANDN])
-                    early_result = a & ~b;
-                else if (op[OP_B_ORN])
-                    early_result = a | ~b;
-                else if (op[OP_B_XNOR])
-                    early_result = ~(a ^ b);
-                else if (op[OP_B_BCLR] || op[OP_B_BCLRI])
-                    early_result = a & ~(DATA_WIDTH'(1) << b[4:0]);
-                else if (op[OP_B_BEXT] || op[OP_B_BEXTI])
-                    early_result = {{(DATA_WIDTH-1){1'b0}},
-                        |(a & (DATA_WIDTH'(1) << b[4:0]))};
-                else if (op[OP_B_BINV] || op[OP_B_BINVI])
-                    early_result = a ^ (DATA_WIDTH'(1) << b[4:0]);
-                else if (op[OP_B_BSET] || op[OP_B_BSETI])
-                    early_result = a | (DATA_WIDTH'(1) << b[4:0]);
+                    early_token_result = (a << 3) + b;
                 else if (op[OP_B_PACK])
-                    early_result = {b[15:0], a[15:0]};
+                    early_token_result = {b[15:0], a[15:0]};
                 else if (op[OP_B_PACKH])
-                    early_result = {16'b0, b[7:0], a[7:0]};
+                    early_token_result = {16'b0, b[7:0], a[7:0]};
                 else if (op[OP_B_REV8])
-                    early_result = {a[7:0], a[15:8], a[23:16], a[31:24]};
+                    early_token_result = {a[7:0], a[15:8], a[23:16], a[31:24]};
                 else if (op[OP_B_SEXT_B])
-                    early_result = {{24{a[7]}}, a[7:0]};
+                    early_token_result = {{24{a[7]}}, a[7:0]};
                 else if (op[OP_B_SEXT_H])
-                    early_result = {{16{a[15]}}, a[15:0]};
+                    early_token_result = {{16{a[15]}}, a[15:0]};
                 else if (op[OP_B_ZEXT_H])
-                    early_result = {16'b0, a[15:0]};
+                    early_token_result = {16'b0, a[15:0]};
             end
         end
     endfunction
 
-    function automatic logic early_bitmanip_supported(
+    function automatic logic early_bitmanip_lite_supported(
         input logic [OPERATOR_WIDTH-1:0] op
     );
         begin
-            early_bitmanip_supported =
+            early_bitmanip_lite_supported =
                 op[OP_B_SH1ADD] | op[OP_B_SH2ADD] | op[OP_B_SH3ADD] |
-                op[OP_B_ANDN] | op[OP_B_ORN] | op[OP_B_XNOR] |
-                op[OP_B_BCLR] | op[OP_B_BCLRI] | op[OP_B_BEXT] |
-                op[OP_B_BEXTI] | op[OP_B_BINV] | op[OP_B_BINVI] |
-                op[OP_B_BSET] | op[OP_B_BSETI] | op[OP_B_PACK] |
-                op[OP_B_PACKH] | op[OP_B_REV8] | op[OP_B_SEXT_B] |
-                op[OP_B_SEXT_H] | op[OP_B_ZEXT_H];
+                op[OP_B_PACK] | op[OP_B_PACKH] | op[OP_B_REV8] |
+                op[OP_B_SEXT_B] | op[OP_B_SEXT_H] | op[OP_B_ZEXT_H];
         end
     endfunction
+
+    wire lane_a_early_plain_alu =
+        lane_a_uop.decode.operator_type[OPERATOR_TYPE_ALU] &&
+        !lane_a_uop.decode.operator_type[OPERATOR_TYPE_BITMANIP];
+    wire lane_b_early_plain_alu =
+        lane_b_uop.decode.operator_type[OPERATOR_TYPE_ALU] &&
+        !lane_b_uop.decode.operator_type[OPERATOR_TYPE_BITMANIP];
+    wire lane_a_early_bjp =
+        lane_a_uop.decode.operator_type[OPERATOR_TYPE_BJP];
+    wire lane_b_early_bjp =
+        lane_b_uop.decode.operator_type[OPERATOR_TYPE_BJP];
+    wire lane_a_early_bitmanip =
+        lane_a_uop.decode.operator_type[OPERATOR_TYPE_BITMANIP] &&
+        early_bitmanip_lite_supported(lane_a_uop.decode.operator_info);
+    wire lane_b_early_bitmanip =
+        lane_b_uop.decode.operator_type[OPERATOR_TYPE_BITMANIP] &&
+        early_bitmanip_lite_supported(lane_b_uop.decode.operator_info);
+    wire lane_a_early_valid = lane_a_valid &&
+        lane_a_uop.dst.writes_gpr && !lane_a_uop.memory_op &&
+        !lane_a_uop.decode.fp_valid && !lane_a_uop.decode.fence_i &&
+        (lane_a_early_plain_alu || lane_a_early_bjp ||
+         lane_a_early_bitmanip);
+    wire lane_b_early_valid = lane_b_valid &&
+        lane_b_uop.dst.writes_gpr && !lane_b_uop.decode.fp_valid &&
+        (lane_b_early_plain_alu || lane_b_early_bjp ||
+         lane_b_early_bitmanip);
 
     ydrasil_issue_ex_pkt_t issue_ex_d;
     ydrasil_issue_ex_pkt_t issue_ex_q;
@@ -650,6 +647,8 @@ import ydrasil_pkg::*;
             early_wakeup_id_q[1] <= '0;
             early_wakeup_rd_q[0] <= '0;
             early_wakeup_rd_q[1] <= '0;
+            early_wakeup_data_q[0] <= '0;
+            early_wakeup_data_q[1] <= '0;
             issue_ex_q <= '0;
             alu_in_valid_q <= 1'b0;
             alu_in_operand_a_q <= '0;
@@ -704,11 +703,23 @@ import ydrasil_pkg::*;
                 // tag after the circular ROB wraps.
                 early_wakeup_valid_q[0] <= 1'b0;
                 early_wakeup_valid_q[1] <= 1'b0;
+                early_wakeup_id_q[0] <= '0;
+                early_wakeup_id_q[1] <= '0;
+                early_wakeup_rd_q[0] <= '0;
+                early_wakeup_rd_q[1] <= '0;
+                early_wakeup_data_q[0] <= '0;
+                early_wakeup_data_q[1] <= '0;
             end else begin
                 if (bubble_id_i) begin
                     issue_ex_q <= '0;
                     early_wakeup_valid_q[0] <= 1'b0;
                     early_wakeup_valid_q[1] <= 1'b0;
+                    early_wakeup_id_q[0] <= '0;
+                    early_wakeup_id_q[1] <= '0;
+                    early_wakeup_rd_q[0] <= '0;
+                    early_wakeup_rd_q[1] <= '0;
+                    early_wakeup_data_q[0] <= '0;
+                    early_wakeup_data_q[1] <= '0;
                     alu_in_valid_q <= 1'b0;
                     bru_in_valid_q <= 1'b0;
                     agu_in_valid_q <= 1'b0;
@@ -722,28 +733,35 @@ import ydrasil_pkg::*;
                     // payload.  Derive it directly from the selected lane so
                     // the LSU request/credit fields in issue_ex_d cannot
                     // re-enter this D cone through struct packing.
-                    early_wakeup_valid_q[0] <= lane_a_valid &&
-                        lane_a_uop.dst.writes_gpr &&
-                        !lane_a_uop.memory_op &&
-                        !lane_a_uop.decode.fp_valid &&
-                        !lane_a_uop.decode.fence_i &&
-                        ((lane_a_uop.decode.operator_type[OPERATOR_TYPE_ALU] &&
-                          !lane_a_uop.decode.operator_type[OPERATOR_TYPE_BITMANIP]) ||
-                         lane_a_uop.decode.operator_type[OPERATOR_TYPE_BJP] ||
-                         (lane_a_uop.decode.operator_type[OPERATOR_TYPE_BITMANIP] &&
-                          early_bitmanip_supported(lane_a_uop.decode.operator_info)));
-                    early_wakeup_valid_q[1] <= lane_b_valid &&
-                        lane_b_uop.dst.writes_gpr &&
-                        !lane_b_uop.decode.fp_valid &&
-                        ((lane_b_uop.decode.operator_type[OPERATOR_TYPE_ALU] &&
-                          !lane_b_uop.decode.operator_type[OPERATOR_TYPE_BITMANIP]) ||
-                         lane_b_uop.decode.operator_type[OPERATOR_TYPE_BJP] ||
-                         (lane_b_uop.decode.operator_type[OPERATOR_TYPE_BITMANIP] &&
-                          early_bitmanip_supported(lane_b_uop.decode.operator_info)));
-                    early_wakeup_id_q[0] <= lane_a_uop.dst.rob_tag;
-                    early_wakeup_id_q[1] <= lane_b_uop.dst.rob_tag;
-                    early_wakeup_rd_q[0] <= lane_a_uop.dst.rd_addr;
-                    early_wakeup_rd_q[1] <= lane_b_uop.dst.rd_addr;
+                    if (id_advance) begin
+                        early_wakeup_valid_q[0] <= lane_a_early_valid;
+                        early_wakeup_valid_q[1] <= lane_b_early_valid;
+                        early_wakeup_id_q[0] <= lane_a_uop.dst.rob_tag;
+                        early_wakeup_id_q[1] <= lane_b_uop.dst.rob_tag;
+                        early_wakeup_rd_q[0] <= lane_a_uop.dst.rd_addr;
+                        early_wakeup_rd_q[1] <= lane_b_uop.dst.rd_addr;
+                        early_wakeup_data_q[0] <= lane_a_early_bjp ?
+                            (lane_a_uop.decode.pc + 32'd4) : early_token_result(
+                                lane_a_uop.decode.operator_info,
+                                lane_a_uop.decode.operator_type,
+                                operand_a_for(lane_a_uop, lane_a_src0_local),
+                                operand_b_for(lane_a_uop, lane_a_src1_local));
+                        early_wakeup_data_q[1] <= lane_b_early_bjp ?
+                            (lane_b_uop.decode.pc + 32'd4) : early_token_result(
+                                lane_b_uop.decode.operator_info,
+                                lane_b_uop.decode.operator_type,
+                                operand_a_for(lane_b_uop, lane_b_src0_local),
+                                operand_b_for(lane_b_uop, lane_b_src1_local));
+                    end else begin
+                        early_wakeup_valid_q[0] <= 1'b0;
+                        early_wakeup_valid_q[1] <= 1'b0;
+                        early_wakeup_id_q[0] <= '0;
+                        early_wakeup_id_q[1] <= '0;
+                        early_wakeup_rd_q[0] <= '0;
+                        early_wakeup_rd_q[1] <= '0;
+                        early_wakeup_data_q[0] <= '0;
+                        early_wakeup_data_q[1] <= '0;
+                    end
                     // Each execution class has its own input cell.  The
                     // values are captured at the same architectural boundary
                     // as issue_ex_q.  Early data is derived from these cells

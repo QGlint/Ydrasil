@@ -61,7 +61,6 @@ import ydrasil_pkg::*;
     end
 
     logic [BTB_ENTRIES-1:0] btb_valid_q;
-    logic [BHT_ENTRIES-1:0] bht_valid_q;
     wire [GHR_WIDTH-1:0] ghr_value;
 
     wire [BTB_INDEX_WIDTH-1:0] predict_btb_index;
@@ -76,7 +75,6 @@ import ydrasil_pkg::*;
     logic [BTB_TAG_WIDTH-1:0]   predict_btb_tag_q;
     logic [BHT_INDEX_WIDTH-1:0] predict_bht_index_q;
     logic                       predict_btb_valid_q;
-    logic                       predict_bht_valid_q;
 
     wire [BTB_DATA_WIDTH-1:0] btb_rdata;
     wire [BTB_DATA_WIDTH-1:0] btb_rdata1;
@@ -96,6 +94,12 @@ import ydrasil_pkg::*;
     wire [1:0] bht_counter;
     wire       train_fire;
     wire       conditional_train_fire;
+    logic      bht_clear_active_q;
+    logic [BHT_INDEX_WIDTH-1:0] bht_clear_index_q;
+    wire       bht_clear_write;
+    wire [BHT_INDEX_WIDTH-1:0] bht_write_index;
+    wire [BHT_MEM_DATA_WIDTH-1:0] bht_write_data;
+    wire       bht_predict_ready;
     wire       btb_hit;
     wire       btb_hit1;
     wire [BTB_INDEX_WIDTH-1:0] predict_btb_index1;
@@ -105,7 +109,6 @@ import ydrasil_pkg::*;
     logic [BTB_TAG_WIDTH-1:0] predict_btb_tag1_q;
     logic [BHT_INDEX_WIDTH-1:0] predict_bht_index1_q;
     logic predict_btb_valid1_q;
-    logic predict_bht_valid1_q;
     wire [GHR_WIDTH-1:0] lane1_ghr =
         (predict0_spec_valid_i && predict0_spec_conditional_i) ?
         {ghr_value[GHR_WIDTH-2:0], predict0_spec_taken_i} : ghr_value;
@@ -143,7 +146,14 @@ import ydrasil_pkg::*;
     assign bht_rdata1 = bht_mem_rdata1[1:0] ^ 2'b01;
     assign {btb_rtag, btb_rtarget} = btb_rdata;
     assign train_fire = train_i.valid && !invalidate_i;
-    assign conditional_train_fire = train_fire;
+    // A reset or FENCE.I must make every BHT entry weak-not-taken. The RAM
+    // cannot be reset bitwise, so scrub both mirrored tables one address per
+    // cycle and suppress BHT training until the scrub has completed.
+    assign bht_clear_write = bht_clear_active_q;
+    assign bht_write_index = bht_clear_write ? bht_clear_index_q : train_bht_index;
+    assign bht_write_data = bht_clear_write ? '0 : bht_mem_wdata;
+    assign conditional_train_fire = train_fire && !bht_clear_active_q;
+    assign bht_predict_ready = rst_n && !invalidate_i && !bht_clear_active_q;
 
     ydrmem_1r1w_ram #(
         .DEPTH(BTB_ENTRIES),
@@ -179,9 +189,9 @@ import ydrasil_pkg::*;
         .ren_i   (1'b1),
         .raddr_i (predict_bht_index),
         .rdata_o (bht_mem_rdata),
-        .wen_i   (conditional_train_fire),
-        .waddr_i (train_bht_index),
-        .wdata_i (bht_mem_wdata)
+        .wen_i   (bht_clear_write || conditional_train_fire),
+        .waddr_i (bht_write_index),
+        .wdata_i (bht_write_data)
     );
 
     ydrmem_1r1w_ram #(
@@ -189,8 +199,8 @@ import ydrasil_pkg::*;
         .ADDR_WIDTH(BHT_INDEX_WIDTH), .INIT_VALUE('0)
     ) u_bht_ram_lane1 (
         .clk(clk), .ren_i(1'b1), .raddr_i(predict_bht_index1),
-        .rdata_o(bht_mem_rdata1), .wen_i(conditional_train_fire),
-        .waddr_i(train_bht_index), .wdata_i(bht_mem_wdata)
+        .rdata_o(bht_mem_rdata1), .wen_i(bht_clear_write || conditional_train_fire),
+        .waddr_i(bht_write_index), .wdata_i(bht_write_data)
     );
 
     always_ff @(posedge clk or negedge rst_n) begin
@@ -198,37 +208,45 @@ import ydrasil_pkg::*;
             predict_btb_tag_q   <= '0;
             predict_bht_index_q <= '0;
             predict_btb_valid_q <= 1'b0;
-            predict_bht_valid_q <= 1'b0;
             predict_btb_tag1_q  <= '0;
             predict_bht_index1_q <= '0;
             predict_btb_valid1_q <= 1'b0;
-            predict_bht_valid1_q <= 1'b0;
             btb_valid_q         <= '0;
-            bht_valid_q         <= '0;
         end else if (invalidate_i) begin
             predict_btb_tag_q   <= '0;
             predict_bht_index_q <= '0;
             predict_btb_valid_q <= 1'b0;
-            predict_bht_valid_q <= 1'b0;
             predict_btb_tag1_q  <= '0;
             predict_bht_index1_q <= '0;
             predict_btb_valid1_q <= 1'b0;
-            predict_bht_valid1_q <= 1'b0;
             btb_valid_q         <= '0;
-            bht_valid_q         <= '0;
         end else begin
             predict_btb_tag_q   <= predict_btb_tag;
             predict_bht_index_q <= predict_bht_index;
             predict_btb_valid_q <= btb_valid_q[predict_btb_index];
-            predict_bht_valid_q <= bht_valid_q[predict_bht_index];
             predict_btb_tag1_q  <= predict_btb_tag1;
             predict_bht_index1_q <= predict_bht_index1;
             predict_btb_valid1_q <= btb_valid_q[predict_btb_index1];
-            predict_bht_valid1_q <= bht_valid_q[predict_bht_index1];
 
             if (train_fire) begin
                 btb_valid_q[train_btb_index] <= 1'b1;
-                bht_valid_q[train_bht_index] <= 1'b1;
+            end
+        end
+    end
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            bht_clear_active_q <= 1'b1;
+            bht_clear_index_q  <= '0;
+        end else if (invalidate_i) begin
+            bht_clear_active_q <= 1'b1;
+            bht_clear_index_q  <= '0;
+        end else if (bht_clear_active_q) begin
+            if (&bht_clear_index_q) begin
+                bht_clear_active_q <= 1'b0;
+                bht_clear_index_q  <= '0;
+            end else begin
+                bht_clear_index_q <= bht_clear_index_q + 1'b1;
             end
         end
     end
@@ -257,14 +275,16 @@ import ydrasil_pkg::*;
     assign {btb_rtag1, btb_rtarget1} = btb_rdata1;
     assign btb_hit1          = predict_btb_valid1_q &&
         (btb_rtag1 == predict_btb_tag1_q);
-    assign bht_counter       = predict_bht_valid_q ? bht_rdata : 2'b01;
-    assign predict_hit_o     = !invalidate_i && btb_hit;
-    assign predict_counter_o = !invalidate_i ? bht_counter : 2'b01;
+    // Physical zero decodes to weak-not-taken. During a scrub the externally
+    // visible state is already weak-not-taken, so no stale BHT entry can
+    // influence the prediction path before the RAM contents are cleared.
+    assign bht_counter       = bht_predict_ready ? bht_rdata : 2'b01;
+    assign predict_hit_o     = bht_predict_ready && btb_hit;
+    assign predict_counter_o = bht_counter;
     assign predict_taken_o   = predict_hit_o && predict_counter_o[1];
     assign predict_target_o  = btb_rtarget;
-    assign predict1_hit_o = !invalidate_i && btb_hit1;
-    assign predict1_counter_o = !invalidate_i && predict_bht_valid1_q ?
-        bht_rdata1 : 2'b01;
+    assign predict1_hit_o = bht_predict_ready && btb_hit1;
+    assign predict1_counter_o = bht_predict_ready ? bht_rdata1 : 2'b01;
     assign predict1_taken_o = predict1_hit_o && predict1_counter_o[1];
     assign predict1_target_o = btb_rtarget1;
     assign predict1_bht_index_o =
