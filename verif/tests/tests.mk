@@ -74,7 +74,7 @@ YDRASIL_TEST_RESULT_DIR ?= $(RESULT_DIR)/ydrasil-tests
 YDRASIL_TEST_TIMEOUT ?= 100000
 YDRASIL_TEST_JOBS ?= $(shell nproc)
 YDRASIL_TEST_REUSE_MODEL ?= 0
-PPA_YDRASIL_TEST_LOG ?= $(PPA_DIR)/ydrasil_tests_summary.log
+VERIF_YDRASIL_TEST_LOG ?= $(VERIF_STATS_DIR)/ydrasil_tests_summary.log
 SW_TEST_TARGETS := $(addprefix sw_comp_,$(SW_FORMAL_TESTS))
 SW_TEST_INCLUDES := $(RVTESTS_INCLUDES) -I$(YDRASIL_TESTS_DIR) -I$(YDRASIL_FPU_TESTS_DIR)
 SW_SINGLE_DB_COUNT := $(shell expr 1 + $(words $(SW_FORMAL_TESTS)))
@@ -160,13 +160,13 @@ ydrasil_test_sim_%:
 	echo "[ydrasil-tests/$$name] [SPIKE=$$spike_status] [SELF=$$self_status] [cycles=$${cycles:-N/A} insts=$${insts:-N/A} ipc=$${ipc:-N/A}] [trace_rows=$$trace_rows] [$$result]" > "$$status"
 
 ydrasil_test_report:
-	@mkdir -p "$(PPA_DIR)"; rm -f "$(PPA_YDRASIL_TEST_LOG)"; \
+	@mkdir -p "$(VERIF_STATS_DIR)"; rm -f "$(VERIF_YDRASIL_TEST_LOG)"; \
 	failed=0; passed=0; matched=0; policy_skip=0; self_pass=0; total=$(words $(YDRASIL_TESTS)); \
-	echo "[YDRASIL TESTS] EXCLUDED=$(YDRASIL_TEST_EXCLUDE) reason=unsupported misaligned accesses" | tee "$(PPA_YDRASIL_TEST_LOG)"; \
+	echo "[YDRASIL TESTS] EXCLUDED=$(YDRASIL_TEST_EXCLUDE) reason=unsupported misaligned accesses" | tee "$(VERIF_YDRASIL_TEST_LOG)"; \
 	for name in $(YDRASIL_TESTS); do status="$(YDRASIL_TEST_RESULT_DIR)/$$name.status"; \
 		if [ ! -s "$$status" ]; then line="[ydrasil-tests/$$name] [FAIL missing status]"; failed=1; \
 		else line=$$(cat "$$status"); fi; \
-		echo "$$line" | tee -a "$(PPA_YDRASIL_TEST_LOG)"; \
+		echo "$$line" | tee -a "$(VERIF_YDRASIL_TEST_LOG)"; \
 		if echo "$$line" | grep -q '\[SPIKE=MATCH\]'; then matched=$$((matched+1)); fi; \
 		if echo "$$line" | grep -q '\[SPIKE=POLICY_SKIP\]'; then policy_skip=$$((policy_skip+1)); fi; \
 		if echo "$$line" | grep -q '\[SELF=PASS\]'; then self_pass=$$((self_pass+1)); fi; \
@@ -176,8 +176,8 @@ ydrasil_test_report:
 				tail -40 "$(SIM_COMPARE_DIR)/ydrasil-tests/$$name/compare.log" 2>/dev/null || true; \
 		fi; \
 	done; overall=PASS; if [ "$$failed" -ne 0 ]; then overall=FAIL; fi; \
-	echo "[YDRASIL TESTS] CORRECTNESS=$$overall passed=$$passed spike_match=$$matched spike_policy_skip=$$policy_skip self_pass=$$self_pass total=$$total" | tee -a "$(PPA_YDRASIL_TEST_LOG)"; \
-	echo "[PPA] Ydrasil tests report: $(PPA_YDRASIL_TEST_LOG)"; exit $$failed
+	echo "[YDRASIL TESTS] CORRECTNESS=$$overall passed=$$passed spike_match=$$matched spike_policy_skip=$$policy_skip self_pass=$$self_pass total=$$total" | tee -a "$(VERIF_YDRASIL_TEST_LOG)"; \
+	echo "[VERIF] Ydrasil tests report: $(VERIF_YDRASIL_TEST_LOG)"; exit $$failed
 
 ydrasil_test_clean:
 	@rm -rf "$(YDRASIL_TEST_RESULT_DIR)" "$(HW_TRACE_OUT_DIR)/ydrasil-tests" \
@@ -294,17 +294,17 @@ rv_report_%:
 	done
 
 ppa_rvtest_report:
-	@mkdir -p "$(PPA_DIR)"; \
-	rm -f "$(PPA_RVTEST_LOG)"; \
+	@mkdir -p "$(VERIF_STATS_DIR)"; \
+	rm -f "$(VERIF_RVTEST_LOG)"; \
 	for typ in $(RVTESTS_TYPE); do \
 		result_dir=$(RVTESTS_RESULT_DIR)/$$typ; \
 		[ -d "$$result_dir" ] || continue; \
-		echo "========== $$typ ==========" >> "$(PPA_RVTEST_LOG)"; \
+		echo "========== $$typ ==========" >> "$(VERIF_RVTEST_LOG)"; \
 		for f in $$(ls $$result_dir/*.status 2>/dev/null | sort); do \
-			awk -f "$(PROJECT_ROOT)/verif/tests/fix_test_all_summary.awk" "$$f" >> "$(PPA_RVTEST_LOG)"; \
+			awk -f "$(PROJECT_ROOT)/verif/tests/fix_test_all_summary.awk" "$$f" >> "$(VERIF_RVTEST_LOG)"; \
 		done; \
 	done; \
-	echo "[PPA] RV test report: $(PPA_RVTEST_LOG)"
+	echo "[VERIF] RV test report: $(VERIF_RVTEST_LOG)"
 
 rv_test_summary_all: $(RVTESTS_SUMMARY_TARGETS)
 

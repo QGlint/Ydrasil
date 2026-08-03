@@ -1,23 +1,84 @@
 #!/usr/bin/env python3
-"""Summarize Verilator's final tree and flag likely unregistered outputs.
+"""Analyze a Verilator final tree for RTL structure hazards.
 
-Verilator 5.048 does not ship --xml-only, so the Make target uses its stable
-tree JSON dump.  Newer Verilator XML can be passed as well; the JSON report is
-intentionally conservative and marks unresolved cases as ``unknown``.
+The report is deliberately structural rather than a synthesis estimate.  It
+tracks registers, unpacked arrays, assignment dependencies, cell connections,
+combinational strongly connected components, path depth, and fanout.  The
+input is Verilator's stable ``--dump-tree-json`` format.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import sys
-from collections import Counter
+from collections import Counter, defaultdict, deque
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 
-def walk(node: Any):
+ASSIGN_TYPES = {"ASSIGN", "ASSIGNW", "ASSIGNDLY"}
+PSEUDO_PREFIX = "@cell:"
+
+# These are expression nodes rather than declarations/references.  Verilator
+# emits a few internal helper nodes as well; counting only operators keeps the
+# metric stable across tree-json versions.
+OPERATOR_TYPES = {
+    "ADD", "SUB", "MUL", "DIV", "MOD", "POW", "NEG", "NOT", "AND", "OR",
+    "XOR", "XNOR", "EQ", "NEQ", "CASEEQ", "CASENEQ", "LT", "LTE", "GT",
+    "GTE", "SHL", "SHR", "ASHL", "ASHR", "ROL", "ROR", "REDAND", "REDOR",
+    "REDXOR", "REDXNOR", "REDNOR", "REDNAND", "COND", "MUX", "PMUX",
+    "CASE", "CASEZ", "CASEX", "IF", "UNIQUE", "PRIORITY",
+    # Verilator emits signed/operator-specialized spellings after width and
+    # signedness lowering.  Keep them in the structural model instead of
+    # silently treating the operation as a wire.
+    "ARRAYSEL", "GTS", "LTES", "GTES", "MULS", "DIVS", "MODDIVS",
+    "CONCAT",
+}
+MUX_TYPES = {"COND", "MUX", "PMUX", "CASE", "CASEZ", "CASEX", "IF"}
+ASSOCIATIVE_TYPES = {"AND", "OR", "XOR", "XNOR", "REDAND", "REDOR", "REDXOR", "REDXNOR"}
+
+# These nodes are elaboration/typing aliases, not different hardware.  The
+# aliases are normalized for depth accounting while their original spelling
+# remains visible in operator statistics.
+OPERATOR_ALIASES = {
+    "GTS": "GT", "GTES": "GTE", "LTES": "LTE", "MULS": "MUL",
+    "DIVS": "DIV", "MODDIVS": "MOD",
+}
+
+
+def operator_depth_cost(node: dict[str, Any], index: dict[str, dict[str, Any]]) -> int:
+    """Return a conservative FPGA-structure cost for one AST operator.
+
+    Constant packed selects and concatenations are wiring and should not
+    inflate timing depth.  Dynamic unpacked-array selects (the common LUTRAM
+    read-address form) do have a mux/decode cost.  Specialized signed
+    operators are charged like their ordinary counterparts.
+    """
+    kind = str(node.get("type", "")).upper()
+    if kind == "CONCAT":
+        return 0
+    if kind == "SEL":
+        # SEL is intentionally outside OPERATOR_TYPES.  A fixed packed slice
+        # is a wire; a variable part-select is represented by a different
+        # Verilator node and is handled below.
+        return 0
+    if kind == "ARRAYSEL":
+        bit_nodes = node.get("bitp", [])
+        dynamic = any(item.get("type") != "CONST" for item in walk(bit_nodes))
+        if not dynamic:
+            return 0
+        source = (node.get("fromp") or [{}])[0]
+        dtype = index.get(source.get("dtypep", "")) if source else None
+        shape = dtype_shape(dtype, index) if dtype else {"array_elements": None}
+        elements = shape.get("array_elements") or 2
+        return max(1, math.ceil(math.log2(max(2, elements))))
+    return 1
+
+
+def walk(node: Any) -> Iterable[dict[str, Any]]:
     if isinstance(node, dict):
         yield node
         for value in node.values():
@@ -27,98 +88,2061 @@ def walk(node: Any):
             yield from walk(value)
 
 
-def width_of(dtype: dict[str, Any] | None, index: dict[str, dict[str, Any]]) -> int | None:
+def node_name(node: dict[str, Any] | None) -> str | None:
+    if not node:
+        return None
+    return node.get("origName") or node.get("verilogName") or node.get("name")
+
+
+def literal_int(node: dict[str, Any] | None) -> int | None:
+    """Read the constant spellings emitted by Verilator (32'h3, 4'sh-1, ...)."""
+    if not node or node.get("type") != "CONST":
+        return None
+    text = str(node.get("name", "")).replace("_", "")
+    match = re.search(r"(?:\d+)?'s?[hH]([0-9a-fA-F]+)$", text)
+    if match:
+        return int(match.group(1), 16)
+    match = re.search(r"(?:\d+)?'s?[dD](-?\d+)$", text)
+    if match:
+        return int(match.group(1), 10)
+    match = re.fullmatch(r"-?\d+", text)
+    return int(text, 10) if match else None
+
+
+def range_extent(range_node: dict[str, Any] | None) -> int | None:
+    if not range_node:
+        return None
+    left = (range_node.get("leftp") or [{}])[0]
+    right = (range_node.get("rightp") or [{}])[0]
+    left_value = literal_int(left)
+    right_value = literal_int(right)
+    if left_value is None or right_value is None:
+        return None
+    return abs(left_value - right_value) + 1
+
+
+def dtype_width(dtype: dict[str, Any] | None, index: dict[str, dict[str, Any]], seen: set[str] | None = None) -> int | None:
     if not dtype:
         return None
+    seen = set() if seen is None else seen
+    addr = dtype.get("addr")
+    if addr and addr in seen:
+        return None
+    if addr:
+        seen.add(addr)
     kind = dtype.get("type", "")
+
     if kind == "BASICDTYPE":
-        ranges = [item for item in dtype.get("rangep", []) if isinstance(item, dict)]
-        if ranges:
-            return int(ranges[0].get("widthConst", 1))
-        return 1
-    if kind == "UNPACKARRAYDTYPE":
-        ranges = [item for item in dtype.get("rangep", []) if isinstance(item, dict)]
+        extents = [range_extent(item) for item in dtype.get("rangep", [])]
+        if extents and all(item is not None for item in extents):
+            return product(item for item in extents if item is not None)
+        raw_range = str(dtype.get("range", ""))
+        match = re.fullmatch(r"\s*(-?\d+)\s*:\s*(-?\d+)\s*", raw_range)
+        if match:
+            return abs(int(match.group(1)) - int(match.group(2))) + 1
+        if str(dtype.get("keyword", "")).lower() in {"integer", "time"}:
+            return 32
+        return int(dtype.get("widthConst", 1) or 1)
+
+    if kind in {"REFDTYPE", "MEMBERDTYPE"}:
+        target = index.get(dtype.get("refDTypep", ""))
+        return dtype_width(target, index, seen)
+
+    if kind == "ENUMDTYPE":
+        target = index.get(dtype.get("refDTypep", ""))
+        width = dtype_width(target, index, seen)
+        if width:
+            return width
+        values = []
+        for item in dtype.get("itemsp", []):
+            for value in item.get("valuep", []):
+                value_text = str(value.get("name", ""))
+                match = re.match(r"(\d+)'", value_text)
+                if match:
+                    values.append(int(match.group(1)))
+        return max(values, default=1)
+
+    if kind == "STRUCTDTYPE":
+        widths = []
+        for member in dtype.get("membersp", []):
+            member_type = index.get(member.get("refDTypep", ""))
+            width = dtype_width(member_type, index, seen.copy())
+            if width is None:
+                return None
+            widths.append(width)
+        return sum(widths) if widths else 0
+
+    if kind in {"PACKARRAYDTYPE", "UNPACKARRAYDTYPE"}:
         extent = 1
-        if ranges:
-            range_node = ranges[0]
-            left = range_node.get("leftp", [{}])[0].get("name", "")
-            right = range_node.get("rightp", [{}])[0].get("name", "")
-            raw_numbers = re.findall(r"32'h([0-9a-fA-F]+)$", left) + re.findall(r"32'h([0-9a-fA-F]+)$", right)
-            raw_numbers += [item for item in (left, right) if item.isdigit()]
-            numbers = [int(item, 16) if not item.isdigit() else int(item, 10) for item in raw_numbers]
-            if len(numbers) == 2:
-                extent = abs(numbers[1] - numbers[0]) + 1
-        return extent * (width_of(index.get(dtype.get("refDTypep", "")), index) or 1)
-    if kind in {"REFDTYPE", "LOGICDTYPE", "PACKARRAYDTYPE"}:
-        return width_of(index.get(dtype.get("refDTypep", "") or dtype.get("dtypep", "")), index)
+        for item in dtype.get("rangep", []):
+            item_extent = range_extent(item)
+            if item_extent is None:
+                extent = None
+                break
+            extent *= item_extent
+        target_width = dtype_width(index.get(dtype.get("refDTypep", "")), index, seen)
+        if extent is None or target_width is None:
+            return None
+        return extent * target_width
+
     if dtype.get("widthConst") is not None:
         return int(dtype["widthConst"])
-    return None
+    target = index.get(dtype.get("refDTypep", "") or dtype.get("dtypep", ""))
+    return dtype_width(target, index, seen) if target and target is not dtype else None
 
 
-def ref_names(node: Any, index: dict[str, dict[str, Any]]) -> set[str]:
-    result: set[str] = set()
-    for item in walk(node):
-        if item.get("type") != "VARREF":
-            continue
-        var = index.get(item.get("varp", ""), item)
-        name = var.get("origName") or var.get("name")
-        if name:
-            result.add(name)
+def product(values: Iterable[int]) -> int:
+    result = 1
+    for value in values:
+        result *= value
     return result
 
 
-def module_report(module: dict[str, Any], index: dict[str, dict[str, Any]]) -> dict[str, Any]:
-    variables = [item for item in walk(module) if item.get("type") == "VAR"]
-    # Function return values also carry direction=OUTPUT in Verilator's tree;
-    # only PORT variables are module outputs.
-    outputs = {
-        item.get("origName") or item.get("name")
-        for item in variables
-        if item.get("direction") == "OUTPUT" and item.get("varType") == "PORT"
-    }
-    outputs.discard(None)
-    delayed_lhs: set[str] = set()
-    continuous: dict[str, set[str]] = {}
-    always_count = Counter()
-    for item in walk(module):
-        if item.get("type") == "ALWAYS":
-            always_count[item.get("keyword", "always")] += 1
-        if item.get("type") not in {"ASSIGNDLY", "ASSIGNW", "ASSIGN"}:
-            continue
-        lhs = item.get("lhsp", [])
-        rhs = item.get("rhsp", [])
-        lhs_names = ref_names(lhs, index)
-        rhs_names = ref_names(rhs, index)
-        if item.get("type") == "ASSIGNDLY":
-            delayed_lhs.update(lhs_names)
+def dtype_shape(dtype: dict[str, Any] | None, index: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    if not dtype:
+        return {"kind": "unknown", "width_bits": None, "array_extents": []}
+    extents = []
+    current = dtype
+    seen: set[str] = set()
+    while current and current.get("addr") not in seen:
+        addr = current.get("addr")
+        if addr:
+            seen.add(addr)
+        kind = current.get("type", "")
+        if kind in {"PACKARRAYDTYPE", "UNPACKARRAYDTYPE"}:
+            for item in current.get("rangep", []):
+                extents.append(range_extent(item))
+            current = index.get(current.get("refDTypep", ""))
+        elif kind in {"REFDTYPE", "MEMBERDTYPE"}:
+            current = index.get(current.get("refDTypep", ""))
         else:
-            for name in lhs_names:
-                continuous.setdefault(name, set()).update(rhs_names)
-
-    registered = sorted(name for name in outputs if name in delayed_lhs or continuous.get(name, set()) & delayed_lhs)
-    combinational = sorted(name for name in outputs if name in continuous and name not in registered)
-    unknown = sorted(outputs - set(registered) - set(combinational))
-    registers = []
-    for item in variables:
-        name = item.get("origName") or item.get("name")
-        if item.get("varType") != "VAR" or not name or name not in delayed_lhs:
-            continue
-        dtype = index.get(item.get("dtypep", ""))
-        registers.append({"name": name, "width_bits": width_of(dtype, index), "array": dtype.get("type") == "UNPACKARRAYDTYPE" if dtype else False})
-    status = "yes" if outputs and not combinational and not unknown else ("no" if combinational else "unknown")
+            break
     return {
-        "name": module.get("origName") or module.get("name"),
-        "output_count": len(outputs),
-        "registered_outputs": registered,
-        "combinational_outputs": combinational,
-        "unknown_outputs": unknown,
-        "all_outputs_registered": status == "yes",
-        "registration_status": status,
-        "register_count": len(registers),
-        "register_bits": sum(item["width_bits"] or 0 for item in registers),
-        "registers": registers,
-        "always_blocks": dict(always_count),
+        "kind": dtype.get("type", "unknown"),
+        "type_name": dtype.get("name") or dtype.get("keyword"),
+        "width_bits": dtype_width(dtype, index),
+        "array_extents": extents,
+        "array_elements": product(item for item in extents if item is not None) if extents and all(item is not None for item in extents) else None,
+        "packed": bool(dtype.get("packed", False)),
+    }
+
+
+def var_refs(node: Any, index: dict[str, dict[str, Any]], access: str | None = None) -> list[dict[str, Any]]:
+    refs = []
+    for item in walk(node):
+        if item.get("type") != "VARREF":
+            continue
+        if access and item.get("access") != access:
+            continue
+        ref = index.get(item.get("varp", ""), item)
+        refs.append({
+            "addr": item.get("varp", ""),
+            "name": node_name(ref) or item.get("name"),
+            "access": item.get("access"),
+            "loc": item.get("loc"),
+        })
+    return refs
+
+
+def refs_from_nodes(nodes: Iterable[dict[str, Any]], index: dict[str, dict[str, Any]], access: str | None = None) -> list[dict[str, Any]]:
+    """Extract references from an already flattened node list."""
+    # Statement fields such as IF.condp/CASE.exprp are emitted as one dict,
+    # while module/always scans pass an already flattened list.  Accept both
+    # forms without recursively walking the flattened list (which would count
+    # every child reference multiple times).
+    iterable: Iterable[dict[str, Any]] = walk(nodes) if isinstance(nodes, dict) else nodes
+    refs = []
+    for item in iterable:
+        if item.get("type") != "VARREF" or (access and item.get("access") != access):
+            continue
+        ref = index.get(item.get("varp", ""), item)
+        refs.append({
+            "addr": item.get("varp", ""),
+            "name": node_name(ref) or item.get("name"),
+            "access": item.get("access"),
+            "loc": item.get("loc"),
+        })
+    return refs
+
+
+def unique_refs(refs: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    result = {}
+    for ref in refs:
+        if ref.get("addr"):
+            result[ref["addr"]] = ref
+    return list(result.values())
+
+
+def node_width(node: dict[str, Any] | None, index: dict[str, dict[str, Any]]) -> int | None:
+    """Return the elaborated width attached to an expression node."""
+    if not node:
+        return None
+    width = node.get("widthConst")
+    if width is not None:
+        try:
+            return max(1, int(width))
+        except (TypeError, ValueError):
+            pass
+    dtype = index.get(node.get("dtypep", ""))
+    return dtype_width(dtype, index) if dtype else None
+
+
+def expression_children(node: dict[str, Any]) -> list[dict[str, Any]]:
+    children = []
+    for key, value in node.items():
+        if key in {"dtypep", "addr", "loc", "name", "varp", "varScopep", "classOrPackagep"}:
+            continue
+        if isinstance(value, dict):
+            children.append(value)
+        elif isinstance(value, list):
+            children.extend(item for item in value if isinstance(item, dict))
+    return children
+
+
+def associative_operands(node: dict[str, Any], kind: str) -> list[dict[str, Any]]:
+    operands = []
+    for child in expression_children(node):
+        if str(child.get("type", "")).upper() == kind:
+            operands.extend(associative_operands(child, kind))
+        else:
+            operands.append(child)
+    return operands
+
+
+def expression_depth(node: Any, index: dict[str, dict[str, Any]]) -> int:
+    """Estimate implementation depth, balancing associative reductions.
+
+    Verilator preserves source associativity.  FPGA synthesis normally builds
+    balanced trees for long OR/AND/XOR reductions, so raw AST nesting would
+    greatly overstate their depth (notably opcode decode and bitmanip logic).
+    """
+    if isinstance(node, list):
+        return max((expression_depth(item, index) for item in node), default=0)
+    if not isinstance(node, dict):
+        return 0
+    kind = str(node.get("type", "")).upper()
+    children = expression_children(node)
+    if kind not in OPERATOR_TYPES:
+        return max((expression_depth(child, index) for child in children), default=0)
+    if kind in ASSOCIATIVE_TYPES:
+        operands = associative_operands(node, kind)
+        reduction_depth = max(1, math.ceil(math.log2(max(2, len(operands)))))
+        return reduction_depth + max((expression_depth(child, index) for child in operands), default=0)
+    return operator_depth_cost(node, index) + max((expression_depth(child, index) for child in children), default=0)
+
+
+def expression_metrics(node: Any, index: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """Summarize an elaborated expression without pretending it is a netlist."""
+    operators = 0
+    conditionals = 0
+    max_width = 0
+    max_depth = 0
+    weighted_work = 0
+
+    def visit(item: Any, depth: int = 0) -> None:
+        nonlocal operators, conditionals, max_width, max_depth, weighted_work
+        if not isinstance(item, dict):
+            if isinstance(item, list):
+                for child in item:
+                    visit(child, depth)
+            return
+        kind = str(item.get("type", "")).upper()
+        width = node_width(item, index) or 1
+        if kind in OPERATOR_TYPES:
+            cost = operator_depth_cost(item, index)
+            operators += 1
+            max_width = max(max_width, width)
+            max_depth = max(max_depth, depth + cost)
+            weighted_work += width * cost
+            if kind in MUX_TYPES:
+                conditionals += 1
+        for key, value in item.items():
+            if key in {"dtypep", "addr", "loc", "name", "varp", "varScopep", "classOrPackagep"}:
+                continue
+            visit(value, depth + (operator_depth_cost(item, index) if kind in OPERATOR_TYPES else 0))
+
+    visit(node)
+    max_depth = expression_depth(node, index)
+    return {
+        "operator_count": operators,
+        "operator_depth": max_depth,
+        "conditional_count": conditionals,
+        "max_expression_width": max_width or None,
+        "weighted_combination_work": weighted_work,
+    }
+
+
+def guarded_assignment_context(
+    always: dict[str, Any],
+    index: dict[str, dict[str, Any]],
+) -> tuple[dict[str, set[str]], dict[str, int], dict[str, dict[str, int]]]:
+    """Map each sequential assignment to enclosing if/case control signals.
+
+    The tree JSON keeps an ``IF.condp`` or ``CASE.exprp`` outside the
+    ASSIGNDLY RHS, so a plain RHS scan misses CE/enable paths.  Preserve the
+    guard context while walking statement branches.  This is an intentional
+    structural approximation; reset and generated unique-case checks remain
+    visible and can be filtered by the caller if needed.
+    """
+    result: dict[str, set[str]] = defaultdict(set)
+    depths: dict[str, int] = defaultdict(int)
+    control_depths: dict[str, dict[str, int]] = defaultdict(dict)
+
+    def visit(
+        node: Any,
+        guards: set[str],
+        guard_depth: int,
+        inherited_costs: dict[str, int],
+    ) -> None:
+        if isinstance(node, list):
+            for item in node:
+                visit(item, guards, guard_depth, inherited_costs)
+            return
+        if not isinstance(node, dict):
+            return
+        kind = str(node.get("type", "")).upper()
+        if kind in ASSIGN_TYPES:
+            addr = node.get("addr")
+            if addr:
+                result[addr].update(guards)
+                depths[addr] = max(depths[addr], guard_depth)
+                for source in guards:
+                    control_depths[addr][source] = max(
+                        control_depths[addr].get(source, 0),
+                        inherited_costs.get(source, 1),
+                    )
+            return
+        if kind == "IF":
+            conds = {
+                ref["addr"]
+                for ref in refs_from_nodes(walk(node.get("condp", [])), index, "RD")
+                if ref.get("addr")
+            }
+            branch_guards = guards | conds
+            condition_cost = max(1, expression_depth(node.get("condp", []), index))
+            branch_costs = dict(inherited_costs)
+            for source in conds:
+                branch_costs[source] = max(branch_costs.get(source, 0), condition_cost)
+            branch_depth = guard_depth + condition_cost
+            visit(node.get("thensp", []), branch_guards, branch_depth, branch_costs)
+            visit(node.get("elsesp", []), branch_guards, branch_depth, branch_costs)
+            return
+        if kind == "CASE":
+            conds = {
+                ref["addr"]
+                for ref in refs_from_nodes(walk(node.get("exprp", [])), index, "RD")
+                if ref.get("addr")
+            }
+            condition_cost = max(1, expression_depth(node.get("exprp", []), index))
+            case_costs = dict(inherited_costs)
+            for source in conds:
+                case_costs[source] = max(case_costs.get(source, 0), condition_cost)
+            case_depth = guard_depth + condition_cost
+            visit(node.get("itemsp", []), guards | conds, case_depth, case_costs)
+            return
+        if kind == "CASEITEM":
+            visit(node.get("stmtsp", []), guards, guard_depth, inherited_costs)
+            return
+        # Avoid Verilator's generated unique-case assertion tree, which is a
+        # second copy of the same assignment context.
+        for key, value in node.items():
+            if key in {"dtypep", "addr", "loc", "name", "varp", "varScopep", "classOrPackagep", "notParallelp"}:
+                continue
+            visit(value, guards, guard_depth, inherited_costs)
+
+    visit(always, set(), 0, {})
+    return result, depths, control_depths
+
+
+def tarjan(graph: dict[str, set[str]]) -> list[list[str]]:
+    index_counter = 0
+    indices: dict[str, int] = {}
+    lowlink: dict[str, int] = {}
+    stack: list[str] = []
+    on_stack: set[str] = set()
+    components: list[list[str]] = []
+
+    def visit(node: str) -> None:
+        nonlocal index_counter
+        indices[node] = index_counter
+        lowlink[node] = index_counter
+        index_counter += 1
+        stack.append(node)
+        on_stack.add(node)
+        for target in graph.get(node, ()):
+            if target not in indices:
+                visit(target)
+                lowlink[node] = min(lowlink[node], lowlink[target])
+            elif target in on_stack:
+                lowlink[node] = min(lowlink[node], indices[target])
+        if lowlink[node] == indices[node]:
+            component = []
+            while True:
+                target = stack.pop()
+                on_stack.remove(target)
+                component.append(target)
+                if target == node:
+                    break
+            components.append(component)
+
+    for node in graph:
+        if node not in indices:
+            visit(node)
+    return components
+
+
+def loc_line(loc: str | None) -> int | None:
+    match = re.search(r",(\d+):", str(loc or ""))
+    return int(match.group(1)) if match else None
+
+
+def loop_bound(loop: dict[str, Any], index: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    test = next((item for item in walk(loop) if item.get("type") == "LOOPTEST"), None)
+    if not test:
+        return {"static": False, "bound": None, "condition": None}
+    constants = [literal_int(item) for item in walk(test) if item.get("type") == "CONST"]
+    refs = unique_refs(var_refs(test, index, "RD"))
+    bound = constants[-1] if constants else None
+    return {
+        "static": bound is not None,
+        "bound": bound,
+        "condition": test.get("loc"),
+        "induction_vars": [item["name"] for item in refs],
+        "estimated_iterations": bound if bound is not None and bound >= 0 else None,
+    }
+
+
+def module_report(module: dict[str, Any], index: dict[str, dict[str, Any]], module_status: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    module_name = node_name(module) or "<unknown>"
+    module_nodes = list(walk(module))
+    # A Verilator MODULE owns declarations in its statement tree.  De-duplicate
+    # by address because declarations can be reached through pin metadata too.
+    variables_by_addr = {}
+    for item in module_nodes:
+        if item.get("type") == "VAR" and item.get("addr"):
+            variables_by_addr[item["addr"]] = item
+    variables = list(variables_by_addr.values())
+    var_names = {addr: node_name(item) or addr for addr, item in variables_by_addr.items()}
+    # In Verilator 5.x ordinary SV module ports are commonly represented as
+    # ``direction=OUTPUT,varType=WIRE``.  Restricting this to varType=PORT
+    # silently dropped the outputs of most RTL modules and made Q-to-output
+    # paths look like unconnected internal sinks.
+    outputs = {
+        addr: var_names[addr]
+        for addr, item in variables_by_addr.items()
+        if item.get("direction") == "OUTPUT" and item.get("varType") in {"PORT", "WIRE"}
+    }
+    inputs = {addr for addr, item in variables_by_addr.items() if item.get("direction") == "INPUT"}
+
+    graph: dict[str, set[str]] = defaultdict(set)
+    reverse: dict[str, set[str]] = defaultdict(set)
+    edge_weight: dict[tuple[str, str], int] = {}
+    reads: Counter[str] = Counter()
+    consumers: dict[str, set[str]] = defaultdict(set)
+    seq_lhs: set[str] = set()
+    sequential_control_registers: dict[str, set[str]] = defaultdict(set)
+    writes: Counter[str] = Counter()
+    assignment_count = Counter()
+    always_summary = []
+    expression_summary = []
+    sequential_assignments = []
+    self_feedback = []
+    partial_feedback = []
+    procedural_reassignments = []
+    latch_like = []
+    block_dependency_edges: list[tuple[str, str, str]] = []
+    sensitivity_edges: set[tuple[str, str]] = set()
+
+    def add_edge(source: str, target: str, consumer: str | None = None, weight: int = 0) -> None:
+        graph[source].add(target)
+        reverse[target].add(source)
+        edge_weight[(source, target)] = max(edge_weight.get((source, target), 0), max(0, weight))
+        if consumer:
+            consumers[source].add(consumer)
+
+    # Capture reset context at the always block level and all assignment edges.
+    for always in [item for item in module_nodes if item.get("type") == "ALWAYS"]:
+        keyword = always.get("keyword", "always")
+        always_nodes = list(walk(always))
+        assignments = [item for item in always_nodes if item.get("type") in ASSIGN_TYPES]
+        guard_controls, guard_depths, guard_costs = guarded_assignment_context(always, index)
+        reset_like = any(re.search(r"(?:^|_)(?:rst|reset)(?:_|$)", ref["name"], re.I) for ref in refs_from_nodes(always_nodes, index) if ref.get("name"))
+        always_lhs = set()
+        assigned_before: set[str] = set()
+        for assignment in assignments:
+            assignment_count[assignment.get("type", "ASSIGN")] += 1
+            assignment_metrics = expression_metrics(assignment.get("rhsp", []), index)
+            lhs = unique_refs(var_refs(assignment.get("lhsp", []), index, "WR"))
+            rhs = unique_refs(var_refs(assignment.get("rhsp", []), index, "RD"))
+            lhs_addrs = {item["addr"] for item in lhs if item.get("addr") in variables_by_addr}
+            rhs_addrs = {item["addr"] for item in rhs if item.get("addr") in variables_by_addr}
+            guard_addrs = {
+                addr
+                for addr in guard_controls.get(assignment.get("addr"), ())
+                if addr in variables_by_addr
+            }
+            for target in lhs_addrs:
+                writes[target] += 1
+                always_lhs.add(target)
+                if assignment.get("type") == "ASSIGNDLY":
+                    seq_lhs.add(target)
+                if target in rhs_addrs and assignment.get("type") != "ASSIGNDLY":
+                    lhs_root = (assignment.get("lhsp") or [{}])[0]
+                    item = {
+                        "signal": var_names.get(target, target),
+                        "loc": assignment.get("loc"),
+                        "assignment_type": assignment.get("type"),
+                    }
+                    if (
+                        keyword in {"always_comb", "always_latch", "always"}
+                        and lhs_root.get("type") == "VARREF"
+                        and target in assigned_before
+                    ):
+                        # A procedural temporary is commonly initialized and
+                        # then conditionally overwritten.  Collapsing all
+                        # versions to one signal would manufacture a false
+                        # SCC (selected_idx/selected_valid in issue logic).
+                        procedural_reassignments.append(item)
+                    elif lhs_root.get("type") == "VARREF":
+                        self_feedback.append(item)
+                    else:
+                        partial_feedback.append(item)
+                    latch_like.append(item)
+                for source in rhs_addrs:
+                    if assignment.get("type") != "ASSIGNDLY":
+                        # A packed-field assignment has VARREFs below a SEL;
+                        # treating it as whole-variable feedback creates a
+                        # false SCC when different fields are initialized.
+                        lhs_root = (assignment.get("lhsp") or [{}])[0]
+                        if source == target and lhs_root.get("type") != "VARREF":
+                            continue
+                        if (
+                            source == target
+                            and keyword in {"always_comb", "always_latch", "always"}
+                            and lhs_root.get("type") == "VARREF"
+                            and target in assigned_before
+                        ):
+                            continue
+                        add_edge(
+                            source,
+                            target,
+                            f"assign:{assignment.get('loc', '')}",
+                            assignment_metrics["operator_depth"],
+                        )
+                # An enclosing if/case is part of the combinational cone even
+                # though the condition is outside the assignment RHS in the
+                # Verilator tree.  This is essential for paths such as
+                # head_accept_ready -> eligible -> selected_idx -> ctx_raddr.
+                if assignment.get("type") != "ASSIGNDLY":
+                    for source in guard_addrs:
+                        if (
+                            source == target
+                            and keyword in {"always_comb", "always_latch", "always"}
+                            and target in assigned_before
+                        ):
+                            continue
+                        add_edge(
+                            source,
+                            target,
+                            f"guard:{assignment.get('loc', '')}",
+                            # Guard evaluation plus the mux/priority select
+                            # introduced by the conditional assignment.
+                            max(1, guard_costs.get(assignment.get("addr"), {}).get(source, 1)) + 2,
+                        )
+            for source in rhs_addrs:
+                consumers[source].add(f"assign:{assignment.get('loc', '')}")
+            for source in guard_addrs:
+                consumers[source].add(f"guard:{assignment.get('loc', '')}")
+            assigned_before.update(lhs_addrs)
+            if assignment.get("type") != "ASSIGNDLY":
+                metrics = assignment_metrics
+                if metrics["operator_count"]:
+                    lhs_names = [item["name"] for item in lhs if item.get("name")]
+                    expression_summary.append({
+                        "lhs": lhs_names,
+                        "loc": assignment.get("loc"),
+                        **metrics,
+                    })
+            else:
+                sequential_assignments.append({
+                    "addr": assignment.get("addr"),
+                    "lhs": [item["addr"] for item in lhs if item.get("addr") in variables_by_addr],
+                    "rhs": [item["addr"] for item in rhs if item.get("addr") in variables_by_addr],
+                    "controls": sorted(
+                        var_names.get(control, control)
+                        for control in guard_controls.get(assignment.get("addr"), ())
+                        if control in variables_by_addr
+                    ),
+                    "loc": assignment.get("loc"),
+                    **assignment_metrics,
+                })
+            if assignment.get("type") == "ASSIGNDLY":
+                for control in guard_controls.get(assignment.get("addr"), ()):
+                    if control in variables_by_addr:
+                        for target in lhs_addrs:
+                            sequential_control_registers[control].add(var_names.get(target, target))
+        # Verilator's UNOPTFLAT check also models a combinational process as a
+        # sensitivity dependency.  A continuous wire read inside an
+        # always_comb can therefore close a loop through a signal assigned in
+        # that process even when no single assignment has the reverse edge
+        # (for example: selected_valid -> issue_fire -> selected_valid).
+        # Preserve that structural dependency for loop detection, but do not
+        # add reads of signals assigned by the same process: those are already
+        # represented by their assignment-level edges and connecting every
+        # procedural temporary to every LHS would create false SCCs.
+        if keyword in {"always_comb", "always_latch", "always"} and not any(
+            item.get("type") == "ASSIGNDLY" for item in assignments
+        ):
+            block_reads = {
+                ref.get("addr")
+                for ref in refs_from_nodes(always_nodes, index, "RD")
+                if ref.get("addr") in variables_by_addr and ref.get("addr") not in always_lhs
+            }
+            for source in block_reads:
+                for target in always_lhs:
+                    if source != target:
+                        block_dependency_edges.append((
+                            source,
+                            target,
+                            f"always:{always.get('loc', '')}",
+                        ))
+        if assignments:
+            always_summary.append({
+                "keyword": keyword,
+                "loc": always.get("loc"),
+                "assignment_count": len(assignments),
+                "lhs_count": len(always_lhs),
+                "reset_like": reset_like,
+                "registered_lhs": sorted(var_names.get(item, item) for item in always_lhs if item in seq_lhs),
+            })
+
+    # Cell pins expose module-to-module connections.  Pseudo nodes keep those
+    # edges visible without pretending a child instance is a combinational gate.
+    cell_outputs: dict[str, dict[str, Any]] = {}
+    cell_inputs: set[str] = set()
+    cell_connections = []
+    cell_bindings = []
+    for cell in [item for item in module_nodes if item.get("type") == "CELL" and item.get("pinsp")]:
+        instance_name = cell.get("origName") or cell.get("name") or "<cell>"
+        child_module = index.get(cell.get("modp", ""), {})
+        child_name = node_name(child_module) or instance_name
+        for pin in cell.get("pinsp", []):
+            child_var = index.get(pin.get("modVarp", ""), {})
+            direction = child_var.get("direction")
+            pin_name = pin.get("name") or "<pin>"
+            pseudo = f"{PSEUDO_PREFIX}{instance_name}.{pin_name}"
+            refs = unique_refs(var_refs(pin.get("exprp", []), index))
+            cell_bindings.append({
+                "instance": instance_name,
+                "child": child_name,
+                "pin": pin_name,
+                "direction": direction or "unknown",
+                "child_var_addr": pin.get("modVarp", ""),
+                "signal_addrs": sorted(
+                    ref["addr"] for ref in refs
+                    if ref.get("addr") in variables_by_addr
+                ),
+            })
+            cell_connections.append({
+                "instance": instance_name,
+                "module": child_name,
+                "pin": pin_name,
+                "direction": direction or "unknown",
+                "signals": sorted(ref["name"] for ref in refs if ref.get("name")),
+            })
+            if direction == "OUTPUT":
+                cell_outputs[pseudo] = {
+                    "child": child_name,
+                    "pin": pin_name,
+                    "signals": sorted(ref["name"] for ref in refs if ref.get("name")),
+                }
+                for ref in refs:
+                    if ref.get("addr") in variables_by_addr:
+                        add_edge(pseudo, ref["addr"], f"cell:{instance_name}.{pin_name}")
+            elif direction == "INPUT":
+                cell_inputs.add(pseudo)
+                for ref in refs:
+                    if ref.get("addr") in variables_by_addr:
+                        add_edge(ref["addr"], pseudo, f"cell:{instance_name}.{pin_name}")
+                        consumers[ref["addr"]].add(f"cell:{instance_name}.{pin_name}")
+
+    # A process-level sensitivity edge is needed only when assignment-level
+    # edges already provide the return path.  Adding every read-to-LHS pair
+    # would connect unrelated outputs in a large always_comb and distort the
+    # reported depth.  This bounded reachability check adds exactly the edge
+    # that closes an existing path, while every node is still visited at most
+    # once per candidate pair.
+    def reaches(start: str, goal: str) -> bool:
+        pending = [start]
+        seen: set[str] = set()
+        while pending:
+            current = pending.pop()
+            if current == goal:
+                return True
+            if current in seen:
+                continue
+            seen.add(current)
+            pending.extend(graph.get(current, ()))
+        return False
+
+    for source, target, consumer in block_dependency_edges:
+        if source != target and reaches(target, source):
+            add_edge(source, target, consumer, 0)
+            sensitivity_edges.add((source, target))
+
+    # Count elaborated read references.  The AST is already expanded, so this
+    # is the useful first-order fanout estimate; ``unique_consumers`` keeps the
+    # assignment/cell-site view for triage.
+    for ref in refs_from_nodes(module_nodes, index, "RD"):
+        addr = ref.get("addr")
+        if addr in variables_by_addr:
+            reads[addr] += 1
+
+    loops = [loop_bound(item, index) | {"loc": item.get("loc")} for item in module_nodes if item.get("type") == "LOOP"]
+    loop_var_names = {name for item in loops for name in item.get("induction_vars", [])}
+    loop_var_addrs = {addr for addr, name in var_names.items() if name in loop_var_names}
+    # Loop counters are elaboration temporaries, not hardware signals.  Remove
+    # their graph nodes before SCC and depth analysis.
+    for addr in loop_var_addrs:
+        graph.pop(addr, None)
+        reverse.pop(addr, None)
+    for targets in graph.values():
+        targets.difference_update(loop_var_addrs)
+    for sources in reverse.values():
+        sources.difference_update(loop_var_addrs)
+
+    nodes = set(graph)
+    nodes.update(target for targets in graph.values() for target in targets)
+    components = tarjan({node: set(graph.get(node, ())) for node in nodes})
+    cycles = []
+    true_cycles = []
+    cycle_components: list[tuple[int, dict[str, Any]]] = []
+    component_of = {}
+    for number, component in enumerate(components):
+        for item in component:
+            component_of[item] = number
+        if len(component) > 1 or any(item in graph.get(item, set()) for item in component):
+            names = [var_names.get(item, item) for item in component]
+            members = set(component)
+            value_graph = {
+                source: {
+                    target
+                    for target in graph.get(source, set())
+                    if target in members and (source, target) not in sensitivity_edges
+                }
+                for source in members
+            }
+            value_components = tarjan(value_graph)
+            value_cycle = any(
+                len(part) > 1 or any(item in value_graph.get(item, set()) for item in part)
+                for part in value_components
+            )
+            internal_sensitivity_edges = sorted(
+                (
+                    var_names.get(source, source),
+                    var_names.get(target, target),
+                )
+                for source, target in sensitivity_edges
+                if source in members and target in members
+            )
+            sensitivity_witness = []
+            for source in sorted({item[0] for item in internal_sensitivity_edges}):
+                candidates = {
+                    target
+                    for left, target in internal_sensitivity_edges
+                    if left == source
+                }
+                frontier = {
+                    target
+                    for target in candidates
+                    if not any(
+                        target != other and reaches(target, other)
+                        for other in candidates
+                    )
+                }
+                sensitivity_witness.extend(
+                    (var_names.get(source, source), var_names.get(target, target))
+                    for target in sorted(frontier)
+                )
+            cycle = {
+                "signals": sorted(names),
+                "size": len(component),
+                "kind": (
+                    "mixed"
+                    if value_cycle and internal_sensitivity_edges
+                    else ("value" if value_cycle else "sensitivity")
+                ),
+                "sensitivity_edges": [
+                    {"source": source, "target": target}
+                    for source, target in internal_sensitivity_edges
+                ],
+                "sensitivity_witness": [
+                    {"source": source, "target": target}
+                    for source, target in sensitivity_witness
+                ],
+                "sensitivity_witness_path": [
+                    [target, source]
+                    for source, target in sensitivity_witness
+                ],
+            }
+            cycles.append(cycle)
+            cycle_components.append((number, cycle))
+            if len(component) > 1:
+                true_cycles.append(cycle)
+
+    # Longest combinational path on the SCC condensation graph.  Sequential
+    # destinations are sources for the next cycle and do not add logic depth.
+    dag: dict[int, set[int]] = defaultdict(set)
+    indegree: Counter[int] = Counter()
+    for source, targets in graph.items():
+        for target in targets:
+            left, right = component_of[source], component_of[target]
+            if left != right and right not in dag[left]:
+                dag[left].add(right)
+                indegree[right] += 1
+
+    def component_edge_cost(left: int, right: int) -> int:
+        if any(item in seq_lhs for item in components[left]):
+            return 0
+        weights = [
+            edge_weight[(source, target)]
+            for source in components[left]
+            for target in components[right]
+            if (source, target) in edge_weight
+        ]
+        return max(weights, default=1)
+
+    queue = deque(number for number in range(len(components)) if indegree[number] == 0)
+    depth = {number: 0 for number in range(len(components))}
+    depth_parent: dict[int, int] = {}
+    topo_order = []
+    while queue:
+        current = queue.popleft()
+        topo_order.append(current)
+        for target in dag.get(current, ()):
+            edge_cost = component_edge_cost(current, target)
+            candidate = depth[current] + edge_cost
+            if candidate > depth[target]:
+                depth[target] = candidate
+                depth_parent[target] = current
+            indegree[target] -= 1
+            if indegree[target] == 0:
+                queue.append(target)
+
+    # A signal on the RHS of a non-blocking assignment is a timing endpoint at
+    # the destination flop's D pin.  Keep the reverse map so a Q-to-boundary
+    # walk can distinguish a real register cut from an unconsumed temporary.
+    sequential_rhs_registers: dict[str, set[str]] = defaultdict(set)
+    for assignment in sequential_assignments:
+        for source in assignment["rhs"]:
+            for target in assignment["lhs"]:
+                sequential_rhs_registers[source].add(var_names.get(target, target))
+
+    # Reverse longest paths answer a different question from input-to-output
+    # depth: how much combinational logic can a register Q drive before the
+    # next register D, module boundary, child input, or dead internal sink?
+    # A path can have more than one terminal; retain the longest terminal and
+    # its endpoint kind for triage.
+    forward_depth = {number: 0 for number in range(len(components))}
+    forward_next: dict[int, int] = {}
+    forward_endpoint: dict[int, str] = {}
+    forward_endpoint_registers: dict[int, list[str]] = {}
+    endpoint_priority = {
+        "register_d": 5,
+        "register_control": 4,
+        "module_output": 3,
+        "child_input": 2,
+        "combinational_sink": 1,
+    }
+
+    def choose_forward_candidate(
+        candidate: tuple[int, str, int | None, list[str] | None],
+        best: tuple[int, str, int | None, list[str] | None] | None,
+    ) -> tuple[int, str, int | None, list[str] | None]:
+        if best is None or candidate[0] > best[0]:
+            return candidate
+        if candidate[0] == best[0] and endpoint_priority[candidate[1]] > endpoint_priority[best[1]]:
+            return candidate
+        return best
+
+    for current in reversed(topo_order):
+        candidates: list[tuple[int, str, int | None, list[str] | None]] = []
+        members = set(components[current])
+        if members & set(outputs):
+            candidates.append((0, "module_output", None, None))
+        if members & cell_inputs:
+            candidates.append((0, "child_input", None, None))
+        register_targets = sorted({
+            target
+            for source in members
+            for target in sequential_rhs_registers.get(source, ())
+        })
+        if register_targets:
+            candidates.append((0, "register_d", None, register_targets))
+        control_targets = sorted({
+            target
+            for source in members
+            for target in sequential_control_registers.get(source, ())
+        })
+        if control_targets:
+            candidates.append((0, "register_control", None, control_targets))
+        if not dag.get(current):
+            candidates.append((0, "combinational_sink", None, None))
+        for target in dag.get(current, ()):
+            candidates.append((
+                component_edge_cost(current, target) + forward_depth[target],
+                forward_endpoint.get(target, "combinational_sink"),
+                target,
+                forward_endpoint_registers.get(target),
+            ))
+        selected = None
+        for candidate in candidates:
+            selected = choose_forward_candidate(candidate, selected)
+        if selected is not None:
+            forward_depth[current] = selected[0]
+            forward_endpoint[current] = selected[1]
+            if selected[2] is not None:
+                forward_next[current] = selected[2]
+            if selected[3]:
+                forward_endpoint_registers[current] = selected[3]
+
+    def bounded_internal_depth(component: int) -> int:
+        """Estimate one simple lap around an SCC, never revisiting a node.
+
+        Repeated relaxation on a cyclic graph keeps adding positive edge
+        weights and reports an invented depth (or loops forever).  A bounded
+        simple-path walk is finite and matches the useful question here:
+        how much distinct combinational logic is in one feedback lap?
+        """
+        members = set(components[component])
+        if not members:
+            return 0
+        value_edges = {
+            source: {
+                target
+                for target in graph.get(source, set())
+                if target in members and (source, target) not in sensitivity_edges
+            }
+            for source in members
+        }
+        best = 0
+        stack: list[tuple[str, frozenset[str], int]] = [
+            (source, frozenset({source}), 0) for source in sorted(members)
+        ]
+        seen_states: set[tuple[str, frozenset[str]]] = set()
+        state_limit = max(10000, len(members) * 4096)
+        while stack and len(seen_states) < state_limit:
+            source, visited, score = stack.pop()
+            state = (source, visited)
+            if state in seen_states:
+                continue
+            seen_states.add(state)
+            best = max(best, score)
+            for target in sorted(value_edges.get(source, ())):
+                if target in visited:
+                    continue
+                stack.append((
+                    target,
+                    visited | {target},
+                    score + edge_weight.get((source, target), 1),
+                ))
+        return best
+
+    for component, cycle in cycle_components:
+        cycle["entry_depth"] = depth.get(component, 0)
+        cycle["internal_operator_depth"] = bounded_internal_depth(component)
+        cycle["exit_depth"] = forward_depth.get(component, 0)
+        cycle["timing_path_depth"] = cycle["entry_depth"] + cycle["exit_depth"]
+        cycle["bounded_path_depth"] = (
+            cycle["entry_depth"]
+            + cycle["internal_operator_depth"]
+            + cycle["exit_depth"]
+        )
+    variable_depth = {}
+    for addr in nodes:
+        component = component_of.get(addr)
+        if component is not None:
+            variable_depth[addr] = depth.get(component, 0)
+
+    # Sequential assignment RHS edges are timing-path terminals.  They are
+    # intentionally absent from the combinational SCC graph, but their
+    # expression depth still belongs in the path ending at the destination D
+    # pin.
+    def reconstruct_upstream_path(addr: str) -> tuple[list[str], list[list[str]]]:
+        component = component_of.get(addr)
+        if component is None:
+            return [var_names.get(addr, addr)], [[var_names.get(addr, addr)]]
+        path = [component]
+        while path[-1] in depth_parent:
+            path.append(depth_parent[path[-1]])
+        path.reverse()
+        signals = []
+        component_signals = []
+        for item in path:
+            names = sorted(var_names.get(node, node) for node in components[item])
+            signals.append(names[0] if names else f"<scc:{item}>")
+            component_signals.append(names[:16])
+        return signals, component_signals
+
+    def source_kind(source: str) -> str:
+        if source in seq_lhs:
+            return "register_q"
+        if source in inputs:
+            return "module_input"
+        if source in cell_outputs:
+            return "child_output"
+        return "unknown"
+
+    register_path_details = []
+    for assignment in sequential_assignments:
+        for target in assignment["lhs"]:
+            sources = assignment["rhs"]
+            source_depth = max((variable_depth.get(source, 0) for source in sources), default=0)
+            critical_source = max(sources, key=lambda source: variable_depth.get(source, 0), default=None)
+            path_signals, component_signals = reconstruct_upstream_path(critical_source) if critical_source else ([], [])
+            kinds = {source_kind(source) for source in sources}
+            if any(name in {var_names[item] for item in inputs} for name in path_signals):
+                kinds.add("module_input")
+            if any(name.startswith(PSEUDO_PREFIX) for name in path_signals):
+                kinds.add("child_output")
+            register_path_details.append({
+                "register": var_names.get(target, target),
+                "source_signals": sorted(var_names.get(source, source) for source in sources),
+                "source_kind": sorted(kinds),
+                "path_signals": path_signals + [var_names.get(target, target)],
+                "path_component_signals": component_signals,
+                "control_signals": assignment.get("controls", []),
+                "depth": source_depth + assignment["operator_depth"],
+                "operator_depth": assignment["operator_depth"],
+                "loc": assignment.get("loc"),
+            })
+
+    # Vivado frequently reports a path ending at a flop CE pin rather than D.
+    # Keep input/child-output paths to those controls separate from Q-to-D
+    # paths.  Otherwise a long internal recovery cone can hide the actual
+    # input-to-enable path when a module's ``max_depth`` is used as a timing
+    # proxy.
+    def path_source_kinds(path_signals: list[str], source_addrs: list[str] | None = None) -> set[str]:
+        kinds: set[str] = set()
+        source_names = set(path_signals[:1])
+        if source_addrs:
+            for addr in source_addrs:
+                if addr in seq_lhs:
+                    kinds.add("register_q")
+                elif addr in inputs:
+                    kinds.add("module_input")
+                elif addr in cell_outputs:
+                    kinds.add("child_output")
+        if any(var_names.get(addr, addr) in source_names for addr in inputs):
+            kinds.add("module_input")
+        if any(var_names.get(addr, addr) in source_names for addr in seq_lhs):
+            kinds.add("register_q")
+        if any(name.startswith(PSEUDO_PREFIX) for name in source_names):
+            kinds.add("child_output")
+        return kinds or {"unknown"}
+
+    control_path_details = []
+    for control in sorted(sequential_control_registers, key=lambda item: var_names.get(item, item)):
+        control_name = var_names.get(control, control)
+        control_depth = variable_depth.get(control, 0)
+        path_signals, component_signals = reconstruct_upstream_path(control)
+        control_path_details.append({
+            "control": control_name,
+            "control_addr": control,
+            "registers": sorted(sequential_control_registers[control]),
+            "source_kind": sorted(path_source_kinds(path_signals, [control])),
+            "depth": control_depth,
+            "path_signals": path_signals,
+            "path_component_signals": component_signals,
+            "loc": var_names.get(control, control),
+        })
+
+    def max_path_depth(items: list[dict[str, Any]], *kinds: str) -> int:
+        if not kinds:
+            return max((item.get("depth", 0) for item in items), default=0)
+        return max(
+            (
+                item.get("depth", 0)
+                for item in items
+                if any(kind in item.get("source_kind", []) for kind in kinds)
+            ),
+            default=0,
+        )
+
+    loop_product = 1
+    static_loops = 0
+    for item in loops:
+        if item.get("estimated_iterations") is not None:
+            static_loops += 1
+            loop_product *= max(1, item["estimated_iterations"])
+
+    def child_output_is_cut(pseudo: str) -> bool:
+        child = cell_outputs.get(pseudo, {})
+        child_report = resolve_child_report(child.get("child", ""))
+        return child.get("pin") in set(child_report.get("registered_outputs", []))
+
+    def resolve_child_report(child_name: str) -> dict[str, Any]:
+        report = module_status.get(child_name)
+        if report:
+            return report
+        # Parameterized Verilator module names commonly have ``__`` suffixes.
+        base = child_name.split("__", 1)[0]
+        return module_status.get(base, {})
+
+    # Module boundaries are not timing cuts by themselves.  Seed each child
+    # output with the child's own output path depth, then propagate that depth
+    # through the parent's condensation graph.  Registered child outputs seed
+    # zero because the destination flop is the cut.
+    boundary_paths = []
+    boundary_depths: dict[str, int] = {}
+    boundary_output_info: dict[str, dict[str, Any]] = {}
+    for pseudo, child in cell_outputs.items():
+        child_report = resolve_child_report(child.get("child", ""))
+        child_output = next(
+            (item for item in child_report.get("outputs", []) if item.get("name") == child.get("pin")),
+            None,
+        )
+        if child_output is None:
+            continue
+        boundary_output_info[pseudo] = child_output
+        cut = child_output.get("status") == "registered"
+        path_depth = 0 if cut else int(child_output.get("path_depth") or 0)
+        boundary_depths[pseudo] = path_depth
+        boundary_paths.append({
+            "instance": pseudo.split(".", 1)[0].removeprefix(PSEUDO_PREFIX),
+            "child_module": child.get("child"),
+            "pin": child.get("pin"),
+            "parent_signals": child.get("signals", []),
+            "cut": cut,
+            "child_output_status": child_output.get("status", "unknown"),
+            "child_path_depth": child_output.get("path_depth", 0),
+            "seed_depth": path_depth,
+        })
+
+    cross_component_depth = {number: 0 for number in range(len(components))}
+    for pseudo, seed in boundary_depths.items():
+        component = component_of.get(pseudo)
+        if component is not None:
+            cross_component_depth[component] = max(cross_component_depth[component], seed)
+    cross_indegree = Counter()
+    for source, targets in dag.items():
+        for target in targets:
+            cross_indegree[target] += 1
+    cross_queue = deque(number for number in range(len(components)) if cross_indegree[number] == 0)
+    cross_parent: dict[int, int] = {}
+    while cross_queue:
+        current = cross_queue.popleft()
+        for target in dag.get(current, ()):
+            edge_cost = component_edge_cost(current, target)
+            candidate = cross_component_depth[current] + edge_cost
+            if candidate > cross_component_depth[target]:
+                cross_component_depth[target] = candidate
+                cross_parent[target] = current
+            cross_indegree[target] -= 1
+            if cross_indegree[target] == 0:
+                cross_queue.append(target)
+    cross_module_max_depth = max(cross_component_depth.values(), default=0)
+
+    def reconstruct_component_path(
+        depths: dict[int, int],
+        parents: dict[int, int],
+    ) -> dict[str, Any]:
+        if not depths:
+            return {"depth": 0, "signals": []}
+        end = max(depths, key=lambda item: depths[item])
+        components_path = [end]
+        while components_path[-1] in parents:
+            components_path.append(parents[components_path[-1]])
+        components_path.reverse()
+        signals = []
+        for component in components_path:
+            names = sorted(var_names.get(item, item) for item in components[component])
+            signals.append(names[0] if names else f"<scc:{component}>")
+        return {
+            "depth": depths[end],
+            "signals": signals,
+            "component_count": len(components_path),
+        }
+
+    critical_local_path = reconstruct_component_path(depth, depth_parent)
+    critical_cross_path = reconstruct_component_path(cross_component_depth, cross_parent)
+
+    def reconstruct_parent_path(addr: str, parents: dict[int, int]) -> tuple[list[str], list[list[str]]]:
+        component = component_of.get(addr)
+        if component is None:
+            name = var_names.get(addr, addr)
+            return [name], [[name]]
+        path = [component]
+        while path[-1] in parents:
+            path.append(parents[path[-1]])
+        path.reverse()
+        signals = []
+        component_signals = []
+        for item in path:
+            names = sorted(var_names.get(node, node) for node in components[item])
+            signals.append(names[0] if names else f"<scc:{item}>")
+            component_signals.append(names[:16])
+        return signals, component_signals
+
+    def reconstruct_forward_path(addr: str) -> dict[str, Any]:
+        component = component_of.get(addr)
+        if component is None:
+            return {"register": var_names.get(addr, addr), "depth": 0, "signals": []}
+        components_path = [component]
+        while components_path[-1] in forward_next:
+            components_path.append(forward_next[components_path[-1]])
+        signals = []
+        component_signals = []
+        for item in components_path:
+            names = sorted(var_names.get(node, node) for node in components[item])
+            signals.append(names[0] if names else f"<scc:{item}>")
+            component_signals.append(names[:16])
+        endpoint = forward_endpoint.get(component, "combinational_sink")
+        return {
+            "register": var_names.get(addr, addr),
+            "depth": forward_depth.get(component, 0),
+            "signals": signals,
+            "component_signals": component_signals,
+            "endpoint": endpoint,
+            "endpoint_registers": forward_endpoint_registers.get(component, []),
+        }
+
+    register_to_boundary_paths = [reconstruct_forward_path(addr) for addr in seq_lhs]
+    register_to_boundary_paths.sort(key=lambda item: (-item["depth"], item["register"]))
+    register_to_boundary_by_endpoint = {
+        endpoint: max(
+            (item["depth"] for item in register_to_boundary_paths if item.get("endpoint") == endpoint),
+            default=0,
+        )
+        for endpoint in ("register_d", "register_control", "module_output", "child_input", "combinational_sink")
+    }
+
+    # Output status used to walk every reverse-graph path independently.  That
+    # is quadratic on ordinary fan-in and can become effectively unbounded for
+    # a real combinational loop.  Work on the SCC condensation DAG instead:
+    # each SCC is visited once, cycles are atomic, and terminal reachability is
+    # unioned independently from the single longest path retained for detail.
+    reverse_dag: dict[int, set[int]] = defaultdict(set)
+    for source, targets in dag.items():
+        for target in targets:
+            reverse_dag[target].add(source)
+
+    component_terminal: dict[int, set[str]] = {}
+    component_best_depth: dict[int, int] = {}
+    component_best_path: dict[int, list[str]] = {}
+
+    def component_rep(component: int) -> str:
+        members = sorted(var_names.get(item, item) for item in components[component])
+        return members[0] if members else f"<scc:{component}>"
+
+    # topo_order is the source-to-sink order of the condensation DAG, so all
+    # predecessor component summaries are available when processing a node.
+    for component in topo_order:
+        members = set(components[component])
+        terminals: set[str] = set()
+        candidates: list[tuple[int, int, list[str]]] = []
+        representative = component_rep(component)
+
+        register_members = sorted(members & seq_lhs)
+        if register_members:
+            terminals.add("register")
+            candidates.append((0, 0, [var_names.get(register_members[0], register_members[0])]))
+
+        input_members = sorted(members & inputs)
+        if input_members:
+            terminals.add("input")
+            candidates.append((0, 1, [var_names.get(input_members[0], input_members[0])]))
+
+        # Child outputs are leaves from the parent graph.  Their child-local
+        # depth is already known from the second module-report pass.
+        for pseudo in sorted(members & set(boundary_output_info)):
+            child_output = boundary_output_info[pseudo]
+            child_terminals = set(child_output.get("terminals", [])) or {"unknown"}
+            terminals.update(child_terminals)
+            candidates.append((
+                int(child_output.get("path_depth") or 0),
+                2,
+                [var_names.get(pseudo, pseudo)],
+            ))
+
+        predecessor_components = reverse_dag.get(component, set())
+        if not predecessor_components and not terminals:
+            terminals.add("unknown")
+        for predecessor in predecessor_components:
+            predecessor_terminals = component_terminal.get(predecessor, {"unknown"})
+            terminals.update(predecessor_terminals)
+            edge_cost = component_edge_cost(predecessor, component)
+            if any(item in seq_lhs for item in components[predecessor]):
+                edge_cost = 0
+            candidates.append((
+                component_best_depth.get(predecessor, 0) + edge_cost,
+                3,
+                [representative] + component_best_path.get(predecessor, [component_rep(predecessor)]),
+            ))
+
+        if candidates:
+            # Prefer greater depth, then a stable path tie-break.  Terminal
+            # priority only breaks equal-depth alternatives deterministically.
+            best_depth, _, best_path = max(
+                candidates,
+                key=lambda item: (item[0], -item[1], tuple(item[2])),
+            )
+        else:
+            best_depth, best_path = 0, [representative]
+        component_terminal[component] = terminals
+        component_best_depth[component] = best_depth
+        component_best_path[component] = best_path
+
+    def output_path_status(output: str) -> tuple[str, int, set[str], list[str]]:
+        component = component_of.get(output)
+        output_name = var_names.get(output, output)
+        if component is None:
+            terminals = {"input"} if output in inputs else {"unknown"}
+            status = "combinational" if terminals == {"input"} else "unknown"
+            return status, 0, terminals, [output_name]
+        terminals = set(component_terminal.get(component, {"unknown"}))
+        path_depth = component_best_depth.get(component, 0)
+        component_path = component_best_path.get(component, [component_rep(component)])
+        # component_best_path is current-component to terminal.  Replace its
+        # representative with the actual module output for a useful report.
+        path_signals = [output_name]
+        if component_path and component_path[0] != output_name:
+            path_signals.extend(component_path[1:])
+        elif len(component_path) > 1:
+            path_signals.extend(component_path[1:])
+        if terminals and terminals <= {"register"}:
+            status = "registered"
+        elif "input" in terminals:
+            status = "combinational"
+        else:
+            status = "unknown"
+        return status, path_depth, terminals, list(reversed(path_signals))
+
+    output_reports = []
+    for addr, name in sorted(outputs.items(), key=lambda item: item[1]):
+        status, path_depth, terminals, path_signals = output_path_status(addr)
+        output_reports.append({
+            "name": name,
+            "addr": addr,
+            "status": status,
+            "path_depth": path_depth,
+            "terminals": sorted(terminals),
+            "critical_path": path_signals,
+            "width_bits": dtype_width(index.get(variables_by_addr[addr].get("dtypep", "")), index),
+        })
+
+    cross_register_path_details = []
+    for assignment in sequential_assignments:
+        for target in assignment["lhs"]:
+            sources = assignment["rhs"]
+            source_depth = max(
+                (
+                    cross_component_depth.get(component_of.get(source, -1), 0)
+                    for source in sources
+                ),
+                default=0,
+            )
+            critical_source = max(
+                sources,
+                key=lambda source: cross_component_depth.get(component_of.get(source, -1), 0),
+                default=None,
+            )
+            path_signals, component_signals = reconstruct_parent_path(critical_source, cross_parent) if critical_source else ([], [])
+            kinds = {source_kind(source) for source in sources}
+            if any(name in {var_names[item] for item in inputs} for name in path_signals):
+                kinds.add("module_input")
+            if any(name.startswith(PSEUDO_PREFIX) for name in path_signals):
+                kinds.add("child_output")
+            cross_register_path_details.append({
+                "register": var_names.get(target, target),
+                "source_signals": sorted(var_names.get(source, source) for source in sources),
+                "source_kind": sorted(kinds),
+                "path_signals": path_signals + [var_names.get(target, target)],
+                "path_component_signals": component_signals,
+                "control_signals": assignment.get("controls", []),
+                "depth": source_depth + assignment["operator_depth"],
+                "operator_depth": assignment["operator_depth"],
+                "loc": assignment.get("loc"),
+            })
+    cross_graph_max_depth = max(cross_component_depth.values(), default=0)
+    cross_output_path_max_depth = max((item["path_depth"] for item in output_reports), default=0)
+    cross_register_path_max_depth = max((item["depth"] for item in cross_register_path_details), default=0)
+    cross_endpoint_depths = [cross_output_path_max_depth, cross_register_path_max_depth]
+    cross_module_max_depth = max(cross_endpoint_depths) if any(cross_endpoint_depths) else cross_graph_max_depth
+    if cross_register_path_details:
+        cross_register_critical = max(cross_register_path_details, key=lambda item: item["depth"])
+        cross_signals = cross_register_critical.get("path_signals") or (cross_register_critical["source_signals"] + [cross_register_critical["register"]])
+        critical_cross_path = {
+            "depth": cross_register_critical["depth"],
+            "signals": cross_signals,
+            "component_count": len(cross_signals),
+            "endpoint": "register_d",
+        }
+    elif output_reports:
+        critical_output = max(output_reports, key=lambda item: item["path_depth"])
+        critical_cross_path = {
+            "depth": critical_output["path_depth"],
+            "signals": [critical_output["name"]],
+            "component_count": 1,
+            "endpoint": "module_output",
+        }
+    if register_path_details:
+        register_critical = max(register_path_details, key=lambda item: item["depth"])
+        local_signals = register_critical.get("path_signals") or (register_critical["source_signals"] + [register_critical["register"]])
+        critical_local_path = {
+            "depth": register_critical["depth"],
+            "signals": local_signals,
+            "component_count": len(local_signals),
+            "endpoint": "register_d",
+        }
+    elif output_reports:
+        critical_output = max(output_reports, key=lambda item: item["path_depth"])
+        critical_local_path = {
+            "depth": critical_output["path_depth"],
+            "signals": [critical_output["name"]],
+            "component_count": 1,
+            "endpoint": "module_output",
+        }
+
+    register_reports = []
+    reset_lhs = set()
+    for item in always_summary:
+        if item["reset_like"]:
+            reset_lhs.update(item["registered_lhs"])
+    for addr in sorted(seq_lhs, key=lambda item: var_names.get(item, item)):
+        var = variables_by_addr.get(addr)
+        dtype = index.get(var.get("dtypep", "")) if var else None
+        shape = dtype_shape(dtype, index)
+        name = var_names.get(addr, addr)
+        register_reports.append({
+            "name": name,
+            "addr": addr,
+            **shape,
+            "writes": writes[addr],
+            "reset_like": name in reset_lhs,
+        })
+
+    signal_reports = []
+    for addr, var in sorted(variables_by_addr.items(), key=lambda item: var_names[item[0]]):
+        dtype = index.get(var.get("dtypep", ""))
+        signal_reports.append({
+            "name": var_names[addr],
+            "addr": addr,
+            "direction": var.get("direction", "NONE"),
+            "var_type": var.get("varType"),
+            **dtype_shape(dtype, index),
+            "register": addr in seq_lhs,
+        })
+
+    fanout_reports = []
+    def transitive_read_estimate(addr: str) -> int:
+        """Estimate downstream load work through combinational assignments."""
+        pending = list(graph.get(addr, ()))
+        visited: set[str] = set()
+        estimate = 0
+        while pending:
+            current = pending.pop()
+            if current in visited:
+                continue
+            visited.add(current)
+            estimate += max(1, reads[current], len(consumers[current]))
+            pending.extend(graph.get(current, ()))
+        return estimate
+
+    for addr, var in variables_by_addr.items():
+        if reads[addr] == 0 and not consumers[addr]:
+            continue
+        width = dtype_width(index.get(var.get("dtypep", "")), index)
+        # This is intentionally named an estimate.  It accounts for packed
+        # width and elaborated read sites, but cannot model Vivado replication
+        # and clock-enable promotion.
+        estimated_bit_fanout = reads[addr] * max(1, width or 1)
+        fanout_score = estimated_bit_fanout + len(consumers[addr])
+        fanout_reports.append({
+            "name": var_names[addr],
+            "addr": addr,
+            "width_bits": width,
+            "read_references": reads[addr],
+            "fanout": reads[addr],
+            "estimated_bit_fanout": estimated_bit_fanout,
+            "transitive_read_estimate": transitive_read_estimate(addr),
+            "fanout_risk_score": fanout_score,
+            "unique_consumers": len(consumers[addr]),
+            "depth": variable_depth.get(addr, 0),
+            "register": addr in seq_lhs,
+        })
+    fanout_reports.sort(key=lambda item: (-item["fanout_risk_score"], -item["fanout"], item["name"]))
+
+    output_statuses = {item["status"] for item in output_reports}
+    all_registered = bool(output_reports) and output_statuses == {"registered"}
+    registration_status = "yes" if all_registered else ("no" if "combinational" in output_statuses else "unknown")
+    signal_graph_max_depth = max(variable_depth.values(), default=0)
+    output_path_max_depth = max((item["path_depth"] for item in output_reports), default=0)
+    register_path_max_depth = max((item["depth"] for item in register_path_details), default=0)
+    input_to_register_max_depth = max_path_depth(register_path_details, "module_input")
+    child_output_to_register_max_depth = max_path_depth(register_path_details, "child_output")
+    input_to_control_max_depth = max_path_depth(control_path_details, "module_input")
+    child_output_to_control_max_depth = max_path_depth(control_path_details, "child_output")
+    q_to_control_path_max_depth = max_path_depth(control_path_details, "register_q")
+    endpoint_depths = [output_path_max_depth, register_path_max_depth]
+    max_depth = max(endpoint_depths) if any(endpoint_depths) else signal_graph_max_depth
+    critical_register_paths = sorted(
+        register_path_details,
+        key=lambda item: (-item["depth"], item["register"], str(item.get("loc", ""))),
+    )[:20]
+    cycle_depths = [item for item in cycles if item.get("size", 0) > 1]
+    expression_summary.sort(
+        key=lambda item: (-item["weighted_combination_work"], -item["operator_depth"], str(item.get("loc", "")))
+    )
+    combination = {
+        "node_count": len(nodes),
+        "edge_count": sum(len(targets) for targets in graph.values()),
+        "max_depth": max_depth,
+        "signal_graph_max_depth": signal_graph_max_depth,
+        "output_path_max_depth": output_path_max_depth,
+        "register_path_max_depth": register_path_max_depth,
+        "input_to_register_max_depth": input_to_register_max_depth,
+        "child_output_to_register_max_depth": child_output_to_register_max_depth,
+        "input_to_control_max_depth": input_to_control_max_depth,
+        "child_output_to_control_max_depth": child_output_to_control_max_depth,
+        "q_to_control_path_max_depth": q_to_control_path_max_depth,
+        "register_q_to_d_max_depth": register_to_boundary_by_endpoint["register_d"],
+        "register_q_to_control_max_depth": register_to_boundary_by_endpoint["register_control"],
+        "register_q_to_output_max_depth": register_to_boundary_by_endpoint["module_output"],
+        "register_q_to_child_input_max_depth": register_to_boundary_by_endpoint["child_input"],
+        "register_q_to_combination_sink_max_depth": register_to_boundary_by_endpoint["combinational_sink"],
+        "register_q_to_any_boundary_max_depth": max(
+            register_to_boundary_by_endpoint["module_output"],
+            register_to_boundary_by_endpoint["child_input"],
+        ),
+        "critical_register_paths": critical_register_paths,
+        "critical_output_paths": sorted(
+            output_reports,
+            key=lambda item: (-item["path_depth"], item["name"]),
+        )[:20],
+        "register_to_boundary_max_depth": max((item["depth"] for item in register_to_boundary_paths), default=0),
+        "critical_register_to_boundary_paths": register_to_boundary_paths[:20],
+        "critical_control_paths": sorted(
+            control_path_details,
+            key=lambda item: (-item["depth"], item["control"]),
+        )[:20],
+        "cross_register_path_max_depth": cross_register_path_max_depth,
+        "critical_cross_register_paths": sorted(
+            cross_register_path_details,
+            key=lambda item: (-item["depth"], item["register"], str(item.get("loc", ""))),
+        )[:20],
+        "depth_model": "operator_tree_weighted",
+        "critical_path": critical_local_path,
+        "cross_module_max_depth": cross_module_max_depth,
+        "cross_module_depth_delta": max(0, cross_module_max_depth - max_depth),
+        "critical_cross_module_path": critical_cross_path,
+        "cycle_count": len(true_cycles),
+        "cycles": true_cycles,
+        "scc_count_including_self": len(cycles),
+        "cycle_kind_counts": dict(Counter(item.get("kind", "unknown") for item in cycle_depths)),
+        "cycle_max_entry_depth": max((item.get("entry_depth", 0) for item in cycle_depths), default=0),
+        "cycle_max_internal_operator_depth": max((item.get("internal_operator_depth", 0) for item in cycle_depths), default=0),
+        "cycle_max_exit_depth": max((item.get("exit_depth", 0) for item in cycle_depths), default=0),
+        "cycle_max_timing_path_depth": max((item.get("timing_path_depth", 0) for item in cycle_depths), default=0),
+        "cycle_max_bounded_path_depth": max((item.get("bounded_path_depth", 0) for item in cycle_depths), default=0),
+        "self_feedback_assignments": self_feedback,
+        "partial_field_feedback": partial_feedback,
+        "procedural_reassignments": procedural_reassignments,
+        "latch_like_combination": latch_like,
+        "operator_count": sum(item["operator_count"] for item in expression_summary),
+        "conditional_count": sum(item["conditional_count"] for item in expression_summary),
+        "max_operator_depth": max((item["operator_depth"] for item in expression_summary), default=0),
+        "max_expression_width": max((item["max_expression_width"] or 0 for item in expression_summary), default=0),
+        "weighted_combination_work": sum(item["weighted_combination_work"] for item in expression_summary),
+        "packed_read_work": sum(item["estimated_bit_fanout"] for item in fanout_reports),
+        "packed_consumer_work": sum((item.get("width_bits") or 1) * item["unique_consumers"] for item in fanout_reports),
+        "expression_hotspots": expression_summary[:20],
+        "cross_module_paths": boundary_paths,
+        "cross_module_uncut_count": sum(1 for item in boundary_paths if item["child_output_status"] == "combinational"),
+        "cross_module_unknown_count": sum(1 for item in boundary_paths if item["child_output_status"] == "unknown"),
+        "cross_module_cut_count": sum(1 for item in boundary_paths if item["cut"]),
+    }
+    return {
+        # Kept for the hierarchical pass and removed before JSON emission.
+        # The local report intentionally remains compact, while this graph
+        # snapshot lets the top-level analysis reconnect CELL pins without
+        # reparsing every assignment a second time.
+        "_analysis": {
+            "nodes": sorted(nodes),
+            "edges": [
+                [source, target]
+                for source in sorted(graph)
+                for target in sorted(graph[source])
+                if source in nodes and target in nodes
+            ],
+            "edge_weights": {
+                f"{source}\x00{target}": edge_weight.get((source, target), 1)
+                for source in graph
+                for target in graph[source]
+                if source in nodes and target in nodes
+            },
+            "sensitivity_edges": [
+                [source, target]
+                for source, target in sorted(sensitivity_edges)
+                if source in nodes and target in nodes
+            ],
+            "seq_lhs": sorted(seq_lhs & nodes),
+            "inputs": sorted(inputs & nodes),
+            "outputs": sorted(outputs),
+            "var_names": var_names,
+            "sequential_rhs": [
+                {
+                    "source": source,
+                    "targets": sorted(
+                        target
+                        for target in assignment["lhs"]
+                    ),
+                }
+                for assignment in sequential_assignments
+                for source in assignment["rhs"]
+                if source in nodes
+            ],
+            "sequential_controls": sorted(sequential_control_registers),
+            "cell_bindings": cell_bindings,
+        },
+        "name": module_name,
+        "loc": module.get("loc"),
+        "output_count": len(output_reports),
+        "outputs": output_reports,
+        "registered_outputs": [item["name"] for item in output_reports if item["status"] == "registered"],
+        "combinational_outputs": [item["name"] for item in output_reports if item["status"] == "combinational"],
+        "unknown_outputs": [item["name"] for item in output_reports if item["status"] == "unknown"],
+        "all_outputs_registered": all_registered,
+        "registration_status": registration_status,
+        "register_count": len(register_reports),
+        "register_bits": sum(item["width_bits"] or 0 for item in register_reports),
+        "registers": register_reports,
+        "signal_count": len(signal_reports),
+        "signals": signal_reports,
+        "cell_connections": cell_connections,
+        "always_blocks": dict(Counter(item["keyword"] for item in always_summary)),
+        "always_details": always_summary,
+        "assignment_count": dict(assignment_count),
+        "loop_count": len(loops),
+        "static_loop_count": static_loops,
+        "static_loop_product": loop_product if static_loops else 0,
+        "loops": loops,
+        "combination": combination,
+        "fanout_hotspots": fanout_reports[:20],
+        "fanout_signals": fanout_reports,
+        "risk_flags": {
+            "combinational_loop": bool(true_cycles),
+            "self_feedback": bool(self_feedback),
+            "partial_field_feedback": bool(partial_feedback),
+            "procedural_reassignment": bool(procedural_reassignments),
+            # Raw references and distinct consumers are the useful structural
+            # fanout signals.  Width-weighted work is reported separately;
+            # otherwise every 450-bit packet would look like a 450-way net.
+            "high_fanout_over_32": any(item["fanout"] > 32 or item["unique_consumers"] > 32 for item in fanout_reports),
+            "deep_combination_over_8": max_depth > 8,
+            "long_register_to_boundary_over_8": combination["register_to_boundary_max_depth"] > 8,
+            "long_register_to_output_over_8": combination["register_q_to_any_boundary_max_depth"] > 8,
+            "long_register_to_d_over_8": combination["register_q_to_d_max_depth"] > 8,
+            "long_input_to_control_over_8": combination["input_to_control_max_depth"] > 8,
+            "cross_module_combination_not_cut": any(item["child_output_status"] == "combinational" for item in boundary_paths),
+            "wide_mux_or_work": combination["weighted_combination_work"] > 4096 or combination["packed_consumer_work"] > 8192 or combination["conditional_count"] > 64,
+            "large_register_array": any((item.get("array_elements") or 0) >= 16 and (item.get("width_bits") or 0) >= 256 for item in register_reports),
+        },
+    }
+
+
+def hierarchical_report(top_name: str, reports: list[dict[str, Any]]) -> dict[str, Any]:
+    """Flatten combinational CELL connections for top-level feedback analysis.
+
+    Local reports deliberately stop at module boundaries.  That is useful for
+    ownership, but it hides a zero-delay path which leaves Rename/ROB, enters
+    LSU, returns through Issue, and crosses an asynchronous LUTRAM read.  This
+    pass reconnects each instantiated child port to its parent signal, while
+    retaining the local operator weights and register cuts.  It never unfolds
+    an SCC as a path list; all depth work is done on the global condensation
+    DAG and bounded walks.
+    """
+    by_name = {report.get("name"): report for report in reports if report.get("name")}
+
+    def resolve(name: str) -> dict[str, Any] | None:
+        report = by_name.get(name)
+        if report:
+            return report
+        return by_name.get(str(name).split("__", 1)[0])
+
+    graph: dict[str, set[str]] = defaultdict(set)
+    edge_weight: dict[tuple[str, str], int] = {}
+    sensitivity_edges: set[tuple[str, str]] = set()
+    node_info: dict[str, tuple[str, str, str]] = {}
+    terminal_nodes: set[str] = set()
+    visited_instances = 0
+    max_instances = 20000
+
+    def node_id(path: str, address: str) -> str:
+        return f"{path}:{address}"
+
+    def ensure_node(path: str, module_name: str, address: str, display_name: str | None = None) -> str:
+        identifier = node_id(path, address)
+        if identifier not in node_info:
+            node_info[identifier] = (path, module_name, display_name or address)
+        return identifier
+
+    def add_edge(source: str, target: str, weight: int = 1, sensitivity: bool = False) -> None:
+        graph[source].add(target)
+        graph.setdefault(target, set())
+        edge_weight[(source, target)] = max(edge_weight.get((source, target), 0), max(0, weight))
+        if sensitivity:
+            sensitivity_edges.add((source, target))
+
+    def is_timing_cut_pin(binding: dict[str, Any]) -> bool:
+        pin = str(binding.get("pin", ""))
+        return bool(re.search(r"(?:^|_)(?:clk|clock|rst|reset)(?:_|$)", pin, re.I))
+
+    def display(identifier: str) -> str:
+        path, module_name, local_name = node_info.get(identifier, ("?", "?", identifier))
+        return f"{path}.{local_name}"
+
+    def visit(report: dict[str, Any], path: str, stack: tuple[str, ...]) -> None:
+        nonlocal visited_instances
+        if visited_instances >= max_instances:
+            return
+        visited_instances += 1
+        module_name = str(report.get("name", "<unknown>"))
+        analysis = report.get("_analysis", {})
+        local_names = analysis.get("var_names", {})
+        for address in analysis.get("nodes", []):
+            ensure_node(path, module_name, address, local_names.get(address, address))
+        for source, target in analysis.get("edges", []):
+            if str(source).startswith(PSEUDO_PREFIX) or str(target).startswith(PSEUDO_PREFIX):
+                continue
+            source_node = ensure_node(path, module_name, source, local_names.get(source, source))
+            target_node = ensure_node(path, module_name, target, local_names.get(target, target))
+            weight = analysis.get("edge_weights", {}).get(f"{source}\x00{target}", 1)
+            add_edge(source_node, target_node, int(weight or 0))
+        for source, target in analysis.get("sensitivity_edges", []):
+            if str(source).startswith(PSEUDO_PREFIX) or str(target).startswith(PSEUDO_PREFIX):
+                continue
+            source_node = node_id(path, source)
+            target_node = node_id(path, target)
+            if target_node in graph.get(source_node, set()):
+                sensitivity_edges.add((source_node, target_node))
+        for item in analysis.get("sequential_rhs", []):
+            source = item.get("source")
+            if source in local_names:
+                terminal_nodes.add(node_id(path, source))
+        for control in analysis.get("sequential_controls", []):
+            if control in local_names:
+                terminal_nodes.add(node_id(path, control))
+        if path == top_name:
+            for output in analysis.get("outputs", []):
+                terminal_nodes.add(node_id(path, output))
+
+        for binding in analysis.get("cell_bindings", []):
+            child = resolve(str(binding.get("child", "")))
+            if not child or is_timing_cut_pin(binding):
+                continue
+            child_name = str(child.get("name", "<unknown>"))
+            child_path = f"{path}/{binding.get('instance', '<cell>')}"
+            child_address = str(binding.get("child_var_addr", ""))
+            if not child_address:
+                continue
+            child_analysis = child.get("_analysis", {})
+            child_names = child_analysis.get("var_names", {})
+            child_node = ensure_node(child_path, child_name, child_address, child_names.get(child_address, child_address))
+            parent_signals = binding.get("signal_addrs", [])
+            if binding.get("direction") == "INPUT":
+                for source in parent_signals:
+                    if source not in local_names:
+                        continue
+                    parent_node = ensure_node(path, module_name, source, local_names.get(source, source))
+                    add_edge(parent_node, child_node, 0)
+            elif binding.get("direction") == "OUTPUT":
+                for target in parent_signals:
+                    if target not in local_names:
+                        continue
+                    parent_node = ensure_node(path, module_name, target, local_names.get(target, target))
+                    add_edge(child_node, parent_node, 0)
+
+            if child_name not in stack:
+                visit(child, child_path, stack + (module_name,))
+
+    top_report = resolve(top_name)
+    if not top_report:
+        return {
+            "available": False,
+            "top": top_name,
+            "reason": "top module report not found",
+        }
+    # The recursive Tarjan implementation is safe for the local reports, but
+    # an elaborated top can contain several thousand flattened signals.
+    sys.setrecursionlimit(max(sys.getrecursionlimit(), 2 * len(reports) * 1000 + 10000))
+    visit(top_report, top_name, ())
+    nodes = set(graph)
+    nodes.update(target for targets in graph.values() for target in targets)
+    if not nodes:
+        return {"available": True, "top": top_name, "node_count": 0, "edge_count": 0, "cycle_count": 0, "cycles": []}
+
+    components = tarjan({node: set(graph.get(node, ())) for node in nodes})
+    component_of: dict[str, int] = {}
+    for number, component in enumerate(components):
+        for item in component:
+            component_of[item] = number
+
+    dag: dict[int, set[int]] = defaultdict(set)
+    indegree: Counter[int] = Counter()
+    for source, targets in graph.items():
+        for target in targets:
+            left, right = component_of[source], component_of[target]
+            if left != right and right not in dag[left]:
+                dag[left].add(right)
+                indegree[right] += 1
+
+    def component_cost(left: int, right: int) -> int:
+        weights = [
+            edge_weight.get((source, target), 1)
+            for source in components[left]
+            for target in components[right]
+            if (source, target) in edge_weight
+        ]
+        return max(weights, default=1)
+
+    queue = deque(number for number in range(len(components)) if indegree[number] == 0)
+    topo_order: list[int] = []
+    depth = {number: 0 for number in range(len(components))}
+    depth_parent: dict[int, int] = {}
+    while queue:
+        current = queue.popleft()
+        topo_order.append(current)
+        for target in dag.get(current, ()):
+            candidate = depth[current] + component_cost(current, target)
+            if candidate > depth[target]:
+                depth[target] = candidate
+                depth_parent[target] = current
+            indegree[target] -= 1
+            if indegree[target] == 0:
+                queue.append(target)
+
+    terminal_components = {component_of[node] for node in terminal_nodes if node in component_of}
+    forward_depth = {number: 0 for number in range(len(components))}
+    forward_endpoint: dict[int, str] = {}
+    for current in reversed(topo_order):
+        candidates = []
+        if current in terminal_components:
+            candidates.append((0, "register_or_output"))
+        if not dag.get(current):
+            candidates.append((0, "combinational_sink"))
+        for target in dag.get(current, ()):
+            candidates.append((component_cost(current, target) + forward_depth[target], forward_endpoint.get(target, "combinational_sink")))
+        if candidates:
+            selected = max(candidates, key=lambda item: (item[0], item[1]))
+            forward_depth[current], forward_endpoint[current] = selected
+
+    def cycle_internal_depth(component: int) -> int:
+        members = set(components[component])
+        value_edges = {
+            source: {
+                target
+                for target in graph.get(source, ())
+                if target in members and (source, target) not in sensitivity_edges
+            }
+            for source in members
+        }
+        best = 0
+        stack: list[tuple[str, frozenset[str], int]] = [
+            (source, frozenset({source}), 0) for source in sorted(members)
+        ]
+        seen_states: set[tuple[str, frozenset[str]]] = set()
+        state_limit = max(10000, len(members) * 4096)
+        while stack and len(seen_states) < state_limit:
+            source, visited, score = stack.pop()
+            state = (source, visited)
+            if state in seen_states:
+                continue
+            seen_states.add(state)
+            best = max(best, score)
+            for target in sorted(value_edges.get(source, ())):
+                if target in visited:
+                    continue
+                stack.append((
+                    target,
+                    visited | {target},
+                    score + edge_weight.get((source, target), 1),
+                ))
+        return best
+
+    def _bounded_reaches(local_graph: dict[str, set[str]], start: str, goal: str) -> bool:
+        pending = [start]
+        visited: set[str] = set()
+        while pending:
+            current = pending.pop()
+            if current == goal:
+                return True
+            if current in visited:
+                continue
+            visited.add(current)
+            pending.extend(local_graph.get(current, ()))
+        return False
+
+    cycles = []
+    for number, component in enumerate(components):
+        has_cycle = len(component) > 1 or any(item in graph.get(item, set()) for item in component)
+        if not has_cycle:
+            continue
+        members = set(component)
+        value_graph = {
+            source: {
+                target for target in graph.get(source, ())
+                if target in members and (source, target) not in sensitivity_edges
+            }
+            for source in members
+        }
+        value_parts = tarjan(value_graph)
+        value_cycle = any(
+            len(part) > 1 or any(item in value_graph.get(item, set()) for item in part)
+            for part in value_parts
+        )
+        internal_sensitivity_nodes = sorted(
+            {
+                (source, target)
+                for source, target in sensitivity_edges
+                if source in members and target in members
+            }
+        )
+        internal_sensitivity = [
+            (display(source), display(target))
+            for source, target in internal_sensitivity_nodes
+        ]
+        sensitivity_witness_nodes = []
+        for source in sorted({item[0] for item in internal_sensitivity_nodes}):
+            candidates = {
+                target for left, target in internal_sensitivity_nodes if left == source
+            }
+            frontier = {
+                target
+                for target in candidates
+                if not any(
+                    target != other and _bounded_reaches(value_graph, target, other)
+                    for other in candidates
+                )
+            }
+            sensitivity_witness_nodes.extend((source, target) for target in sorted(frontier))
+        sensitivity_witness = [
+            {"source": display(source), "target": display(target)}
+            for source, target in sensitivity_witness_nodes
+        ]
+        entry_depth = depth.get(number, 0)
+        exit_depth = forward_depth.get(number, 0)
+        internal_depth = cycle_internal_depth(number)
+        cycles.append({
+            "signals": sorted(display(item) for item in component)[:128],
+            "size": len(component),
+            "kind": (
+                "mixed"
+                if value_cycle and internal_sensitivity
+                else ("value" if value_cycle else "sensitivity")
+            ),
+            "sensitivity_edges": [
+                {"source": source, "target": target}
+                for source, target in internal_sensitivity
+            ],
+            "sensitivity_witness": sensitivity_witness,
+            "sensitivity_witness_path": [
+                [display(target), display(source)]
+                for source, target in sensitivity_witness_nodes
+            ],
+            "entry_depth": entry_depth,
+            "internal_operator_depth": internal_depth,
+            "exit_depth": exit_depth,
+            "timing_path_depth": entry_depth + exit_depth,
+            "bounded_path_depth": entry_depth + internal_depth + exit_depth,
+        })
+
+    # ``max(depth)`` includes combinational sinks that never feed a flop D/CE
+    # or a top-level output.  Keep it as a structural upper bound, but expose
+    # a timing-endpoint depth separately for correlation with Vivado paths.
+    endpoint_depths = {
+        component: depth.get(component, 0)
+        for component in terminal_components
+    }
+    max_component = max(depth, key=depth.get, default=0)
+    max_endpoint_component = max(endpoint_depths, key=endpoint_depths.get, default=max_component)
+    critical_components = [max_endpoint_component]
+    while critical_components[-1] in depth_parent:
+        critical_components.append(depth_parent[critical_components[-1]])
+    critical_components.reverse()
+    critical_path = [display(sorted(components[item])[0]) for item in critical_components]
+
+    def named_path(source_pattern: str, target_pattern: str) -> dict[str, Any] | None:
+        source_nodes = [node for node in nodes if re.search(source_pattern, display(node), re.I)]
+        target_nodes = [node for node in nodes if re.search(target_pattern, display(node), re.I)]
+        if not source_nodes or not target_nodes:
+            return None
+        target_components = {component_of[node] for node in target_nodes}
+        best_depth: dict[int, int] = {}
+        parents: dict[int, int] = {}
+        source_for: dict[int, str] = {}
+        for source in source_nodes:
+            component = component_of[source]
+            if component not in best_depth or best_depth[component] < 0:
+                best_depth[component] = 0
+                source_for[component] = source
+        for current in topo_order:
+            if current not in best_depth:
+                continue
+            for target in dag.get(current, ()):
+                candidate = best_depth[current] + component_cost(current, target)
+                if candidate > best_depth.get(target, -1):
+                    best_depth[target] = candidate
+                    parents[target] = current
+                    source_for[target] = source_for[current]
+        reachable = [component for component in target_components if component in best_depth]
+        if not reachable:
+            return None
+        end = max(reachable, key=lambda item: best_depth[item])
+        path_components = [end]
+        while path_components[-1] in parents:
+            path_components.append(parents[path_components[-1]])
+        path_components.reverse()
+        return {
+            "source": display(source_for[path_components[0]]),
+            "target": display(next(node for node in target_nodes if component_of[node] == end)),
+            "depth": best_depth[end],
+            "signals": [display(sorted(components[item])[0]) for item in path_components],
+        }
+
+    named_paths = {
+        name: path
+        for name, source_pattern, target_pattern in (
+            ("producer_tag_to_issue_ex_d", r"u_rename_rob\.producer_tag_q", r"u_issue_window\.issue_ex_d"),
+            ("producer_tag_to_lsu_head_accept", r"u_rename_rob\.producer_tag_q", r"u_ydrasil_load_store_unit\.head_accept_ready"),
+            ("lsu_head_accept_to_issue_ex_d", r"u_ydrasil_load_store_unit\.head_accept_ready", r"u_issue_window\.issue_ex_d"),
+            ("rob_head_to_issue_ex_d", r"\.rob_head_tag_q$|\.rob_head_tag$", r"u_issue_window\.issue_ex_d"),
+        )
+        if (path := named_path(source_pattern, target_pattern)) is not None
+    }
+    meaningful_cycles = [item for item in cycles if item.get("size", 0) > 1]
+    critical_timing_path = [display(sorted(components[item])[0]) for item in critical_components]
+    return {
+        "available": True,
+        "top": top_name,
+        "instance_count": visited_instances,
+        "node_count": len(nodes),
+        "edge_count": sum(len(targets) for targets in graph.values()),
+        "max_depth": max(depth.values(), default=0),
+        "critical_path": critical_path,
+        "timing_endpoint_count": len(terminal_components),
+        "timing_endpoint_max_depth": max(endpoint_depths.values(), default=0),
+        "critical_timing_path": critical_timing_path,
+        "named_paths": named_paths,
+        # A one-node SCC is useful detail (often a procedural temporary), but
+        # it should not trip the architectural loop gate by itself.
+        "cycle_count": len(meaningful_cycles),
+        "self_cycle_count": len(cycles) - len(meaningful_cycles),
+        "cycles": cycles,
+        "meaningful_cycles": meaningful_cycles,
+        "cycle_kind_counts": dict(Counter(item["kind"] for item in cycles)),
+        "cycle_max_bounded_path_depth": max((item["bounded_path_depth"] for item in cycles), default=0),
+        "cycle_max_timing_path_depth": max((item["timing_path_depth"] for item in cycles), default=0),
     }
 
 
@@ -135,15 +2159,85 @@ def main() -> int:
         return 2
 
     index = {item["addr"]: item for item in walk(tree) if item.get("addr")}
-    modules = [item for item in walk(tree) if item.get("type") == "MODULE" and item.get("name") != "@CONST-POOL@"]
-    reports = [module_report(module, index) for module in modules]
+    modules = [item for item in walk(tree) if item.get("type") == "MODULE" and item.get("name") not in {"$root", "@CONST-POOL@"}]
+    # The first pass builds local graphs.  A second pass resolves registered
+    # child outputs used by parent cell pins.
+    reports = []
+    status = {}
+    for module in modules:
+        report = module_report(module, index, status)
+        reports.append(report)
+        status[report["name"]] = report
+    for report, module in zip(reports, modules):
+        refreshed = module_report(module, index, status)
+        report.clear()
+        report.update(refreshed)
+        status[report["name"]] = report
+
+    hierarchy_top = args.top or "ydrasil_core"
+    hierarchy = hierarchical_report(hierarchy_top, reports)
+    for report in reports:
+        if report.get("name") == hierarchy_top:
+            report["combination"]["hierarchical"] = hierarchy
+            report["risk_flags"]["hierarchical_combinational_loop"] = bool(hierarchy.get("cycle_count"))
+            report["risk_flags"]["hierarchical_deep_combination_over_32"] = hierarchy.get("max_depth", 0) > 32
+        else:
+            report["risk_flags"]["hierarchical_combinational_loop"] = False
+            report["risk_flags"]["hierarchical_deep_combination_over_32"] = False
+
     if args.top:
         reports.sort(key=lambda item: (item["name"] != args.top, item["name"]))
-    result = {"input": str(args.input), "top": args.top, "modules": reports}
+    summary = {
+        "modules_with_combinational_loops": [item["name"] for item in reports if item["risk_flags"]["combinational_loop"]],
+        "modules_with_self_feedback": [item["name"] for item in reports if item["risk_flags"]["self_feedback"]],
+        "modules_with_partial_field_feedback": [item["name"] for item in reports if item["risk_flags"]["partial_field_feedback"]],
+        "modules_with_high_fanout": [item["name"] for item in reports if item["risk_flags"]["high_fanout_over_32"]],
+        "modules_with_deep_combination": [item["name"] for item in reports if item["risk_flags"]["deep_combination_over_8"]],
+        "modules_with_long_register_to_boundary": [item["name"] for item in reports if item["risk_flags"]["long_register_to_boundary_over_8"]],
+        "modules_with_long_register_to_output": [item["name"] for item in reports if item["risk_flags"]["long_register_to_output_over_8"]],
+        "modules_with_long_input_to_control": [item["name"] for item in reports if item["risk_flags"]["long_input_to_control_over_8"]],
+        "modules_with_uncut_cross_module_combination": [item["name"] for item in reports if item["risk_flags"]["cross_module_combination_not_cut"]],
+        "modules_with_wide_mux_or_work": [item["name"] for item in reports if item["risk_flags"]["wide_mux_or_work"]],
+        "modules_with_unregistered_outputs": [item["name"] for item in reports if item["registration_status"] != "yes"],
+        "hierarchical_combinational_loops": (
+            hierarchy.get("meaningful_cycles", hierarchy.get("cycles", []))
+            if hierarchy.get("available") else []
+        ),
+        "hierarchical_self_cycle_count": hierarchy.get("self_cycle_count", 0) if hierarchy.get("available") else 0,
+        "hierarchical_max_depth": hierarchy.get("max_depth", 0) if hierarchy.get("available") else 0,
+    }
+    for report in reports:
+        report.pop("_analysis", None)
+    result = {
+        "input": str(args.input),
+        "top": args.top,
+        "module_count": len(reports),
+        "summary": summary,
+        "hierarchical": hierarchy,
+        "modules": reports,
+    }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(f"wrote {args.output} ({len(reports)} modules)")
     for report in reports:
+        flags = report["risk_flags"]
+        if flags["combinational_loop"] or flags["hierarchical_combinational_loop"] or flags["self_feedback"] or flags["high_fanout_over_32"] or flags["deep_combination_over_8"] or flags["long_register_to_boundary_over_8"] or flags.get("long_input_to_control_over_8") or flags["wide_mux_or_work"] or flags["cross_module_combination_not_cut"]:
+            cycle_depth = report["combination"].get("cycle_max_timing_path_depth", 0)
+            cycle_kind = ",".join(sorted(report["combination"].get("cycle_kind_counts", {}))) or "-"
+            print(f"{report['name']}: depth={report['combination']['max_depth']} cycles={report['combination']['cycle_count']} "
+                  f"cycle-kind={cycle_kind} cycle-path={cycle_depth} "
+                  f"cross-depth={report['combination']['cross_module_max_depth']} "
+                  f"q-to-boundary={report['combination']['register_to_boundary_max_depth']} "
+                  f"q-to-d={report['combination']['register_q_to_d_max_depth']} "
+                  f"in-to-d={report['combination']['input_to_register_max_depth']} "
+                  f"in-to-ce={report['combination']['input_to_control_max_depth']} "
+                  f"q-to-output={report['combination']['register_q_to_any_boundary_max_depth']} "
+                  f"ops={report['combination']['operator_count']} work={report['combination']['weighted_combination_work']} "
+                  f"fanout-risk>{32}={flags['high_fanout_over_32']} self-feedback={flags['self_feedback']}")
+        if flags.get("hierarchical_combinational_loop"):
+            print(f"{report['name']}: hierarchical-depth={report['combination']['hierarchical'].get('max_depth', 0)} "
+                  f"hierarchical-cycles={report['combination']['hierarchical'].get('cycle_count', 0)} "
+                  f"hierarchical-cycle-path={report['combination']['hierarchical'].get('cycle_max_timing_path_depth', 0)}")
         if report["combinational_outputs"]:
             print(f"{report['name']}: combinational outputs: {', '.join(report['combinational_outputs'])}")
     return 0

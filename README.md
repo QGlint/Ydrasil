@@ -153,11 +153,11 @@ make syn250 IROM_COE=/path/to/irom.coe DRAM_COE=/path/to/dram.coe
 COE 转成文本或二进制内存文件，可使用：
 
 ```sh
-perl sw/coe_to_mem.pl input.coe output.mem
-perl sw/coe_to_mem.pl --binary input.coe output.bin
+perl verif/tools/coe_to_mem.pl input.coe output.mem
+perl verif/tools/coe_to_mem.pl --binary input.coe output.bin
 ```
 
-`sw/coe_to_mem.pl` 只接受 `memory_initialization_radix=16` 的 COE 文件，初始化向量里的每个字都必须是 1 到 8 位十六进制数。
+`verif/tools/coe_to_mem.pl` 只接受 `memory_initialization_radix=16` 的 COE 文件，初始化向量里的每个字都必须是 1 到 8 位十六进制数。
 
 长期回归目标由 `REGRESSION_TARGETS` 控制，默认包含完整 sort 与优化矩阵，
 可继续追加随机指令测试目标。完整 sort 不再属于 `coverage_all`，
@@ -207,6 +207,9 @@ make rtl-strict
 # Verilator 展开树（Verilator 5.048 没有 XML 时自动使用 tree JSON）和结构报告
 make rtl-structure
 
+# 将结构指标与已有 200 MHz Vivado synth/post-route 报告校准
+make rtl-vivado-compare
+
 # Vivado pin-free OOC；主线综合检查，使用 Xilinx wrapper，不读取 hw/ip/ydrmem 仿真模型
 make vivado-ooc
 
@@ -216,6 +219,20 @@ make yosys-slang-gate YOSYS_BASELINE_STAT=build/yosys-slang/base/stat.json
 ```
 
 `rtl-quickcheck` 现在默认串起 `rtl-strict`、`rtl-structure` 和 `vivado-ooc`。
+`rtl-vivado-compare` 不重新启动 Vivado，只读取 `config.mk` 中的
+`RTL_QC_VIVADO_*` 报告路径，并在 `build/rtl-quickcheck/` 生成比较 JSON。
+寄存器位数是 RTL 状态上界；宽度加权的 AST fanout 和组合工作量是趋势估计，
+不能替代 Vivado 的复制、时钟使能提升和布线 fanout。结构报告同时给出
+`max_depth`（模块内）和 `cross_module_max_depth`（跨 CELL 展开），并标记
+子模块组合输出是否真正被寄存器切断。深度按表达式 operator tree 计数，
+对长 OR/AND/XOR 归约使用平衡树估计；另外给出 `register_to_boundary_max_depth`，
+表示寄存器 Q 到下一个模块边界、寄存器 D/CE 或组合终点之间仍有多少组合层。
+其中 `register_q_to_d_max_depth`、`register_q_to_control_max_depth`、
+`register_q_to_output_max_depth` 和 `register_q_to_combination_sink_max_depth`
+分别拆开数据端、条件/使能端、模块组合输出和未继续连接的内部终点；每条
+`critical_register_to_boundary_paths` 还保留展开后的信号链和 endpoint 类型。
+Verilator tree 中 `direction=OUTPUT,varType=WIRE` 也会作为普通 SV 输出端口，
+而函数自动变量不会被误当成模块输出。
 Yosys 目标仍保留为可选交叉检查，可通过 `YOSYS_TOP`、`YOSYS_BENDER_DIR`、`YOSYS_RUN`
 和 `YOSYS_WITH_WRAPPERS` 覆盖。
 Vivado OOC 默认器件为 `xc7k325tffg900-2`，可用 `VIVADO_OOC_PART` 覆盖。
@@ -242,8 +259,9 @@ make syn VIVADO_SETTINGS=/path/to/settings64.sh VIVADO=/path/to/vivado
 | --- | --- |
 | `build/wave` | 仿真波形。 |
 | `build/log` | 仿真日志。 |
+| `build/verif` | 验证结果、验证汇总和覆盖率报告。 |
 | `build/riscv_tests` | RISC-V 测试编译输出。 |
-| `build/rvtest_results` | 回归测试结果。 |
+| `build/verif/rvtest_results` | 回归测试结果。 |
 | `build/syn/pll150m/reports` | 默认 150MHz Vivado batch 报告和 timing path 合并结果。 |
 | `build/syn/pll150m/checkpoints` | 默认 150MHz batch flow 保存的 Vivado checkpoint。 |
 | `build/syn/pll200m/artifacts` | 200MHz bitstream、checkpoint 副本和 manifest，使用 `make synf` 生成。 |

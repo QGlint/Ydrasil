@@ -20,7 +20,7 @@ core_sources = [
     for name in ('core_list_join', 'core_main', 'core_matrix',
                  'core_state', 'core_util')
 ]
-sources = core_sources + [
+support_sources = [
     os.path.join(coremark_variant, 'simple', 'core_portme.c'),
     os.path.join(bsp_lib_variant, 'sim_ctrl.c'),
     os.path.join(bsp_lib_variant, 'xprintf.c'),
@@ -40,9 +40,7 @@ defines = [
     ('FLAGS_STR', '\\"RT-Thread-' + profile + '\\"'),
 ]
 
-group = DefineGroup(
-    'RT-Thread App: CoreMark',
-    sources,
+common_group = dict(
     depend=[''],
     CPPPATH=[
         app_root,
@@ -54,4 +52,24 @@ group = DefineGroup(
     CPPDEFINES=defines,
 )
 
+# Keep the RT-Thread kernel and application glue at the global optimization
+# level.  A local flag is appended after the global CFLAGS, so an optional
+# '-O3 -funroll-loops' here overrides the usual '-Os' for CoreMark only.
+core_cflags = os.getenv('RTT_COREMARK_CORE_CFLAGS', '').strip()
+if core_cflags:
+    core_cflags = ' ' + core_cflags
+
+core_group = DefineGroup(
+    'RT-Thread App: CoreMark algorithm',
+    core_sources,
+    LOCAL_CFLAGS=core_cflags,
+    **common_group
+)
+support_group = DefineGroup(
+    'RT-Thread App: CoreMark support',
+    support_sources,
+    **common_group
+)
+
+group = [core_group, support_group]
 Return('group')

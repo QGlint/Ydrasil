@@ -18,7 +18,7 @@ header="program,cycles,insts,ipc,scoreboard,lsu_struct,producer_full,multi,flush
 echo "$header" > "$csv"
 
 mapfile -t logs < <(find "$root" -type f -name hw.log \( \
-    -path '*/coe_loop5/hw.log' -o -path '*/coe_loop_lina/hw.log' -o \
+    -path '*/coe_loop_lina/hw.log' -o \
     -path '*/coremark/hw.log' -o \
     -path '*/coremark-opt/*/hw.log' -o \
     -path '*/sort/*/hw.log' -o -path '*/sort-opt/*/*/hw.log' -o -path '*/boundary/*/hw.log' -o \

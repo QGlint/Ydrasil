@@ -3,28 +3,31 @@ include config.mk
 SHELL := /bin/bash
 # 硬件verilator编译 VERILATOR_IGNORE_ALL=0 不忽略所有语法检查
 # --- 自动化测试相关定义 ---
-RESULT_DIR := $(LOG_DIR)/test_results
+VERIF_DIR ?= $(BUILD_DIR)/verif
+VERIF_STATS_DIR ?= $(VERIF_DIR)/stats
+VERIF_COVERAGE_DIR ?= $(VERIF_DIR)/coverage
+RESULT_DIR := $(VERIF_DIR)/test_results
 PPA_DIR ?= $(BUILD_DIR)/PPA
-PPA_RVTEST_LOG ?= $(PPA_DIR)/test_all_summary.log
 PPA_COREMARK_LOG ?= $(PPA_DIR)/coremark_summary.log
+VERIF_RVTEST_LOG ?= $(VERIF_STATS_DIR)/test_all_summary.log
 BUS_IRQ_OBJ_DIR ?= $(BUILD_DIR)/ydrasil_bus_irq_tb$(if $(filter 1,$(VERILATOR_COVERAGE)),-coverage,)
 BUS_IRQ_COVERAGE_FILE ?= $(COVERAGE_DATA_DIR)/bus_irq.dat
 BUS_IRQ_TIMEOUT ?= 5000
-SORT_APP_DIR := $(PROJECT_ROOT)/sw/apps/sort
+SORT_APP_DIR := $(PROJECT_ROOT)/verif/tests/sw_tests/sort
 SORT_APP_NAMES := $(sort $(basename $(notdir $(wildcard $(SORT_APP_DIR)/*.c))))
 SORT_SIM_TARGETS := $(addprefix sort_sim_,$(SORT_APP_NAMES))
 SORT_RESULT_DIR ?= $(RESULT_DIR)/sort
-BOUNDARY_APP_DIR := $(PROJECT_ROOT)/sw/apps/boundary
+BOUNDARY_APP_DIR := $(PROJECT_ROOT)/verif/tests/sw_tests/boundary
 BOUNDARY_APP_NAMES := $(sort $(basename $(notdir $(wildcard $(BOUNDARY_APP_DIR)/*.c))))
 BOUNDARY_SIM_TARGETS := $(addprefix boundary_sim_,$(BOUNDARY_APP_NAMES))
 BOUNDARY_RESULT_DIR ?= $(RESULT_DIR)/boundary
-PPA_BOUNDARY_LOG ?= $(PPA_DIR)/boundary_summary.log
+VERIF_BOUNDARY_LOG ?= $(VERIF_STATS_DIR)/boundary_summary.log
 BOUNDARY_OPT_PROFILES ?= O0 O1 O2 O3 Os Og O2_noinline O3_app_unroll
 BOUNDARY_OPT_JOBS ?= $(shell nproc)
 BOUNDARY_OPT_APP_ROOT ?= $(BUILD_DIR)/app/boundary-opt
 BOUNDARY_OPT_RESULT_DIR ?= $(RESULT_DIR)/boundary-opt
 BOUNDARY_OPT_RUN_DIR ?= $(BUILD_DIR)/boundary-opt-run
-PPA_BOUNDARY_OPT_LOG ?= $(PPA_DIR)/boundary_opt_summary.log
+VERIF_BOUNDARY_OPT_LOG ?= $(VERIF_STATS_DIR)/boundary_opt_summary.log
 APP_OPT_PROFILES ?= O0 O1 O2 O3 Os Og O2_noinline O3_app_unroll
 APP_OPT_JOBS ?= $(shell nproc)
 APP_OPT_ITCM_BYTES ?= 16384
@@ -58,7 +61,7 @@ COREMARK_OPT_TIMEOUT ?= 2000000
 COREMARK_OPT_TIMEOUT_O0 ?= 5000000
 SORT_OPT_ROOT ?= $(BUILD_DIR)/app/sort-opt
 SORT_OPT_RESULT_DIR ?= $(RESULT_DIR)/sort-opt
-PPA_SORT_OPT_LOG ?= $(PPA_DIR)/sort_opt_summary.log
+VERIF_SORT_OPT_LOG ?= $(VERIF_STATS_DIR)/sort_opt_summary.log
 SORT_SIM_TIMEOUT ?= 20000000
 SORT_OPT_TIMEOUT ?= 20000000
 SORT_OPT_TIMEOUT_O0 ?= 50000000
@@ -66,18 +69,18 @@ COREMARK_OPT_BUILD_TARGETS := $(addprefix coremark_opt_build_,$(APP_OPT_PROFILES
 COREMARK_OPT_SIM_TARGETS := $(addprefix coremark_opt_sim_,$(APP_OPT_PROFILES))
 SORT_OPT_BUILD_TARGETS := $(foreach profile,$(APP_OPT_PROFILES),$(foreach app,$(SORT_APP_NAMES),sort_opt_build_$(profile)_$(app)))
 SORT_OPT_SIM_TARGETS := $(foreach profile,$(APP_OPT_PROFILES),$(foreach app,$(SORT_APP_NAMES),sort_opt_sim_$(profile)_$(app)))
-COVERAGE_QUICK_TARGETS ?= boundary_all test_all coremark_sim coe_loop5
-COVERAGE_QUICK_SUMMARY ?= $(PPA_DIR)/coverage_quick_summary.log
-COVERAGE_CLOSURE_DIR ?= $(BUILD_DIR)/coverage-closure
+COVERAGE_QUICK_TARGETS ?= boundary_all test_all coremark_sim coe_loop_lina
+VERIF_COVERAGE_QUICK_SUMMARY ?= $(VERIF_COVERAGE_DIR)/coverage_quick_summary.log
+COVERAGE_CLOSURE_DIR ?= $(VERIF_COVERAGE_DIR)/closure
 COVERAGE_CLOSURE_DATA ?= $(COVERAGE_CLOSURE_DIR)/data/boundary_coverage_closure_edges.dat
 COVERAGE_CLOSURE_MERGED ?= $(COVERAGE_CLOSURE_DIR)/merged.dat
 COVERAGE_CLOSURE_INFO ?= $(COVERAGE_CLOSURE_DIR)/coverage.info
 COVERAGE_CLOSURE_ANNOTATED ?= $(COVERAGE_CLOSURE_DIR)/annotated
 COVERAGE_CLOSURE_BASES ?=
 REGRESSION_TARGETS ?= coverage_all regression_sort regression_sort_opt riscv_dv_random
-REGRESSION_SUMMARY ?= $(PPA_DIR)/regression_summary.log
-REGRESSION_STATUS_REPORT ?= $(PPA_DIR)/regression_status.log
-REGRESSION_LOG_DIR ?= $(BUILD_DIR)/log/regression
+REGRESSION_SUMMARY ?= $(VERIF_STATS_DIR)/regression_summary.log
+REGRESSION_STATUS_REPORT ?= $(VERIF_STATS_DIR)/regression_status.log
+REGRESSION_LOG_DIR ?= $(VERIF_DIR)/regression
 REGRESSION_RUN_ID ?=
 REGRESSION_CONTEXT_LINES ?= 12
 REGRESSION_CACHE_TOOL ?= $(PROJECT_ROOT)/verif/regression/cache.py
@@ -88,12 +91,12 @@ REGRESSION_RUNNER_FILE ?= $(REGRESSION_CONTROL_DIR)/runner.json
 COVERAGE_ALL_CACHE_DIR ?= $(REGRESSION_CACHE_DIR)/coverage-all
 REGRESSION_SORT_COVERAGE_DIR ?= $(REGRESSION_CACHE_DIR)/coverage/sort
 REGRESSION_SORT_OPT_COVERAGE_DIR ?= $(REGRESSION_CACHE_DIR)/coverage/sort-opt
-REGRESSION_TOTAL_COVERAGE_DIR ?= $(BUILD_DIR)/coverage-total
+REGRESSION_TOTAL_COVERAGE_DIR ?= $(VERIF_COVERAGE_DIR)/total
 REGRESSION_TOTAL_COVERAGE_DATA ?= $(REGRESSION_TOTAL_COVERAGE_DIR)/merged.dat
 REGRESSION_TOTAL_COVERAGE_INFO ?= $(REGRESSION_TOTAL_COVERAGE_DIR)/coverage.info
 REGRESSION_TOTAL_COVERAGE_ANNOTATED ?= $(REGRESSION_TOTAL_COVERAGE_DIR)/annotated
-REGRESSION_TOTAL_COVERAGE_SUMMARY ?= $(PPA_DIR)/regression_coverage_summary.log
-REGRESSION_TOTAL_COVERAGE_UNCOVERED ?= $(PPA_DIR)/regression_coverage_uncovered.log
+REGRESSION_TOTAL_COVERAGE_SUMMARY ?= $(VERIF_COVERAGE_DIR)/regression_coverage_summary.log
+REGRESSION_TOTAL_COVERAGE_UNCOVERED ?= $(VERIF_COVERAGE_DIR)/regression_coverage_uncovered.log
 RISCV_DV_ROOT ?= $(PROJECT_ROOT)/verif/riscv-dv
 RISCV_DV_DRIVER ?= $(RISCV_DV_ROOT)/ydrasil_regression.py
 RISCV_DV_WORK_ROOT ?= $(BUILD_DIR)/riscv-dv
@@ -118,11 +121,11 @@ RISCV_DV_COVERAGE_BATCH ?= 20
 RISCV_DV_STOP_REPORT ?= 1
 RISCV_DV_RERUN ?= 0
 RISCV_DV_MAX_CACHE_GB ?= 4
-RISCV_DV_SUMMARY ?= $(PPA_DIR)/riscv_dv_summary.log
+RISCV_DV_SUMMARY ?= $(VERIF_STATS_DIR)/riscv_dv_summary.log
 RISCV_DV_ARCH ?= rv32im_zicsr_zifencei
 RISCV_DV_ABI ?= ilp32
-RISCV_DV_GCC ?= $(RISCV_PREFIX)-gcc
-RISCV_DV_OBJCOPY ?= $(RISCV_PREFIX)-objcopy
+override RISCV_DV_GCC := $(RISCV_TOOLCHAIN_PREFIX)-gcc
+override RISCV_DV_OBJCOPY := $(RISCV_TOOLCHAIN_PREFIX)-objcopy
 RISCV_DV_COMMON_ARGS = \
 	--project-root "$(PROJECT_ROOT)" \
 	--dv-root "$(RISCV_DV_ROOT)" \
@@ -177,15 +180,15 @@ COE_SIM_TIMEOUT ?= 2000000
 BOUNDARY_OPT_BUILD_TARGETS := $(addprefix boundary_opt_build_,$(BOUNDARY_OPT_PROFILES))
 BOUNDARY_OPT_SIM_TARGETS := $(foreach profile,$(BOUNDARY_OPT_PROFILES),$(foreach app,$(BOUNDARY_APP_NAMES),boundary_opt_sim_$(profile)_$(app)))
 BOUNDARY_OPT_SW_DEPS := $(wildcard $(BOUNDARY_APP_DIR)/*.c $(BOUNDARY_APP_DIR)/*.h $(PROJECT_ROOT)/sw/bsp/*.S $(PROJECT_ROOT)/sw/bsp/lib/*.c $(PROJECT_ROOT)/sw/bsp/include/*.h) $(PROJECT_ROOT)/sw/Makefile
-PPA_SORT_LOG ?= $(PPA_DIR)/sort_summary.log
+VERIF_SORT_LOG ?= $(VERIF_STATS_DIR)/sort_summary.log
 SORT_EXPECT_CASES ?= 91
 SORT_EXPECT_CHECKS ?= 455
 SORT_EXPECT_SIGNATURE ?= c02bdfa9
-PPA_COE_LOG ?= $(PPA_DIR)/$(COE_SIMPLE_NAME)_summary.log
+VERIF_COE_LOG ?= $(VERIF_STATS_DIR)/$(COE_SIMPLE_NAME)_summary.log
 COE_M3_DIR ?= $(BUILD_DIR)/fpga_coe_m3
-COE_TO_MEM ?= $(PROJECT_ROOT)/sw/coe_to_mem.pl
-COE_LOOP_PATCH ?= $(PROJECT_ROOT)/sw/make_m3_loop_variant.pl
-COE_LOOP_LINA_PATCH ?= $(PROJECT_ROOT)/sw/make_m3_loop_lina.pl
+COE_TO_MEM ?= $(PROJECT_ROOT)/verif/tools/coe_to_mem.pl
+COE_LOOP_PATCH ?= $(PROJECT_ROOT)/verif/tools/make_m3_loop_variant.pl
+COE_LOOP_LINA_PATCH ?= $(PROJECT_ROOT)/verif/tools/make_m3_loop_lina.pl
 COE_M3_IROM_SOURCE ?= $(PROJECT_ROOT)/FPGA/coe/irom_M3.coe
 COE_M3_DRAM_SOURCE ?= $(PROJECT_ROOT)/FPGA/coe/dram_M.coe
 COE_M3_ITCM ?= $(COE_M3_DIR)/irom_M3.itcm
@@ -221,7 +224,7 @@ COE_LOOP_LINA_ITCM ?= $(COE_LOOP_LINA_DIR)/irom_M3_loop_lina.itcm
 COE_LOOP_LINA_DTCM ?= $(COE_LOOP_LINA_DIR)/dram_M_loop_lina.dtcm
 COE_LOOP_LINA_DUMP ?= $(COE_LOOP_LINA_DIR)/irom_M3_loop_lina.dump
 COE_MFLINA_DIR ?= $(BUILD_DIR)/fpga_coe_mflina
-COE_MFLINA_PATCH ?= $(PROJECT_ROOT)/sw/make_mf_lina.pl
+COE_MFLINA_PATCH ?= $(PROJECT_ROOT)/verif/tools/make_mf_lina.pl
 COE_MFLINA_IROM_SOURCE ?= $(PROJECT_ROOT)/FPGA/coe/irom_MF.coe
 COE_MFLINA_DRAM_SOURCE ?= $(PROJECT_ROOT)/FPGA/coe/dram_MF.coe
 COE_MFLINA_MATRIX_ITERATIONS ?= 8
@@ -240,7 +243,7 @@ COE_MFLINA_ITCM ?= $(COE_MFLINA_DIR)/irom_MFlina.itcm
 COE_MFLINA_DTCM ?= $(COE_MFLINA_DIR)/dram_MF.dtcm
 COE_MFLINA_DUMP ?= $(COE_MFLINA_DIR)/irom_MFlina.dump
 
-export PROJECT_ROOT BUILD_DIR WAVE_DIR LOG_DIR SIM_TOOL IP VERILATOR_MOD COVERAGE VERILATOR_COVERAGE UVM USE_BENDER BENDER DIV_IMPL FPU LSU_IMPL MEMS_IMPL ARCH ABI RISCV_PREFIX CC OBJCOPY OBJDUMP GDB QEMU TRACE_TO_CSV TRACE_COMPARE
+export PROJECT_ROOT BUILD_DIR WAVE_DIR LOG_DIR SIM_TOOL IP VERILATOR_MOD COVERAGE VERILATOR_COVERAGE UVM USE_BENDER BENDER DIV_IMPL FPU LSU_IMPL MEMS_IMPL ARCH ABI RISCV_PREFIX RISCV_TOOLCHAIN_ROOT RISCV_TOOLCHAIN_BIN RISCV_TOOLCHAIN_TRIPLE RISCV_TOOLCHAIN_PREFIX CC OBJCOPY OBJDUMP GDB QEMU TRACE_TO_CSV TRACE_COMPARE
 
 SYN_DIR ?= $(PROJECT_ROOT)/syn
 SYN_BUILD_DIR ?= $(BUILD_DIR)/syn
@@ -312,7 +315,7 @@ endif
 .PHONY: coremark coremark_sim coremark_run coremark_result coremark-rebuild coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map coremark_opt_all coremark_opt_build_all coremark_opt_sim_all coremark_opt_report coremark_opt_clean $(COREMARK_OPT_BUILD_TARGETS) $(COREMARK_OPT_SIM_TARGETS) sort_app sort_all sort_sim_all sort_report sort_app_sim sort_app-rebuild sort_app-clean sort_opt_all sort_opt_build_all sort_opt_sim_all sort_opt_report sort_opt_clean $(SORT_OPT_BUILD_TARGETS) $(SORT_OPT_SIM_TARGETS) boundary_app boundary_all boundary_sim_all boundary_report boundary_app-rebuild boundary_app-clean boundary_opt_all boundary_opt_build_all boundary_opt_sim_all boundary_opt_report boundary_opt_clean $(BOUNDARY_OPT_BUILD_TARGETS) $(BOUNDARY_OPT_SIM_TARGETS) coe_m3_force coe_loop2_gen coe_loop5 coe_loop5_gen coe_loop_lina coe_loop_lina_gen loop_lina coe_MFlina coe_MFlina_gen coe_mflina coe_mflina_gen rtthread rtthread-build rtthread-clean rtthread-coremark rtthread-coremark-build rtthread-coremark-build-all rtthread-coremark-sim rtthread-coremark-sim-all rtthread-coremark-report rtthread-coremark-compare rtthread-coremark-clean rtthread-utest rtthread-utest-build rtthread-utest-sim rtthread-utest-report rtthread-utest-clean $(RTTHREAD_COREMARK_PROFILE_BUILD_TARGETS) $(RTTHREAD_COREMARK_PROFILE_SIM_TARGETS)
 .PHONY: riscv_dv_venv riscv_dv_model riscv_dv_prepare riscv_dv_run riscv_dv_random riscv_dv_random_status riscv_dv_regression riscv_dv_count riscv_dv_repro riscv_dv_estimate riscv_dv_stop riscv_dv_coverage_report riscv_dv_cleanup riscv_dv_distclean
 .PHONY: syn synf syn225 syn240 syn250 synf-board syn-extreme syn-venv syn-prep syn-stage-xpr syn-stage-memory syn-vivado syn-analyze syn-clean
-.PHONY: rtl-quickcheck rtl-strict rtl-xml rtl-structure verilator-strict verilator-xml slang-ast
+.PHONY: rtl-quickcheck rtl-strict rtl-xml rtl-structure rtl-vivado-compare verilator-strict verilator-xml slang-ast
 .PHONY: yosys-slang yosys-slang-gate yosys-slang-baseline yosys-slang-quick vivado-ooc vivado-ooc-synth vivado-ooc-issue
 
 .SECONDEXPANSION:
@@ -354,14 +357,14 @@ riscv_dv_prepare: riscv_dv_venv get_spike
 
 # Deliberately has no prepare dependency: execution never regenerates cached programs.
 riscv_dv_run: riscv_dv_venv riscv_dv_model get_spike
-	@mkdir -p "$(PPA_DIR)"
+	@mkdir -p "$(VERIF_STATS_DIR)"
 	@"$(RISCV_DV_PYTHON)" "$(RISCV_DV_DRIVER)" run $(RISCV_DV_COMMON_ARGS); rc=$$?; \
 	summary=$$(find "$(RISCV_DV_WORK_ROOT)/runs" -mindepth 2 -maxdepth 2 -name summary.log -type f -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2-); \
 	if [ -n "$$summary" ]; then cp "$$summary" "$(RISCV_DV_SUMMARY)"; echo "[RISCV-DV] Summary: $$summary"; fi; \
 	exit $$rc
 
 riscv_dv_random: riscv_dv_venv riscv_dv_model get_spike
-	@mkdir -p "$(PPA_DIR)"
+	@mkdir -p "$(VERIF_STATS_DIR)"
 	@"$(RISCV_DV_PYTHON)" "$(RISCV_DV_DRIVER)" continuous $(RISCV_DV_COMMON_ARGS); rc=$$?; \
 	summary=$$(find "$(RISCV_DV_WORK_ROOT)/runs" -mindepth 2 -maxdepth 2 -name summary.log -type f -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2-); \
 	if [ -n "$$summary" ]; then cp "$$summary" "$(RISCV_DV_SUMMARY)"; echo "[RISCV-DV] Summary: $$summary"; fi; \
@@ -403,11 +406,11 @@ riscv_dv_stop:
 	@if [ "$(RISCV_DV_STOP_REPORT)" = "1" ]; then $(MAKE) --no-print-directory riscv_dv_coverage_report; fi
 
 riscv_dv_coverage_report:
-	@mkdir -p "$(PPA_DIR)"; \
+	@mkdir -p "$(VERIF_COVERAGE_DIR)"; \
 	data=$$("$(RISCV_DV_PYTHON)" "$(RISCV_DV_DRIVER)" coverage-path $(RISCV_DV_COMMON_ARGS)); \
 	if [ -z "$$data" ]; then echo "[RISCV-DV] No merged coverage database found"; exit 2; fi; \
 	cov_dir="$${data%/*}"; info="$$cov_dir/coverage.info"; annotated="$$cov_dir/annotated"; \
-	summary="$(PPA_DIR)/riscv_dv_coverage_summary.log"; uncovered="$(PPA_DIR)/riscv_dv_uncovered.log"; \
+	summary="$(VERIF_COVERAGE_DIR)/riscv_dv_coverage_summary.log"; uncovered="$(VERIF_COVERAGE_DIR)/riscv_dv_uncovered.log"; \
 	verilator_coverage --write-info "$$info" "$$data"; \
 	rm -rf "$$annotated"; verilator_coverage --annotate "$$annotated" "$$data" >/dev/null; \
 	databases=$$(find "$$cov_dir" -maxdepth 1 -name 'merged.dat' -type f | wc -l); \
@@ -436,7 +439,7 @@ regression_suite_coverage_merge:
 regression_sort:
 	@set -e; state="$(REGRESSION_CACHE_DIR)/sort.json"; merged="$(REGRESSION_SORT_COVERAGE_DIR)/merged.dat"; \
 	if $(PYTHON) "$(REGRESSION_CACHE_TOOL)" check --project-root "$(PROJECT_ROOT)" --scope sort \
-		--state "$$state" --artifact "$$merged" --artifact "$(PPA_SORT_LOG)" --artifact "$(SORT_RESULT_DIR)"; then \
+		--state "$$state" --artifact "$$merged" --artifact "$(VERIF_SORT_LOG)" --artifact "$(SORT_RESULT_DIR)"; then \
 		echo "[REGRESSION] SKIP sort_all: completed inputs unchanged"; exit 0; \
 	fi; \
 	start_fp=$$($(PYTHON) "$(REGRESSION_CACHE_TOOL)" fingerprint --project-root "$(PROJECT_ROOT)" --scope sort); \
@@ -447,12 +450,12 @@ regression_sort:
 		REGRESSION_SUITE_COVERAGE_DIR="$(REGRESSION_SORT_COVERAGE_DIR)"; \
 	$(PYTHON) "$(REGRESSION_CACHE_TOOL)" record --project-root "$(PROJECT_ROOT)" --scope sort \
 		--state "$$state" --expected-fingerprint "$$start_fp" \
-		--artifact "$$merged" --artifact "$(PPA_SORT_LOG)" --artifact "$(SORT_RESULT_DIR)"
+		--artifact "$$merged" --artifact "$(VERIF_SORT_LOG)" --artifact "$(SORT_RESULT_DIR)"
 
 regression_sort_opt:
 	@set -e; state="$(REGRESSION_CACHE_DIR)/sort_opt.json"; merged="$(REGRESSION_SORT_OPT_COVERAGE_DIR)/merged.dat"; \
 	if $(PYTHON) "$(REGRESSION_CACHE_TOOL)" check --project-root "$(PROJECT_ROOT)" --scope sort_opt \
-		--state "$$state" --artifact "$$merged" --artifact "$(PPA_SORT_OPT_LOG)" --artifact "$(SORT_OPT_RESULT_DIR)"; then \
+		--state "$$state" --artifact "$$merged" --artifact "$(VERIF_SORT_OPT_LOG)" --artifact "$(SORT_OPT_RESULT_DIR)"; then \
 		echo "[REGRESSION] SKIP sort_opt_all: completed inputs unchanged"; exit 0; \
 	fi; \
 	start_fp=$$($(PYTHON) "$(REGRESSION_CACHE_TOOL)" fingerprint --project-root "$(PROJECT_ROOT)" --scope sort_opt); \
@@ -463,7 +466,7 @@ regression_sort_opt:
 		REGRESSION_SUITE_COVERAGE_DIR="$(REGRESSION_SORT_OPT_COVERAGE_DIR)"; \
 	$(PYTHON) "$(REGRESSION_CACHE_TOOL)" record --project-root "$(PROJECT_ROOT)" --scope sort_opt \
 		--state "$$state" --expected-fingerprint "$$start_fp" \
-		--artifact "$$merged" --artifact "$(PPA_SORT_OPT_LOG)" --artifact "$(SORT_OPT_RESULT_DIR)"
+		--artifact "$$merged" --artifact "$(VERIF_SORT_OPT_LOG)" --artifact "$(SORT_OPT_RESULT_DIR)"
 
 regression_coverage_report:
 	@set -e; sources=(); \
@@ -479,7 +482,7 @@ regression_coverage_report:
 	riscv_data=$$("$(RISCV_DV_PYTHON)" "$(RISCV_DV_DRIVER)" coverage-path $(RISCV_DV_COMMON_ARGS) 2>/dev/null || true); \
 	if [ -n "$$riscv_data" ] && [ -f "$$riscv_data" ]; then sources+=("$$riscv_data"); fi; \
 	if [ "$${#sources[@]}" -eq 0 ]; then echo "[REGRESSION] No current-RTL coverage suites are complete"; exit 2; fi; \
-	rm -rf "$(REGRESSION_TOTAL_COVERAGE_DIR)"; mkdir -p "$(REGRESSION_TOTAL_COVERAGE_DIR)" "$(PPA_DIR)"; \
+	rm -rf "$(REGRESSION_TOTAL_COVERAGE_DIR)"; mkdir -p "$(REGRESSION_TOTAL_COVERAGE_DIR)" "$(VERIF_COVERAGE_DIR)"; \
 	echo "[REGRESSION] Merging $${#sources[@]} suite databases"; printf '  %s\n' "$${sources[@]}"; \
 	verilator_coverage --write "$(REGRESSION_TOTAL_COVERAGE_DATA)" "$${sources[@]}"; \
 	verilator_coverage --write-info "$(REGRESSION_TOTAL_COVERAGE_INFO)" "$(REGRESSION_TOTAL_COVERAGE_DATA)"; \
@@ -493,7 +496,7 @@ regression_coverage_report:
 regression:
 	@set +e; failed=0; stopped=0; run_id="$(REGRESSION_RUN_ID)"; \
 	if [ -z "$$run_id" ]; then run_id="$$(date '+%Y%m%d_%H%M%S')_$$$$"; fi; \
-	run_dir="$(REGRESSION_LOG_DIR)/$$run_id"; mkdir -p "$$run_dir" "$(PPA_DIR)" "$(REGRESSION_CONTROL_DIR)"; \
+	run_dir="$(REGRESSION_LOG_DIR)/$$run_id"; mkdir -p "$$run_dir" "$(VERIF_STATS_DIR)" "$(REGRESSION_CONTROL_DIR)"; \
 	summary="$$run_dir/summary.log"; rm -f "$(REGRESSION_STOP_FILE)"; \
 	printf '{"pid":%s,"run_id":"%s"}\n' "$$$$" "$$run_id" > "$(REGRESSION_RUNNER_FILE)"; \
 	trap 'rm -f "$(REGRESSION_RUNNER_FILE)" "$(REGRESSION_STOP_FILE)"' EXIT; \
@@ -529,7 +532,7 @@ regression:
 regression_all: regression
 
 regression_status:
-	@set -e; mkdir -p "$(PPA_DIR)"; report="$(REGRESSION_STATUS_REPORT)"; tmp="$$report.tmp.$$$$"; \
+	@set -e; mkdir -p "$(VERIF_STATS_DIR)"; report="$(REGRESSION_STATUS_REPORT)"; tmp="$$report.tmp.$$$$"; \
 	trap 'rm -f "$$tmp"' EXIT; \
 	latest_regression=$$(find "$(REGRESSION_LOG_DIR)" -mindepth 2 -maxdepth 2 -name summary.log -type f \
 		-printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2-); \
@@ -604,7 +607,6 @@ coverage_all_run: coverage_clean
 	@$(MAKE) coremark_opt_all VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
 	@$(MAKE) test_all VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
 	@$(MAKE) coremark_sim VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
-	@$(MAKE) coe_loop5 VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
 	@$(MAKE) coe_loop_lina VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
 	@$(MAKE) coverage_report
 	@$(MAKE) ppa_perf_report
@@ -624,10 +626,10 @@ bus_irq_coverage:
 	@$(MAKE) --no-print-directory bus_irq_test VERILATOR_COVERAGE=1
 
 coverage_quick: coverage_clean
-	@mkdir -p "$(COVERAGE_DATA_DIR)" "$(PPA_DIR)"
+	@mkdir -p "$(COVERAGE_DATA_DIR)" "$(VERIF_COVERAGE_DIR)"
 	@$(MAKE) comp VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
-	@set +e; failed=0; rm -f "$(COVERAGE_QUICK_SUMMARY)"; \
-	echo "[COVERAGE QUICK] Targets: $(COVERAGE_QUICK_TARGETS)" | tee "$(COVERAGE_QUICK_SUMMARY)"; \
+	@set +e; failed=0; rm -f "$(VERIF_COVERAGE_QUICK_SUMMARY)"; \
+	echo "[COVERAGE QUICK] Targets: $(COVERAGE_QUICK_TARGETS)" | tee "$(VERIF_COVERAGE_QUICK_SUMMARY)"; \
 	for target in $(COVERAGE_QUICK_TARGETS); do \
 		measured=0; minimum=$(COVERAGE_QUICK_TIMEOUT); \
 		if [ -s "$(PPA_DIR)/perf_stats.csv" ]; then \
@@ -635,7 +637,7 @@ coverage_quick: coverage_clean
 				boundary_all) pattern='^boundary(-opt)?/'; minimum=$(COVERAGE_QUICK_BOUNDARY_MIN) ;; \
 				test_all) pattern='^rv32'; minimum=$(COVERAGE_QUICK_ISA_MIN) ;; \
 				coremark_sim) pattern='^coremark$$'; minimum=$(COVERAGE_QUICK_COREMARK_MIN) ;; \
-				coe_loop5) pattern='^coe_loop5$$'; minimum=$(COVERAGE_QUICK_COE_MIN) ;; \
+				coe_loop_lina) pattern='^coe_loop_lina$$'; minimum=$(COVERAGE_QUICK_COE_MIN) ;; \
 				*) pattern='a^' ;; \
 			esac; \
 			measured=$$(awk -F, -v p="$$pattern" 'NR>1 && $$1 ~ p && $$2 ~ /^[0-9]+$$/ && $$2>m {m=$$2} END{print m+0}' "$(PPA_DIR)/perf_stats.csv"); \
@@ -644,32 +646,32 @@ coverage_quick: coverage_clean
 				boundary_all) minimum=$(COVERAGE_QUICK_BOUNDARY_MIN) ;; \
 				test_all) minimum=$(COVERAGE_QUICK_ISA_MIN) ;; \
 				coremark_sim) minimum=$(COVERAGE_QUICK_COREMARK_MIN) ;; \
-				coe_loop5) minimum=$(COVERAGE_QUICK_COE_MIN) ;; \
+				coe_loop_lina) minimum=$(COVERAGE_QUICK_COE_MIN) ;; \
 			esac; \
 		fi; \
 		budget=$$(( (measured * $(COVERAGE_QUICK_TICKS_PER_CYCLE) * (100 + $(COVERAGE_QUICK_MARGIN_PERCENT)) + 99) / 100 + $(COVERAGE_QUICK_TIMEOUT_PAD) )); \
 		if [ "$$budget" -lt "$$minimum" ]; then budget=$$minimum; fi; \
-		echo "[COVERAGE QUICK] RUN  $$target timeout=$$budget measured_cycles=$$measured" | tee -a "$(COVERAGE_QUICK_SUMMARY)"; \
+		echo "[COVERAGE QUICK] RUN  $$target timeout=$$budget measured_cycles=$$measured" | tee -a "$(VERIF_COVERAGE_QUICK_SUMMARY)"; \
 		if $(MAKE) --no-print-directory "$$target" VERILATOR_COVERAGE=1 VERILATOR_TRACE=0 \
 			SIM_COMPARE_TIMEOUT="$$budget" \
 			BOUNDARY_SIM_TIMEOUT="$$budget" \
 			COREMARK_SIM_TIMEOUT="$$budget" \
 			COE_SIM_TIMEOUT="$$budget"; then \
-			echo "[COVERAGE QUICK] PASS $$target" | tee -a "$(COVERAGE_QUICK_SUMMARY)"; \
+			echo "[COVERAGE QUICK] PASS $$target" | tee -a "$(VERIF_COVERAGE_QUICK_SUMMARY)"; \
 		else \
-			echo "[COVERAGE QUICK] FAIL $$target" | tee -a "$(COVERAGE_QUICK_SUMMARY)"; failed=1; \
+			echo "[COVERAGE QUICK] FAIL $$target" | tee -a "$(VERIF_COVERAGE_QUICK_SUMMARY)"; failed=1; \
 		fi; \
 	done; \
 	if $(MAKE) --no-print-directory coverage_report; then \
-		echo "[COVERAGE QUICK] PASS coverage_report" | tee -a "$(COVERAGE_QUICK_SUMMARY)"; \
-		grep '^\[COVERAGE\] LCOV source-line coverage:' "$(COVERAGE_SUMMARY)" | tail -1 | tee -a "$(COVERAGE_QUICK_SUMMARY)"; \
+		echo "[COVERAGE QUICK] PASS coverage_report" | tee -a "$(VERIF_COVERAGE_QUICK_SUMMARY)"; \
+		grep '^\[COVERAGE\] LCOV source-line coverage:' "$(COVERAGE_SUMMARY)" | tail -1 | tee -a "$(VERIF_COVERAGE_QUICK_SUMMARY)"; \
 	else \
-		echo "[COVERAGE QUICK] FAIL coverage_report" | tee -a "$(COVERAGE_QUICK_SUMMARY)"; failed=1; \
+		echo "[COVERAGE QUICK] FAIL coverage_report" | tee -a "$(VERIF_COVERAGE_QUICK_SUMMARY)"; failed=1; \
 	fi; \
 	dat_count=$$(find "$(COVERAGE_DATA_DIR)" -type f -name '*.dat' | wc -l); \
 	overall=PASS; if [ "$$failed" -ne 0 ]; then overall=FAIL; fi; \
-	echo "[COVERAGE QUICK] CORRECTNESS=$$overall coverage_databases=$$dat_count" | tee -a "$(COVERAGE_QUICK_SUMMARY)"; \
-	echo "[COVERAGE QUICK] Summary: $(COVERAGE_QUICK_SUMMARY)"; \
+	echo "[COVERAGE QUICK] CORRECTNESS=$$overall coverage_databases=$$dat_count" | tee -a "$(VERIF_COVERAGE_QUICK_SUMMARY)"; \
+	echo "[COVERAGE QUICK] Summary: $(VERIF_COVERAGE_QUICK_SUMMARY)"; \
 	exit "$$failed"
 
 coverage_closure:
@@ -707,7 +709,7 @@ coverage_closure_merge: coverage_closure
 		if [ ! -s "$$input" ]; then echo "[COVERAGE CLOSURE] Missing $$input"; exit 2; fi; \
 	done; \
 	databases=$$#; \
-	mkdir -p "$(REGRESSION_TOTAL_COVERAGE_DIR)" "$(PPA_DIR)"; \
+	mkdir -p "$(REGRESSION_TOTAL_COVERAGE_DIR)" "$(VERIF_COVERAGE_DIR)"; \
 	verilator_coverage --write "$(REGRESSION_TOTAL_COVERAGE_DATA).next" "$$@"; \
 	verilator_coverage --write-info "$(REGRESSION_TOTAL_COVERAGE_INFO).next" \
 		"$(REGRESSION_TOTAL_COVERAGE_DATA).next"; \
@@ -731,7 +733,7 @@ coverage_closure_merge: coverage_closure
 	echo "[COVERAGE CLOSURE] merged into $(REGRESSION_TOTAL_COVERAGE_DATA)"
 
 ppa_perf_report:
-	@bash sw/scripts/collect_perf_stats.sh "$(HW_TRACE_OUT_DIR)" "$(PPA_DIR)"
+	@bash verif/tools/collect_perf_stats.sh "$(HW_TRACE_OUT_DIR)" "$(PPA_DIR)"
 
 coverage_report:
 	@mkdir -p "$(COVERAGE_DIR)"; \
@@ -1038,6 +1040,15 @@ rtl-xml: $(RTL_QC_FLIST)
 rtl-structure: rtl-xml
 	$(PYTHON) "$(SYN_DIR)/analyze_rtl_structure.py" \
 		--input "$(RTL_QC_TREE_JSON)" --output "$(RTL_QC_STRUCTURE_JSON)" --top "$(RTL_QC_TOP)"
+
+rtl-vivado-compare: rtl-structure
+	@test -f "$(RTL_QC_VIVADO_UTILIZATION)" || { echo "Vivado utilization report not found: $(RTL_QC_VIVADO_UTILIZATION)" >&2; exit 2; }
+	$(PYTHON) "$(SYN_DIR)/compare_rtl_vivado.py" \
+		--structure "$(RTL_QC_STRUCTURE_JSON)" \
+		--utilization "$(RTL_QC_VIVADO_UTILIZATION)" \
+		--timing "$(RTL_QC_VIVADO_TIMING)" \
+		--timing "$(RTL_QC_VIVADO_POST_ROUTE_TIMING)" \
+		--output "$(RTL_QC_VIVADO_COMPARE_JSON)"
 
 verilator-strict: rtl-strict
 verilator-xml: rtl-xml
@@ -1424,12 +1435,12 @@ sort_sim_%:
 	echo "[$$name] [Cycles: $$cycles | Insts: $$insts | IPC: $$ipc] [$$result]" > "$$status"
 
 sort_report:
-	@mkdir -p "$(PPA_DIR)"; \
-	rm -f "$(PPA_SORT_LOG)"; \
+	@mkdir -p "$(VERIF_STATS_DIR)"; \
+	rm -f "$(VERIF_SORT_LOG)"; \
 	failed=0; \
 	for status in $$(find "$(SORT_RESULT_DIR)" -maxdepth 1 -name '*.status' -type f | sort); do \
 		line=$$(cat "$$status"); \
-		echo "$$line" | tee -a "$(PPA_SORT_LOG)"; \
+		echo "$$line" | tee -a "$(VERIF_SORT_LOG)"; \
 		if echo "$$line" | grep -q '\[FAIL\]'; then \
 			failed=1; \
 			name=$$(basename "$$status" .status); \
@@ -1441,7 +1452,7 @@ sort_report:
 		echo "[SORT] Missing status files: expected $(words $(SORT_APP_NAMES)), got $$count"; \
 		failed=1; \
 	fi; \
-	echo "[PPA] Sort report: $(PPA_SORT_LOG)"; \
+	echo "[VERIF] Sort report: $(VERIF_SORT_LOG)"; \
 	exit $$failed
 
 sort_app_sim: sort_all
@@ -1511,15 +1522,15 @@ endef
 $(foreach profile,$(APP_OPT_PROFILES),$(foreach app,$(SORT_APP_NAMES),$(eval $(call SORT_OPT_template,$(profile),$(app)))))
 
 sort_opt_report:
-	@mkdir -p "$(PPA_DIR)"; rm -f "$(PPA_SORT_OPT_LOG)"; failed=0; pass=0; skip=0; expanded_count=0; total=$(words $(SORT_OPT_SIM_TARGETS)); \
+	@mkdir -p "$(VERIF_STATS_DIR)"; rm -f "$(VERIF_SORT_OPT_LOG)"; failed=0; pass=0; skip=0; expanded_count=0; total=$(words $(SORT_OPT_SIM_TARGETS)); \
 	for profile in $(APP_OPT_PROFILES); do for name in $(SORT_APP_NAMES); do status="$(SORT_OPT_RESULT_DIR)/$$profile/$$name.status"; \
-		if [ ! -f "$$status" ]; then echo "[$$profile/$$name] [FAIL] missing status" | tee -a "$(PPA_SORT_OPT_LOG)"; failed=1; continue; fi; \
-		line=$$(cat "$$status"); echo "$$line" | tee -a "$(PPA_SORT_OPT_LOG)"; \
+		if [ ! -f "$$status" ]; then echo "[$$profile/$$name] [FAIL] missing status" | tee -a "$(VERIF_SORT_OPT_LOG)"; failed=1; continue; fi; \
+		line=$$(cat "$$status"); echo "$$line" | tee -a "$(VERIF_SORT_OPT_LOG)"; \
 		if echo "$$line" | grep -q 'expanded_itcm=YES'; then expanded_count=$$((expanded_count+1)); fi; \
 		if echo "$$line" | grep -q '\[PASS\]'; then pass=$$((pass+1)); elif echo "$$line" | grep -q '\[SKIP\]'; then skip=$$((skip+1)); else failed=1; fi; \
 	done; done; overall=PASS; if [ "$$failed" -ne 0 ]; then overall=FAIL; fi; \
-	echo "[SORT OPT] ITCM original=$(APP_OPT_ITCM_BYTES) expanded=$(APP_OPT_EXPANDED_ITCM_BYTES) expanded_runs=$$expanded_count" | tee -a "$(PPA_SORT_OPT_LOG)"; \
-	echo "[SORT OPT] CORRECTNESS=$$overall passed=$$pass skipped=$$skip total=$$total" | tee -a "$(PPA_SORT_OPT_LOG)"; exit $$failed
+	echo "[SORT OPT] ITCM original=$(APP_OPT_ITCM_BYTES) expanded=$(APP_OPT_EXPANDED_ITCM_BYTES) expanded_runs=$$expanded_count" | tee -a "$(VERIF_SORT_OPT_LOG)"; \
+	echo "[SORT OPT] CORRECTNESS=$$overall passed=$$pass skipped=$$skip total=$$total" | tee -a "$(VERIF_SORT_OPT_LOG)"; exit $$failed
 
 sort_opt_clean:
 	@rm -rf "$(SORT_OPT_ROOT)" "$(SORT_OPT_RESULT_DIR)" "$(HW_TRACE_OUT_DIR)/sort-opt"
@@ -1549,11 +1560,11 @@ boundary_sim_%:
 	echo "[$$name] [$$result]" > "$$status"
 
 boundary_report:
-	@mkdir -p "$(PPA_DIR)"; rm -f "$(PPA_BOUNDARY_LOG)"; failed=0; \
-	for status in $$(find "$(BOUNDARY_RESULT_DIR)" -maxdepth 1 -name '*.status' -type f | sort); do line=$$(cat "$$status"); echo "$$line" | tee -a "$(PPA_BOUNDARY_LOG)"; if echo "$$line" | grep -q '\[FAIL\]'; then failed=1; name=$$(basename "$$status" .status); tail -40 "$(BOUNDARY_RESULT_DIR)/$$name.log"; fi; done; \
+	@mkdir -p "$(VERIF_STATS_DIR)"; rm -f "$(VERIF_BOUNDARY_LOG)"; failed=0; \
+	for status in $$(find "$(BOUNDARY_RESULT_DIR)" -maxdepth 1 -name '*.status' -type f | sort); do line=$$(cat "$$status"); echo "$$line" | tee -a "$(VERIF_BOUNDARY_LOG)"; if echo "$$line" | grep -q '\[FAIL\]'; then failed=1; name=$$(basename "$$status" .status); tail -40 "$(BOUNDARY_RESULT_DIR)/$$name.log"; fi; done; \
 	count=$$(find "$(BOUNDARY_RESULT_DIR)" -maxdepth 1 -name '*.status' -type f | wc -l); \
 	if [ "$$count" -ne "$(words $(BOUNDARY_APP_NAMES))" ]; then echo "[BOUNDARY] Missing status files: expected $(words $(BOUNDARY_APP_NAMES)), got $$count"; failed=1; fi; \
-	echo "[PPA] Boundary report: $(PPA_BOUNDARY_LOG)"; exit $$failed
+	echo "[VERIF] Boundary report: $(VERIF_BOUNDARY_LOG)"; exit $$failed
 
 boundary_opt_all: boundary_opt_clean
 	@echo "==========================================================="
@@ -1627,12 +1638,12 @@ endef
 $(foreach profile,$(BOUNDARY_OPT_PROFILES),$(foreach app,$(BOUNDARY_APP_NAMES),$(eval $(call BOUNDARY_OPT_SIM_template,$(profile),$(app)))))
 
 boundary_opt_report:
-	@mkdir -p "$(PPA_DIR)"; rm -f "$(PPA_BOUNDARY_OPT_LOG)"; failed=0; total_pass=0; total_partial=0; \
-	echo "[BOUNDARY OPT] Correctness matrix: $(words $(BOUNDARY_OPT_PROFILES)) profiles x $(words $(BOUNDARY_APP_NAMES)) apps" | tee -a "$(PPA_BOUNDARY_OPT_LOG)"; \
-	echo "[BOUNDARY OPT] Correctness method: program self-check + testbench assertions + complete-program Spike commit differential" | tee -a "$(PPA_BOUNDARY_OPT_LOG)"; \
+	@mkdir -p "$(VERIF_STATS_DIR)"; rm -f "$(VERIF_BOUNDARY_OPT_LOG)"; failed=0; total_pass=0; total_partial=0; \
+	echo "[BOUNDARY OPT] Correctness matrix: $(words $(BOUNDARY_OPT_PROFILES)) profiles x $(words $(BOUNDARY_APP_NAMES)) apps" | tee -a "$(VERIF_BOUNDARY_OPT_LOG)"; \
+	echo "[BOUNDARY OPT] Correctness method: program self-check + testbench assertions + complete-program Spike commit differential" | tee -a "$(VERIF_BOUNDARY_OPT_LOG)"; \
 	for profile in $(BOUNDARY_OPT_PROFILES); do \
 		for status in $$(find "$(BOUNDARY_OPT_RESULT_DIR)/$$profile" -maxdepth 1 -name '*.status' -type f 2>/dev/null | sort); do \
-			line=$$(cat "$$status"); echo "$$line" | tee -a "$(PPA_BOUNDARY_OPT_LOG)"; \
+			line=$$(cat "$$status"); echo "$$line" | tee -a "$(VERIF_BOUNDARY_OPT_LOG)"; \
 			if echo "$$line" | grep -q '\[FAIL\]'; then \
 				failed=1; name=$$(basename "$$status" .status); \
 				tail -40 "$(BOUNDARY_OPT_RESULT_DIR)/$$profile/$$name.log"; \
@@ -1653,11 +1664,11 @@ boundary_opt_report:
 		total_pass=$$((total_pass + pass)); total_partial=$$((total_partial + partial)); result=PASS; \
 		if [ "$$fail" -ne 0 ]; then result=FAIL; failed=1; elif [ "$$partial" -ne 0 ]; then result=PARTIAL; fi; \
 		flags=$$(tr '\n' ' ' < "$(BOUNDARY_OPT_APP_ROOT)/$$profile/flags.txt"); \
-		echo "[BOUNDARY OPT][$$profile] CORRECTNESS=$$result passed=$$pass partial=$$partial failed=$$fail total=$(words $(BOUNDARY_APP_NAMES)) $$flags" | tee -a "$(PPA_BOUNDARY_OPT_LOG)"; \
+		echo "[BOUNDARY OPT][$$profile] CORRECTNESS=$$result passed=$$pass partial=$$partial failed=$$fail total=$(words $(BOUNDARY_APP_NAMES)) $$flags" | tee -a "$(VERIF_BOUNDARY_OPT_LOG)"; \
 	done; \
 	overall=PASS; if [ "$$failed" -ne 0 ]; then overall=FAIL; elif [ "$$total_partial" -ne 0 ]; then overall=PARTIAL; fi; \
-	echo "[BOUNDARY OPT] CORRECTNESS=$$overall passed=$$total_pass partial=$$total_partial total=$(words $(BOUNDARY_OPT_SIM_TARGETS))" | tee -a "$(PPA_BOUNDARY_OPT_LOG)"; \
-	echo "[PPA] Boundary optimization report: $(PPA_BOUNDARY_OPT_LOG)"; exit $$failed
+	echo "[BOUNDARY OPT] CORRECTNESS=$$overall passed=$$total_pass partial=$$total_partial total=$(words $(BOUNDARY_OPT_SIM_TARGETS))" | tee -a "$(VERIF_BOUNDARY_OPT_LOG)"; \
+	echo "[VERIF] Boundary optimization report: $(VERIF_BOUNDARY_OPT_LOG)"; exit $$failed
 
 boundary_opt_clean:
 	@rm -rf "$(BOUNDARY_OPT_APP_ROOT)" "$(BOUNDARY_OPT_RESULT_DIR)" "$(BOUNDARY_OPT_RUN_DIR)" "$(HW_TRACE_OUT_DIR)/boundary-opt"
@@ -1803,10 +1814,15 @@ coe_simple: comp $(COE_SIMPLE_ITCM) $(COE_SIMPLE_DTCM)
 		grep -E "^core   0:|^3 0x|timeout pc=|TEST_FAIL|fail testnum|RISCV_TEST|Simulation finished" "$$log" | tail -200; \
 		exit 1; \
 	fi; \
-	mkdir -p "$(PPA_DIR)"; \
-	{ echo "[COE_SIMPLE] PASS $(COE_SIMPLE_NAME)"; \
-	  grep -E "LED write|SEG write|CNT write|CNT read|PERF_" "$$log"; \
-	} > "$(PPA_COE_LOG)"; \
+	if [ "$(COE_SIMPLE_NAME)" = "coe_loop_lina" ]; then \
+		rm -f "$(VERIF_COE_LOG)" "$(PPA_DIR)/$(COE_SIMPLE_NAME)_summary.log"; \
+		echo "[COE_SIMPLE] PASS $(COE_SIMPLE_NAME) (included in aggregate performance statistics; no dedicated report)"; \
+	else \
+		mkdir -p "$(VERIF_STATS_DIR)"; \
+		{ echo "[COE_SIMPLE] PASS $(COE_SIMPLE_NAME)"; \
+		  grep -E "LED write|SEG write|CNT write|CNT read|PERF_" "$$log"; \
+		} > "$(VERIF_COE_LOG)"; \
+	fi; \
 	echo "[COE_SIMPLE] PASS $(COE_SIMPLE_NAME)"; \
 	grep -E "LED write|SEG write|CNT write|CNT read|PERF_|\\[PERIP\\]|\\[TB\\]|Simulation finished" "$$log" | tail -100
 

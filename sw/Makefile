@@ -3,7 +3,22 @@
 # ====== user config ======
 PROJECT_ROOT ?= $(abspath ..)
 
-RISCV_PREFIX ?= riscv64-elf
+# This standalone software makefile is also invoked directly, so it cannot
+# rely on the top-level config.mk to select the repository toolchain.
+RISCV_TOOLCHAIN_ROOT ?= $(PROJECT_ROOT)/tools/riscv
+RISCV_TOOLCHAIN_BIN ?= $(RISCV_TOOLCHAIN_ROOT)/bin
+RISCV_TOOLCHAIN_TRIPLE ?= riscv64-unknown-elf
+override RISCV_TOOLCHAIN_PREFIX := $(RISCV_TOOLCHAIN_BIN)/$(RISCV_TOOLCHAIN_TRIPLE)
+override RISCV_PREFIX := $(RISCV_TOOLCHAIN_PREFIX)
+RISCV_TOOLCHAIN_TOOLS := gcc g++ ar objcopy objdump size
+RISCV_TOOLCHAIN_MISSING := $(strip $(shell \
+	for tool in $(RISCV_TOOLCHAIN_TOOLS); do \
+		path="$(RISCV_TOOLCHAIN_PREFIX)-$$tool"; \
+		if [ ! -x "$$path" ]; then printf '%s ' "$$path"; fi; \
+	done))
+ifneq ($(RISCV_TOOLCHAIN_MISSING),)
+$(error Required RISC-V toolchain is missing or not executable: $(RISCV_TOOLCHAIN_MISSING). Expected tools under $(RISCV_TOOLCHAIN_BIN); refusing to use a system compiler)
+endif
 ARCH ?= rv32im_zicsr_zifencei
 ABI  ?= ilp32
 
@@ -36,14 +51,10 @@ ifeq ($(COMP_MODE), rvtest)
 endif
 
 # ====== tools ======
-ifeq ($(origin CC),default)
-CC := $(RISCV_PREFIX)-gcc
-else
-CC ?= $(RISCV_PREFIX)-gcc
-endif
-OBJCOPY ?= $(RISCV_PREFIX)-objcopy
-OBJDUMP ?= $(RISCV_PREFIX)-objdump
-AR ?= $(RISCV_PREFIX)-ar
+override CC := $(RISCV_TOOLCHAIN_PREFIX)-gcc
+override OBJCOPY := $(RISCV_TOOLCHAIN_PREFIX)-objcopy
+override OBJDUMP := $(RISCV_TOOLCHAIN_PREFIX)-objdump
+override AR := $(RISCV_TOOLCHAIN_PREFIX)-ar
 
 RV_CFLAGS ?= -march=$(ARCH) -mabi=$(ABI) -nostdlib -nostartfiles -static -mcmodel=medany
 LDFLAGS ?=
@@ -66,7 +77,7 @@ COREMARK_ITCM_BIN := $(COREMARK_OUT)/$(COREMARK_NAME)_itcm.bin
 COREMARK_DTCM_BIN := $(COREMARK_OUT)/$(COREMARK_NAME)_dtcm.bin
 COREMARK_OBJDUMP := $(COREMARK_OUT)/$(COREMARK_NAME).objdump
 COREMARK_MAP := $(COREMARK_OUT)/$(COREMARK_NAME).map
-SORT_APP_DIR := apps/sort
+SORT_APP_DIR := $(PROJECT_ROOT)/verif/tests/sw_tests/sort
 SORT_APP_OUT ?= $(PROJECT_ROOT)/build/app/sort
 SORT_APP_NAMES := $(sort $(basename $(notdir $(wildcard $(SORT_APP_DIR)/*.c))))
 SORT_APP_ELFS := $(addprefix $(SORT_APP_OUT)/,$(addsuffix .elf,$(SORT_APP_NAMES)))
@@ -76,7 +87,7 @@ SORT_APP_ITCMS := $(addprefix $(SORT_APP_OUT)/,$(addsuffix .itcm,$(SORT_APP_NAME
 SORT_APP_DTCMS := $(addprefix $(SORT_APP_OUT)/,$(addsuffix .dtcm,$(SORT_APP_NAMES)))
 SORT_APP_EXTRA_CFLAGS ?=
 SORT_APP_ONLY_CFLAGS ?=
-BOUNDARY_APP_DIR := apps/boundary
+BOUNDARY_APP_DIR := $(PROJECT_ROOT)/verif/tests/sw_tests/boundary
 BOUNDARY_APP_OUT ?= $(PROJECT_ROOT)/build/app/boundary
 BOUNDARY_APP_NAMES := $(sort $(basename $(notdir $(wildcard $(BOUNDARY_APP_DIR)/*.c))))
 BOUNDARY_APP_ELFS := $(addprefix $(BOUNDARY_APP_OUT)/,$(addsuffix .elf,$(BOUNDARY_APP_NAMES)))
@@ -122,6 +133,9 @@ RTTHREAD_COREMARK_PROFILES ?= Os O2 O3
 RTTHREAD_COREMARK_OPT_Os := -Os
 RTTHREAD_COREMARK_OPT_O2 := -O2
 RTTHREAD_COREMARK_OPT_O3 := -O3
+# Optional per-source optimization for the CoreMark algorithm group.  Keep
+# empty by default so the existing profile targets remain comparable.
+RTTHREAD_COREMARK_CORE_CFLAGS ?=
 RTTHREAD_COREMARK_OUTPUT_ROOT ?= $(PROJECT_ROOT)/build/app/rtthread-coremark
 RTTHREAD_COREMARK_LINKER ?= $(RTTHREAD_COREMARK_OUTPUT_ROOT)/itcm-64K.lds
 RTTHREAD_COREMARK_ITERATIONS ?= 1
@@ -455,6 +469,9 @@ rtthread-build:
 		RTT_OUTPUT_BASENAME="$(RTTHREAD_OUTPUT_BASENAME)" \
 		RTT_LINKER="$(RTTHREAD_LINKER)" \
 		RTT_BUILD_DIR="$(RTTHREAD_BUILD_DIR)" \
+		RTT_COREMARK_CORE_CFLAGS="$(RTTHREAD_COREMARK_CORE_CFLAGS)" \
+		RTT_CC_PREFIX="$(RISCV_TOOLCHAIN_PREFIX)-" \
+		RTT_EXEC_PATH="$(RISCV_TOOLCHAIN_BIN)" \
 		$(RTTHREAD_SCONS) -j$(RTTHREAD_JOBS) $(RTTHREAD_SCONS_ARGS)
 
 rtthread-clean:
@@ -477,6 +494,7 @@ rtthread-coremark-build-$(1): $(RTTHREAD_COREMARK_LINKER)
 		RTTHREAD_APP=rtthread-coremark \
 		RTTHREAD_PROFILE=$(1) \
 		RTTHREAD_OPT="$(RTTHREAD_COREMARK_OPT_$(1))" \
+		RTTHREAD_COREMARK_CORE_CFLAGS="$(RTTHREAD_COREMARK_CORE_CFLAGS)" \
 		RTTHREAD_ITERATIONS=$(RTTHREAD_COREMARK_ITERATIONS) \
 		RTTHREAD_OUTPUT_DIR="$(RTTHREAD_COREMARK_OUTPUT_ROOT)/$(1)" \
 		RTTHREAD_OUTPUT_BASENAME=rtthread_coremark \

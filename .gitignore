@@ -2,7 +2,7 @@ build/
 .venv/
 hw/ip/alioth/
 hw/ip/alkaid/
-tools/
+/tools/
 spec/
 spec
 __pycache__/

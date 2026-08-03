@@ -20,15 +20,15 @@ SCOPE_PATHS = {
     "rtl": ("Makefile", "config.mk", "hw/ip"),
     "coverage_all": (
         "Makefile", "config.mk", "hw/ip", "sw/Makefile", "sw/bsp",
-        "sw/apps/boundary", "sw/apps/coremark", "verif/tests", "verif/coverage",
+        "verif/tests/sw_tests/boundary", "sw/coremark", "verif/tests", "verif/coverage",
     ),
     "sort": (
         "Makefile", "config.mk", "hw/ip", "sw/Makefile", "sw/bsp",
-        "sw/apps/sort",
+        "verif/tests/sw_tests/sort",
     ),
     "sort_opt": (
         "Makefile", "config.mk", "hw/ip", "sw/Makefile", "sw/bsp",
-        "sw/apps/sort",
+        "verif/tests/sw_tests/sort",
     ),
 }
 

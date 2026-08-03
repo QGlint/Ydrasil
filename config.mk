@@ -86,7 +86,8 @@ SPIKE_MEM_BASE ?= $(patsubst %/elf/,%/mem/,$(dir $(SPIKE_ELF)))$(basename $(notd
 HW_TRACE_OUT_DIR ?= $(SIM_OUT_DIR)/hw
 HW_TRACE_LOG ?= $(HW_TRACE_OUT_DIR)/$(SPIKE_LOG)/hw.log
 HW_TRACE_CSV ?= $(HW_TRACE_OUT_DIR)/$(SPIKE_LOG)/hw.csv
-COVERAGE_DIR ?= $(BUILD_DIR)/coverage
+VERIF_DIR ?= $(BUILD_DIR)/verif
+COVERAGE_DIR ?= $(VERIF_DIR)/coverage
 COVERAGE_DATA_DIR ?= $(COVERAGE_DIR)/data
 COVERAGE_MERGED ?= $(COVERAGE_DIR)/merged.dat
 COVERAGE_INFO ?= $(COVERAGE_DIR)/coverage.info
@@ -96,7 +97,7 @@ COVERAGE ?= 0
 VERILATOR_COVERAGE ?= $(COVERAGE)
 SW_TEST_OUT_ROOT ?= $(BUILD_DIR)/sw_tests
 SW_BOUNDARY_DIR ?= $(BUILD_DIR)/sw_boundary
-SW_COVERAGE_DIR ?= $(BUILD_DIR)/coverage
+SW_COVERAGE_DIR ?= $(VERIF_DIR)/sw_coverage
 SW_COVERAGE_DATA_DIR ?= $(SW_COVERAGE_DIR)/data
 SW_COVERAGE_MERGED ?= $(SW_COVERAGE_DIR)/merged.dat
 SW_COVERAGE_INFO ?= $(SW_COVERAGE_DIR)/coverage.info
@@ -137,8 +138,7 @@ SPIKE_BUILD_TOOLS ?= autoconf automake gcc make dtc boost
 PKG_EXISTS ?= pacman -Qs -q
 PKG_MANAGER ?= sudo pacman -S --needed
 PKG_UPDATE ?= true
-RISCV_PREFIX ?= riscv64-elf
-GDB ?= $(RISCV_PREFIX)-gdb
+GDB ?= gdb-multiarch
 QEMU ?= qemu-system-riscv
 else ifeq ($(PKG_KIND),ubuntu)
 TOOLS ?= verilator gtkwave gcc-riscv64-unknown-elf binutils-riscv64-unknown-elf picolibc-riscv64-unknown-elf gdb-multiarch qemu-system-misc
@@ -146,7 +146,6 @@ SPIKE_BUILD_TOOLS ?= autoconf automake gcc g++ make device-tree-compiler libboos
 PKG_EXISTS ?= dpkg -l
 PKG_MANAGER ?= sudo apt-get install -y
 PKG_UPDATE ?= sudo apt-get update
-RISCV_PREFIX ?= riscv64-unknown-elf
 GDB ?= gdb-multiarch
 QEMU ?= qemu-system-riscv64
 else
@@ -180,8 +179,7 @@ PKG_MANAGER := $(shell \
 		echo "unknown"; \
 	fi)
 PKG_UPDATE ?= true
-RISCV_PREFIX ?= riscv64-elf
-GDB ?= $(RISCV_PREFIX)-gdb
+GDB ?= gdb-multiarch
 QEMU ?= qemu-system-riscv
 SPIKE_BUILD_TOOLS ?= autoconf automake gcc g++ make device-tree-compiler boost
 endif
@@ -191,13 +189,27 @@ endif
 # toolchain
 #------------------------------------------
 
-ifeq ($(origin CC),default)
-CC := $(RISCV_PREFIX)-gcc
-else
-CC ?= $(RISCV_PREFIX)-gcc
+# RISC-V software must use the toolchain checked into this repository. Keep
+# the target prefix separate from the absolute executable prefix: tools such
+# as Spike expect the former to be a canonical target triplet.
+RISCV_TOOLCHAIN_ROOT ?= $(PROJECT_ROOT)/tools/riscv
+RISCV_TOOLCHAIN_BIN ?= $(RISCV_TOOLCHAIN_ROOT)/bin
+RISCV_TOOLCHAIN_TRIPLE ?= riscv64-unknown-elf
+override RISCV_PREFIX := $(RISCV_TOOLCHAIN_TRIPLE)
+RISCV_TOOLCHAIN_PREFIX := $(RISCV_TOOLCHAIN_BIN)/$(RISCV_TOOLCHAIN_TRIPLE)
+RISCV_TOOLCHAIN_TOOLS := gcc g++ ar objcopy objdump size
+RISCV_TOOLCHAIN_MISSING := $(strip $(shell \
+	for tool in $(RISCV_TOOLCHAIN_TOOLS); do \
+		path="$(RISCV_TOOLCHAIN_PREFIX)-$$tool"; \
+		if [ ! -x "$$path" ]; then printf '%s ' "$$path"; fi; \
+	done))
+ifneq ($(RISCV_TOOLCHAIN_MISSING),)
+$(error Required RISC-V toolchain is missing or not executable: $(RISCV_TOOLCHAIN_MISSING). Expected tools under $(RISCV_TOOLCHAIN_BIN); refusing to use a system compiler)
 endif
-OBJCOPY ?= $(RISCV_PREFIX)-objcopy
-OBJDUMP ?= $(RISCV_PREFIX)-objdump
+
+override CC := $(RISCV_TOOLCHAIN_PREFIX)-gcc
+override OBJCOPY := $(RISCV_TOOLCHAIN_PREFIX)-objcopy
+override OBJDUMP := $(RISCV_TOOLCHAIN_PREFIX)-objdump
 
 # -----------------------------------------------------------------------------
 # RTL architecture quick-checks
@@ -216,11 +228,18 @@ RTL_QC_METADATA ?= $(RTL_QC_DIR)/$(RTL_QC_TOP).sources.json
 RTL_QC_TREE_DIR ?= $(RTL_QC_DIR)/verilator-tree
 RTL_QC_TREE_JSON ?= $(RTL_QC_TREE_DIR)/final.tree.json
 RTL_QC_STRUCTURE_JSON ?= $(RTL_QC_DIR)/$(RTL_QC_TOP).structure.json
+RTL_QC_VIVADO_REPORT_DIR ?= $(BUILD_DIR)/syn/pll200m/reports
+RTL_QC_VIVADO_UTILIZATION ?= $(RTL_QC_VIVADO_REPORT_DIR)/synth_utilization_hier.rpt
+RTL_QC_VIVADO_TIMING ?= $(RTL_QC_VIVADO_REPORT_DIR)/synth_timing_summary.rpt
+RTL_QC_VIVADO_POST_ROUTE_TIMING ?= $(RTL_QC_VIVADO_REPORT_DIR)/post_route_timing_summary.rpt
+RTL_QC_VIVADO_COMPARE_JSON ?= $(RTL_QC_DIR)/$(RTL_QC_TOP).vivado-compare.json
 RTL_QC_ERROR_LIMIT ?= 50
 VERILATOR_STRICT ?= verilator
 VERILATOR_STRICT_FLAGS ?= --lint-only --sv -Wall --report-unoptflat --error-limit $(RTL_QC_ERROR_LIMIT)
 VERILATOR_STRICT_WNO ?=
-VERILATOR_XML_FLAGS ?= --lint-only --dump-tree-json -Wno-fatal
+# Keep structural diagnostics in the same log as the elaborated tree.  The
+# target remains non-fatal so the JSON is still available for post-analysis.
+VERILATOR_XML_FLAGS ?= --lint-only --dump-tree-json --report-unoptflat --error-limit $(RTL_QC_ERROR_LIMIT) -Wno-fatal
 
 YOSYS ?= yosys
 YOSYS_TOP ?= $(RTL_QC_TOP)
@@ -228,7 +247,9 @@ YOSYS_BENDER_DIR ?= $(RTL_QC_BENDER_DIR)
 YOSYS_BENDER_TARGETS ?= $(RTL_QC_BENDER_TARGETS)
 YOSYS_FAMILY ?= xc7
 YOSYS_RUN ?= coarse:map_luts
-YOSYS_WITH_WRAPPERS ?= 0
+# Yosys must use the same FPGA-side memory wrappers as Vivado.  The generic
+# hw/ip/ydrmem tree is a simulation model and is filtered when this is 1.
+YOSYS_WITH_WRAPPERS ?= 1
 YOSYS_DEFINES ?= SYNTHESIS TARGET_SYNTHESIS
 YOSYS_DIR ?= $(BUILD_DIR)/yosys-slang/$(YOSYS_TOP)
 YOSYS_FLIST ?= $(YOSYS_DIR)/$(YOSYS_TOP).f
@@ -284,7 +305,7 @@ RVTESTS_EXCLUDE ?= rv32ui/ma_data
 
 RVTESTS_OUT_ROOT := $(BUILD_DIR)/riscv_tests
 
-RVTESTS_RESULT_DIR := $(BUILD_DIR)/rvtest_results
+RVTESTS_RESULT_DIR := $(VERIF_DIR)/rvtest_results
 
 SPIKE_FLAGS := \
 	--isa=$(ARCH) \
