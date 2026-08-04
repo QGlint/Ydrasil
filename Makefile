@@ -1139,11 +1139,13 @@ vivado-ooc: $(VIVADO_OOC_FLIST)
 		"$(VIVADO_OOC)" -mode batch -nojournal -nolog -source "$(SYN_DIR)/run_vivado_ooc.tcl" \
 			-tclargs -flist "$(VIVADO_OOC_FLIST)" -top "$(VIVADO_OOC_TOP)" \
 			-part "$(VIVADO_OOC_PART)" -out_dir "$(VIVADO_OOC_DIR)" \
+			-period_ns "$(VIVADO_OOC_PERIOD_NS)" -synth_directive "$(VIVADO_OOC_SYNTH_DIRECTIVE)" \
 			>"$(VIVADO_OOC_LOG)" 2>&1; \
 	else \
 		"$(VIVADO_OOC)" -mode batch -nojournal -nolog -source "$(SYN_DIR)/run_vivado_ooc.tcl" \
 			-tclargs -flist "$(VIVADO_OOC_FLIST)" -top "$(VIVADO_OOC_TOP)" \
 			-part "$(VIVADO_OOC_PART)" -out_dir "$(VIVADO_OOC_DIR)" \
+			-period_ns "$(VIVADO_OOC_PERIOD_NS)" -synth_directive "$(VIVADO_OOC_SYNTH_DIRECTIVE)" \
 			>"$(VIVADO_OOC_LOG)" 2>&1; \
 	fi
 	@tail -20 "$(VIVADO_OOC_LOG)"
