@@ -5,6 +5,12 @@ src = []
 
 if GetDepend('BSP_USING_MTIME_TICK'):
     src += ['drv_mtime.c']
+if GetDepend('BSP_USING_PLIC'):
+    src += ['drv_plic.c']
+if GetDepend('BSP_USING_UART0'):
+    src += ['drv_uart.c']
+if GetDepend('BSP_USING_PERIPHERAL_COMMANDS'):
+    src += ['drv_peripherals.c']
 
 group = DefineGroup('Ydrasil Drivers', src, depend=[''], CPPPATH=[cwd, '../board'])
 

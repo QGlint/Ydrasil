@@ -274,8 +274,8 @@ YOSYS_BENDER_DIR ?= $(RTL_QC_BENDER_DIR)
 YOSYS_BENDER_TARGETS ?= $(RTL_QC_BENDER_TARGETS)
 YOSYS_FAMILY ?= xc7
 YOSYS_RUN ?= coarse:map_luts
-# Yosys must use the same FPGA-side memory wrappers as Vivado.  The generic
-# hw/ip/ydrmem tree is a simulation model and is filtered when this is 1.
+# Yosys can use the same FPGA-side memory wrappers as Vivado. Pure RTL
+# simulation uses the technology-independent hw/ip/ydrasil_sim models.
 YOSYS_WITH_WRAPPERS ?= 1
 YOSYS_DEFINES ?= SYNTHESIS TARGET_SYNTHESIS
 YOSYS_DIR ?= $(BUILD_DIR)/yosys-slang/$(YOSYS_TOP)

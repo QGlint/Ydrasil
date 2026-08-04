@@ -2,6 +2,10 @@ package:
   name: ydrasil::utils
   description: Reusable bus, CDC, and SoC utility blocks for Ydrasil
 
+dependencies:
+  ydrasil::sim:
+    path: ../ydrasil_sim
+
 sources:
   - target: any(verilator, iverilog, vcs)
     include_dirs:
@@ -9,6 +13,10 @@ sources:
     files:
       - rtl/ydrasil_axi_pkg.sv
       - rtl/ydrasil_apb_pkg.sv
+      - rtl/ydrasil_1r1w_ram.sv
+      - rtl/ydrasil_1r1w_bram.sv
+      - rtl/ydrasil_itcm.sv
+      - rtl/ydrasil_dtcm.sv
       - rtl/ydrasil_cdc_sync.sv
       - rtl/ydrasil_axi_lite_master.sv
       - rtl/ydrasil_axi_to_apb.sv

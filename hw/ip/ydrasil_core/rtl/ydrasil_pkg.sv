@@ -1,8 +1,8 @@
 
 package ydrasil_pkg;
 	// Memory and address configuration
-	localparam int ITCM_ADDR_WIDTH = 13; // Word address width; simulation may override it.
-	localparam int DTCM_ADDR_WIDTH = 16; // 256KB
+	localparam int ITCM_ADDR_WIDTH = 15; // 32768 words, 128 KiB
+	localparam int DTCM_ADDR_WIDTH = 14; // 16384 words, 64 KiB
 
 	localparam logic [31:0] ITCM_BASE_ADDR = 32'h8000_0000;
 	localparam int ITCM_SIZE = (1 << ITCM_ADDR_WIDTH);

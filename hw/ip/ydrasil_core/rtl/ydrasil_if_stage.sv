@@ -98,7 +98,7 @@ import ydrasil_pkg::*;
         end
     end
 
-    xpm_lutram_1r1w #(
+    ydrasil_1r1w_ram #(
         .DEPTH       (BANK_DEPTH),
         .DATA_WIDTH  (132),
         .ADDR_WIDTH  (BANK_ADDR_WIDTH),
@@ -112,7 +112,7 @@ import ydrasil_pkg::*;
         .waddr_i(write_addr_even),
         .wdata_i(write_data_even)
     );
-    xpm_lutram_1r1w #(
+    ydrasil_1r1w_ram #(
         .DEPTH       (BANK_DEPTH),
         .DATA_WIDTH  (132),
         .ADDR_WIDTH  (BANK_ADDR_WIDTH),
@@ -268,7 +268,7 @@ import ydrasil_pkg::*;
 	// Two read copies preserve the original two-lane, zero-latency lookup
 	// contract while making the data arrays explicit distributed RAM. Metadata
 	// stays in resettable FFs and prevents an uninitialized table from hitting.
-	xpm_lutram_1r1w #(
+	ydrasil_1r1w_ram #(
 		.DEPTH       (TARGET_FF_ENTRIES),
 		.DATA_WIDTH  (24),
 		.ADDR_WIDTH  (5),
@@ -282,7 +282,7 @@ import ydrasil_pkg::*;
 		.waddr_i(target_ff_write_index),
 		.wdata_i(target_ff_train_i.pc[31:8])
 	);
-	xpm_lutram_1r1w #(
+	ydrasil_1r1w_ram #(
 		.DEPTH       (TARGET_FF_ENTRIES),
 		.DATA_WIDTH  (24),
 		.ADDR_WIDTH  (5),
@@ -296,7 +296,7 @@ import ydrasil_pkg::*;
 		.waddr_i(target_ff_write_index),
 		.wdata_i(target_ff_train_i.pc[31:8])
 	);
-	xpm_lutram_1r1w #(
+	ydrasil_1r1w_ram #(
 		.DEPTH       (TARGET_FF_ENTRIES),
 		.DATA_WIDTH  (30),
 		.ADDR_WIDTH  (5),
@@ -310,7 +310,7 @@ import ydrasil_pkg::*;
 		.waddr_i(target_ff_write_index),
 		.wdata_i(target_ff_train_i.target[31:2])
 	);
-	xpm_lutram_1r1w #(
+	ydrasil_1r1w_ram #(
 		.DEPTH       (TARGET_FF_ENTRIES),
 		.DATA_WIDTH  (30),
 		.ADDR_WIDTH  (5),

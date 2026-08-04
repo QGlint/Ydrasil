@@ -4,8 +4,8 @@ ENTRY(_start)
 
 MEMORY
 {
-  itcm (rwx) : ORIGIN = 0x80000000, LENGTH = 16K
-  dtcm (rwx) : ORIGIN = 0x80100000, LENGTH = 256K
+  itcm (rwx) : ORIGIN = 0x80000000, LENGTH = 128K
+  dtcm (rwx) : ORIGIN = 0x80100000, LENGTH = 64K
 }
 
 
@@ -165,5 +165,6 @@ SECTIONS
   PROVIDE( _heap_end = __stack_bottom );
 
   ASSERT(_end <= _heap_end, "DTCM overflow: data/BSS overlaps the runtime stack")
+  ASSERT(SIZEOF(.init) + SIZEOF(.text) <= LENGTH(itcm), "ITCM overflow")
 
 }

@@ -4,6 +4,7 @@ proc usage {} {
     puts "usage: vivado -mode batch -source syn/run_vivado.tcl -tclargs ?options?"
     puts "  -xpr <path>             Vivado project, default FPGA/Ydrasil_FPGA.xpr"
     puts "  -sources_tcl <path>     generated source sync Tcl"
+    puts "  -top <module>           synthesis top, default ydrasil_soc"
     puts "  -report_dir <path>      report output directory"
     puts "  -jobs <n>               Vivado launch job count"
     puts "  -threads_per_run <n>    max threads used by each Vivado process"
@@ -17,11 +18,13 @@ proc usage {} {
     puts "  -reset_impl <0|1>       reset implementation runs without resetting synth_1, default 0"
     puts "  -report_synth <0|1>     generate and open post-synth reports, default 1"
     puts "  -force <0|1>            reset runs before launching"
-    puts "  -pll_freq_mhz <mhz>     200 selects pll IP; other supported frequencies select RTL MMCM"
+    puts "  -pll_freq_mhz <mhz>     CPU frequency selected by the RTL MMCM define"
     puts "  -board_xdc <path>       overlay board-specific constraints after platform constraints"
+    puts "  -replace_constraints <0|1> disable project XDC files before adding board_xdc"
     puts "  -enable_ila <0|1>       create ila_board for the conditional board probes"
-    puts "  -irom_coe <path>        IROM initialization file for this build"
-    puts "  -dram_coe <path>        DRAM initialization file for this build"
+    puts "  -itcm_mem <path>        XPM ITCM initialization .mem file"
+    puts "  -dtcm_mem <path>        XPM DTCM initialization .mem file"
+    puts "  -legacy_ip <0|1>        preserve generated IP for the legacy jyd_fpga top"
     puts "  -artifact_dir <path>    copied bitstream/artifact output directory"
     puts "  -timing_summary_max_paths <n>  timing summary path limit, default 1000"
     puts "  -timing_path_max_paths <n>     violating report_timing path limit, default 500"
@@ -164,13 +167,27 @@ proc remove_hw_ip_sources {} {
     set stale [list]
     foreach f [get_files -of_objects $fs] {
         set nf [file normalize $f]
-        if {[regexp {/(hw/ip)/(jyd_fpga|ydrasil_core|ydrmem|Xilinx_ip_wrapper)/.*\.(sv|v|svh|vh)$} $nf]} {
+        if {[regexp {/(hw/ip)/.*\.(sv|v|svh|vh)$} $nf]} {
             lappend stale $f
         }
     }
     if {[llength $stale] > 0} {
         puts "Removing [llength $stale] existing hw/ip RTL/header files from sources_1"
         remove_files -fileset $fs $stale
+    }
+}
+
+proc remove_legacy_generated_ips {} {
+    foreach ip_name {IROM DRAM BRAM pll} {
+        foreach ip_obj [get_ips -quiet $ip_name] {
+            set ip_file [get_property IP_FILE $ip_obj]
+            if {$ip_file ne ""} {
+                puts "Removing unused generated IP from the new SoC project: $ip_name"
+                if {[catch {remove_files $ip_file} msg]} {
+                    puts "warning: could not remove $ip_name: $msg"
+                }
+            }
+        }
     }
 }
 
@@ -194,7 +211,7 @@ proc remove_missing_sources {} {
     }
 }
 
-proc configure_board_constraints {board_xdc} {
+proc configure_board_constraints {board_xdc replace_constraints} {
     if {$board_xdc eq ""} {
         puts "Using platform constraints from the project"
         return
@@ -205,8 +222,17 @@ proc configure_board_constraints {board_xdc} {
     }
 
     set fs [get_filesets constrs_1]
-    puts "Adding board clock override while retaining platform pin constraints: $board_xdc"
+    if {$replace_constraints} {
+        puts "Disabling project constraints before applying board constraints"
+        foreach old_xdc [get_files -of_objects $fs -filter {FILE_TYPE == XDC}] {
+            catch {set_property USED_IN_SYNTHESIS false $old_xdc}
+            catch {set_property USED_IN_IMPLEMENTATION false $old_xdc}
+        }
+    }
+    puts "Adding board constraints: $board_xdc"
     add_files -norecurse -fileset $fs $board_xdc
+    set_property USED_IN_SYNTHESIS true [get_files -of_objects $fs $board_xdc]
+    set_property USED_IN_IMPLEMENTATION true [get_files -of_objects $fs $board_xdc]
     set_property PROCESSING_ORDER LATE [get_files -of_objects $fs $board_xdc]
 }
 
@@ -368,13 +394,13 @@ proc report_cpu_freq_timing {report_dir freq_mhz} {
     }
 }
 
-proc validate_clocking_frequency {freq_mhz} {
+proc validate_clocking_frequency {freq_mhz legacy_ip} {
     set freq_mhz [string trim $freq_mhz]
     if {![regexp {^[0-9]+([.][0-9]+)?$} $freq_mhz] || double($freq_mhz) <= 0.0} {
         error "invalid -pll_freq_mhz value: $freq_mhz"
     }
 
-    if {double($freq_mhz) != 200.0} {
+    if {!$legacy_ip || double($freq_mhz) != 200.0} {
         puts "Using RTL MMCM clocking configured by synthesis define for ${freq_mhz} MHz CPU clock"
         return
     }
@@ -405,7 +431,7 @@ proc copy_existing_files {patterns dest_dir} {
 }
 
 proc archive_run_artifacts {run_name artifact_dir pll_freq_mhz run_to report_dir checkpoint_dir run_dir top_name} {
-    global board_xdc dram_coe enable_ila irom_coe
+    global board_xdc dtcm_mem enable_ila itcm_mem
     set artifact_dir [ensure_dir $artifact_dir]
     if {$run_dir eq ""} {
         set run_obj [get_runs -quiet $run_name]
@@ -420,9 +446,13 @@ proc archive_run_artifacts {run_name artifact_dir pll_freq_mhz run_to report_dir
         puts "warning: run directory for $run_name not found; only checkpoint_dir artifacts will be archived"
     }
 
+    set project_dir [get_property DIRECTORY [current_project]]
     set patterns [list \
         [file join $run_dir "${top_name}.bit"] \
         [file join $run_dir "${top_name}*.bit"] \
+        [file join $run_dir "${top_name}*.mmi"] \
+        [file join $run_dir "*.mmi"] \
+        [file join $project_dir "*.mmi"] \
         [file join $run_dir "${top_name}*.ltx"] \
         [file join $run_dir "${top_name}_routed.dcp"] \
         [file join $checkpoint_dir "best_impl_route.dcp"] \
@@ -437,8 +467,8 @@ proc archive_run_artifacts {run_name artifact_dir pll_freq_mhz run_to report_dir
     puts $fp "pll_freq_mhz=$pll_freq_mhz"
     puts $fp "board_xdc=$board_xdc"
     puts $fp "enable_ila=$enable_ila"
-    puts $fp "irom_coe=$irom_coe"
-    puts $fp "dram_coe=$dram_coe"
+    puts $fp "itcm_mem=$itcm_mem"
+    puts $fp "dtcm_mem=$dtcm_mem"
     puts $fp "run_to=$run_to"
     puts $fp "xpr=[current_project]"
     puts $fp "run_dir=$run_dir"
@@ -559,6 +589,7 @@ set repo_root [file normalize [file join $script_dir ".."]]
 
 set xpr [file normalize [arg_value "-xpr" [file join $repo_root "FPGA/Ydrasil_FPGA.xpr"]]]
 set sources_tcl [file normalize [arg_value "-sources_tcl" [file join $repo_root "build/syn/vivado_sources.tcl"]]]
+set requested_top [arg_value "-top" "ydrasil_soc"]
 set report_dir [ensure_dir [arg_value "-report_dir" [file join $repo_root "build/syn/reports"]]]
 set checkpoint_dir [ensure_dir [arg_value "-checkpoint_dir" [file join $repo_root "build/syn/checkpoints"]]]
 set artifact_dir [ensure_dir [arg_value "-artifact_dir" [file join $repo_root "build/syn/artifacts"]]]
@@ -576,9 +607,11 @@ set report_synth [clamp_int [arg_value "-report_synth" "1"] 0 1]
 set force_runs [arg_value "-force" "1"]
 set pll_freq_mhz [arg_value "-pll_freq_mhz" "150"]
 set board_xdc [arg_value "-board_xdc" ""]
+set replace_constraints [clamp_int [arg_value "-replace_constraints" "0"] 0 1]
 set enable_ila [arg_value "-enable_ila" "0"]
-set irom_coe [file normalize [arg_value "-irom_coe" [file join $repo_root "FPGA/coe/irom_M3.coe"]]]
-set dram_coe [file normalize [arg_value "-dram_coe" [file join $repo_root "FPGA/coe/dram_M.coe"]]]
+set itcm_mem [file normalize [arg_value "-itcm_mem" [file join $repo_root "build/syn/memory/itcm.mem"]]]
+set dtcm_mem [file normalize [arg_value "-dtcm_mem" [file join $repo_root "build/syn/memory/dtcm.mem"]]]
+set legacy_ip [clamp_int [arg_value "-legacy_ip" "0"] 0 1]
 set timing_summary_max_paths [arg_value "-timing_summary_max_paths" "1000"]
 set timing_path_max_paths [arg_value "-timing_path_max_paths" "500"]
 set timing_nworst [arg_value "-timing_nworst" "100"]
@@ -590,6 +623,9 @@ if {![file exists $xpr]} {
 }
 if {$sync_sources && ![file exists $sources_tcl]} {
     error "generated sources Tcl not found: $sources_tcl"
+}
+if {!$legacy_ip && (![file exists $itcm_mem] || ![file exists $dtcm_mem])} {
+    error "XPM initialization files are missing: ITCM=$itcm_mem DTCM=$dtcm_mem"
 }
 if {$reuse_synth && $sync_sources} {
     error "-reuse_synth requires -sync_sources 0 to preserve synth_1"
@@ -607,6 +643,7 @@ puts "Implementation mode: $impl_mode, runs: $impl_runs"
 puts "Synthesis strategy: $synth_strategy"
 puts "Sweep post-route phys_opt: $sweep_post_route_physopt"
 puts "Run target: $run_to"
+puts "Synthesis top: $requested_top"
 puts "Reuse completed synthesis: $reuse_synth"
 open_project $xpr
 
@@ -628,7 +665,7 @@ if {!$reuse_synth} {
 
     catch {set_property XPM_LIBRARIES {XPM_MEMORY} [current_project]}
     remove_missing_sources
-    configure_board_constraints $board_xdc
+    configure_board_constraints $board_xdc $replace_constraints
 
     if {$sync_sources} {
         remove_hw_ip_sources
@@ -636,17 +673,11 @@ if {!$reuse_synth} {
         source $sources_tcl
     }
 
-    set_property top jyd_fpga [get_filesets sources_1]
-    if {$run_to ne "reports" && [llength [get_ips -quiet]] > 0} {
-        # The checked-in Block Memory Generator XCI can be locked at an older
-        # catalog revision. Upgrade before setting CONFIG.Coe_File so a requested
-        # benchmark image cannot silently fall back to the XCI's old image.
-        puts "Upgrading memory IP before initialization configuration"
-        upgrade_ip [get_ips IROM DRAM]
+    set_property top $requested_top [get_filesets sources_1]
+    if {!$legacy_ip} {
+        remove_legacy_generated_ips
     }
-    configure_memory_coe IROM $irom_coe
-    configure_memory_coe DRAM $dram_coe
-    validate_clocking_frequency $pll_freq_mhz
+    validate_clocking_frequency $pll_freq_mhz $legacy_ip
     configure_board_ila $enable_ila
     update_compile_order -fileset sources_1
 
@@ -656,10 +687,21 @@ if {!$reuse_synth} {
         exit 0
     }
 
-    if {$run_to ne "reports" && [llength [get_ips -quiet]] > 0} {
-        puts "Refreshing IP output products"
-        report_ip_status -file [file join $report_dir "ip_status.rpt"]
-        generate_target all [get_ips]
+    set flow_ips [list]
+    if {$legacy_ip} {
+        set flow_ips [get_ips -quiet]
+    } elseif {$enable_ila} {
+        set flow_ips [get_ips -quiet ila_board]
+    }
+    if {$run_to ne "reports" && [llength $flow_ips] > 0} {
+        set flow_ip_names [list]
+        foreach flow_ip $flow_ips {
+            lappend flow_ip_names [get_property NAME $flow_ip]
+        }
+        puts "Refreshing generated IP output products: $flow_ip_names"
+        generate_target all $flow_ips
+    } elseif {!$legacy_ip} {
+        puts "New SoC uses RTL/XPM sources; no generated IP output products are required"
     }
 } else {
     puts "Reusing staged synth_1 without modifying sources, IP products, or clocking"

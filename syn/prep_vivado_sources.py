@@ -16,7 +16,11 @@ BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
 LINE_COMMENT_RE = re.compile(r"//.*?$", re.MULTILINE)
 
 DEFAULT_DEFINES = ["SYNTHESIS", "TARGET_FPGA", "TARGET_SYNTHESIS", "TARGET_VIVADO", "TARGET_XILINX"]
-WRAPPER_ORDER = ["tpdram_wrapper.sv", "ydrmem_1r1w_ram.sv", "dtcm.sv", "itcm.sv"]
+WRAPPER_ORDER = [
+    "xpm_tpdram_wrapper.sv",
+    "xpm_sdpram_wrapper.sv",
+    "xpm_init_bram_wrapper.sv",
+]
 
 
 def unique(items: list[str]) -> list[str]:
@@ -30,7 +34,7 @@ def unique(items: list[str]) -> list[str]:
 
 
 def tcl_quote(value: str) -> str:
-    return "{" + value.replace("\\", "/").replace("}", "\\}") + "}"
+    return "{" + value.replace("}", "\\}") + "}"
 
 
 def strip_comments(text: str) -> str:
@@ -88,12 +92,9 @@ def run_bender_sources(bender: str, bender_dir: Path, targets: list[str]) -> dic
 def wrapper_files(wrapper_dir: Path) -> list[Path]:
     ordered = [wrapper_dir / name for name in WRAPPER_ORDER if (wrapper_dir / name).is_file()]
     ordered_names = {path.name for path in ordered}
-    # The full Vivado project supplies the generated IROM module from its IP
-    # output products.  The OOC black box has the same module name and causes
-    # a duplicate-definition critical warning when both are compiled.
     rest = sorted(
         path for path in wrapper_dir.glob("*.sv")
-        if path.name not in ordered_names and path.name != "IROM_blackbox.sv"
+        if path.name not in ordered_names
     )
     return ordered + rest
 
@@ -151,13 +152,15 @@ def main() -> int:
     parser.add_argument("--bender", default="bender")
     parser.add_argument("--bender-dir", type=Path, default=None)
     parser.add_argument("--wrapper-dir", type=Path, default=None)
+    parser.add_argument("--itcm-init-file", type=Path, default=None)
+    parser.add_argument("--dtcm-init-file", type=Path, default=None)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--target", action="append", default=["verilator", "iverilog", "vcs"])
     parser.add_argument("--define", action="append", default=[])
     args = parser.parse_args()
 
     repo_root = args.repo_root.resolve()
-    bender_dir = (args.bender_dir or repo_root / "hw/ip/jyd_fpga").resolve()
+    bender_dir = (args.bender_dir or repo_root / "hw/ip/ydrasil_soc").resolve()
     wrapper_dir = (args.wrapper_dir or repo_root / "hw/ip/Xilinx_ip_wrapper/rtl").resolve()
 
     manifest = run_bender_sources(args.bender, bender_dir, args.target)
@@ -183,7 +186,14 @@ def main() -> int:
 
     source_files = unique(filtered_files + [str(path.resolve()) for path in wrappers])
     include_dirs = unique([str(Path(path).resolve()) for path in incdirs if Path(path).exists()])
-    defines = unique(DEFAULT_DEFINES + args.define)
+    init_defines: list[str] = []
+    if args.itcm_init_file:
+        init_path = args.itcm_init_file.resolve().as_posix()
+        init_defines.append(f'ITCM_INIT_FILE="{init_path}"')
+    if args.dtcm_init_file:
+        init_path = args.dtcm_init_file.resolve().as_posix()
+        init_defines.append(f'DTCM_INIT_FILE="{init_path}"')
+    defines = unique(DEFAULT_DEFINES + args.define + init_defines)
 
     missing = [path for path in source_files if not Path(path).is_file()]
     if missing:
@@ -196,6 +206,8 @@ def main() -> int:
         "targets": args.target,
         "wrapper_dir": str(wrapper_dir),
         "wrapper_modules": sorted(wrapper_modules),
+        "itcm_init_file": str(args.itcm_init_file.resolve()) if args.itcm_init_file else None,
+        "dtcm_init_file": str(args.dtcm_init_file.resolve()) if args.dtcm_init_file else None,
         "ignored_bender_defines": sorted(unique(bender_defines)),
         "skipped_bender_sources": skipped,
         "source_count": len(source_files),

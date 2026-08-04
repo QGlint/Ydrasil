@@ -1,0 +1,28 @@
+packages:
+  ydrasil::core:
+    revision: null
+    version: null
+    source:
+      Path: ../ydrasil_core
+    dependencies:
+    - ydrasil::utils
+  ydrasil::perip:
+    revision: null
+    version: null
+    source:
+      Path: ../ydrasil_perip
+    dependencies:
+    - ydrasil::utils
+  ydrasil::sim:
+    revision: null
+    version: null
+    source:
+      Path: ../ydrasil_utils/../ydrasil_sim
+    dependencies: []
+  ydrasil::utils:
+    revision: null
+    version: null
+    source:
+      Path: ../ydrasil_utils
+    dependencies:
+    - ydrasil::sim

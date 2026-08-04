@@ -155,7 +155,7 @@ import ydrasil_pkg::*;
     assign conditional_train_fire = train_fire && !bht_clear_active_q;
     assign bht_predict_ready = rst_n && !invalidate_i && !bht_clear_active_q;
 
-    ydrmem_1r1w_ram #(
+    ydrasil_1r1w_bram #(
         .DEPTH(BTB_ENTRIES),
         .DATA_WIDTH(BTB_MEM_DATA_WIDTH),
         .ADDR_WIDTH(BTB_INDEX_WIDTH),
@@ -170,7 +170,7 @@ import ydrasil_pkg::*;
         .wdata_i (btb_mem_wdata)
     );
 
-    ydrmem_1r1w_ram #(
+    ydrasil_1r1w_bram #(
         .DEPTH(BTB_ENTRIES), .DATA_WIDTH(BTB_MEM_DATA_WIDTH),
         .ADDR_WIDTH(BTB_INDEX_WIDTH), .INIT_VALUE('0)
     ) u_btb_ram_lane1 (
@@ -179,7 +179,7 @@ import ydrasil_pkg::*;
         .waddr_i(train_btb_index), .wdata_i(btb_mem_wdata)
     );
 
-    ydrmem_1r1w_ram #(
+    ydrasil_1r1w_bram #(
         .DEPTH(BHT_ENTRIES),
         .DATA_WIDTH(BHT_MEM_DATA_WIDTH),
         .ADDR_WIDTH(BHT_INDEX_WIDTH),
@@ -194,7 +194,7 @@ import ydrasil_pkg::*;
         .wdata_i (bht_write_data)
     );
 
-    ydrmem_1r1w_ram #(
+    ydrasil_1r1w_bram #(
         .DEPTH(BHT_ENTRIES), .DATA_WIDTH(BHT_MEM_DATA_WIDTH),
         .ADDR_WIDTH(BHT_INDEX_WIDTH), .INIT_VALUE('0)
     ) u_bht_ram_lane1 (

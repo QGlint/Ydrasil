@@ -262,13 +262,18 @@ SYN_PLL_FREQ_MHZ ?= 150
 SYN_PLL_SUPPORTED_FREQS := 150 200 225 240 250
 SYN_PLL_FREQ_TAG = pll$(subst .,p,$(SYN_PLL_FREQ_MHZ))m
 SYN_PLL_DEFINE = SYN_PLL_FREQ_$(subst .,P,$(SYN_PLL_FREQ_MHZ))
+SYN_TOP ?= ydrasil_soc
+SYN_BENDER_DIR ?= $(PROJECT_ROOT)/hw/ip/ydrasil_soc
+SYN_XPM_MMI ?= 0
 SYN_RTL_DEFINES = $(SYN_PLL_DEFINE)
 SYN_RTL_DEFINES += SYNTHESIS
+SYN_RTL_DEFINES += $(if $(filter 1,$(SYN_XPM_MMI)),YDRASIL_XPM_MMI)
 SYN_RTL_DEFINES += $(if $(filter 1,$(FPU)),YDRASIL_ENABLE_FPU)
 SYN_PROFILE ?= official
-SYN_PROFILE_SUFFIX = $(if $(filter official,$(SYN_PROFILE)),,-$(SYN_PROFILE))$(if $(filter 1,$(FPU)),-fpu)
+SYN_PROFILE_SUFFIX = $(if $(filter official,$(SYN_PROFILE)),,-$(SYN_PROFILE))$(if $(filter 1,$(FPU)),-fpu)$(if $(filter 1,$(SYN_XPM_MMI)),-mmi)
 SYN_ENABLE_ILA ?= 0
 SYN_BOARD_XDC ?=
+SYN_REPLACE_CONSTRAINTS ?= 0
 SYN_RTL_DEFINES += $(if $(filter 1,$(SYN_ENABLE_ILA)),SYN_BOARD_ILA)
 ifeq ($(DIV_IMPL),lzc)
 SYN_RTL_DEFINES += YDRASIL_DIV_IMPL_LZC
@@ -290,8 +295,8 @@ SYN_CHECKPOINT_DIR ?= $(SYN_FREQ_BUILD_DIR)/checkpoints
 IROM_COE ?= $(PROJECT_ROOT)/FPGA/coe/irom_MF.coe
 DRAM_COE ?= $(PROJECT_ROOT)/FPGA/coe/dram_MF.coe
 SYN_MEMORY_DIR ?= $(SYN_FREQ_BUILD_DIR)/memory
-SYN_STAGED_IROM_COE ?= $(SYN_MEMORY_DIR)/irom.coe
-SYN_STAGED_DRAM_COE ?= $(SYN_MEMORY_DIR)/dram.coe
+SYN_STAGED_ITCM_MEM ?= $(SYN_MEMORY_DIR)/itcm.mem
+SYN_STAGED_DTCM_MEM ?= $(SYN_MEMORY_DIR)/dtcm.mem
 SYN_JOBS ?= $(shell nproc)
 ifeq ($(HOSTNAME),servera437)
 SYN_IMPL_RUNS ?= 4
@@ -898,24 +903,28 @@ syn: syn-vivado
 
 synf: SYN_PLL_FREQ_MHZ := 200
 synf: SYN_RUN_TO := bitstream
+ifeq ($(HOSTNAME),servera437)
+synf: SYN_IMPL_MODE := sweep
+synf: SYN_JOBS := 40
+synf: SYN_IMPL_RUNS := 5
+synf: SYN_THREADS_PER_RUN := 8
+else
 synf: SYN_IMPL_MODE := extreme
 synf: SYN_JOBS := 1
 synf: SYN_IMPL_RUNS := 1
-# The 7-series IP generators can fork one worker per Vivado thread and exceed
-# the host memory budget before top-level synthesis starts.  Keep the final
-# timing flow serial; directives, not host parallelism, select QoR quality.
 synf: SYN_THREADS_PER_RUN := 1
+endif
 synf: syn-vivado
-	@src="$(SYN_ARTIFACT_DIR)/jyd_fpga.bit"; \
+	@src="$(SYN_ARTIFACT_DIR)/$(SYN_TOP).bit"; \
 	if [ ! -f "$$src" ]; then \
 		echo "Error: best bitstream not found: $$src"; \
 		exit 1; \
 	fi; \
 	mkdir -p "$(SYN_BIT_DIR)"; \
 	timestamp=$$(date '+%Y%m%d_%H%M'); \
-	dst="$(SYN_BIT_DIR)/jyd_fpga$${timestamp}.bit"; \
+	dst="$(SYN_BIT_DIR)/$(SYN_TOP)$${timestamp}.bit"; \
 	cp "$$src" "$$dst"; \
-	ltx_src="$(SYN_ARTIFACT_DIR)/jyd_fpga.ltx"; \
+	ltx_src="$(SYN_ARTIFACT_DIR)/$(SYN_TOP).ltx"; \
 	if [ -f "$$ltx_src" ]; then \
 		ltx_dst="$${dst%.bit}.ltx"; cp "$$ltx_src" "$$ltx_dst"; \
 		echo "[SYN] ILA probes: $$ltx_dst"; \
@@ -931,16 +940,16 @@ syn225 syn240 syn250: SYN_JOBS := 40
 syn225 syn240 syn250: SYN_IMPL_RUNS := 5
 syn225 syn240 syn250: SYN_THREADS_PER_RUN := 8
 syn225 syn240 syn250: syn-vivado
-	@src="$(SYN_ARTIFACT_DIR)/jyd_fpga.bit"; \
+	@src="$(SYN_ARTIFACT_DIR)/$(SYN_TOP).bit"; \
 	if [ ! -f "$$src" ]; then \
 		echo "Error: best bitstream not found: $$src"; \
 		exit 1; \
 	fi; \
 	mkdir -p "$(SYN_BIT_DIR)"; \
 	timestamp=$$(date '+%Y%m%d_%H%M'); \
-	dst="$(SYN_BIT_DIR)/jyd_fpga$${timestamp}.bit"; \
+	dst="$(SYN_BIT_DIR)/$(SYN_TOP)$${timestamp}.bit"; \
 	cp "$$src" "$$dst"; \
-	ltx_src="$(SYN_ARTIFACT_DIR)/jyd_fpga.ltx"; \
+	ltx_src="$(SYN_ARTIFACT_DIR)/$(SYN_TOP).ltx"; \
 	if [ -f "$$ltx_src" ]; then \
 		ltx_dst="$${dst%.bit}.ltx"; cp "$$ltx_src" "$$ltx_dst"; \
 		echo "[SYN] ILA probes: $$ltx_dst"; \
@@ -948,9 +957,9 @@ syn225 syn240 syn250: syn-vivado
 	echo "[SYN] Best bitstream: $$dst"
 	@$(MAKE) syn-analyze SYN_PLL_FREQ_MHZ=$(SYN_PLL_FREQ_MHZ) SYN_PROFILE=$(SYN_PROFILE)
 
-synf-board: SYN_PROFILE := board-ag10-ah10
-synf-board: SYN_ENABLE_ILA := 1
-synf-board: SYN_BOARD_XDC = $(SYN_STAGE_FPGA_DIR)/Ydrasil_FPGA.srcs/constrs_1/new/board_ag10_ah10.xdc
+synf-board: SYN_PROFILE := custom-board
+synf-board: SYN_BOARD_XDC = $(SYN_STAGE_FPGA_DIR)/Ydrasil_FPGA.srcs/constrs_1/new/ydrasil_custom_board.xdc
+synf-board: SYN_REPLACE_CONSTRAINTS := 1
 synf-board: synf
 
 syn-extreme: SYN_PLL_FREQ_MHZ := 200
@@ -996,8 +1005,10 @@ syn-prep: syn-venv
 	$(SYN_PYTHON) $(SYN_DIR)/prep_vivado_sources.py \
 		--repo-root $(PROJECT_ROOT) \
 		--bender $(BENDER) \
-		--bender-dir $(PROJECT_ROOT)/hw/ip/jyd_fpga \
+		--bender-dir $(SYN_BENDER_DIR) \
 		--wrapper-dir $(PROJECT_ROOT)/hw/ip/Xilinx_ip_wrapper/rtl \
+		--itcm-init-file $(SYN_STAGED_ITCM_MEM) \
+		--dtcm-init-file $(SYN_STAGED_DTCM_MEM) \
 		$(if $(filter 1,$(FPU)),--target fpu) \
 		$(SYN_DEFINE_ARGS) \
 		--out $(SYN_SOURCES_TCL)
@@ -1021,7 +1032,7 @@ syn-stage-xpr:
 	# Never carry the checked-in imported incremental checkpoint into a new
 	# architecture build.  It is from an older netlist and can make Vivado
 	# report timing for a design that is not the current RTL.
-	@rm -f "$(SYN_STAGE_FPGA_DIR)/Ydrasil_FPGA.srcs/utils_1/imports/synth_1/jyd_fpga.dcp"
+	@rm -f "$(SYN_STAGE_FPGA_DIR)/Ydrasil_FPGA.srcs/utils_1/imports/synth_1/$(SYN_TOP).dcp"
 	# The checked-in XPR was created on another host.  Vivado uses its
 	# top-level Path attribute as the project root even when the file itself is
 	# staged locally, so normalize it before opening the project; otherwise IP
@@ -1033,9 +1044,9 @@ syn-stage-memory:
 	@test -f "$(IROM_COE)" || { echo "Error: IROM COE not found: $(IROM_COE)"; exit 1; }
 	@test -f "$(DRAM_COE)" || { echo "Error: DRAM COE not found: $(DRAM_COE)"; exit 1; }
 	@mkdir -p "$(SYN_MEMORY_DIR)"
-	cp "$(IROM_COE)" "$(SYN_STAGED_IROM_COE)"
-	cp "$(DRAM_COE)" "$(SYN_STAGED_DRAM_COE)"
-	@printf 'IROM_COE=%s\nDRAM_COE=%s\n' "$(abspath $(IROM_COE))" "$(abspath $(DRAM_COE))" > "$(SYN_MEMORY_DIR)/sources.txt"
+	perl "$(COE_TO_MEM)" "$(IROM_COE)" "$(SYN_STAGED_ITCM_MEM)"
+	perl "$(COE_TO_MEM)" "$(DRAM_COE)" "$(SYN_STAGED_DTCM_MEM)"
+	@printf 'ITCM_COE=%s\nDTCM_COE=%s\n' "$(abspath $(IROM_COE))" "$(abspath $(DRAM_COE))" > "$(SYN_MEMORY_DIR)/sources.txt"
 
 ifeq ($(SYN_REUSE_STAGE),1)
 SYN_VIVADO_PREREQS := syn-reuse-stage-check
@@ -1045,9 +1056,9 @@ endif
 
 syn-reuse-stage-check:
 	@test -f "$(SYN_XPR)" || { echo "Error: staged XPR not found: $(SYN_XPR)"; exit 1; }
-	@test -f "$(SYN_STAGED_IROM_COE)" || { echo "Error: staged IROM COE not found: $(SYN_STAGED_IROM_COE)"; exit 1; }
-	@test -f "$(SYN_STAGED_DRAM_COE)" || { echo "Error: staged DRAM COE not found: $(SYN_STAGED_DRAM_COE)"; exit 1; }
-	@test -f "$(SYN_STAGE_FPGA_DIR)/Ydrasil_FPGA.runs/synth_1/jyd_fpga.dcp" || { echo "Error: completed top synthesis DCP not found in staged project"; exit 1; }
+	@test -f "$(SYN_STAGED_ITCM_MEM)" || { echo "Error: staged ITCM MEM not found: $(SYN_STAGED_ITCM_MEM)"; exit 1; }
+	@test -f "$(SYN_STAGED_DTCM_MEM)" || { echo "Error: staged DTCM MEM not found: $(SYN_STAGED_DTCM_MEM)"; exit 1; }
+	@test -f "$(SYN_STAGE_FPGA_DIR)/Ydrasil_FPGA.runs/synth_1/$(SYN_TOP).dcp" || { echo "Error: completed top synthesis DCP not found in staged project"; exit 1; }
 
 syn-vivado: $(SYN_VIVADO_PREREQS)
 	@mkdir -p $(SYN_REPORT_DIR) $(SYN_LOG_DIR) $(SYN_ARTIFACT_DIR)
@@ -1056,6 +1067,7 @@ syn-vivado: $(SYN_VIVADO_PREREQS)
 		-tclargs \
 		-xpr $(SYN_XPR) \
 		-sources_tcl $(SYN_SOURCES_TCL) \
+		-top $(SYN_TOP) \
 		-report_dir $(SYN_REPORT_DIR) \
 		-checkpoint_dir $(SYN_CHECKPOINT_DIR) \
 		-artifact_dir $(SYN_ARTIFACT_DIR) \
@@ -1071,9 +1083,10 @@ syn-vivado: $(SYN_VIVADO_PREREQS)
 		-report_synth $(SYN_REPORT_SYNTH) \
 		-pll_freq_mhz $(SYN_PLL_FREQ_MHZ) \
 		-board_xdc "$(SYN_BOARD_XDC)" \
+		-replace_constraints $(SYN_REPLACE_CONSTRAINTS) \
 		-enable_ila $(SYN_ENABLE_ILA) \
-		-irom_coe "$(SYN_STAGED_IROM_COE)" \
-		-dram_coe "$(SYN_STAGED_DRAM_COE)" \
+		-itcm_mem "$(SYN_STAGED_ITCM_MEM)" \
+		-dtcm_mem "$(SYN_STAGED_DTCM_MEM)" \
 		-full_reports $(SYN_FULL_REPORTS) \
 		-post_route_physopt $(SYN_POST_ROUTE_PHYSOPT) \
 		-sweep_post_route_physopt $(SYN_SWEEP_POST_ROUTE_PHYSOPT) \
@@ -1317,6 +1330,8 @@ BOUNDARY_APP_SW_MAKE_ARGS = $(COREMARK_SW_MAKE_ARGS)
 BOUNDARY_APP_SW_MAKE_ARGS += BOUNDARY_EXTRA_CFLAGS="$(BOUNDARY_EXTRA_CFLAGS)"
 COREMARK_RESULT_LOG ?= $(HW_TRACE_OUT_DIR)/coremark/hw.log
 COREMARK_SIM_COMPARE ?= none
+COREMARK_DIFF_STOP_SYMBOL ?= stop_time
+COREMARK_DIFF_STOP_PC = $(shell $(RISCV_PREFIX)-nm -n "$(BUILD_DIR)/app/coremark/coremark.elf" 2>/dev/null | awk '$$3 == "$(COREMARK_DIFF_STOP_SYMBOL)" { print "0x" $$1; exit }')
 COMPARE_TRACE_DEFINES = $(if $(filter none,$(SIM_COMPARE)),,$(if $(findstring +commit_trace,$(COMPARE_SIM_EXTRA_DEFINES)),,+commit_trace))
 COMPARE_SIM_DEFINES = $(strip $(COMPARE_SIM_EXTRA_DEFINES) $(COMPARE_TRACE_DEFINES))
 
@@ -1387,6 +1402,9 @@ endef
 $(foreach profile,$(RTTHREAD_COREMARK_PROFILES),$(eval $(call RTTHREAD_COREMARK_PROFILE_template,$(profile))))
 
 coremark_sim: coremark
+	@if [ "$(COREMARK_SIM_COMPARE)" != "none" ] && [ -z "$(COREMARK_DIFF_STOP_PC)" ]; then \
+		echo "Unable to resolve CoreMark diff stop symbol: $(COREMARK_DIFF_STOP_SYMBOL)"; exit 2; \
+	fi
 	@$(MAKE) comp VERILATOR_COVERAGE=$(VERILATOR_COVERAGE) VERILATOR_TRACE=0 \
 		OBJ_DIR="$(COREMARK_SIM_OBJ_DIR)" LOG_DIR="$(COREMARK_SIM_LOG_DIR)" \
 		ITCM_ADDR_WIDTH_OVERRIDE=$(COREMARK_SIM_ITCM_ADDR_WIDTH)
@@ -1398,6 +1416,8 @@ coremark_sim: coremark
 		COMPARE_ITCM=$(BUILD_DIR)/app/coremark/coremark.itcm \
 		COMPARE_DTCM=$(BUILD_DIR)/app/coremark/coremark.dtcm \
 		SIM_COMPARE=$(COREMARK_SIM_COMPARE) \
+		COMPARE_COMPLETE_PROGRAM=1 \
+		COMPARE_TRACE_STOP_PC=$(COREMARK_DIFF_STOP_PC) \
 		COMPARE_SIM_EXTRA_DEFINES="+cpp_timeout=$(COREMARK_SIM_TIMEOUT) +sv_timeout=$(COREMARK_SIM_TIMEOUT)" \
 		VERILATOR_COVERAGE=$(VERILATOR_COVERAGE) \
 		OBJ_DIR="$(COREMARK_SIM_OBJ_DIR)" LOG_DIR="$(COREMARK_SIM_LOG_DIR)" \
@@ -2159,7 +2179,7 @@ else ifeq ($(SIM_COMPARE),csv)
 	@echo "[SIM] CSV compare: $(COMPARE_NAME)"
 	@set +e; env $(SPIKE_RUN_ENV) $(SPIKE) $(SPIKE_FLAGS) $(spike_stepout) $(spike_extension) $(abspath $(COMPARE_ELF)) \
 		> $(COMPARE_SPIKE_LOG) 2>&1; rc=$$?; echo "SPIKE_EXIT_CODE=$$rc" >> $(COMPARE_SPIKE_LOG); exit 0
-	@$(PYTHON) $(TRACE_TO_CSV) --log $(COMPARE_SPIKE_LOG) --csv $(COMPARE_SPIKE_CSV) --source spike $(if $(filter 1,$(COMPARE_COMPLETE_PROGRAM)),--complete-program,)
+	@$(PYTHON) $(TRACE_TO_CSV) --log $(COMPARE_SPIKE_LOG) --csv $(COMPARE_SPIKE_CSV) --source spike $(if $(filter 1,$(COMPARE_COMPLETE_PROGRAM)),--complete-program,) $(if $(strip $(COMPARE_TRACE_STOP_PC)),--stop-after-pc $(COMPARE_TRACE_STOP_PC),)
 	@echo "[SIM] Spike CSV: $(COMPARE_SPIKE_CSV)"
 	@$(MAKE) -C hw/dv sim \
 		VERILATOR_TRACE=0 \
@@ -2168,7 +2188,7 @@ else ifeq ($(SIM_COMPARE),csv)
 		DTCM_FILE=$(abspath $(COMPARE_DTCM)) \
 		SIM_EXTRA_DEFINES="$(COMPARE_SIM_DEFINES) $(if $(filter 1,$(VERILATOR_COVERAGE)),+coverage_file=$(abspath $(COMPARE_COVERAGE_FILE)),)" \
 		> $(COMPARE_HW_LOG) 2>&1
-	@$(PYTHON) $(TRACE_TO_CSV) --log $(COMPARE_HW_LOG) --csv $(COMPARE_HW_CSV) --source ydrasil $(if $(filter 1,$(COMPARE_COMPLETE_PROGRAM)),--complete-program,)
+	@$(PYTHON) $(TRACE_TO_CSV) --log $(COMPARE_HW_LOG) --csv $(COMPARE_HW_CSV) --source ydrasil $(if $(filter 1,$(COMPARE_COMPLETE_PROGRAM)),--complete-program,) $(if $(strip $(COMPARE_TRACE_STOP_PC)),--stop-after-pc $(COMPARE_TRACE_STOP_PC),)
 	@echo "[SIM] HW CSV: $(COMPARE_HW_CSV)"
 	@set +e; \
 	$(PYTHON) $(TRACE_COMPARE) --mode csv \

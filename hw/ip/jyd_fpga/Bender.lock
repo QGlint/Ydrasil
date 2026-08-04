@@ -5,17 +5,17 @@ packages:
     source:
       Path: ../ydrasil_core
     dependencies:
-    - ydrasil::memory
     - ydrasil::utils
-  ydrasil::memory:
+  ydrasil::sim:
     revision: null
     version: null
     source:
-      Path: ../ydrasil_core/../ydrmem
+      Path: ../ydrasil_utils/../ydrasil_sim
     dependencies: []
   ydrasil::utils:
     revision: null
     version: null
     source:
       Path: ../ydrasil_utils
-    dependencies: []
+    dependencies:
+    - ydrasil::sim

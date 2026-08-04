@@ -18,8 +18,8 @@ string dtcmfile;
 // ToHost程序地址,用于监控测试是否结束
 `define PC_WRITE_TOHOST 32'h80000040
 // ITCM 访问路径
-`define ITCM u_dut.u_ydrasil_mems.u_itcm.u_irom
-`define DTCM u_dut.u_ydrasil_mems.u_dtcm.u_dram
+`define ITCM u_dut.u_ydrasil_mems.u_itcm.u_impl
+`define DTCM u_dut.u_ydrasil_mems.u_dtcm.u_impl
 
 longint time_out;
 longint sv_timeout;
@@ -342,13 +342,21 @@ end
         {1'b0, u_dut.ex_accept_valid} + {1'b0, u_dut.ex_accept_valid1};
     wire [2:0] perf_lost_slots = 3'd2 - {1'b0, perf_executed_slots};
     wire [31:0] perf_lost_slots_ext = {{29{1'b0}}, perf_lost_slots};
+    wire        retire0_valid;
+    wire [31:0] retire0_pc;
+    wire        retire1_valid;
+    wire [31:0] retire1_pc;
 
 	ydrasil_core u_dut (
 		.clk      (clk),
 		.rst_n    (rst_n),
 		.axi_m2s_o (axi_m2s),
 		.axi_s2m_i (axi_s2m),
-		.irq_i     (irq)
+		.irq_i     (irq),
+        .retire0_valid_o(retire0_valid),
+        .retire0_pc_o   (retire0_pc),
+        .retire1_valid_o(retire1_valid),
+        .retire1_pc_o   (retire1_pc)
 `ifndef SYNTHESIS
         ,.dbg_bp_predict_pc_o(dbg_bp_predict_pc)
         ,.dbg_bp_predict_hit_o(dbg_bp_predict_hit)

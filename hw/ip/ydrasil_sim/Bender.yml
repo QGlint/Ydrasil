@@ -1,0 +1,13 @@
+package:
+  name: ydrasil::sim
+  description: Technology-independent memory models for Ydrasil simulation
+
+dependencies: {}
+
+sources:
+  - target: any(verilator, iverilog, vcs)
+    files:
+      - rtl/ydrasil_sim_tpdram.sv
+      - rtl/ydrasil_sim_sdpram.sv
+      - rtl/ydrasil_sim_1r1w_ram.sv
+      - rtl/ydrasil_sim_1r1w_bram.sv

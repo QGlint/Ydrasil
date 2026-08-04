@@ -1,0 +1,20 @@
+package:
+  name: ydrasil::perip
+  description: APB peripherals for the Ydrasil SoC
+
+dependencies:
+  ydrasil::utils:
+    path: ../ydrasil_utils
+
+sources:
+  - target: any(verilator, iverilog, vcs)
+    files:
+      - rtl/ydrasil_apb_sysctrl.sv
+      - rtl/ydrasil_apb_gpio.sv
+      - rtl/ydrasil_apb_uart.sv
+      - rtl/ydrasil_apb_spi.sv
+      - rtl/ydrasil_apb_i2c.sv
+      - rtl/ydrasil_plic.sv
+  - target: all(test, any(verilator, iverilog, vcs))
+    files:
+      - dv/ydrasil_perip_tb.sv

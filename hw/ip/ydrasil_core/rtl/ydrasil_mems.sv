@@ -78,9 +78,11 @@ import ydrasil_pkg::*;
         (lsu_mem_req_i.load.valid | if_dtcm_access) : lsu_mem_req_i.load.valid;
     assign dtcm_wen = lsu_mem_req_i.store.valid;
 
-    itcm #(
+    ydrasil_itcm #(
         .ITCM_ADDR_WIDTH(ITCM_ADDR_WIDTH),
-        .INST_DATA_WIDTH(INST_DATA_WIDTH)
+        .INST_DATA_WIDTH(INST_DATA_WIDTH),
+        .INIT_FILE(ITCM_INIT_FILE),
+        .INIT_ENABLE(INIT_ITCM != 0)
     ) u_itcm (
         .clk(clk),
         .itcm_en(rst_n), // ITCM在复位后始终使能
@@ -91,9 +93,11 @@ import ydrasil_pkg::*;
         .itcm_data1_o(itcm_rdata1)
     );
 
-    dtcm #(
+    ydrasil_dtcm #(
         .DTCM_ADDR_WIDTH(DTCM_ADDR_WIDTH),
-        .BUS_DATA_WIDTH(BUS_DATA_WIDTH)
+        .BUS_DATA_WIDTH(BUS_DATA_WIDTH),
+        .INIT_FILE(DTCM_INIT_FILE),
+        .INIT_ENABLE(INIT_DTCM != 0)
     ) u_dtcm (
         .clk(clk),
         .dtcm_ren(dtcm_ren),

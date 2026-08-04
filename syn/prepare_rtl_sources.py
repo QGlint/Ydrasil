@@ -114,12 +114,6 @@ def main() -> int:
         wrapper_modules = set().union(*(modules_in_file(path) for path in wrappers))
         filtered: list[str] = []
         for file_name in files:
-            # ydrmem/rtl contains simulation/inference models.  A Vivado
-            # wrapper build must use only the Xilinx replacements, including
-            # the integrated LUTRAM model, rather than compiling both trees.
-            if "/hw/ip/ydrmem/rtl/" in file_name.replace("\\", "/"):
-                skipped.append(f"{file_name}:generic-memory-model")
-                continue
             overlap = modules_in_file(Path(file_name)) & wrapper_modules
             if overlap:
                 skipped.append(f"{file_name}:{','.join(sorted(overlap))}")

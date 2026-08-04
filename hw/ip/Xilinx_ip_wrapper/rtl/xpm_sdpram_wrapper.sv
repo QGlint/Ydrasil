@@ -1,0 +1,76 @@
+module xpm_sdpram_wrapper #(
+    parameter int DEPTH = 256,
+    parameter int DATA_WIDTH = 32,
+    parameter int ADDR_WIDTH = (DEPTH > 1) ? $clog2(DEPTH) : 1,
+    parameter int READ_LATENCY = 1,
+    parameter int BYTE_WRITE_WIDTH = 8,
+    parameter int WRITE_ENABLE_WIDTH = DATA_WIDTH / BYTE_WRITE_WIDTH,
+    parameter MEMORY_PRIMITIVE = "block",
+    parameter WRITE_MODE = "read_first",
+    parameter MEMORY_INIT_FILE = "none",
+    parameter bit USE_MEM_INIT = 1'b0,
+    parameter bit USE_MEM_INIT_MMI = 1'b0,
+    parameter int MEMORY_SIZE = DEPTH * DATA_WIDTH
+) (
+    input  wire                      clk,
+    input  wire                      ren_i,
+    input  wire [ADDR_WIDTH-1:0]     raddr_i,
+    output wire [DATA_WIDTH-1:0]     rdata_o,
+    input  wire                      wen_i,
+    input  wire [ADDR_WIDTH-1:0]     waddr_i,
+    input  wire [DATA_WIDTH-1:0]     wdata_i,
+    input  wire [WRITE_ENABLE_WIDTH-1:0] wstrb_i
+);
+    wire dbiterr_unused;
+    wire sbiterr_unused;
+
+    xpm_memory_sdpram #(
+        .ADDR_WIDTH_A(ADDR_WIDTH),
+        .ADDR_WIDTH_B(ADDR_WIDTH),
+        .AUTO_SLEEP_TIME(0),
+        .BYTE_WRITE_WIDTH_A(BYTE_WRITE_WIDTH),
+        .CASCADE_HEIGHT(0),
+        .CLOCKING_MODE("common_clock"),
+        .ECC_BIT_RANGE("7:0"),
+        .ECC_MODE("no_ecc"),
+        .ECC_TYPE("none"),
+        .IGNORE_INIT_SYNTH(0),
+        .MEMORY_INIT_FILE(MEMORY_INIT_FILE),
+        .MEMORY_INIT_PARAM("0"),
+        .MEMORY_OPTIMIZATION("true"),
+        .MEMORY_PRIMITIVE(MEMORY_PRIMITIVE),
+        .MEMORY_SIZE(MEMORY_SIZE),
+        .MESSAGE_CONTROL(0),
+        .RAM_DECOMP("auto"),
+        .READ_DATA_WIDTH_B(DATA_WIDTH),
+        .READ_LATENCY_B(READ_LATENCY),
+        .READ_RESET_VALUE_B("0"),
+        .RST_MODE_A("SYNC"),
+        .RST_MODE_B("SYNC"),
+        .SIM_ASSERT_CHK(0),
+        .USE_EMBEDDED_CONSTRAINT(0),
+        .USE_MEM_INIT(USE_MEM_INIT),
+        .USE_MEM_INIT_MMI(USE_MEM_INIT_MMI),
+        .WAKEUP_TIME("disable_sleep"),
+        .WRITE_DATA_WIDTH_A(DATA_WIDTH),
+        .WRITE_MODE_B(WRITE_MODE),
+        .WRITE_PROTECT(1)
+    ) u_xpm_memory_sdpram (
+        .dbiterrb(dbiterr_unused),
+        .doutb(rdata_o),
+        .sbiterrb(sbiterr_unused),
+        .addra(waddr_i),
+        .addrb(raddr_i),
+        .clka(clk),
+        .clkb(clk),
+        .dina(wdata_i),
+        .ena(wen_i),
+        .enb(ren_i),
+        .injectdbiterra(1'b0),
+        .injectsbiterra(1'b0),
+        .regceb(1'b1),
+        .rstb(1'b0),
+        .sleep(1'b0),
+        .wea(wstrb_i)
+    );
+endmodule

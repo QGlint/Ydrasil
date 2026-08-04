@@ -7,28 +7,27 @@ config SOC_YDRASIL
 
 config BSP_USING_SIM_CONSOLE
     bool "Use the 0x80200060 simulation output register"
-    default y
+    default n
     help
         This is the only console endpoint currently implemented in the FPGA
         integration. It is write-only and therefore cannot provide FinSH input.
 
 config BSP_USING_UART0
     bool "Enable UART0 console"
-    default n
+    default y
     help
-        Enable only after the 0x84004000 UART and its clock/reset are connected
-        in the FPGA top level.
+        Use UART0 at 0x40002000 as the console and FinSH input device.
 
 config BSP_USING_MTIME_TICK
     bool "Enable CLINT machine-timer tick"
-    default n
+    default y
     help
         Enable only after MTIME, MTIMECMP and machine-timer interrupt delivery
         are implemented and verified in hardware.
 
 config BSP_USING_PLIC
     bool "Enable PLIC external interrupts"
-    default n
+    default y
     help
         Enable only after the PLIC and machine-external interrupt path are
         connected in hardware.

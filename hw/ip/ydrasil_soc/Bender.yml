@@ -1,0 +1,30 @@
+package:
+  name: ydrasil::soc
+  description: Standalone Ydrasil SoC and FPGA board top
+
+dependencies:
+  ydrasil::core:
+    path: ../ydrasil_core
+  ydrasil::utils:
+    path: ../ydrasil_utils
+  ydrasil::perip:
+    path: ../ydrasil_perip
+
+sources:
+  - target: any(verilator, iverilog, vcs)
+    files:
+      - rtl/ydrasil_soc_pkg.sv
+      - rtl/ydrasil_apb_fabric.sv
+      - rtl/ydrasil_coremark_monitor.sv
+      - rtl/ydrasil_mmio_subsystem.sv
+      - rtl/ydrasil_soc_core.sv
+      - rtl/ydrasil_soc.sv
+      - rtl/ydrasil_reset_sync.sv
+      - rtl/ydrasil_clocking.sv
+  - target: all(soc_test, any(verilator, iverilog, vcs))
+    defines:
+      SYNTHESIS:
+      INIT_ITCM: 0
+      INIT_DTCM: 0
+    files:
+      - dv/ydrasil_soc_tb.sv

@@ -3,8 +3,6 @@ package:
   description: Core IP for Ydrasil RV32I core
 
 dependencies:
-  ydrasil::memory:
-    path: ../ydrmem
   ydrasil::utils:
     path: ../ydrasil_utils
 
@@ -33,7 +31,6 @@ sources:
       - rtl/ydrasil_exception_ctrl.sv
       - rtl/ydrasil_ctrl.sv
       - rtl/ydrasil_core.sv
-      - ../Xilinx_ip_wrapper/rtl/xpm_lutram_1r1w.sv
 
 
   - target: ip_tb
