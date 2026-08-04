@@ -296,6 +296,10 @@ SYN_SYNTH_STRATEGY ?= Flow_PerfOptimized_high
 SYN_RUN_TO ?= route
 SYN_FORCE ?= 1
 SYN_SYNC_SOURCES ?= 1
+SYN_REUSE_STAGE ?= 0
+SYN_REUSE_SYNTH ?= 0
+SYN_RESET_IMPL ?= 0
+SYN_REPORT_SYNTH ?= 1
 SYN_FULL_REPORTS ?= 0
 SYN_POST_ROUTE_PHYSOPT ?= 0
 SYN_SWEEP_POST_ROUTE_PHYSOPT ?= 0
@@ -315,7 +319,7 @@ endif
 .PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests regression regression_all regression_status regression_stop regression_clean regression_sort regression_sort_opt regression_suite_coverage_merge regression_coverage_report init install-bender get_spike download_and_extract_spike check_spike_prebuilt_abi build_spike_from_source check_deps spike spike_wave_to_csv sim_compare commit_check commit_spike_csv commit_hw_trace commit_hw_csv commit_compare rv_test_comp_genmem ppa_rvtest_report ppa_perf_report coe_simple coe_smoke coe_smoke_led coe_isa_probes coverage_all coverage_all_run coverage_quick coverage_closure coverage_closure_merge coverage_clean coverage_report bus_irq_test bus_irq_coverage sw_boundary_test sw_coverage sw_coverage_clean sw_run_mode sw_coverage_report
 .PHONY: coremark coremark_sim coremark_run coremark_result coremark-rebuild coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map coremark_opt_all coremark_opt_build_all coremark_opt_sim_all coremark_opt_report coremark_opt_clean $(COREMARK_OPT_BUILD_TARGETS) $(COREMARK_OPT_SIM_TARGETS) sort_app sort_all sort_sim_all sort_report sort_app_sim sort_app-rebuild sort_app-clean sort_opt_all sort_opt_build_all sort_opt_sim_all sort_opt_report sort_opt_clean $(SORT_OPT_BUILD_TARGETS) $(SORT_OPT_SIM_TARGETS) boundary_app boundary_all boundary_sim_all boundary_report boundary_app-rebuild boundary_app-clean boundary_opt_all boundary_opt_build_all boundary_opt_sim_all boundary_opt_report boundary_opt_clean $(BOUNDARY_OPT_BUILD_TARGETS) $(BOUNDARY_OPT_SIM_TARGETS) coe_m3_force coe_loop2_gen coe_loop5 coe_loop5_gen coe_loop_lina coe_loop_lina_gen loop_lina coe_MFlina coe_MFlina_gen coe_mflina coe_mflina_gen rtthread rtthread-build rtthread-clean rtthread-coremark rtthread-coremark-build rtthread-coremark-build-all rtthread-coremark-sim rtthread-coremark-sim-all rtthread-coremark-report rtthread-coremark-compare rtthread-coremark-clean rtthread-utest rtthread-utest-build rtthread-utest-sim rtthread-utest-report rtthread-utest-clean $(RTTHREAD_COREMARK_PROFILE_BUILD_TARGETS) $(RTTHREAD_COREMARK_PROFILE_SIM_TARGETS)
 .PHONY: riscv_dv_venv riscv_dv_model riscv_dv_prepare riscv_dv_run riscv_dv_random riscv_dv_random_status riscv_dv_regression riscv_dv_count riscv_dv_repro riscv_dv_estimate riscv_dv_stop riscv_dv_coverage_report riscv_dv_cleanup riscv_dv_distclean
-.PHONY: syn synf syn225 syn240 syn250 synf-board syn-extreme syn-venv syn-prep syn-stage-xpr syn-stage-memory syn-vivado syn-analyze syn-clean
+.PHONY: syn synf syn225 syn240 syn250 synf-board syn-extreme syn-lowmem-synth syn-lowmem-impl syn-venv syn-prep syn-stage-xpr syn-stage-memory syn-reuse-stage-check syn-vivado syn-analyze syn-clean
 .PHONY: rtl-quickcheck rtl-strict rtl-xml rtl-structure rtl-vivado-compare verilator-strict verilator-xml slang-ast
 .PHONY: yosys-slang yosys-slang-gate yosys-slang-baseline yosys-slang-quick vivado-ooc vivado-ooc-synth vivado-ooc-issue
 
@@ -926,6 +930,28 @@ syn-extreme: SYN_THREADS_PER_RUN := 1
 syn-extreme: syn-vivado
 	@$(MAKE) syn-analyze SYN_IMPL_MODE=extreme SYN_IMPL_RUNS=1
 
+# Split the peak-memory operations into separate Vivado processes.  Phase one
+# creates a current top-level DCP with the low-memory synthesis strategy.
+# Phase two keeps that staged project intact, releases the opened synth design
+# before implementation, then runs the highest stable per-step implementation
+# directives serially.
+syn-lowmem-synth:
+	@$(MAKE) syn-vivado \
+		SYN_PLL_FREQ_MHZ=200 SYN_RUN_TO=synth SYN_FORCE=1 \
+		SYN_IMPL_MODE=extreme SYN_IMPL_RUNS=1 SYN_JOBS=1 SYN_THREADS_PER_RUN=1 \
+		SYN_SYNTH_STRATEGY=Flow_RuntimeOptimized SYN_SYNC_SOURCES=1 \
+		SYN_REUSE_STAGE=0 SYN_REUSE_SYNTH=0 SYN_RESET_IMPL=0 \
+		SYN_REPORT_SYNTH=0 SYN_FULL_REPORTS=0 SYN_POST_ROUTE_PHYSOPT=0 \
+		SYN_SWEEP_POST_ROUTE_PHYSOPT=0
+
+syn-lowmem-impl:
+	@$(MAKE) syn-vivado \
+		SYN_PLL_FREQ_MHZ=200 SYN_RUN_TO=route SYN_FORCE=0 \
+		SYN_IMPL_MODE=extreme SYN_IMPL_RUNS=1 SYN_JOBS=1 SYN_THREADS_PER_RUN=1 \
+		SYN_SYNC_SOURCES=0 SYN_REUSE_STAGE=1 SYN_REUSE_SYNTH=1 SYN_RESET_IMPL=1 \
+		SYN_REPORT_SYNTH=0 SYN_FULL_REPORTS=0 SYN_POST_ROUTE_PHYSOPT=0 \
+		SYN_SWEEP_POST_ROUTE_PHYSOPT=0
+
 syn-venv: $(SYN_VENV)/.stamp
 
 $(SYN_VENV)/.stamp:
@@ -979,7 +1005,19 @@ syn-stage-memory:
 	cp "$(DRAM_COE)" "$(SYN_STAGED_DRAM_COE)"
 	@printf 'IROM_COE=%s\nDRAM_COE=%s\n' "$(abspath $(IROM_COE))" "$(abspath $(DRAM_COE))" > "$(SYN_MEMORY_DIR)/sources.txt"
 
-syn-vivado: syn-prep syn-stage-xpr syn-stage-memory
+ifeq ($(SYN_REUSE_STAGE),1)
+SYN_VIVADO_PREREQS := syn-reuse-stage-check
+else
+SYN_VIVADO_PREREQS := syn-prep syn-stage-xpr syn-stage-memory
+endif
+
+syn-reuse-stage-check:
+	@test -f "$(SYN_XPR)" || { echo "Error: staged XPR not found: $(SYN_XPR)"; exit 1; }
+	@test -f "$(SYN_STAGED_IROM_COE)" || { echo "Error: staged IROM COE not found: $(SYN_STAGED_IROM_COE)"; exit 1; }
+	@test -f "$(SYN_STAGED_DRAM_COE)" || { echo "Error: staged DRAM COE not found: $(SYN_STAGED_DRAM_COE)"; exit 1; }
+	@test -f "$(SYN_STAGE_FPGA_DIR)/Ydrasil_FPGA.runs/synth_1/jyd_fpga.dcp" || { echo "Error: completed top synthesis DCP not found in staged project"; exit 1; }
+
+syn-vivado: $(SYN_VIVADO_PREREQS)
 	@mkdir -p $(SYN_REPORT_DIR) $(SYN_LOG_DIR) $(SYN_ARTIFACT_DIR)
 	. $(VIVADO_SETTINGS) && $(VIVADO) -mode batch -nojournal -log $(SYN_LOG_DIR)/vivado.log \
 		-source $(SYN_DIR)/run_vivado.tcl \
@@ -996,6 +1034,9 @@ syn-vivado: syn-prep syn-stage-xpr syn-stage-memory
 		-synth_strategy "$(SYN_SYNTH_STRATEGY)" \
 		-run_to $(SYN_RUN_TO) \
 		-sync_sources $(SYN_SYNC_SOURCES) \
+		-reuse_synth $(SYN_REUSE_SYNTH) \
+		-reset_impl $(SYN_RESET_IMPL) \
+		-report_synth $(SYN_REPORT_SYNTH) \
 		-pll_freq_mhz $(SYN_PLL_FREQ_MHZ) \
 		-board_xdc "$(SYN_BOARD_XDC)" \
 		-enable_ila $(SYN_ENABLE_ILA) \

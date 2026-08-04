@@ -13,6 +13,9 @@ proc usage {} {
     puts "  -sweep_post_route_physopt <0|1>  enable sweep post-route phys_opt step, default 0"
     puts "  -run_to <synth|route|bitstream|reports|sync_only>"
     puts "  -sync_sources <0|1>     remove old hw/ip sources and add generated list"
+    puts "  -reuse_synth <0|1>      reuse an unchanged staged synth_1 run, default 0"
+    puts "  -reset_impl <0|1>       reset implementation runs without resetting synth_1, default 0"
+    puts "  -report_synth <0|1>     generate and open post-synth reports, default 1"
     puts "  -force <0|1>            reset runs before launching"
     puts "  -pll_freq_mhz <mhz>     200 selects pll IP; other supported frequencies select RTL MMCM"
     puts "  -board_xdc <path>       overlay board-specific constraints after platform constraints"
@@ -567,6 +570,9 @@ set sweep_post_route_physopt [clamp_int [arg_value "-sweep_post_route_physopt" "
 set threads_per_run [arg_value "-threads_per_run" $jobs]
 set run_to [arg_value "-run_to" "route"]
 set sync_sources [arg_value "-sync_sources" "1"]
+set reuse_synth [clamp_int [arg_value "-reuse_synth" "0"] 0 1]
+set reset_impl [clamp_int [arg_value "-reset_impl" "0"] 0 1]
+set report_synth [clamp_int [arg_value "-report_synth" "1"] 0 1]
 set force_runs [arg_value "-force" "1"]
 set pll_freq_mhz [arg_value "-pll_freq_mhz" "150"]
 set board_xdc [arg_value "-board_xdc" ""]
@@ -585,6 +591,15 @@ if {![file exists $xpr]} {
 if {$sync_sources && ![file exists $sources_tcl]} {
     error "generated sources Tcl not found: $sources_tcl"
 }
+if {$reuse_synth && $sync_sources} {
+    error "-reuse_synth requires -sync_sources 0 to preserve synth_1"
+}
+if {$reuse_synth && $force_runs} {
+    error "-reuse_synth requires -force 0 to preserve synth_1"
+}
+if {$reuse_synth && $run_to ne "route" && $run_to ne "bitstream" && $run_to ne "impl"} {
+    error "-reuse_synth is only valid with -run_to route, bitstream, or impl"
+}
 
 puts "Opening project: $xpr"
 puts "Vivado jobs: $jobs"
@@ -592,16 +607,8 @@ puts "Implementation mode: $impl_mode, runs: $impl_runs"
 puts "Synthesis strategy: $synth_strategy"
 puts "Sweep post-route phys_opt: $sweep_post_route_physopt"
 puts "Run target: $run_to"
+puts "Reuse completed synthesis: $reuse_synth"
 open_project $xpr
-
-# A staged project may retain an INCREMENTAL_CHECKPOINT property from a
-# previous host/build tree even when the imported DCP has been removed.  That
-# makes Vivado reject the run (or, worse, reuse an old netlist).  This build is
-# an architectural timing measurement, so always clear stale incremental
-# checkpoints before synthesis/implementation setup.
-foreach run_obj [get_runs -quiet] {
-    catch {set_property INCREMENTAL_CHECKPOINT "" $run_obj}
-}
 
 set max_threads [clamp_int $threads_per_run 1 32]
 if {$max_threads != $threads_per_run} {
@@ -609,41 +616,53 @@ if {$max_threads != $threads_per_run} {
 }
 puts "Vivado threads per process: $max_threads"
 safe_param general.maxThreads $max_threads
-catch {set_property XPM_LIBRARIES {XPM_MEMORY} [current_project]}
+if {!$reuse_synth} {
+    # A staged project may retain an INCREMENTAL_CHECKPOINT property from a
+    # previous host/build tree even when the imported DCP has been removed.
+    # This build is an architectural timing measurement, so clear it before a
+    # fresh synthesis setup.  Do not touch it when a completed synth_1 is
+    # intentionally being reused by a separate implementation process.
+    foreach run_obj [get_runs -quiet] {
+        catch {set_property INCREMENTAL_CHECKPOINT "" $run_obj}
+    }
 
-remove_missing_sources
-configure_board_constraints $board_xdc
+    catch {set_property XPM_LIBRARIES {XPM_MEMORY} [current_project]}
+    remove_missing_sources
+    configure_board_constraints $board_xdc
 
-if {$sync_sources} {
-    remove_hw_ip_sources
-    puts "Sourcing generated sources: $sources_tcl"
-    source $sources_tcl
-}
+    if {$sync_sources} {
+        remove_hw_ip_sources
+        puts "Sourcing generated sources: $sources_tcl"
+        source $sources_tcl
+    }
 
-set_property top jyd_fpga [get_filesets sources_1]
-if {$run_to ne "reports" && [llength [get_ips -quiet]] > 0} {
-    # The checked-in Block Memory Generator XCI can be locked at an older
-    # catalog revision. Upgrade before setting CONFIG.Coe_File so a requested
-    # benchmark image cannot silently fall back to the XCI's old image.
-    puts "Upgrading memory IP before initialization configuration"
-    upgrade_ip [get_ips IROM DRAM]
-}
-configure_memory_coe IROM $irom_coe
-configure_memory_coe DRAM $dram_coe
-validate_clocking_frequency $pll_freq_mhz
-configure_board_ila $enable_ila
-update_compile_order -fileset sources_1
+    set_property top jyd_fpga [get_filesets sources_1]
+    if {$run_to ne "reports" && [llength [get_ips -quiet]] > 0} {
+        # The checked-in Block Memory Generator XCI can be locked at an older
+        # catalog revision. Upgrade before setting CONFIG.Coe_File so a requested
+        # benchmark image cannot silently fall back to the XCI's old image.
+        puts "Upgrading memory IP before initialization configuration"
+        upgrade_ip [get_ips IROM DRAM]
+    }
+    configure_memory_coe IROM $irom_coe
+    configure_memory_coe DRAM $dram_coe
+    validate_clocking_frequency $pll_freq_mhz
+    configure_board_ila $enable_ila
+    update_compile_order -fileset sources_1
 
-if {$run_to eq "sync_only"} {
-    puts "Source synchronization complete."
-    close_project
-    exit 0
-}
+    if {$run_to eq "sync_only"} {
+        puts "Source synchronization complete."
+        close_project
+        exit 0
+    }
 
-if {$run_to ne "reports" && [llength [get_ips -quiet]] > 0} {
-    puts "Refreshing IP output products"
-    report_ip_status -file [file join $report_dir "ip_status.rpt"]
-    generate_target all [get_ips]
+    if {$run_to ne "reports" && [llength [get_ips -quiet]] > 0} {
+        puts "Refreshing IP output products"
+        report_ip_status -file [file join $report_dir "ip_status.rpt"]
+        generate_target all [get_ips]
+    }
+} else {
+    puts "Reusing staged synth_1 without modifying sources, IP products, or clocking"
 }
 
 if {$run_to eq "reports"} {
@@ -687,47 +706,58 @@ if {$run_to eq "reports"} {
     exit 0
 }
 
-if {$force_runs} {
-    foreach child_run [get_runs -quiet *synth*] {
-        if {[get_property NAME $child_run] ne "synth_1"} {
-            puts "Resetting [get_property NAME $child_run]"
-            reset_run $child_run
+if {!$reuse_synth} {
+    if {$force_runs} {
+        foreach child_run [get_runs -quiet *synth*] {
+            if {[get_property NAME $child_run] ne "synth_1"} {
+                puts "Resetting [get_property NAME $child_run]"
+                reset_run $child_run
+            }
         }
+        puts "Resetting synth_1"
+        reset_run synth_1
     }
-    puts "Resetting synth_1"
-    reset_run synth_1
-}
-set synth_run [get_runs synth_1]
-# Reset first because an XPR may retain per-step arguments from an earlier
-# strategy. The default is the strongest supported 2024.2 timing-oriented
-# preset; exposing it lets a low-memory area-oriented trial retain the same
-# high-directive implementation stage.
-set_property strategy {Vivado Synthesis Defaults} $synth_run
-if {[catch {set_property strategy $synth_strategy $synth_run} synth_strategy_msg]} {
-    error "could not apply synthesis strategy '$synth_strategy': $synth_strategy_msg"
-}
-set synth_status [get_property STATUS [get_runs synth_1]]
-if {!$force_runs && [regexp -nocase {complete} $synth_status]} {
-    puts "Reusing completed synth_1: $synth_status"
+    set synth_run [get_runs synth_1]
+    # Reset first because an XPR may retain per-step arguments from an earlier
+    # strategy. The default is the strongest supported 2024.2 timing-oriented
+    # preset; exposing it lets a low-memory trial retain aggressive
+    # implementation directives without retaining a previous synth strategy.
+    set_property strategy {Vivado Synthesis Defaults} $synth_run
+    if {[catch {set_property strategy $synth_strategy $synth_run} synth_strategy_msg]} {
+        error "could not apply synthesis strategy '$synth_strategy': $synth_strategy_msg"
+    }
+    set synth_status [get_property STATUS [get_runs synth_1]]
+    if {!$force_runs && [regexp -nocase {complete} $synth_status]} {
+        puts "Reusing completed synth_1: $synth_status"
+    } else {
+        launch_runs synth_1 -jobs $jobs
+        wait_on_run synth_1
+    }
 } else {
-    launch_runs synth_1 -jobs $jobs
-    wait_on_run synth_1
+    set synth_status [get_property STATUS [get_runs synth_1]]
+    if {![regexp -nocase {complete} $synth_status]} {
+        error "requested synth_1 reuse, but status is '$synth_status'"
+    }
+    puts "Reusing completed synth_1: $synth_status"
 }
 assert_run_ok synth_1
 
-open_run synth_1 -name synth_1
-report_if_possible "post-synthesis utilization" \
-    "report_utilization -hierarchical -file [file join $report_dir synth_utilization_hier.rpt]"
-report_if_possible "post-synthesis timing summary" \
-    "report_timing_summary -delay_type max -max_paths 50 -report_unconstrained -file [file join $report_dir synth_timing_summary.rpt]"
-report_if_possible "post-synthesis clocks" \
-    "report_clocks -file [file join $report_dir synth_clocks.rpt]"
-report_cpu_freq_timing $report_dir $pll_freq_mhz
-report_if_possible "post-synthesis methodology" \
-    "report_methodology -file [file join $report_dir synth_methodology.rpt]"
-report_if_possible "post-synthesis DRC" \
-    "report_drc -file [file join $report_dir synth_drc.rpt]"
-write_checkpoint -force [file join $checkpoint_dir synth_1.dcp]
+if {$report_synth} {
+    open_run synth_1 -name synth_1
+    report_if_possible "post-synthesis utilization" \
+        "report_utilization -hierarchical -file [file join $report_dir synth_utilization_hier.rpt]"
+    report_if_possible "post-synthesis timing summary" \
+        "report_timing_summary -delay_type max -max_paths 50 -report_unconstrained -file [file join $report_dir synth_timing_summary.rpt]"
+    report_if_possible "post-synthesis clocks" \
+        "report_clocks -file [file join $report_dir synth_clocks.rpt]"
+    report_cpu_freq_timing $report_dir $pll_freq_mhz
+    report_if_possible "post-synthesis methodology" \
+        "report_methodology -file [file join $report_dir synth_methodology.rpt]"
+    report_if_possible "post-synthesis DRC" \
+        "report_drc -file [file join $report_dir synth_drc.rpt]"
+    write_checkpoint -force [file join $checkpoint_dir synth_1.dcp]
+    close_design
+}
 
 if {$run_to eq "synth"} {
     close_project
@@ -735,7 +765,7 @@ if {$run_to eq "synth"} {
 }
 
 set implementation_runs [prepare_implementation_runs $impl_runs $impl_mode $sweep_post_route_physopt]
-if {$force_runs} {
+if {$force_runs || $reset_impl} {
     foreach run_name $implementation_runs {
         puts "Resetting $run_name"
         reset_run $run_name
