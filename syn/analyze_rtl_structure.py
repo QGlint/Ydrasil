@@ -2327,6 +2327,18 @@ def apply_timing_risk_policy(
         bool(report.get("risk_flags", {}).get("high_fanout_over_32"))
         and base_depth >= fanout_timing_min_depth
     )
+    routing_sensitivity_reasons = []
+    if high_fanout_timing:
+        routing_sensitivity_reasons.append("rtl_fanout_estimate")
+    if memory.get("asynchronous_lutram_boundary"):
+        routing_sensitivity_reasons.append("asynchronous_lutram_boundary")
+    if memory.get("contains_bram_boundary"):
+        routing_sensitivity_reasons.append("bram_clock_to_out_boundary")
+    if (
+        report.get("risk_flags", {}).get("cross_module_combination_not_cut")
+        and base_depth >= fanout_timing_min_depth
+    ):
+        routing_sensitivity_reasons.append("uncut_cross_module_combination")
     if excluded:
         reasons.append("simulation_memory_model_excluded_from_synthesis_risk")
     else:
@@ -2371,6 +2383,19 @@ def apply_timing_risk_policy(
             max(0.0, period_ns - bram_clock_to_out_ns)
             if memory.get("contains_bram_boundary") else None
         ),
+        "routing_sensitivity": (
+            "high" if (
+                len(routing_sensitivity_reasons) >= 2
+                or (high_fanout_timing and adjusted_depth >= possible_depth)
+            )
+            else "possible" if routing_sensitivity_reasons
+            else "low"
+        ),
+        "routing_sensitivity_reasons": routing_sensitivity_reasons,
+        "expected_failure_mode": (
+            "route_or_fpga_memory_sensitive"
+            if routing_sensitivity_reasons else "logic_depth_sensitive"
+        ),
         "reasons": reasons,
         "critical_path": critical_path,
         "interpretation": (
@@ -2391,6 +2416,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--source-metadata", type=Path, default=None)
     parser.add_argument("--top", default=None)
     parser.add_argument("--target-period-ns", type=float, default=5.0)
     parser.add_argument("--timing-possible-depth", type=int, default=9)
@@ -2406,6 +2432,13 @@ def main() -> int:
     except (OSError, json.JSONDecodeError) as exc:
         print(f"error: cannot read Verilator tree {args.input}: {exc}", file=sys.stderr)
         return 2
+    source_metadata = None
+    if args.source_metadata:
+        try:
+            source_metadata = json.loads(args.source_metadata.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"error: cannot read RTL source metadata {args.source_metadata}: {exc}", file=sys.stderr)
+            return 2
 
     index = {item["addr"]: item for item in walk(tree) if item.get("addr")}
     modules = [item for item in walk(tree) if item.get("type") == "MODULE" and item.get("name") not in {"$root", "@CONST-POOL@"}]
@@ -2467,6 +2500,10 @@ def main() -> int:
         "modules_with_unregistered_outputs": [item["name"] for item in synthesis_reports if item["registration_status"] != "yes"],
         "modules_with_possible_target_period_failure": [item["name"] for item in synthesis_reports if item["risk_flags"]["possible_target_period_failure"]],
         "modules_with_definite_target_period_failure": [item["name"] for item in synthesis_reports if item["risk_flags"]["definite_target_period_failure"]],
+        "modules_with_high_routing_sensitivity": [
+            item["name"] for item in synthesis_reports
+            if item.get("timing_risk", {}).get("routing_sensitivity") == "high"
+        ],
         "simulation_memory_models_excluded": [item["name"] for item in reports if item["risk_flags"]["simulation_memory_model_excluded"]],
         "hierarchical_combinational_loops": (
             hierarchy.get("meaningful_cycles", hierarchy.get("cycles", []))
@@ -2484,6 +2521,13 @@ def main() -> int:
     result = {
         "input": str(args.input),
         "top": args.top,
+        "provenance": {
+            "source_metadata": str(args.source_metadata) if args.source_metadata else None,
+            "source_fingerprint": source_metadata.get("source_fingerprint") if source_metadata else None,
+            "git_revision": source_metadata.get("git_revision") if source_metadata else None,
+            "source_generated_at_utc": source_metadata.get("generated_at_utc") if source_metadata else None,
+            "source_count": len(source_metadata.get("sources", [])) if source_metadata else None,
+        },
         "module_count": len(reports),
         "summary": summary,
         "hierarchical": hierarchy,
@@ -2511,6 +2555,7 @@ def main() -> int:
             risk = report["timing_risk"]
             print(f"{report['name']}: timing-risk={risk['classification']} target={risk['target_period_ns']}ns "
                   f"depth={risk['structural_endpoint_depth']} adjusted-depth={risk['memory_adjusted_depth']} "
+                  f"routing={risk['routing_sensitivity']} "
                   f"reasons={','.join(risk['reasons'])}")
         if flags.get("hierarchical_combinational_loop"):
             print(f"{report['name']}: hierarchical-depth={report['combination']['hierarchical'].get('max_depth', 0)} "

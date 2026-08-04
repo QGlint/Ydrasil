@@ -13,6 +13,7 @@ VERILATOR_TRACE ?= 1
 DIV_IMPL ?= lzc
 FPU ?= 0
 PYTHON ?= python3
+export PYTHONPYCACHEPREFIX ?= $(BUILD_DIR)/pycache
 TRACE_TO_CSV ?= $(PROJECT_ROOT)/verif/sim/riscv_trace_csv.py
 TRACE_COMPARE ?= $(PROJECT_ROOT)/verif/sim/ydrasil_sim.py
 
@@ -232,8 +233,16 @@ RTL_QC_VIVADO_REPORT_DIR ?= $(BUILD_DIR)/syn/pll200m/reports
 RTL_QC_VIVADO_UTILIZATION ?= $(RTL_QC_VIVADO_REPORT_DIR)/synth_utilization_hier.rpt
 RTL_QC_VIVADO_TIMING ?= $(RTL_QC_VIVADO_REPORT_DIR)/synth_timing_summary.rpt
 RTL_QC_VIVADO_POST_ROUTE_TIMING ?= $(RTL_QC_VIVADO_REPORT_DIR)/post_route_timing_summary.rpt
+RTL_QC_VIVADO_TIMING_PATHS_CSV ?= $(RTL_QC_VIVADO_REPORT_DIR)/cpu200_timing_paths.csv
 RTL_QC_VIVADO_COMPARE_JSON ?= $(RTL_QC_DIR)/$(RTL_QC_TOP).vivado-compare.json
 RTL_QC_RELIABILITY_SUMMARY ?= $(RTL_QC_DIR)/reliability-summary.txt
+RTL_QC_CALIBRATION_ROOT ?= $(BUILD_DIR)/rtl-calibration
+RTL_QC_CALIBRATION_HISTORY ?= $(RTL_QC_CALIBRATION_ROOT)
+RTL_QC_GIT_SHORT := $(shell git -C $(PROJECT_ROOT) rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
+RTL_QC_CALIBRATION_TIMESTAMP := $(shell date -u +%Y%m%d-%H%M%S)
+RTL_QC_CALIBRATION_TAG ?= $(RTL_QC_GIT_SHORT)-pll200m-$(RTL_QC_CALIBRATION_TIMESTAMP)
+RTL_QC_CALIBRATION_DIR ?= $(RTL_QC_CALIBRATION_ROOT)/$(RTL_QC_CALIBRATION_TAG)
+RTL_QC_ARCHIVE_SCRIPT ?= $(SYN_DIR)/archive_rtl_calibration.py
 RTL_QC_ERROR_LIMIT ?= 50
 # Structural timing warning policy, calibrated against the current xc7
 # synth/post-route reports.  The BRAM reference includes both cascaded RAMB
@@ -246,6 +255,7 @@ RTL_QC_FANOUT_TIMING_MIN_DEPTH ?= 3
 RTL_QC_BRAM_LAUNCH_PENALTY_DEPTH ?= 6
 RTL_QC_BRAM_CLOCK_TO_OUT_NS ?= 2.45
 RTL_QC_LUTRAM_ARC_NS ?= 0.06
+RTL_QC_ROUTE_DOMINATED_FRACTION ?= 0.65
 VERILATOR_STRICT ?= verilator
 VERILATOR_STRICT_FLAGS ?= --lint-only --sv -Wall --report-unoptflat --error-limit $(RTL_QC_ERROR_LIMIT)
 # The RTL strict pass remains fatal for width, loop, latch and timing-shape

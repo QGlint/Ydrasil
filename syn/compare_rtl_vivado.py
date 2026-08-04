@@ -9,16 +9,145 @@ one-to-one prediction of the RTL module.
 from __future__ import annotations
 
 import argparse
+import csv
 from collections import Counter
+import hashlib
 import json
 import math
 import re
+import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 
 RESOURCE_KEYS = ("lut", "logic_lut", "lutram", "srl", "ff", "ramb36", "ramb18", "dsp")
 EXCLUDED_MODULES = {"dtcm", "itcm"}
+DEFAULT_ROUTE_DOMINATED_FRACTION = 0.65
+
+
+def structural_calibration_fingerprint(dataset: dict[str, Any]) -> str | None:
+    rows = []
+    for row in sorted(dataset.get("modules", []), key=lambda item: str(item.get("module", ""))):
+        rows.append({
+            key: row.get(key)
+            for key in (
+                "module",
+                "rtl_register_bits",
+                "rtl_max_depth",
+                "rtl_cross_module_max_depth",
+                "rtl_timing_depth_proxy",
+                "rtl_endpoint_timing_depth_proxy",
+                "rtl_input_boundary_max_depth",
+                "rtl_data_boundary_max_depth",
+                "rtl_control_boundary_max_depth",
+                "rtl_output_boundary_max_depth",
+                "rtl_weighted_combination_work",
+                "rtl_packed_consumer_work",
+                "rtl_memory_kind",
+            )
+        })
+    if not rows:
+        return None
+    encoded = json.dumps(rows, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def utc_mtime(path: Path) -> str | None:
+    if not path.is_file():
+        return None
+    return datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat()
+
+
+def comparison_provenance(
+    structure_path: Path,
+    structure: dict[str, Any],
+    timing_paths: list[Path],
+) -> dict[str, Any]:
+    structure_provenance = structure.get("provenance", {})
+    source_metadata_path = structure_provenance.get("source_metadata")
+    source_metadata = None
+    if source_metadata_path:
+        try:
+            source_metadata = json.loads(Path(source_metadata_path).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            source_metadata = None
+    sources = [Path(item) for item in (source_metadata or {}).get("sources", [])]
+    source_mtimes = [path.stat().st_mtime for path in sources if path.is_file()]
+    latest_source_mtime = max(source_mtimes, default=None)
+    report_snapshots = []
+    for path in timing_paths:
+        mtime = path.stat().st_mtime if path.is_file() else None
+        report_snapshots.append({
+            "path": str(path),
+            "available": path.is_file(),
+            "mtime_utc": utc_mtime(path),
+            "not_older_than_latest_rtl_source": (
+                mtime >= latest_source_mtime
+                if mtime is not None and latest_source_mtime is not None else None
+            ),
+        })
+
+    repo_root = Path(__file__).resolve().parents[1]
+    try:
+        current_revision = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        current_revision = None
+    try:
+        rtl_status = subprocess.run(
+            ["git", "-C", str(repo_root), "status", "--porcelain", "--", "hw/ip"],
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        rtl_status = "unknown"
+
+    structure_revision = structure_provenance.get("git_revision")
+    revision_matches = bool(
+        structure_revision and current_revision and structure_revision == current_revision
+    )
+    report_freshness = [
+        item["not_older_than_latest_rtl_source"]
+        for item in report_snapshots
+        if item["available"] and item["not_older_than_latest_rtl_source"] is not None
+    ]
+    if revision_matches and rtl_status == "" and report_freshness and all(report_freshness):
+        status = "current_rtl_snapshot_and_reports_not_older_than_sources"
+    elif report_freshness and not all(report_freshness):
+        status = "report_predates_current_rtl_sources"
+    elif structure_revision and current_revision and not revision_matches:
+        status = "structure_revision_does_not_match_worktree"
+    else:
+        status = "unverified"
+    return {
+        "status": status,
+        "structure": str(structure_path),
+        "structure_mtime_utc": utc_mtime(structure_path),
+        "structure_git_revision": structure_revision,
+        "current_git_revision": current_revision,
+        "structure_revision_matches_worktree": revision_matches,
+        "rtl_worktree_dirty": bool(rtl_status),
+        "rtl_worktree_status": rtl_status.splitlines() if rtl_status not in {"", "unknown"} else [],
+        "source_fingerprint": structure_provenance.get("source_fingerprint"),
+        "source_count": structure_provenance.get("source_count"),
+        "latest_rtl_source_mtime_utc": (
+            datetime.fromtimestamp(latest_source_mtime, timezone.utc).isoformat()
+            if latest_source_mtime is not None else None
+        ),
+        "timing_reports": report_snapshots,
+        "limitation": (
+            "Vivado text reports do not embed a Git revision. Freshness proves the report is not older than the "
+            "current RTL files, but exact source identity requires a synthesis-side source fingerprint."
+        ),
+    }
 
 
 def parse_int(value: str) -> int:
@@ -145,6 +274,27 @@ def parse_timing(path: Path) -> dict[str, Any]:
     if destination:
         result["critical_destination"] = destination.group(1).strip()
 
+    def parse_path_delays(block: str) -> dict[str, float | str | None]:
+        match = re.search(
+            r"Data Path Delay:\s*([-+]?\d+(?:\.\d+)?)ns\s*"
+            r"\(logic\s+([-+]?\d+(?:\.\d+)?)ns\s*\(([-+]?\d+(?:\.\d+)?)%\)\s*"
+            r"route\s+([-+]?\d+(?:\.\d+)?)ns\s*\(([-+]?\d+(?:\.\d+)?)%\)\)",
+            block,
+        )
+        if not match:
+            return {
+                "logic_delay_ns": None,
+                "route_delay_ns": None,
+                "logic_fraction": None,
+                "route_fraction": None,
+            }
+        return {
+            "logic_delay_ns": float(match.group(2)),
+            "route_delay_ns": float(match.group(4)),
+            "logic_fraction": float(match.group(3)) / 100.0,
+            "route_fraction": float(match.group(5)) / 100.0,
+        }
+
     path_pattern = re.compile(
         r"^\s*Source:\s+([^\n]+).*?^\s*Destination:\s+([^\n]+).*?"
         r"^\s*Data Path Delay:\s*([-+]?\d+(?:\.\d+)?)ns.*?"
@@ -159,11 +309,20 @@ def parse_timing(path: Path) -> dict[str, Any]:
             for primitive, count in re.findall(r"([A-Za-z][A-Za-z0-9_]*)=(\d+)", match.group(5) or "")
         }
         cells = parse_logic_cells(text[match.end():end], declared)
+        path_delays = parse_path_delays(text[match.start():end])
+        destination_text = match.group(2).strip()
+        endpoint_pin = (
+            "CE" if re.search(r"/CE(?:\[[^]]+\])?$", destination_text)
+            else "D" if re.search(r"/D(?:\[[^]]+\])?$", destination_text)
+            else "other"
+        )
         result["paths"].append({
             "source": match.group(1).strip(),
             "destination": match.group(2).strip(),
             "data_path_delay_ns": float(match.group(3)),
             "logic_levels": int(match.group(4)),
+            "endpoint_pin": endpoint_pin,
+            **path_delays,
             "declared_primitives": declared,
             "parsed_logic_levels": sum(bool(cell["counts_as_logic_level"]) for cell in cells),
             "physical_timing_arc_count": len(cells),
@@ -178,6 +337,85 @@ def parse_timing(path: Path) -> dict[str, Any]:
         base = re.sub(r"_reg(?:\[[^]]+\])?", "", base)
         base = re.sub(r"_rep__.*$", "", base)
         result["net_fanout"][base] = max(fanout, int(result["net_fanout"].get(base, 0)))
+    return result
+
+
+def parse_timing_csv(path: Path) -> dict[str, Any]:
+    """Read the compact Vivado path CSV emitted by syn/analyze_timing.py."""
+    result: dict[str, Any] = {
+        "report": str(path),
+        "format": "vivado_timing_csv",
+        "available": path.is_file(),
+        "net_fanout": {},
+        "paths": [],
+    }
+    if not path.is_file():
+        return result
+    try:
+        records = list(csv.DictReader(path.read_text(encoding="utf-8", errors="replace").splitlines()))
+    except OSError:
+        return result
+    for row in records:
+        try:
+            delay = float(row.get("data_delay_ns", ""))
+            levels = int(float(row.get("logic_levels", "0")))
+        except (TypeError, ValueError):
+            continue
+        destination = str(row.get("destination", "")).strip()
+        endpoint_pin = (
+            "CE" if re.search(r"/CE(?:\[[^]]+\])?$", destination)
+            else "D" if re.search(r"/D(?:\[[^]]+\])?$", destination)
+            else "other"
+        )
+        route_fraction = None
+        logic_fraction = None
+        try:
+            route_fraction = float(row.get("route_pct", "")) / 100.0
+        except (TypeError, ValueError):
+            pass
+        try:
+            logic_fraction = float(row.get("logic_pct", "")) / 100.0
+        except (TypeError, ValueError):
+            pass
+        result["paths"].append({
+            "source": str(row.get("source", "")).strip(),
+            "destination": destination,
+            "data_path_delay_ns": delay,
+            "logic_levels": levels,
+            "endpoint_pin": endpoint_pin,
+            "logic_delay_ns": delay * logic_fraction if logic_fraction is not None else None,
+            "route_delay_ns": delay * route_fraction if route_fraction is not None else None,
+            "logic_fraction": logic_fraction,
+            "route_fraction": route_fraction,
+            "cause": row.get("cause"),
+            "structure_signature": row.get("structure_signature"),
+            "slack_ns": float(row["slack_ns"]) if row.get("slack_ns") else None,
+            "status": row.get("status"),
+            "path_group": row.get("path_group"),
+            "declared_primitives": {},
+            "parsed_logic_levels": levels,
+            "physical_timing_arc_count": 0,
+            "logic_cells": [],
+            "module_logic_levels": {},
+            "module_hier_logic_levels": {},
+            "unattributed_logic_levels": levels,
+        })
+    result["path_count"] = len(result["paths"])
+    result["logic_level_parse_coverage"] = {
+        "path_count": len(result["paths"]),
+        "exact_path_count": len(result["paths"]),
+        "exact_path_ratio": 1.0 if result["paths"] else None,
+        "under_parsed_path_count": 0,
+        "over_parsed_path_count": 0,
+        "declared_logic_levels": sum(item["logic_levels"] for item in result["paths"]),
+        "parsed_logic_levels": sum(item["logic_levels"] for item in result["paths"]),
+        "parsed_level_ratio": 1.0 if result["paths"] else None,
+        "primitive_count_delta": {},
+        "unattributed_logic_levels": 0,
+        "attributed_logic_levels": 0,
+        "attributed_level_ratio": None,
+        "unattributed_primitives": {},
+    }
     return result
 
 
@@ -212,6 +450,11 @@ def endpoint_module(resource: str | None, aliases: dict[str, str]) -> str | None
 
 def attribute_timing_report(report: dict[str, Any], module_names: set[str]) -> None:
     aliases = module_alias_map(module_names)
+    if report.get("format") == "vivado_timing_csv":
+        for path in report.get("paths", []):
+            path["source_module"] = endpoint_module(path.get("source"), aliases)
+            path["destination_module"] = endpoint_module(path.get("destination"), aliases)
+        return
     declared_total = 0
     parsed_total = 0
     exact_paths = 0
@@ -403,6 +646,11 @@ def module_metrics(
             "vivado_worst_delay_logic_levels": (timing_paths or {}).get(name, {}).get("worst_delay_logic_levels"),
             "vivado_worst_delay_source": (timing_paths or {}).get(name, {}).get("worst_delay_source"),
             "vivado_worst_delay_destination": (timing_paths or {}).get(name, {}).get("worst_delay_destination"),
+            "vivado_logic_delay_ns_max": (timing_paths or {}).get(name, {}).get("logic_delay_ns_max"),
+            "vivado_route_delay_ns_max": (timing_paths or {}).get(name, {}).get("route_delay_ns_max"),
+            "vivado_route_fraction_max": (timing_paths or {}).get(name, {}).get("route_fraction_max"),
+            "vivado_route_dominated_path_count": (timing_paths or {}).get(name, {}).get("route_dominated_path_count", 0),
+            "vivado_over_period_path_count": (timing_paths or {}).get(name, {}).get("over_period_path_count", 0),
             "vivado_logic_path_count": (timing_paths or {}).get(name, {}).get("path_count", 0),
             "vivado_local_logic_levels_max": (timing_paths or {}).get(name, {}).get("local_logic_levels_max"),
             "vivado_local_worst_delay_logic_levels": (timing_paths or {}).get(name, {}).get("local_worst_delay_logic_levels"),
@@ -445,27 +693,42 @@ def timing_metric_stats(
     absolute_errors = []
     relative_errors = []
     modules = []
+    samples = []
     for row in rows:
         paths = paths_by_module.get(row["module"], [])
         if not paths:
             continue
         if actual == "max":
-            observed = max(item["logic_levels"] for item in paths)
+            selected = max(paths, key=lambda item: item["logic_levels"])
+            observed = selected["logic_levels"]
         else:
-            worst = max(paths, key=lambda item: item["data_path_delay_ns"])
-            observed = worst["logic_levels"]
+            selected = max(paths, key=lambda item: item["data_path_delay_ns"])
+            observed = selected["logic_levels"]
         predicted = float(row[predictor])
         error = abs(predicted - observed)
         pairs.append((predicted, float(observed)))
         absolute_errors.append(error)
         relative_errors.append(error / observed if observed else 0.0)
         modules.append(row["module"])
+        samples.append({
+            "module": row["module"],
+            "predicted": predicted,
+            "observed_path_logic_levels": observed,
+            "path_count": len(paths),
+            "source": selected.get("source"),
+            "destination": selected.get("destination"),
+            "data_path_delay_ns": selected.get("data_path_delay_ns"),
+            "logic_delay_ns": selected.get("logic_delay_ns"),
+            "route_delay_ns": selected.get("route_delay_ns"),
+            "route_fraction": selected.get("route_fraction"),
+        })
     return {
         "n": len(pairs),
         "modules": sorted(modules),
         "spearman": spearman(pairs),
         "mae": sum(absolute_errors) / len(absolute_errors) if absolute_errors else None,
         "mape": sum(relative_errors) / len(relative_errors) if relative_errors else None,
+        "samples": sorted(samples, key=lambda item: item["module"]),
     }
 
 
@@ -548,6 +811,34 @@ def timing_role_stats(
     return timing_local_metric_stats(rows, paths_by_module, predictor, "max")
 
 
+def timing_endpoint_stats(
+    rows: list[dict[str, Any]],
+    report: dict[str, Any],
+    role: str,
+    predictor: str,
+) -> dict[str, Any]:
+    """Compare a module's boundary depth with path-wide levels at its endpoint.
+
+    This intentionally uses the destination module for D/CE paths.  A path can
+    traverse several RTL instances after Vivado flattening; attributing the
+    whole path to every touched child obscures whether the destination boundary
+    was structurally deep.
+    """
+    paths_by_module: dict[str, list[dict[str, Any]]] = {}
+    for path in report.get("paths", []):
+        pin = path.get("endpoint_pin") or endpoint_pin(path)
+        if role == "destination_d" and pin != "D":
+            continue
+        if role == "destination_ce" and pin != "CE":
+            continue
+        if role == "destination_clocked" and pin not in {"D", "CE"}:
+            continue
+        module = path.get("destination_module")
+        if module:
+            paths_by_module.setdefault(module, []).append(path)
+    return timing_metric_stats(rows, paths_by_module, predictor, "max")
+
+
 def memory_primitive_calibration(report: dict[str, Any]) -> dict[str, Any]:
     primitives = ("RAMD32", "RAMB18E1", "RAMB36E1")
     result = {}
@@ -587,6 +878,222 @@ def memory_primitive_calibration(report: dict[str, Any]) -> dict[str, Any]:
                 )[:10],
             }
     return result
+
+
+def route_delay_calibration(
+    report: dict[str, Any],
+    module_names: set[str],
+    target_period_ns: float,
+    route_dominated_fraction: float,
+) -> dict[str, Any]:
+    paths = [
+        path for path in report.get("paths", [])
+        if path_modules(path, module_names) or path.get("module_logic_levels")
+    ]
+    clocked = [path for path in paths if path.get("endpoint_pin") in {"D", "CE"}]
+    calibrated = [
+        path for path in clocked
+        if path.get("logic_delay_ns") is not None and path.get("route_delay_ns") is not None
+    ]
+    over_target = [path for path in clocked if float(path.get("data_path_delay_ns", 0.0)) >= target_period_ns]
+    route_dominated = [
+        path for path in calibrated
+        if float(path.get("route_fraction", 0.0)) >= route_dominated_fraction
+    ]
+
+    def correlation(key: str, selected_paths: list[dict[str, Any]] | None = None) -> float | None:
+        selected_paths = calibrated if selected_paths is None else selected_paths
+        return spearman([
+            (float(path.get("logic_levels", 0)), float(path[key]))
+            for path in selected_paths
+            if path.get(key) is not None
+        ])
+
+    def is_memory_path(path: dict[str, Any]) -> bool:
+        primitives = path.get("declared_primitives", {})
+        if any(str(name).startswith(("RAMB", "RAMD")) for name in primitives):
+            return True
+        signature = str(path.get("structure_signature") or "")
+        endpoints = f"{path.get('source', '')} {path.get('destination', '')}"
+        return bool(
+            re.search(r"\b(?:RAMB|RAMD)\w*[:/]", signature)
+            or "xpm_memory" in endpoints
+        )
+
+    memory_paths = [path for path in calibrated if is_memory_path(path)]
+    ordinary_paths = [path for path in calibrated if not is_memory_path(path)]
+
+    def worst_path(paths_to_rank: list[dict[str, Any]]) -> dict[str, Any] | None:
+        if not paths_to_rank:
+            return None
+        path = max(paths_to_rank, key=lambda item: float(item.get("data_path_delay_ns", 0.0)))
+        return {
+            "source": path.get("source"),
+            "destination": path.get("destination"),
+            "source_module": path.get("source_module"),
+            "destination_module": path.get("destination_module"),
+            "endpoint_pin": path.get("endpoint_pin"),
+            "data_path_delay_ns": path.get("data_path_delay_ns"),
+            "logic_delay_ns": path.get("logic_delay_ns"),
+            "route_delay_ns": path.get("route_delay_ns"),
+            "route_fraction": path.get("route_fraction"),
+            "logic_levels": path.get("logic_levels"),
+        }
+
+    route_fractions = [float(path["route_fraction"]) for path in calibrated]
+    return {
+        "target_period_ns": target_period_ns,
+        "route_dominated_fraction_threshold": route_dominated_fraction,
+        "core_attributed_path_count": len(paths),
+        "clocked_endpoint_path_count": len(clocked),
+        "clocked_endpoint_over_target_count": len(over_target),
+        "route_delay_parsed_path_count": len(calibrated),
+        "route_dominated_path_count": len(route_dominated),
+        "route_dominated_over_target_count": sum(
+            float(path.get("data_path_delay_ns", 0.0)) >= target_period_ns
+            for path in route_dominated
+        ),
+        "cause_counts": dict(sorted(Counter(
+            str(path.get("cause"))
+            for path in clocked
+            if path.get("cause")
+        ).items())),
+        "route_fraction_mean": sum(route_fractions) / len(route_fractions) if route_fractions else None,
+        "logic_levels_vs_total_delay_spearman": correlation("data_path_delay_ns"),
+        "logic_levels_vs_logic_delay_spearman": correlation("logic_delay_ns"),
+        "logic_levels_vs_route_delay_spearman": correlation("route_delay_ns"),
+        "memory_path_count": len(memory_paths),
+        "non_memory_path_count": len(ordinary_paths),
+        "memory_logic_levels_vs_logic_delay_spearman": correlation("logic_delay_ns", memory_paths),
+        "non_memory_logic_levels_vs_logic_delay_spearman": correlation("logic_delay_ns", ordinary_paths),
+        "worst_clocked_path": worst_path(clocked),
+        "worst_route_dominated_path": worst_path(route_dominated),
+        "interpretation": (
+            "Structural depth should follow logic levels and logic delay. Route delay is placement- and fanout-dependent; "
+            "route-dominated failures require the structural fanout/memory warnings in addition to depth."
+        ),
+    }
+
+
+def historical_calibration(root: Path | None, current: dict[str, Any]) -> dict[str, Any]:
+    """Combine raw calibration samples from archived source snapshots."""
+    datasets = [("current", current)]
+    skipped = []
+    current_fingerprint = current.get("provenance", {}).get("source_fingerprint")
+    seen_fingerprints = {current_fingerprint} if current_fingerprint else set()
+    current_structural_fingerprint = structural_calibration_fingerprint(current)
+    seen_structural_fingerprints = (
+        {current_structural_fingerprint} if current_structural_fingerprint else set()
+    )
+    if root and root.is_dir():
+        for comparison_path in sorted(root.glob("*/vivado-compare.json")):
+            try:
+                archived = json.loads(comparison_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                skipped.append({"path": str(comparison_path), "reason": str(exc)})
+                continue
+            fingerprint = archived.get("provenance", {}).get("source_fingerprint")
+            if not fingerprint:
+                manifest_path = comparison_path.parent / "manifest.json"
+                try:
+                    fingerprint = json.loads(manifest_path.read_text(encoding="utf-8")).get("source_fingerprint")
+                except (OSError, json.JSONDecodeError):
+                    pass
+            if fingerprint and fingerprint in seen_fingerprints:
+                skipped.append({
+                    "path": str(comparison_path),
+                    "reason": "duplicate_source_fingerprint",
+                })
+                continue
+            structural_fingerprint = structural_calibration_fingerprint(archived)
+            if structural_fingerprint and structural_fingerprint in seen_structural_fingerprints:
+                skipped.append({
+                    "path": str(comparison_path),
+                    "reason": "duplicate_structural_calibration_fingerprint",
+                    "source_fingerprint": fingerprint,
+                })
+                continue
+            if fingerprint:
+                seen_fingerprints.add(fingerprint)
+            if structural_fingerprint:
+                seen_structural_fingerprints.add(structural_fingerprint)
+            datasets.append((str(comparison_path.parent), archived))
+
+    def post_route_comparison(dataset: dict[str, Any]) -> dict[str, Any] | None:
+        candidates = [
+            item for item in dataset.get("timing_report_comparisons", [])
+            if Path(str(item.get("report", ""))).name == "post_route_timing_summary.rpt"
+        ]
+        return candidates[0] if candidates else None
+
+    endpoint_pairs: dict[str, list[tuple[float, float]]] = {
+        "destination_d": [],
+        "destination_clocked": [],
+    }
+    endpoint_samples: dict[str, list[dict[str, Any]]] = {
+        "destination_d": [],
+        "destination_clocked": [],
+    }
+    register_pairs = []
+    work_pairs = []
+    dataset_reports = []
+    for dataset_name, dataset in datasets:
+        comparison = post_route_comparison(dataset)
+        if comparison:
+            dataset_reports.append({
+                "dataset": dataset_name,
+                "source_fingerprint": dataset.get("provenance", {}).get("source_fingerprint"),
+                "report": comparison.get("report"),
+                "wns_ns": comparison.get("wns_ns"),
+            })
+            stage_endpoint = comparison.get("endpoint_path_reliability", {}).get("stage_timed", {})
+            for role in endpoint_pairs:
+                for sample in stage_endpoint.get(role, {}).get("samples", []):
+                    predicted = float(sample.get("predicted", 0.0))
+                    observed = float(sample.get("observed_path_logic_levels", 0.0))
+                    endpoint_pairs[role].append((predicted, observed))
+                    endpoint_samples[role].append({"dataset": dataset_name, **sample})
+        for row in dataset.get("modules", []):
+            if row.get("module") == "xpm_lutram_1r1w" or row.get("rtl_synthesis_timing_excluded"):
+                continue
+            rtl_bits = float(row.get("rtl_register_bits", 0.0) or 0.0)
+            rtl_work = float(row.get("rtl_weighted_combination_work", 0.0) or 0.0)
+            vivado = row.get("vivado", {})
+            if rtl_bits:
+                register_pairs.append((rtl_bits, float(vivado.get("ff", 0.0) or 0.0)))
+            if rtl_work:
+                work_pairs.append((rtl_work, float(vivado.get("lut", 0.0) or 0.0)))
+
+    def pair_stats(pairs: list[tuple[float, float]]) -> dict[str, Any]:
+        errors = [abs(predicted - observed) for predicted, observed in pairs]
+        return {
+            "n": len(pairs),
+            "spearman": spearman(pairs),
+            "mae": sum(errors) / len(errors) if errors else None,
+        }
+
+    return {
+        "root": str(root) if root else None,
+        "current_structural_calibration_fingerprint": current_structural_fingerprint,
+        "dataset_count_including_current": len(datasets),
+        "historical_dataset_count": max(0, len(datasets) - 1),
+        "datasets": dataset_reports,
+        "skipped": skipped,
+        "stage_destination_d": {
+            **pair_stats(endpoint_pairs["destination_d"]),
+            "samples": endpoint_samples["destination_d"],
+        },
+        "stage_destination_clocked": {
+            **pair_stats(endpoint_pairs["destination_clocked"]),
+            "samples": endpoint_samples["destination_clocked"],
+        },
+        "register_bits_vs_ff": pair_stats(register_pairs),
+        "weighted_work_vs_lut": pair_stats(work_pairs),
+        "interpretation": (
+            "Archives with the same source fingerprint as the current sample are skipped to avoid double weighting. "
+            "Each later RTL version contributes its endpoint samples to the combined ranking."
+        ),
+    }
 
 
 def timing_risk_validation(
@@ -655,9 +1162,14 @@ def timing_risk_validation(
 
 
 def render_summary(result: dict[str, Any]) -> str:
+    provenance = result.get("provenance", {})
     lines = [
         "RTL structure / Vivado reliability summary",
         f"structure: {result.get('structure')}",
+        f"provenance_status={provenance.get('status')} "
+        f"revision_match={provenance.get('structure_revision_matches_worktree')} "
+        f"rtl_dirty={provenance.get('rtl_worktree_dirty')} "
+        f"calibration_compatibility={provenance.get('calibration_compatibility')}",
         "Spearman samples are small; use them as ranking evidence, not an absolute timing model.",
         "",
     ]
@@ -666,15 +1178,34 @@ def render_summary(result: dict[str, Any]) -> str:
         risk = comparison.get("timing_risk_validation", {})
         local = comparison.get("local_logic_level_reliability", {}).get("stage_timed", {})
         boundary = local.get("rtl_input_boundary_max_depth_vs_local_max_logic_levels", {})
+        endpoint = comparison.get("endpoint_path_reliability", {}).get("stage_timed", {})
+        endpoint_d = endpoint.get("destination_d", {})
+        endpoint_clocked = endpoint.get("destination_clocked", {})
+        route = comparison.get("route_delay_calibration", {})
         possible = risk.get("possible_flag_validation", {})
         definite = risk.get("definite_flag_validation", {})
         lines.extend([
             f"REPORT {comparison.get('report')}",
+            f"format={comparison.get('format')} wns_ns={comparison.get('wns_ns')} "
+            f"tns_ns={comparison.get('tns_ns')} max_data_delay_ns={comparison.get('max_data_path_delay_ns')}",
             f"paths={comparison.get('path_count', 0)} "
             f"logic_parse_exact={coverage.get('exact_path_count', 0)}/{coverage.get('path_count', 0)} "
             f"attributed_ratio={coverage.get('attributed_level_ratio')}",
             f"stage_input_boundary_vs_local_max: n={boundary.get('n')} "
             f"spearman={boundary.get('spearman')} mae={boundary.get('mae')}",
+            f"stage_destination_D_boundary_vs_path_levels: n={endpoint_d.get('n')} "
+            f"spearman={endpoint_d.get('spearman')} mae={endpoint_d.get('mae')}",
+            f"stage_destination_DCE_boundary_vs_path_levels: n={endpoint_clocked.get('n')} "
+            f"spearman={endpoint_clocked.get('spearman')} mae={endpoint_clocked.get('mae')}",
+            f"core_clocked_paths={route.get('clocked_endpoint_path_count')} "
+            f"over_target={route.get('clocked_endpoint_over_target_count')} "
+            f"route_dominated={route.get('route_dominated_path_count')} "
+            f"logic_levels_vs_logic_delay={route.get('logic_levels_vs_logic_delay_spearman')} "
+            f"logic_levels_vs_total_delay={route.get('logic_levels_vs_total_delay_spearman')}",
+            f"memory_paths={route.get('memory_path_count')} "
+            f"memory_levels_vs_logic_delay={route.get('memory_logic_levels_vs_logic_delay_spearman')} "
+            f"non_memory_paths={route.get('non_memory_path_count')} "
+            f"non_memory_levels_vs_logic_delay={route.get('non_memory_logic_levels_vs_logic_delay_spearman')}",
             f"possible_5ns_observed_recall={possible.get('observed_module_recall')} "
             f"missed={possible.get('observed_not_flagged_modules', [])}",
             f"definite_5ns_observed_recall={definite.get('observed_module_recall')} "
@@ -689,10 +1220,26 @@ def render_summary(result: dict[str, Any]) -> str:
         lines.append("")
     lines.extend([
         "INTERPRETATION",
-        "- input/child-output to D/CE is the most useful module-local depth ranking on this build.",
+        "- input/child-output to destination D/CE versus path-wide logic levels is the primary cross-module depth ranking.",
+        "- local primitive ownership remains diagnostic only; it is not the primary fit metric after Vivado flattening.",
+        "- route-dominated paths require fanout and FPGA-memory warnings in addition to structural depth.",
         "- local primitive ownership is hierarchy-name based and can move after Vivado flattening.",
         "- possible is a conservative design-time warning; definite requires a loop or the configured high-depth threshold.",
         "- ydrmem storage is a simulation model and is excluded from synthesis-risk and FF correlation.",
+    ])
+    fanout = result.get("fanout_calibration_summary", {})
+    history = result.get("historical_calibration", {})
+    historical_clocked = history.get("stage_destination_clocked", {})
+    lines.extend([
+        f"- fanout calibration: n={fanout.get('matched_signal_count')} "
+        f"raw_reads_spearman={fanout.get('read_references_vs_vivado_fanout_spearman')} "
+        f"transitive_spearman={fanout.get('transitive_read_estimate_vs_vivado_fanout_spearman')}.",
+        "- weak fanout correlation means RTL fanout remains a conservative warning, never a definite timing verdict.",
+        f"- historical calibration: datasets={history.get('dataset_count_including_current')} "
+        f"archived={history.get('historical_dataset_count')} "
+        f"DCE_n={historical_clocked.get('n')} "
+        f"DCE_spearman={historical_clocked.get('spearman')} "
+        f"DCE_mae={historical_clocked.get('mae')}.",
     ])
     return "\n".join(lines) + "\n"
 
@@ -702,18 +1249,27 @@ def main() -> int:
     parser.add_argument("--structure", type=Path, required=True)
     parser.add_argument("--utilization", type=Path, required=True)
     parser.add_argument("--timing", type=Path, action="append", default=[])
+    parser.add_argument("--timing-csv", type=Path, action="append", default=[])
+    parser.add_argument(
+        "--route-dominated-fraction",
+        type=float,
+        default=DEFAULT_ROUTE_DOMINATED_FRACTION,
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--summary-output", type=Path, default=None)
+    parser.add_argument("--history-root", type=Path, default=None)
     args = parser.parse_args()
 
     structure = json.loads(args.structure.read_text(encoding="utf-8"))
     utilization = parse_utilization(args.utilization)
+    target_period_ns = float(structure.get("summary", {}).get("target_period_ns", 5.0))
     module_names = {
         str(module.get("name"))
         for module in structure.get("modules", [])
         if module.get("name")
     }
     timing = [parse_timing(path) for path in args.timing]
+    timing.extend(parse_timing_csv(path) for path in args.timing_csv)
     for report in timing:
         attribute_timing_report(report, module_names)
     timing_paths: dict[str, dict[str, Any]] = {}
@@ -725,9 +1281,27 @@ def main() -> int:
                     "path_count": 0,
                     "worst_delay_ns": 0.0,
                     "worst_delay_logic_levels": 0,
+                    "logic_delay_ns_max": 0.0,
+                    "route_delay_ns_max": 0.0,
+                    "route_fraction_max": 0.0,
+                    "route_dominated_path_count": 0,
+                    "over_period_path_count": 0,
                 })
                 item["logic_levels_max"] = max(item["logic_levels_max"], path_info["logic_levels"])
                 item["path_count"] += 1
+                logic_delay = path_info.get("logic_delay_ns")
+                route_delay = path_info.get("route_delay_ns")
+                route_fraction = path_info.get("route_fraction")
+                if logic_delay is not None:
+                    item["logic_delay_ns_max"] = max(item["logic_delay_ns_max"], float(logic_delay))
+                if route_delay is not None:
+                    item["route_delay_ns_max"] = max(item["route_delay_ns_max"], float(route_delay))
+                if route_fraction is not None:
+                    item["route_fraction_max"] = max(item["route_fraction_max"], float(route_fraction))
+                    if float(route_fraction) >= args.route_dominated_fraction:
+                        item["route_dominated_path_count"] += 1
+                if float(path_info.get("data_path_delay_ns", 0.0)) >= target_period_ns:
+                    item["over_period_path_count"] += 1
                 if path_info["data_path_delay_ns"] > item["worst_delay_ns"]:
                     item.update({
                         "worst_delay_ns": path_info["data_path_delay_ns"],
@@ -741,6 +1315,11 @@ def main() -> int:
                     "path_count": 0,
                     "worst_delay_ns": 0.0,
                     "worst_delay_logic_levels": 0,
+                    "logic_delay_ns_max": 0.0,
+                    "route_delay_ns_max": 0.0,
+                    "route_fraction_max": 0.0,
+                    "route_dominated_path_count": 0,
+                    "over_period_path_count": 0,
                 })
                 item["local_logic_levels_max"] = max(
                     int(item.get("local_logic_levels_max", 0)),
@@ -820,11 +1399,39 @@ def main() -> int:
             }
             for scope_name, scope_rows in scopes.items()
         }
+        endpoint_role_specs = {
+            "destination_d": "rtl_data_boundary_max_depth",
+            "destination_ce": "rtl_control_boundary_max_depth",
+            # D and CE share the conservative input-boundary proxy.  This is
+            # the stable comparison when a small selected-path report does not
+            # contain enough samples to split the endpoint types.
+            "destination_clocked": "rtl_input_boundary_max_depth",
+        }
+        endpoint_reliability = {
+            scope_name: {
+                role: timing_endpoint_stats(scope_rows, report, role, predictor)
+                for role, predictor in endpoint_role_specs.items()
+            }
+            for scope_name, scope_rows in scopes.items()
+        }
         timing_report_comparisons.append({
             "report": report.get("report"),
+            "format": report.get("format", "vivado_timing_report"),
+            "wns_ns": report.get("wns_ns"),
+            "tns_ns": report.get("tns_ns"),
+            "max_data_path_delay_ns": max(
+                (float(path.get("data_path_delay_ns", 0.0)) for path in report.get("paths", [])),
+                default=None,
+            ),
             "path_count": len(report.get("paths", [])),
             "logic_level_parse_coverage": report.get("logic_level_parse_coverage"),
             "memory_primitive_calibration": memory_primitive_calibration(report),
+            "route_delay_calibration": route_delay_calibration(
+                report,
+                module_names,
+                target_period_ns,
+                args.route_dominated_fraction,
+            ),
             "timing_risk_validation": timing_risk_validation(structure, report, module_names),
             "module_path_counts": {
                 module: len(paths)
@@ -837,6 +1444,7 @@ def main() -> int:
             "reliability": report_reliability,
             "local_logic_level_reliability": local_reliability,
             "path_role_reliability": role_reliability,
+            "endpoint_path_reliability": endpoint_reliability,
         })
     fanout_actual = {}
     for report in timing:
@@ -870,13 +1478,43 @@ def main() -> int:
                 "rtl_estimates": estimates,
             })
 
+    fanout_pairs: dict[str, list[tuple[float, float]]] = {
+        "read_references": [],
+        "estimated_bit_fanout": [],
+        "transitive_read_estimate": [],
+        "fanout_risk_score": [],
+    }
+    for item in fanout_calibration:
+        for key, pairs in fanout_pairs.items():
+            pairs.append((
+                float(max(estimate.get(key, 0) for estimate in item["rtl_estimates"])),
+                float(item["vivado_fanout"]),
+            ))
+    fanout_calibration_summary = {
+        "matched_signal_count": len(fanout_calibration),
+        **{
+            f"{key}_vs_vivado_fanout_spearman": spearman(pairs)
+            for key, pairs in fanout_pairs.items()
+        },
+        "interpretation": (
+            "Fanout is strongly transformed by synthesis replication, enable promotion, and packed-field lowering. "
+            "Treat the RTL estimate as a conservative route-risk trigger, not a physical fanout predictor."
+        ),
+    }
+
     result = {
         "structure": str(args.structure),
+        "provenance": comparison_provenance(
+            args.structure,
+            structure,
+            [*args.timing, *args.timing_csv],
+        ),
         "utilization": str(args.utilization),
         "timing": timing,
         "timing_report_comparisons": timing_report_comparisons,
         "modules": rows,
         "fanout_calibration": fanout_calibration[:100],
+        "fanout_calibration_summary": fanout_calibration_summary,
         "excluded_modules": sorted(EXCLUDED_MODULES | {name for name in utilization if str(name).startswith("ydrmem")}),
         "excluded_resource_correlation_modules": ["xpm_lutram_1r1w", "ydrmem*"],
         "reliability": {
@@ -906,6 +1544,19 @@ def main() -> int:
             "hierarchy_warning": "ydrasil_core and ydrasil_ex_block Vivado rows include child hierarchy; compare stage rows as trends, not exact local counts.",
         },
     }
+    result["provenance"]["structural_calibration_fingerprint"] = (
+        structural_calibration_fingerprint(result)
+    )
+    result["historical_calibration"] = historical_calibration(args.history_root, result)
+    structurally_equivalent_archive = any(
+        item.get("reason") == "duplicate_structural_calibration_fingerprint"
+        for item in result["historical_calibration"].get("skipped", [])
+    )
+    result["provenance"]["calibration_compatibility"] = (
+        "structurally_equivalent_to_archived_report_snapshot"
+        if structurally_equivalent_archive
+        else "exact_source_freshness_only"
+    )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     if args.summary_output:

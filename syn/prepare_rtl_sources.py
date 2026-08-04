@@ -9,10 +9,12 @@ last and any generic module shadowed by a wrapper is removed first.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -40,6 +42,31 @@ def unique(items: list[str]) -> list[str]:
             seen.add(item)
             result.append(item)
     return result
+
+
+def source_fingerprint(files: list[str]) -> str:
+    """Hash the exact source snapshot used by a generated file list."""
+    digest = hashlib.sha256()
+    for file_name in files:
+        path = Path(file_name)
+        digest.update(str(path).encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(hashlib.sha256(path.read_bytes()).digest())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def git_revision(repo_root: Path) -> str | None:
+    try:
+        return subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        ).stdout.strip() or None
+    except (OSError, subprocess.CalledProcessError):
+        return None
 
 
 def run_bender(bender: str, bender_dir: Path, targets: list[str]) -> list[str]:
@@ -128,6 +155,9 @@ def main() -> int:
         "defines": defines,
         "sources": files,
         "skipped_shadowed_sources": skipped,
+        "source_fingerprint": source_fingerprint(files),
+        "git_revision": git_revision(repo_root),
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
     }
     if args.metadata:
         args.metadata.parent.mkdir(parents=True, exist_ok=True)

@@ -31,9 +31,9 @@ VERIF_BOUNDARY_OPT_LOG ?= $(VERIF_STATS_DIR)/boundary_opt_summary.log
 APP_OPT_PROFILES ?= O0 O1 O2 O3 Os Og O2_noinline O3_app_unroll
 APP_OPT_JOBS ?= $(shell nproc)
 APP_OPT_ITCM_BYTES ?= 16384
-APP_OPT_EXPANDED_ITCM_BYTES ?= 32768
-APP_OPT_EXPANDED_ITCM_KIB ?= 32
-APP_OPT_EXPANDED_ITCM_ADDR_WIDTH ?= 13
+APP_OPT_EXPANDED_ITCM_BYTES ?= 65536
+APP_OPT_EXPANDED_ITCM_KIB ?= 64
+APP_OPT_EXPANDED_ITCM_ADDR_WIDTH ?= 14
 APP_OPT_EXPANDED_OBJ_DIR ?= $(BUILD_DIR)/ydrasil_core_tb-itcm-expanded
 APP_OPT_EXPANDED_LOG_DIR ?= $(BUILD_DIR)/log/itcm-expanded
 APP_OPT_EXPANDED_LINKER ?= $(BUILD_DIR)/app/opt-link/itcm-$(APP_OPT_EXPANDED_ITCM_KIB)K.lds
@@ -49,6 +49,13 @@ COREMARK_OPT_BSP_CFLAGS_O3 ?= -Os
 COREMARK_OPT_APP_CFLAGS_O3 ?= -O3
 COREMARK_OPT_BSP_CFLAGS_O3_app_unroll ?= -Os
 COREMARK_OPT_APP_CFLAGS_O3_app_unroll ?= -O3 -funroll-loops
+COREMARK_PROFILE ?= O3_app_unroll
+COREMARK_BSP_CFLAGS ?= $(if $(COREMARK_OPT_BSP_CFLAGS_$(COREMARK_PROFILE)),$(COREMARK_OPT_BSP_CFLAGS_$(COREMARK_PROFILE)),$(APP_OPT_CFLAGS_$(COREMARK_PROFILE)))
+COREMARK_APP_CFLAGS ?= $(COREMARK_OPT_APP_CFLAGS_$(COREMARK_PROFILE))
+COREMARK_LINKER ?= $(APP_OPT_EXPANDED_LINKER)
+COREMARK_SIM_ITCM_ADDR_WIDTH ?= $(APP_OPT_EXPANDED_ITCM_ADDR_WIDTH)
+COREMARK_SIM_OBJ_DIR ?= $(BUILD_DIR)/ydrasil_core_tb-coremark
+COREMARK_SIM_LOG_DIR ?= $(BUILD_DIR)/log/coremark
 SORT_OPT_BSP_CFLAGS_O3_app_unroll ?= -Os
 SORT_OPT_APP_CFLAGS_O3_app_unroll ?= -O3 -funroll-loops
 COREMARK_OPT_ROOT ?= $(BUILD_DIR)/app/coremark-opt
@@ -69,7 +76,9 @@ COREMARK_OPT_BUILD_TARGETS := $(addprefix coremark_opt_build_,$(APP_OPT_PROFILES
 COREMARK_OPT_SIM_TARGETS := $(addprefix coremark_opt_sim_,$(APP_OPT_PROFILES))
 SORT_OPT_BUILD_TARGETS := $(foreach profile,$(APP_OPT_PROFILES),$(foreach app,$(SORT_APP_NAMES),sort_opt_build_$(profile)_$(app)))
 SORT_OPT_SIM_TARGETS := $(foreach profile,$(APP_OPT_PROFILES),$(foreach app,$(SORT_APP_NAMES),sort_opt_sim_$(profile)_$(app)))
-COVERAGE_QUICK_TARGETS ?= boundary_all test_all coremark_sim coe_loop_lina
+COVERAGE_QUICK_COREMARK_PROFILE ?= $(COREMARK_PROFILE)
+COVERAGE_QUICK_COREMARK_TARGET ?= coremark_opt_sim_$(COVERAGE_QUICK_COREMARK_PROFILE)
+COVERAGE_QUICK_TARGETS ?= boundary_all test_all $(COVERAGE_QUICK_COREMARK_TARGET) coe_loop_lina
 VERIF_COVERAGE_QUICK_SUMMARY ?= $(VERIF_COVERAGE_DIR)/coverage_quick_summary.log
 COVERAGE_CLOSURE_DIR ?= $(VERIF_COVERAGE_DIR)/closure
 COVERAGE_CLOSURE_DATA ?= $(COVERAGE_CLOSURE_DIR)/data/boundary_coverage_closure_edges.dat
@@ -320,7 +329,7 @@ endif
 .PHONY: coremark coremark_sim coremark_run coremark_result coremark-rebuild coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map coremark_opt_all coremark_opt_build_all coremark_opt_sim_all coremark_opt_report coremark_opt_clean $(COREMARK_OPT_BUILD_TARGETS) $(COREMARK_OPT_SIM_TARGETS) sort_app sort_all sort_sim_all sort_report sort_app_sim sort_app-rebuild sort_app-clean sort_opt_all sort_opt_build_all sort_opt_sim_all sort_opt_report sort_opt_clean $(SORT_OPT_BUILD_TARGETS) $(SORT_OPT_SIM_TARGETS) boundary_app boundary_all boundary_sim_all boundary_report boundary_app-rebuild boundary_app-clean boundary_opt_all boundary_opt_build_all boundary_opt_sim_all boundary_opt_report boundary_opt_clean $(BOUNDARY_OPT_BUILD_TARGETS) $(BOUNDARY_OPT_SIM_TARGETS) coe_m3_force coe_loop2_gen coe_loop5 coe_loop5_gen coe_loop_lina coe_loop_lina_gen loop_lina coe_MFlina coe_MFlina_gen coe_mflina coe_mflina_gen rtthread rtthread-build rtthread-clean rtthread-coremark rtthread-coremark-build rtthread-coremark-build-all rtthread-coremark-sim rtthread-coremark-sim-all rtthread-coremark-report rtthread-coremark-compare rtthread-coremark-clean rtthread-utest rtthread-utest-build rtthread-utest-sim rtthread-utest-report rtthread-utest-clean $(RTTHREAD_COREMARK_PROFILE_BUILD_TARGETS) $(RTTHREAD_COREMARK_PROFILE_SIM_TARGETS)
 .PHONY: riscv_dv_venv riscv_dv_model riscv_dv_prepare riscv_dv_run riscv_dv_random riscv_dv_random_status riscv_dv_regression riscv_dv_count riscv_dv_repro riscv_dv_estimate riscv_dv_stop riscv_dv_coverage_report riscv_dv_cleanup riscv_dv_distclean
 .PHONY: syn synf syn225 syn240 syn250 synf-board syn-extreme syn-lowmem-synth syn-lowmem-impl syn-venv syn-prep syn-stage-xpr syn-stage-memory syn-reuse-stage-check syn-vivado syn-analyze syn-clean
-.PHONY: rtl-quickcheck rtl-strict rtl-xml rtl-structure rtl-vivado-compare verilator-strict verilator-xml slang-ast
+.PHONY: rtl-quickcheck rtl-strict rtl-xml rtl-structure rtl-vivado-compare rtl-vivado-archive verilator-strict verilator-xml slang-ast
 .PHONY: yosys-slang yosys-slang-gate yosys-slang-baseline yosys-slang-quick vivado-ooc vivado-ooc-synth vivado-ooc-issue
 
 .SECONDEXPANSION:
@@ -641,7 +650,7 @@ coverage_quick: coverage_clean
 			case "$$target" in \
 				boundary_all) pattern='^boundary(-opt)?/'; minimum=$(COVERAGE_QUICK_BOUNDARY_MIN) ;; \
 				test_all) pattern='^rv32'; minimum=$(COVERAGE_QUICK_ISA_MIN) ;; \
-				coremark_sim) pattern='^coremark$$'; minimum=$(COVERAGE_QUICK_COREMARK_MIN) ;; \
+				$(COVERAGE_QUICK_COREMARK_TARGET)) pattern='^coremark-opt/$(COVERAGE_QUICK_COREMARK_PROFILE)$$'; minimum=$(COVERAGE_QUICK_COREMARK_MIN) ;; \
 				coe_loop_lina) pattern='^coe_loop_lina$$'; minimum=$(COVERAGE_QUICK_COE_MIN) ;; \
 				*) pattern='a^' ;; \
 			esac; \
@@ -650,18 +659,41 @@ coverage_quick: coverage_clean
 			case "$$target" in \
 				boundary_all) minimum=$(COVERAGE_QUICK_BOUNDARY_MIN) ;; \
 				test_all) minimum=$(COVERAGE_QUICK_ISA_MIN) ;; \
-				coremark_sim) minimum=$(COVERAGE_QUICK_COREMARK_MIN) ;; \
+				$(COVERAGE_QUICK_COREMARK_TARGET)) minimum=$(COVERAGE_QUICK_COREMARK_MIN) ;; \
 				coe_loop_lina) minimum=$(COVERAGE_QUICK_COE_MIN) ;; \
 			esac; \
 		fi; \
 		budget=$$(( (measured * $(COVERAGE_QUICK_TICKS_PER_CYCLE) * (100 + $(COVERAGE_QUICK_MARGIN_PERCENT)) + 99) / 100 + $(COVERAGE_QUICK_TIMEOUT_PAD) )); \
 		if [ "$$budget" -lt "$$minimum" ]; then budget=$$minimum; fi; \
 		echo "[COVERAGE QUICK] RUN  $$target timeout=$$budget measured_cycles=$$measured" | tee -a "$(VERIF_COVERAGE_QUICK_SUMMARY)"; \
-		if $(MAKE) --no-print-directory "$$target" VERILATOR_COVERAGE=1 VERILATOR_TRACE=0 \
+		prepare_ok=1; \
+		if [ "$$target" = "$(COVERAGE_QUICK_COREMARK_TARGET)" ]; then \
+			if ! $(MAKE) --no-print-directory "coremark_opt_build_$(COVERAGE_QUICK_COREMARK_PROFILE)"; then \
+				prepare_ok=0; \
+			else \
+				build_state=$$(sed -n 's/^STATE=\([^ ]*\).*/\1/p' \
+					"$(COREMARK_OPT_ROOT)/$(COVERAGE_QUICK_COREMARK_PROFILE)/build.status"); \
+				case "$$build_state" in \
+					READY|READY_EXPANDED) \
+						$(MAKE) --no-print-directory app_opt_comp_expanded_if_needed \
+							APP_OPT_STATUS_ROOTS="$(COREMARK_OPT_ROOT)/$(COVERAGE_QUICK_COREMARK_PROFILE)" \
+							VERILATOR_COVERAGE=1 VERILATOR_TRACE=0 || prepare_ok=0 ;; \
+					*) echo "[COVERAGE QUICK] Invalid $(COVERAGE_QUICK_COREMARK_PROFILE) build state: $${build_state:-MISSING}"; prepare_ok=0 ;; \
+				esac; \
+			fi; \
+		fi; \
+		target_result=FAIL; \
+		if [ "$$prepare_ok" -eq 1 ] && $(MAKE) --no-print-directory "$$target" VERILATOR_COVERAGE=1 VERILATOR_TRACE=0 \
 			SIM_COMPARE_TIMEOUT="$$budget" \
 			BOUNDARY_SIM_TIMEOUT="$$budget" \
 			COREMARK_SIM_TIMEOUT="$$budget" \
-			COE_SIM_TIMEOUT="$$budget"; then \
+			COREMARK_OPT_TIMEOUT_$(COVERAGE_QUICK_COREMARK_PROFILE)="$$budget" \
+			COE_SIM_TIMEOUT="$$budget"; then target_result=PASS; fi; \
+		if [ "$$target" = "$(COVERAGE_QUICK_COREMARK_TARGET)" ] && \
+			! grep -q '\[PASS\]' "$(COREMARK_OPT_RESULT_DIR)/$(COVERAGE_QUICK_COREMARK_PROFILE).status" 2>/dev/null; then \
+			target_result=FAIL; \
+		fi; \
+		if [ "$$target_result" = PASS ]; then \
 			echo "[COVERAGE QUICK] PASS $$target" | tee -a "$(VERIF_COVERAGE_QUICK_SUMMARY)"; \
 		else \
 			echo "[COVERAGE QUICK] FAIL $$target" | tee -a "$(VERIF_COVERAGE_QUICK_SUMMARY)"; failed=1; \
@@ -1099,6 +1131,7 @@ rtl-xml: $(RTL_QC_FLIST)
 rtl-structure: rtl-xml
 	$(PYTHON) "$(SYN_DIR)/analyze_rtl_structure.py" \
 		--input "$(RTL_QC_TREE_JSON)" --output "$(RTL_QC_STRUCTURE_JSON)" --top "$(RTL_QC_TOP)" \
+		--source-metadata "$(RTL_QC_METADATA)" \
 		--target-period-ns "$(RTL_QC_TARGET_PERIOD_NS)" \
 		--timing-possible-depth "$(RTL_QC_TIMING_POSSIBLE_DEPTH)" \
 		--timing-definite-depth "$(RTL_QC_TIMING_DEFINITE_DEPTH)" \
@@ -1115,8 +1148,23 @@ rtl-vivado-compare: rtl-structure
 		--utilization "$(RTL_QC_VIVADO_UTILIZATION)" \
 		--timing "$(RTL_QC_VIVADO_TIMING)" \
 		--timing "$(RTL_QC_VIVADO_POST_ROUTE_TIMING)" \
+		$(if $(wildcard $(RTL_QC_VIVADO_TIMING_PATHS_CSV)),--timing-csv "$(RTL_QC_VIVADO_TIMING_PATHS_CSV)",) \
+		--route-dominated-fraction "$(RTL_QC_ROUTE_DOMINATED_FRACTION)" \
+		--history-root "$(RTL_QC_CALIBRATION_HISTORY)" \
 		--output "$(RTL_QC_VIVADO_COMPARE_JSON)" \
 		--summary-output "$(RTL_QC_RELIABILITY_SUMMARY)"
+
+rtl-vivado-archive: rtl-vivado-compare
+	$(PYTHON) "$(RTL_QC_ARCHIVE_SCRIPT)" \
+		--repo-root "$(PROJECT_ROOT)" \
+		--build-root "$(BUILD_DIR)" \
+		--archive-dir "$(RTL_QC_CALIBRATION_DIR)" \
+		--reports "$(RTL_QC_VIVADO_REPORT_DIR)" \
+		--structure "$(RTL_QC_STRUCTURE_JSON)" \
+		--source-metadata "$(RTL_QC_METADATA)" \
+		--filelist "$(RTL_QC_FLIST)" \
+		--comparison "$(RTL_QC_VIVADO_COMPARE_JSON)" \
+		--summary "$(RTL_QC_RELIABILITY_SUMMARY)"
 
 verilator-strict: rtl-strict
 verilator-xml: rtl-xml
@@ -1255,6 +1303,11 @@ COREMARK_SW_MAKE_ARGS = \
 		RISCV_PREFIX=$(RISCV_PREFIX) \
 		ARCH=rv32im_zicsr_zifencei_zba_zbb_zbc_zbkb_zbkx_zbs \
 		ABI=$(ABI)
+COREMARK_SW_PROFILE_ARGS = \
+		BSP_LINKER_SCRIPT="$(COREMARK_LINKER)" \
+		COREMARK_EXTRA_CFLAGS="$(COREMARK_BSP_CFLAGS)" \
+		COREMARK_APP_ONLY_CFLAGS="$(COREMARK_APP_CFLAGS)" \
+		COREMARK_FLAGS_STR="$(COREMARK_PROFILE)"
 SORT_APP_SW_MAKE_ARGS = \
 		PROJECT_ROOT=$(PROJECT_ROOT) \
 		RISCV_PREFIX=$(RISCV_PREFIX) \
@@ -1267,11 +1320,11 @@ COREMARK_SIM_COMPARE ?= none
 COMPARE_TRACE_DEFINES = $(if $(filter none,$(SIM_COMPARE)),,$(if $(findstring +commit_trace,$(COMPARE_SIM_EXTRA_DEFINES)),,+commit_trace))
 COMPARE_SIM_DEFINES = $(strip $(COMPARE_SIM_EXTRA_DEFINES) $(COMPARE_TRACE_DEFINES))
 
-coremark:
-	@$(MAKE) -C sw coremark $(COREMARK_SW_MAKE_ARGS)
+coremark: $(COREMARK_LINKER)
+	@$(MAKE) -C sw coremark-clean-all $(COREMARK_SW_MAKE_ARGS) $(COREMARK_SW_PROFILE_ARGS)
+	@$(MAKE) -C sw coremark $(COREMARK_SW_MAKE_ARGS) $(COREMARK_SW_PROFILE_ARGS)
 
-coremark-rebuild:
-	@$(MAKE) -C sw coremark-rebuild $(COREMARK_SW_MAKE_ARGS)
+coremark-rebuild: coremark
 
 rtthread:
 	@$(MAKE) --no-print-directory -C sw rtthread
@@ -1333,7 +1386,10 @@ rtthread-coremark-sim-$(1):
 endef
 $(foreach profile,$(RTTHREAD_COREMARK_PROFILES),$(eval $(call RTTHREAD_COREMARK_PROFILE_template,$(profile))))
 
-coremark_sim: coremark comp
+coremark_sim: coremark
+	@$(MAKE) comp VERILATOR_COVERAGE=$(VERILATOR_COVERAGE) VERILATOR_TRACE=0 \
+		OBJ_DIR="$(COREMARK_SIM_OBJ_DIR)" LOG_DIR="$(COREMARK_SIM_LOG_DIR)" \
+		ITCM_ADDR_WIDTH_OVERRIDE=$(COREMARK_SIM_ITCM_ADDR_WIDTH)
 	@set +e; \
 	rm -f $(COREMARK_RESULT_LOG); \
 	$(MAKE) sim_compare \
@@ -1342,7 +1398,10 @@ coremark_sim: coremark comp
 		COMPARE_ITCM=$(BUILD_DIR)/app/coremark/coremark.itcm \
 		COMPARE_DTCM=$(BUILD_DIR)/app/coremark/coremark.dtcm \
 		SIM_COMPARE=$(COREMARK_SIM_COMPARE) \
-		COMPARE_SIM_EXTRA_DEFINES="+cpp_timeout=$(COREMARK_SIM_TIMEOUT) +sv_timeout=$(COREMARK_SIM_TIMEOUT)"; \
+		COMPARE_SIM_EXTRA_DEFINES="+cpp_timeout=$(COREMARK_SIM_TIMEOUT) +sv_timeout=$(COREMARK_SIM_TIMEOUT)" \
+		VERILATOR_COVERAGE=$(VERILATOR_COVERAGE) \
+		OBJ_DIR="$(COREMARK_SIM_OBJ_DIR)" LOG_DIR="$(COREMARK_SIM_LOG_DIR)" \
+		ITCM_ADDR_WIDTH_OVERRIDE=$(COREMARK_SIM_ITCM_ADDR_WIDTH); \
 	rc=$$?; \
 	$(MAKE) --no-print-directory coremark_result; \
 	exit $$rc

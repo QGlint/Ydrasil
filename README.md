@@ -161,7 +161,9 @@ perl verif/tools/coe_to_mem.pl --binary input.coe output.bin
 
 长期回归目标由 `REGRESSION_TARGETS` 控制，默认包含完整 sort 与优化矩阵，
 可继续追加随机指令测试目标。完整 sort 不再属于 `coverage_all`，
-`coverage_quick` 也保持原有快速套件。
+`coverage_quick` 使用 `O3_app_unroll` CoreMark 替代基础 `coremark_sim`，并在该镜像超出
+基础 ITCM 时自动使用 64 KiB 的 coverage 仿真模型。
+独立运行 `coremark_sim` 时也使用相同的 `O3_app_unroll` 软件配置和 64 KiB 仿真 ITCM。
 
 无 GUI 跑 Vivado 综合、实现到 route，并生成时序分析：
 
