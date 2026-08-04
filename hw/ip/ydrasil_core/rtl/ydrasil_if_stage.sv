@@ -348,19 +348,33 @@ import ydrasil_pkg::*;
     wire [1:0] read_pop_count = (!stall_if_i && fetchq_valid0) ?
         ((consume_two_i && fetchq_valid1) ? 2'd2 : 2'd1) : 2'd0;
     wire mem_resp_valid = !flush_fetch && mem_req_valid_q;
-    wire predict_redirect_resp = mem_resp_valid &&
-        (bp_predict_taken_i || (mem_req_two_q && bp_predict1_taken_i));
+    wire [31:0] sequential_next_pc =
+        mem_req_pc_q + (mem_req_two_q ? 32'd8 : 32'd4);
+    wire lane1_pred_taken = mem_req_two_q && bp_predict1_taken_i;
+    wire bram_pred_taken_any = bp_predict_taken_i || lane1_pred_taken;
+    wire seq_matches_launch = sequential_next_pc == mem_req_next_pc_q;
+    // Keep target selection out of the control path to the next request.
+    // Each candidate compares in parallel, and only the one-bit result is
+    // selected using the established lane0-over-lane1 priority.
     wire [31:0] predict_next_pc = bp_predict_taken_i ? bp_predict_target_i :
-        ((mem_req_two_q && bp_predict1_taken_i) ? bp_predict1_target_i :
-         (mem_req_pc_q + (mem_req_two_q ? 32'd8 : 32'd4)));
-    wire predict_correction_resp = mem_resp_valid &&
-        (predict_next_pc != mem_req_next_pc_q);
+        (lane1_pred_taken ? bp_predict1_target_i : sequential_next_pc);
+    (* keep = "true" *) wire lane0_target_mismatch =
+        bp_predict_target_i != mem_req_next_pc_q;
+    (* keep = "true" *) wire lane1_target_mismatch =
+        bp_predict1_target_i != mem_req_next_pc_q;
+    (* keep = "true" *) wire seq_target_mismatch =
+        sequential_next_pc != mem_req_next_pc_q;
+    (* keep = "true" *) wire bram_next_pc_mismatch = bp_predict_taken_i ?
+        lane0_target_mismatch :
+        (lane1_pred_taken ? lane1_target_mismatch : seq_target_mismatch);
+    wire predict_redirect_resp = mem_resp_valid && bram_pred_taken_any;
+    wire predict_correction_resp = mem_resp_valid && bram_next_pc_mismatch;
 	// The registered L0 decision, rather than the returning BRAM data, releases
 	// the next fetch.  A stale entry kills that speculative request below and
 	// retains the existing one-cycle correction through pending_redirect_target_q.
 	wire target_ff_hit = mem_resp_valid && mem_req_target_ff_hit_q;
-	wire target_ff_correction_resp = target_ff_hit &&
-		predict_correction_resp;
+    wire target_ff_correction_resp = target_ff_hit &&
+        bram_next_pc_mismatch;
     wire [1:0] push_count = mem_resp_valid ?
         ((bp_predict_taken_i || !mem_req_two_q) ? 2'd1 : 2'd2) : 2'd0;
     wire [1:0] read_push_count = mem_req_valid_q ?
@@ -370,8 +384,11 @@ import ydrasil_pkg::*;
         (mem_req_valid_q ? (mem_req_two_q ? RESERVED_WIDTH'(2) :
          RESERVED_WIDTH'(1)) : '0);
     wire pair_capacity = reserved_count <= RESERVED_WIDTH'(FETCHQ_DEPTH - 2);
-    wire fetch_issue = !flush_fetch && !bp_invalidate_i && pair_capacity && (target_ff_hit ||
-			 (!predict_correction_resp && !predict_redirect_resp));
+    wire bram_response_allows_issue = !mem_resp_valid ||
+        mem_req_target_ff_hit_q ||
+        (!bram_pred_taken_any && seq_matches_launch);
+    wire fetch_issue = !flush_fetch && !bp_invalidate_i && pair_capacity &&
+        bram_response_allows_issue;
 
     wire [131:0] fetchq_push_payload0 = {
         mem_req_pc_q,

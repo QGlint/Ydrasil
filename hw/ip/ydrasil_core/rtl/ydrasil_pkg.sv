@@ -324,7 +324,6 @@ package ydrasil_pkg;
 		producer_id_t                 producer_id;
 		logic [REGS_ADDR_WIDTH-1:0]   arch_addr;
 		ydrasil_result_class_t        result_class;
-		logic [REGS_DATA_WIDTH-1:0]   predicted_data;
 	} ydrasil_reservation_pkt_t;
 
 	typedef struct packed {

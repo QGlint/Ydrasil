@@ -188,6 +188,17 @@ proc remove_legacy_generated_ips {} {
                 }
             }
         }
+        # Removing an XCI from sources does not remove its old OOC run from
+        # a copied project.  launch_runs then tries to rebuild the locked
+        # legacy IP before it can place the RTL/XPM SoC.  The new top has no
+        # dependency on these runs, so drop them with the stale IP object.
+        set legacy_run [get_runs -quiet "${ip_name}_synth_1"]
+        if {[llength $legacy_run] > 0} {
+            puts "Removing unused generated IP run from the new SoC project: ${ip_name}_synth_1"
+            if {[catch {delete_runs $legacy_run} msg]} {
+                puts "warning: could not remove ${ip_name}_synth_1: $msg"
+            }
+        }
     }
 }
 

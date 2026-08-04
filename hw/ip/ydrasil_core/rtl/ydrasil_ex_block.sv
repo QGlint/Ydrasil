@@ -76,6 +76,7 @@ import ydrasil_pkg::*;
     output wire [REGS_ADDR_WIDTH-1:0]      alu_rf_waddr_rd_o,
     output producer_id_t                   alu_producer_id_o,
     output ydrasil_gpr_fwd_pkt_t           completion_o,
+    output wire [REGS_DATA_WIDTH-1:0]      early_bypass_data_o,
 
     output wire                            mul_issue_o,
     output wire [REGS_ADDR_WIDTH-1:0]      mul_issue_waddr_o,
@@ -375,6 +376,23 @@ import ydrasil_pkg::*;
         ({32{operator_i[OP_ALU_ADD] | operator_i[OP_ALU_AUIPC]}} & fast_add_result);
     wire [31:0] fast_result =
         fast_alu_op ? fast_alu_result : fast_add_result;
+    // This is intentionally a restricted result cone. Issue uses it only
+    // after recording a matching early-wakeup token, so slow bitmanip logic
+    // never reaches the next instruction's operand capture path.
+    wire early_lite_bitmanip_op = op_bitmanip &
+        (operator_i[OP_B_SH1ADD] | operator_i[OP_B_SH2ADD] |
+         operator_i[OP_B_SH3ADD] | operator_i[OP_B_PACK] |
+         operator_i[OP_B_PACKH]  | operator_i[OP_B_REV8] |
+         operator_i[OP_B_SEXT_B] | operator_i[OP_B_SEXT_H] |
+         operator_i[OP_B_ZEXT_H]);
+    wire [31:0] early_lite_bitmanip_result =
+        fast_b_shadd_result | fast_b_pack_result | fast_b_extend_result;
+    wire [31:0] early_plain_alu_result = fast_alu_op ?
+        fast_alu_result : alu_result;
+    assign early_bypass_data_o = early_lite_bitmanip_op ?
+        early_lite_bitmanip_result :
+        operator_type_i[OPERATOR_TYPE_ALU] ? early_plain_alu_result :
+        operator_type_i[OPERATOR_TYPE_BJP] ? fast_add_result : '0;
 
     ydrasil_alu #(
         .DATAWIDTH(DATA_WIDTH)
