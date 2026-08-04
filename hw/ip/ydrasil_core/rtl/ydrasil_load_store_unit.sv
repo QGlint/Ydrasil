@@ -47,10 +47,25 @@ import ydrasil_pkg::*;
     reg [QUEUE_COUNT_WIDTH-1:0] issue_credit_q;
     reg [$clog2(QUEUE_DEPTH)-1:0] queue_head_q;
     reg [$clog2(QUEUE_DEPTH)-1:0] queue_tail_q;
-    ydrasil_lsu_req_pkt_t store_buf_q [0:STORE_BUFFER_DEPTH-1];
+    // Only the fields below survive after a store has left the request queue.
+    // Keeping the full LSU request packet in this tiny FIFO turns every
+    // forwarding lookup into a wide four-way table, even though most fields
+    // are dead.  Store entries are maintained in age order (entry 0 is the
+    // drain head), so the forwarding CAM can use direct registers rather than
+    // pointer-indexed array reads.
+    typedef struct packed {
+        logic                         valid;
+        logic [BUS_ADDR_WIDTH-1:0]    addr;
+        logic [BUS_DATA_WIDTH-1:0]    store_data;
+        logic [3:0]                   store_mask;
+        logic                         store_data_valid;
+    } store_buf_entry_t;
+    store_buf_entry_t store_buf0_q;
+    store_buf_entry_t store_buf1_q;
+    store_buf_entry_t store_buf2_q;
+    store_buf_entry_t store_buf3_q;
+    store_buf_entry_t store_enqueue_pkt;
     reg [STORE_COUNT_WIDTH-1:0] store_buf_count_q;
-    reg [$clog2(STORE_BUFFER_DEPTH)-1:0] store_head_q;
-    reg [$clog2(STORE_BUFFER_DEPTH)-1:0] store_tail_q;
 
     wire queue_empty = queue_count_q == '0;
     wire queue_full = queue_count_q == QUEUE_COUNT_WIDTH'(QUEUE_DEPTH);
@@ -59,8 +74,8 @@ import ydrasil_pkg::*;
         store_buf_count_q == STORE_COUNT_WIDTH'(STORE_BUFFER_DEPTH);
 
     wire store_head_data_valid = !store_buf_empty &&
-        store_buf_q[store_head_q].store_data_valid;
-    wire [31:0] store_head_wdata = store_buf_q[store_head_q].store_data;
+        store_buf0_q.store_data_valid;
+    wire [31:0] store_head_wdata = store_buf0_q.store_data;
     wire store_buf_dequeue = store_head_data_valid;
 
 	ydrasil_lsu_req_pkt_t active_pkt;
@@ -68,81 +83,76 @@ import ydrasil_pkg::*;
 
     wire active_from_queue = !queue_empty;
     wire active_valid = active_pkt.valid;
-    wire active_dtcm_load = active_valid && active_pkt.addr_is_dtcm &&
-        active_pkt.is_load;
-    wire active_dtcm_store = active_valid && active_pkt.addr_is_dtcm &&
-        active_pkt.is_store;
-    wire active_mmio = active_valid && !active_pkt.addr_is_dtcm;
+    wire active_is_load = active_pkt.is_load;
+    wire active_is_store = active_pkt.is_store;
+    wire [OP_LSU_INFO_WIDTH-1:0] active_op = active_pkt.op;
+    wire [BUS_ADDR_WIDTH-1:0] active_addr = active_pkt.addr;
+    wire active_addr_is_dtcm = active_pkt.addr_is_dtcm;
+    wire [REGS_ADDR_WIDTH-1:0] active_rd_addr = active_pkt.rd_addr;
+    wire [PRODUCER_ID_WIDTH-1:0] active_producer_id = active_pkt.producer_id;
+    wire active_producer_tracked = active_pkt.producer_tracked;
+    wire [BUS_DATA_WIDTH-1:0] active_store_data = active_pkt.store_data;
+    wire [3:0] active_store_mask = active_pkt.store_mask;
+    wire active_store_data_valid = active_pkt.store_data_valid;
+    wire active_fp_load = active_pkt.fp_load;
+    wire [REGS_ADDR_WIDTH-1:0] active_fp_rd_addr = active_pkt.fp_rd_addr;
+    wire active_dtcm_load = active_valid && active_addr_is_dtcm && active_is_load;
+    wire active_dtcm_store = active_valid && active_addr_is_dtcm && active_is_store;
+    wire active_mmio = active_valid && !active_addr_is_dtcm;
 
-    reg [3:0] load_forward_mask;
-    reg [31:0] load_forward_data;
-    integer byte_scan_fwd;
+    // Resolve forwarding by byte-mask priority instead of a procedural
+    // byte-by-byte loop.  The select masks are mutually exclusive, allowing
+    // the four data lanes to be combined with a shallow OR tree.
     integer byte_scan_load;
-    // The store buffer is fixed at four entries.  Keep the age walk in the
-    // natural two-bit index domain instead of synthesizing an integer modulo
-    // and a variable loop index for every byte of every entry.
-    wire [1:0] store_slot0 = store_head_q;
-    wire [1:0] store_slot1 = store_head_q + 2'd1;
-    wire [1:0] store_slot2 = store_head_q + 2'd2;
-    wire [1:0] store_slot3 = store_head_q + 2'd3;
     wire store_hit0 = (store_buf_count_q > STORE_COUNT_WIDTH'(0)) &&
-        store_buf_q[store_slot0].valid &&
-        (store_buf_q[store_slot0].addr[BUS_ADDR_WIDTH-1:2] ==
-         active_pkt.addr[BUS_ADDR_WIDTH-1:2]);
+        store_buf0_q.valid &&
+        (store_buf0_q.addr[BUS_ADDR_WIDTH-1:2] ==
+         active_addr[BUS_ADDR_WIDTH-1:2]);
     wire store_hit1 = (store_buf_count_q > STORE_COUNT_WIDTH'(1)) &&
-        store_buf_q[store_slot1].valid &&
-        (store_buf_q[store_slot1].addr[BUS_ADDR_WIDTH-1:2] ==
-         active_pkt.addr[BUS_ADDR_WIDTH-1:2]);
+        store_buf1_q.valid &&
+        (store_buf1_q.addr[BUS_ADDR_WIDTH-1:2] ==
+         active_addr[BUS_ADDR_WIDTH-1:2]);
     wire store_hit2 = (store_buf_count_q > STORE_COUNT_WIDTH'(2)) &&
-        store_buf_q[store_slot2].valid &&
-        (store_buf_q[store_slot2].addr[BUS_ADDR_WIDTH-1:2] ==
-         active_pkt.addr[BUS_ADDR_WIDTH-1:2]);
+        store_buf2_q.valid &&
+        (store_buf2_q.addr[BUS_ADDR_WIDTH-1:2] ==
+         active_addr[BUS_ADDR_WIDTH-1:2]);
     wire store_hit3 = (store_buf_count_q > STORE_COUNT_WIDTH'(3)) &&
-        store_buf_q[store_slot3].valid &&
-        (store_buf_q[store_slot3].addr[BUS_ADDR_WIDTH-1:2] ==
-         active_pkt.addr[BUS_ADDR_WIDTH-1:2]);
-    always_comb begin
-        load_forward_mask = '0;
-        load_forward_data = '0;
-        // Walk oldest to newest so a younger partial store overwrites only
-        // the bytes it owns, matching the previous associative scan semantics.
-        if (store_hit0) begin
-            for (byte_scan_fwd = 0; byte_scan_fwd < 4; byte_scan_fwd++) begin
-                if (store_buf_q[store_slot0].store_mask[byte_scan_fwd]) begin
-                    load_forward_mask[byte_scan_fwd] = 1'b1;
-                    load_forward_data[byte_scan_fwd*8 +: 8] =
-                        store_buf_q[store_slot0].store_data[byte_scan_fwd*8 +: 8];
-                end
-            end
-        end
-        if (store_hit1) begin
-            for (byte_scan_fwd = 0; byte_scan_fwd < 4; byte_scan_fwd++) begin
-                if (store_buf_q[store_slot1].store_mask[byte_scan_fwd]) begin
-                    load_forward_mask[byte_scan_fwd] = 1'b1;
-                    load_forward_data[byte_scan_fwd*8 +: 8] =
-                        store_buf_q[store_slot1].store_data[byte_scan_fwd*8 +: 8];
-                end
-            end
-        end
-        if (store_hit2) begin
-            for (byte_scan_fwd = 0; byte_scan_fwd < 4; byte_scan_fwd++) begin
-                if (store_buf_q[store_slot2].store_mask[byte_scan_fwd]) begin
-                    load_forward_mask[byte_scan_fwd] = 1'b1;
-                    load_forward_data[byte_scan_fwd*8 +: 8] =
-                        store_buf_q[store_slot2].store_data[byte_scan_fwd*8 +: 8];
-                end
-            end
-        end
-        if (store_hit3) begin
-            for (byte_scan_fwd = 0; byte_scan_fwd < 4; byte_scan_fwd++) begin
-                if (store_buf_q[store_slot3].store_mask[byte_scan_fwd]) begin
-                    load_forward_mask[byte_scan_fwd] = 1'b1;
-                    load_forward_data[byte_scan_fwd*8 +: 8] =
-                        store_buf_q[store_slot3].store_data[byte_scan_fwd*8 +: 8];
-                end
-            end
-        end
-    end
+        store_buf3_q.valid &&
+        (store_buf3_q.addr[BUS_ADDR_WIDTH-1:2] ==
+         active_addr[BUS_ADDR_WIDTH-1:2]);
+    wire [3:0] forward_mask0 = {4{store_hit0}} & store_buf0_q.store_mask;
+    wire [3:0] forward_mask1 = {4{store_hit1}} & store_buf1_q.store_mask;
+    wire [3:0] forward_mask2 = {4{store_hit2}} & store_buf2_q.store_mask;
+    wire [3:0] forward_mask3 = {4{store_hit3}} & store_buf3_q.store_mask;
+    wire [3:0] forward_select3 = forward_mask3;
+    wire [3:0] forward_select2 = forward_mask2 & ~forward_mask3;
+    wire [3:0] forward_select1 = forward_mask1 &
+        ~(forward_mask2 | forward_mask3);
+    wire [3:0] forward_select0 = forward_mask0 &
+        ~(forward_mask1 | forward_mask2 | forward_mask3);
+    wire [31:0] forward_data_mask0 = {
+        {8{forward_select0[3]}}, {8{forward_select0[2]}},
+        {8{forward_select0[1]}}, {8{forward_select0[0]}}
+    };
+    wire [31:0] forward_data_mask1 = {
+        {8{forward_select1[3]}}, {8{forward_select1[2]}},
+        {8{forward_select1[1]}}, {8{forward_select1[0]}}
+    };
+    wire [31:0] forward_data_mask2 = {
+        {8{forward_select2[3]}}, {8{forward_select2[2]}},
+        {8{forward_select2[1]}}, {8{forward_select2[0]}}
+    };
+    wire [31:0] forward_data_mask3 = {
+        {8{forward_select3[3]}}, {8{forward_select3[2]}},
+        {8{forward_select3[1]}}, {8{forward_select3[0]}}
+    };
+    wire [3:0] load_forward_mask = forward_mask0 | forward_mask1 |
+        forward_mask2 | forward_mask3;
+    wire [31:0] load_forward_data =
+        (store_buf0_q.store_data & forward_data_mask0) |
+        (store_buf1_q.store_data & forward_data_mask1) |
+        (store_buf2_q.store_data & forward_data_mask2) |
+        (store_buf3_q.store_data & forward_data_mask3);
 
     reg mmio_req_valid_q;
     reg mmio_is_load_q;
@@ -188,9 +198,8 @@ import ydrasil_pkg::*;
     wire dtcm_store_fire = active_dtcm_store && store_buf_has_room;
     // MMIO observes all older buffered stores before it starts. Once launched,
     // younger DTCM requests can proceed independently while APB is busy.
-    wire active_store_data_valid = active_pkt.store_data_valid;
     wire mmio_fire = active_mmio && !mmio_busy && store_buf_empty &&
-        (!active_pkt.is_store || active_store_data_valid);
+        (!active_is_store || active_store_data_valid);
     wire active_fire = dtcm_load_fire || dtcm_store_fire || mmio_fire;
     wire input_direct_fire = active_fire && !active_from_queue;
     wire queue_dequeue = active_fire && active_from_queue;
@@ -229,12 +238,12 @@ import ydrasil_pkg::*;
     always_comb begin
         dtcm_req_o = '0;
         dtcm_req_o.load.valid = dtcm_load_fire;
-        dtcm_req_o.load.addr = active_pkt.addr;
+        dtcm_req_o.load.addr = active_addr;
         dtcm_req_o.store.valid = store_buf_dequeue;
         dtcm_req_o.store.write = store_buf_dequeue;
-        dtcm_req_o.store.addr = store_buf_q[store_head_q].addr;
+        dtcm_req_o.store.addr = store_buf0_q.addr;
         dtcm_req_o.store.wdata = store_head_wdata;
-        dtcm_req_o.store.wmask = store_buf_q[store_head_q].store_mask;
+        dtcm_req_o.store.wmask = store_buf0_q.store_mask;
     end
 
     assign mmio_req_o.valid = mmio_req_valid_q;
@@ -325,8 +334,19 @@ import ydrasil_pkg::*;
 		enqueue_pkt.valid = 1'b1;
 	end
 
-    integer queue_idx;
-    integer store_idx;
+	always_comb begin
+        store_enqueue_pkt = '0;
+        store_enqueue_pkt.valid = 1'b1;
+        store_enqueue_pkt.addr = active_addr;
+        store_enqueue_pkt.store_data = align_store_data(
+            active_op, active_addr[1:0], active_store_data);
+        store_enqueue_pkt.store_mask = active_store_mask;
+        // This is intentionally unconditional to retain the prior store
+        // buffer contract: a DTCM store becomes drainable in the next cycle.
+        store_enqueue_pkt.store_data_valid = 1'b1;
+    end
+
+	integer queue_idx;
 	always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             queue_count_q <= '0;
@@ -334,12 +354,12 @@ import ydrasil_pkg::*;
             queue_head_q <= '0;
             queue_tail_q <= '0;
             store_buf_count_q <= '0;
-            store_head_q <= '0;
-            store_tail_q <= '0;
             for (queue_idx = 0; queue_idx < QUEUE_DEPTH; queue_idx++)
                 queue_q[queue_idx] <= '0;
-            for (store_idx = 0; store_idx < STORE_BUFFER_DEPTH; store_idx++)
-                store_buf_q[store_idx] <= '0;
+            store_buf0_q <= '0;
+            store_buf1_q <= '0;
+            store_buf2_q <= '0;
+            store_buf3_q <= '0;
             load_s1_valid_q <= 1'b0;
             load_s1_rd_addr_q <= '0;
             load_s1_producer_id_q <= '0;
@@ -396,18 +416,48 @@ import ydrasil_pkg::*;
                 default: queue_count_q <= queue_count_q;
             endcase
 
-            if (store_buf_dequeue) begin
-                store_buf_q[store_head_q] <= '0;
-                store_head_q <= store_head_q + 1'b1;
-            end
-            if (store_buf_enqueue) begin
-                store_buf_q[store_tail_q] <= active_pkt;
-                store_buf_q[store_tail_q].valid <= 1'b1;
-                store_buf_q[store_tail_q].store_data <= align_store_data(
-                    active_pkt.op, active_pkt.addr[1:0], active_pkt.store_data);
-                store_buf_q[store_tail_q].store_data_valid <= 1'b1;
-                store_tail_q <= store_tail_q + 1'b1;
-            end
+            // The four entries are an age-ordered shift FIFO.  This removes
+            // the rotating head/tail lookup from both the DTCM drain and the
+            // load-forwarding CAM.  Entries outside store_buf_count_q are
+            // deliberately left as don't-care state; every consumer is
+            // count-gated and a later enqueue overwrites the corresponding
+            // tail slot.
+            unique case ({store_buf_enqueue, store_buf_dequeue})
+                2'b01: begin
+                    store_buf0_q <= store_buf1_q;
+                    store_buf1_q <= store_buf2_q;
+                    store_buf2_q <= store_buf3_q;
+                end
+                2'b10: begin
+                    unique case (store_buf_count_q)
+                        STORE_COUNT_WIDTH'(0): store_buf0_q <= store_enqueue_pkt;
+                        STORE_COUNT_WIDTH'(1): store_buf1_q <= store_enqueue_pkt;
+                        STORE_COUNT_WIDTH'(2): store_buf2_q <= store_enqueue_pkt;
+                        default: store_buf3_q <= store_enqueue_pkt;
+                    endcase
+                end
+                2'b11: begin
+                    unique case (store_buf_count_q)
+                        STORE_COUNT_WIDTH'(1): store_buf0_q <= store_enqueue_pkt;
+                        STORE_COUNT_WIDTH'(2): begin
+                            store_buf0_q <= store_buf1_q;
+                            store_buf1_q <= store_enqueue_pkt;
+                        end
+                        STORE_COUNT_WIDTH'(3): begin
+                            store_buf0_q <= store_buf1_q;
+                            store_buf1_q <= store_buf2_q;
+                            store_buf2_q <= store_enqueue_pkt;
+                        end
+                        default: begin
+                            store_buf0_q <= store_buf1_q;
+                            store_buf1_q <= store_buf2_q;
+                            store_buf2_q <= store_buf3_q;
+                            store_buf3_q <= store_enqueue_pkt;
+                        end
+                    endcase
+                end
+                default: begin end
+            endcase
             unique case ({store_buf_enqueue, store_buf_dequeue})
                 2'b10: store_buf_count_q <= store_buf_count_q + 1'b1;
                 2'b01: store_buf_count_q <= store_buf_count_q - 1'b1;
@@ -416,15 +466,15 @@ import ydrasil_pkg::*;
 
             load_s1_valid_q <= dtcm_load_fire;
             if (dtcm_load_fire) begin
-                load_s1_rd_addr_q <= active_pkt.rd_addr;
-                load_s1_producer_id_q <= active_pkt.producer_id;
-                load_s1_producer_tracked_q <= active_pkt.producer_tracked;
-                load_s1_op_q <= active_pkt.op;
-                load_s1_addr_index_q <= active_pkt.addr[1:0];
+                load_s1_rd_addr_q <= active_rd_addr;
+                load_s1_producer_id_q <= active_producer_id;
+                load_s1_producer_tracked_q <= active_producer_tracked;
+                load_s1_op_q <= active_op;
+                load_s1_addr_index_q <= active_addr[1:0];
                 load_s1_forward_mask_q <= load_forward_mask;
                 load_s1_forward_data_q <= load_forward_data;
-                load_s1_fp_load_q <= active_pkt.fp_load;
-                load_s1_fp_rd_addr_q <= active_pkt.fp_rd_addr;
+                load_s1_fp_load_q <= active_fp_load;
+                load_s1_fp_rd_addr_q <= active_fp_rd_addr;
             end
             if (mmio_wb_valid_q && !load_s1_valid_q)
                 mmio_wb_valid_q <= 1'b0;
@@ -442,18 +492,18 @@ import ydrasil_pkg::*;
             end
             if (mmio_fire) begin
                 mmio_req_valid_q <= 1'b1;
-                mmio_is_load_q <= active_pkt.is_load;
-                mmio_addr_q <= active_pkt.addr;
+                mmio_is_load_q <= active_is_load;
+                mmio_addr_q <= active_addr;
                 mmio_wdata_q <= align_store_data(
-                    active_pkt.op, active_pkt.addr[1:0], active_pkt.store_data);
-                mmio_wmask_q <= active_pkt.store_mask;
-                mmio_addr_index_q <= active_pkt.addr[1:0];
-                mmio_operator_lsu_q <= active_pkt.op;
-                mmio_rd_addr_q <= active_pkt.rd_addr;
-                mmio_producer_id_q <= active_pkt.producer_id;
-                mmio_producer_tracked_q <= active_pkt.producer_tracked;
-                mmio_fp_load_q <= active_pkt.fp_load;
-                mmio_fp_rd_addr_q <= active_pkt.fp_rd_addr;
+                    active_op, active_addr[1:0], active_store_data);
+                mmio_wmask_q <= active_store_mask;
+                mmio_addr_index_q <= active_addr[1:0];
+                mmio_operator_lsu_q <= active_op;
+                mmio_rd_addr_q <= active_rd_addr;
+                mmio_producer_id_q <= active_producer_id;
+                mmio_producer_tracked_q <= active_producer_tracked;
+                mmio_fp_load_q <= active_fp_load;
+                mmio_fp_rd_addr_q <= active_fp_rd_addr;
             end
 
 `ifndef SYNTHESIS
