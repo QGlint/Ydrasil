@@ -91,9 +91,12 @@ import ydrasil_pkg::*;
     input  wire [DATA_WIDTH-1:0]       fpr_rdata_rs2_i,
     input  wire [DATA_WIDTH-1:0]       fpr_rdata_rs3_i
 );
-    // These snapshots terminate the Issue grant control cone.  The raw
-    // producer/LSU signals only feed the D pins of these registers.
-    ydrasil_completion_bus_t completion_q;
+    // Completion state is committed into the producer file on the same edge
+    // that the global completion bus is observed.  Consumers therefore use
+    // the registered ROB result on the next Issue cycle; retaining a second
+    // copy here created a wide, high-fanout bypass cone with no earlier
+    // visibility.  The only zero-latency path is the tagged ALU reservation
+    // below, whose raw result is needed for the immediately following issue.
     reg lsu_idle_q;
     reg issue_at_rob_head_q;
     reg early_wakeup_valid_q [0:1];
@@ -135,62 +138,13 @@ import ydrasil_pkg::*;
     reg [OPERATOR_WIDTH-1:0] mul_in_operator_q;
     reg [OPERATOR_TYPE_WIDTH-1:0] mul_in_operator_type_q;
     ydrasil_dual_issue_pkt_t dual_in_q;
-    integer completion_idx;
-
-    function automatic logic completion_hit(
-        input ydrasil_source_desc_t src,
-        input integer lane
-    );
-        begin
-            completion_hit = src.used && (src.arch_addr != '0) &&
-                src.tag_valid && completion_q[lane].valid &&
-                completion_q[lane].producer_tracked &&
-                (completion_q[lane].addr == src.arch_addr) &&
-                (completion_q[lane].producer_id == src.producer_tag);
-        end
-    endfunction
-
-    function automatic logic typed_completion_hit(
-        input ydrasil_source_desc_t src
-    );
-        begin
-            unique case (src.producer_class)
-                RESULT_LSU: typed_completion_hit =
-                    completion_hit(src, COMPLETION_LSU);
-                RESULT_MDU: typed_completion_hit =
-                    completion_hit(src, COMPLETION_MUL);
-                default: typed_completion_hit =
-                    completion_hit(src, COMPLETION_ALU) ||
-                    completion_hit(src, COMPLETION_DUAL_ALU);
-            endcase
-        end
-    endfunction
-
-    function automatic [DATA_WIDTH-1:0] typed_completion_data(
-        input ydrasil_source_desc_t src
-    );
-        begin
-            unique case (src.producer_class)
-                RESULT_LSU:
-                    typed_completion_data = completion_q[COMPLETION_LSU].data;
-                RESULT_MDU:
-                    typed_completion_data = completion_q[COMPLETION_MUL].data;
-                default:
-                    typed_completion_data =
-                        completion_hit(src, COMPLETION_ALU) ?
-                        completion_q[COMPLETION_ALU].data :
-                        completion_q[COMPLETION_DUAL_ALU].data;
-            endcase
-        end
-    endfunction
-
     function automatic logic source_ready(
         input ydrasil_source_desc_t src,
         input ydrasil_rob_source_state_t state
     );
         begin
             source_ready = !src.used || (src.arch_addr == '0) ||
-                !state.live || state.done || typed_completion_hit(src) ||
+                !state.live || state.done ||
                 early_wakeup_hit(src) || dtcm_reservation_hit(src);
         end
     endfunction
@@ -204,9 +158,6 @@ import ydrasil_pkg::*;
             source_data = arf_data;
             if (src.used && (src.arch_addr != '0) && state.live)
                 source_data = state.result;
-            if (src.used && (src.arch_addr != '0) &&
-                typed_completion_hit(src))
-                source_data = typed_completion_data(src);
             // A fixed-latency ALU reservation carries the value alongside
             // its generation-tagged identity.  It is a data-only local
             // bypass; source_ready still requires the same reservation hit.
@@ -270,10 +221,8 @@ import ydrasil_pkg::*;
     );
         begin
             source_data_local_bypass = source_data(src, state, arf_data);
-            // Completion data is consumed from completion_q, which is the
-            // registered wakeup boundary. Fixed-latency ALU/BRU/bit results
-            // still use the tagged early reservation below; no raw global
-            // completion bus is allowed back into operand generation.
+            // Fixed-latency ALU/BRU/bit results use the tagged reservation;
+            // all other completions are read from the producer file above.
             if (dtcm_reservation_hit(src))
                 source_data_local_bypass = dtcm_reservation_i.predicted_data;
         end
@@ -578,9 +527,6 @@ import ydrasil_pkg::*;
 
     always_ff @(posedge clk) begin
         if (!rst_n || flush_id_i) begin
-            for (completion_idx = 0; completion_idx < COMPLETION_LANES;
-                 completion_idx = completion_idx + 1)
-                completion_q[completion_idx] <= '0;
             lsu_idle_q <= 1'b1;
             issue_at_rob_head_q <= 1'b0;
             early_wakeup_valid_q[0] <= 1'b0;
@@ -632,8 +578,6 @@ import ydrasil_pkg::*;
             mul_in_operator_type_q <= '0;
             dual_in_q <= '0;
         end else begin
-            // Only these FFs see the raw completion/status/head signals.
-            completion_q <= completion_bus_i;
             lsu_idle_q <= lsu_idle_i;
             issue_at_rob_head_q <= issue_at_rob_head_i;
 
@@ -808,8 +752,8 @@ import ydrasil_pkg::*;
     wire issue_valid_ff = issue_pkt_i.valid;
     wire [OPERATOR_TYPE_WIDTH-1:0] issue_operator_type_ff =
         issue_pkt_i.decode.operator_type;
-    wire rs1_completion_fwd = typed_completion_hit(issue_pkt_i.src0);
-    wire rs2_completion_fwd = typed_completion_hit(issue_pkt_i.src1);
+    wire rs1_completion_fwd = 1'b0;
+    wire rs2_completion_fwd = 1'b0;
     wire issue_plain_alu_op =
         issue_operator_type_ff[OPERATOR_TYPE_ALU] &&
         !issue_operator_type_ff[OPERATOR_TYPE_BITMANIP];
