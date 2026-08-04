@@ -286,6 +286,43 @@ proc assert_run_ok {run_name} {
     }
 }
 
+proc validate_io_constraints {} {
+    set missing_package_pin [list]
+    set missing_iostandard [list]
+    foreach port [get_ports -quiet *] {
+        set port_name [get_property NAME $port]
+        if {[get_property PACKAGE_PIN $port] eq ""} {
+            lappend missing_package_pin $port_name
+        }
+        set iostandard [get_property IOSTANDARD $port]
+        if {$iostandard eq "" || $iostandard eq "DEFAULT"} {
+            lappend missing_iostandard $port_name
+        }
+    }
+    if {[llength $missing_package_pin] > 0 ||
+        [llength $missing_iostandard] > 0} {
+        error "incomplete board constraints: missing PACKAGE_PIN={$missing_package_pin}; missing IOSTANDARD={$missing_iostandard}"
+    }
+    puts "Validated PACKAGE_PIN and IOSTANDARD on [llength [get_ports -quiet *]] top-level ports"
+}
+
+proc report_and_validate_drc {report_file} {
+    report_drc -file $report_file
+    set error_violations [list]
+    foreach violation [get_drc_violations -quiet] {
+        set violation_name [get_property NAME $violation]
+        set rule_name [lindex [split $violation_name "#"] 0]
+        set rule [get_drc_checks -quiet $rule_name]
+        if {[llength $rule] > 0 && [get_property SEVERITY $rule] eq "Error"} {
+            lappend error_violations $violation_name
+        }
+    }
+    if {[llength $error_violations] > 0} {
+        error "post-synthesis DRC errors: {$error_violations}; see $report_file"
+    }
+    puts "Post-synthesis DRC contains no Error-severity violations"
+}
+
 proc ensure_dir {dir_name} {
     file mkdir $dir_name
     return [file normalize $dir_name]
@@ -784,8 +821,10 @@ if {!$reuse_synth} {
 }
 assert_run_ok synth_1
 
+open_run synth_1 -name synth_1
+validate_io_constraints
+report_and_validate_drc [file join $report_dir synth_drc.rpt]
 if {$report_synth} {
-    open_run synth_1 -name synth_1
     report_if_possible "post-synthesis utilization" \
         "report_utilization -hierarchical -file [file join $report_dir synth_utilization_hier.rpt]"
     report_if_possible "post-synthesis timing summary" \
@@ -795,11 +834,9 @@ if {$report_synth} {
     report_cpu_freq_timing $report_dir $pll_freq_mhz
     report_if_possible "post-synthesis methodology" \
         "report_methodology -file [file join $report_dir synth_methodology.rpt]"
-    report_if_possible "post-synthesis DRC" \
-        "report_drc -file [file join $report_dir synth_drc.rpt]"
     write_checkpoint -force [file join $checkpoint_dir synth_1.dcp]
-    close_design
 }
+close_design
 
 if {$run_to eq "synth"} {
     close_project

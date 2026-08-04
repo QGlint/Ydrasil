@@ -1,2 +1,53 @@
-# The checked-in Vivado project defaults to the official board.
-source [file join [file dirname [info script]] official_gpio40.xdc]
+# Official digital-twin board constraints for ydrasil_soc.
+set_property PACKAGE_PIN AD12 [get_ports clk_in1_p]
+set_property PACKAGE_PIN AD11 [get_ports clk_in1_n]
+set_property IOSTANDARD DIFF_HSTL_II_18 [get_ports {clk_in1_p clk_in1_n}]
+create_clock -period 5.000 -name clk_in1_p [get_ports clk_in1_p]
+set_input_jitter [get_clocks clk_in1_p] 0.050
+
+set_property PACKAGE_PIN D18 [get_ports uart_rx]
+set_property PACKAGE_PIN D17 [get_ports uart_tx]
+set_property IOSTANDARD LVCMOS33 [get_ports {uart_rx uart_tx}]
+
+# GPIO1-10: UART1.
+set_property PACKAGE_PIN G17 [get_ports uart1_rx]
+set_property PACKAGE_PIN G18 [get_ports uart1_tx]
+set_property IOSTANDARD LVCMOS33 [get_ports {uart1_rx uart1_tx}]
+
+# GPIO11-20: SPI0.
+set_property PACKAGE_PIN C19 [get_ports spi_miso]
+set_property PACKAGE_PIN B19 [get_ports spi_sclk]
+set_property PACKAGE_PIN B18 [get_ports spi_mosi]
+set_property PACKAGE_PIN A18 [get_ports {spi_cs_n[0]}]
+set_property PACKAGE_PIN A20 [get_ports {spi_cs_n[1]}]
+set_property PACKAGE_PIN H21 [get_ports {spi_cs_n[2]}]
+set_property PACKAGE_PIN C20 [get_ports {spi_cs_n[3]}]
+set_property IOSTANDARD LVCMOS33 [get_ports {spi_miso spi_sclk spi_mosi spi_cs_n[0] spi_cs_n[1] spi_cs_n[2] spi_cs_n[3]}]
+
+# GPIO21-30: I2C0.
+set_property PACKAGE_PIN K20 [get_ports i2c_scl]
+set_property PACKAGE_PIN K19 [get_ports i2c_sda]
+set_property IOSTANDARD LVCMOS33 [get_ports {i2c_scl i2c_sda}]
+
+# GPIO31-39: software-controlled GPIO.
+set_property PACKAGE_PIN A22 [get_ports {gpio[0]}]
+set_property PACKAGE_PIN A21 [get_ports {gpio[1]}]
+set_property PACKAGE_PIN C21 [get_ports {gpio[2]}]
+set_property PACKAGE_PIN D21 [get_ports {gpio[3]}]
+set_property PACKAGE_PIN C22 [get_ports {gpio[4]}]
+set_property PACKAGE_PIN E21 [get_ports {gpio[5]}]
+set_property PACKAGE_PIN D22 [get_ports {gpio[6]}]
+set_property PACKAGE_PIN F21 [get_ports {gpio[7]}]
+set_property PACKAGE_PIN F22 [get_ports {gpio[8]}]
+set_property IOSTANDARD LVCMOS33 [get_ports {gpio[0] gpio[1] gpio[2] gpio[3] gpio[4] gpio[5] gpio[6] gpio[7] gpio[8]}]
+
+# The SoC uses the first eight LEDs from the original board mapping.
+set_property PACKAGE_PIN G24 [get_ports {led[0]}]
+set_property PACKAGE_PIN E24 [get_ports {led[1]}]
+set_property PACKAGE_PIN C24 [get_ports {led[2]}]
+set_property PACKAGE_PIN E25 [get_ports {led[3]}]
+set_property PACKAGE_PIN C26 [get_ports {led[4]}]
+set_property PACKAGE_PIN F26 [get_ports {led[5]}]
+set_property PACKAGE_PIN G25 [get_ports {led[6]}]
+set_property PACKAGE_PIN E29 [get_ports {led[7]}]
+set_property IOSTANDARD LVCMOS18 [get_ports {led[0] led[1] led[2] led[3] led[4] led[5] led[6] led[7]}]

@@ -24,6 +24,7 @@ sources:
   - target: all(soc_test, any(verilator, iverilog, vcs))
     defines:
       SYNTHESIS:
+      YDRASIL_RETIRE_TRACE:
       INIT_ITCM: 0
       INIT_DTCM: 0
     files:
