@@ -9,8 +9,8 @@ from pathlib import Path
 
 
 PROCESSORS = {
-    "itcm": "u_soc/u_core/u_ydrasil_mems/u_itcm/u_impl/u_xpm_memory_tdpram",
-    "dtcm": "u_soc/u_core/u_ydrasil_mems/u_dtcm/u_impl/u_xpm_memory_sdpram",
+    "itcm": "u_soc_core/u_core/u_ydrasil_mems/u_itcm/u_impl/u_xpm_memory_tdpram",
+    "dtcm": "u_soc_core/u_core/u_ydrasil_mems/u_dtcm/u_impl/u_xpm_memory_sdpram",
 }
 
 

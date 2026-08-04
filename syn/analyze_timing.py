@@ -480,7 +480,7 @@ def main() -> int:
     parser.add_argument("--paths-csv", type=Path, default=None)
     parser.add_argument("--violations-csv", type=Path, default=None)
     parser.add_argument("--max-groups", type=int, default=80)
-    parser.add_argument("--max-violating-paths", type=int, default=500)
+    parser.add_argument("--max-violating-paths", type=int, default=5000)
     args = parser.parse_args()
 
     report_dir = args.report_dir

@@ -4,7 +4,8 @@ module xpm_init_bram_wrapper #(
     parameter int ADDR_WIDTH = (DEPTH > 1) ? $clog2(DEPTH) : 1,
     parameter MEMORY_INIT_FILE = "none",
     parameter bit USE_MEM_INIT = 1'b1,
-    parameter bit USE_MEM_INIT_MMI = 1'b0
+    parameter bit USE_MEM_INIT_MMI = 1'b0,
+    parameter MEMORY_OPTIMIZATION = "false"
 ) (
     input  wire                  clk,
     input  wire                  ena_i,
@@ -26,7 +27,8 @@ module xpm_init_bram_wrapper #(
         .WRITE_MODE_B("read_first"),
         .MEMORY_INIT_FILE(MEMORY_INIT_FILE),
         .USE_MEM_INIT(USE_MEM_INIT),
-        .USE_MEM_INIT_MMI(USE_MEM_INIT_MMI)
+        .USE_MEM_INIT_MMI(USE_MEM_INIT_MMI),
+        .MEMORY_OPTIMIZATION(MEMORY_OPTIMIZATION)
     ) u_bram (
         .clk(clk),
         .ena_i(ena_i),

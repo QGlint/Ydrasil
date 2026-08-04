@@ -26,7 +26,8 @@ module ydrasil_dtcm #(
         .ADDR_WIDTH(DTCM_ADDR_WIDTH),
         .MEMORY_INIT_FILE(INIT_FILE),
         .USE_MEM_INIT(INIT_ENABLE),
-        .USE_MEM_INIT_MMI(ENABLE_XPM_MMI)
+        .USE_MEM_INIT_MMI(ENABLE_XPM_MMI),
+        .MEMORY_OPTIMIZATION("false")
     ) u_impl (
 `else
     ydrasil_sim_sdpram #(

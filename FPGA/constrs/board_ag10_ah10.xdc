@@ -1,4 +1,4 @@
-# Custom board constraints for ydrasil_soc.
+# AG10/AH10 custom board constraints for ydrasil_soc.
 set_property PACKAGE_PIN AG10 [get_ports clk_in1_p]
 set_property PACKAGE_PIN AH10 [get_ports clk_in1_n]
 set_property IOSTANDARD DIFF_SSTL15 [get_ports {clk_in1_p clk_in1_n}]
