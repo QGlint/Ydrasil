@@ -1,9 +1,8 @@
 module ydrasil_soc (
     input  wire       clk_in1_p,
     input  wire       clk_in1_n,
-    input  wire       rs232_rx,
-    output wire       rs232_tx,
-    output wire       uart_rst,
+    input  wire       uart_rx,
+    output wire       uart_tx,
     input  wire       uart1_rx,
     output wire       uart1_tx,
     input  wire       spi_miso,
@@ -49,7 +48,7 @@ module ydrasil_soc (
         .cpu_clk_i(cpu_clk), .cpu_rst_n_i(cpu_rst_n),
         .apb_clk_i(apb_clk), .apb_rst_n_i(apb_rst_n),
         .gpio_i(gpio_input), .gpio_o(gpio_output), .gpio_oe_o(gpio_oe),
-        .uart0_rx_i(rs232_rx), .uart0_tx_o(rs232_tx),
+        .uart0_rx_i(uart_rx), .uart0_tx_o(uart_tx),
         .uart1_rx_i(uart1_rx), .uart1_tx_o(uart1_tx),
         .spi_miso_i(spi_miso), .spi_sclk_o(spi_sclk),
         .spi_mosi_o(spi_mosi), .spi_cs_n_o(spi_cs_n),
@@ -70,5 +69,4 @@ module ydrasil_soc (
     assign i2c_scl = i2c_scl_drive_low ? 1'b0 : 1'bz;
     assign i2c_sda = i2c_sda_drive_low ? 1'b0 : 1'bz;
     assign led = {gpio_output[7:1], gpio_output[0] | coremark_active};
-    assign uart_rst = 1'b1;
 endmodule

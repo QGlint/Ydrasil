@@ -56,6 +56,10 @@ BENDER_INCDIRS := $(shell \
 	if [ -f $(IP_DIR)/Bender.yml ] || [ -f $(IP_DIR)/Bender.yaml ]; then \
 		cd $(IP_DIR) && $(BENDER) script flist-plus $(BENDER_TARGET_ARGS) | sed -n 's/^+incdir+//p'; \
 	fi)
+BENDER_DEFINES := $(shell \
+	if [ -f $(IP_DIR)/Bender.yml ] || [ -f $(IP_DIR)/Bender.yaml ]; then \
+		cd $(IP_DIR) && $(BENDER) script flist-plus $(BENDER_TARGET_ARGS) | sed -n 's/^+define+//p'; \
+	fi)
 INC_DIRS += $(BENDER_INCDIRS)
 endif
 
@@ -85,6 +89,7 @@ endif
 SIM_DEFINES += $(SIM_EXTRA_DEFINES)
 
 DEFINES := RANDOM_SEED=$(RANDOM_SEED)
+DEFINES += $(BENDER_DEFINES)
 
 ifeq ($(FPU),1)
 DEFINES += YDRASIL_ENABLE_FPU

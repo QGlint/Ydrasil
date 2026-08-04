@@ -12,11 +12,13 @@ import ydrasil_axi_pkg::*;
 	input  wire rst_n,
 	output ydrasil_axi_lite_m2s_pkt_t axi_m2s_o,
 	input  ydrasil_axi_lite_s2m_pkt_t axi_s2m_i,
-	input  ydrasil_irq_pkt_t          irq_i,
-	output wire                       retire0_valid_o,
-	output wire [31:0]                retire0_pc_o,
-	output wire                       retire1_valid_o,
-	output wire [31:0]                retire1_pc_o
+	input  ydrasil_irq_pkt_t          irq_i
+`ifdef YDRASIL_RETIRE_TRACE
+    ,output wire                       retire0_valid_o
+    ,output wire [31:0]                retire0_pc_o
+    ,output wire                       retire1_valid_o
+    ,output wire [31:0]                retire1_pc_o
+`endif
 `ifndef SYNTHESIS
     ,output wire [31:0] dbg_bp_predict_pc_o
     ,output wire        dbg_bp_predict_hit_o
@@ -308,10 +310,12 @@ import ydrasil_axi_pkg::*;
 `endif
 	ydrasil_commit_pkt_t         commit_pkt;
 	ydrasil_commit_pkt_t         commit_pkt1;
+`ifdef YDRASIL_RETIRE_TRACE
 	assign retire0_valid_o = commit_pkt.valid;
 	assign retire0_pc_o = commit_pkt.pc;
 	assign retire1_valid_o = commit_pkt1.valid;
 	assign retire1_pc_o = commit_pkt1.pc;
+`endif
 
     //LSU -> CTRL
 	wire                            lsu_ctrl_busy;

@@ -10,6 +10,7 @@ module xpm_sdpram_wrapper #(
     parameter MEMORY_INIT_FILE = "none",
     parameter bit USE_MEM_INIT = 1'b0,
     parameter bit USE_MEM_INIT_MMI = 1'b0,
+    parameter MEMORY_OPTIMIZATION = "true",
     parameter int MEMORY_SIZE = DEPTH * DATA_WIDTH
 ) (
     input  wire                      clk,
@@ -37,7 +38,7 @@ module xpm_sdpram_wrapper #(
         .IGNORE_INIT_SYNTH(0),
         .MEMORY_INIT_FILE(MEMORY_INIT_FILE),
         .MEMORY_INIT_PARAM("0"),
-        .MEMORY_OPTIMIZATION("true"),
+        .MEMORY_OPTIMIZATION(MEMORY_OPTIMIZATION),
         .MEMORY_PRIMITIVE(MEMORY_PRIMITIVE),
         .MEMORY_SIZE(MEMORY_SIZE),
         .MESSAGE_CONTROL(0),

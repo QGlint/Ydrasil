@@ -3,6 +3,8 @@
 proc usage {} {
     puts "usage: vivado -mode batch -source syn/run_vivado.tcl -tclargs ?options?"
     puts "  -xpr <path>             Vivado project, default FPGA/Ydrasil_FPGA.xpr"
+    puts "  -part <name>            FPGA part used when creating a new project"
+    puts "  -staging_dir <path>     pre-project sources copied after create_project"
     puts "  -sources_tcl <path>     generated source sync Tcl"
     puts "  -top <module>           synthesis top, default ydrasil_soc"
     puts "  -report_dir <path>      report output directory"
@@ -26,9 +28,9 @@ proc usage {} {
     puts "  -dtcm_mem <path>        XPM DTCM initialization .mem file"
     puts "  -legacy_ip <0|1>        preserve generated IP for the legacy jyd_fpga top"
     puts "  -artifact_dir <path>    copied bitstream/artifact output directory"
-    puts "  -timing_summary_max_paths <n>  timing summary path limit, default 1000"
-    puts "  -timing_path_max_paths <n>     violating report_timing path limit, default 500"
-    puts "  -timing_nworst <n>             report_timing nworst per endpoint/group, default 100"
+    puts "  -timing_summary_max_paths <n>  timing summary path limit, default 5000"
+    puts "  -timing_path_max_paths <n>     violating report_timing path limit, default 5000"
+    puts "  -timing_nworst <n>             report_timing nworst per endpoint/group, default 1"
     puts "  -full_reports <0|1>            enable extended diagnostic reports, default 0"
     puts "  -post_route_physopt <0|1>      enable one extra post-route physopt pass, default 0"
 }
@@ -297,9 +299,61 @@ proc assert_run_ok {run_name} {
     }
 }
 
+proc validate_io_constraints {} {
+    set missing_package_pin [list]
+    set missing_iostandard [list]
+    foreach port [get_ports -quiet *] {
+        set port_name [get_property NAME $port]
+        if {[get_property PACKAGE_PIN $port] eq ""} {
+            lappend missing_package_pin $port_name
+        }
+        set iostandard [get_property IOSTANDARD $port]
+        if {$iostandard eq "" || $iostandard eq "DEFAULT"} {
+            lappend missing_iostandard $port_name
+        }
+    }
+    if {[llength $missing_package_pin] > 0 ||
+        [llength $missing_iostandard] > 0} {
+        error "incomplete board constraints: missing PACKAGE_PIN={$missing_package_pin}; missing IOSTANDARD={$missing_iostandard}"
+    }
+    puts "Validated PACKAGE_PIN and IOSTANDARD on [llength [get_ports -quiet *]] top-level ports"
+}
+
+proc report_and_validate_drc {report_file} {
+    report_drc -file $report_file
+    set error_violations [list]
+    foreach violation [get_drc_violations -quiet] {
+        set violation_name [get_property NAME $violation]
+        set rule_name [lindex [split $violation_name "#"] 0]
+        set rule [get_drc_checks -quiet $rule_name]
+        if {[llength $rule] > 0 && [get_property SEVERITY $rule] eq "Error"} {
+            lappend error_violations $violation_name
+        }
+    }
+    if {[llength $error_violations] > 0} {
+        error "post-synthesis DRC errors: {$error_violations}; see $report_file"
+    }
+    puts "Post-synthesis DRC contains no Error-severity violations"
+}
+
 proc ensure_dir {dir_name} {
     file mkdir $dir_name
     return [file normalize $dir_name]
+}
+
+proc copy_tree {source_dir destination_dir} {
+    if {![file isdirectory $source_dir]} {
+        error "staged directory not found: $source_dir"
+    }
+    file mkdir $destination_dir
+    foreach source [glob -nocomplain -directory $source_dir *] {
+        set destination [file join $destination_dir [file tail $source]]
+        if {[file isdirectory $source]} {
+            copy_tree $source $destination
+        } else {
+            file copy -force $source $destination
+        }
+    }
 }
 
 proc report_if_possible {description command} {
@@ -399,7 +453,7 @@ proc report_cpu_freq_timing {report_dir freq_mhz} {
     if {[catch {
         report_timing -delay_type max -from $cpu_clocks -to $cpu_clocks -sort_by slack \
             -slack_lesser_than 0.000 -max_paths $timing_path_max_paths -nworst $timing_nworst \
-            -input_pins -file [file join $report_dir cpu${tag}_timing_violations.rpt]
+            -unique_pins -input_pins -file [file join $report_dir cpu${tag}_timing_violations.rpt]
     } msg]} {
         puts "warning: failed to write $freq_mhz MHz violating timing paths: $msg"
     }
@@ -599,6 +653,8 @@ set script_dir [file dirname [file normalize [info script]]]
 set repo_root [file normalize [file join $script_dir ".."]]
 
 set xpr [file normalize [arg_value "-xpr" [file join $repo_root "FPGA/Ydrasil_FPGA.xpr"]]]
+set part [arg_value "-part" "xc7k325tffg900-2"]
+set staging_dir [arg_value "-staging_dir" ""]
 set sources_tcl [file normalize [arg_value "-sources_tcl" [file join $repo_root "build/syn/vivado_sources.tcl"]]]
 set requested_top [arg_value "-top" "ydrasil_soc"]
 set report_dir [ensure_dir [arg_value "-report_dir" [file join $repo_root "build/syn/reports"]]]
@@ -623,20 +679,14 @@ set enable_ila [arg_value "-enable_ila" "0"]
 set itcm_mem [file normalize [arg_value "-itcm_mem" [file join $repo_root "build/syn/memory/itcm.mem"]]]
 set dtcm_mem [file normalize [arg_value "-dtcm_mem" [file join $repo_root "build/syn/memory/dtcm.mem"]]]
 set legacy_ip [clamp_int [arg_value "-legacy_ip" "0"] 0 1]
-set timing_summary_max_paths [arg_value "-timing_summary_max_paths" "1000"]
-set timing_path_max_paths [arg_value "-timing_path_max_paths" "500"]
-set timing_nworst [arg_value "-timing_nworst" "100"]
+set timing_summary_max_paths [arg_value "-timing_summary_max_paths" "5000"]
+set timing_path_max_paths [arg_value "-timing_path_max_paths" "5000"]
+set timing_nworst [arg_value "-timing_nworst" "1"]
 set full_reports [clamp_int [arg_value "-full_reports" "0"] 0 1]
 set post_route_physopt [clamp_int [arg_value "-post_route_physopt" "0"] 0 1]
 
-if {![file exists $xpr]} {
-    error "Vivado project not found: $xpr"
-}
 if {$sync_sources && ![file exists $sources_tcl]} {
     error "generated sources Tcl not found: $sources_tcl"
-}
-if {!$legacy_ip && (![file exists $itcm_mem] || ![file exists $dtcm_mem])} {
-    error "XPM initialization files are missing: ITCM=$itcm_mem DTCM=$dtcm_mem"
 }
 if {$reuse_synth && $sync_sources} {
     error "-reuse_synth requires -sync_sources 0 to preserve synth_1"
@@ -644,11 +694,12 @@ if {$reuse_synth && $sync_sources} {
 if {$reuse_synth && $force_runs} {
     error "-reuse_synth requires -force 0 to preserve synth_1"
 }
-if {$reuse_synth && $run_to ne "route" && $run_to ne "bitstream" && $run_to ne "impl"} {
-    error "-reuse_synth is only valid with -run_to route, bitstream, or impl"
+if {$reuse_synth && $run_to ne "route" && $run_to ne "bitstream" &&
+    $run_to ne "impl" && $run_to ne "reports"} {
+    error "-reuse_synth is only valid with -run_to route, bitstream, impl, or reports"
 }
 
-puts "Opening project: $xpr"
+puts "Vivado project: $xpr"
 puts "Vivado jobs: $jobs"
 puts "Implementation mode: $impl_mode, runs: $impl_runs"
 puts "Synthesis strategy: $synth_strategy"
@@ -656,7 +707,32 @@ puts "Sweep post-route phys_opt: $sweep_post_route_physopt"
 puts "Run target: $run_to"
 puts "Synthesis top: $requested_top"
 puts "Reuse completed synthesis: $reuse_synth"
-open_project $xpr
+set created_project 0
+if {[file exists $xpr]} {
+    puts "Opening existing project"
+    open_project $xpr
+} else {
+    set project_dir [file dirname $xpr]
+    set project_name [file rootname [file tail $xpr]]
+    file mkdir $project_dir
+    puts "Creating fresh project: name=$project_name part=$part directory=$project_dir"
+    create_project $project_name $project_dir -part $part -force
+    set created_project 1
+}
+if {$created_project} {
+    if {$staging_dir eq ""} {
+        error "a fresh project requires -staging_dir"
+    }
+    set staging_dir [file normalize $staging_dir]
+    set project_dir [file normalize [get_property DIRECTORY [current_project]]]
+    set project_srcs [file join $project_dir Ydrasil_FPGA.srcs]
+    puts "Materializing staged sources inside the fresh project"
+    copy_tree [file join $staging_dir sources_1] [file join $project_srcs sources_1]
+    copy_tree [file join $staging_dir constrs_1] [file join $project_srcs constrs_1]
+}
+if {!$legacy_ip && !$reuse_synth && (![file exists $itcm_mem] || ![file exists $dtcm_mem])} {
+    error "XPM initialization files are missing: ITCM=$itcm_mem DTCM=$dtcm_mem"
+}
 
 set max_threads [clamp_int $threads_per_run 1 32]
 if {$max_threads != $threads_per_run} {
@@ -682,6 +758,10 @@ if {!$reuse_synth} {
         remove_hw_ip_sources
         puts "Sourcing generated sources: $sources_tcl"
         source $sources_tcl
+    }
+
+    if {$created_project} {
+        file delete -force $staging_dir
     }
 
     set_property top $requested_top [get_filesets sources_1]
@@ -730,7 +810,7 @@ if {$run_to eq "reports"} {
     report_if_possible "post-route timing summary" \
         "report_timing_summary -delay_type max -max_paths $timing_summary_max_paths -report_unconstrained -check_timing_verbose -file [file join $report_dir post_route_timing_summary.rpt]"
     report_if_possible "post-route violating timing paths" \
-        "report_timing -delay_type max -sort_by slack -slack_lesser_than 0.000 -max_paths $timing_path_max_paths -nworst $timing_nworst -input_pins -file [file join $report_dir post_route_timing_violations.rpt]"
+        "report_timing -delay_type max -sort_by slack -slack_lesser_than 0.000 -max_paths $timing_path_max_paths -nworst $timing_nworst -unique_pins -input_pins -file [file join $report_dir post_route_timing_violations.rpt]"
     report_if_possible "post-route clocks" \
         "report_clocks -file [file join $report_dir post_route_clocks.rpt]"
     report_cpu_freq_timing $report_dir $pll_freq_mhz
@@ -795,22 +875,22 @@ if {!$reuse_synth} {
 }
 assert_run_ok synth_1
 
+open_run synth_1 -name synth_1
+validate_io_constraints
+report_and_validate_drc [file join $report_dir synth_drc.rpt]
 if {$report_synth} {
-    open_run synth_1 -name synth_1
     report_if_possible "post-synthesis utilization" \
         "report_utilization -hierarchical -file [file join $report_dir synth_utilization_hier.rpt]"
     report_if_possible "post-synthesis timing summary" \
-        "report_timing_summary -delay_type max -max_paths 50 -report_unconstrained -file [file join $report_dir synth_timing_summary.rpt]"
+        "report_timing_summary -delay_type max -max_paths $timing_summary_max_paths -report_unconstrained -file [file join $report_dir synth_timing_summary.rpt]"
     report_if_possible "post-synthesis clocks" \
         "report_clocks -file [file join $report_dir synth_clocks.rpt]"
     report_cpu_freq_timing $report_dir $pll_freq_mhz
     report_if_possible "post-synthesis methodology" \
         "report_methodology -file [file join $report_dir synth_methodology.rpt]"
-    report_if_possible "post-synthesis DRC" \
-        "report_drc -file [file join $report_dir synth_drc.rpt]"
     write_checkpoint -force [file join $checkpoint_dir synth_1.dcp]
-    close_design
 }
+close_design
 
 if {$run_to eq "synth"} {
     close_project
@@ -838,21 +918,11 @@ if {$run_to ne "bitstream" && $run_to ne "route" && $run_to ne "impl"} {
     error "unknown -run_to value: $run_to"
 }
 if {[llength $pending_implementation_runs] > 0} {
-    # Launch each implementation child independently.  A failed launch must
-    # not prevent the other sweep candidates from starting.
-    foreach run_name $pending_implementation_runs {
-        set launch_msg ""
-        if {[catch {
-            if {$run_to eq "bitstream"} {
-                launch_runs $run_name -to_step write_bitstream -jobs $jobs
-            } else {
-                launch_runs $run_name -to_step route_design -jobs $jobs
-            }
-        } launch_msg]} {
-            puts "INFO: implementation run $run_name could not be launched; ignoring this candidate: $launch_msg"
-        } else {
-            puts "INFO: launched implementation run $run_name"
-        }
+    puts "Launching implementation runs in parallel: $pending_implementation_runs"
+    if {$run_to eq "bitstream"} {
+        launch_runs $pending_implementation_runs -to_step write_bitstream -jobs $jobs
+    } else {
+        launch_runs $pending_implementation_runs -to_step route_design -jobs $jobs
     }
 }
 foreach run_name $implementation_runs {
@@ -888,7 +958,7 @@ close $best_fp
 report_if_possible "post-route timing summary" \
     "report_timing_summary -delay_type max -max_paths $timing_summary_max_paths -report_unconstrained -check_timing_verbose -file [file join $report_dir post_route_timing_summary.rpt]"
 report_if_possible "post-route violating timing paths" \
-    "report_timing -delay_type max -sort_by slack -slack_lesser_than 0.000 -max_paths $timing_path_max_paths -nworst $timing_nworst -input_pins -file [file join $report_dir post_route_timing_violations.rpt]"
+    "report_timing -delay_type max -sort_by slack -slack_lesser_than 0.000 -max_paths $timing_path_max_paths -nworst $timing_nworst -unique_pins -input_pins -file [file join $report_dir post_route_timing_violations.rpt]"
 report_if_possible "post-route clocks" \
     "report_clocks -file [file join $report_dir post_route_clocks.rpt]"
 report_cpu_freq_timing $report_dir $pll_freq_mhz

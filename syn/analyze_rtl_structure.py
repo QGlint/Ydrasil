@@ -2231,17 +2231,41 @@ def memory_timing_profile(
         for item in report.get("cell_connections", [])
         if item.get("module")
     }
-    simulation_model = name.startswith("ydrmem")
+    simulation_model = name.startswith("ydrmem") or name.startswith("ydrasil_sim_")
+    bram_modules = {
+        "dtcm",
+        "itcm",
+        "IROM",
+        "tpdram_wrapper",
+        "xpm_init_bram_wrapper",
+        "xpm_sdpram_wrapper",
+        "xpm_tpdram_wrapper",
+        "ydrasil_1r1w_bram",
+        "ydrasil_dtcm",
+        "ydrasil_itcm",
+    }
+    bram_simulation_children = {
+        "ydrasil_sim_1r1w_bram",
+        "ydrasil_sim_sdpram",
+        "ydrasil_sim_tpdram",
+    }
+    lutram_modules = {"xpm_lutram_1r1w", "ydrasil_1r1w_ram"}
     contains_bram = (
-        name in {"dtcm", "itcm"}
+        name in bram_modules
         or any(
             child.startswith("ydrmem")
-            or child in {"dtcm", "itcm", "tpdram_wrapper", "IROM"}
+            or child in bram_modules
+            or child in bram_simulation_children
             for child in children
         )
     )
-    contains_lutram = name == "xpm_lutram_1r1w" or "xpm_lutram_1r1w" in children
-    asynchronous_lutram = contains_lutram and report.get("registration_status") != "yes"
+    contains_lutram = name in lutram_modules or bool(children & lutram_modules)
+    synchronous_lutram = name == "ydrasil_1r1w_ram" or "ydrasil_1r1w_ram" in children
+    asynchronous_lutram = (
+        contains_lutram
+        and not synchronous_lutram
+        and report.get("registration_status") != "yes"
+    )
     if simulation_model:
         kind = "simulation_memory_model"
     elif contains_bram and contains_lutram:
@@ -2257,6 +2281,7 @@ def memory_timing_profile(
         "simulation_model_excluded_from_synthesis_risk": simulation_model,
         "contains_bram_boundary": contains_bram,
         "contains_lutram_boundary": contains_lutram,
+        "synchronous_lutram_boundary": synchronous_lutram,
         "asynchronous_lutram_boundary": asynchronous_lutram,
         "storage_bits_interpretation": (
             "simulation memory capacity; do not compare with Vivado FF count"
@@ -2332,6 +2357,8 @@ def apply_timing_risk_policy(
         routing_sensitivity_reasons.append("rtl_fanout_estimate")
     if memory.get("asynchronous_lutram_boundary"):
         routing_sensitivity_reasons.append("asynchronous_lutram_boundary")
+    elif memory.get("contains_lutram_boundary"):
+        routing_sensitivity_reasons.append("synchronous_lutram_boundary")
     if memory.get("contains_bram_boundary"):
         routing_sensitivity_reasons.append("bram_clock_to_out_boundary")
     if (
@@ -2348,6 +2375,8 @@ def apply_timing_risk_policy(
             reasons.append("high_fanout_with_nontrivial_combination")
         if memory.get("asynchronous_lutram_boundary") and base_depth >= lutram_possible_depth:
             reasons.append("asynchronous_lutram_on_unregistered_path")
+        elif memory.get("contains_lutram_boundary") and base_depth >= lutram_possible_depth:
+            reasons.append("synchronous_lutram_with_downstream_combination")
         if memory.get("contains_bram_boundary"):
             reasons.append("bram_clock_to_out_reduces_downstream_budget")
         if loop:
@@ -2363,7 +2392,7 @@ def apply_timing_risk_policy(
             or high_fanout_timing
             or memory.get("contains_bram_boundary")
             or (
-                memory.get("asynchronous_lutram_boundary")
+                memory.get("contains_lutram_boundary")
                 and base_depth >= lutram_possible_depth
             )
         )

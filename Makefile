@@ -263,6 +263,7 @@ SYN_PLL_SUPPORTED_FREQS := 150 200 225 240 250
 SYN_PLL_FREQ_TAG = pll$(subst .,p,$(SYN_PLL_FREQ_MHZ))m
 SYN_PLL_DEFINE = SYN_PLL_FREQ_$(subst .,P,$(SYN_PLL_FREQ_MHZ))
 SYN_TOP ?= ydrasil_soc
+SYN_PART ?= xc7k325tffg900-2
 SYN_BENDER_DIR ?= $(PROJECT_ROOT)/hw/ip/ydrasil_soc
 SYN_XPM_MMI ?= 0
 SYN_RTL_DEFINES = $(SYN_PLL_DEFINE)
@@ -272,8 +273,7 @@ SYN_RTL_DEFINES += $(if $(filter 1,$(FPU)),YDRASIL_ENABLE_FPU)
 SYN_PROFILE ?= official
 SYN_PROFILE_SUFFIX = $(if $(filter official,$(SYN_PROFILE)),,-$(SYN_PROFILE))$(if $(filter 1,$(FPU)),-fpu)$(if $(filter 1,$(SYN_XPM_MMI)),-mmi)
 SYN_ENABLE_ILA ?= 0
-SYN_BOARD_XDC ?=
-SYN_REPLACE_CONSTRAINTS ?= 0
+SYN_REPLACE_CONSTRAINTS ?= 1
 SYN_RTL_DEFINES += $(if $(filter 1,$(SYN_ENABLE_ILA)),SYN_BOARD_ILA)
 ifeq ($(DIV_IMPL),lzc)
 SYN_RTL_DEFINES += YDRASIL_DIV_IMPL_LZC
@@ -283,20 +283,42 @@ endif
 SYN_DEFINE_ARGS = $(foreach define,$(SYN_RTL_DEFINES),--define $(define))
 SYN_FREQ_BUILD_DIR ?= $(SYN_BUILD_DIR)/$(SYN_PLL_FREQ_TAG)$(SYN_PROFILE_SUFFIX)
 SYN_STAGE_ROOT ?= $(SYN_FREQ_BUILD_DIR)/project
-SYN_ORIG_FPGA_DIR ?= $(PROJECT_ROOT)/FPGA
 SYN_STAGE_FPGA_DIR ?= $(SYN_STAGE_ROOT)/FPGA
+SYN_STAGE_SOURCE_DIR ?= $(SYN_STAGE_FPGA_DIR)/Ydrasil_FPGA.srcs/sources_1
+SYN_STAGE_CONSTR_DIR ?= $(SYN_STAGE_FPGA_DIR)/Ydrasil_FPGA.srcs/constrs_1
+SYN_STAGE_MEMORY_DIR ?= $(SYN_STAGE_SOURCE_DIR)/memory
+SYN_PREPROJECT_DIR ?= $(SYN_STAGE_FPGA_DIR)/staging
+SYN_PREPROJECT_SOURCE_DIR ?= $(SYN_PREPROJECT_DIR)/sources_1
+SYN_PREPROJECT_CONSTR_DIR ?= $(SYN_PREPROJECT_DIR)/constrs_1
+SYN_PREPROJECT_MEMORY_DIR ?= $(SYN_PREPROJECT_SOURCE_DIR)/memory
 SYN_XPR ?= $(SYN_STAGE_FPGA_DIR)/Ydrasil_FPGA.xpr
-SYN_SOURCES_TCL ?= $(SYN_FREQ_BUILD_DIR)/vivado_sources.tcl
+SYN_SOURCES_TCL ?= $(SYN_STAGE_FPGA_DIR)/vivado_sources.tcl
+SYN_CONSTR_DIR ?= $(PROJECT_ROOT)/FPGA/constrs
+SYN_DEFAULT_XDC ?= $(SYN_STAGE_CONSTR_DIR)/digital_twin.xdc
+SYN_BOARD_XDC ?= $(SYN_DEFAULT_XDC)
 SYN_REPORT_DIR ?= $(SYN_FREQ_BUILD_DIR)/reports
 SYN_LOG_DIR ?= $(SYN_FREQ_BUILD_DIR)/log
 SYN_ARTIFACT_DIR ?= $(SYN_FREQ_BUILD_DIR)/artifacts
 SYN_BIT_DIR ?= $(SYN_FREQ_BUILD_DIR)/bit
 SYN_CHECKPOINT_DIR ?= $(SYN_FREQ_BUILD_DIR)/checkpoints
-IROM_COE ?= $(PROJECT_ROOT)/FPGA/coe/irom_MF.coe
-DRAM_COE ?= $(PROJECT_ROOT)/FPGA/coe/dram_MF.coe
-SYN_MEMORY_DIR ?= $(SYN_FREQ_BUILD_DIR)/memory
-SYN_STAGED_ITCM_MEM ?= $(SYN_MEMORY_DIR)/itcm.mem
-SYN_STAGED_DTCM_MEM ?= $(SYN_MEMORY_DIR)/dtcm.mem
+SYN_MSH_PROFILE ?= Os
+SYN_MSH_IMAGE_DIR ?= $(BUILD_DIR)/app/rtthread-coremark/$(SYN_MSH_PROFILE)
+SYN_MSH_ITCM ?= $(SYN_MSH_IMAGE_DIR)/rtthread_coremark.itcm
+SYN_MSH_DTCM ?= $(SYN_MSH_IMAGE_DIR)/rtthread_coremark.dtcm
+SYN_STAGED_ITCM_MEM ?= $(SYN_STAGE_MEMORY_DIR)/itcm.mem
+SYN_STAGED_DTCM_MEM ?= $(SYN_STAGE_MEMORY_DIR)/dtcm.mem
+SYN_STAGED_ITCM_COE ?= $(SYN_STAGE_MEMORY_DIR)/itcm.coe
+SYN_STAGED_DTCM_COE ?= $(SYN_STAGE_MEMORY_DIR)/dtcm.coe
+SYN_PREPROJECT_ITCM_MEM ?= $(SYN_PREPROJECT_MEMORY_DIR)/itcm.mem
+SYN_PREPROJECT_DTCM_MEM ?= $(SYN_PREPROJECT_MEMORY_DIR)/dtcm.mem
+SYN_PREPROJECT_ITCM_COE ?= $(SYN_PREPROJECT_MEMORY_DIR)/itcm.coe
+SYN_PREPROJECT_DTCM_COE ?= $(SYN_PREPROJECT_MEMORY_DIR)/dtcm.coe
+SYN_ITCM_WORDS ?= 32768
+SYN_DTCM_WORDS ?= 16384
+SYN_MEMORY_WIDTH ?= 32
+SYN_TIMING_SUMMARY_MAX_PATHS ?= 5000
+SYN_TIMING_PATH_MAX_PATHS ?= 5000
+SYN_TIMING_NWORST ?= 1
 SYN_JOBS ?= $(shell nproc)
 ifeq ($(HOSTNAME),servera437)
 SYN_IMPL_RUNS ?= 4
@@ -333,7 +355,7 @@ endif
 .PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests regression regression_all regression_status regression_stop regression_clean regression_sort regression_sort_opt regression_suite_coverage_merge regression_coverage_report init install-bender get_spike download_and_extract_spike check_spike_prebuilt_abi build_spike_from_source check_deps spike spike_wave_to_csv sim_compare commit_check commit_spike_csv commit_hw_trace commit_hw_csv commit_compare rv_test_comp_genmem ppa_rvtest_report ppa_perf_report coe_simple coe_smoke coe_smoke_led coe_isa_probes coverage_all coverage_all_run coverage_quick coverage_closure coverage_closure_merge coverage_clean coverage_report bus_irq_test bus_irq_coverage sw_boundary_test sw_coverage sw_coverage_clean sw_run_mode sw_coverage_report
 .PHONY: coremark coremark_sim coremark_run coremark_result coremark-rebuild coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map coremark_opt_all coremark_opt_build_all coremark_opt_sim_all coremark_opt_report coremark_opt_clean $(COREMARK_OPT_BUILD_TARGETS) $(COREMARK_OPT_SIM_TARGETS) sort_app sort_all sort_sim_all sort_report sort_app_sim sort_app-rebuild sort_app-clean sort_opt_all sort_opt_build_all sort_opt_sim_all sort_opt_report sort_opt_clean $(SORT_OPT_BUILD_TARGETS) $(SORT_OPT_SIM_TARGETS) boundary_app boundary_all boundary_sim_all boundary_report boundary_app-rebuild boundary_app-clean boundary_opt_all boundary_opt_build_all boundary_opt_sim_all boundary_opt_report boundary_opt_clean $(BOUNDARY_OPT_BUILD_TARGETS) $(BOUNDARY_OPT_SIM_TARGETS) coe_m3_force coe_loop2_gen coe_loop5 coe_loop5_gen coe_loop_lina coe_loop_lina_gen loop_lina coe_MFlina coe_MFlina_gen coe_mflina coe_mflina_gen rtthread rtthread-build rtthread-clean rtthread-coremark rtthread-coremark-build rtthread-coremark-build-all rtthread-coremark-sim rtthread-coremark-sim-all rtthread-coremark-report rtthread-coremark-compare rtthread-coremark-clean rtthread-utest rtthread-utest-build rtthread-utest-sim rtthread-utest-report rtthread-utest-clean $(RTTHREAD_COREMARK_PROFILE_BUILD_TARGETS) $(RTTHREAD_COREMARK_PROFILE_SIM_TARGETS)
 .PHONY: riscv_dv_venv riscv_dv_model riscv_dv_prepare riscv_dv_run riscv_dv_random riscv_dv_random_status riscv_dv_regression riscv_dv_count riscv_dv_repro riscv_dv_estimate riscv_dv_stop riscv_dv_coverage_report riscv_dv_cleanup riscv_dv_distclean
-.PHONY: syn synf syn225 syn240 syn250 synf-board syn-extreme syn-lowmem-synth syn-lowmem-impl syn-venv syn-prep syn-stage-xpr syn-stage-memory syn-reuse-stage-check syn-vivado syn-analyze syn-clean
+.PHONY: syn synf syn225 syn240 syn250 syn-board synf-board syn-extreme syn-reports syn-dedup syn-lowmem-synth syn-lowmem-impl syn-venv syn-prep syn-stage-xpr syn-stage-memory syn-reuse-stage-check syn-vivado syn-analyze syn-clean
 .PHONY: rtl-quickcheck rtl-strict rtl-xml rtl-structure rtl-vivado-compare rtl-vivado-archive verilator-strict verilator-xml slang-ast
 .PHONY: yosys-slang yosys-slang-gate yosys-slang-baseline yosys-slang-quick vivado-ooc vivado-ooc-synth vivado-ooc-issue
 
@@ -906,7 +928,7 @@ synf: SYN_RUN_TO := bitstream
 ifeq ($(HOSTNAME),servera437)
 synf: SYN_IMPL_MODE := sweep
 synf: SYN_JOBS := 40
-synf: SYN_IMPL_RUNS := 5
+synf: SYN_IMPL_RUNS := 4
 synf: SYN_THREADS_PER_RUN := 8
 else
 synf: SYN_IMPL_MODE := extreme
@@ -937,7 +959,7 @@ syn240: SYN_PLL_FREQ_MHZ := 240
 syn250: SYN_PLL_FREQ_MHZ := 250
 syn225 syn240 syn250: SYN_RUN_TO := bitstream
 syn225 syn240 syn250: SYN_JOBS := 40
-syn225 syn240 syn250: SYN_IMPL_RUNS := 5
+syn225 syn240 syn250: SYN_IMPL_RUNS := 4
 syn225 syn240 syn250: SYN_THREADS_PER_RUN := 8
 syn225 syn240 syn250: syn-vivado
 	@src="$(SYN_ARTIFACT_DIR)/$(SYN_TOP).bit"; \
@@ -957,10 +979,11 @@ syn225 syn240 syn250: syn-vivado
 	echo "[SYN] Best bitstream: $$dst"
 	@$(MAKE) syn-analyze SYN_PLL_FREQ_MHZ=$(SYN_PLL_FREQ_MHZ) SYN_PROFILE=$(SYN_PROFILE)
 
-synf-board: SYN_PROFILE := custom-board
-synf-board: SYN_BOARD_XDC = $(SYN_STAGE_FPGA_DIR)/Ydrasil_FPGA.srcs/constrs_1/new/ydrasil_custom_board.xdc
-synf-board: SYN_REPLACE_CONSTRAINTS := 1
-synf-board: synf
+syn-board: SYN_PROFILE := custom-board
+syn-board: SYN_BOARD_XDC = $(SYN_STAGE_CONSTR_DIR)/board_ag10_ah10.xdc
+syn-board: synf
+
+synf-board: syn-board
 
 syn-extreme: SYN_PLL_FREQ_MHZ := 200
 syn-extreme: SYN_RUN_TO := bitstream
@@ -970,6 +993,22 @@ syn-extreme: SYN_JOBS := 1
 syn-extreme: SYN_THREADS_PER_RUN := 1
 syn-extreme: syn-vivado
 	@$(MAKE) syn-analyze SYN_IMPL_MODE=extreme SYN_IMPL_RUNS=1
+
+# Regenerate Vivado reports from routed checkpoints without launching synthesis,
+# placement, or routing. syn-dedup only rebuilds the derived CSV/Markdown files.
+syn-reports: SYN_PLL_FREQ_MHZ := 200
+syn-reports:
+	@$(MAKE) --no-print-directory syn-vivado \
+		SYN_PLL_FREQ_MHZ=$(SYN_PLL_FREQ_MHZ) SYN_PROFILE="$(SYN_PROFILE)" \
+		SYN_RUN_TO=reports SYN_REUSE_STAGE=1 SYN_REUSE_SYNTH=1 \
+		SYN_SYNC_SOURCES=0 SYN_FORCE=0 SYN_REPORT_SYNTH=0
+	@$(MAKE) --no-print-directory syn-analyze \
+		SYN_PLL_FREQ_MHZ=$(SYN_PLL_FREQ_MHZ) SYN_PROFILE="$(SYN_PROFILE)"
+
+syn-dedup: SYN_PLL_FREQ_MHZ := 200
+syn-dedup:
+	@$(MAKE) --no-print-directory syn-analyze \
+		SYN_PLL_FREQ_MHZ=$(SYN_PLL_FREQ_MHZ) SYN_PROFILE="$(SYN_PROFILE)"
 
 # Split the peak-memory operations into separate Vivado processes.  Phase one
 # creates a current top-level DCP with the low-memory synthesis strategy.
@@ -1000,64 +1039,50 @@ $(SYN_VENV)/.stamp:
 	$(PYTHON) -m venv $(SYN_VENV)
 	@touch $@
 
-syn-prep: syn-venv
+syn-prep: syn-venv syn-stage-memory
 	@mkdir -p $(SYN_FREQ_BUILD_DIR)
 	$(SYN_PYTHON) $(SYN_DIR)/prep_vivado_sources.py \
 		--repo-root $(PROJECT_ROOT) \
 		--bender $(BENDER) \
 		--bender-dir $(SYN_BENDER_DIR) \
 		--wrapper-dir $(PROJECT_ROOT)/hw/ip/Xilinx_ip_wrapper/rtl \
-		--itcm-init-file $(SYN_STAGED_ITCM_MEM) \
-		--dtcm-init-file $(SYN_STAGED_DTCM_MEM) \
+		--itcm-init-file $(SYN_PREPROJECT_ITCM_MEM) \
+		--dtcm-init-file $(SYN_PREPROJECT_DTCM_MEM) \
+		--stage-sources-dir $(SYN_PREPROJECT_SOURCE_DIR) \
 		$(if $(filter 1,$(FPU)),--target fpu) \
 		$(SYN_DEFINE_ARGS) \
 		--out $(SYN_SOURCES_TCL)
 
 syn-stage-xpr:
-	@mkdir -p $(SYN_STAGE_ROOT)
-	rm -rf \
-		$(SYN_STAGE_FPGA_DIR)/Ydrasil_FPGA.cache \
-		$(SYN_STAGE_FPGA_DIR)/Ydrasil_FPGA.gen \
-		$(SYN_STAGE_FPGA_DIR)/Ydrasil_FPGA.hw \
-		$(SYN_STAGE_FPGA_DIR)/Ydrasil_FPGA.ip_user_files \
-		$(SYN_STAGE_FPGA_DIR)/Ydrasil_FPGA.runs
-	rsync -a --delete \
-		--exclude 'Ydrasil_FPGA.cache' \
-		--exclude 'Ydrasil_FPGA.gen' \
-		--exclude 'Ydrasil_FPGA.hw' \
-		--exclude 'Ydrasil_FPGA.ip_user_files' \
-		--exclude 'Ydrasil_FPGA.runs' \
-		--exclude 'vivado*' \
-		$(SYN_ORIG_FPGA_DIR)/ $(SYN_STAGE_FPGA_DIR)/
-	# Never carry the checked-in imported incremental checkpoint into a new
-	# architecture build.  It is from an older netlist and can make Vivado
-	# report timing for a design that is not the current RTL.
-	@rm -f "$(SYN_STAGE_FPGA_DIR)/Ydrasil_FPGA.srcs/utils_1/imports/synth_1/$(SYN_TOP).dcp"
-	# The checked-in XPR was created on another host.  Vivado uses its
-	# top-level Path attribute as the project root even when the file itself is
-	# staged locally, so normalize it before opening the project; otherwise IP
-	# checkpoints and run scripts are silently created under the old tree.
-	@xpr="$(SYN_XPR)"; \
-		sed -i -E 's#(<Project Product="Vivado" Version="7" Minor="68" Path=")[^"]*(">)#\1'"$$xpr"'\2#' "$$xpr"
+	@test -f "$(SYN_CONSTR_DIR)/digital_twin.xdc" || { echo "Error: official XDC not found"; exit 1; }
+	@test -f "$(SYN_CONSTR_DIR)/board_ag10_ah10.xdc" || { echo "Error: board XDC not found"; exit 1; }
+	rm -rf "$(SYN_STAGE_FPGA_DIR)"
+	@mkdir -p "$(SYN_PREPROJECT_SOURCE_DIR)" "$(SYN_PREPROJECT_CONSTR_DIR)"
+	cp "$(SYN_CONSTR_DIR)/digital_twin.xdc" "$(SYN_PREPROJECT_CONSTR_DIR)/digital_twin.xdc"
+	cp "$(SYN_CONSTR_DIR)/board_ag10_ah10.xdc" "$(SYN_PREPROJECT_CONSTR_DIR)/board_ag10_ah10.xdc"
 
-syn-stage-memory:
-	@test -f "$(IROM_COE)" || { echo "Error: IROM COE not found: $(IROM_COE)"; exit 1; }
-	@test -f "$(DRAM_COE)" || { echo "Error: DRAM COE not found: $(DRAM_COE)"; exit 1; }
-	@mkdir -p "$(SYN_MEMORY_DIR)"
-	perl "$(COE_TO_MEM)" "$(IROM_COE)" "$(SYN_STAGED_ITCM_MEM)"
-	perl "$(COE_TO_MEM)" "$(DRAM_COE)" "$(SYN_STAGED_DTCM_MEM)"
-	@printf 'ITCM_COE=%s\nDTCM_COE=%s\n' "$(abspath $(IROM_COE))" "$(abspath $(DRAM_COE))" > "$(SYN_MEMORY_DIR)/sources.txt"
+syn-stage-memory: syn-stage-xpr rtthread-coremark-build-$(SYN_MSH_PROFILE)
+	@test -f "$(SYN_MSH_ITCM)" || { echo "Error: msh ITCM image not found: $(SYN_MSH_ITCM)"; exit 1; }
+	@test -f "$(SYN_MSH_DTCM)" || { echo "Error: msh DTCM image not found: $(SYN_MSH_DTCM)"; exit 1; }
+	@mkdir -p "$(SYN_PREPROJECT_MEMORY_DIR)"
+	$(PYTHON) "$(SYN_DIR)/prepare_memory_init.py" \
+		--input "$(SYN_MSH_ITCM)" --width $(SYN_MEMORY_WIDTH) --depth $(SYN_ITCM_WORDS) \
+		--mem "$(SYN_PREPROJECT_ITCM_MEM)" --coe "$(SYN_PREPROJECT_ITCM_COE)"
+	$(PYTHON) "$(SYN_DIR)/prepare_memory_init.py" \
+		--input "$(SYN_MSH_DTCM)" --width $(SYN_MEMORY_WIDTH) --depth $(SYN_DTCM_WORDS) \
+		--mem "$(SYN_PREPROJECT_DTCM_MEM)" --coe "$(SYN_PREPROJECT_DTCM_COE)"
+	@printf 'image=rtthread_coremark\nprofile=%s\nwidth=%s\nitcm_words=%s\ndtcm_words=%s\n' \
+		"$(SYN_MSH_PROFILE)" "$(SYN_MEMORY_WIDTH)" "$(SYN_ITCM_WORDS)" "$(SYN_DTCM_WORDS)" \
+		> "$(SYN_PREPROJECT_MEMORY_DIR)/manifest.txt"
 
 ifeq ($(SYN_REUSE_STAGE),1)
 SYN_VIVADO_PREREQS := syn-reuse-stage-check
 else
-SYN_VIVADO_PREREQS := syn-prep syn-stage-xpr syn-stage-memory
+SYN_VIVADO_PREREQS := syn-prep
 endif
 
 syn-reuse-stage-check:
 	@test -f "$(SYN_XPR)" || { echo "Error: staged XPR not found: $(SYN_XPR)"; exit 1; }
-	@test -f "$(SYN_STAGED_ITCM_MEM)" || { echo "Error: staged ITCM MEM not found: $(SYN_STAGED_ITCM_MEM)"; exit 1; }
-	@test -f "$(SYN_STAGED_DTCM_MEM)" || { echo "Error: staged DTCM MEM not found: $(SYN_STAGED_DTCM_MEM)"; exit 1; }
 	@test -f "$(SYN_STAGE_FPGA_DIR)/Ydrasil_FPGA.runs/synth_1/$(SYN_TOP).dcp" || { echo "Error: completed top synthesis DCP not found in staged project"; exit 1; }
 
 syn-vivado: $(SYN_VIVADO_PREREQS)
@@ -1066,6 +1091,8 @@ syn-vivado: $(SYN_VIVADO_PREREQS)
 		-source $(SYN_DIR)/run_vivado.tcl \
 		-tclargs \
 		-xpr $(SYN_XPR) \
+		-part $(SYN_PART) \
+		-staging_dir $(SYN_PREPROJECT_DIR) \
 		-sources_tcl $(SYN_SOURCES_TCL) \
 		-top $(SYN_TOP) \
 		-report_dir $(SYN_REPORT_DIR) \
@@ -1087,6 +1114,9 @@ syn-vivado: $(SYN_VIVADO_PREREQS)
 		-enable_ila $(SYN_ENABLE_ILA) \
 		-itcm_mem "$(SYN_STAGED_ITCM_MEM)" \
 		-dtcm_mem "$(SYN_STAGED_DTCM_MEM)" \
+		-timing_summary_max_paths $(SYN_TIMING_SUMMARY_MAX_PATHS) \
+		-timing_path_max_paths $(SYN_TIMING_PATH_MAX_PATHS) \
+		-timing_nworst $(SYN_TIMING_NWORST) \
 		-full_reports $(SYN_FULL_REPORTS) \
 		-post_route_physopt $(SYN_POST_ROUTE_PHYSOPT) \
 		-sweep_post_route_physopt $(SYN_SWEEP_POST_ROUTE_PHYSOPT) \
