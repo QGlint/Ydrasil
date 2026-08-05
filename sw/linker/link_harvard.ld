@@ -4,7 +4,7 @@ ENTRY(_start)
 MEMORY
 {
     IROM (rx) : ORIGIN = 0x80000000, LENGTH = 16K
-    DRAM (rwx): ORIGIN = 0x80100000, LENGTH = 256K
+    DRAM (rwx): ORIGIN = 0x80100000, LENGTH = 64K
 }
 
 /* 栈顶 */

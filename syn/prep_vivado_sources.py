@@ -18,6 +18,7 @@ LINE_COMMENT_RE = re.compile(r"//.*?$", re.MULTILINE)
 
 DEFAULT_DEFINES = ["SYNTHESIS", "TARGET_FPGA", "TARGET_SYNTHESIS", "TARGET_VIVADO", "TARGET_XILINX"]
 WRAPPER_ORDER = [
+    "xpm_spram_wrapper.sv",
     "xpm_tpdram_wrapper.sv",
     "xpm_sdpram_wrapper.sv",
     "xpm_init_bram_wrapper.sv",

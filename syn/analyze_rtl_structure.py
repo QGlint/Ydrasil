@@ -2237,6 +2237,7 @@ def memory_timing_profile(
         "itcm",
         "IROM",
         "tpdram_wrapper",
+        "xpm_spram_wrapper",
         "xpm_init_bram_wrapper",
         "xpm_sdpram_wrapper",
         "xpm_tpdram_wrapper",

@@ -56,7 +56,9 @@ override OBJCOPY := $(RISCV_TOOLCHAIN_PREFIX)-objcopy
 override OBJDUMP := $(RISCV_TOOLCHAIN_PREFIX)-objdump
 override AR := $(RISCV_TOOLCHAIN_PREFIX)-ar
 
+CONTROL_FLOW_ALIGN_CFLAGS ?= -falign-functions=8 -falign-jumps=8 -falign-labels=8 -falign-loops=8
 RV_CFLAGS ?= -march=$(ARCH) -mabi=$(ABI) -nostdlib -nostartfiles -static -mcmodel=medany
+override RV_CFLAGS += $(CONTROL_FLOW_ALIGN_CFLAGS)
 LDFLAGS ?=
 
 COREMARK_DIR := coremark
@@ -178,7 +180,8 @@ COREMARK_CFLAGS := \
 	-I$(COREMARK_DIR) \
 	-I$(COREMARK_DIR)/$(COREMARK_PORT_DIR) \
 	$(BSP_INCLUDES) \
-	$(COREMARK_EXTRA_CFLAGS)
+	$(COREMARK_EXTRA_CFLAGS) \
+	$(CONTROL_FLOW_ALIGN_CFLAGS)
 COREMARK_LDFLAGS := \
 	-march=$(ARCH) \
 	-mabi=$(ABI) \
@@ -206,7 +209,8 @@ SORT_APP_CFLAGS := \
 	-DSDK_BANNER=0 \
 	-I$(SORT_APP_DIR) \
 	$(BSP_INCLUDES) \
-	$(SORT_APP_EXTRA_CFLAGS)
+	$(SORT_APP_EXTRA_CFLAGS) \
+	$(CONTROL_FLOW_ALIGN_CFLAGS)
 SORT_APP_LDFLAGS := \
 	-march=$(ARCH) \
 	-mabi=$(ABI) \
@@ -239,7 +243,8 @@ DTCM_BIN  := $(OUT_DIR)/bin/$(NAME)_dtcm.bin
 .PHONY: boundary_app boundary_app-rebuild boundary_app-clean
 .PHONY: coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map
 rv_comp_genmem:
-	@if [ "$(REBUILD)" != "1" ] && [ -f "$(ELF)" ] && [ -f "$(DUMP)" ] && [ -f "$(ITCM)" ] && [ -f "$(DTCM)" ]; then \
+	@if [ "$(REBUILD)" != "1" ] && [ -f "$(ELF)" ] && [ -f "$(DUMP)" ] && [ -f "$(ITCM)" ] && [ -f "$(DTCM)" ] && \
+		awk 'NF { seen=1; if ($$0 !~ /^[[:xdigit:]]{16}$$/) bad=1 } END { exit !(seen && !bad) }' "$(ITCM)"; then \
 		echo "[skip] outputs exist for $(NAME) (set REBUILD=1 to force)"; \
 	else \
 		$(MAKE) rv_elf rv_dump rv_mem; \
@@ -264,7 +269,7 @@ rv_mem: rv_elf
 	  $(addprefix --only-section=,$(DRAM_SECTIONS)) \
 		$(DRAM_SECTFLAGS) \
 	  $(ELF) $(DTCM_BIN) || true
-	od -An -t x4 -w4 -v $(ITCM_BIN) | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > $(ITCM)
+	od -An -t x8 -w8 -v $(ITCM_BIN) | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > $(ITCM)
 	@if [ -s $(DTCM_BIN) ]; then \
 	  od -An -t x4 -w4 -v $(DTCM_BIN) | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > $(DTCM); \
 	else \
@@ -285,7 +290,7 @@ $(COREMARK_ELF): $(COREMARK_SRCS) $(BSP_LINKER_SCRIPT) Makefile | $(COREMARK_OUT
 	for src in $(BSP_ASM_SRCS) $(BSP_C_SRCS); do base=$${src##*/}; base=$${base%.*}; obj="$$obj_dir/bsp_$$base.o"; \
 		$(CC) $(COREMARK_CFLAGS) -c "$$src" -o "$$obj"; objects="$$objects $$obj"; done; \
 	for src in $(COREMARK_C_SRCS); do base=$${src##*/}; base=$${base%.*}; obj="$$obj_dir/app_$$base.o"; \
-		$(CC) $(COREMARK_CFLAGS) $(COREMARK_APP_ONLY_CFLAGS) -c "$$src" -o "$$obj"; objects="$$objects $$obj"; done; \
+	$(CC) $(COREMARK_CFLAGS) $(COREMARK_APP_ONLY_CFLAGS) $(CONTROL_FLOW_ALIGN_CFLAGS) -c "$$src" -o "$$obj"; objects="$$objects $$obj"; done; \
 	$(CC) $(COREMARK_LDFLAGS) $$objects -lgcc -o "$@"
 else
 $(COREMARK_ELF): $(COREMARK_SRCS) $(BSP_LINKER_SCRIPT) Makefile | $(COREMARK_OUT)
@@ -312,7 +317,7 @@ $(COREMARK_ITCM): | $(COREMARK_ELF) $(COREMARK_OUT)
 		--only-section=.ctors \
 		--only-section=.dtors \
 		$(COREMARK_ELF) $(COREMARK_ITCM_BIN)
-	od -An -t x4 -w4 -v $(COREMARK_ITCM_BIN) | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > $@
+	od -An -t x8 -w8 -v $(COREMARK_ITCM_BIN) | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > $@
 
 $(COREMARK_DTCM): | $(COREMARK_ELF) $(COREMARK_OUT)
 	$(OBJCOPY) -O binary --gap-fill=0x00 \
@@ -362,7 +367,7 @@ $(SORT_APP_OUT)/%.elf: $(SORT_APP_DIR)/%.c $(SORT_APP_DIR)/sort_common.h $(SORT_
 	@set -eu; obj_dir="$(SORT_APP_OUT)/obj/$*"; rm -rf "$$obj_dir"; mkdir -p "$$obj_dir"; objects=""; \
 	for src in $(BSP_ASM_SRCS) $(BSP_C_SRCS); do base=$${src##*/}; base=$${base%.*}; obj="$$obj_dir/bsp_$$base.o"; \
 		$(CC) $(SORT_APP_CFLAGS) -c "$$src" -o "$$obj"; objects="$$objects $$obj"; done; \
-	app_obj="$$obj_dir/app_$*.o"; $(CC) $(SORT_APP_CFLAGS) $(SORT_APP_ONLY_CFLAGS) -c "$<" -o "$$app_obj"; \
+	app_obj="$$obj_dir/app_$*.o"; $(CC) $(SORT_APP_CFLAGS) $(SORT_APP_ONLY_CFLAGS) $(CONTROL_FLOW_ALIGN_CFLAGS) -c "$<" -o "$$app_obj"; \
 	$(CC) $(SORT_APP_LDFLAGS) $$objects "$$app_obj" -Wl,-Map,$(@:.elf=.map) -lgcc -o "$@"
 else
 $(SORT_APP_OUT)/%.elf: $(SORT_APP_DIR)/%.c $(SORT_APP_DIR)/sort_common.h $(SORT_APP_DIR)/sort_data.h $(BSP_LINKER_SCRIPT) Makefile | $(SORT_APP_OUT)
@@ -386,7 +391,7 @@ $(SORT_APP_OUT)/%.itcm: $(SORT_APP_OUT)/%.elf | $(SORT_APP_OUT)
 		--only-section=.ctors \
 		--only-section=.dtors \
 		$< $(@:.itcm=_itcm.bin)
-	od -An -t x4 -w4 -v $(@:.itcm=_itcm.bin) | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > $@
+	od -An -t x8 -w8 -v $(@:.itcm=_itcm.bin) | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > $@
 
 $(SORT_APP_OUT)/%.dtcm: $(SORT_APP_OUT)/%.elf | $(SORT_APP_OUT)
 	$(OBJCOPY) -O binary --gap-fill=0x00 \
@@ -423,7 +428,7 @@ $(BOUNDARY_APP_OUT)/%.elf: $(BOUNDARY_APP_DIR)/%.c $(BOUNDARY_APP_DIR)/boundary.
 		objects="$$objects $$obj"; \
 	done; \
 	app_obj="$$obj_dir/$*.o"; \
-	$(CC) $(SORT_APP_CFLAGS) $(BOUNDARY_EXTRA_CFLAGS) $(BOUNDARY_APP_ONLY_CFLAGS) -I$(BOUNDARY_APP_DIR) -c "$<" -o "$$app_obj"; \
+		$(CC) $(SORT_APP_CFLAGS) $(BOUNDARY_EXTRA_CFLAGS) $(BOUNDARY_APP_ONLY_CFLAGS) $(CONTROL_FLOW_ALIGN_CFLAGS) -I$(BOUNDARY_APP_DIR) -c "$<" -o "$$app_obj"; \
 	$(CC) $(SORT_APP_LDFLAGS) $$objects "$$app_obj" -Wl,-Map,$(@:.elf=.map) -lgcc -o "$@"
 else
 $(BOUNDARY_APP_OUT)/%.elf: $(BOUNDARY_APP_DIR)/%.c $(BOUNDARY_APP_DIR)/boundary.h $(BSP_ASM_SRCS) $(BSP_C_SRCS) $(BSP_DIR)/link.lds Makefile | $(BOUNDARY_APP_OUT)
@@ -438,7 +443,7 @@ $(BOUNDARY_APP_OUT)/%.dump: $(BOUNDARY_APP_OUT)/%.elf
 
 $(BOUNDARY_APP_OUT)/%.itcm: $(BOUNDARY_APP_OUT)/%.elf | $(BOUNDARY_APP_OUT)
 	$(OBJCOPY) -O binary --gap-fill=0x00 --only-section=.init --only-section=.text --only-section=.text.* --only-section=.text.vector $< $(@:.itcm=_itcm.bin)
-	od -An -t x4 -w4 -v $(@:.itcm=_itcm.bin) | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > $@
+	od -An -t x8 -w8 -v $(@:.itcm=_itcm.bin) | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > $@
 
 $(BOUNDARY_APP_OUT)/%.dtcm: $(BOUNDARY_APP_OUT)/%.elf | $(BOUNDARY_APP_OUT)
 	$(OBJCOPY) -O binary --gap-fill=0x00 --only-section=.tohost --only-section=.data --only-section=.bss --only-section=.stack --set-section-flags .bss=alloc,load,contents --set-section-flags .stack=alloc,load,contents $< $(@:.dtcm=_dtcm.bin) || true

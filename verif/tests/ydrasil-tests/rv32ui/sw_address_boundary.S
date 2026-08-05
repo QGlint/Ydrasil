@@ -12,7 +12,7 @@ RVTEST_CODE_BEGIN
   CHECK_EQ_IMM(2, t2, 0x01234567)
   sw s0, 0(t0)
 
-  li t0, 0x8013fffc
+  li t0, 0x8010fffc
   lw s1, 0(t0)
   li t1, 0x89abcdef
   sw t1, 0(t0)

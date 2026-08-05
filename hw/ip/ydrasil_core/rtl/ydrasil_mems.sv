@@ -21,10 +21,11 @@ import ydrasil_pkg::*;
 );
 
 
-    wire [ITCM_ADDR_WIDTH-1:0] itcm_addr;
-    wire [ITCM_ADDR_WIDTH-1:0] itcm_addr1;
-    wire [INST_DATA_WIDTH-1:0] itcm_rdata;
-    wire [INST_DATA_WIDTH-1:0] itcm_rdata1;
+    wire [ITCM_ADDR_WIDTH-2:0] itcm_addr;
+    wire [(2*INST_DATA_WIDTH)-1:0] itcm_rdata;
+    reg itcm_addr_odd_q;
+    wire [INST_DATA_WIDTH-1:0] itcm_instr;
+    wire [INST_DATA_WIDTH-1:0] itcm_instr1;
 
     wire [DTCM_ADDR_WIDTH-1:0] dtcm_addr;
     wire [BUS_DATA_WIDTH-1:0] dtcm_rdata;
@@ -58,8 +59,12 @@ import ydrasil_pkg::*;
     assign if_dtcm_addr = if_mem_addr_i[DTCM_ADDR_WIDTH+1:2];
     assign lsu_dtcm_addr = lsu_mem_req_i.load.addr[DTCM_ADDR_WIDTH+1:2];
 
-    assign itcm_addr = if_mem_addr_i[ITCM_ADDR_WIDTH+1:2]; // 地址对齐到4字节
-    assign itcm_addr1 = if_mem_addr1_i[ITCM_ADDR_WIDTH+1:2];
+    assign itcm_addr = if_mem_addr_i[ITCM_ADDR_WIDTH+1:3];
+    assign itcm_instr = itcm_addr_odd_q ?
+        itcm_rdata[(2*INST_DATA_WIDTH)-1:INST_DATA_WIDTH] :
+        itcm_rdata[INST_DATA_WIDTH-1:0];
+    assign itcm_instr1 = itcm_addr_odd_q ? RV32I_INS_NOP :
+        itcm_rdata[(2*INST_DATA_WIDTH)-1:INST_DATA_WIDTH];
     assign dtcm_wdata = lsu_mem_req_i.store.wdata;
     assign dtcm_wmask = lsu_mem_req_i.store.valid ?
         lsu_mem_req_i.store.wmask : 4'b0000;
@@ -68,15 +73,22 @@ import ydrasil_pkg::*;
     // constant here so LSU request valid is not part of every BRAM address bit.
     assign dtcm_addr = IF_DTCM_FETCH_ENABLE ?
         (lsu_mem_req_i.load.valid ? lsu_dtcm_addr : if_dtcm_addr) : lsu_dtcm_addr;
-    assign if_mem_rdata_o = if_dtcm_access ? dtcm_rdata : itcm_rdata;
+    assign if_mem_rdata_o = if_dtcm_access ? dtcm_rdata : itcm_instr;
     // DTCM self-modifying execution is a simulation aid only.  The second
     // fetch lane is deliberately suppressed there because DTCM has one port.
     assign if_mem_rdata1_o = (IF_DTCM_FETCH_ENABLE & if_dtcm_sel1) ?
-        RV32I_INS_NOP : itcm_rdata1;
+        RV32I_INS_NOP : itcm_instr1;
     assign lsu_mem_data_o = dtcm_rdata;
     assign dtcm_ren = IF_DTCM_FETCH_ENABLE ?
         (lsu_mem_req_i.load.valid | if_dtcm_access) : lsu_mem_req_i.load.valid;
     assign dtcm_wen = lsu_mem_req_i.store.valid;
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n)
+            itcm_addr_odd_q <= 1'b0;
+        else
+            itcm_addr_odd_q <= if_mem_addr_i[2];
+    end
 
     ydrasil_itcm #(
         .ITCM_ADDR_WIDTH(ITCM_ADDR_WIDTH),
@@ -87,10 +99,7 @@ import ydrasil_pkg::*;
         .clk(clk),
         .itcm_en(rst_n), // ITCM在复位后始终使能
         .itcm_addr(itcm_addr),
-        .itcm_data_o(itcm_rdata),
-        .itcm_en1(rst_n),
-        .itcm_addr1(itcm_addr1),
-        .itcm_data1_o(itcm_rdata1)
+        .itcm_data_o(itcm_rdata)
     );
 
     ydrasil_dtcm #(

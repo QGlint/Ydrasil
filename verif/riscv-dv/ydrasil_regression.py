@@ -25,8 +25,8 @@ from pathlib import Path
 from typing import Any
 
 MAX_JOBS = 20
-ITCM_WORDS = 16 * 1024 // 4
-DTCM_WORDS = 256 * 1024 // 4
+ITCM_WORDS = 16 * 1024 // 8
+DTCM_WORDS = 64 * 1024 // 4
 DIRECTED_REGION_BYTES = 4096
 
 
@@ -37,7 +37,7 @@ class Profile:
     abi: str
     instr_count: int
     subprograms: int
-    version: int = 6
+    version: int = 7
 
 
 def _json_dump(path: Path, value: Any) -> None:
@@ -118,14 +118,15 @@ def _run_logged(
         )
 
 
-def _binary_to_mem(binary: Path, mem: Path) -> int:
+def _binary_to_mem(binary: Path, mem: Path, word_bytes: int = 4) -> int:
     data = binary.read_bytes()
-    if len(data) % 4:
-        data += b"\0" * (4 - len(data) % 4)
+    if len(data) % word_bytes:
+        data += b"\0" * (word_bytes - len(data) % word_bytes)
     with mem.open("w", encoding="ascii") as stream:
-        for offset in range(0, len(data), 4):
-            stream.write(f"{int.from_bytes(data[offset:offset + 4], 'little'):08x}\n")
-    return len(data) // 4
+        for offset in range(0, len(data), word_bytes):
+            value = int.from_bytes(data[offset:offset + word_bytes], "little")
+            stream.write(f"{value:0{word_bytes * 2}x}\n")
+    return len(data) // word_bytes
 
 
 def _symbol_address(gcc: Path, elf: Path, symbol: str) -> int:
@@ -292,7 +293,7 @@ def _prepare_one(args: argparse.Namespace, profile: Profile, profile_id: str, se
             objcopy_common + [item for section in dtcm_sections for item in (f"--only-section={section}",)] + [str(elf), str(dtcm_bin)],
             check=True,
         )
-        itcm_words = _binary_to_mem(itcm_bin, tmp / "program.itcm")
+        itcm_words = _binary_to_mem(itcm_bin, tmp / "program.itcm", 8)
         dtcm_words = _binary_to_mem(dtcm_bin, tmp / "program.dtcm")
         if itcm_words > ITCM_WORDS or dtcm_words > DTCM_WORDS:
             raise RuntimeError(f"memory overflow: ITCM={itcm_words}/{ITCM_WORDS}, DTCM={dtcm_words}/{DTCM_WORDS} words")

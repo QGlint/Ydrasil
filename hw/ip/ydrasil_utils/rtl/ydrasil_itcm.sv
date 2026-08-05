@@ -10,44 +10,38 @@ module ydrasil_itcm #(
         1'b0
 `endif
 ) (
-    input  wire                       clk,
-    input  wire                       itcm_en,
-    input  wire [ITCM_ADDR_WIDTH-1:0] itcm_addr,
-    output wire [INST_DATA_WIDTH-1:0] itcm_data_o,
-    input  wire                       itcm_en1,
-    input  wire [ITCM_ADDR_WIDTH-1:0] itcm_addr1,
-    output wire [INST_DATA_WIDTH-1:0] itcm_data1_o
+    input  wire                              clk,
+    input  wire                              itcm_en,
+    input  wire [ITCM_ADDR_WIDTH-2:0]        itcm_addr,
+    output wire [(2*INST_DATA_WIDTH)-1:0]    itcm_data_o
 );
 `ifdef TARGET_XILINX
-    xpm_tpdram_wrapper #(
-        .DEPTH(1 << ITCM_ADDR_WIDTH),
-        .DATA_WIDTH(INST_DATA_WIDTH),
-        .ADDR_WIDTH_A(ITCM_ADDR_WIDTH),
-        .ADDR_WIDTH_B(ITCM_ADDR_WIDTH),
+    xpm_sdpram_wrapper #(
+        .DEPTH(1 << (ITCM_ADDR_WIDTH - 1)),
+        .DATA_WIDTH(2 * INST_DATA_WIDTH),
+        .ADDR_WIDTH(ITCM_ADDR_WIDTH - 1),
+        .MEMORY_PRIMITIVE("block"),
         .MEMORY_INIT_FILE(INIT_FILE),
         .USE_MEM_INIT(INIT_ENABLE),
         .USE_MEM_INIT_MMI(ENABLE_XPM_MMI),
         .MEMORY_OPTIMIZATION("false")
     ) u_impl (
 `else
-    ydrasil_sim_tpdram #(
-        .DEPTH(1 << ITCM_ADDR_WIDTH),
-        .DATA_WIDTH(INST_DATA_WIDTH),
-        .ADDR_WIDTH(ITCM_ADDR_WIDTH),
+    ydrasil_sim_sdpram #(
+        .DEPTH(1 << (ITCM_ADDR_WIDTH - 1)),
+        .DATA_WIDTH(2 * INST_DATA_WIDTH),
+        .ADDR_WIDTH(ITCM_ADDR_WIDTH - 1),
         .INIT_FILE(INIT_FILE),
         .INIT_ENABLE(INIT_ENABLE)
     ) u_impl (
 `endif
         .clk(clk),
-        .ena_i(itcm_en),
-        .addra_i(itcm_addr),
-        .dina_i('0),
-        .wea_i('0),
-        .douta_o(itcm_data_o),
-        .enb_i(itcm_en1),
-        .addrb_i(itcm_addr1),
-        .dinb_i('0),
-        .web_i('0),
-        .doutb_o(itcm_data1_o)
+        .ren_i(itcm_en),
+        .raddr_i(itcm_addr),
+        .rdata_o(itcm_data_o),
+        .wen_i(1'b0),
+        .waddr_i('0),
+        .wdata_i('0),
+        .wstrb_i('0)
     );
 endmodule

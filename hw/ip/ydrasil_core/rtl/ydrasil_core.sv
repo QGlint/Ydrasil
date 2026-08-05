@@ -599,10 +599,14 @@ import ydrasil_axi_pkg::*;
 			commit_instr = u_ydrasil_mems.u_dtcm.u_impl.mem_r[
 				id_instr_addr[ydrasil_pkg::DTCM_ADDR_WIDTH+1:2]
 			];
-		end else begin
-			commit_instr = u_ydrasil_mems.u_itcm.u_impl.mem_r[
-				id_instr_addr[ydrasil_pkg::ITCM_ADDR_WIDTH+1:2]
-			];
+			end else begin
+				commit_instr = id_instr_addr[2] ?
+					u_ydrasil_mems.u_itcm.u_impl.mem_r[
+						id_instr_addr[ydrasil_pkg::ITCM_ADDR_WIDTH+1:3]
+					][63:32] :
+					u_ydrasil_mems.u_itcm.u_impl.mem_r[
+						id_instr_addr[ydrasil_pkg::ITCM_ADDR_WIDTH+1:3]
+					][31:0];
 		end
 	end
 	always_comb begin
@@ -612,10 +616,14 @@ import ydrasil_axi_pkg::*;
 			retire_instr = u_ydrasil_mems.u_dtcm.u_impl.mem_r[
 				commit_pkt.pc[ydrasil_pkg::DTCM_ADDR_WIDTH+1:2]
 			];
-		end else begin
-			retire_instr = u_ydrasil_mems.u_itcm.u_impl.mem_r[
-				commit_pkt.pc[ydrasil_pkg::ITCM_ADDR_WIDTH+1:2]
-			];
+			end else begin
+				retire_instr = commit_pkt.pc[2] ?
+					u_ydrasil_mems.u_itcm.u_impl.mem_r[
+						commit_pkt.pc[ydrasil_pkg::ITCM_ADDR_WIDTH+1:3]
+					][63:32] :
+					u_ydrasil_mems.u_itcm.u_impl.mem_r[
+						commit_pkt.pc[ydrasil_pkg::ITCM_ADDR_WIDTH+1:3]
+					][31:0];
 		end
 		if ((commit_pkt1.pc >= ydrasil_pkg::DTCM_BASE_ADDR) &&
 		    (commit_pkt1.pc < (ydrasil_pkg::DTCM_BASE_ADDR +
@@ -623,10 +631,14 @@ import ydrasil_axi_pkg::*;
 			retire_instr1 = u_ydrasil_mems.u_dtcm.u_impl.mem_r[
 				commit_pkt1.pc[ydrasil_pkg::DTCM_ADDR_WIDTH+1:2]
 			];
-		end else begin
-			retire_instr1 = u_ydrasil_mems.u_itcm.u_impl.mem_r[
-				commit_pkt1.pc[ydrasil_pkg::ITCM_ADDR_WIDTH+1:2]
-			];
+			end else begin
+				retire_instr1 = commit_pkt1.pc[2] ?
+					u_ydrasil_mems.u_itcm.u_impl.mem_r[
+						commit_pkt1.pc[ydrasil_pkg::ITCM_ADDR_WIDTH+1:3]
+					][63:32] :
+					u_ydrasil_mems.u_itcm.u_impl.mem_r[
+						commit_pkt1.pc[ydrasil_pkg::ITCM_ADDR_WIDTH+1:3]
+					][31:0];
 		end
 	end
 	assign commit_alu_instr = commit_instr;

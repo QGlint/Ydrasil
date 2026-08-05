@@ -47,11 +47,12 @@ DEVICE = ' -march=rv32im_zicsr_zifencei_zba_zbb_zbc_zbkb_zbkx_zbs -mabi=ilp32 -m
 # The repository toolchain ships Newlib, not the distro's picolibc specs.
 # nosys.specs supplies the bare-metal syscall stubs expected by this BSP.
 COMMON = DEVICE + ' --specs=nosys.specs -ffunction-sections -fdata-sections -fno-common -fno-zero-initialized-in-bss'
+CONTROL_FLOW_ALIGNMENT = ' -falign-functions=8 -falign-jumps=8 -falign-labels=8 -falign-loops=8'
 
 OPTIMIZATION = os.getenv('RTT_OPT', '-Os')
 LINK_SCRIPT = os.path.abspath(os.getenv('RTT_LINKER', '../link.lds'))
 
-CFLAGS = COMMON + ' ' + OPTIMIZATION + ' -g -Wall -Wno-unused-function -fno-builtin'
+CFLAGS = COMMON + ' ' + OPTIMIZATION + CONTROL_FLOW_ALIGNMENT + ' -g -Wall -Wno-unused-function -fno-builtin'
 if os.getenv('RTT_APP') == 'rtthread-coremark' or os.getenv('RTT_COREMARK') == '1':
     CFLAGS += ' -DRTT_COREMARK_BUILD=1'
 AFLAGS = COMMON + ' -x assembler-with-cpp -DRTOS_RTTHREAD'
@@ -64,5 +65,5 @@ POST_ACTION += OBJDUMP + ' -d -S $TARGET > "' + DUMP + '"\n'
 POST_ACTION += OBJCPY + ' -O binary --gap-fill=0 --only-section=.init --only-section=.text $TARGET "' + ITCM_BIN + '"\n'
 POST_ACTION += OBJCPY + ' -O binary --gap-fill=0 --only-section=.data --only-section=.bss '
 POST_ACTION += '--set-section-flags .bss=alloc,load,contents $TARGET "' + DTCM_BIN + '"\n'
-POST_ACTION += "od -An -t x4 -w4 -v \"" + ITCM_BIN + "\" | tr -d ' \\t' | sed '/^$/d' > \"" + ITCM + "\"\n"
+POST_ACTION += "od -An -t x8 -w8 -v \"" + ITCM_BIN + "\" | tr -d ' \\t' | sed '/^$/d' > \"" + ITCM + "\"\n"
 POST_ACTION += "od -An -t x4 -w4 -v \"" + DTCM_BIN + "\" | tr -d ' \\t' | sed '/^$/d' > \"" + DTCM + "\"\n"

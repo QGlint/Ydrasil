@@ -83,8 +83,8 @@ end
     reg     [8*300:1] testcase;
 
     // 计算ITCM的深度和字节大小
-    localparam ITCM_DEPTH = (1 << (ydrasil_pkg::ITCM_ADDR_WIDTH));  // ITCM中的字数
-    localparam ITCM_BYTE_SIZE = ITCM_DEPTH * 4;  // 总字节数
+    localparam ITCM_DEPTH = (1 << (ydrasil_pkg::ITCM_ADDR_WIDTH - 1));
+    localparam ITCM_BYTE_SIZE = (1 << ydrasil_pkg::ITCM_ADDR_WIDTH) * 4;
 
     // 创建与ITCM容量相同的临时字节数组
     reg [7:0] prog_mem[0:ITCM_BYTE_SIZE-1];
@@ -1316,7 +1316,10 @@ end
 
             $readmemh({testcase, ".verilog"}, prog_mem);
             for (i = 0; i < ITCM_DEPTH; i = i + 1) begin
-                `ITCM.mem_r[i] = {prog_mem[i*4+3], prog_mem[i*4+2], prog_mem[i*4+1], prog_mem[i*4+0]};
+                `ITCM.mem_r[i] = {
+                    prog_mem[i*8+7], prog_mem[i*8+6], prog_mem[i*8+5], prog_mem[i*8+4],
+                    prog_mem[i*8+3], prog_mem[i*8+2], prog_mem[i*8+1], prog_mem[i*8+0]
+                };
             end
             $display("Successfully loaded instructions to ITCM");
             $display("ITCM 0x00: %h", `ITCM.mem_r[0]);

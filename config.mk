@@ -323,7 +323,11 @@ RISCV_CFLAGS := \
     -nostdlib \
     -nostartfiles \
     -static \
-    -mcmodel=medany
+    -mcmodel=medany \
+    -falign-functions=8 \
+    -falign-jumps=8 \
+    -falign-labels=8 \
+    -falign-loops=8
 
 RVTESTS_TYPE := rv32ui rv32um rv32uzba rv32uzbb rv32uzbc rv32uzbkb rv32uzbkx rv32uzbs rv32mi
 ifeq ($(FPU),1)

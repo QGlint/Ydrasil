@@ -9,11 +9,15 @@ package ydrasil_pkg;
 	localparam logic [31:0] DTCM_BASE_ADDR = 32'h8010_0000;
 	localparam int DTCM_SIZE = (1 << DTCM_ADDR_WIDTH);
 
-`ifdef INIT_ITCM
-	localparam int INIT_ITCM = `INIT_ITCM;
-`else
-	localparam int INIT_ITCM = 1;
-`endif
+	`ifdef INIT_ITCM
+		localparam int INIT_ITCM = `INIT_ITCM;
+	`else
+	`ifdef TARGET_XILINX
+		localparam int INIT_ITCM = 1;
+	`else
+		localparam int INIT_ITCM = 0;
+	`endif
+	`endif
 
 `ifdef ITCM_INIT_FILE
 	localparam string ITCM_INIT_FILE = `ITCM_INIT_FILE;
@@ -21,11 +25,15 @@ package ydrasil_pkg;
 	localparam string ITCM_INIT_FILE = "hw/dv/test_data/mem_generated/rv32ui-p-add.mem";
 `endif
 
-`ifdef INIT_DTCM
-	localparam int INIT_DTCM = `INIT_DTCM;
-`else
-	localparam int INIT_DTCM = 1;
-`endif
+	`ifdef INIT_DTCM
+		localparam int INIT_DTCM = `INIT_DTCM;
+	`else
+	`ifdef TARGET_XILINX
+		localparam int INIT_DTCM = 1;
+	`else
+		localparam int INIT_DTCM = 0;
+	`endif
+	`endif
 
 `ifdef DTCM_INIT_FILE
 	localparam string DTCM_INIT_FILE = `DTCM_INIT_FILE;

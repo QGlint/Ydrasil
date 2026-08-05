@@ -24,6 +24,7 @@ module ydrasil_dtcm #(
         .DEPTH(1 << DTCM_ADDR_WIDTH),
         .DATA_WIDTH(BUS_DATA_WIDTH),
         .ADDR_WIDTH(DTCM_ADDR_WIDTH),
+        .MEMORY_PRIMITIVE("block"),
         .MEMORY_INIT_FILE(INIT_FILE),
         .USE_MEM_INIT(INIT_ENABLE),
         .USE_MEM_INIT_MMI(ENABLE_XPM_MMI),

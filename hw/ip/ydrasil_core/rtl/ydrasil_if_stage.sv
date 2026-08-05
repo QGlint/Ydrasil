@@ -415,7 +415,7 @@ import ydrasil_pkg::*;
     wire fetch_addr_is_dtcm =
         (fetch_addr >= DTCM_BASE_ADDR) &&
         (fetch_addr < (DTCM_BASE_ADDR + ((32'd1 << DTCM_ADDR_WIDTH) << 2)));
-    wire fetch_two = !fetch_addr_is_dtcm;
+    wire fetch_two = !fetch_addr_is_dtcm && !fetch_addr[2];
     assign fetch_addr1 = fetch_addr + 32'd4;
 	wire [31:0] target_ff_target0 = {target_ff_target0_q, 2'b00};
 	wire [31:0] target_ff_target1 = {target_ff_target1_q, 2'b00};

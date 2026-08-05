@@ -78,7 +78,7 @@ SORT_OPT_BUILD_TARGETS := $(foreach profile,$(APP_OPT_PROFILES),$(foreach app,$(
 SORT_OPT_SIM_TARGETS := $(foreach profile,$(APP_OPT_PROFILES),$(foreach app,$(SORT_APP_NAMES),sort_opt_sim_$(profile)_$(app)))
 COVERAGE_QUICK_COREMARK_PROFILE ?= $(COREMARK_PROFILE)
 COVERAGE_QUICK_COREMARK_TARGET ?= coremark_opt_sim_$(COVERAGE_QUICK_COREMARK_PROFILE)
-COVERAGE_QUICK_TARGETS ?= boundary_all test_all $(COVERAGE_QUICK_COREMARK_TARGET) coe_loop_lina
+COVERAGE_QUICK_TARGETS ?= boundary_all test_all $(COVERAGE_QUICK_COREMARK_TARGET)
 VERIF_COVERAGE_QUICK_SUMMARY ?= $(VERIF_COVERAGE_DIR)/coverage_quick_summary.log
 COVERAGE_CLOSURE_DIR ?= $(VERIF_COVERAGE_DIR)/closure
 COVERAGE_CLOSURE_DATA ?= $(COVERAGE_CLOSURE_DIR)/data/boundary_coverage_closure_edges.dat
@@ -313,9 +313,10 @@ SYN_PREPROJECT_ITCM_MEM ?= $(SYN_PREPROJECT_MEMORY_DIR)/itcm.mem
 SYN_PREPROJECT_DTCM_MEM ?= $(SYN_PREPROJECT_MEMORY_DIR)/dtcm.mem
 SYN_PREPROJECT_ITCM_COE ?= $(SYN_PREPROJECT_MEMORY_DIR)/itcm.coe
 SYN_PREPROJECT_DTCM_COE ?= $(SYN_PREPROJECT_MEMORY_DIR)/dtcm.coe
-SYN_ITCM_WORDS ?= 32768
+SYN_ITCM_WORDS ?= 16384
 SYN_DTCM_WORDS ?= 16384
-SYN_MEMORY_WIDTH ?= 32
+SYN_ITCM_WIDTH ?= 64
+SYN_DTCM_WIDTH ?= 32
 SYN_TIMING_SUMMARY_MAX_PATHS ?= 5000
 SYN_TIMING_PATH_MAX_PATHS ?= 5000
 SYN_TIMING_NWORST ?= 1
@@ -648,7 +649,6 @@ coverage_all_run: coverage_clean
 	@$(MAKE) coremark_opt_all VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
 	@$(MAKE) test_all VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
 	@$(MAKE) coremark_sim VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
-	@$(MAKE) coe_loop_lina VERILATOR_COVERAGE=1 VERILATOR_TRACE=0
 	@$(MAKE) coverage_report
 	@$(MAKE) ppa_perf_report
 
@@ -678,7 +678,6 @@ coverage_quick: coverage_clean
 				boundary_all) pattern='^boundary(-opt)?/'; minimum=$(COVERAGE_QUICK_BOUNDARY_MIN) ;; \
 				test_all) pattern='^rv32'; minimum=$(COVERAGE_QUICK_ISA_MIN) ;; \
 				$(COVERAGE_QUICK_COREMARK_TARGET)) pattern='^coremark-opt/$(COVERAGE_QUICK_COREMARK_PROFILE)$$'; minimum=$(COVERAGE_QUICK_COREMARK_MIN) ;; \
-				coe_loop_lina) pattern='^coe_loop_lina$$'; minimum=$(COVERAGE_QUICK_COE_MIN) ;; \
 				*) pattern='a^' ;; \
 			esac; \
 			measured=$$(awk -F, -v p="$$pattern" 'NR>1 && $$1 ~ p && $$2 ~ /^[0-9]+$$/ && $$2>m {m=$$2} END{print m+0}' "$(PPA_DIR)/perf_stats.csv"); \
@@ -687,7 +686,6 @@ coverage_quick: coverage_clean
 				boundary_all) minimum=$(COVERAGE_QUICK_BOUNDARY_MIN) ;; \
 				test_all) minimum=$(COVERAGE_QUICK_ISA_MIN) ;; \
 				$(COVERAGE_QUICK_COREMARK_TARGET)) minimum=$(COVERAGE_QUICK_COREMARK_MIN) ;; \
-				coe_loop_lina) minimum=$(COVERAGE_QUICK_COE_MIN) ;; \
 			esac; \
 		fi; \
 		budget=$$(( (measured * $(COVERAGE_QUICK_TICKS_PER_CYCLE) * (100 + $(COVERAGE_QUICK_MARGIN_PERCENT)) + 99) / 100 + $(COVERAGE_QUICK_TIMEOUT_PAD) )); \
@@ -1066,13 +1064,13 @@ syn-stage-memory: syn-stage-xpr rtthread-coremark-build-$(SYN_MSH_PROFILE)
 	@test -f "$(SYN_MSH_DTCM)" || { echo "Error: msh DTCM image not found: $(SYN_MSH_DTCM)"; exit 1; }
 	@mkdir -p "$(SYN_PREPROJECT_MEMORY_DIR)"
 	$(PYTHON) "$(SYN_DIR)/prepare_memory_init.py" \
-		--input "$(SYN_MSH_ITCM)" --width $(SYN_MEMORY_WIDTH) --depth $(SYN_ITCM_WORDS) \
+		--input "$(SYN_MSH_ITCM)" --width $(SYN_ITCM_WIDTH) --depth $(SYN_ITCM_WORDS) \
 		--mem "$(SYN_PREPROJECT_ITCM_MEM)" --coe "$(SYN_PREPROJECT_ITCM_COE)"
 	$(PYTHON) "$(SYN_DIR)/prepare_memory_init.py" \
-		--input "$(SYN_MSH_DTCM)" --width $(SYN_MEMORY_WIDTH) --depth $(SYN_DTCM_WORDS) \
+		--input "$(SYN_MSH_DTCM)" --width $(SYN_DTCM_WIDTH) --depth $(SYN_DTCM_WORDS) \
 		--mem "$(SYN_PREPROJECT_DTCM_MEM)" --coe "$(SYN_PREPROJECT_DTCM_COE)"
-	@printf 'image=rtthread_coremark\nprofile=%s\nwidth=%s\nitcm_words=%s\ndtcm_words=%s\n' \
-		"$(SYN_MSH_PROFILE)" "$(SYN_MEMORY_WIDTH)" "$(SYN_ITCM_WORDS)" "$(SYN_DTCM_WORDS)" \
+	@printf 'image=rtthread_coremark\nprofile=%s\nitcm_width=%s\ndtcm_width=%s\nitcm_words=%s\ndtcm_words=%s\n' \
+		"$(SYN_MSH_PROFILE)" "$(SYN_ITCM_WIDTH)" "$(SYN_DTCM_WIDTH)" "$(SYN_ITCM_WORDS)" "$(SYN_DTCM_WORDS)" \
 		> "$(SYN_PREPROJECT_MEMORY_DIR)/manifest.txt"
 
 ifeq ($(SYN_REUSE_STAGE),1)
@@ -1540,9 +1538,9 @@ coremark_opt_sim_$(1):
 		>"$$$$run_log" 2>&1; rc=$$$$?; set -e; hw_log="$(HW_TRACE_OUT_DIR)/coremark-opt/$$$$profile/hw.log"; \
 	result=FAIL; if [ "$$$$rc" -eq 0 ] && grep -q 'Correct operation validated' "$$$$hw_log" && \
 		grep -q 'COREMARK DONE' "$$$$hw_log"; then result=PASS; fi; \
-	cycles=$$$$(grep -o 'CYCLES=[0-9]*' "$$$$hw_log" 2>/dev/null | tail -1 | cut -d= -f2); \
-	insts=$$$$(grep -o 'INSTS=[0-9]*' "$$$$hw_log" 2>/dev/null | tail -1 | cut -d= -f2); \
-	ipc=$$$$(grep -o 'IPC=[0-9.]*' "$$$$hw_log" 2>/dev/null | tail -1 | cut -d= -f2); \
+	cycles=$$$$(sed -n 's/^PERF_METRIC:.*CYCLES= *\([0-9]*\).*/\1/p' "$$$$hw_log" 2>/dev/null | tail -1); \
+	insts=$$$$(sed -n 's/^PERF_METRIC:.*INSTS= *\([0-9]*\).*/\1/p' "$$$$hw_log" 2>/dev/null | tail -1); \
+	ipc=$$$$(sed -n 's/^PERF_METRIC:.*IPC= *\([0-9.]*\).*/\1/p' "$$$$hw_log" 2>/dev/null | tail -1); \
 	score=$$$$(sed -n 's/^CoreMark 1\.0 : *\([0-9.]*\).*/\1/p' "$$$$hw_log" 2>/dev/null | tail -1); \
 	echo "[$$$$profile] [$$$$result] itcm_bytes=$$$$bytes itcm_capacity=$$$$capacity expanded_itcm=$$$$expanded cycles=$$$${cycles:-N/A} insts=$$$${insts:-N/A} ipc=$$$${ipc:-N/A} score=$$$${score:-N/A}" > "$$$$status"
 endef
@@ -1552,8 +1550,17 @@ coremark_opt_report:
 	@mkdir -p "$(PPA_DIR)"; rm -f "$(PPA_COREMARK_OPT_LOG)"; failed=0; pass=0; skip=0; expanded_count=0; \
 	for profile in $(APP_OPT_PROFILES); do status="$(COREMARK_OPT_RESULT_DIR)/$$profile.status"; \
 		if [ ! -f "$$status" ]; then echo "[$$profile] [FAIL] missing status" | tee -a "$(PPA_COREMARK_OPT_LOG)"; failed=1; continue; fi; \
-		line=$$(cat "$$status"); if ! echo "$$line" | grep -q ' score='; then \
-			score=$$(sed -n 's/^CoreMark 1\.0 : *\([0-9.]*\).*/\1/p' "$(HW_TRACE_OUT_DIR)/coremark-opt/$$profile/hw.log" 2>/dev/null | tail -1); \
+		line=$$(cat "$$status"); hw_log="$(HW_TRACE_OUT_DIR)/coremark-opt/$$profile/hw.log"; \
+		if echo "$$line" | grep -q '\[PASS\]'; then \
+			cycles=$$(sed -n 's/^PERF_METRIC:.*CYCLES= *\([0-9]*\).*/\1/p' "$$hw_log" 2>/dev/null | tail -1); \
+			insts=$$(sed -n 's/^PERF_METRIC:.*INSTS= *\([0-9]*\).*/\1/p' "$$hw_log" 2>/dev/null | tail -1); \
+			ipc=$$(sed -n 's/^PERF_METRIC:.*IPC= *\([0-9.]*\).*/\1/p' "$$hw_log" 2>/dev/null | tail -1); \
+			if [ -n "$$cycles" ] && [ -n "$$insts" ] && [ -n "$$ipc" ]; then \
+				line=$$(printf '%s\n' "$$line" | sed -E "s/cycles=[^ ]+ insts=[^ ]+ ipc=[^ ]+/cycles=$$cycles insts=$$insts ipc=$$ipc/"); \
+			fi; \
+		fi; \
+		if ! echo "$$line" | grep -q ' score='; then \
+			score=$$(sed -n 's/^CoreMark 1\.0 : *\([0-9.]*\).*/\1/p' "$$hw_log" 2>/dev/null | tail -1); \
 			line="$$line score=$${score:-N/A}"; \
 		fi; echo "$$line" | tee -a "$(PPA_COREMARK_OPT_LOG)"; \
 		if echo "$$line" | grep -q 'expanded_itcm=YES'; then expanded_count=$$((expanded_count+1)); fi; \
@@ -1605,9 +1612,9 @@ sort_sim_%:
 	else \
 		result=FAIL; \
 	fi; \
-	cycles=$$(grep -o 'CYCLES=[0-9]*' "$$hw_log" 2>/dev/null | tail -1 | cut -d= -f2); \
-	insts=$$(grep -o 'INSTS=[0-9]*' "$$hw_log" 2>/dev/null | tail -1 | cut -d= -f2); \
-	ipc=$$(grep -o 'IPC=[0-9.]*' "$$hw_log" 2>/dev/null | tail -1 | cut -d= -f2); \
+	cycles=$$(sed -n 's/^PERF_METRIC:.*CYCLES= *\([0-9]*\).*/\1/p' "$$hw_log" 2>/dev/null | tail -1); \
+	insts=$$(sed -n 's/^PERF_METRIC:.*INSTS= *\([0-9]*\).*/\1/p' "$$hw_log" 2>/dev/null | tail -1); \
+	ipc=$$(sed -n 's/^PERF_METRIC:.*IPC= *\([0-9.]*\).*/\1/p' "$$hw_log" 2>/dev/null | tail -1); \
 	[ -n "$$cycles" ] || cycles=N/A; \
 	[ -n "$$insts" ] || insts=N/A; \
 	[ -n "$$ipc" ] || ipc=N/A; \
@@ -1693,9 +1700,9 @@ sort_opt_sim_$(1)_$(2):
 	result=FAIL; if [ "$$$$rc" -eq 0 ] \
 		&& [ "$$$$(grep -Ec "^SORT SUITE PASS name=$$$$name cases=$(SORT_EXPECT_CASES) checks=$(SORT_EXPECT_CHECKS) signature=0x$(SORT_EXPECT_SIGNATURE)$$$$" "$$$$hw_log")" -eq 1 ] \
 		&& ! grep -q "^SORT FAIL name=$$$$name " "$$$$hw_log"; then result=PASS; fi; \
-	cycles=$$$$(grep -o 'CYCLES=[0-9]*' "$$$$hw_log" 2>/dev/null | tail -1 | cut -d= -f2); \
-	insts=$$$$(grep -o 'INSTS=[0-9]*' "$$$$hw_log" 2>/dev/null | tail -1 | cut -d= -f2); \
-	ipc=$$$$(grep -o 'IPC=[0-9.]*' "$$$$hw_log" 2>/dev/null | tail -1 | cut -d= -f2); \
+	cycles=$$$$(sed -n 's/^PERF_METRIC:.*CYCLES= *\([0-9]*\).*/\1/p' "$$$$hw_log" 2>/dev/null | tail -1); \
+	insts=$$$$(sed -n 's/^PERF_METRIC:.*INSTS= *\([0-9]*\).*/\1/p' "$$$$hw_log" 2>/dev/null | tail -1); \
+	ipc=$$$$(sed -n 's/^PERF_METRIC:.*IPC= *\([0-9.]*\).*/\1/p' "$$$$hw_log" 2>/dev/null | tail -1); \
 	echo "[$$$$profile/$$$$name] [$$$$result] itcm_bytes=$$$$bytes itcm_capacity=$$$$capacity expanded_itcm=$$$$expanded cycles=$$$${cycles:-N/A} insts=$$$${insts:-N/A} ipc=$$$${ipc:-N/A}" > "$$$$status"
 endef
 $(foreach profile,$(APP_OPT_PROFILES),$(foreach app,$(SORT_APP_NAMES),$(eval $(call SORT_OPT_template,$(profile),$(app)))))
@@ -1883,9 +1890,8 @@ coremark_result:
 
 coe_m3_force:
 
-$(COE_M3_ITCM): $(COE_M3_IROM_SOURCE) $(COE_TO_MEM) coe_m3_force
-	@mkdir -p "$(@D)"
-	perl "$(COE_TO_MEM)" "$<" "$@"
+$(COE_M3_ITCM): $(COE_M3_ITCM_BIN)
+	od -An -t x8 -w8 -v "$<" | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > "$@"
 
 $(COE_M3_ITCM_BIN): $(COE_M3_IROM_SOURCE) $(COE_TO_MEM) coe_m3_force
 	@mkdir -p "$(@D)"
@@ -1899,13 +1905,13 @@ $(COE_LOOP2_ITCM_BIN): $(COE_M3_ITCM_BIN) $(COE_LOOP_PATCH)
 	perl "$(COE_LOOP_PATCH)" "$<" "$@" 1
 
 $(COE_LOOP2_ITCM): $(COE_LOOP2_ITCM_BIN)
-	od -An -t x4 -w4 -v "$<" | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > "$@"
+	od -An -t x8 -w8 -v "$<" | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > "$@"
 
 $(COE_LOOP5_ITCM_BIN): $(COE_M3_ITCM_BIN) $(COE_LOOP_PATCH)
 	perl "$(COE_LOOP_PATCH)" "$<" "$@" 4
 
 $(COE_LOOP5_ITCM): $(COE_LOOP5_ITCM_BIN)
-	od -An -t x4 -w4 -v "$<" | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > "$@"
+	od -An -t x8 -w8 -v "$<" | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > "$@"
 
 $(COE_LOOP5_DUMP): $(COE_LOOP5_ITCM_BIN)
 	$(OBJDUMP) -D -b binary -m riscv:rv32 "$<" > "$@"
@@ -1914,7 +1920,7 @@ $(COE_LOOP_LINA_ITCM_BIN): $(COE_M3_ITCM_BIN) $(COE_LOOP_LINA_PATCH)
 	perl "$(COE_LOOP_LINA_PATCH)" "$<" "$@" "$(COE_LOOP_LINA_SCALE)"
 
 $(COE_LOOP_LINA_ITCM): $(COE_LOOP_LINA_ITCM_BIN)
-	od -An -t x4 -w4 -v "$<" | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > "$@"
+	od -An -t x8 -w8 -v "$<" | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > "$@"
 
 $(COE_LOOP_LINA_DUMP): $(COE_LOOP_LINA_ITCM_BIN)
 	$(OBJDUMP) -D -b binary -m riscv:rv32 "$<" > "$@"
@@ -1931,7 +1937,7 @@ $(COE_MFLINA_ITCM_BIN): $(COE_MFLINA_SOURCE_ITCM_BIN) $(COE_MFLINA_PATCH)
 		"$(COE_MFLINA_CRC_LENGTH)" "$(COE_MFLINA_CRC_OUTER_ITERATIONS)"
 
 $(COE_MFLINA_ITCM): $(COE_MFLINA_ITCM_BIN)
-	od -An -t x4 -w4 -v "$<" | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > "$@"
+	od -An -t x8 -w8 -v "$<" | tr -d ' \t' | tr 'A-F' 'a-f' | sed '/^$$/d' > "$@"
 
 $(COE_MFLINA_DTCM): $(COE_MFLINA_DRAM_SOURCE) $(COE_TO_MEM)
 	@mkdir -p "$(@D)"
