@@ -30,10 +30,10 @@ BOUNDARY_OPT_RUN_DIR ?= $(BUILD_DIR)/boundary-opt-run
 VERIF_BOUNDARY_OPT_LOG ?= $(VERIF_STATS_DIR)/boundary_opt_summary.log
 APP_OPT_PROFILES ?= O0 O1 O2 O3 Os Og O2_noinline O3_app_unroll
 APP_OPT_JOBS ?= $(shell nproc)
-APP_OPT_ITCM_BYTES ?= 16384
-APP_OPT_EXPANDED_ITCM_BYTES ?= 65536
-APP_OPT_EXPANDED_ITCM_KIB ?= 64
-APP_OPT_EXPANDED_ITCM_ADDR_WIDTH ?= 14
+APP_OPT_ITCM_BYTES ?= 131072
+APP_OPT_EXPANDED_ITCM_BYTES ?= 131072
+APP_OPT_EXPANDED_ITCM_KIB ?= 128
+APP_OPT_EXPANDED_ITCM_ADDR_WIDTH ?= 15
 APP_OPT_EXPANDED_OBJ_DIR ?= $(BUILD_DIR)/ydrasil_core_tb-itcm-expanded
 APP_OPT_EXPANDED_LOG_DIR ?= $(BUILD_DIR)/log/itcm-expanded
 APP_OPT_EXPANDED_LINKER ?= $(BUILD_DIR)/app/opt-link/itcm-$(APP_OPT_EXPANDED_ITCM_KIB)K.lds
@@ -48,7 +48,51 @@ APP_OPT_CFLAGS_O3_app_unroll ?= -O3 -funroll-loops
 COREMARK_OPT_BSP_CFLAGS_O3 ?= -Os
 COREMARK_OPT_APP_CFLAGS_O3 ?= -O3
 COREMARK_OPT_BSP_CFLAGS_O3_app_unroll ?= -Os
-COREMARK_OPT_APP_CFLAGS_O3_app_unroll ?= -O3 -funroll-loops
+# Keep application tuning orthogonal to the BSP so compiler groups can be
+# re-swept after microarchitectural changes.
+COREMARK_SWOPT_BASE_CFLAGS ?= -O3 -funroll-loops
+COREMARK_SWOPT_CFLAGS_inline = \
+	-finline-functions -finline-small-functions \
+	-findirect-inlining -finline-functions-called-once \
+	--param=max-inline-insns-auto=4000 \
+	--param=large-function-insns=4000 \
+	--param=large-function-growth=4000 \
+	--param=inline-unit-growth=4000 \
+	-finline-limit=4000
+COREMARK_SWOPT_CFLAGS_register = \
+	-frename-registers -fweb -fomit-frame-pointer -fno-caller-saves
+COREMARK_SWOPT_CFLAGS_loop_shape = \
+	-fno-tree-loop-distribute-patterns \
+	-fno-tree-loop-vectorize -fno-tree-slp-vectorize \
+	-fno-peel-loops -fno-split-loops
+COREMARK_SWOPT_CFLAGS_control_shape = \
+	-fno-branch-count-reg -fno-crossjumping \
+	-fno-if-conversion -fno-if-conversion2 -fno-code-hoisting
+COREMARK_SWOPT_CFLAGS_tree_shape = \
+	-fno-tree-dse -fno-section-anchors \
+	-fno-tree-forwprop -fno-tree-partial-pre
+COREMARK_SWOPT_CFLAGS_unroll_all = -funroll-all-loops
+COREMARK_SWOPT_CFLAGS_no_strict_alias = -fno-strict-aliasing
+COREMARK_SWOPT_CFLAGS_lto = -flto
+COREMARK_SWOPT_CFLAGS_mtune_s7 = -mtune=sifive-7-series
+COREMARK_SWOPT_CFLAGS_branch_cost_2 = -mbranch-cost=2
+COREMARK_SWOPT_CFLAGS_branch_cost_3 = -mbranch-cost=3
+COREMARK_SWOPT_CFLAGS_branch_cost_5 = -mbranch-cost=5
+COREMARK_SWOPT_AVAILABLE_GROUPS := inline register loop_shape control_shape tree_shape unroll_all no_strict_alias lto mtune_s7 branch_cost_2 branch_cost_3 branch_cost_5
+COREMARK_SWOPT_DEFAULT_GROUPS ?= inline register loop_shape control_shape tree_shape
+COREMARK_SWOPT_GROUPS ?= $(COREMARK_SWOPT_DEFAULT_GROUPS)
+COREMARK_SWOPT_UNKNOWN_GROUPS := $(filter-out $(COREMARK_SWOPT_AVAILABLE_GROUPS),$(COREMARK_SWOPT_GROUPS))
+ifneq ($(strip $(COREMARK_SWOPT_UNKNOWN_GROUPS)),)
+$(error Unknown COREMARK_SWOPT_GROUPS: $(COREMARK_SWOPT_UNKNOWN_GROUPS). Available: $(COREMARK_SWOPT_AVAILABLE_GROUPS))
+endif
+COREMARK_SWOPT_SELECTED_CFLAGS = $(strip $(foreach group,$(COREMARK_SWOPT_GROUPS),$(COREMARK_SWOPT_CFLAGS_$(group))))
+COREMARK_SWOPT_ALIGN_BYTES ?= 8
+COREMARK_SWOPT_ALIGN_CFLAGS = \
+	-falign-functions=$(COREMARK_SWOPT_ALIGN_BYTES) \
+	-falign-jumps=$(COREMARK_SWOPT_ALIGN_BYTES) \
+	-falign-labels=$(COREMARK_SWOPT_ALIGN_BYTES) \
+	-falign-loops=$(COREMARK_SWOPT_ALIGN_BYTES)
+COREMARK_OPT_APP_CFLAGS_O3_app_unroll ?= $(COREMARK_SWOPT_BASE_CFLAGS) $(COREMARK_SWOPT_SELECTED_CFLAGS)
 COREMARK_PROFILE ?= O3_app_unroll
 COREMARK_BSP_CFLAGS ?= $(if $(COREMARK_OPT_BSP_CFLAGS_$(COREMARK_PROFILE)),$(COREMARK_OPT_BSP_CFLAGS_$(COREMARK_PROFILE)),$(APP_OPT_CFLAGS_$(COREMARK_PROFILE)))
 COREMARK_APP_CFLAGS ?= $(COREMARK_OPT_APP_CFLAGS_$(COREMARK_PROFILE))
@@ -355,7 +399,7 @@ $(error Unsupported SYN_PLL_FREQ_MHZ=$(SYN_PLL_FREQ_MHZ); supported values: $(SY
 endif
 
 .PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests regression regression_all regression_status regression_stop regression_clean regression_sort regression_sort_opt regression_suite_coverage_merge regression_coverage_report init install-bender get_spike download_and_extract_spike check_spike_prebuilt_abi build_spike_from_source check_deps spike spike_wave_to_csv sim_compare commit_check commit_spike_csv commit_hw_trace commit_hw_csv commit_compare rv_test_comp_genmem ppa_rvtest_report ppa_perf_report coe_simple coe_smoke coe_smoke_led coe_isa_probes coverage_all coverage_all_run coverage_quick coverage_closure coverage_closure_merge coverage_clean coverage_report bus_irq_test bus_irq_coverage sw_boundary_test sw_coverage sw_coverage_clean sw_run_mode sw_coverage_report
-.PHONY: coremark coremark_sim coremark_run coremark_result coremark-rebuild coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map coremark_opt_all coremark_opt_build_all coremark_opt_sim_all coremark_opt_report coremark_opt_clean $(COREMARK_OPT_BUILD_TARGETS) $(COREMARK_OPT_SIM_TARGETS) sort_app sort_all sort_sim_all sort_report sort_app_sim sort_app-rebuild sort_app-clean sort_opt_all sort_opt_build_all sort_opt_sim_all sort_opt_report sort_opt_clean $(SORT_OPT_BUILD_TARGETS) $(SORT_OPT_SIM_TARGETS) boundary_app boundary_all boundary_sim_all boundary_report boundary_app-rebuild boundary_app-clean boundary_opt_all boundary_opt_build_all boundary_opt_sim_all boundary_opt_report boundary_opt_clean $(BOUNDARY_OPT_BUILD_TARGETS) $(BOUNDARY_OPT_SIM_TARGETS) coe_m3_force coe_loop2_gen coe_loop5 coe_loop5_gen coe_loop_lina coe_loop_lina_gen loop_lina coe_MFlina coe_MFlina_gen coe_mflina coe_mflina_gen rtthread rtthread-build rtthread-clean rtthread-coremark rtthread-coremark-build rtthread-coremark-build-all rtthread-coremark-sim rtthread-coremark-sim-all rtthread-coremark-report rtthread-coremark-compare rtthread-coremark-clean rtthread-utest rtthread-utest-build rtthread-utest-sim rtthread-utest-report rtthread-utest-clean $(RTTHREAD_COREMARK_PROFILE_BUILD_TARGETS) $(RTTHREAD_COREMARK_PROFILE_SIM_TARGETS)
+.PHONY: coremark coremark_sim coremark_run coremark_result coremark-rebuild coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map coremark_swopt_show coremark_opt_all coremark_opt_build_all coremark_opt_sim_all coremark_opt_report coremark_opt_clean $(COREMARK_OPT_BUILD_TARGETS) $(COREMARK_OPT_SIM_TARGETS) sort_app sort_all sort_sim_all sort_report sort_app_sim sort_app-rebuild sort_app-clean sort_opt_all sort_opt_build_all sort_opt_sim_all sort_opt_report sort_opt_clean $(SORT_OPT_BUILD_TARGETS) $(SORT_OPT_SIM_TARGETS) boundary_app boundary_all boundary_sim_all boundary_report boundary_app-rebuild boundary_app-clean boundary_opt_all boundary_opt_build_all boundary_opt_sim_all boundary_opt_report boundary_opt_clean $(BOUNDARY_OPT_BUILD_TARGETS) $(BOUNDARY_OPT_SIM_TARGETS) coe_m3_force coe_loop2_gen coe_loop5 coe_loop5_gen coe_loop_lina coe_loop_lina_gen loop_lina coe_MFlina coe_MFlina_gen coe_mflina coe_mflina_gen rtthread rtthread-build rtthread-clean rtthread-coremark rtthread-coremark-build rtthread-coremark-build-all rtthread-coremark-sim rtthread-coremark-sim-all rtthread-coremark-report rtthread-coremark-compare rtthread-coremark-clean rtthread-utest rtthread-utest-build rtthread-utest-sim rtthread-utest-report rtthread-utest-clean $(RTTHREAD_COREMARK_PROFILE_BUILD_TARGETS) $(RTTHREAD_COREMARK_PROFILE_SIM_TARGETS)
 .PHONY: riscv_dv_venv riscv_dv_model riscv_dv_prepare riscv_dv_run riscv_dv_random riscv_dv_random_status riscv_dv_regression riscv_dv_count riscv_dv_repro riscv_dv_estimate riscv_dv_stop riscv_dv_coverage_report riscv_dv_cleanup riscv_dv_distclean
 .PHONY: syn synf syn225 syn240 syn250 syn-board synf-board syn-extreme syn-reports syn-dedup syn-lowmem-synth syn-lowmem-impl syn-venv syn-prep syn-stage-xpr syn-stage-memory syn-reuse-stage-check syn-vivado syn-analyze syn-clean
 .PHONY: rtl-quickcheck rtl-strict rtl-xml rtl-structure rtl-vivado-compare rtl-vivado-archive verilator-strict verilator-xml slang-ast
@@ -1344,7 +1388,8 @@ COREMARK_SW_MAKE_ARGS = \
 		PROJECT_ROOT=$(PROJECT_ROOT) \
 		RISCV_PREFIX=$(RISCV_PREFIX) \
 		ARCH=rv32im_zicsr_zifencei_zba_zbb_zbc_zbkb_zbkx_zbs \
-		ABI=$(ABI)
+		ABI=$(ABI) \
+		CONTROL_FLOW_ALIGN_CFLAGS="$(COREMARK_SWOPT_ALIGN_CFLAGS)"
 COREMARK_SW_PROFILE_ARGS = \
 		BSP_LINKER_SCRIPT="$(COREMARK_LINKER)" \
 		COREMARK_EXTRA_CFLAGS="$(COREMARK_BSP_CFLAGS)" \
@@ -1360,6 +1405,12 @@ BOUNDARY_APP_SW_MAKE_ARGS += BOUNDARY_EXTRA_CFLAGS="$(BOUNDARY_EXTRA_CFLAGS)"
 COREMARK_RESULT_LOG ?= $(HW_TRACE_OUT_DIR)/coremark/hw.log
 COREMARK_SIM_COMPARE ?= none
 COREMARK_DIFF_STOP_SYMBOL ?= stop_time
+
+coremark_swopt_show:
+	@printf 'COREMARK_SWOPT_AVAILABLE_GROUPS=%s\n' '$(COREMARK_SWOPT_AVAILABLE_GROUPS)'
+	@printf 'COREMARK_SWOPT_GROUPS=%s\n' '$(COREMARK_SWOPT_GROUPS)'
+	@printf 'COREMARK_SWOPT_ALIGN_BYTES=%s\n' '$(COREMARK_SWOPT_ALIGN_BYTES)'
+	@printf 'COREMARK_OPT_APP_CFLAGS_O3_app_unroll=%s\n' '$(COREMARK_OPT_APP_CFLAGS_O3_app_unroll)'
 COREMARK_DIFF_STOP_PC = $(shell $(RISCV_PREFIX)-nm -n "$(BUILD_DIR)/app/coremark/coremark.elf" 2>/dev/null | awk '$$3 == "$(COREMARK_DIFF_STOP_SYMBOL)" { print "0x" $$1; exit }')
 COMPARE_TRACE_DEFINES = $(if $(filter none,$(SIM_COMPARE)),,$(if $(findstring +commit_trace,$(COMPARE_SIM_EXTRA_DEFINES)),,+commit_trace))
 COMPARE_SIM_DEFINES = $(strip $(COMPARE_SIM_EXTRA_DEFINES) $(COMPARE_TRACE_DEFINES))
@@ -1505,7 +1556,7 @@ coremark_opt_build_$(1): $(APP_OPT_EXPANDED_LINKER)
 		if [ "$$$$bytes" -le "$(APP_OPT_ITCM_BYTES)" ]; then state=READY; else rc=1; fi; \
 	fi; \
 	if { [ "$$$$rc" -ne 0 ] && grep -Eq 'region .itcm. overflowed|will not fit in region .itcm' "$$$$log"; } || [ "$$$$bytes" -gt "$(APP_OPT_ITCM_BYTES)" ]; then \
-		echo "[COREMARK OPT][$$$$profile] 16 KiB ITCM exceeded; rebuilding for $(APP_OPT_EXPANDED_ITCM_KIB) KiB simulation only"; set +e; \
+		echo "[COREMARK OPT][$$$$profile] base ITCM capacity exceeded; rebuilding for $(APP_OPT_EXPANDED_ITCM_KIB) KiB simulation only"; set +e; \
 		$(MAKE) -C sw coremark $(COREMARK_SW_MAKE_ARGS) COREMARK_OUT="$$$$out" \
 			BSP_LINKER_SCRIPT="$(APP_OPT_EXPANDED_LINKER)" \
 			COREMARK_EXTRA_CFLAGS="$(if $(COREMARK_OPT_BSP_CFLAGS_$(1)),$(COREMARK_OPT_BSP_CFLAGS_$(1)),$(APP_OPT_CFLAGS_$(1)))" \
@@ -1517,7 +1568,7 @@ coremark_opt_build_$(1): $(APP_OPT_EXPANDED_LINKER)
 		elif grep -Eq 'region .itcm. overflowed|will not fit in region .itcm' "$$$$expanded_log"; then state=SKIP_SIZE; \
 		else state=BUILD_FAIL; fi; \
 	fi; \
-	echo "STATE=$$$$state ITCM_BYTES=$$$$bytes ITCM_CAPACITY_BYTES=$$$$capacity EXPANDED_ITCM=$$$$expanded FLAGS=$(APP_OPT_CFLAGS_$(1))" | tee "$$$$out/build.status"
+	echo "STATE=$$$$state ITCM_BYTES=$$$$bytes ITCM_CAPACITY_BYTES=$$$$capacity EXPANDED_ITCM=$$$$expanded FLAGS=$(COREMARK_OPT_APP_CFLAGS_$(1))" | tee "$$$$out/build.status"
 
 coremark_opt_sim_$(1):
 	+@profile="$(1)"; out="$(COREMARK_OPT_ROOT)/$(1)"; result_dir="$(COREMARK_OPT_RESULT_DIR)"; \
@@ -1667,7 +1718,7 @@ sort_opt_build_$(1)_$(2): $(APP_OPT_EXPANDED_LINKER)
 		if [ "$$$$bytes" -le "$(APP_OPT_ITCM_BYTES)" ]; then state=READY; else rc=1; fi; \
 	fi; \
 	if { [ "$$$$rc" -ne 0 ] && grep -Eq 'region .itcm. overflowed|will not fit in region .itcm' "$$$$log"; } || [ "$$$$bytes" -gt "$(APP_OPT_ITCM_BYTES)" ]; then \
-		echo "[SORT OPT][$$$$profile/$$$$name] 16 KiB ITCM exceeded; rebuilding for $(APP_OPT_EXPANDED_ITCM_KIB) KiB simulation only"; set +e; \
+		echo "[SORT OPT][$$$$profile/$$$$name] base ITCM capacity exceeded; rebuilding for $(APP_OPT_EXPANDED_ITCM_KIB) KiB simulation only"; set +e; \
 		$(MAKE) -C sw sort_app $(SORT_APP_SW_MAKE_ARGS) SORT_APP_OUT="$$$$out" SORT_APP_NAMES="$$$$name" \
 			BSP_LINKER_SCRIPT="$(APP_OPT_EXPANDED_LINKER)" \
 			SORT_APP_EXTRA_CFLAGS="$(if $(SORT_OPT_BSP_CFLAGS_$(1)),$(SORT_OPT_BSP_CFLAGS_$(1)),$(APP_OPT_CFLAGS_$(1)))" \
