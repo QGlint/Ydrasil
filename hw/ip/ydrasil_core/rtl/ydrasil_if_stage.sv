@@ -352,7 +352,6 @@ import ydrasil_pkg::*;
         mem_req_pc_q + (mem_req_two_q ? 32'd8 : 32'd4);
     wire lane1_pred_taken = mem_req_two_q && bp_predict1_taken_i;
     wire bram_pred_taken_any = bp_predict_taken_i || lane1_pred_taken;
-    wire seq_matches_launch = sequential_next_pc == mem_req_next_pc_q;
     // Keep target selection out of the control path to the next request.
     // Each candidate compares in parallel, and only the one-bit result is
     // selected using the established lane0-over-lane1 priority.
@@ -384,11 +383,13 @@ import ydrasil_pkg::*;
         (mem_req_valid_q ? (mem_req_two_q ? RESERVED_WIDTH'(2) :
          RESERVED_WIDTH'(1)) : '0);
     wire pair_capacity = reserved_count <= RESERVED_WIDTH'(FETCHQ_DEPTH - 2);
-    wire bram_response_allows_issue = !mem_resp_valid ||
-        mem_req_target_ff_hit_q ||
-        (!bram_pred_taken_any && seq_matches_launch);
-    wire fetch_issue = !flush_fetch && !bp_invalidate_i && pair_capacity &&
-        bram_response_allows_issue;
+    // Launch the next physical fetch whenever queue capacity permits.  A BTB
+    // response that corrects the sequential launch is still captured into the
+    // redirect state below, but its already-started wrong-path fetch is marked
+    // invalid on this edge.  This keeps BRAM tag/data comparison out of the
+    // high-fanout PC clock-enable cone without making the stale request visible
+    // to the fetch queue on the following cycle.
+    wire fetch_issue = !flush_fetch && !bp_invalidate_i && pair_capacity;
 
     wire [131:0] fetchq_push_payload0 = {
         mem_req_pc_q,
@@ -531,7 +532,8 @@ import ydrasil_pkg::*;
 			// On an L0 mismatch the request issued from the stale target is
 			// intentionally discarded; pending_redirect_target_q retries the
 			// corrected address on the following cycle.
-			mem_req_valid_q <= fetch_issue && !target_ff_correction_resp;
+			mem_req_valid_q <= fetch_issue && !target_ff_correction_resp &&
+                !predict_correction_resp;
             if (fetch_issue) begin
                 mem_req_pc_q <= fetch_addr;
                 mem_req_two_q <= fetch_two;

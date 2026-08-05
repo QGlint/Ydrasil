@@ -229,14 +229,12 @@ import ydrasil_pkg::*;
     assign status_o.idle = queue_empty && !req_i.valid && store_buf_empty &&
         !mmio_busy && !load_s1_valid_q;
     assign status_o.fast_load = 1'b0;
-    // Registered request credit is the only structural signal consumed by
-    // Issue. It tracks real queue enqueue/dequeue events, so a stale status
-    // snapshot cannot over-admit a third request.
-    wire issue_credit_reserved = req_i.valid && !input_direct_fire;
-    // Reserve the currently presented E-stage request as well as the
-    // registered queue slots.  This is a one-bit look-ahead token, not the
-    // raw busy/idle status, and prevents the request pipeline from presenting
-    // a third item while the second item is entering the queue.
+    // Reserve the E-stage request unconditionally.  Whether an empty queue
+    // happens to launch it directly depends on the AGU address, DTCM/MMIO
+    // decode, and forwarding state; feeding that decision into Issue formed
+    // the long EX-to-Issue backpressure arc.  A direct request temporarily
+    // costs one conservative credit, while queue accounting remains exact.
+    wire issue_credit_reserved = req_i.valid;
     assign issue_credit_o = issue_credit_reserved ?
         ((issue_credit_q != '0) ? issue_credit_q - 1'b1 : '0) : issue_credit_q;
 

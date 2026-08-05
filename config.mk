@@ -12,6 +12,7 @@ BENDER ?= bender
 VERILATOR_TRACE ?= 1
 DIV_IMPL ?= lzc
 FPU ?= 0
+YDRASIL_PRODUCER_NUM ?= 12
 PYTHON ?= python3
 export PYTHONPYCACHEPREFIX ?= $(BUILD_DIR)/pycache
 TRACE_TO_CSV ?= $(PROJECT_ROOT)/verif/sim/riscv_trace_csv.py
@@ -222,7 +223,7 @@ RTL_QC_TOP ?= ydrasil_core
 RTL_QC_BENDER_DIR ?= $(PROJECT_ROOT)/hw/ip/ydrasil_core
 RTL_QC_BENDER_TARGETS ?= verilator
 RTL_QC_WRAPPER_DIR ?= $(PROJECT_ROOT)/hw/ip/Xilinx_ip_wrapper/rtl
-RTL_QC_DEFINES ?= SYNTHESIS
+RTL_QC_DEFINES ?= SYNTHESIS YDRASIL_PRODUCER_NUM=$(YDRASIL_PRODUCER_NUM)
 RTL_QC_SOURCE_DEPS ?= $(shell find $(PROJECT_ROOT)/hw/ip -type f \( -name '*.sv' -o -name '*.svh' -o -name 'Bender.yml' -o -name 'Bender.yaml' -o -name 'Bender.lock' \) 2>/dev/null)
 RTL_QC_FLIST ?= $(RTL_QC_DIR)/$(RTL_QC_TOP).f
 RTL_QC_METADATA ?= $(RTL_QC_DIR)/$(RTL_QC_TOP).sources.json
@@ -277,7 +278,7 @@ YOSYS_RUN ?= coarse:map_luts
 # Yosys can use the same FPGA-side memory wrappers as Vivado. Pure RTL
 # simulation uses the technology-independent hw/ip/ydrasil_sim models.
 YOSYS_WITH_WRAPPERS ?= 1
-YOSYS_DEFINES ?= SYNTHESIS TARGET_SYNTHESIS
+YOSYS_DEFINES ?= SYNTHESIS TARGET_SYNTHESIS YDRASIL_PRODUCER_NUM=$(YDRASIL_PRODUCER_NUM)
 YOSYS_DIR ?= $(BUILD_DIR)/yosys-slang/$(YOSYS_TOP)
 YOSYS_FLIST ?= $(YOSYS_DIR)/$(YOSYS_TOP).f
 YOSYS_METADATA ?= $(YOSYS_DIR)/sources.json

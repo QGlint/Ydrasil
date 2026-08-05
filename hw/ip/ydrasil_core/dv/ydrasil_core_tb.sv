@@ -763,15 +763,15 @@ end
             perf_sample_cycle_count <= perf_sample_cycle_count + 1'b1;
             perf_productive_slot_count <= perf_productive_slot_count +
                 {30'b0, perf_executed_slots};
-            issue_fence_count <= issue_fence_count + u_dut.id_fence_i;
+            issue_fence_count <= issue_fence_count + {31'b0, u_dut.id_fence_i};
             issue_slot1_replay_count <= issue_slot1_replay_count +
-                u_dut.issue_slot1_replay;
+                {31'b0, u_dut.issue_slot1_replay};
             issue_slot1_sb_replay_count <= issue_slot1_sb_replay_count +
-                (u_dut.issue_slot1_replay && u_dut.issue_scoreboard_stall1);
+                {31'b0, (u_dut.issue_slot1_replay && u_dut.issue_scoreboard_stall1)};
             issue_slot1_lsu_replay_count <= issue_slot1_lsu_replay_count +
-                (u_dut.issue_slot1_replay && u_dut.issue_lsu_struct_stall1);
+                {31'b0, (u_dut.issue_slot1_replay && u_dut.issue_lsu_struct_stall1)};
             issue_serialize_wait_count <= issue_serialize_wait_count +
-                u_dut.issue_serialize_stall;
+                {31'b0, u_dut.issue_serialize_stall};
             dispatchq_occ_count[u_dut.issue_pipe_count_q] <=
                 dispatchq_occ_count[u_dut.issue_pipe_count_q] + 1'b1;
             bp_predict_redirect_q <= u_dut.u_ydrasil_if_stage.bp_predict_redirect;
@@ -1161,7 +1161,7 @@ end
             if (u_dut.u_ydrasil_if_stage.fetch_issue) begin
                 l0_lookup_count <= l0_lookup_count +
                     (u_dut.u_ydrasil_if_stage.fetch_two ? 32'd2 : 32'd1);
-                l0_hit_count <= l0_hit_count + u_dut.l0_hit +
+                l0_hit_count <= l0_hit_count + {31'b0, u_dut.l0_hit} +
                     (u_dut.u_ydrasil_if_stage.fetch_two ?
                         {31'b0, u_dut.l0_hit1} : 32'd0);
             end
@@ -1231,13 +1231,13 @@ end
             end
             if (u_dut.u_ydrasil_issue_stage.issue_early_alu_valid_ff) begin
                 early_arith_count <= early_arith_count +
-                    u_dut.u_ydrasil_issue_stage.issue_early_kind_ff[0];
+                    {31'b0, u_dut.u_ydrasil_issue_stage.issue_early_kind_ff[0]};
                 early_logic_count <= early_logic_count +
-                    u_dut.u_ydrasil_issue_stage.issue_early_kind_ff[1];
+                    {31'b0, u_dut.u_ydrasil_issue_stage.issue_early_kind_ff[1]};
                 early_shift_count <= early_shift_count +
-                    u_dut.u_ydrasil_issue_stage.issue_early_kind_ff[2];
+                    {31'b0, u_dut.u_ydrasil_issue_stage.issue_early_kind_ff[2]};
                 early_pass_count <= early_pass_count +
-                    u_dut.u_ydrasil_issue_stage.issue_early_kind_ff[3];
+                    {31'b0, u_dut.u_ydrasil_issue_stage.issue_early_kind_ff[3]};
             end
             if (u_dut.u_ydrasil_issue_stage.rs1_issue_early_alu_fwd)
                 early_rs1_fwd_count <= early_rs1_fwd_count + 1'b1;

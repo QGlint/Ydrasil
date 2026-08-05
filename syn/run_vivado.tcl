@@ -319,12 +319,16 @@ proc validate_io_constraints {} {
     puts "Validated PACKAGE_PIN and IOSTANDARD on [llength [get_ports -quiet *]] top-level ports"
 }
 
-proc report_and_validate_drc {report_file} {
+proc report_and_validate_drc {report_file {ignored_rules {}}} {
     report_drc -file $report_file
     set error_violations [list]
     foreach violation [get_drc_violations -quiet] {
         set violation_name [get_property NAME $violation]
         set rule_name [lindex [split $violation_name "#"] 0]
+        if {[lsearch -exact $ignored_rules $rule_name] >= 0} {
+            puts "warning: ignoring $violation_name during this flow stage"
+            continue
+        }
         set rule [get_drc_checks -quiet $rule_name]
         if {[llength $rule] > 0 && [get_property SEVERITY $rule] eq "Error"} {
             lappend error_violations $violation_name
@@ -877,7 +881,11 @@ assert_run_ok synth_1
 
 open_run synth_1 -name synth_1
 validate_io_constraints
-report_and_validate_drc [file join $report_dir synth_drc.rpt]
+# NDRV-1 is a pre-implementation artefact for intentionally constant fields
+# in packed pipeline records. opt_design removes those dangling nets before
+# placement; all other Error-severity synthesis DRCs remain fatal here, and
+# the completed implementation is checked without exceptions below.
+report_and_validate_drc [file join $report_dir synth_drc.rpt] {NDRV-1}
 if {$report_synth} {
     report_if_possible "post-synthesis utilization" \
         "report_utilization -hierarchical -file [file join $report_dir synth_utilization_hier.rpt]"
@@ -980,6 +988,7 @@ if {$full_reports} {
     report_if_possible "QoR suggestions" \
         "report_qor_suggestions -file [file join $report_dir post_route_qor_suggestions.rpt]"
 }
+report_and_validate_drc [file join $report_dir post_route_drc.rpt]
 write_checkpoint -force [file join $checkpoint_dir best_impl_route.dcp]
 if {$enable_ila} {
     write_debug_probes -force [file join $impl_run_dir "${top_name}.ltx"]
