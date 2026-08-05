@@ -60,7 +60,7 @@ import ydrasil_pkg::*;
     output wire                        bru_in_pred_taken_o,
     output wire [DATA_WIDTH-1:0]       bru_in_pred_target_o,
     output wire [1:0]                  bru_in_pred_counter_o,
-    output wire [DATA_WIDTH-1:0]       bru_in_pred_bht_index_o,
+    output bp_bht_index_t              bru_in_pred_bht_index_o,
     output wire                        agu_in_valid_o,
     output wire [DATA_WIDTH-1:0]       agu_in_operand_a_o,
     output wire [DATA_WIDTH-1:0]       agu_in_operand_b_o,
@@ -125,7 +125,7 @@ import ydrasil_pkg::*;
     reg [DATA_WIDTH-1:0] bru_in_pc_q, bru_in_pred_target_q;
     reg bru_in_pred_hit_q, bru_in_pred_taken_q;
     reg [1:0] bru_in_pred_counter_q;
-    reg [DATA_WIDTH-1:0] bru_in_pred_bht_index_q;
+    bp_bht_index_t bru_in_pred_bht_index_q;
     reg agu_in_valid_q;
     reg [DATA_WIDTH-1:0] agu_in_operand_a_q, agu_in_operand_b_q;
     ydrasil_lsu_req_pkt_t agu_in_req_q;
@@ -1253,7 +1253,7 @@ import ydrasil_pkg::*;
     input  wire                           pred_taken_i,
     input  wire [INST_ADDR_WIDTH-1:0]     pred_target_i,
     input  wire [1:0]                     pred_counter_i,
-    input  wire [INST_ADDR_WIDTH-1:0]     pred_bht_index_i,
+    input  bp_bht_index_t                 pred_bht_index_i,
     input  wire [INST_ADDR_WIDTH-1:0]     trap_redirect_addr_i,
     output ydrasil_gpr_fwd_pkt_t          completion_o,
     output wire [REGS_DATA_WIDTH-1:0]     early_bypass_data_o,

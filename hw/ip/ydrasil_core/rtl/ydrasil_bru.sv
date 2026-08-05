@@ -21,7 +21,7 @@ import ydrasil_pkg::*;
     input  wire                            id_ex_pred_taken_i,
     input  wire [DATA_WIDTH-1:0]           id_ex_pred_target_i,
     input  wire [1:0]                      id_ex_pred_counter_i,
-    input  wire [DATA_WIDTH-1:0]           id_ex_pred_bht_index_i,
+    input  bp_bht_index_t                  id_ex_pred_bht_index_i,
     input  producer_id_t                   id_ex_producer_id_i,
     input  wire                            trap_redirect_i,
     input  wire [INST_ADDR_WIDTH-1:0]      trap_redirect_addr_i,

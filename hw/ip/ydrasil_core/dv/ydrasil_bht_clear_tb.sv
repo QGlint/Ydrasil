@@ -1,8 +1,8 @@
 `timescale 1ns/1ns
 
-// Targeted regression for the serial BHT reset/FENCE.I scrub.  It deliberately
-// presents a train request after that BHT address has been scrubbed, proving a
-// stale or colliding write cannot reappear when the sweep completes.
+// Targeted regression for generation-based reset/FENCE.I invalidation. It
+// proves stale state disappears immediately and the new generation can train
+// without waiting for a whole-table sweep.
 module ydrasil_bht_clear_tb
 import ydrasil_pkg::*;
 (
@@ -38,12 +38,12 @@ import ydrasil_pkg::*;
     logic predict_taken;
     logic [31:0] predict_target;
     logic [1:0] predict_counter;
-    logic [31:0] predict_bht_index;
+    bp_bht_index_t predict_bht_index;
     logic predict1_hit;
     logic predict1_taken;
     logic [31:0] predict1_target;
     logic [1:0] predict1_counter;
-    logic [31:0] predict1_bht_index;
+    bp_bht_index_t predict1_bht_index;
     ydrasil_bp_train_pkt_t train_pkt;
     logic invalidate;
     integer step;
@@ -87,7 +87,7 @@ import ydrasil_pkg::*;
             train_pkt.taken <= train_taken;
             train_pkt.target <= TARGET_A;
             train_pkt.counter <= 2'b01;
-            train_pkt.bht_index <= PC_A >> 2;
+            train_pkt.bht_index <= BP_BHT_INDEX_WIDTH'(PC_A >> 2);
             invalidate <= do_invalidate;
         end
     endtask
@@ -112,9 +112,8 @@ import ydrasil_pkg::*;
             invalidate <= 1'b0;
         end else begin
             case (step)
-                // Allow the reset-time BHT scrub to cover every entry.
                 0, 1, 2, 3: begin
-                    expect_counter(2'b01, "reset scrub");
+                    expect_counter(2'b01, "reset generation");
                     drive(1'b0, 1'b0, 1'b0);
                     step <= step + 1;
                 end
@@ -142,8 +141,7 @@ import ydrasil_pkg::*;
                     step <= step + 1;
                 end
                 8: begin
-                    // Index zero was scrubbed in the preceding cycle. This
-                    // request must not repopulate it while the sweep is live.
+                    // The new generation accepts training immediately.
                     drive(1'b1, 1'b1, 1'b0);
                     step <= step + 1;
                 end
@@ -152,9 +150,9 @@ import ydrasil_pkg::*;
                     step <= step + 1;
                 end
                 11: begin
-                    expect_counter(2'b01, "post-FENCE.I scrub");
-                    if (predict_taken)
-                        $fatal(1, "stale BHT state survived FENCE.I");
+                    expect_counter(2'b10, "post-FENCE.I generation");
+                    if (!predict_hit || !predict_taken)
+                        $fatal(1, "new predictor generation did not train");
                     drive(1'b1, 1'b1, 1'b0);
                     step <= step + 1;
                 end

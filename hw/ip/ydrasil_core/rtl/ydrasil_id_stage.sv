@@ -7,7 +7,7 @@ import ydrasil_pkg::*;
     input  wire        pred_taken_i,
     input  wire [31:0] pred_target_i,
     input  wire [1:0]  pred_counter_i,
-    input  wire [31:0] pred_bht_index_i,
+    input  bp_bht_index_t pred_bht_index_i,
     output ydrasil_decode_pkt_t decode_pkt_o
 );
     wire [4:0] rs1_addr;
@@ -249,7 +249,7 @@ import ydrasil_pkg::*;
     input  wire                  if_id_pred_taken_i,
     input  wire [31:0]           if_id_pred_target_i,
     input  wire [1:0]            if_id_pred_counter_i,
-    input  wire [31:0]           if_id_pred_bht_index_i,
+    input  bp_bht_index_t        if_id_pred_bht_index_i,
     input  wire                  if_id_valid_i,
     input  wire [31:0]           if_id1_pc_i,
     input  wire [31:0]           if_id1_instr_i,
@@ -257,7 +257,7 @@ import ydrasil_pkg::*;
     input  wire                  if_id1_pred_taken_i,
     input  wire [31:0]           if_id1_pred_target_i,
     input  wire [1:0]            if_id1_pred_counter_i,
-    input  wire [31:0]           if_id1_pred_bht_index_i,
+    input  bp_bht_index_t        if_id1_pred_bht_index_i,
     input  wire                  if_id1_valid_i,
     output wire                  if_id_ready_o,
     output wire                  if_id_consume_two_o,

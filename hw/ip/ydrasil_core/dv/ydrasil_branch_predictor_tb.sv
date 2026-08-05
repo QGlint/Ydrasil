@@ -38,12 +38,12 @@ module ydrasil_branch_predictor_tb
     logic        predict_taken;
     logic [31:0] predict_target;
     logic [1:0]  predict_counter;
-    logic [31:0] predict_bht_index;
+    ydrasil_pkg::bp_bht_index_t predict_bht_index;
     logic        predict1_hit;
     logic        predict1_taken;
     logic [31:0] predict1_target;
     logic [1:0]  predict1_counter;
-    logic [31:0] predict1_bht_index;
+    ydrasil_pkg::bp_bht_index_t predict1_bht_index;
 
     logic [31:0] predict_pc;
     ydrasil_pkg::ydrasil_bp_train_pkt_t train_pkt;
@@ -99,7 +99,7 @@ module ydrasil_branch_predictor_tb
             train_pkt.counter <= counter;
             // USE_GSHARE=0 in this test, so the branch's carried BHT index is
             // the word address index of the branch being trained.
-            train_pkt.bht_index <= pc >> 2;
+            train_pkt.bht_index <= ydrasil_pkg::BP_BHT_INDEX_WIDTH'(pc >> 2);
             invalidate    <= 1'b0;
         end
     endtask
@@ -117,7 +117,7 @@ module ydrasil_branch_predictor_tb
             train_pkt.taken <= 1'b1;
             train_pkt.target <= target;
             train_pkt.counter <= 2'b00;
-            train_pkt.bht_index <= pc >> 2;
+            train_pkt.bht_index <= ydrasil_pkg::BP_BHT_INDEX_WIDTH'(pc >> 2);
             invalidate <= 1'b0;
         end
     endtask
@@ -275,7 +275,8 @@ module ydrasil_branch_predictor_tb
                     train_pkt.taken <= 1'b1;
                     train_pkt.target <= TARGET_B0;
                     train_pkt.counter <= predict_counter;
-                    train_pkt.bht_index <= PC_B >> 2;
+                    train_pkt.bht_index <=
+                        ydrasil_pkg::BP_BHT_INDEX_WIDTH'(PC_B >> 2);
                     invalidate    <= 1'b1;
                     step <= step + 1;
                 end
@@ -285,7 +286,7 @@ module ydrasil_branch_predictor_tb
                     step <= step + 1;
                 end
                 22: begin
-                    check_predict(1'b0, 1'b0, '0, 2'b11);
+                    check_predict(1'b0, 1'b0, '0, 2'b01);
                     predict_pc <= PC_B;
                     train_pkt <= '0;
                     invalidate <= 1'b1;
@@ -297,7 +298,7 @@ module ydrasil_branch_predictor_tb
                     step <= step + 1;
                 end
                 24: begin
-                    check_predict(1'b0, 1'b0, '0, 2'b11);
+                    check_predict(1'b0, 1'b0, '0, 2'b01);
                     drive_jump(PC_C, TARGET_C0);
                     step <= step + 1;
                 end
@@ -309,7 +310,7 @@ module ydrasil_branch_predictor_tb
                 26: begin
                     // An unconditional BTB entry is taken even though its BHT
                     // counter remains at weak-not-taken.
-                    check_predict(1'b1, 1'b1, TARGET_C0, 2'b01);
+                    check_predict(1'b1, 1'b1, TARGET_C0, 2'b11);
                     $display("TEST_PASS");
                     $finish;
                 end
