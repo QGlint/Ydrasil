@@ -73,6 +73,8 @@ def endpoint(value: str) -> str:
 
 def normalize_endpoint(value: str) -> str:
     value = endpoint(value)
+    # LUTRAM write-enable endpoints differ only by the physical RAM lane.
+    value = re.sub(r"/RAM[A-Z]+(_D\d+/WE)(?=/|$)", r"/RAM*\1", value)
     value = re.sub(r"_rep__\d+", "_rep__*", value)
     value = re.sub(r"__\d+(?=/|$)", "__*", value)
     value = re.sub(r"_i_\d+(?=/|$)", "_i_*", value)
@@ -159,7 +161,9 @@ def extract_structure_signature(block: str) -> str:
         if compact and compact[-1] == cell:
             continue
         compact.append(cell)
-    return ">".join(compact)
+    signature = ">".join(compact)
+    # RAMD32 and RAMS32 are alternate physical lanes of the same LUTRAM WE.
+    return re.sub(r"\bRAM(?:D|S)\d+:WE\b", "RAM:WE", signature)
 
 
 def parse_path(block: str) -> TimingPath | None:
