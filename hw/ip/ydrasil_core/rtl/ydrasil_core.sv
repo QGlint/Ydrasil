@@ -162,6 +162,8 @@ import ydrasil_axi_pkg::*;
 	wire [ydrasil_pkg::BUS_ADDR_WIDTH-1:0]  ex_lsu_mem_addr;
     wire [31:0]                 ex_lsu_result;
 	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] alu_result;
+	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] main_early_bypass_data;
+	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] dual_early_bypass_data;
 	wire                        alu_rf_wen_rd;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] alu_rf_waddr_rd;
 	producer_id_t               alu_producer_id;
@@ -333,6 +335,7 @@ import ydrasil_axi_pkg::*;
 	ydrasil_ex_hzd_pkt_t            ex_hzd_pkt1;
 	ydrasil_gpr_fwd_pkt_t           lsu_fwd_pkt;
 	ydrasil_reservation_pkt_t       dtcm_reservation;
+	wire [REGS_DATA_WIDTH-1:0]      dtcm_resp_data;
 	ydrasil_gpr_fwd_pkt_t           lsu_wb_fwd_pkt;
 	ydrasil_gpr_fwd_pkt_t           alu_fwd_pkt;
 	ydrasil_gpr_fwd_pkt_t           mul_fwd_pkt;
@@ -345,7 +348,7 @@ import ydrasil_axi_pkg::*;
 	wire                            issue_at_rob_head;
 	wire [ydrasil_pkg::PRODUCER_NUM-1:0]
 	                                branch_recovery_keep_mask;
-	ydrasil_issue_ex_pkt_t          issue_ex_pkt;
+	ydrasil_fpu_req_pkt_t           issue_fpu_req_pkt;
 	ydrasil_issue_pkt_t             id_issue_pkt;
 	ydrasil_issue_pkt_t             id_issue_pkt1;
 	ydrasil_issue_pkt_t             dispatch_issue_pkt;
@@ -536,7 +539,7 @@ import ydrasil_axi_pkg::*;
 	// The AGU cell owns the complete memory request.  No LSU control or data
 	// field is reconstructed from the shared Issue/EX compatibility packet.
 	assign id_lsu_req_pkt = agu_in_req;
-	assign id_fpu_req_pkt = issue_ex_pkt.fpu_req;
+	assign id_fpu_req_pkt = issue_fpu_req_pkt;
 	assign id_ex_jalr = bru_in_jalr;
 	assign id_ex_branch_target = bru_in_branch_target;
 	assign id_ex_branch_next_pc = bru_in_branch_next_pc;
@@ -904,9 +907,10 @@ import ydrasil_axi_pkg::*;
 		.dtcm_req_o        (dtcm_req_pkt),
 		.mmio_rsp_i        (mmio_rsp_pkt),
 		.mmio_req_o        (mmio_req_pkt),
-			.status_o          (lsu_status_pkt),
-			.issue_credit_o     (lsu_issue_credit),
-			.dtcm_reservation_o(dtcm_reservation),
+		.status_o          (lsu_status_pkt),
+		.issue_credit_o     (lsu_issue_credit),
+		.dtcm_reservation_o(dtcm_reservation),
+		.dtcm_resp_data_o   (dtcm_resp_data),
 		.completion_o      (lsu_fwd_pkt),
 		.fp_completion_valid_o(lsu_fp_completion_valid),
 		.fp_completion_addr_o(lsu_fp_completion_addr),
@@ -1077,10 +1081,12 @@ import ydrasil_axi_pkg::*;
 		.issue_src1_state_i  (issue_src1_state),
 		.issue_src2_state_i  (issue_src2_state),
 		.issue_src3_state_i  (issue_src3_state),
-			.completion_bus_i    (completion_bus),
+			.early_main_bypass_data_i(main_early_bypass_data),
+			.early_dual_bypass_data_i(dual_early_bypass_data),
 			.lsu_idle_i          (lsu_status_pkt.idle),
-			.lsu_credit_i        (lsu_issue_credit),
-			.dtcm_reservation_i (dtcm_reservation),
+		.lsu_credit_i        (lsu_issue_credit),
+		.dtcm_reservation_i (dtcm_reservation),
+		.dtcm_resp_data_i   (dtcm_resp_data),
 		.issue_at_rob_head_i (issue_at_rob_head),
 		.issue_ready_o       (issue_ready),
 		.issue_consume_two_o (issue_consume_two),
@@ -1097,7 +1103,7 @@ import ydrasil_axi_pkg::*;
 		.src1_wait_o         (issue_src1_wait),
 		.src2_wait_o         (issue_src2_wait),
 			.src3_wait_o         (issue_src3_wait),
-			.issue_ex_o         (issue_ex_pkt),
+			.issue_fpu_req_o    (issue_fpu_req_pkt),
 			.alu_in_valid_o     (alu_in_valid),
 			.alu_in_operand_a_o (alu_in_operand_a),
 			.alu_in_operand_b_o (alu_in_operand_b),
@@ -1221,6 +1227,7 @@ import ydrasil_axi_pkg::*;
 		.alu_rf_waddr_rd_o  (alu_rf_waddr_rd),
 			.alu_producer_id_o  (alu_producer_id),
 			.completion_o       (alu_fwd_pkt),
+			.early_bypass_data_o(main_early_bypass_data),
 		.mul_issue_o        (ex_mul_issue),
 		.mul_issue_waddr_o  (ex_mul_issue_waddr),
 		.mul_wdata_rd_o     (mul_wb_result),
@@ -1277,6 +1284,7 @@ import ydrasil_axi_pkg::*;
 			.pred_bht_index_i    (dual_in.pred_bht_index),
 		.trap_redirect_addr_i(trap_redirect_addr),
 		.completion_o        (dual_alu_fwd_pkt),
+		.early_bypass_data_o(dual_early_bypass_data),
 		.lsu_req_o           (dual_lsu_req_pkt),
 		.ex_branch_jump_o    (ex_branch_jump),
 		.ex_branch_target_o  (ex_branch_target),

@@ -303,7 +303,11 @@ package ydrasil_pkg;
 	localparam int BP_BHT_ENTRIES = 512;
 	// Future File: each producer carries its value independently of the two
 	// architectural writeback ports.
+`ifdef YDRASIL_PRODUCER_NUM
+	localparam int PRODUCER_NUM = `YDRASIL_PRODUCER_NUM;
+`else
 	localparam int PRODUCER_NUM = 12;
+`endif
 	localparam int PRODUCER_SLOT_WIDTH = $clog2(PRODUCER_NUM);
 	localparam int PRODUCER_ID_WIDTH = PRODUCER_SLOT_WIDTH + 1;
 	typedef logic [PRODUCER_SLOT_WIDTH-1:0] producer_slot_t;
@@ -332,7 +336,6 @@ package ydrasil_pkg;
 		producer_id_t                 producer_id;
 		logic [REGS_ADDR_WIDTH-1:0]   arch_addr;
 		ydrasil_result_class_t        result_class;
-		logic [REGS_DATA_WIDTH-1:0]   predicted_data;
 	} ydrasil_reservation_pkt_t;
 
 	typedef struct packed {

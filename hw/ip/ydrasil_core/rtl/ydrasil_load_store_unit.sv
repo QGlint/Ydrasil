@@ -11,6 +11,7 @@ import ydrasil_pkg::*;
     output ydrasil_lsu_status_pkt_t        status_o,
     output wire [1:0]                     issue_credit_o,
     output ydrasil_reservation_pkt_t      dtcm_reservation_o,
+    output wire [REGS_DATA_WIDTH-1:0]     dtcm_resp_data_o,
     output ydrasil_gpr_fwd_pkt_t           completion_o,
     output wire                            fp_completion_valid_o,
     output wire [REGS_ADDR_WIDTH-1:0]      fp_completion_addr_o,
@@ -185,6 +186,10 @@ import ydrasil_pkg::*;
     reg [31:0] load_s1_forward_data_q;
     reg load_s1_fp_load_q;
     reg [REGS_ADDR_WIDTH-1:0] load_s1_fp_rd_addr_q;
+    // This is the only wide DTCM response boundary.  Issue receives the
+    // matching tag through dtcm_reservation_o and selects this registered
+    // data only after its own FU input cells.
+    reg [REGS_DATA_WIDTH-1:0] dtcm_resp_data_q;
 
     // Give a buffered peripheral response a bounded path to completion. At
     // most one already-issued DTCM response remains after this hold asserts.
@@ -224,14 +229,12 @@ import ydrasil_pkg::*;
     assign status_o.idle = queue_empty && !req_i.valid && store_buf_empty &&
         !mmio_busy && !load_s1_valid_q;
     assign status_o.fast_load = 1'b0;
-    // Registered request credit is the only structural signal consumed by
-    // Issue. It tracks real queue enqueue/dequeue events, so a stale status
-    // snapshot cannot over-admit a third request.
-    wire issue_credit_reserved = req_i.valid && !input_direct_fire;
-    // Reserve the currently presented E-stage request as well as the
-    // registered queue slots.  This is a one-bit look-ahead token, not the
-    // raw busy/idle status, and prevents the request pipeline from presenting
-    // a third item while the second item is entering the queue.
+    // Reserve the E-stage request unconditionally.  Whether an empty queue
+    // happens to launch it directly depends on the AGU address, DTCM/MMIO
+    // decode, and forwarding state; feeding that decision into Issue formed
+    // the long EX-to-Issue backpressure arc.  A direct request temporarily
+    // costs one conservative credit, while queue accounting remains exact.
+    wire issue_credit_reserved = req_i.valid;
     assign issue_credit_o = issue_credit_reserved ?
         ((issue_credit_q != '0) ? issue_credit_q - 1'b1 : '0) : issue_credit_q;
 
@@ -326,7 +329,7 @@ import ydrasil_pkg::*;
     assign dtcm_reservation_o.producer_id = load_s1_producer_id_q;
     assign dtcm_reservation_o.arch_addr = load_s1_rd_addr_q;
     assign dtcm_reservation_o.result_class = RESULT_LSU;
-    assign dtcm_reservation_o.predicted_data = dtcm_load_result;
+    assign dtcm_resp_data_o = dtcm_resp_data_q;
 
 	ydrasil_lsu_req_pkt_t enqueue_pkt;
 	always_comb begin
@@ -465,6 +468,8 @@ import ydrasil_pkg::*;
             endcase
 
             load_s1_valid_q <= dtcm_load_fire;
+            if (load_s1_valid_q)
+                dtcm_resp_data_q <= dtcm_load_result;
             if (dtcm_load_fire) begin
                 load_s1_rd_addr_q <= active_rd_addr;
                 load_s1_producer_id_q <= active_producer_id;

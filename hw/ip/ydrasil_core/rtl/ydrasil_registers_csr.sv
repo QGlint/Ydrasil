@@ -282,7 +282,7 @@ import ydrasil_pkg::*;
                 mcycle_low_write_carry <= 1'b0;
             end else if (mcycleh_we) begin
                 cycle[63:32] <= csr_write_data +
-                    (mcycle_low_write_pending && mcycle_low_write_carry);
+                    {31'b0, (mcycle_low_write_pending && mcycle_low_write_carry)};
                 mcycle_low_write_pending <= 1'b0;
                 mcycle_low_write_carry <= 1'b0;
             end else if (!cycle_inhibited) begin

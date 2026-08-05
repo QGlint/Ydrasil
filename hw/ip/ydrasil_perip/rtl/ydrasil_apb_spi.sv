@@ -33,8 +33,32 @@ import ydrasil_apb_pkg::*;
         SPI_DATA, SPI_FINISH
     } spi_state_t;
 
-    logic [31:0] tx_fifo [0:FIFO_DEPTH-1];
-    logic [31:0] rx_fifo [0:FIFO_DEPTH-1];
+    // Keep the FIFO front in a register so RXFIFO remains a zero-extra-cycle
+    // APB read.  The remaining entries live in synchronous block RAM.
+    logic [31:0] tx_head_q;
+    logic [31:0] rx_head_q;
+    logic tx_head_valid_q;
+    logic rx_head_valid_q;
+    logic tx_word_stall_q;
+    logic [31:0] tx_bram_rdata;
+    logic [31:0] rx_bram_rdata;
+    // The BRAM wrapper has a registered read output.  `*_rvalid_q` delays
+    // cache refill until the cycle after the registered BRAM response.
+    logic tx_bram_ren_q;
+    logic rx_bram_ren_q;
+    logic tx_bram_rvalid_q;
+    logic rx_bram_rvalid_q;
+    logic tx_bram_wen_q;
+    logic rx_bram_wen_q;
+    logic [PTR_WIDTH-1:0] tx_bram_raddr_q;
+    logic [PTR_WIDTH-1:0] rx_bram_raddr_q;
+    logic [PTR_WIDTH-1:0] tx_bram_waddr_q;
+    logic [PTR_WIDTH-1:0] rx_bram_waddr_q;
+    logic [31:0] tx_bram_wdata_q;
+    logic [31:0] rx_bram_wdata_q;
+    logic rx_bram_deferred_write_q;
+    logic [PTR_WIDTH-1:0] rx_bram_deferred_addr_q;
+    logic [31:0] rx_bram_deferred_data_q;
     logic [PTR_WIDTH-1:0] tx_write_ptr_q;
     logic [PTR_WIDTH-1:0] tx_read_ptr_q;
     logic [PTR_WIDTH-1:0] rx_write_ptr_q;
@@ -75,7 +99,13 @@ import ydrasil_apb_pkg::*;
     wire tx_fifo_push = apb_write && (register_index == REG_TXFIFO) &&
         (tx_count_q < COUNT_WIDTH'(FIFO_DEPTH));
     wire rx_fifo_pop = apb_read && (register_index == REG_RXFIFO) &&
-        (rx_count_q != 0);
+        (rx_count_q != 0) && rx_head_valid_q;
+    wire fifo_clear = apb_write && (register_index == REG_STATUS) &&
+        apb_req_i.pwdata[4];
+    // The cached RX head normally preserves the old one-access APB read.
+    // Only a read arriving during the synchronous refill is stretched.
+    wire rx_fifo_read_wait = apb_read && (register_index == REG_RXFIFO) &&
+        (rx_count_q != 0) && !rx_head_valid_q;
     wire divider_tick = divider_count_q == 0;
     wire busy = state_q != SPI_IDLE;
     wire tx_irq = tx_count_q < tx_irq_threshold_q;
@@ -86,6 +116,26 @@ import ydrasil_apb_pkg::*;
         (state_q == SPI_DUMMY), 1'b0, (state_q == SPI_ADDRESS),
         (state_q == SPI_COMMAND), !busy};
 
+    ydrasil_1r1w_bram #(
+        .DEPTH(FIFO_DEPTH), .DATA_WIDTH(32), .ADDR_WIDTH(PTR_WIDTH),
+        .INIT_VALUE('0)
+    ) u_tx_fifo_bram (
+        .clk(clk), .ren_i(tx_bram_ren_q),
+        .raddr_i(tx_bram_raddr_q), .rdata_o(tx_bram_rdata),
+        .wen_i(tx_bram_wen_q), .waddr_i(tx_bram_waddr_q),
+        .wdata_i(tx_bram_wdata_q)
+    );
+
+    ydrasil_1r1w_bram #(
+        .DEPTH(FIFO_DEPTH), .DATA_WIDTH(32), .ADDR_WIDTH(PTR_WIDTH),
+        .INIT_VALUE('0)
+    ) u_rx_fifo_bram (
+        .clk(clk), .ren_i(rx_bram_ren_q),
+        .raddr_i(rx_bram_raddr_q), .rdata_o(rx_bram_rdata),
+        .wen_i(rx_bram_wen_q), .waddr_i(rx_bram_waddr_q),
+        .wdata_i(rx_bram_wdata_q)
+    );
+
     always_ff @(posedge clk or negedge rst_n) begin
         logic [NUM_CS-1:0] requested_cs;
         logic start_read;
@@ -93,6 +143,7 @@ import ydrasil_apb_pkg::*;
         logic [15:0] requested_dummy;
         logic transmit_fifo_pop;
         logic receive_fifo_push;
+        logic [31:0] receive_fifo_data;
         if (!rst_n) begin
             tx_write_ptr_q <= '0;
             tx_read_ptr_q <= '0;
@@ -100,6 +151,26 @@ import ydrasil_apb_pkg::*;
             rx_read_ptr_q <= '0;
             tx_count_q <= '0;
             rx_count_q <= '0;
+            tx_head_q <= '0;
+            rx_head_q <= '0;
+            tx_head_valid_q <= 1'b0;
+            rx_head_valid_q <= 1'b0;
+            tx_word_stall_q <= 1'b0;
+            tx_bram_ren_q <= 1'b0;
+            rx_bram_ren_q <= 1'b0;
+            tx_bram_rvalid_q <= 1'b0;
+            rx_bram_rvalid_q <= 1'b0;
+            tx_bram_wen_q <= 1'b0;
+            rx_bram_wen_q <= 1'b0;
+            tx_bram_raddr_q <= '0;
+            rx_bram_raddr_q <= '0;
+            tx_bram_waddr_q <= '0;
+            rx_bram_waddr_q <= '0;
+            tx_bram_wdata_q <= '0;
+            rx_bram_wdata_q <= '0;
+            rx_bram_deferred_write_q <= 1'b0;
+            rx_bram_deferred_addr_q <= '0;
+            rx_bram_deferred_data_q <= '0;
             clock_divider_q <= 8'd3;
             command_q <= '0;
             address_q <= '0;
@@ -126,13 +197,22 @@ import ydrasil_apb_pkg::*;
             end_event_q <= 1'b0;
             transmit_fifo_pop = 1'b0;
             receive_fifo_push = 1'b0;
+            receive_fifo_data = '0;
+            tx_bram_ren_q <= 1'b0;
+            rx_bram_ren_q <= 1'b0;
+            tx_bram_wen_q <= 1'b0;
+            rx_bram_wen_q <= 1'b0;
+            tx_bram_rvalid_q <= tx_bram_ren_q;
+            rx_bram_rvalid_q <= rx_bram_ren_q;
 
-            if (tx_fifo_push) begin
-                tx_fifo[tx_write_ptr_q] <= apb_req_i.pwdata;
-                tx_write_ptr_q <= tx_write_ptr_q + 1'b1;
+            if (tx_bram_rvalid_q && !fifo_clear) begin
+                tx_head_q <= tx_bram_rdata;
+                tx_head_valid_q <= 1'b1;
             end
-            if (rx_fifo_pop)
-                rx_read_ptr_q <= rx_read_ptr_q + 1'b1;
+            if (rx_bram_rvalid_q && !fifo_clear) begin
+                rx_head_q <= rx_bram_rdata;
+                rx_head_valid_q <= 1'b1;
+            end
 
             if (apb_write) begin
                 unique case (register_index)
@@ -171,6 +251,18 @@ import ydrasil_apb_pkg::*;
                     rx_read_ptr_q <= '0;
                     tx_count_q <= '0;
                     rx_count_q <= '0;
+                    tx_head_q <= '0;
+                    rx_head_q <= '0;
+                    tx_head_valid_q <= 1'b0;
+                    rx_head_valid_q <= 1'b0;
+                    tx_word_stall_q <= 1'b0;
+                    tx_bram_ren_q <= 1'b0;
+                    rx_bram_ren_q <= 1'b0;
+                    tx_bram_rvalid_q <= 1'b0;
+                    rx_bram_rvalid_q <= 1'b0;
+                    tx_bram_wen_q <= 1'b0;
+                    rx_bram_wen_q <= 1'b0;
+                    rx_bram_deferred_write_q <= 1'b0;
                 end else if (!busy && (start_read || start_write)) begin
                     transaction_read_q <= start_read;
                     chip_select_q <= (requested_cs == '0) ?
@@ -179,6 +271,7 @@ import ydrasil_apb_pkg::*;
                     serial_clock_q <= 1'b0;
                     word_bit_index_q <= '0;
                     receive_shift_q <= '0;
+                    tx_word_stall_q <= 1'b0;
                     if (command_length_q != 0) begin
                         state_q <= SPI_COMMAND;
                         segment_bits_q <= {10'h000, command_length_q};
@@ -199,10 +292,14 @@ import ydrasil_apb_pkg::*;
                             state_q <= SPI_DATA;
                             segment_bits_q <= data_length_q;
                             if (!start_read && (tx_count_q != 0)) begin
-                                transmit_shift_q <= tx_fifo[tx_read_ptr_q];
-                                serial_data_q <= tx_fifo[tx_read_ptr_q][31];
-                                tx_read_ptr_q <= tx_read_ptr_q + 1'b1;
-                                transmit_fifo_pop = 1'b1;
+                                if (tx_head_valid_q) begin
+                                    transmit_shift_q <= tx_head_q;
+                                    serial_data_q <= tx_head_q[31];
+                                    transmit_fifo_pop = 1'b1;
+                                end else begin
+                                    serial_data_q <= 1'b0;
+                                    tx_word_stall_q <= 1'b1;
+                                end
                             end else begin
                                 serial_data_q <= 1'b0;
                             end
@@ -219,9 +316,20 @@ import ydrasil_apb_pkg::*;
                 end else begin
                     divider_count_q <= {8'h00, clock_divider_q};
                     if (!serial_clock_q) begin
-                        serial_clock_q <= 1'b1;
-                        if ((state_q == SPI_DATA) && transaction_read_q)
-                            receive_shift_q <= {receive_shift_q[30:0], miso_i};
+                        if ((state_q == SPI_DATA) && !transaction_read_q &&
+                            tx_word_stall_q) begin
+                            if (tx_head_valid_q) begin
+                                transmit_shift_q <= tx_head_q;
+                                serial_data_q <= tx_head_q[31];
+                                tx_word_stall_q <= 1'b0;
+                                transmit_fifo_pop = 1'b1;
+                            end
+                        end else begin
+                            serial_clock_q <= 1'b1;
+                            if ((state_q == SPI_DATA) && transaction_read_q)
+                                receive_shift_q <=
+                                    {receive_shift_q[30:0], miso_i};
+                        end
                     end else begin
                         serial_clock_q <= 1'b0;
                         if (segment_bits_q > 1) begin
@@ -238,11 +346,8 @@ import ydrasil_apb_pkg::*;
                                         if ((rx_count_q <
                                             COUNT_WIDTH'(FIFO_DEPTH)) ||
                                             rx_fifo_pop) begin
-                                            rx_fifo[rx_write_ptr_q] <=
-                                                receive_shift_q;
-                                            rx_write_ptr_q <=
-                                                rx_write_ptr_q + 1'b1;
                                             receive_fifo_push = 1'b1;
+                                            receive_fifo_data = receive_shift_q;
                                         end
                                         word_bit_index_q <= '0;
                                         receive_shift_q <= '0;
@@ -250,12 +355,14 @@ import ydrasil_apb_pkg::*;
                                 end else if (word_bit_index_q == 6'd31) begin
                                     word_bit_index_q <= '0;
                                     if (tx_count_q != 0) begin
-                                        transmit_shift_q <=
-                                            tx_fifo[tx_read_ptr_q];
-                                        serial_data_q <=
-                                            tx_fifo[tx_read_ptr_q][31];
-                                        tx_read_ptr_q <= tx_read_ptr_q + 1'b1;
-                                        transmit_fifo_pop = 1'b1;
+                                        if (tx_head_valid_q) begin
+                                            transmit_shift_q <= tx_head_q;
+                                            serial_data_q <= tx_head_q[31];
+                                            transmit_fifo_pop = 1'b1;
+                                        end else begin
+                                            serial_data_q <= 1'b0;
+                                            tx_word_stall_q <= 1'b1;
+                                        end
                                     end else begin
                                         transmit_shift_q <= '0;
                                         serial_data_q <= 1'b0;
@@ -289,12 +396,14 @@ import ydrasil_apb_pkg::*;
                                 word_bit_index_q <= '0;
                                 if (!transaction_read_q &&
                                     (tx_count_q != 0)) begin
-                                    transmit_shift_q <=
-                                        tx_fifo[tx_read_ptr_q];
-                                    serial_data_q <=
-                                        tx_fifo[tx_read_ptr_q][31];
-                                    tx_read_ptr_q <= tx_read_ptr_q + 1'b1;
-                                    transmit_fifo_pop = 1'b1;
+                                    if (tx_head_valid_q) begin
+                                        transmit_shift_q <= tx_head_q;
+                                        serial_data_q <= tx_head_q[31];
+                                        transmit_fifo_pop = 1'b1;
+                                    end else begin
+                                        serial_data_q <= 1'b0;
+                                        tx_word_stall_q <= 1'b1;
+                                    end
                                 end else begin
                                     serial_data_q <= 1'b0;
                                 end
@@ -305,10 +414,8 @@ import ydrasil_apb_pkg::*;
                                     ((rx_count_q <
                                       COUNT_WIDTH'(FIFO_DEPTH)) ||
                                      rx_fifo_pop)) begin
-                                    rx_fifo[rx_write_ptr_q] <=
-                                        receive_shift_q;
-                                    rx_write_ptr_q <= rx_write_ptr_q + 1'b1;
                                     receive_fifo_push = 1'b1;
+                                    receive_fifo_data = receive_shift_q;
                                 end
                                 state_q <= SPI_FINISH;
                                 serial_data_q <= 1'b0;
@@ -320,19 +427,82 @@ import ydrasil_apb_pkg::*;
                 state_q <= SPI_IDLE;
                 chip_select_q <= '0;
                 serial_clock_q <= 1'b0;
+                tx_word_stall_q <= 1'b0;
                 end_event_q <= 1'b1;
             end
 
-            unique case ({tx_fifo_push, transmit_fifo_pop})
-                2'b10: tx_count_q <= tx_count_q + 1'b1;
-                2'b01: tx_count_q <= tx_count_q - 1'b1;
-                default: ;
-            endcase
-            unique case ({receive_fifo_push, rx_fifo_pop})
-                2'b10: rx_count_q <= rx_count_q + 1'b1;
-                2'b01: rx_count_q <= rx_count_q - 1'b1;
-                default: ;
-            endcase
+            if (!fifo_clear) begin
+                if (tx_fifo_push) begin
+                    if ((tx_count_q == 0) ||
+                        (transmit_fifo_pop && (tx_count_q == 1))) begin
+                        tx_head_q <= apb_req_i.pwdata;
+                        tx_head_valid_q <= 1'b1;
+                    end else begin
+                        tx_bram_wen_q <= 1'b1;
+                        tx_bram_waddr_q <= tx_write_ptr_q;
+                        tx_bram_wdata_q <= apb_req_i.pwdata;
+                        tx_write_ptr_q <= tx_write_ptr_q + 1'b1;
+                    end
+                end
+                if (transmit_fifo_pop) begin
+                    if (tx_count_q > 1) begin
+                        tx_head_valid_q <= 1'b0;
+                        tx_bram_ren_q <= 1'b1;
+                        tx_bram_raddr_q <= tx_read_ptr_q;
+                        tx_read_ptr_q <= tx_read_ptr_q + 1'b1;
+                    end else if (!tx_fifo_push) begin
+                        tx_head_valid_q <= 1'b0;
+                    end
+                end
+
+                if (rx_bram_deferred_write_q) begin
+                    rx_bram_wen_q <= 1'b1;
+                    rx_bram_waddr_q <= rx_bram_deferred_addr_q;
+                    rx_bram_wdata_q <= rx_bram_deferred_data_q;
+                    rx_bram_deferred_write_q <= 1'b0;
+                end
+                if (receive_fifo_push) begin
+                    if ((rx_count_q == 0) ||
+                        (rx_fifo_pop && (rx_count_q == 1))) begin
+                        rx_head_q <= receive_fifo_data;
+                        rx_head_valid_q <= 1'b1;
+                    end else if (rx_fifo_pop &&
+                        (rx_count_q == COUNT_WIDTH'(FIFO_DEPTH))) begin
+                        // On a full FIFO, defer the replacement write until
+                        // the read port has captured the displaced entry.
+                        rx_bram_deferred_write_q <= 1'b1;
+                        rx_bram_deferred_addr_q <= rx_write_ptr_q;
+                        rx_bram_deferred_data_q <= receive_fifo_data;
+                        rx_write_ptr_q <= rx_write_ptr_q + 1'b1;
+                    end else begin
+                        rx_bram_wen_q <= 1'b1;
+                        rx_bram_waddr_q <= rx_write_ptr_q;
+                        rx_bram_wdata_q <= receive_fifo_data;
+                        rx_write_ptr_q <= rx_write_ptr_q + 1'b1;
+                    end
+                end
+                if (rx_fifo_pop) begin
+                    if (rx_count_q > 1) begin
+                        rx_head_valid_q <= 1'b0;
+                        rx_bram_ren_q <= 1'b1;
+                        rx_bram_raddr_q <= rx_read_ptr_q;
+                        rx_read_ptr_q <= rx_read_ptr_q + 1'b1;
+                    end else if (!receive_fifo_push) begin
+                        rx_head_valid_q <= 1'b0;
+                    end
+                end
+
+                unique case ({tx_fifo_push, transmit_fifo_pop})
+                    2'b10: tx_count_q <= tx_count_q + 1'b1;
+                    2'b01: tx_count_q <= tx_count_q - 1'b1;
+                    default: ;
+                endcase
+                unique case ({receive_fifo_push, rx_fifo_pop})
+                    2'b10: rx_count_q <= rx_count_q + 1'b1;
+                    2'b01: rx_count_q <= rx_count_q - 1'b1;
+                    default: ;
+                endcase
+            end
         end
     end
 
@@ -347,8 +517,8 @@ import ydrasil_apb_pkg::*;
                 address_length_q, 2'b00, command_length_q};
             REG_SPIDUM: read_data = {dummy_write_q, dummy_read_q};
             REG_RXFIFO:
-                read_data = (rx_count_q != 0) ?
-                    rx_fifo[rx_read_ptr_q] : 32'h00000000;
+                read_data = ((rx_count_q != 0) && rx_head_valid_q) ?
+                    rx_head_q : 32'h00000000;
             REG_INTCFG: read_data = {interrupt_enable_q, 18'h00000,
                 rx_irq_threshold_q, 3'b000, tx_irq_threshold_q};
             REG_INTSTA: read_data = {30'h00000000, rx_irq, tx_irq};
@@ -361,6 +531,6 @@ import ydrasil_apb_pkg::*;
     assign cs_n_o = ~chip_select_q;
     assign irq_o = interrupt_enable_q && (tx_irq || rx_irq || end_event_q);
     assign apb_rsp_o.prdata = read_data;
-    assign apb_rsp_o.pready = 1'b1;
+    assign apb_rsp_o.pready = !rx_fifo_read_wait;
     assign apb_rsp_o.pslverr = 1'b0;
 endmodule

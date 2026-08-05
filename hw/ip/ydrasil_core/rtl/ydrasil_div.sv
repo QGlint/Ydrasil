@@ -130,28 +130,71 @@ import ydrasil_pkg::*;
                 .lzc_empty_o (divisor_empty)
             );
 
+            // Redirect handling only needs to kill the architectural divider
+            // state. Keeping that control separate prevents the high-fanout
+            // recovery signal from becoming a data-select input on every
+            // iterative datapath register.
             always_ff @(posedge clk or negedge rst_n) begin
                 if (!rst_n) begin
-                    state_q          <= DIV_STATE_IDLE;
-                    busy_q           <= 1'b0;
-                    done_q           <= 1'b0;
-                    iter_q           <= '0;
-                    dividend_q       <= '0;
-                    divisor_q        <= '0;
-                    divisor_shift_q  <= '0;
-                    quotient_q       <= '0;
-                    remainder_q      <= '0;
-                    quotient_neg_q   <= 1'b0;
-                    remainder_neg_q  <= 1'b0;
-                    rem_result_q     <= 1'b0;
-                    dividend_lzc_q   <= '0;
-                    divisor_lzc_q    <= '0;
-                    dividend_empty_q <= 1'b0;
-                    result_q         <= '0;
+                    state_q <= DIV_STATE_IDLE;
+                    busy_q  <= 1'b0;
+                    done_q  <= 1'b0;
                 end else if (flush_i) begin
-                    state_q          <= DIV_STATE_IDLE;
-                    busy_q           <= 1'b0;
-                    done_q           <= 1'b0;
+                    state_q <= DIV_STATE_IDLE;
+                    busy_q  <= 1'b0;
+                    done_q  <= 1'b0;
+                end else begin
+                    done_q <= 1'b0;
+
+                    unique case (state_q)
+                        DIV_STATE_IDLE: begin
+                            if (start_i && !busy_q) begin
+                                if (divisor_is_zero || signed_overflow) begin
+                                    busy_q <= 1'b0;
+                                    done_q <= 1'b1;
+                                end else begin
+                                    busy_q  <= 1'b1;
+                                    state_q <= DIV_STATE_SHIFT;
+                                end
+                            end
+                        end
+
+                        DIV_STATE_SHIFT: begin
+                            if (dividend_empty_q || dividend_smaller) begin
+                                busy_q  <= 1'b0;
+                                done_q  <= 1'b1;
+                                state_q <= DIV_STATE_IDLE;
+                            end else begin
+                                state_q <= DIV_STATE_ITER;
+                            end
+                        end
+
+                        DIV_STATE_ITER: begin
+                            if (iter_q == '0)
+                                state_q <= DIV_STATE_FINISH;
+                        end
+
+                        DIV_STATE_FINISH: begin
+                            busy_q  <= 1'b0;
+                            done_q  <= 1'b1;
+                            state_q <= DIV_STATE_IDLE;
+                        end
+
+                        default: begin
+                            state_q <= DIV_STATE_IDLE;
+                            busy_q  <= 1'b0;
+                            done_q  <= 1'b0;
+                        end
+                    endcase
+                end
+            end
+
+            // The ex-block clears the matching producer state on the same
+            // redirect edge, so a killed result is architecturally invisible.
+            // Do not reference flush_i here: it must remain out of the wide
+            // iterative data cone.
+            always_ff @(posedge clk or negedge rst_n) begin
+                if (!rst_n) begin
                     iter_q           <= '0;
                     dividend_q       <= '0;
                     divisor_q        <= '0;
@@ -166,22 +209,14 @@ import ydrasil_pkg::*;
                     dividend_empty_q <= 1'b0;
                     result_q         <= '0;
                 end else begin
-                    done_q <= 1'b0;
-
                     unique case (state_q)
                         DIV_STATE_IDLE: begin
                             if (start_i && !busy_q) begin
                                 if (divisor_is_zero) begin
-                                    busy_q   <= 1'b0;
-                                    done_q   <= 1'b1;
                                     result_q <= divide_by_zero_result;
                                 end else if (signed_overflow) begin
-                                    busy_q   <= 1'b0;
-                                    done_q   <= 1'b1;
                                     result_q <= overflow_result;
                                 end else begin
-                                    busy_q           <= 1'b1;
-                                    state_q          <= DIV_STATE_SHIFT;
                                     dividend_q       <= dividend_abs;
                                     divisor_q        <= divisor_abs;
                                     quotient_q       <= '0;
@@ -200,12 +235,8 @@ import ydrasil_pkg::*;
 
                         DIV_STATE_SHIFT: begin
                             if (dividend_empty_q || dividend_smaller) begin
-                                busy_q   <= 1'b0;
-                                done_q   <= 1'b1;
-                                state_q  <= DIV_STATE_IDLE;
                                 result_q <= smaller_result;
                             end else begin
-                                state_q         <= DIV_STATE_ITER;
                                 iter_q          <= align_shift;
                                 divisor_shift_q <= divisor_aligned;
                                 quotient_q      <= '0;
@@ -217,27 +248,18 @@ import ydrasil_pkg::*;
                             remainder_q     <= remainder_calc;
                             quotient_q      <= quotient_next;
                             divisor_shift_q <= divisor_shift_q >> 1;
-
-                            if (iter_q == '0) begin
-                                state_q <= DIV_STATE_FINISH;
-                                iter_q  <= '0;
-                            end else begin
-                                iter_q <= iter_q - {{LZC_CNT_WIDTH{1'b0}}, 1'b1};
-                            end
+                            if (iter_q == '0)
+                                iter_q <= '0;
+                            else
+                                iter_q <= iter_q -
+                                    {{LZC_CNT_WIDTH{1'b0}}, 1'b1};
                         end
 
                         DIV_STATE_FINISH: begin
-                            busy_q   <= 1'b0;
-                            done_q   <= 1'b1;
-                            state_q  <= DIV_STATE_IDLE;
                             result_q <= finish_result;
                         end
 
-                        default: begin
-                            state_q <= DIV_STATE_IDLE;
-                            busy_q  <= 1'b0;
-                            done_q  <= 1'b0;
-                        end
+                        default: begin end
                     endcase
                 end
             end
