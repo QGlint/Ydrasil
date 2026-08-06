@@ -26,11 +26,15 @@ sources:
       - rtl/ydrasil_bitmanip.sv
       - rtl/ydrasil_bru.sv
       - rtl/ydrasil_ex_block.sv
+      - rtl/ydrasil_execute_stage.sv
       - rtl/ydrasil_load_store_unit.sv
+      - rtl/ydrasil_completion_ctrl.sv
       - rtl/ydrasil_mems.sv
       - rtl/ydrasil_registers.sv
       - rtl/ydrasil_registers_csr.sv
+      - rtl/ydrasil_csr_stage.sv
       - rtl/ydrasil_exception_ctrl.sv
+      - rtl/ydrasil_exception_stage.sv
       - rtl/ydrasil_value_file.sv
       - rtl/ydrasil_ctrl.sv
       - rtl/ydrasil_core.sv

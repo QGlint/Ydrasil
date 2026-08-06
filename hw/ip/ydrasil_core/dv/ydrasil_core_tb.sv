@@ -71,13 +71,13 @@ end
 			end
 
     // 通用寄存器访问 - 仅用于错误信息显示
-    wire [31:0] x3 = u_dut.u_ydrasil_registers.registers[3];
+    wire [31:0] x3 = u_dut.u_ydrasil_issue_stage.u_registers.registers[3];
     // PC 监控
     // ID and issue are independently buffered.  Use the execution-side PC
     // for tohost detection; the fetch PC can be several instructions ahead.
-    wire [31:0] pc = u_dut.id_instr_addr;
-    wire [31:0] csr_instret = u_dut.u_ydrasil_registers_csr.instret[31:0];
-    wire [31:0] csr_cyclel = u_dut.u_ydrasil_registers_csr.cycle[31:0];
+    wire [31:0] pc = u_dut.u_ydrasil_commit_trace.id_instr_addr;
+    wire [31:0] csr_instret = u_dut.u_ydrasil_commit_trace.csr_instret;
+    wire [31:0] csr_cyclel = u_dut.u_ydrasil_commit_trace.csr_cyclel;
 
     integer           r;
     reg     [8*300:1] testcase;
@@ -388,7 +388,7 @@ end
             interrupt_q <= 1'b0;
             early_clear_q <= 1'b0;
         end else begin
-            interrupt_q <= u_dut.interrupt;
+            interrupt_q <= u_dut.u_ydrasil_commit_trace.interrupt;
             early_clear_q <= u_dut.flush_id || u_dut.bubble_id;
 
             if (u_dut.u_ydrasil_issue_stage.issue_early_alu_valid_ff) begin
@@ -410,9 +410,9 @@ end
                                 u_dut.u_ydrasil_issue_stage.issue_early_kind_ff);
             end
 
-            assert (u_dut.u_ydrasil_registers.registers[0] == 32'b0)
+            assert (u_dut.u_ydrasil_issue_stage.u_registers.registers[0] == 32'b0)
                 else $fatal(1, "ASSERT_X0_NONZERO value=0x%08h",
-                            u_dut.u_ydrasil_registers.registers[0]);
+                            u_dut.u_ydrasil_issue_stage.u_registers.registers[0]);
             assert (u_dut.u_ydrasil_if_stage.pc_ff[1:0] == 2'b00)
                 else $fatal(1, "ASSERT_PC_MISALIGNED pc=0x%08h",
                             u_dut.u_ydrasil_if_stage.pc_ff);
@@ -421,12 +421,12 @@ end
                             u_dut.gpr_pending_q);
             // The LSU has independent registered DTCM and MMIO backends.
             // Concurrent requests are legal; validate each side below.
-            assert (!u_dut.dtcm_we || (u_dut.dtcm_req && (|u_dut.dtcm_wmask)))
+            assert (!u_dut.u_ydrasil_commit_trace.dtcm_we || (u_dut.u_ydrasil_commit_trace.dtcm_req && (|u_dut.u_ydrasil_commit_trace.dtcm_wmask)))
                 else $fatal(1, "ASSERT_BAD_DTCM_WRITE req=%0b mask=0x%01h addr=0x%08h",
-                            u_dut.dtcm_req, u_dut.dtcm_wmask, u_dut.dtcm_addr);
-            assert (!u_dut.mmio_we || (u_dut.mmio_req && (|u_dut.mmio_wmask)))
+                            u_dut.u_ydrasil_commit_trace.dtcm_req, u_dut.u_ydrasil_commit_trace.dtcm_wmask, u_dut.u_ydrasil_commit_trace.dtcm_addr);
+            assert (!u_dut.u_ydrasil_commit_trace.mmio_we || (u_dut.u_ydrasil_commit_trace.mmio_req && (|u_dut.u_ydrasil_commit_trace.mmio_wmask)))
                 else $fatal(1, "ASSERT_BAD_MMIO_WRITE req=%0b mask=0x%01h addr=0x%08h",
-                            u_dut.mmio_req, u_dut.mmio_wmask, u_dut.mmio_addr);
+                            u_dut.u_ydrasil_commit_trace.mmio_req, u_dut.u_ydrasil_commit_trace.mmio_wmask, u_dut.u_ydrasil_commit_trace.mmio_addr);
             assert ((u_dut.flush_if == u_dut.branch_jump) &&
                     (u_dut.flush_id == u_dut.branch_jump) &&
                     (u_dut.flush_ex == u_dut.branch_jump))
@@ -447,51 +447,51 @@ end
             assert (u_dut.u_ydrasil_load_store_unit.queue_count_q <= 2'd2)
                 else $fatal(1, "ASSERT_LSU_QUEUE_COUNT count=%0d",
                             u_dut.u_ydrasil_load_store_unit.queue_count_q);
-            if (u_dut.clint_csr_we) begin
-                assert ((u_dut.clint_csr_waddr == ydrasil_pkg::CSR_MSTATUS) ||
-                        (u_dut.clint_csr_waddr == ydrasil_pkg::CSR_MEPC) ||
-                        (u_dut.clint_csr_waddr == ydrasil_pkg::CSR_MCAUSE) ||
-                        (u_dut.clint_csr_waddr == ydrasil_pkg::CSR_MTVAL))
+            if (u_dut.u_ydrasil_commit_trace.clint_csr_we) begin
+                assert ((u_dut.u_ydrasil_commit_trace.clint_csr_waddr == ydrasil_pkg::CSR_MSTATUS) ||
+                        (u_dut.u_ydrasil_commit_trace.clint_csr_waddr == ydrasil_pkg::CSR_MEPC) ||
+                        (u_dut.u_ydrasil_commit_trace.clint_csr_waddr == ydrasil_pkg::CSR_MCAUSE) ||
+                        (u_dut.u_ydrasil_commit_trace.clint_csr_waddr == ydrasil_pkg::CSR_MTVAL))
                     else $fatal(1, "ASSERT_BAD_TRAP_CSR_WRITE addr=0x%03h data=0x%08h",
-                                u_dut.clint_csr_waddr, u_dut.clint_csr_wdata);
+                                u_dut.u_ydrasil_commit_trace.clint_csr_waddr, u_dut.u_ydrasil_commit_trace.clint_csr_wdata);
             end
             for (completion_assert_lane = 0;
                  completion_assert_lane < ydrasil_pkg::COMPLETION_LANES;
                  completion_assert_lane = completion_assert_lane + 1) begin
-                if (u_dut.completion_bus[completion_assert_lane].valid &&
-                    u_dut.completion_bus[completion_assert_lane].producer_tracked &&
-                    (u_dut.completion_bus[completion_assert_lane].addr != '0)) begin
+                if (u_dut.u_ydrasil_commit_trace.completion_bus[completion_assert_lane].valid &&
+                    u_dut.u_ydrasil_commit_trace.completion_bus[completion_assert_lane].producer_tracked &&
+                    (u_dut.u_ydrasil_commit_trace.completion_bus[completion_assert_lane].addr != '0)) begin
                     assert (u_dut.u_ctrl.producer_valid_q[
-                                u_dut.completion_bus[completion_assert_lane].producer_id[
+                                u_dut.u_ydrasil_commit_trace.completion_bus[completion_assert_lane].producer_id[
                                     ydrasil_pkg::PRODUCER_SLOT_WIDTH-1:0]] ||
                             (u_dut.u_ctrl.producer_alloc_ex &&
                              (u_dut.ex_hzd_pkt.producer_id ==
-                              u_dut.completion_bus[completion_assert_lane].producer_id)) ||
+                              u_dut.u_ydrasil_commit_trace.completion_bus[completion_assert_lane].producer_id)) ||
                             (u_dut.u_ctrl.producer_alloc_ex1 &&
                              (u_dut.ex_hzd_pkt1.producer_id ==
-                              u_dut.completion_bus[completion_assert_lane].producer_id)))
+                              u_dut.u_ydrasil_commit_trace.completion_bus[completion_assert_lane].producer_id)))
                         else $fatal(1,
                             "ASSERT_COMPLETION_FOR_FREE_TOKEN lane=%0d id=%0d rd=%0d data=0x%08h",
                             completion_assert_lane,
-                            u_dut.completion_bus[completion_assert_lane].producer_id,
-                            u_dut.completion_bus[completion_assert_lane].addr,
-                            u_dut.completion_bus[completion_assert_lane].data);
+                            u_dut.u_ydrasil_commit_trace.completion_bus[completion_assert_lane].producer_id,
+                            u_dut.u_ydrasil_commit_trace.completion_bus[completion_assert_lane].addr,
+                            u_dut.u_ydrasil_commit_trace.completion_bus[completion_assert_lane].data);
                 end
                 for (completion_assert_other_lane = completion_assert_lane + 1;
                      completion_assert_other_lane < ydrasil_pkg::COMPLETION_LANES;
                      completion_assert_other_lane = completion_assert_other_lane + 1) begin
-                    assert (!(u_dut.completion_bus[completion_assert_lane].valid &&
-                              u_dut.completion_bus[completion_assert_lane].producer_tracked &&
-                              (u_dut.completion_bus[completion_assert_lane].addr != '0) &&
-                              u_dut.completion_bus[completion_assert_other_lane].valid &&
-                              u_dut.completion_bus[completion_assert_other_lane].producer_tracked &&
-                              (u_dut.completion_bus[completion_assert_other_lane].addr != '0) &&
-                              (u_dut.completion_bus[completion_assert_lane].producer_id ==
-                               u_dut.completion_bus[completion_assert_other_lane].producer_id)))
+                    assert (!(u_dut.u_ydrasil_commit_trace.completion_bus[completion_assert_lane].valid &&
+                              u_dut.u_ydrasil_commit_trace.completion_bus[completion_assert_lane].producer_tracked &&
+                              (u_dut.u_ydrasil_commit_trace.completion_bus[completion_assert_lane].addr != '0) &&
+                              u_dut.u_ydrasil_commit_trace.completion_bus[completion_assert_other_lane].valid &&
+                              u_dut.u_ydrasil_commit_trace.completion_bus[completion_assert_other_lane].producer_tracked &&
+                              (u_dut.u_ydrasil_commit_trace.completion_bus[completion_assert_other_lane].addr != '0) &&
+                              (u_dut.u_ydrasil_commit_trace.completion_bus[completion_assert_lane].producer_id ==
+                               u_dut.u_ydrasil_commit_trace.completion_bus[completion_assert_other_lane].producer_id)))
                         else $fatal(1,
                             "ASSERT_DUPLICATE_COMPLETION_ID lane_a=%0d lane_b=%0d id=%0d",
                             completion_assert_lane, completion_assert_other_lane,
-                            u_dut.completion_bus[completion_assert_lane].producer_id);
+                            u_dut.u_ydrasil_commit_trace.completion_bus[completion_assert_lane].producer_id);
                 end
             end
         end
@@ -526,38 +526,38 @@ end
             $display("[TB] timeout reached, finish simulation");
             $display("[TB] timeout pc=0x%08h cycle=%0d instret=%0d", pc, cycle_count, instruction_count);
             $display("[TB] stall scoreboard=%0b lsu_struct=%0b clint=%0b wb=%0b stall_if=%0b stall_id=%0b bubble_id=%0b id_ex_valid=%0b",
-                     u_dut.scoreboard_stall,
-                     u_dut.lsu_struct_stall,
-                     u_dut.clint_stall,
-                     u_dut.wb_backpressure,
+                     u_dut.u_ydrasil_commit_trace.scoreboard_stall,
+                     u_dut.u_ydrasil_commit_trace.lsu_struct_stall,
+                     u_dut.u_ydrasil_commit_trace.clint_stall,
+                     u_dut.u_ydrasil_commit_trace.wb_backpressure,
                      u_dut.stall_if,
                      u_dut.stall_id,
                      u_dut.bubble_id,
                      u_dut.id_ex_valid);
             $display("[TB] id_ctrl rs1=%0d ren1=%0b pend1=%0b rs2=%0d ren2=%0b pend2=%0b rd=%0d wen=%0b pend_rd=%0b lsu_req=%0b lsu_busy=%0b",
-                     u_dut.id_ctrl_rs1_addr,
-                     u_dut.id_ctrl_rs1_ren,
-                     u_dut.gpr_pending_for_hazard[u_dut.id_ctrl_rs1_addr],
-                     u_dut.id_ctrl_rs2_addr,
-                     u_dut.id_ctrl_rs2_ren,
-                     u_dut.gpr_pending_for_hazard[u_dut.id_ctrl_rs2_addr],
-                     u_dut.id_ctrl_rd_addr,
-                     u_dut.id_ctrl_rd_wen,
-                     u_dut.gpr_pending_for_hazard[u_dut.id_ctrl_rd_addr],
-                     u_dut.id_ctrl_lsu_req,
-                     u_dut.lsu_ctrl_busy);
+                     u_dut.u_ydrasil_commit_trace.id_ctrl_rs1_addr,
+                     u_dut.u_ydrasil_commit_trace.id_ctrl_rs1_ren,
+                     u_dut.u_ydrasil_commit_trace.gpr_pending_for_hazard[u_dut.u_ydrasil_commit_trace.id_ctrl_rs1_addr],
+                     u_dut.u_ydrasil_commit_trace.id_ctrl_rs2_addr,
+                     u_dut.u_ydrasil_commit_trace.id_ctrl_rs2_ren,
+                     u_dut.u_ydrasil_commit_trace.gpr_pending_for_hazard[u_dut.u_ydrasil_commit_trace.id_ctrl_rs2_addr],
+                     u_dut.u_ydrasil_commit_trace.id_ctrl_rd_addr,
+                     u_dut.u_ydrasil_commit_trace.id_ctrl_rd_wen,
+                     u_dut.u_ydrasil_commit_trace.gpr_pending_for_hazard[u_dut.u_ydrasil_commit_trace.id_ctrl_rd_addr],
+                     u_dut.u_ydrasil_commit_trace.id_ctrl_lsu_req,
+                     u_dut.u_ydrasil_commit_trace.lsu_ctrl_busy);
             $display("[TB] pending=0x%08h clear=0x%08h issue=0x%08h ex_accept=%0b id_rd_issue=%0b rf_wen=%0b rf_waddr=%0d alu_wen=%0b alu_waddr=%0d lsu_wen=%0b lsu_waddr=%0d mul_wen=%0b mul_waddr=%0d",
                      u_dut.gpr_pending_q,
-                     u_dut.gpr_pending_clear_mask,
-                     u_dut.gpr_pending_issue_mask,
+                     u_dut.u_ydrasil_commit_trace.gpr_pending_clear_mask,
+                     u_dut.u_ydrasil_commit_trace.gpr_pending_issue_mask,
                      u_dut.ex_accept_valid,
-                     u_dut.id_ex_rd_issue,
-                     u_dut.rf_wen_rd,
-                     u_dut.rf_waddr_rd,
+                     u_dut.u_ydrasil_commit_trace.id_ex_rd_issue,
+                     u_dut.u_ydrasil_commit_trace.rf_wen_rd,
+                     u_dut.u_ydrasil_commit_trace.rf_waddr_rd,
                      u_dut.alu_rf_wen_rd,
                      u_dut.alu_rf_waddr_rd,
-                     u_dut.lsu_rf_wen_rd,
-                     u_dut.lsu_rf_waddr_rd,
+                     u_dut.u_ydrasil_commit_trace.lsu_rf_wen_rd,
+                     u_dut.u_ydrasil_commit_trace.lsu_rf_waddr_rd,
                      u_dut.mul_rf_wen_rd,
                      u_dut.mul_rf_waddr_rd);
             print_perf_metrics();
@@ -772,8 +772,8 @@ end
                 {31'b0, (u_dut.issue_slot1_replay && u_dut.issue_lsu_struct_stall1)};
             issue_serialize_wait_count <= issue_serialize_wait_count +
                 {31'b0, u_dut.issue_serialize_stall};
-            dispatchq_occ_count[u_dut.issue_pipe_count_q] <=
-                dispatchq_occ_count[u_dut.issue_pipe_count_q] + 1'b1;
+            dispatchq_occ_count[u_dut.u_ydrasil_commit_trace.issue_pipe_count_q] <=
+                dispatchq_occ_count[u_dut.u_ydrasil_commit_trace.issue_pipe_count_q] + 1'b1;
             bp_predict_redirect_q <= u_dut.u_ydrasil_if_stage.bp_predict_redirect;
             if (u_dut.branch_jump)
                 control_refill_active_q <= 1'b1;
@@ -832,42 +832,42 @@ end
             end
 `endif
             stall_scoreboard_count <= stall_scoreboard_count +
-                (u_dut.scoreboard_stall ? 32'd1 : 32'd0);
+                (u_dut.u_ydrasil_commit_trace.scoreboard_stall ? 32'd1 : 32'd0);
             stall_lsu_struct_count <= stall_lsu_struct_count +
-                (u_dut.lsu_struct_stall ? 32'd1 : 32'd0);
+                (u_dut.u_ydrasil_commit_trace.lsu_struct_stall ? 32'd1 : 32'd0);
             stall_wb_backpressure_count <= stall_wb_backpressure_count +
-                (u_dut.wb_backpressure ? 32'd1 : 32'd0);
+                (u_dut.u_ydrasil_commit_trace.wb_backpressure ? 32'd1 : 32'd0);
             stall_clint_count <= stall_clint_count +
-                (u_dut.clint_stall ? 32'd1 : 32'd0);
+                (u_dut.u_ydrasil_commit_trace.clint_stall ? 32'd1 : 32'd0);
             stall_mul_count <= stall_mul_count +
                 (u_dut.ex_mul_stall ? 32'd1 : 32'd0);
             completion_alu_lsu_q <=
-                u_dut.completion_bus[ydrasil_pkg::COMPLETION_ALU].valid &&
-                u_dut.completion_bus[ydrasil_pkg::COMPLETION_LSU].valid;
+                u_dut.u_ydrasil_commit_trace.completion_bus[ydrasil_pkg::COMPLETION_ALU].valid &&
+                u_dut.u_ydrasil_commit_trace.completion_bus[ydrasil_pkg::COMPLETION_LSU].valid;
             completion_mul_q <=
-                u_dut.completion_bus[ydrasil_pkg::COMPLETION_MUL].valid;
+                u_dut.u_ydrasil_commit_trace.completion_bus[ydrasil_pkg::COMPLETION_MUL].valid;
             completion_alu_lsu_count <= completion_alu_lsu_count +
-                ((u_dut.completion_bus[ydrasil_pkg::COMPLETION_ALU].valid &&
-                  u_dut.completion_bus[ydrasil_pkg::COMPLETION_LSU].valid) ? 32'd1 : 32'd0);
+                ((u_dut.u_ydrasil_commit_trace.completion_bus[ydrasil_pkg::COMPLETION_ALU].valid &&
+                  u_dut.u_ydrasil_commit_trace.completion_bus[ydrasil_pkg::COMPLETION_LSU].valid) ? 32'd1 : 32'd0);
             completion_alu_mul_count <= completion_alu_mul_count +
-                ((u_dut.completion_bus[ydrasil_pkg::COMPLETION_ALU].valid &&
-                  u_dut.completion_bus[ydrasil_pkg::COMPLETION_MUL].valid) ? 32'd1 : 32'd0);
+                ((u_dut.u_ydrasil_commit_trace.completion_bus[ydrasil_pkg::COMPLETION_ALU].valid &&
+                  u_dut.u_ydrasil_commit_trace.completion_bus[ydrasil_pkg::COMPLETION_MUL].valid) ? 32'd1 : 32'd0);
             completion_lsu_mul_count <= completion_lsu_mul_count +
-                ((u_dut.completion_bus[ydrasil_pkg::COMPLETION_LSU].valid &&
-                  u_dut.completion_bus[ydrasil_pkg::COMPLETION_MUL].valid) ? 32'd1 : 32'd0);
+                ((u_dut.u_ydrasil_commit_trace.completion_bus[ydrasil_pkg::COMPLETION_LSU].valid &&
+                  u_dut.u_ydrasil_commit_trace.completion_bus[ydrasil_pkg::COMPLETION_MUL].valid) ? 32'd1 : 32'd0);
             completion_all_count <= completion_all_count +
-                ((u_dut.completion_bus[ydrasil_pkg::COMPLETION_ALU].valid &&
-                  u_dut.completion_bus[ydrasil_pkg::COMPLETION_LSU].valid &&
-                  u_dut.completion_bus[ydrasil_pkg::COMPLETION_MUL].valid) ? 32'd1 : 32'd0);
+                ((u_dut.u_ydrasil_commit_trace.completion_bus[ydrasil_pkg::COMPLETION_ALU].valid &&
+                  u_dut.u_ydrasil_commit_trace.completion_bus[ydrasil_pkg::COMPLETION_LSU].valid &&
+                  u_dut.u_ydrasil_commit_trace.completion_bus[ydrasil_pkg::COMPLETION_MUL].valid) ? 32'd1 : 32'd0);
             completion_alu_lsu_then_mul_count <=
                 completion_alu_lsu_then_mul_count +
                 ((completion_alu_lsu_q &&
-                  u_dut.completion_bus[ydrasil_pkg::COMPLETION_MUL].valid) ? 32'd1 : 32'd0);
+                  u_dut.u_ydrasil_commit_trace.completion_bus[ydrasil_pkg::COMPLETION_MUL].valid) ? 32'd1 : 32'd0);
             completion_mul_then_alu_lsu_count <=
                 completion_mul_then_alu_lsu_count +
                 ((completion_mul_q &&
-                  u_dut.completion_bus[ydrasil_pkg::COMPLETION_ALU].valid &&
-                  u_dut.completion_bus[ydrasil_pkg::COMPLETION_LSU].valid) ? 32'd1 : 32'd0);
+                  u_dut.u_ydrasil_commit_trace.completion_bus[ydrasil_pkg::COMPLETION_ALU].valid &&
+                  u_dut.u_ydrasil_commit_trace.completion_bus[ydrasil_pkg::COMPLETION_LSU].valid) ? 32'd1 : 32'd0);
             unique case ({|u_dut.u_ctrl.producer_complete_mask,
                           |u_dut.u_ctrl.producer_retire_q,
                           u_dut.u_ctrl.producer_alloc_ex})
@@ -912,101 +912,101 @@ end
                   u_dut.u_ctrl.producer_complete_mask[u_dut.ex_hzd_pkt.producer_id[ydrasil_pkg::PRODUCER_SLOT_WIDTH-1:0]] &&
                   u_dut.u_ctrl.producer_retire_q[u_dut.ex_hzd_pkt.producer_id[ydrasil_pkg::PRODUCER_SLOT_WIDTH-1:0]]) ? 32'd1 : 32'd0);
             sb_rs1_pending_count <= sb_rs1_pending_count +
-                (u_dut.rs1_pending_stall ? 32'd1 : 32'd0);
+                (u_dut.u_ydrasil_commit_trace.rs1_pending_stall ? 32'd1 : 32'd0);
             sb_rs2_pending_count <= sb_rs2_pending_count +
-                (u_dut.rs2_pending_stall ? 32'd1 : 32'd0);
+                (u_dut.u_ydrasil_commit_trace.rs2_pending_stall ? 32'd1 : 32'd0);
             sb_rd_waw_count <= sb_rd_waw_count +
-                (u_dut.rd_waw_stall ? 32'd1 : 32'd0);
+                (u_dut.u_ydrasil_commit_trace.rd_waw_stall ? 32'd1 : 32'd0);
             sb_issue_rs1_hzd_count <= sb_issue_rs1_hzd_count +
-                (u_dut.rs1_issue_hzd ? 32'd1 : 32'd0);
+                (u_dut.u_ydrasil_commit_trace.rs1_issue_hzd ? 32'd1 : 32'd0);
             sb_issue_rs2_hzd_count <= sb_issue_rs2_hzd_count +
-                (u_dut.rs2_issue_hzd ? 32'd1 : 32'd0);
+                (u_dut.u_ydrasil_commit_trace.rs2_issue_hzd ? 32'd1 : 32'd0);
             sb_issue_rd_hzd_count <= sb_issue_rd_hzd_count +
-                (u_dut.rd_issue_hzd ? 32'd1 : 32'd0);
+                (u_dut.u_ydrasil_commit_trace.rd_issue_hzd ? 32'd1 : 32'd0);
             sb_load_use_count <= sb_load_use_count +
-                ((u_dut.issue_load_producer & u_dut.issue_src_hzd) ? 32'd1 : 32'd0);
+                ((u_dut.u_ydrasil_commit_trace.issue_load_producer & u_dut.u_ydrasil_commit_trace.issue_src_hzd) ? 32'd1 : 32'd0);
             sb_alu_use_count <= sb_alu_use_count +
-                ((u_dut.issue_alu_producer & u_dut.issue_src_hzd) ? 32'd1 : 32'd0);
+                ((u_dut.u_ydrasil_commit_trace.issue_alu_producer & u_dut.u_ydrasil_commit_trace.issue_src_hzd) ? 32'd1 : 32'd0);
             sb_mul_div_use_count <= sb_mul_div_use_count +
-                ((u_dut.issue_mul_div_producer & u_dut.issue_src_hzd) ? 32'd1 : 32'd0);
+                ((u_dut.u_ydrasil_commit_trace.issue_mul_div_producer & u_dut.u_ydrasil_commit_trace.issue_src_hzd) ? 32'd1 : 32'd0);
             sb_branch_src_wait_count <= sb_branch_src_wait_count +
-                ((u_dut.scoreboard_stall &&
+                ((u_dut.u_ydrasil_commit_trace.scoreboard_stall &&
                   u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP]) ? 32'd1 : 32'd0);
             sb_store_addr_wait_count <= sb_store_addr_wait_count +
-                ((u_dut.scoreboard_stall &&
+                ((u_dut.u_ydrasil_commit_trace.scoreboard_stall &&
                   u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
-                  (u_dut.rs1_pending_stall | u_dut.rs1_issue_hzd)) ? 32'd1 : 32'd0);
+                  (u_dut.u_ydrasil_commit_trace.rs1_pending_stall | u_dut.u_ydrasil_commit_trace.rs1_issue_hzd)) ? 32'd1 : 32'd0);
             sb_store_data_wait_count <= sb_store_data_wait_count +
-                ((u_dut.scoreboard_stall &&
+                ((u_dut.u_ydrasil_commit_trace.scoreboard_stall &&
                   u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
-                  (u_dut.rs2_pending_stall | u_dut.rs2_issue_hzd)) ? 32'd1 : 32'd0);
+                  (u_dut.u_ydrasil_commit_trace.rs2_pending_stall | u_dut.u_ydrasil_commit_trace.rs2_issue_hzd)) ? 32'd1 : 32'd0);
             sb_load_to_alu_count <= sb_load_to_alu_count +
-                ((u_dut.issue_load_producer & u_dut.issue_src_hzd &
+                ((u_dut.u_ydrasil_commit_trace.issue_load_producer & u_dut.u_ydrasil_commit_trace.issue_src_hzd &
                   u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_ALU]) ? 32'd1 : 32'd0);
             sb_load_to_branch_count <= sb_load_to_branch_count +
-                ((u_dut.issue_load_producer & u_dut.issue_src_hzd &
+                ((u_dut.u_ydrasil_commit_trace.issue_load_producer & u_dut.u_ydrasil_commit_trace.issue_src_hzd &
                   u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP]) ? 32'd1 : 32'd0);
             sb_load_to_load_count <= sb_load_to_load_count +
-                ((u_dut.issue_load_producer & u_dut.issue_src_hzd &
+                ((u_dut.u_ydrasil_commit_trace.issue_load_producer & u_dut.u_ydrasil_commit_trace.issue_src_hzd &
                   u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD]) ? 32'd1 : 32'd0);
             sb_load_to_store_count <= sb_load_to_store_count +
-                ((u_dut.issue_load_producer & u_dut.issue_src_hzd &
+                ((u_dut.u_ydrasil_commit_trace.issue_load_producer & u_dut.u_ydrasil_commit_trace.issue_src_hzd &
                   u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) ? 32'd1 : 32'd0);
             sb_load_to_mul_count <= sb_load_to_mul_count +
-                ((u_dut.issue_load_producer & u_dut.issue_src_hzd &
+                ((u_dut.u_ydrasil_commit_trace.issue_load_producer & u_dut.u_ydrasil_commit_trace.issue_src_hzd &
                   u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL]) ? 32'd1 : 32'd0);
             sb_load_to_other_count <= sb_load_to_other_count +
-                ((u_dut.issue_load_producer & u_dut.issue_src_hzd &
+                ((u_dut.u_ydrasil_commit_trace.issue_load_producer & u_dut.u_ydrasil_commit_trace.issue_src_hzd &
                   !(u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_ALU] |
                     u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] |
                     u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] |
                     u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] |
                     u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL])) ? 32'd1 : 32'd0);
             sb_load_rs1_count <= sb_load_rs1_count +
-                ((u_dut.issue_load_producer & u_dut.rs1_issue_hzd) ? 32'd1 : 32'd0);
+                ((u_dut.u_ydrasil_commit_trace.issue_load_producer & u_dut.u_ydrasil_commit_trace.rs1_issue_hzd) ? 32'd1 : 32'd0);
             sb_load_rs2_count <= sb_load_rs2_count +
-                ((u_dut.issue_load_producer & u_dut.rs2_issue_hzd) ? 32'd1 : 32'd0);
+                ((u_dut.u_ydrasil_commit_trace.issue_load_producer & u_dut.u_ydrasil_commit_trace.rs2_issue_hzd) ? 32'd1 : 32'd0);
             sb_pending_tail_count <= sb_pending_tail_count +
-                (((u_dut.rs1_pending_stall | u_dut.rs2_pending_stall) &
-                  !(u_dut.rs1_issue_hzd | u_dut.rs2_issue_hzd)) ? 32'd1 : 32'd0);
+                (((u_dut.u_ydrasil_commit_trace.rs1_pending_stall | u_dut.u_ydrasil_commit_trace.rs2_pending_stall) &
+                  !(u_dut.u_ydrasil_commit_trace.rs1_issue_hzd | u_dut.u_ydrasil_commit_trace.rs2_issue_hzd)) ? 32'd1 : 32'd0);
             sb_alu_to_alu_count <= sb_alu_to_alu_count +
-                ((u_dut.issue_alu_producer & u_dut.issue_src_hzd &
+                ((u_dut.u_ydrasil_commit_trace.issue_alu_producer & u_dut.u_ydrasil_commit_trace.issue_src_hzd &
                   u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_ALU]) ? 32'd1 : 32'd0);
             sb_alu_to_branch_count <= sb_alu_to_branch_count +
-                ((u_dut.issue_alu_producer & u_dut.issue_src_hzd &
+                ((u_dut.u_ydrasil_commit_trace.issue_alu_producer & u_dut.u_ydrasil_commit_trace.issue_src_hzd &
                   u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP]) ? 32'd1 : 32'd0);
             sb_alu_to_load_count <= sb_alu_to_load_count +
-                ((u_dut.issue_alu_producer & u_dut.issue_src_hzd &
+                ((u_dut.u_ydrasil_commit_trace.issue_alu_producer & u_dut.u_ydrasil_commit_trace.issue_src_hzd &
                   u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD]) ? 32'd1 : 32'd0);
             sb_alu_to_store_count <= sb_alu_to_store_count +
-                ((u_dut.issue_alu_producer & u_dut.issue_src_hzd &
+                ((u_dut.u_ydrasil_commit_trace.issue_alu_producer & u_dut.u_ydrasil_commit_trace.issue_src_hzd &
                   u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) ? 32'd1 : 32'd0);
             sb_alu_to_mul_count <= sb_alu_to_mul_count +
-                ((u_dut.issue_alu_producer & u_dut.issue_src_hzd &
+                ((u_dut.u_ydrasil_commit_trace.issue_alu_producer & u_dut.u_ydrasil_commit_trace.issue_src_hzd &
                   u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL]) ? 32'd1 : 32'd0);
             sb_alu_to_other_count <= sb_alu_to_other_count +
-                ((u_dut.issue_alu_producer & u_dut.issue_src_hzd &
+                ((u_dut.u_ydrasil_commit_trace.issue_alu_producer & u_dut.u_ydrasil_commit_trace.issue_src_hzd &
                   !(u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_ALU] |
                     u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] |
                     u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] |
                     u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] |
                     u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL])) ? 32'd1 : 32'd0);
-            if ((u_dut.rs1_pending_stall | u_dut.rs2_pending_stall) &&
-                !(u_dut.rs1_issue_hzd | u_dut.rs2_issue_hzd)) begin
-                if ((u_dut.rs1_pending_stall && u_dut.issue_head_compact_uop.src0.producer_class == ydrasil_pkg::RESULT_LSU) ||
-                    (u_dut.rs2_pending_stall && u_dut.issue_head_compact_uop.src1.producer_class == ydrasil_pkg::RESULT_LSU))
+            if ((u_dut.u_ydrasil_commit_trace.rs1_pending_stall | u_dut.u_ydrasil_commit_trace.rs2_pending_stall) &&
+                !(u_dut.u_ydrasil_commit_trace.rs1_issue_hzd | u_dut.u_ydrasil_commit_trace.rs2_issue_hzd)) begin
+                if ((u_dut.u_ydrasil_commit_trace.rs1_pending_stall && u_dut.issue_head_compact_uop.src0.producer_class == ydrasil_pkg::RESULT_LSU) ||
+                    (u_dut.u_ydrasil_commit_trace.rs2_pending_stall && u_dut.issue_head_compact_uop.src1.producer_class == ydrasil_pkg::RESULT_LSU))
                     sb_pending_load_count <= sb_pending_load_count + 1'b1;
-                else if ((u_dut.rs1_pending_stall && u_dut.issue_head_compact_uop.src0.producer_class == ydrasil_pkg::RESULT_MDU) ||
-                         (u_dut.rs2_pending_stall && u_dut.issue_head_compact_uop.src1.producer_class == ydrasil_pkg::RESULT_MDU))
+                else if ((u_dut.u_ydrasil_commit_trace.rs1_pending_stall && u_dut.issue_head_compact_uop.src0.producer_class == ydrasil_pkg::RESULT_MDU) ||
+                         (u_dut.u_ydrasil_commit_trace.rs2_pending_stall && u_dut.issue_head_compact_uop.src1.producer_class == ydrasil_pkg::RESULT_MDU))
                     sb_pending_mul_count <= sb_pending_mul_count + 1'b1;
-                else if ((u_dut.rs1_pending_stall && u_dut.issue_head_compact_uop.src0.producer_class == ydrasil_pkg::RESULT_ALU) ||
-                         (u_dut.rs2_pending_stall && u_dut.issue_head_compact_uop.src1.producer_class == ydrasil_pkg::RESULT_ALU))
+                else if ((u_dut.u_ydrasil_commit_trace.rs1_pending_stall && u_dut.issue_head_compact_uop.src0.producer_class == ydrasil_pkg::RESULT_ALU) ||
+                         (u_dut.u_ydrasil_commit_trace.rs2_pending_stall && u_dut.issue_head_compact_uop.src1.producer_class == ydrasil_pkg::RESULT_ALU))
                     sb_pending_alu_count <= sb_pending_alu_count + 1'b1;
                 else
                     sb_pending_other_count <= sb_pending_other_count + 1'b1;
             end
             sb_ready_but_stall_count <= sb_ready_but_stall_count +
-                ((u_dut.scoreboard_stall &&
+                ((u_dut.u_ydrasil_commit_trace.scoreboard_stall &&
                   ((u_dut.u_ctrl.rs1_has_producer && u_dut.u_ctrl.rs1_producer_ready) ||
                    (u_dut.u_ctrl.rs2_has_producer && u_dut.u_ctrl.rs2_producer_ready))) ? 32'd1 : 32'd0);
             sb_complete_visible_count <= sb_complete_visible_count +
@@ -1034,7 +1034,7 @@ end
                     (u_dut.u_ctrl.rs2_has_producer &&
                      u_dut.u_ctrl.producer_ready_q[u_dut.u_ctrl.rs2_producer_slot]))) ? 32'd1 : 32'd0);
             mul_tail_consumer_no_bypass_count <= mul_tail_consumer_no_bypass_count +
-                ((u_dut.mul_result_valid && u_dut.scoreboard_stall &&
+                ((u_dut.mul_result_valid && u_dut.u_ydrasil_commit_trace.scoreboard_stall &&
                   ((u_dut.u_ctrl.rs1_has_producer &&
                     u_dut.u_ctrl.producer_complete_mask[u_dut.u_ctrl.rs1_producer_slot]) ||
                    (u_dut.u_ctrl.rs2_has_producer &&
@@ -1047,30 +1047,30 @@ end
             end else if (u_dut.ex_mul_stall) begin
                 acct_mul_hold_count <= acct_mul_hold_count + 1'b1;
                 perf_lost_mul_hold_slot_count <= perf_lost_mul_hold_slot_count + perf_lost_slots_ext;
-            end else if ((u_dut.scoreboard_stall &
-                          (u_dut.lsu_struct_stall | u_dut.u_ctrl.producer_full_stall |
-                           u_dut.wb_backpressure | u_dut.clint_stall)) |
-                         (u_dut.lsu_struct_stall &
-                          (u_dut.u_ctrl.producer_full_stall | u_dut.wb_backpressure |
-                           u_dut.clint_stall)) |
+            end else if ((u_dut.u_ydrasil_commit_trace.scoreboard_stall &
+                          (u_dut.u_ydrasil_commit_trace.lsu_struct_stall | u_dut.u_ctrl.producer_full_stall |
+                           u_dut.u_ydrasil_commit_trace.wb_backpressure | u_dut.u_ydrasil_commit_trace.clint_stall)) |
+                         (u_dut.u_ydrasil_commit_trace.lsu_struct_stall &
+                          (u_dut.u_ctrl.producer_full_stall | u_dut.u_ydrasil_commit_trace.wb_backpressure |
+                           u_dut.u_ydrasil_commit_trace.clint_stall)) |
                          (u_dut.u_ctrl.producer_full_stall &
-                          (u_dut.wb_backpressure | u_dut.clint_stall)) |
-                         (u_dut.wb_backpressure & u_dut.clint_stall)) begin
+                          (u_dut.u_ydrasil_commit_trace.wb_backpressure | u_dut.u_ydrasil_commit_trace.clint_stall)) |
+                         (u_dut.u_ydrasil_commit_trace.wb_backpressure & u_dut.u_ydrasil_commit_trace.clint_stall)) begin
                 acct_multi_cause_count <= acct_multi_cause_count + 1'b1;
                 perf_lost_multi_slot_count <= perf_lost_multi_slot_count + perf_lost_slots_ext;
-            end else if (u_dut.scoreboard_stall) begin
+            end else if (u_dut.u_ydrasil_commit_trace.scoreboard_stall) begin
                 acct_scoreboard_count <= acct_scoreboard_count + 1'b1;
                 perf_lost_scoreboard_slot_count <= perf_lost_scoreboard_slot_count + perf_lost_slots_ext;
-            end else if (u_dut.lsu_struct_stall) begin
+            end else if (u_dut.u_ydrasil_commit_trace.lsu_struct_stall) begin
                 acct_lsu_struct_count <= acct_lsu_struct_count + 1'b1;
                 perf_lost_lsu_struct_slot_count <= perf_lost_lsu_struct_slot_count + perf_lost_slots_ext;
             end else if (u_dut.u_ctrl.producer_full_stall) begin
                 acct_producer_full_count <= acct_producer_full_count + 1'b1;
                 perf_lost_producer_full_slot_count <= perf_lost_producer_full_slot_count + perf_lost_slots_ext;
-            end else if (u_dut.wb_backpressure) begin
+            end else if (u_dut.u_ydrasil_commit_trace.wb_backpressure) begin
                 acct_wb_count <= acct_wb_count + 1'b1;
                 perf_lost_wb_slot_count <= perf_lost_wb_slot_count + perf_lost_slots_ext;
-            end else if (u_dut.clint_stall) begin
+            end else if (u_dut.u_ydrasil_commit_trace.clint_stall) begin
                 acct_clint_count <= acct_clint_count + 1'b1;
                 perf_lost_clint_slot_count <= perf_lost_clint_slot_count + perf_lost_slots_ext;
             end else if (u_dut.issue_serialize_stall) begin
@@ -1100,10 +1100,10 @@ end
             end else begin
                 acct_other_count <= acct_other_count + 1'b1;
                 perf_lost_other_slot_count <= perf_lost_other_slot_count + perf_lost_slots_ext;
-                if (!u_dut.u_ydrasil_issue_stage.issue_valid_ff && u_dut.decode_valid)
+                if (!u_dut.u_ydrasil_issue_stage.issue_valid_ff && u_dut.u_ydrasil_commit_trace.decode_valid)
                     other_issue_refill_count <= other_issue_refill_count + 1'b1;
                 else if (!u_dut.u_ydrasil_issue_stage.issue_valid_ff &&
-                         !u_dut.decode_valid && u_dut.decode_if_ready) begin
+                         !u_dut.u_ydrasil_commit_trace.decode_valid && u_dut.u_ydrasil_commit_trace.decode_if_ready) begin
                     other_decode_refill_count <= other_decode_refill_count + 1'b1;
                     if (control_refill_active_q)
                         decode_refill_after_control_count <= decode_refill_after_control_count + 1'b1;
@@ -1121,18 +1121,18 @@ end
                     other_unclassified_count <= other_unclassified_count + 1'b1;
             end
 
-            if (u_dut.scoreboard_stall) begin
-                if ((u_dut.rs1_issue_hzd | u_dut.rs2_issue_hzd |
-                     u_dut.rs1_pending_stall | u_dut.rs2_pending_stall) &&
-                    (u_dut.rd_issue_hzd | u_dut.rd_waw_stall))
+            if (u_dut.u_ydrasil_commit_trace.scoreboard_stall) begin
+                if ((u_dut.u_ydrasil_commit_trace.rs1_issue_hzd | u_dut.u_ydrasil_commit_trace.rs2_issue_hzd |
+                     u_dut.u_ydrasil_commit_trace.rs1_pending_stall | u_dut.u_ydrasil_commit_trace.rs2_pending_stall) &&
+                    (u_dut.u_ydrasil_commit_trace.rd_issue_hzd | u_dut.u_ydrasil_commit_trace.rd_waw_stall))
                     acct_raw_waw_count <= acct_raw_waw_count + 1'b1;
-                else if (u_dut.rd_issue_hzd | u_dut.rd_waw_stall)
+                else if (u_dut.u_ydrasil_commit_trace.rd_issue_hzd | u_dut.u_ydrasil_commit_trace.rd_waw_stall)
                     acct_waw_only_count <= acct_waw_only_count + 1'b1;
                 else
                     acct_raw_only_count <= acct_raw_only_count + 1'b1;
             end
 
-            unique case (u_dut.instret_inc_count)
+            unique case (u_dut.u_ydrasil_commit_trace.instret_inc_count)
                 3'd0: retire_zero_count <= retire_zero_count + 1'b1;
                 3'd1: retire_one_count <= retire_one_count + 1'b1;
                 3'd2: retire_two_count <= retire_two_count + 1'b1;
@@ -1140,7 +1140,7 @@ end
                 3'd4: retire_four_count <= retire_four_count + 1'b1;
                 default: begin end
             endcase
-            if (u_dut.issue_pair_execute) begin
+            if (u_dut.u_ydrasil_commit_trace.issue_pair_execute) begin
                 dual_issue_count <= dual_issue_count + 1'b1;
                 if (u_dut.issue_head_compact_uop.op_class == ydrasil_pkg::UOP_CLASS_BJP)
                     dual_bru_alu_count <= dual_bru_alu_count + 1'b1;
@@ -1170,12 +1170,12 @@ end
                 l0_correction_count <= l0_correction_count + 1'b1;
             end
 
-            bubble_cause_hist[{u_dut.clint_stall, u_dut.wb_backpressure,
-                u_dut.u_ctrl.producer_full_stall, u_dut.lsu_struct_stall,
-                u_dut.scoreboard_stall}] <=
-                bubble_cause_hist[{u_dut.clint_stall, u_dut.wb_backpressure,
-                    u_dut.u_ctrl.producer_full_stall, u_dut.lsu_struct_stall,
-                    u_dut.scoreboard_stall}] + 1'b1;
+            bubble_cause_hist[{u_dut.u_ydrasil_commit_trace.clint_stall, u_dut.u_ydrasil_commit_trace.wb_backpressure,
+                u_dut.u_ctrl.producer_full_stall, u_dut.u_ydrasil_commit_trace.lsu_struct_stall,
+                u_dut.u_ydrasil_commit_trace.scoreboard_stall}] <=
+                bubble_cause_hist[{u_dut.u_ydrasil_commit_trace.clint_stall, u_dut.u_ydrasil_commit_trace.wb_backpressure,
+                    u_dut.u_ctrl.producer_full_stall, u_dut.u_ydrasil_commit_trace.lsu_struct_stall,
+                    u_dut.u_ydrasil_commit_trace.scoreboard_stall}] + 1'b1;
             if ($countones(u_dut.u_ctrl.producer_valid_q &
                            ~u_dut.u_ctrl.producer_retire_q) == 0) begin
                 producer_occ_zero_count <= producer_occ_zero_count + 1'b1;
@@ -1219,7 +1219,7 @@ end
                 lsu_queue_full_count <= lsu_queue_full_count + 1'b1;
             if (u_dut.u_ydrasil_load_store_unit.queue_dequeue)
                 lsu_queue_pop_count <= lsu_queue_pop_count + 1'b1;
-            if (u_dut.lsu_struct_stall) begin
+            if (u_dut.u_ydrasil_commit_trace.lsu_struct_stall) begin
                 if (u_dut.u_ydrasil_load_store_unit.mmio_busy)
                     lsu_struct_mmio_count <= lsu_struct_mmio_count + 1'b1;
                 else if (u_dut.u_ydrasil_load_store_unit.active_pkt.is_store &&
@@ -1283,8 +1283,8 @@ end
     end
 
     wire lane0_finish_accept = u_dut.ex_accept_valid &&
-        ((u_dut.id_instr_addr == finish_pc) ||
-         ((u_dut.id_instr_addr + 32'd4) == finish_pc));
+        ((u_dut.u_ydrasil_commit_trace.id_instr_addr == finish_pc) ||
+         ((u_dut.u_ydrasil_commit_trace.id_instr_addr + 32'd4) == finish_pc));
     wire lane1_finish_accept = u_dut.ex_accept_valid1 &&
         ((u_dut.dual_id_ex_pc == finish_pc) ||
          ((u_dut.dual_id_ex_pc + 32'd4) == finish_pc));
@@ -1502,7 +1502,7 @@ end
                 $display("~~~~~~~~~~#       #    #     #    ######~~~~~~~~~~");
                 $display("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
                 $display("fail testnum = %2d", x3);
-                for (r = 0; r < 32; r = r + 1) $display("x%2d = 0x%x", r, u_dut.u_ydrasil_registers.registers[r]);
+                for (r = 0; r < 32; r = r + 1) $display("x%2d = 0x%x", r, u_dut.u_ydrasil_issue_stage.u_registers.registers[r]);
             end
             print_perf_metrics();
             $finish;

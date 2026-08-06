@@ -391,10 +391,11 @@ package ydrasil_pkg;
 		logic                                operand_a_imm_sel;
 		logic                                bt_a_rs_sel;
 		logic                                operand_b_jump_sel;
-		logic [OPERATOR_WIDTH-1:0]           operator_info;
-		logic [OP_LSU_INFO_WIDTH-1:0]        operator_lsu;
-			logic [OPERATOR_TYPE_WIDTH-1:0]      operator_type;
-			logic [RESOURCE_WIDTH-1:0]           resources;
+		logic [UOP_CLASS_WIDTH-1:0]          op_class;
+		logic [UOP_SUBOP_WIDTH-1:0]          subop;
+		logic [UOP_LSU_SUBOP_WIDTH-1:0]      lsu_subop;
+		logic                                full_bitmanip;
+		logic                                divrem;
 		logic [CSR_ADDR_WIDTH-1:0]           csr_raddr;
 		logic [CSR_ADDR_WIDTH-1:0]           csr_waddr;
 		logic [OP_CSR_INFO_WIDTH-1:0]        csr_op_info;
@@ -425,7 +426,6 @@ package ydrasil_pkg;
 		logic                                lsu_req;
 		logic                                store_req;
 		logic                                serialize_before;
-		logic                                checkpoint_req;
 	} ydrasil_id_ctrl_pkt_t;
 
 	typedef struct packed {
@@ -545,20 +545,13 @@ package ydrasil_pkg;
 
 	typedef struct packed {
 		logic                                  valid;
-		logic                                  lane1;
-		logic                                  dual_capable;
-		logic                                  pair_eligible;
-		logic                                  memory_op;
 		logic [1:0]                            lane_mask;
-		logic                                  static_pair;
 		logic [UOP_CLASS_WIDTH-1:0]            uop_class;
 		logic [UOP_SUBOP_WIDTH-1:0]            uop_subop;
 		logic [UOP_LSU_SUBOP_WIDTH-1:0]        uop_lsu_subop;
 		ydrasil_source_desc_t                  src0;
 		ydrasil_source_desc_t                  src1;
 		ydrasil_dest_desc_t                    dst;
-		logic [INST_ADDR_WIDTH-1:0]            target;
-		logic [INST_ADDR_WIDTH-1:0]            next_pc;
 		ydrasil_id_ctrl_pkt_t                  ctrl;
 		ydrasil_decode_pkt_t                   decode;
 	} ydrasil_issue_pkt_t;
@@ -568,8 +561,6 @@ package ydrasil_pkg;
 	// from PC/class are reconstructed at the two-entry Issue skid output.
 	typedef struct packed {
 		logic                                  valid;
-		logic                                  lane1;
-		logic                                  pair_eligible;
 		logic [1:0]                            lane_mask;
 		ydrasil_source_desc_t                  src0;
 		ydrasil_source_desc_t                  src1;

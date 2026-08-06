@@ -239,7 +239,7 @@ import ydrasil_pkg::*;
 ) (
     input  wire        clk,
     input  wire        rst_n,
-    input  wire        stall_if_i,
+    input  wire        decode_ready_i,
     input  wire        flush_if_i,
     input  wire        consume_two_i,
 
@@ -302,7 +302,7 @@ import ydrasil_pkg::*;
 
     reg [31:0] pc_q;
     reg        mem_req_valid_q;
-    reg        mem_req_two_q;
+    reg [1:0]  mem_req_lane_valid_q;
     reg [31:0] mem_req_pc_q;
     reg [31:0] mem_req_next_pc_q;
 	reg        mem_req_target_ff_hit_q;
@@ -378,12 +378,12 @@ import ydrasil_pkg::*;
     wire flush_fetch = flush_if_i | branch_jump_i;
     wire [31:0] pc_plus4 = pc_q + 32'd4;
     wire [31:0] flush_target = branch_jump_i ? branch_target_i : pc_plus4;
-    wire [1:0] pop_count = (!flush_fetch && !stall_if_i && fetchq_valid0) ?
+    wire [1:0] pop_count = (!flush_fetch && decode_ready_i && fetchq_valid0) ?
         ((consume_two_i && fetchq_valid1) ? 2'd2 : 2'd1) : 2'd0;
     wire mem_resp_valid = !flush_fetch && mem_req_valid_q;
     wire [31:0] sequential_next_pc =
-        mem_req_pc_q + (mem_req_two_q ? 32'd8 : 32'd4);
-    wire lane1_pred_taken = mem_req_two_q && bp_predict1_taken_i;
+        mem_req_pc_q + (mem_req_lane_valid_q[1] ? 32'd8 : 32'd4);
+    wire lane1_pred_taken = mem_req_lane_valid_q[1] && bp_predict1_taken_i;
     wire bram_pred_taken_any = bp_predict_taken_i || lane1_pred_taken;
     // Keep target selection out of the control path to the next request.
     // Each candidate compares in parallel, and only the one-bit result is
@@ -408,10 +408,12 @@ import ydrasil_pkg::*;
     wire target_ff_correction_resp = target_ff_hit &&
         bram_next_pc_mismatch;
     wire [1:0] push_count = mem_resp_valid ?
-        ((bp_predict_taken_i || !mem_req_two_q) ? 2'd1 : 2'd2) : 2'd0;
+        (bp_predict_taken_i ? 2'd1 :
+         ({1'b0, mem_req_lane_valid_q[0]} +
+          {1'b0, mem_req_lane_valid_q[1]})) : 2'd0;
     wire [RESERVED_WIDTH-1:0] reserved_count =
         RESERVED_WIDTH'(fetchq_count_q) +
-        (mem_req_valid_q ? (mem_req_two_q ? RESERVED_WIDTH'(2) :
+        (mem_req_valid_q ? (mem_req_lane_valid_q[1] ? RESERVED_WIDTH'(2) :
          RESERVED_WIDTH'(1)) : '0);
     wire pair_capacity = reserved_count <= RESERVED_WIDTH'(FETCHQ_DEPTH - 2);
     // Launch the next physical fetch whenever queue capacity permits.  A BTB
@@ -476,6 +478,7 @@ import ydrasil_pkg::*;
         (fetch_addr >= DTCM_BASE_ADDR) &&
         (fetch_addr < (DTCM_BASE_ADDR + ((32'd1 << DTCM_ADDR_WIDTH) << 2)));
 	wire fetch_two = !fetch_addr_is_dtcm && !fetch_addr[2];
+	wire [1:0] fetch_lane_valid = {fetch_two, 1'b1};
 	assign fetch_addr1 = fetch_addr + 32'd4;
 	fetch_addr_token_t target_ff_lookup_token;
 	assign target_ff_lookup_token = {
@@ -577,7 +580,7 @@ import ydrasil_pkg::*;
         if (!rst_n) begin
             pc_q <= RESET_INS;
             mem_req_valid_q <= 1'b0;
-            mem_req_two_q <= 1'b0;
+            mem_req_lane_valid_q <= '0;
             mem_req_pc_q <= RESET_INS;
             mem_req_next_pc_q <= RESET_INS + 32'd8;
 			mem_req_target_ff_hit_q <= 1'b0;
@@ -588,7 +591,7 @@ import ydrasil_pkg::*;
         end else if (flush_fetch || bp_invalidate_i) begin
             pc_q <= flush_fetch ? flush_target : bp_invalidate_target_i;
             mem_req_valid_q <= 1'b0;
-            mem_req_two_q <= 1'b0;
+            mem_req_lane_valid_q <= '0;
             mem_req_pc_q <= flush_fetch ? flush_target : bp_invalidate_target_i;
             mem_req_next_pc_q <= flush_fetch ? flush_target : bp_invalidate_target_i;
 			mem_req_target_ff_hit_q <= 1'b0;
@@ -606,7 +609,10 @@ import ydrasil_pkg::*;
                 !predict_correction_resp;
             if (fetch_issue) begin
                 mem_req_pc_q <= fetch_addr;
-                mem_req_two_q <= fetch_two;
+                // The 64-bit ITCM adapter maps an odd target's upper word to
+                // logical lane 0. Its discarded lower half never enters the
+                // instruction stream or consumes a ROB entry.
+                mem_req_lane_valid_q <= fetch_lane_valid;
 				mem_req_target_ff_hit_q <= target_ff_lookup_hit;
                 mem_req_next_pc_q <= target_ff_lookup_hit ? target_ff_target :
                     (fetch_addr + (fetch_two ? 32'd8 : 32'd4));

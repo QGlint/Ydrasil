@@ -8,16 +8,21 @@ import ydrasil_pkg::*;
     input  wire                        stall_id_i,
     input  wire                        bubble_id_i,
     input  wire                        flush_id_i,
-    input  ydrasil_compact_uop_t       issue_pkt_i,
-    input  ydrasil_compact_uop_t       issue_pkt1_i,
+    input  ydrasil_issue_pkt_t         decode_pkt_i,
+    input  ydrasil_issue_pkt_t         decode_pkt1_i,
+    input  ydrasil_issue_pkt_t         dispatch_pkt_i,
+    input  ydrasil_issue_pkt_t         dispatch_pkt1_i,
+    input  wire                        dispatch_ready_i,
     input  ydrasil_rob_source_state_t  issue_src0_state_i,
     input  ydrasil_rob_source_state_t  issue_src1_state_i,
     input  ydrasil_rob_source_state_t  issue_src2_state_i,
     input  ydrasil_rob_source_state_t  issue_src3_state_i,
-    input  wire [DATA_WIDTH-1:0]       issue_src0_value_i,
-    input  wire [DATA_WIDTH-1:0]       issue_src1_value_i,
-    input  wire [DATA_WIDTH-1:0]       issue_src2_value_i,
-    input  wire [DATA_WIDTH-1:0]       issue_src3_value_i,
+    input  ydrasil_completion_meta_t   completion_meta_i [COMPLETION_LANES],
+    input  wire [REGS_DATA_WIDTH-1:0]  completion_data_i [COMPLETION_LANES],
+    input  ydrasil_commit_pkt_t        commit_pkt_i,
+    input  ydrasil_commit_pkt_t        commit_pkt1_i,
+    input  producer_slot_t             retire_slot0_i,
+    input  producer_slot_t             retire_slot1_i,
     input  wire [DATA_WIDTH-1:0]       early_main_bypass_data_i,
     input  wire [DATA_WIDTH-1:0]       early_dual_bypass_data_i,
     input  wire                        lsu_idle_i,
@@ -25,6 +30,14 @@ import ydrasil_pkg::*;
     input  ydrasil_reservation_pkt_t   dtcm_reservation_i,
     input  wire [DATA_WIDTH-1:0]       dtcm_resp_data_i,
     input  wire                        issue_at_rob_head_i,
+    output wire                        decode_ready_o,
+    output wire                        decode_consume_two_o,
+    output wire                        dispatch_accept_o,
+    output wire                        dispatch_accept1_o,
+    output ydrasil_compact_uop_t       issue_pkt_o,
+    output ydrasil_compact_uop_t       issue_pkt1_o,
+    output wire [REGS_DATA_WIDTH-1:0]  retire_value0_o,
+    output wire [REGS_DATA_WIDTH-1:0]  retire_value1_o,
     output wire                        issue_ready_o,
     output wire                        issue_consume_two_o,
     output wire                        issue_slot1_replay_o,
@@ -75,16 +88,175 @@ import ydrasil_pkg::*;
     output wire                        dual_bru_valid_o,
     output ydrasil_lane_b_bru_payload_t dual_bru_payload_o,
     output wire [DATA_WIDTH-1:0]       dual_bru_operand_a_o,
-    output wire [DATA_WIDTH-1:0]       dual_bru_operand_b_o,
-    output wire [4:0]                  rf_addr_rs1_o,
-    output wire [4:0]                  rf_addr_rs2_o,
-    output wire [4:0]                  rf_addr_rs3_o,
-    output wire [4:0]                  rf_addr_rs4_o,
-    input  wire [DATA_WIDTH-1:0]       rf_rdata_rs1_i,
-    input  wire [DATA_WIDTH-1:0]       rf_rdata_rs2_i,
-	input  wire [DATA_WIDTH-1:0]       rf_rdata_rs3_i,
-	input  wire [DATA_WIDTH-1:0]       rf_rdata_rs4_i
+    output wire [DATA_WIDTH-1:0]       dual_bru_operand_b_o
 );
+    ydrasil_compact_uop_t issue_pipe_q0;
+    ydrasil_compact_uop_t issue_pipe_q1;
+    ydrasil_compact_uop_t issue_pipe_q2;
+    ydrasil_compact_uop_t issue_pipe_q3;
+    ydrasil_compact_uop_t dispatch_compact_uop;
+    ydrasil_compact_uop_t dispatch_compact_uop1;
+    ydrasil_compact_uop_t issue_pkt_i;
+    ydrasil_compact_uop_t issue_pkt1_i;
+    reg [2:0] issue_pipe_count_q;
+    reg [1:0] issue_pipe_head_q;
+    reg [1:0] issue_pipe_tail_q;
+    wire [REGS_ADDR_WIDTH-1:0] rf_addr_rs1;
+    wire [REGS_ADDR_WIDTH-1:0] rf_addr_rs2;
+    wire [REGS_ADDR_WIDTH-1:0] rf_addr_rs3;
+    wire [REGS_ADDR_WIDTH-1:0] rf_addr_rs4;
+    wire [DATA_WIDTH-1:0] rf_rdata_rs1_i;
+    wire [DATA_WIDTH-1:0] rf_rdata_rs2_i;
+    wire [DATA_WIDTH-1:0] rf_rdata_rs3_i;
+    wire [DATA_WIDTH-1:0] rf_rdata_rs4_i;
+    wire [DATA_WIDTH-1:0] issue_src0_value_i;
+    wire [DATA_WIDTH-1:0] issue_src1_value_i;
+    wire [DATA_WIDTH-1:0] issue_src2_value_i;
+    wire [DATA_WIDTH-1:0] issue_src3_value_i;
+
+    wire issue_pair_execute = issue_consume_two_o &&
+        !issue_slot1_replay_o;
+    wire [1:0] issue_pipe_pop_count =
+        (issue_ready_o && (issue_pipe_count_q != '0)) ?
+        (issue_pair_execute ? 2'd2 : 2'd1) : 2'd0;
+    // Reserve room for both decoded lanes. Capacity feedback therefore ends
+    // at this registered ID/Issue boundary and cannot depend on head pairing.
+    wire issue_pipe_has_room = dispatch_ready_i &&
+        (issue_pipe_count_q <= 3'd2);
+    wire issue_pipe_push_two = issue_pipe_has_room &&
+        decode_pkt_i.valid && decode_pkt1_i.valid;
+    wire issue_pipe_push = issue_pipe_has_room && decode_pkt_i.valid;
+    wire [1:0] issue_pipe_push_count = issue_pipe_push ?
+        (issue_pipe_push_two ? 2'd2 : 2'd1) : 2'd0;
+
+    assign decode_ready_o = issue_pipe_has_room;
+    assign decode_consume_two_o = issue_pipe_push_two;
+    assign dispatch_accept_o = issue_pipe_push;
+    assign dispatch_accept1_o = issue_pipe_push_two;
+    assign issue_pkt_o = issue_pkt_i;
+    assign issue_pkt1_o = issue_pkt1_i;
+
+    ydrasil_issue_compactor u_issue_compactor0 (
+        .issue_pkt_i   (dispatch_pkt_i),
+        .compact_uop_o (dispatch_compact_uop)
+    );
+
+    ydrasil_issue_compactor u_issue_compactor1 (
+        .issue_pkt_i   (dispatch_pkt1_i),
+        .compact_uop_o (dispatch_compact_uop1)
+    );
+
+    always_comb begin
+        unique case (issue_pipe_head_q)
+            2'd0: begin
+                issue_pkt_i = issue_pipe_q0;
+                issue_pkt1_i = issue_pipe_q1;
+            end
+            2'd1: begin
+                issue_pkt_i = issue_pipe_q1;
+                issue_pkt1_i = issue_pipe_q2;
+            end
+            2'd2: begin
+                issue_pkt_i = issue_pipe_q2;
+                issue_pkt1_i = issue_pipe_q3;
+            end
+            default: begin
+                issue_pkt_i = issue_pipe_q3;
+                issue_pkt1_i = issue_pipe_q0;
+            end
+        endcase
+        if (issue_pipe_count_q == '0) begin
+            issue_pkt_i.valid = 1'b0;
+            issue_pkt_i.lane_mask = '0;
+        end
+        if (issue_pipe_count_q < 3'd2) begin
+            issue_pkt1_i.valid = 1'b0;
+            issue_pkt1_i.lane_mask = '0;
+        end
+    end
+
+    always_ff @(posedge clk) begin
+        if (!rst_n || flush_id_i) begin
+            issue_pipe_count_q <= '0;
+            issue_pipe_head_q <= '0;
+            issue_pipe_tail_q <= '0;
+        end else begin
+            if (issue_pipe_push) begin
+                unique case (issue_pipe_tail_q)
+                    2'd0: begin
+                        issue_pipe_q0 <= dispatch_compact_uop;
+                        if (issue_pipe_push_two)
+                            issue_pipe_q1 <= dispatch_compact_uop1;
+                    end
+                    2'd1: begin
+                        issue_pipe_q1 <= dispatch_compact_uop;
+                        if (issue_pipe_push_two)
+                            issue_pipe_q2 <= dispatch_compact_uop1;
+                    end
+                    2'd2: begin
+                        issue_pipe_q2 <= dispatch_compact_uop;
+                        if (issue_pipe_push_two)
+                            issue_pipe_q3 <= dispatch_compact_uop1;
+                    end
+                    default: begin
+                        issue_pipe_q3 <= dispatch_compact_uop;
+                        if (issue_pipe_push_two)
+                            issue_pipe_q0 <= dispatch_compact_uop1;
+                    end
+                endcase
+            end
+            issue_pipe_head_q <= issue_pipe_head_q + 2'(issue_pipe_pop_count);
+            issue_pipe_tail_q <= issue_pipe_tail_q + 2'(issue_pipe_push_count);
+            issue_pipe_count_q <= issue_pipe_count_q + issue_pipe_push_count -
+                issue_pipe_pop_count;
+        end
+    end
+
+`ifndef SYNTHESIS
+    always_ff @(posedge clk) begin
+        if (rst_n)
+            assert (issue_pipe_count_q <= 3'd4)
+                else $fatal(1, "compact issue queue occupancy overflow");
+    end
+`endif
+
+    ydrasil_registers u_registers (
+        .clk             (clk),
+        .rst_n           (rst_n),
+        .commit_pkt_i    (commit_pkt_i),
+        .commit_pkt1_i   (commit_pkt1_i),
+        .rf_raddr_rs1_i  (rf_addr_rs1),
+        .rf_rdata_rs1_o  (rf_rdata_rs1_i),
+        .rf_raddr_rs2_i  (rf_addr_rs2),
+        .rf_rdata_rs2_o  (rf_rdata_rs2_i),
+        .rf_raddr_rs3_i  (rf_addr_rs3),
+        .rf_rdata_rs3_o  (rf_rdata_rs3_i),
+        .rf_raddr_rs4_i  (rf_addr_rs4),
+        .rf_rdata_rs4_o  (rf_rdata_rs4_i)
+    );
+
+    ydrasil_value_file u_value_file (
+        .clk               (clk),
+        .completion_meta_i (completion_meta_i),
+        .completion_data_i (completion_data_i),
+        .read_slot0_i      (issue_pkt_i.src0.producer_tag[
+            PRODUCER_SLOT_WIDTH-1:0]),
+        .read_slot1_i      (issue_pkt_i.src1.producer_tag[
+            PRODUCER_SLOT_WIDTH-1:0]),
+        .read_slot2_i      (issue_pkt1_i.src0.producer_tag[
+            PRODUCER_SLOT_WIDTH-1:0]),
+        .read_slot3_i      (issue_pkt1_i.src1.producer_tag[
+            PRODUCER_SLOT_WIDTH-1:0]),
+        .retire_slot0_i    (retire_slot0_i),
+        .retire_slot1_i    (retire_slot1_i),
+        .read_data0_o      (issue_src0_value_i),
+        .read_data1_o      (issue_src1_value_i),
+        .read_data2_o      (issue_src2_value_i),
+        .read_data3_o      (issue_src3_value_i),
+        .retire_data0_o    (retire_value0_o),
+        .retire_data1_o    (retire_value1_o)
+    );
+
     function automatic [OPERATOR_TYPE_WIDTH-1:0] uop_operator_type(
         input ydrasil_compact_uop_t uop
     );
@@ -135,6 +307,17 @@ import ydrasil_pkg::*;
     function automatic logic uop_memory(input ydrasil_compact_uop_t uop);
         uop_memory = (uop.op_class == UOP_CLASS_LOAD) ||
             (uop.op_class == UOP_CLASS_STORE);
+    endfunction
+
+    function automatic logic uop_serial(input ydrasil_compact_uop_t uop);
+        uop_serial = (uop.op_class == UOP_CLASS_CSR) ||
+            (uop.op_class == UOP_CLASS_SYS) || uop.fence_i ||
+            uop.illegal_instr;
+    endfunction
+
+    function automatic logic uop_divrem(input ydrasil_compact_uop_t uop);
+        uop_divrem = (uop.op_class == UOP_CLASS_MUL) &&
+            (uop.subop >= UOP_SUBOP_WIDTH'(OP_MUL_DIV));
     endfunction
 
     function automatic logic uop_early_bitmanip(
@@ -315,7 +498,25 @@ import ydrasil_pkg::*;
     wire slot0_store = issue_pkt_i.op_class == UOP_CLASS_STORE;
     wire slot0_scoreboard_stall = issue_pkt_i.valid &&
         (!src0_ready || (!src1_ready && !slot0_store));
-    wire slot1_active = issue_pkt_i.pair_eligible && issue_pkt1_i.valid;
+    wire pair_lane_assignable =
+        (issue_pkt_i.lane_mask[0] && issue_pkt1_i.lane_mask[1]) ||
+        (issue_pkt_i.lane_mask[1] && issue_pkt1_i.lane_mask[0]);
+    wire pair_raw = issue_pkt_i.dst.writes_gpr &&
+        ((issue_pkt1_i.src0.tag_valid &&
+          (issue_pkt1_i.src0.producer_tag == issue_pkt_i.dst.rob_tag)) ||
+         (issue_pkt1_i.src1.tag_valid &&
+          (issue_pkt1_i.src1.producer_tag == issue_pkt_i.dst.rob_tag)));
+    wire pair_waw = issue_pkt_i.dst.writes_gpr &&
+        issue_pkt1_i.dst.writes_gpr &&
+        (issue_pkt_i.dst.rd_addr == issue_pkt1_i.dst.rd_addr);
+    wire pair_div_memory =
+        (uop_divrem(issue_pkt_i) && uop_memory(issue_pkt1_i)) ||
+        (uop_memory(issue_pkt_i) && uop_divrem(issue_pkt1_i));
+    wire pair_eligible = issue_pkt_i.valid && issue_pkt1_i.valid &&
+        pair_lane_assignable && !pair_raw && !pair_waw &&
+        !uop_serial(issue_pkt_i) && !uop_serial(issue_pkt1_i) &&
+        !pair_div_memory;
+    wire slot1_active = pair_eligible;
     wire slot1_store = issue_pkt1_i.op_class == UOP_CLASS_STORE;
     wire slot1_scoreboard_stall = slot1_active &&
         (!src2_ready || (!src3_ready && !slot1_store));
@@ -331,7 +532,6 @@ import ydrasil_pkg::*;
     wire local_issue_stall = slot0_scoreboard_stall || slot0_lsu_stall ||
         serialize_stall;
     wire id_advance = !stall_id_i && !bubble_id_i && !local_issue_stall;
-    wire pair_eligible = slot1_active;
     wire slot1_blocked = slot1_scoreboard_stall || slot1_lsu_stall;
     wire pair_issue = pair_eligible && !slot1_blocked;
     wire swap_pair = pair_issue &&
@@ -469,10 +669,10 @@ import ydrasil_pkg::*;
         uop_operator_info(lane_a_uop);
     wire [OPERATOR_TYPE_WIDTH-1:0] lane_a_operator_type =
         uop_operator_type(lane_a_uop);
-    assign rf_addr_rs1_o = issue_pkt_i.src0.arch_addr;
-    assign rf_addr_rs2_o = issue_pkt_i.src1.arch_addr;
-    assign rf_addr_rs3_o = issue_pkt1_i.src0.arch_addr;
-    assign rf_addr_rs4_o = issue_pkt1_i.src1.arch_addr;
+    assign rf_addr_rs1 = issue_pkt_i.src0.arch_addr;
+    assign rf_addr_rs2 = issue_pkt_i.src1.arch_addr;
+    assign rf_addr_rs3 = issue_pkt1_i.src0.arch_addr;
+    assign rf_addr_rs4 = issue_pkt1_i.src1.arch_addr;
 
     wire [DATA_WIDTH-1:0] lane_b_operand_a_local =
         lane_b_uop.operand_a_pc_sel ? lane_b_uop.pc :

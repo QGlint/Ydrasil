@@ -2,244 +2,234 @@
 
 module ydrasil_commit_trace
 import ydrasil_pkg::*;
-#(
-    parameter int FIFO_DEPTH = 256,
-    parameter int FIFO_PTR_WIDTH = 8
-) (
-    input  wire clk,
-    input  wire rst_n,
-
-    input  wire alu_valid_i,
-    input  wire [INST_ADDR_WIDTH-1:0] alu_pc_i,
-    input  wire [INST_DATA_WIDTH-1:0] alu_instr_i,
-    input  wire [REGS_ADDR_WIDTH-1:0] alu_waddr_i,
-    input  wire [REGS_DATA_WIDTH-1:0] alu_wdata_i,
-
-    input  wire dual_alu_valid_i,
-    input  wire [INST_ADDR_WIDTH-1:0] dual_alu_pc_i,
-    input  wire [INST_DATA_WIDTH-1:0] dual_alu_instr_i,
-    input  wire [REGS_ADDR_WIDTH-1:0] dual_alu_waddr_i,
-    input  wire [REGS_DATA_WIDTH-1:0] dual_alu_wdata_i,
-
-    input  wire dual_lsu_issue_valid_i,
-    input  wire [INST_ADDR_WIDTH-1:0] dual_lsu_issue_pc_i,
-    input  wire [INST_DATA_WIDTH-1:0] dual_lsu_issue_instr_i,
-
-    input  wire lsu_issue_valid_i,
-    input  wire [INST_ADDR_WIDTH-1:0] lsu_issue_pc_i,
-    input  wire [INST_DATA_WIDTH-1:0] lsu_issue_instr_i,
-    input  wire lsu_valid_i,
-    input  wire [REGS_ADDR_WIDTH-1:0] lsu_waddr_i,
-	input  wire [REGS_DATA_WIDTH-1:0] lsu_wdata_i,
-
-    input  wire mul_issue_valid_i,
-    input  wire [INST_ADDR_WIDTH-1:0] mul_issue_pc_i,
-    input  wire [INST_DATA_WIDTH-1:0] mul_issue_instr_i,
-    input  wire mul_valid_i,
-    input  wire [REGS_ADDR_WIDTH-1:0] mul_waddr_i,
-	input  wire [REGS_DATA_WIDTH-1:0] mul_wdata_i
-    ,input ydrasil_commit_pkt_t retire_i
-    ,input wire [INST_DATA_WIDTH-1:0] retire_instr_i
-    ,input ydrasil_commit_pkt_t retire1_i
-    ,input wire [INST_DATA_WIDTH-1:0] retire1_instr_i
+(
+    input wire clk,
+    input wire rst_n,
+    input ydrasil_commit_pkt_t retire_i,
+    input ydrasil_commit_pkt_t retire1_i,
+    output wire retire0_valid_o,
+    output wire [INST_ADDR_WIDTH-1:0] retire0_pc_o,
+    output wire retire1_valid_o,
+    output wire [INST_ADDR_WIDTH-1:0] retire1_pc_o,
+    output wire [INST_ADDR_WIDTH-1:0] dbg_bp_predict_pc_o,
+    output wire dbg_bp_predict_hit_o,
+    output wire dbg_bp_predict_taken_o,
+    output wire [INST_ADDR_WIDTH-1:0] dbg_bp_predict_target_o,
+    output wire [1:0] dbg_bp_predict_counter_o,
+    output wire dbg_bp_resolve_valid_o,
+    output wire [INST_ADDR_WIDTH-1:0] dbg_bp_resolve_pc_o,
+    output wire dbg_bp_actual_taken_o,
+    output wire [INST_ADDR_WIDTH-1:0] dbg_bp_actual_target_o,
+    output wire [INST_ADDR_WIDTH-1:0] dbg_bp_actual_next_pc_o,
+    output wire dbg_bp_pred_hit_o,
+    output wire dbg_bp_pred_taken_o,
+    output wire [INST_ADDR_WIDTH-1:0] dbg_bp_pred_target_o,
+    output wire [1:0] dbg_bp_pred_counter_o,
+    output wire [INST_ADDR_WIDTH-1:0] dbg_bp_pred_next_pc_o,
+    output wire dbg_bp_mispredict_o
 );
-
-    localparam [1:0] COMMIT_ALU = 2'd0;
-    localparam [1:0] COMMIT_LSU = 2'd1;
-    localparam [1:0] COMMIT_MUL = 2'd2;
-    localparam [1:0] COMMIT_DIV = 2'd3;
-
-    reg [1:0]                 commit_kind_q  [0:FIFO_DEPTH-1];
-    reg [INST_ADDR_WIDTH-1:0] commit_pc_q    [0:FIFO_DEPTH-1];
-    reg [INST_DATA_WIDTH-1:0] commit_instr_q [0:FIFO_DEPTH-1];
-    reg [REGS_ADDR_WIDTH-1:0] commit_waddr_q [0:FIFO_DEPTH-1];
-    reg [REGS_DATA_WIDTH-1:0] commit_wdata_q [0:FIFO_DEPTH-1];
-    reg                       commit_ready_q [0:FIFO_DEPTH-1];
-    reg [FIFO_PTR_WIDTH-1:0]  commit_rptr_q;
-    reg [FIFO_PTR_WIDTH-1:0]  commit_wptr_q;
-
-    reg [FIFO_PTR_WIDTH-1:0] lsu_commit_idx_q [0:FIFO_DEPTH-1];
-    reg [FIFO_PTR_WIDTH-1:0] lsu_rptr_q;
-    reg [FIFO_PTR_WIDTH-1:0] lsu_wptr_q;
-
-    reg [FIFO_PTR_WIDTH-1:0] mul_commit_idx_q [0:FIFO_DEPTH-1];
-    reg [FIFO_PTR_WIDTH-1:0] mul_rptr_q;
-    reg [FIFO_PTR_WIDTH-1:0] mul_wptr_q;
-    reg [FIFO_PTR_WIDTH-1:0] div_commit_idx_q;
-    reg                      div_pending_q;
-    reg                      div_active_seen_q;
     bit trace_en;
+    ydrasil_completion_bus_t completion_bus;
 
-    // DIV is completed through the ALU writeback path and has no public trace
-    // issue port. Observe it here so the verification-only commit FIFO still
-    // represents architectural order.
-    wire div_active = $root.ydrasil_core_tb.u_dut.u_ydrasil_ex_block.div_active_q;
-    wire div_result_valid =
-        $root.ydrasil_core_tb.u_dut.u_ydrasil_ex_block.alu_rf_wen_rd_ff;
-    wire [REGS_ADDR_WIDTH-1:0] div_waddr =
-        $root.ydrasil_core_tb.u_dut.u_ydrasil_ex_block.alu_rf_waddr_rd_ff;
-    wire [REGS_DATA_WIDTH-1:0] div_wdata =
-        $root.ydrasil_core_tb.u_dut.u_ydrasil_ex_block.alu_result_ff;
-    wire [INST_ADDR_WIDTH-1:0] div_issue_pc =
+    // All custom observability stays below this DV-only instance. These
+    // hierarchical reads do not add RTL fanout or enter synthesis.
+    wire [INST_ADDR_WIDTH-1:0] id_instr_addr =
         $root.ydrasil_core_tb.u_dut.id_instr_addr;
-    wire [INST_DATA_WIDTH-1:0] div_issue_instr =
-        $root.ydrasil_core_tb.u_dut.commit_mul_instr;
+    wire [BUS_ADDR_WIDTH-1:0] dtcm_addr =
+        $root.ydrasil_core_tb.u_dut.dtcm_req_pkt.store.addr;
+    wire dtcm_we =
+        $root.ydrasil_core_tb.u_dut.dtcm_req_pkt.store.valid;
+    wire dtcm_req =
+        $root.ydrasil_core_tb.u_dut.dtcm_req_pkt.load.valid |
+        $root.ydrasil_core_tb.u_dut.dtcm_req_pkt.store.valid;
+    wire [3:0] dtcm_wmask =
+        $root.ydrasil_core_tb.u_dut.dtcm_req_pkt.store.wmask;
+    wire [BUS_ADDR_WIDTH-1:0] mmio_addr =
+        $root.ydrasil_core_tb.u_dut.mmio_req_pkt.addr;
+    wire mmio_we = $root.ydrasil_core_tb.u_dut.mmio_req_pkt.write;
+    wire mmio_req = $root.ydrasil_core_tb.u_dut.mmio_req_pkt.valid;
+    wire [3:0] mmio_wmask =
+        $root.ydrasil_core_tb.u_dut.mmio_req_pkt.wmask;
 
-    initial begin
-        trace_en = $test$plusargs("commit_trace");
-    end
+    wire scoreboard_stall =
+        $root.ydrasil_core_tb.u_dut.issue_scoreboard_stall;
+    wire lsu_struct_stall =
+        $root.ydrasil_core_tb.u_dut.issue_lsu_struct_stall;
+    wire rs1_pending_stall =
+        $root.ydrasil_core_tb.u_dut.issue_src0_wait;
+    wire rs2_pending_stall =
+        $root.ydrasil_core_tb.u_dut.issue_src1_wait;
+    wire rs1_issue_hzd = rs1_pending_stall;
+    wire rs2_issue_hzd = rs2_pending_stall;
+    wire rd_waw_stall = 1'b0;
+    wire rd_issue_hzd = 1'b0;
+    wire issue_src_hzd = rs1_pending_stall || rs2_pending_stall;
+    wire issue_load_producer =
+        (rs1_pending_stall &&
+         ($root.ydrasil_core_tb.u_dut.issue_head_compact_uop.src0.producer_class == RESULT_LSU)) ||
+        (rs2_pending_stall &&
+         ($root.ydrasil_core_tb.u_dut.issue_head_compact_uop.src1.producer_class == RESULT_LSU));
+    wire issue_alu_producer =
+        (rs1_pending_stall &&
+         ($root.ydrasil_core_tb.u_dut.issue_head_compact_uop.src0.producer_class == RESULT_ALU)) ||
+        (rs2_pending_stall &&
+         ($root.ydrasil_core_tb.u_dut.issue_head_compact_uop.src1.producer_class == RESULT_ALU));
+    wire issue_mul_div_producer =
+        (rs1_pending_stall &&
+         ($root.ydrasil_core_tb.u_dut.issue_head_compact_uop.src0.producer_class == RESULT_MDU)) ||
+        (rs2_pending_stall &&
+         ($root.ydrasil_core_tb.u_dut.issue_head_compact_uop.src1.producer_class == RESULT_MDU));
+
+    wire [REGS_ADDR_WIDTH-1:0] id_ctrl_rs1_addr =
+        $root.ydrasil_core_tb.u_dut.issue_head_compact_uop.src0.arch_addr;
+    wire [REGS_ADDR_WIDTH-1:0] id_ctrl_rs2_addr =
+        $root.ydrasil_core_tb.u_dut.issue_head_compact_uop.src1.arch_addr;
+    wire id_ctrl_rs1_ren =
+        $root.ydrasil_core_tb.u_dut.issue_head_compact_uop.src0.used;
+    wire id_ctrl_rs2_ren =
+        $root.ydrasil_core_tb.u_dut.issue_head_compact_uop.src1.used;
+    wire [REGS_ADDR_WIDTH-1:0] id_ctrl_rd_addr =
+        $root.ydrasil_core_tb.u_dut.issue_head_compact_uop.dst.rd_addr;
+    wire id_ctrl_rd_wen =
+        $root.ydrasil_core_tb.u_dut.issue_head_compact_uop.dst.writes_gpr;
+    wire id_ctrl_lsu_req =
+        ($root.ydrasil_core_tb.u_dut.issue_head_compact_uop.op_class == UOP_CLASS_LOAD) ||
+        ($root.ydrasil_core_tb.u_dut.issue_head_compact_uop.op_class == UOP_CLASS_STORE);
+    wire [REGS_NUM-1:0] gpr_pending_for_hazard =
+        $root.ydrasil_core_tb.u_dut.gpr_pending_q;
+    wire [REGS_NUM-1:0] gpr_pending_clear_mask = '0;
+    wire [REGS_NUM-1:0] gpr_pending_issue_mask =
+        $root.ydrasil_core_tb.u_dut.gpr_pending_q;
+    wire id_ex_rd_issue =
+        $root.ydrasil_core_tb.u_dut.ex_accept_valid &&
+        $root.ydrasil_core_tb.u_dut.ex_hzd_pkt.producer_tracked;
+    wire [2:0] issue_pipe_count_q =
+        $root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.issue_pipe_count_q;
+    wire issue_pair_execute =
+        $root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.issue_pair_execute;
+
+    wire decode_valid =
+        $root.ydrasil_core_tb.u_dut.issue_head_compact_uop.valid;
+    wire decode_if_ready = $root.ydrasil_core_tb.u_dut.decode_if_ready;
+    wire wb_backpressure = 1'b0;
+    wire rf_wen_rd = 1'b0;
+    wire [REGS_ADDR_WIDTH-1:0] rf_waddr_rd = '0;
+    wire lsu_rf_wen_rd =
+        $root.ydrasil_core_tb.u_dut.lsu_completion_valid;
+    wire [REGS_ADDR_WIDTH-1:0] lsu_rf_waddr_rd =
+        $root.ydrasil_core_tb.u_dut.lsu_completion_addr;
+    wire clint_stall = $root.ydrasil_core_tb.u_dut.trap_ctrl_pkt.stall;
+    wire interrupt = $root.ydrasil_core_tb.u_dut.trap_ctrl_pkt.redirect;
+    wire clint_csr_we =
+        $root.ydrasil_core_tb.u_dut.trap_csr_write_pkt.valid;
+    wire [CSR_ADDR_WIDTH-1:0] clint_csr_waddr =
+        $root.ydrasil_core_tb.u_dut.trap_csr_write_pkt.addr;
+    wire [REGS_DATA_WIDTH-1:0] clint_csr_wdata =
+        $root.ydrasil_core_tb.u_dut.trap_csr_write_pkt.data;
+    wire [2:0] instret_inc_count = {2'b0, retire_i.valid} +
+        {2'b0, retire1_i.valid};
+    wire [31:0] csr_instret =
+        $root.ydrasil_core_tb.u_dut.u_ydrasil_csr_stage.
+            u_registers_csr.instret[31:0];
+    wire [31:0] csr_cyclel =
+        $root.ydrasil_core_tb.u_dut.u_ydrasil_csr_stage.
+            u_registers_csr.cycle[31:0];
+    wire lsu_ctrl_busy =
+        $root.ydrasil_core_tb.u_dut.lsu_status_pkt.busy;
+
+    genvar completion_lane;
+    generate
+        for (completion_lane = 0; completion_lane < COMPLETION_LANES;
+             completion_lane++) begin : g_completion_probe
+            assign completion_bus[completion_lane].valid =
+                $root.ydrasil_core_tb.u_dut.completion_meta[completion_lane].valid;
+            assign completion_bus[completion_lane].producer_id =
+                $root.ydrasil_core_tb.u_dut.completion_meta[completion_lane].producer_id;
+            assign completion_bus[completion_lane].producer_tracked =
+                $root.ydrasil_core_tb.u_dut.completion_meta[completion_lane].producer_tracked;
+            assign completion_bus[completion_lane].addr =
+                $root.ydrasil_core_tb.u_dut.completion_rd[completion_lane];
+            assign completion_bus[completion_lane].data =
+                $root.ydrasil_core_tb.u_dut.completion_data[completion_lane];
+        end
+    endgenerate
+
+    assign retire0_valid_o = retire_i.valid;
+    assign retire0_pc_o = retire_i.pc;
+    assign retire1_valid_o = retire1_i.valid;
+    assign retire1_pc_o = retire1_i.pc;
+    assign dbg_bp_predict_pc_o = $root.ydrasil_core_tb.u_dut.bp_lookup_pc;
+    assign dbg_bp_predict_hit_o =
+        $root.ydrasil_core_tb.u_dut.bp_bram_predict_hit;
+    assign dbg_bp_predict_taken_o =
+        $root.ydrasil_core_tb.u_dut.bp_bram_predict_taken;
+    assign dbg_bp_predict_target_o =
+        $root.ydrasil_core_tb.u_dut.bp_bram_predict_target;
+    assign dbg_bp_predict_counter_o =
+        $root.ydrasil_core_tb.u_dut.bp_bram_predict_counter;
+    assign dbg_bp_resolve_valid_o =
+        $root.ydrasil_core_tb.u_dut.dbg_bp_resolve_valid;
+    assign dbg_bp_resolve_pc_o =
+        $root.ydrasil_core_tb.u_dut.dbg_bp_resolve_pc;
+    assign dbg_bp_actual_taken_o =
+        $root.ydrasil_core_tb.u_dut.dbg_bp_actual_taken;
+    assign dbg_bp_actual_target_o =
+        $root.ydrasil_core_tb.u_dut.dbg_bp_actual_target;
+    assign dbg_bp_actual_next_pc_o =
+        $root.ydrasil_core_tb.u_dut.dbg_bp_actual_next_pc;
+    assign dbg_bp_pred_hit_o = $root.ydrasil_core_tb.u_dut.dbg_bp_pred_hit;
+    assign dbg_bp_pred_taken_o =
+        $root.ydrasil_core_tb.u_dut.dbg_bp_pred_taken;
+    assign dbg_bp_pred_target_o =
+        $root.ydrasil_core_tb.u_dut.dbg_bp_pred_target;
+    assign dbg_bp_pred_counter_o =
+        $root.ydrasil_core_tb.u_dut.dbg_bp_pred_counter;
+    assign dbg_bp_pred_next_pc_o =
+        $root.ydrasil_core_tb.u_dut.dbg_bp_pred_next_pc;
+    assign dbg_bp_mispredict_o =
+        $root.ydrasil_core_tb.u_dut.dbg_bp_mispredict;
+
+    function automatic [INST_DATA_WIDTH-1:0] read_instr(
+        input [INST_ADDR_WIDTH-1:0] pc
+    );
+        begin
+            if ((pc >= DTCM_BASE_ADDR) &&
+                (pc < (DTCM_BASE_ADDR + ((32'd1 << DTCM_ADDR_WIDTH) << 2))))
+                read_instr = $root.ydrasil_core_tb.u_dut.u_ydrasil_mems.u_dtcm.u_impl.mem_r[
+                    pc[DTCM_ADDR_WIDTH+1:2]];
+            else if (pc[2])
+                read_instr = $root.ydrasil_core_tb.u_dut.u_ydrasil_mems.u_itcm.u_impl.mem_r[
+                    pc[ITCM_ADDR_WIDTH+1:3]][63:32];
+            else
+                read_instr = $root.ydrasil_core_tb.u_dut.u_ydrasil_mems.u_itcm.u_impl.mem_r[
+                    pc[ITCM_ADDR_WIDTH+1:3]][31:0];
+        end
+    endfunction
 
     task automatic print_register_commit;
         input [INST_ADDR_WIDTH-1:0] pc;
         input [INST_DATA_WIDTH-1:0] instr;
         input [REGS_ADDR_WIDTH-1:0] waddr;
-		input [REGS_DATA_WIDTH-1:0] wdata;
-		begin
-			if (trace_en && (waddr != '0)) begin
-				$display("core   0: 0x%08h (0x%08h) unknown", pc, instr);
-				$display("3 0x%08h (0x%08h) x%0d 0x%08h", pc, instr, waddr, wdata);
+        input [REGS_DATA_WIDTH-1:0] wdata;
+        begin
+            if (trace_en && (waddr != '0)) begin
+                $display("core   0: 0x%08h (0x%08h) unknown", pc, instr);
+                $display("3 0x%08h (0x%08h) x%0d 0x%08h",
+                    pc, instr, waddr, wdata);
             end
         end
     endtask
 
-    always @(negedge clk or negedge rst_n) begin
-        integer i;
-        if (!rst_n) begin
-            commit_rptr_q = '0;
-            commit_wptr_q = '0;
-            lsu_rptr_q = '0;
-            lsu_wptr_q = '0;
-            mul_rptr_q = '0;
-            mul_wptr_q = '0;
-            div_commit_idx_q = '0;
-            div_pending_q = 1'b0;
-            div_active_seen_q = 1'b0;
-            for (i = 0; i < FIFO_DEPTH; i = i + 1) begin
-                commit_kind_q[i] = '0;
-                commit_pc_q[i] = '0;
-                commit_instr_q[i] = '0;
-                commit_waddr_q[i] = '0;
-                commit_wdata_q[i] = '0;
-                commit_ready_q[i] = 1'b0;
-                lsu_commit_idx_q[i] = '0;
-                mul_commit_idx_q[i] = '0;
-            end
-        end else if (1'b0) begin
-            if (alu_valid_i &&
-                !(div_pending_q && div_active_seen_q && !div_active && div_result_valid)) begin
-                commit_kind_q[commit_wptr_q] = COMMIT_ALU;
-                commit_pc_q[commit_wptr_q] = alu_pc_i;
-                commit_instr_q[commit_wptr_q] = alu_instr_i;
-                commit_waddr_q[commit_wptr_q] = alu_waddr_i;
-                commit_wdata_q[commit_wptr_q] = alu_wdata_i;
-                commit_ready_q[commit_wptr_q] = 1'b1;
-                commit_wptr_q = commit_wptr_q + FIFO_PTR_WIDTH'(1);
-            end
+    initial trace_en = $test$plusargs("commit_trace");
 
-            if (dual_alu_valid_i) begin
-                commit_kind_q[commit_wptr_q] = COMMIT_ALU;
-                commit_pc_q[commit_wptr_q] = dual_alu_pc_i;
-                commit_instr_q[commit_wptr_q] = dual_alu_instr_i;
-                commit_waddr_q[commit_wptr_q] = dual_alu_waddr_i;
-                commit_wdata_q[commit_wptr_q] = dual_alu_wdata_i;
-                commit_ready_q[commit_wptr_q] = 1'b1;
-                commit_wptr_q = commit_wptr_q + FIFO_PTR_WIDTH'(1);
-            end
-
-            if (dual_lsu_issue_valid_i) begin
-                commit_kind_q[commit_wptr_q] = COMMIT_LSU;
-                commit_pc_q[commit_wptr_q] = dual_lsu_issue_pc_i;
-                commit_instr_q[commit_wptr_q] = dual_lsu_issue_instr_i;
-                commit_waddr_q[commit_wptr_q] = '0;
-                commit_wdata_q[commit_wptr_q] = '0;
-                commit_ready_q[commit_wptr_q] = 1'b0;
-                lsu_commit_idx_q[lsu_wptr_q] = commit_wptr_q;
-                lsu_wptr_q = lsu_wptr_q + FIFO_PTR_WIDTH'(1);
-                commit_wptr_q = commit_wptr_q + FIFO_PTR_WIDTH'(1);
-            end
-
-            if (lsu_issue_valid_i) begin
-                commit_kind_q[commit_wptr_q] = COMMIT_LSU;
-                commit_pc_q[commit_wptr_q] = lsu_issue_pc_i;
-                commit_instr_q[commit_wptr_q] = lsu_issue_instr_i;
-                commit_waddr_q[commit_wptr_q] = '0;
-                commit_wdata_q[commit_wptr_q] = '0;
-                commit_ready_q[commit_wptr_q] = 1'b0;
-                lsu_commit_idx_q[lsu_wptr_q] = commit_wptr_q;
-                lsu_wptr_q = lsu_wptr_q + FIFO_PTR_WIDTH'(1);
-                commit_wptr_q = commit_wptr_q + FIFO_PTR_WIDTH'(1);
-            end
-
-            if (mul_issue_valid_i) begin
-                commit_kind_q[commit_wptr_q] = COMMIT_MUL;
-                commit_pc_q[commit_wptr_q] = mul_issue_pc_i;
-                commit_instr_q[commit_wptr_q] = mul_issue_instr_i;
-                commit_waddr_q[commit_wptr_q] = '0;
-                commit_wdata_q[commit_wptr_q] = '0;
-                commit_ready_q[commit_wptr_q] = 1'b0;
-                mul_commit_idx_q[mul_wptr_q] = commit_wptr_q;
-                mul_wptr_q = mul_wptr_q + FIFO_PTR_WIDTH'(1);
-                commit_wptr_q = commit_wptr_q + FIFO_PTR_WIDTH'(1);
-            end
-
-            if (div_active && !div_active_seen_q) begin
-                commit_kind_q[commit_wptr_q] = COMMIT_DIV;
-                commit_pc_q[commit_wptr_q] = div_issue_pc;
-                commit_instr_q[commit_wptr_q] = div_issue_instr;
-                commit_waddr_q[commit_wptr_q] = '0;
-                commit_wdata_q[commit_wptr_q] = '0;
-                commit_ready_q[commit_wptr_q] = 1'b0;
-                div_commit_idx_q = commit_wptr_q;
-                div_pending_q = 1'b1;
-                commit_wptr_q = commit_wptr_q + FIFO_PTR_WIDTH'(1);
-            end
-
-            if (mul_valid_i) begin
-                commit_waddr_q[mul_commit_idx_q[mul_rptr_q]] = mul_waddr_i;
-                commit_wdata_q[mul_commit_idx_q[mul_rptr_q]] = mul_wdata_i;
-                commit_ready_q[mul_commit_idx_q[mul_rptr_q]] = 1'b1;
-                mul_rptr_q = mul_rptr_q + FIFO_PTR_WIDTH'(1);
-            end
-
-			if (lsu_valid_i) begin
-				commit_waddr_q[lsu_commit_idx_q[lsu_rptr_q]] = lsu_waddr_i;
-				commit_wdata_q[lsu_commit_idx_q[lsu_rptr_q]] = lsu_wdata_i;
-                commit_ready_q[lsu_commit_idx_q[lsu_rptr_q]] = 1'b1;
-                lsu_rptr_q = lsu_rptr_q + FIFO_PTR_WIDTH'(1);
-            end
-
-            if (div_pending_q && div_active_seen_q && !div_active) begin
-                commit_waddr_q[div_commit_idx_q] = div_result_valid ? div_waddr : '0;
-                commit_wdata_q[div_commit_idx_q] = div_wdata;
-                commit_ready_q[div_commit_idx_q] = 1'b1;
-                div_pending_q = 1'b0;
-            end
-
-            div_active_seen_q = div_active;
-
-            for (i = 0; i < FIFO_DEPTH; i = i + 1) begin
-                if ((commit_rptr_q != commit_wptr_q) && commit_ready_q[commit_rptr_q]) begin
-					print_register_commit(commit_pc_q[commit_rptr_q], commit_instr_q[commit_rptr_q],
-										  commit_waddr_q[commit_rptr_q], commit_wdata_q[commit_rptr_q]);
-                    commit_ready_q[commit_rptr_q] = 1'b0;
-                    commit_rptr_q = commit_rptr_q + FIFO_PTR_WIDTH'(1);
-                end
-            end
-        end
-    end
-
-    // Architectural trace follows the retirement ROB. The legacy issue FIFO
-    // above cannot stay aligned when an execution result moves across a stage
-    // boundary, and it also observes instructions later removed by a redirect.
     always @(posedge clk) begin
         if (rst_n) begin
             if (retire_i.valid && retire_i.writes_gpr)
-				print_register_commit(retire_i.pc, retire_instr_i,
-					retire_i.rd_addr, retire_i.value);
+                print_register_commit(retire_i.pc, read_instr(retire_i.pc),
+                    retire_i.rd_addr, retire_i.value);
             if (retire1_i.valid && retire1_i.writes_gpr)
-				print_register_commit(retire1_i.pc, retire1_instr_i,
-					retire1_i.rd_addr, retire1_i.value);
+                print_register_commit(retire1_i.pc, read_instr(retire1_i.pc),
+                    retire1_i.rd_addr, retire1_i.value);
         end
     end
-
 endmodule

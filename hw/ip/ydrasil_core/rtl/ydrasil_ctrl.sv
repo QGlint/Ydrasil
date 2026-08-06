@@ -5,6 +5,7 @@ import ydrasil_pkg::*;
     input  wire                         rst_n,
     input  wire                         ex_branch_jump_i,
     input  wire                         ex_branch_resolve_i,
+    input  producer_id_t                ex_branch_producer_id_i,
     input  wire [INST_ADDR_WIDTH-1:0]   ex_branch_target_i,
     input  wire [INST_ADDR_WIDTH-1:0]   ex_pc_i,
     input  wire [INST_ADDR_WIDTH-1:0]   ex_pc1_i,
@@ -46,13 +47,12 @@ import ydrasil_pkg::*;
     output wire                         flush_if_o,
     output wire                         flush_id_o,
     output wire                         flush_ex_o,
+    output wire                         pipeline_flush_o,
     output wire                         branch_jump_o,
     output wire [INST_ADDR_WIDTH-1:0]   branch_target_o,
     output wire [PRODUCER_NUM-1:0]      branch_recovery_keep_mask_o
 );
     localparam int QUEUE_COUNT_WIDTH = $clog2(PRODUCER_NUM + 1);
-    localparam int BRANCH_DEPTH = 4;
-    localparam int BRANCH_PTR_WIDTH = $clog2(BRANCH_DEPTH);
 
     reg [PRODUCER_NUM-1:0] producer_valid_q;
     reg [PRODUCER_NUM-1:0] producer_ready_q;
@@ -78,11 +78,6 @@ import ydrasil_pkg::*;
     producer_slot_t queue_tail_q;
     reg [QUEUE_COUNT_WIDTH-1:0] queue_count_q;
     reg serial_pending_q;
-
-    producer_id_t branch_tag_q [0:BRANCH_DEPTH-1];
-    reg [BRANCH_PTR_WIDTH-1:0] branch_head_q;
-    reg [BRANCH_PTR_WIDTH-1:0] branch_tail_q;
-    reg [2:0] branch_count_q;
 
     // Recover the RAT from the surviving producer window rather than storing a
     // 32-entry checkpoint for every unresolved branch. Decode pauses for the
@@ -151,13 +146,12 @@ import ydrasil_pkg::*;
 
     wire producer_has_two_free = queue_count_q <=
         QUEUE_COUNT_WIDTH'(PRODUCER_NUM - 2);
-    wire branch_has_room = branch_count_q < 3'(BRANCH_DEPTH);
     // Dispatch credit is a registered-state contract. Branch/trap recovery has
     // priority in the sequential state update, while backend stalls are
     // absorbed by the four-entry Issue queue. Keeping those current-cycle
     // signals out of ready prevents execution feedback from reaching FetchQ.
-    assign dispatch_ready_o = producer_has_two_free && branch_has_room &&
-        !serial_pending_q && !recovering_q;
+    assign dispatch_ready_o = producer_has_two_free && !serial_pending_q &&
+        !recovering_q;
     wire queue_alloc0 = dispatch_accept_i && dispatch_pkt_i.valid;
     wire queue_alloc1 = dispatch_accept1_i && dispatch_pkt1_i.valid;
     wire [1:0] queue_alloc_count = {1'b0, queue_alloc0} +
@@ -166,8 +160,9 @@ import ydrasil_pkg::*;
     wire producer_full_stall = dispatch_pkt_i.valid && !producer_has_two_free;
 `endif
     wire producer_pair_stall = dispatch_pkt1_i.valid && !producer_has_two_free;
-    wire serial_alloc = queue_alloc0 &&
-        dispatch_pkt_i.ctrl.serialize_before;
+    wire serial_alloc =
+        (queue_alloc0 && dispatch_pkt_i.ctrl.serialize_before) ||
+        (queue_alloc1 && dispatch_pkt1_i.ctrl.serialize_before);
     wire serial_accept = issue_fence_i ||
         (ex_accept_valid_o &&
          (ex_hzd_i.operator_type[OPERATOR_TYPE_CSR] &&
@@ -210,13 +205,19 @@ import ydrasil_pkg::*;
     wire ydrasil_result_class_t dispatch1_src1_latest_class =
         latest_class_q[dispatch_pkt1_i.src1.arch_addr];
     wire ydrasil_result_class_t dispatch_result_class =
-        dispatch_pkt_i.decode.operator_type[OPERATOR_TYPE_LOAD] ? RESULT_LSU :
-		dispatch_pkt_i.decode.operator_type[OPERATOR_TYPE_MUL] ?
+        (dispatch_pkt_i.uop_class == UOP_CLASS_LOAD) ? RESULT_LSU :
+		(dispatch_pkt_i.uop_class == UOP_CLASS_MUL) ?
         RESULT_MDU : RESULT_ALU;
     wire ydrasil_result_class_t dispatch1_result_class =
-        dispatch_pkt1_i.decode.operator_type[OPERATOR_TYPE_LOAD] ? RESULT_LSU :
-		dispatch_pkt1_i.decode.operator_type[OPERATOR_TYPE_MUL] ?
+        (dispatch_pkt1_i.uop_class == UOP_CLASS_LOAD) ? RESULT_LSU :
+		(dispatch_pkt1_i.uop_class == UOP_CLASS_MUL) ?
         RESULT_MDU : RESULT_ALU;
+    wire dispatch1_src0_from_slot0 = dispatch_pkt1_i.src0.used &&
+        dispatch_pkt_i.dst.writes_gpr && (dispatch_pkt_i.dst.rd_addr != '0) &&
+        (dispatch_pkt1_i.src0.arch_addr == dispatch_pkt_i.dst.rd_addr);
+    wire dispatch1_src1_from_slot0 = dispatch_pkt1_i.src1.used &&
+        dispatch_pkt_i.dst.writes_gpr && (dispatch_pkt_i.dst.rd_addr != '0) &&
+        (dispatch_pkt1_i.src1.arch_addr == dispatch_pkt_i.dst.rd_addr);
 
     always_comb begin
         dispatch_pkt_o = dispatch_pkt_i;
@@ -235,16 +236,22 @@ import ydrasil_pkg::*;
         dispatch_pkt_o.dst.rob_tag = producer_alloc_id;
         dispatch_pkt_o.dst.result_class = dispatch_result_class;
 
-        dispatch_pkt1_o.src0.tag_valid = dispatch_pkt1_i.src0.used &&
-            (dispatch_pkt1_i.src0.arch_addr != '0) &&
-            latest_valid_q[dispatch_pkt1_i.src0.arch_addr];
-        dispatch_pkt1_o.src0.producer_tag = dispatch1_src0_latest_id;
-        dispatch_pkt1_o.src0.producer_class = dispatch1_src0_latest_class;
-        dispatch_pkt1_o.src1.tag_valid = dispatch_pkt1_i.src1.used &&
-            (dispatch_pkt1_i.src1.arch_addr != '0) &&
-            latest_valid_q[dispatch_pkt1_i.src1.arch_addr];
-        dispatch_pkt1_o.src1.producer_tag = dispatch1_src1_latest_id;
-        dispatch_pkt1_o.src1.producer_class = dispatch1_src1_latest_class;
+        dispatch_pkt1_o.src0.tag_valid = dispatch1_src0_from_slot0 ||
+            (dispatch_pkt1_i.src0.used &&
+             (dispatch_pkt1_i.src0.arch_addr != '0) &&
+             latest_valid_q[dispatch_pkt1_i.src0.arch_addr]);
+        dispatch_pkt1_o.src0.producer_tag = dispatch1_src0_from_slot0 ?
+            producer_alloc_id : dispatch1_src0_latest_id;
+        dispatch_pkt1_o.src0.producer_class = dispatch1_src0_from_slot0 ?
+            dispatch_result_class : dispatch1_src0_latest_class;
+        dispatch_pkt1_o.src1.tag_valid = dispatch1_src1_from_slot0 ||
+            (dispatch_pkt1_i.src1.used &&
+             (dispatch_pkt1_i.src1.arch_addr != '0) &&
+             latest_valid_q[dispatch_pkt1_i.src1.arch_addr]);
+        dispatch_pkt1_o.src1.producer_tag = dispatch1_src1_from_slot0 ?
+            producer_alloc_id : dispatch1_src1_latest_id;
+        dispatch_pkt1_o.src1.producer_class = dispatch1_src1_from_slot0 ?
+            dispatch_result_class : dispatch1_src1_latest_class;
         dispatch_pkt1_o.dst.rob_tag = producer_alloc_id1;
         dispatch_pkt1_o.dst.result_class = dispatch1_result_class;
     end
@@ -298,6 +305,7 @@ import ydrasil_pkg::*;
     assign flush_if_o = ex_branch_jump_i;
     assign flush_id_o = ex_branch_jump_i;
     assign flush_ex_o = ex_branch_jump_i;
+    assign pipeline_flush_o = flush_id_o | issue_fence_i;
 
 `ifndef SYNTHESIS
     wire rs1_has_producer = issue_pkt_i.src0.tag_valid;
@@ -408,37 +416,44 @@ import ydrasil_pkg::*;
         end
     end
 `endif
-    wire branch_alloc0 = queue_alloc0 && dispatch_pkt_i.ctrl.checkpoint_req;
-    wire branch_alloc1 = queue_alloc1 && dispatch_pkt1_i.ctrl.checkpoint_req;
-    wire branch_alloc = branch_alloc0 || branch_alloc1;
-    wire producer_id_t branch_alloc_tag = branch_alloc0 ?
-        producer_alloc_id : producer_alloc_id1;
-    wire producer_id_t resolved_branch_tag = branch_tag_q[branch_head_q];
+    wire producer_id_t resolved_branch_tag = ex_branch_producer_id_i;
     wire producer_slot_t resolved_branch_slot =
         resolved_branch_tag[PRODUCER_SLOT_WIDTH-1:0];
-    wire resolved_branch_live = (branch_count_q != '0) &&
+    wire resolved_branch_live = ex_branch_resolve_i &&
         producer_valid_q[resolved_branch_slot] &&
         (producer_epoch_q[resolved_branch_slot] ==
          resolved_branch_tag[PRODUCER_ID_WIDTH-1]);
-    wire [PRODUCER_EXT_WIDTH-1:0] resolved_branch_next_sum =
-        {1'b0, resolved_branch_slot} + PRODUCER_EXT_WIDTH'(1);
-    wire producer_slot_t resolved_branch_next =
-        (resolved_branch_next_sum >= PRODUCER_NUM_EXT) ?
-        producer_slot_t'(resolved_branch_next_sum - PRODUCER_NUM_EXT) :
-        producer_slot_t'(resolved_branch_next_sum);
+    wire producer_slot_t resolved_fence_slot =
+        issue_fence_tag_i[PRODUCER_SLOT_WIDTH-1:0];
+    wire resolved_fence_live = issue_fence_i &&
+        producer_valid_q[resolved_fence_slot] &&
+        (producer_epoch_q[resolved_fence_slot] ==
+         issue_fence_tag_i[PRODUCER_ID_WIDTH-1]);
+    wire recovery_event = (ex_branch_jump_i && resolved_branch_live) ||
+        resolved_fence_live;
+    wire producer_id_t recovery_tag = resolved_fence_live ?
+        issue_fence_tag_i : resolved_branch_tag;
+    wire producer_slot_t recovery_slot =
+        recovery_tag[PRODUCER_SLOT_WIDTH-1:0];
+    wire [PRODUCER_EXT_WIDTH-1:0] recovery_next_sum =
+        {1'b0, recovery_slot} + PRODUCER_EXT_WIDTH'(1);
+    wire producer_slot_t recovery_next =
+        (recovery_next_sum >= PRODUCER_NUM_EXT) ?
+        producer_slot_t'(recovery_next_sum - PRODUCER_NUM_EXT) :
+        producer_slot_t'(recovery_next_sum);
     wire [QUEUE_COUNT_WIDTH-1:0] recovery_count_before_commit =
-        (resolved_branch_next == queue_head_q) ?
+        (recovery_next == queue_head_q) ?
         QUEUE_COUNT_WIDTH'(PRODUCER_NUM) :
-        (resolved_branch_next > queue_head_q) ?
-        QUEUE_COUNT_WIDTH'(resolved_branch_next) -
+        (recovery_next > queue_head_q) ?
+        QUEUE_COUNT_WIDTH'(recovery_next) -
         QUEUE_COUNT_WIDTH'(queue_head_q) :
         QUEUE_COUNT_WIDTH'(PRODUCER_NUM) -
         QUEUE_COUNT_WIDTH'(queue_head_q) +
-        QUEUE_COUNT_WIDTH'(resolved_branch_next);
+        QUEUE_COUNT_WIDTH'(recovery_next);
     wire [QUEUE_COUNT_WIDTH-1:0] recovery_count =
         recovery_count_before_commit -
         QUEUE_COUNT_WIDTH'(queue_commit_count);
-    wire recovery_window_wrap = queue_head_q > resolved_branch_slot;
+    wire recovery_window_wrap = queue_head_q > recovery_slot;
     wire [PRODUCER_NUM-1:0] recovery_live_mask;
 
     // Each slot independently checks the circular [head, branch] window.
@@ -456,7 +471,7 @@ import ydrasil_pkg::*;
             end else begin : g_later_slot
                 assign slot_at_or_before_branch =
                     producer_slot_t'(recovery_slot_idx) <=
-                    resolved_branch_slot;
+                    recovery_slot;
             end
             wire slot_in_window = recovery_window_wrap ?
                 (slot_at_or_after_head || slot_at_or_before_branch) :
@@ -467,7 +482,7 @@ import ydrasil_pkg::*;
                 (queue_commit1 &&
                  (queue_head1 == producer_slot_t'(recovery_slot_idx)));
             assign recovery_live_mask[recovery_slot_idx] =
-                resolved_branch_live &&
+                recovery_event &&
                 producer_valid_q[recovery_slot_idx] && slot_in_window &&
                 !slot_retires;
         end
@@ -515,7 +530,6 @@ import ydrasil_pkg::*;
 
     integer slot_idx;
     integer reg_idx;
-    integer branch_idx;
     integer fence_idx;
     wire [PRODUCER_EXT_WIDTH-1:0] queue_tail_alloc_sum =
         {1'b0, queue_tail_q} + PRODUCER_EXT_WIDTH'(queue_alloc_count);
@@ -534,9 +548,6 @@ import ydrasil_pkg::*;
             queue_tail_q <= '0;
             queue_count_q <= '0;
             serial_pending_q <= 1'b0;
-            branch_head_q <= '0;
-            branch_tail_q <= '0;
-            branch_count_q <= '0;
             recovering_q <= 1'b0;
             rebuild_ptr_q <= '0;
             rebuild_remaining_q <= '0;
@@ -552,9 +563,6 @@ import ydrasil_pkg::*;
             for (reg_idx = 0; reg_idx < REGS_NUM; reg_idx++) begin
                 latest_id_q[reg_idx] <= '0;
                 latest_class_q[reg_idx] <= RESULT_NONE;
-            end
-            for (branch_idx = 0; branch_idx < BRANCH_DEPTH; branch_idx++) begin
-                branch_tag_q[branch_idx] <= '0;
             end
         end else begin
             if (ex_branch_jump_i || serial_accept)
@@ -628,9 +636,9 @@ import ydrasil_pkg::*;
                     ~producer_epoch_q[alloc_slot0];
                 producer_pc_q[alloc_slot0] <= dispatch_pkt_i.decode.pc;
                 producer_op_class_q[alloc_slot0] <= {
-                    dispatch_pkt_i.decode.operator_type[OPERATOR_TYPE_BJP],
-                    dispatch_pkt_i.decode.operator_type[OPERATOR_TYPE_STORE],
-                    dispatch_pkt_i.decode.operator_type[OPERATOR_TYPE_LOAD]};
+                    dispatch_pkt_i.uop_class == UOP_CLASS_BJP,
+                    dispatch_pkt_i.uop_class == UOP_CLASS_STORE,
+                    dispatch_pkt_i.uop_class == UOP_CLASS_LOAD};
                 producer_result_class_q[alloc_slot0] <=
                     dispatch_result_class;
                 if (dispatch_pkt_i.dst.writes_gpr) begin
@@ -640,11 +648,11 @@ import ydrasil_pkg::*;
                         dispatch_result_class;
                 end
 `ifndef SYNTHESIS
-                if (dispatch_pkt_i.decode.operator_type[OPERATOR_TYPE_LOAD])
+                if (dispatch_pkt_i.uop_class == UOP_CLASS_LOAD)
                     dbg_producer_kind_q[alloc_slot0] <= DBG_PRODUCER_LOAD;
-                else if (dispatch_pkt_i.decode.operator_type[OPERATOR_TYPE_MUL])
+                else if (dispatch_pkt_i.uop_class == UOP_CLASS_MUL)
                     dbg_producer_kind_q[alloc_slot0] <= DBG_PRODUCER_MUL;
-                else if (dispatch_pkt_i.decode.operator_type[OPERATOR_TYPE_ALU])
+                else if (dispatch_pkt_i.uop_class == UOP_CLASS_ALU)
                     dbg_producer_kind_q[alloc_slot0] <= DBG_PRODUCER_ALU;
                 else
                     dbg_producer_kind_q[alloc_slot0] <= DBG_PRODUCER_OTHER;
@@ -660,9 +668,9 @@ import ydrasil_pkg::*;
                     ~producer_epoch_q[alloc_slot1];
                 producer_pc_q[alloc_slot1] <= dispatch_pkt1_i.decode.pc;
                 producer_op_class_q[alloc_slot1] <= {
-                    dispatch_pkt1_i.decode.operator_type[OPERATOR_TYPE_BJP],
-                    dispatch_pkt1_i.decode.operator_type[OPERATOR_TYPE_STORE],
-                    dispatch_pkt1_i.decode.operator_type[OPERATOR_TYPE_LOAD]};
+                    dispatch_pkt1_i.uop_class == UOP_CLASS_BJP,
+                    dispatch_pkt1_i.uop_class == UOP_CLASS_STORE,
+                    dispatch_pkt1_i.uop_class == UOP_CLASS_LOAD};
                 producer_result_class_q[alloc_slot1] <=
                     dispatch1_result_class;
                 if (dispatch_pkt1_i.dst.writes_gpr) begin
@@ -672,40 +680,23 @@ import ydrasil_pkg::*;
                         dispatch1_result_class;
                 end
 `ifndef SYNTHESIS
-                if (dispatch_pkt1_i.decode.operator_type[OPERATOR_TYPE_LOAD])
+                if (dispatch_pkt1_i.uop_class == UOP_CLASS_LOAD)
                     dbg_producer_kind_q[alloc_slot1] <= DBG_PRODUCER_LOAD;
-                else if (dispatch_pkt1_i.decode.operator_type[OPERATOR_TYPE_MUL])
+                else if (dispatch_pkt1_i.uop_class == UOP_CLASS_MUL)
                     dbg_producer_kind_q[alloc_slot1] <= DBG_PRODUCER_MUL;
-                else if (dispatch_pkt1_i.decode.operator_type[OPERATOR_TYPE_ALU])
+                else if (dispatch_pkt1_i.uop_class == UOP_CLASS_ALU)
                     dbg_producer_kind_q[alloc_slot1] <= DBG_PRODUCER_ALU;
                 else
                     dbg_producer_kind_q[alloc_slot1] <= DBG_PRODUCER_OTHER;
 `endif
             end
 
-            if (branch_alloc) begin
-                branch_tag_q[branch_tail_q] <= branch_alloc_tag;
-                branch_tail_q <= branch_tail_q + 1'b1;
-            end
-            if (ex_branch_resolve_i && (branch_count_q != '0))
-                branch_head_q <= branch_head_q + 1'b1;
-            unique case ({branch_alloc,
-                          ex_branch_resolve_i && (branch_count_q != '0)})
-                2'b10: branch_count_q <= branch_count_q + 1'b1;
-                2'b01: branch_count_q <= branch_count_q - 1'b1;
-                default: branch_count_q <= branch_count_q;
-            endcase
-
-            if (ex_branch_jump_i && ex_branch_resolve_i &&
-                resolved_branch_live) begin
+            if (recovery_event) begin
                 producer_valid_q <= recovery_live_mask;
                 queue_head_q <= queue_head_after_commit;
-                queue_tail_q <= resolved_branch_next;
+                queue_tail_q <= recovery_next;
                 queue_count_q <= recovery_count;
                 latest_valid_q <= '0;
-                branch_head_q <= '0;
-                branch_tail_q <= '0;
-                branch_count_q <= '0;
                 recovering_q <= (recovery_count != '0);
                 rebuild_ptr_q <= queue_head_after_commit;
                 rebuild_remaining_q <= recovery_count;

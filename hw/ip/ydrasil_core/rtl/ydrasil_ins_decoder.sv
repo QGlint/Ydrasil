@@ -31,7 +31,12 @@ import ydrasil_pkg::*;
 
 	output wire [ydrasil_pkg::OPERATOR_WIDTH-1:0] operator_o,
 	output wire [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0] operator_lsu_o,
-	output wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] operator_type_o
+	output wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] operator_type_o,
+	output logic [ydrasil_pkg::UOP_CLASS_WIDTH-1:0] uop_class_o,
+	output logic [ydrasil_pkg::UOP_SUBOP_WIDTH-1:0] uop_subop_o,
+	output logic [ydrasil_pkg::UOP_LSU_SUBOP_WIDTH-1:0] uop_lsu_subop_o,
+	output wire full_bitmanip_o,
+	output wire divrem_o
 );
 
 
@@ -476,6 +481,123 @@ import ydrasil_pkg::*;
 	assign operator_type_o [ydrasil_pkg::OPERATOR_TYPE_SYS] = is_sys;
 	assign operator_type_o [ydrasil_pkg::OPERATOR_TYPE_MUL] = is_mul_use;
 	assign operator_type_o [ydrasil_pkg::OPERATOR_TYPE_BITMANIP] = is_bitmanip_use;
+
+	always_comb begin
+		uop_class_o = ydrasil_pkg::UOP_CLASS_ALU;
+		if (is_bjp_use)
+			uop_class_o = ydrasil_pkg::UOP_CLASS_BJP;
+		else if (is_load)
+			uop_class_o = ydrasil_pkg::UOP_CLASS_LOAD;
+		else if (is_store)
+			uop_class_o = ydrasil_pkg::UOP_CLASS_STORE;
+		else if (is_sys)
+			uop_class_o = ydrasil_pkg::UOP_CLASS_SYS;
+		else if (is_csr)
+			uop_class_o = ydrasil_pkg::UOP_CLASS_CSR;
+		else if (is_mul_use)
+			uop_class_o = ydrasil_pkg::UOP_CLASS_MUL;
+		else if (is_bitmanip_use)
+			uop_class_o = ydrasil_pkg::UOP_CLASS_BITMANIP;
+
+		uop_subop_o = '0;
+		unique case (uop_class_o)
+			ydrasil_pkg::UOP_CLASS_ALU: begin
+				unique case (1'b1)
+					is_lui:   uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_ALU_LUI);
+					is_auipc: uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_ALU_AUIPC);
+					is_addi || is_add: uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_ALU_ADD);
+					is_sub:   uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_ALU_SUB);
+					is_slli || is_sll: uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_ALU_SLL);
+					is_slti || is_slt: uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_ALU_SLT);
+					is_sltiu || is_sltu: uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_ALU_SLTU);
+					is_xori || is_xor: uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_ALU_XOR);
+					is_srli || is_srl: uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_ALU_SRL);
+					is_srai || is_sra: uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_ALU_SRA);
+					is_ori || is_or: uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_ALU_OR);
+					is_andi || is_and: uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_ALU_AND);
+					default: uop_subop_o = '0;
+				endcase
+			end
+			ydrasil_pkg::UOP_CLASS_BJP: begin
+				unique case (1'b1)
+					is_jal || is_jalr: uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_BJP_JUMP);
+					is_beq:  uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_BJP_BEQ);
+					is_bne:  uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_BJP_BNE);
+					is_blt:  uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_BJP_BLT);
+					is_bge:  uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_BJP_BGE);
+					is_bltu: uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_BJP_BLTU);
+					is_bgeu: uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_BJP_BGEU);
+					default: uop_subop_o = '0;
+				endcase
+			end
+			ydrasil_pkg::UOP_CLASS_MUL:
+				uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(funct3);
+			ydrasil_pkg::UOP_CLASS_BITMANIP: begin
+				unique case (1'b1)
+					is_sh1add: uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_SH1ADD);
+					is_sh2add: uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_SH2ADD);
+					is_sh3add: uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_SH3ADD);
+					is_andn:   uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_ANDN);
+					is_clz:    uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_CLZ);
+					is_cpop:   uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_CPOP);
+					is_ctz:    uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_CTZ);
+					is_max:    uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_MAX);
+					is_maxu:   uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_MAXU);
+					is_min:    uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_MIN);
+					is_minu:   uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_MINU);
+					is_orc_b:  uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_ORC_B);
+					is_orn:    uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_ORN);
+					is_rev8:   uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_REV8);
+					is_rol:    uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_ROL);
+					is_ror:    uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_ROR);
+					is_rori:   uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_RORI);
+					is_sext_b: uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_SEXT_B);
+					is_sext_h: uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_SEXT_H);
+					is_xnor:   uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_XNOR);
+					is_zext_h: uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_ZEXT_H);
+					is_clmul:  uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_CLMUL);
+					is_clmulh: uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_CLMULH);
+					is_clmulr: uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_CLMULR);
+					is_bclr:   uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_BCLR);
+					is_bclri:  uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_BCLRI);
+					is_bext:   uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_BEXT);
+					is_bexti:  uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_BEXTI);
+					is_binv:   uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_BINV);
+					is_binvi:  uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_BINVI);
+					is_bset:   uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_BSET);
+					is_bseti:  uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_BSETI);
+					is_brev8:  uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_BREV8);
+					is_pack:   uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_PACK);
+					is_packh:  uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_PACKH);
+					is_zip:    uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_ZIP);
+					is_unzip:  uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_UNZIP);
+					is_xperm4: uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_XPERM4);
+					is_xperm8: uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_XPERM8);
+					default: uop_subop_o = '0;
+				endcase
+			end
+			default: uop_subop_o = '0;
+		endcase
+
+		uop_lsu_subop_o = '0;
+		unique case (1'b1)
+			is_lb:  uop_lsu_subop_o = ydrasil_pkg::UOP_LSU_SUBOP_WIDTH'(ydrasil_pkg::OP_LSU_LB);
+			is_lh:  uop_lsu_subop_o = ydrasil_pkg::UOP_LSU_SUBOP_WIDTH'(ydrasil_pkg::OP_LSU_LH);
+			is_lw:  uop_lsu_subop_o = ydrasil_pkg::UOP_LSU_SUBOP_WIDTH'(ydrasil_pkg::OP_LSU_LW);
+			is_lbu: uop_lsu_subop_o = ydrasil_pkg::UOP_LSU_SUBOP_WIDTH'(ydrasil_pkg::OP_LSU_LBU);
+			is_lhu: uop_lsu_subop_o = ydrasil_pkg::UOP_LSU_SUBOP_WIDTH'(ydrasil_pkg::OP_LSU_LHU);
+			is_sb:  uop_lsu_subop_o = ydrasil_pkg::UOP_LSU_SUBOP_WIDTH'(ydrasil_pkg::OP_LSU_SB);
+			is_sh:  uop_lsu_subop_o = ydrasil_pkg::UOP_LSU_SUBOP_WIDTH'(ydrasil_pkg::OP_LSU_SH);
+			is_sw:  uop_lsu_subop_o = ydrasil_pkg::UOP_LSU_SUBOP_WIDTH'(ydrasil_pkg::OP_LSU_SW);
+			default: uop_lsu_subop_o = '0;
+		endcase
+	end
+
+	assign full_bitmanip_o = is_bitmanip_use &&
+		!(is_sh1add || is_sh2add || is_sh3add || is_andn || is_orn ||
+		  is_xnor || is_min || is_max || is_minu || is_maxu || is_rev8 ||
+		  is_sext_b || is_sext_h || is_zext_h);
+	assign divrem_o = is_div || is_divu || is_rem || is_remu;
 	// wire [`OPERATOR_WIDTH-1:0] alu_op_info_mark = ({`OPERATOR_WIDTH{is_alu_use }}& {{{`OPERATOR_WIDTH-`OP_ALU_INFO_WIDTH}{1'b0}},alu_op_info});
 	// wire [`OPERATOR_WIDTH-1:0] bjp_op_info_mark = ({`OPERATOR_WIDTH{is_bjp_use }}& {{{`OPERATOR_WIDTH-`OP_BJP_INFO_WIDTH}{1'b0}},bjp_op_info});
 	// assign lsu_op_info_mark =  operator_type_o [OPERATOR_TYPE_LOAD] ? {{`OPERATOR_WIDTH-`OP_LSU_INFO_WIDTH{1'b0}},lsu_op_info} : '0;

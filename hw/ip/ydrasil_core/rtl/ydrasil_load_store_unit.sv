@@ -50,16 +50,14 @@ import ydrasil_pkg::*;
 	    store_buf_entry_t store_enqueue_pkt;
 	    reg [STORE_COUNT_WIDTH-1:0] store_buf_count_q;
 
-	    typedef struct packed {
-	        logic                         valid;
-	        producer_id_t                 producer_id;
-	        logic [BUS_DATA_WIDTH-1:0]    data;
-	    } store_completion_shadow_t;
-	    // A taken JAL reaches the dual completion lane before its redirected
-	    // target store reaches this queue. Keep one extra dual-lane sample so a
-	    // link-register store can still be patched without stalling Issue.
-	    localparam int STORE_COMPLETION_SHADOWS = 4;
-	    store_completion_shadow_t completion_shadow_q
+	    // Completion data stops at this local FF boundary. Queue and store-buffer
+	    // entries consume only registered shadows, so an execution result never
+	    // drives every LSU entry and its multiwrite priority logic in one cycle.
+	    // Keep one extra dual-lane sample for a redirected JAL target store.
+	    localparam int STORE_COMPLETION_SHADOWS = COMPLETION_LANES + 1;
+	    logic completion_shadow_valid_q [0:STORE_COMPLETION_SHADOWS-1];
+	    producer_id_t completion_shadow_id_q [0:STORE_COMPLETION_SHADOWS-1];
+	    logic [BUS_DATA_WIDTH-1:0] completion_shadow_data_q
 	        [0:STORE_COMPLETION_SHADOWS-1];
 
 	    function automatic [BUS_DATA_WIDTH-1:0] align_store_data(
@@ -87,14 +85,13 @@ import ydrasil_pkg::*;
 	                !entry.store_data_valid &&
 	                entry.store_producer_tracked) begin
 	                for (completion_idx = 0;
-	                     completion_idx < COMPLETION_LANES;
+	                     completion_idx < STORE_COMPLETION_SHADOWS;
 	                     completion_idx = completion_idx + 1) begin
-		                    if (completion_meta_i[completion_idx].valid &&
-		                        completion_meta_i[completion_idx].producer_tracked &&
-		                        (completion_meta_i[completion_idx].producer_id ==
+		                    if (completion_shadow_valid_q[completion_idx] &&
+		                        (completion_shadow_id_q[completion_idx] ==
 		                         entry.store_producer_id)) begin
 		                        patch_queue_store.store_data =
-		                            completion_data_i[completion_idx];
+		                            completion_shadow_data_q[completion_idx];
 	                        patch_queue_store.store_data_valid = 1'b1;
 	                        patch_queue_store.store_producer_tracked = 1'b0;
 	                    end
@@ -112,14 +109,13 @@ import ydrasil_pkg::*;
 	            if (entry.valid && !entry.store_data_valid &&
 	                entry.store_producer_tracked) begin
 	                for (completion_idx = 0;
-	                     completion_idx < COMPLETION_LANES;
+	                     completion_idx < STORE_COMPLETION_SHADOWS;
 	                     completion_idx = completion_idx + 1) begin
-		                    if (completion_meta_i[completion_idx].valid &&
-		                        completion_meta_i[completion_idx].producer_tracked &&
-		                        (completion_meta_i[completion_idx].producer_id ==
+		                    if (completion_shadow_valid_q[completion_idx] &&
+		                        (completion_shadow_id_q[completion_idx] ==
 		                         entry.store_producer_id)) begin
 		                        patch_buffer_store.store_data = align_store_data(
-		                            completion_data_i[completion_idx],
+		                            completion_shadow_data_q[completion_idx],
 	                            entry.store_mask);
 	                        patch_buffer_store.store_data_valid = 1'b1;
 	                        patch_buffer_store.store_producer_tracked = 1'b0;
@@ -380,11 +376,11 @@ import ydrasil_pkg::*;
 			for (shadow_match_idx = 0;
 			     shadow_match_idx < STORE_COMPLETION_SHADOWS;
 			     shadow_match_idx = shadow_match_idx + 1) begin
-				if (completion_shadow_q[shadow_match_idx].valid &&
-				    (completion_shadow_q[shadow_match_idx].producer_id ==
+				if (completion_shadow_valid_q[shadow_match_idx] &&
+				    (completion_shadow_id_q[shadow_match_idx] ==
 				     enqueue_pkt.store_producer_id)) begin
 					enqueue_pkt.store_data =
-					    completion_shadow_q[shadow_match_idx].data;
+					    completion_shadow_data_q[shadow_match_idx];
 					enqueue_pkt.store_data_valid = 1'b1;
 					enqueue_pkt.store_producer_tracked = 1'b0;
 				end
@@ -442,10 +438,21 @@ import ydrasil_pkg::*;
                 queue_q[queue_idx] <= '0;
             store_buf0_q <= '0;
             store_buf1_q <= '0;
-	            completion_shadow_q[0] <= '0;
-	            completion_shadow_q[1] <= '0;
-	            completion_shadow_q[2] <= '0;
-	            completion_shadow_q[3] <= '0;
+	            completion_shadow_valid_q[0] <= 1'b0;
+	            completion_shadow_valid_q[1] <= 1'b0;
+	            completion_shadow_valid_q[2] <= 1'b0;
+	            completion_shadow_valid_q[3] <= 1'b0;
+	            completion_shadow_valid_q[4] <= 1'b0;
+	            completion_shadow_id_q[0] <= '0;
+	            completion_shadow_id_q[1] <= '0;
+	            completion_shadow_id_q[2] <= '0;
+	            completion_shadow_id_q[3] <= '0;
+	            completion_shadow_id_q[4] <= '0;
+	            completion_shadow_data_q[0] <= '0;
+	            completion_shadow_data_q[1] <= '0;
+	            completion_shadow_data_q[2] <= '0;
+	            completion_shadow_data_q[3] <= '0;
+	            completion_shadow_data_q[4] <= '0;
             load_s1_valid_q <= 1'b0;
             load_s1_rd_addr_q <= '0;
             load_s1_producer_id_q <= '0;
@@ -476,28 +483,37 @@ import ydrasil_pkg::*;
             perf_stb_drain_q <= '0;
 `endif
 	        end else begin
-	            completion_shadow_q[0].valid <=
+	            completion_shadow_valid_q[0] <=
 		                completion_meta_i[COMPLETION_ALU].valid &&
 		                completion_meta_i[COMPLETION_ALU].producer_tracked;
-		            completion_shadow_q[0].producer_id <=
+		            completion_shadow_id_q[0] <=
 		                completion_meta_i[COMPLETION_ALU].producer_id;
-		            completion_shadow_q[0].data <=
+		            completion_shadow_data_q[0] <=
 		                completion_data_i[COMPLETION_ALU];
-		            completion_shadow_q[1].valid <=
+		            completion_shadow_valid_q[1] <=
 		                completion_meta_i[COMPLETION_MUL].valid &&
 		                completion_meta_i[COMPLETION_MUL].producer_tracked;
-		            completion_shadow_q[1].producer_id <=
+		            completion_shadow_id_q[1] <=
 		                completion_meta_i[COMPLETION_MUL].producer_id;
-		            completion_shadow_q[1].data <=
+		            completion_shadow_data_q[1] <=
 		                completion_data_i[COMPLETION_MUL];
-	            completion_shadow_q[3] <= completion_shadow_q[2];
-	            completion_shadow_q[2].valid <=
+	            completion_shadow_valid_q[3] <= completion_shadow_valid_q[2];
+	            completion_shadow_id_q[3] <= completion_shadow_id_q[2];
+	            completion_shadow_data_q[3] <= completion_shadow_data_q[2];
+	            completion_shadow_valid_q[2] <=
 		                completion_meta_i[COMPLETION_DUAL_ALU].valid &&
 		                completion_meta_i[COMPLETION_DUAL_ALU].producer_tracked;
-		            completion_shadow_q[2].producer_id <=
+		            completion_shadow_id_q[2] <=
 		                completion_meta_i[COMPLETION_DUAL_ALU].producer_id;
-		            completion_shadow_q[2].data <=
+		            completion_shadow_data_q[2] <=
 		                completion_data_i[COMPLETION_DUAL_ALU];
+	            completion_shadow_valid_q[4] <=
+	                completion_meta_i[COMPLETION_LSU].valid &&
+	                completion_meta_i[COMPLETION_LSU].producer_tracked;
+	            completion_shadow_id_q[4] <=
+	                completion_meta_i[COMPLETION_LSU].producer_id;
+	            completion_shadow_data_q[4] <=
+	                completion_data_i[COMPLETION_LSU];
 	            for (queue_idx = 0; queue_idx < QUEUE_DEPTH; queue_idx++)
 	                queue_q[queue_idx] <= patch_queue_store(queue_q[queue_idx]);
 	            if (queue_dequeue) begin
