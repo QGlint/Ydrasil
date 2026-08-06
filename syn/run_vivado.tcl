@@ -54,6 +54,29 @@ proc safe_param {name value} {
     }
 }
 
+proc format_elapsed_ms {elapsed_ms} {
+    set total_ms [expr {wide($elapsed_ms)}]
+    set hours [expr {$total_ms / 3600000}]
+    set minutes [expr {($total_ms / 60000) % 60}]
+    set seconds [expr {($total_ms / 1000) % 60}]
+    set milliseconds [expr {$total_ms % 1000}]
+    return [format "%02d:%02d:%02d.%03d" $hours $minutes $seconds $milliseconds]
+}
+
+proc print_flow_elapsed {started_ms} {
+    set elapsed_ms [expr {[clock milliseconds] - $started_ms}]
+    puts "Vivado flow elapsed: [format_elapsed_ms $elapsed_ms]"
+}
+
+proc get_run_elapsed {run_name} {
+    set elapsed ""
+    catch {set elapsed [get_property STATS.ELAPSED [get_runs $run_name]]}
+    if {$elapsed eq ""} {
+        return "unavailable"
+    }
+    return $elapsed
+}
+
 proc configure_performance_implementation {run_name} {
     set run [get_runs $run_name]
     set_property STEPS.OPT_DESIGN.ARGS.DIRECTIVE Explore $run
@@ -85,12 +108,21 @@ proc prepare_implementation_runs {count mode sweep_post_route_physopt} {
         error "unknown -impl_mode value: $mode"
     }
 
+    # Move entries between these lists when changing the sweep.  Only the
+    # enabled list is selected by -impl_runs.
     set strategies [list \
-        Performance_ExtraTimingOpt \
         Performance_Explore \
         Performance_ExplorePostRoutePhysOpt \
-        Performance_Retiming]
+        Performance_NetDelay_high \
+        Performance_ExtraNetDelay_high \
+        Performance_ExploreWithRemap]
+    set candidate_strategies [list \
+        Performance_ExtraTimingOpt \
+        Performance_Retiming \
+        Performance_RefinePlacement]
     set count [clamp_int $count 1 [llength $strategies]]
+    puts "Enabled implementation strategies: $strategies"
+    puts "Candidate implementation strategies (disabled): $candidate_strategies"
     set runs [list]
     for {set idx 0} {$idx < $count} {incr idx} {
         set run_name [expr {$idx == 0 ? "impl_1" : "impl_sweep_$idx"}]
@@ -696,6 +728,7 @@ puts "Sweep post-route phys_opt: $sweep_post_route_physopt"
 puts "Run target: $run_to"
 puts "Synthesis top: $requested_top"
 puts "Reuse completed synthesis: $reuse_synth"
+set flow_started_ms [clock milliseconds]
 set created_project 0
 if {[file exists $xpr]} {
     puts "Opening existing project"
@@ -764,6 +797,7 @@ if {!$reuse_synth} {
     if {$run_to eq "sync_only"} {
         puts "Source synchronization complete."
         close_project
+        print_flow_elapsed $flow_started_ms
         exit 0
     }
 
@@ -825,6 +859,7 @@ if {$run_to eq "reports"} {
 
     puts "Reports written to $report_dir"
     close_project
+    print_flow_elapsed $flow_started_ms
     exit 0
 }
 
@@ -863,6 +898,7 @@ if {!$reuse_synth} {
     puts "Reusing completed synth_1: $synth_status"
 }
 assert_run_ok synth_1
+puts "Synthesis result: synth_1 status=[get_property STATUS [get_runs synth_1]] elapsed=[get_run_elapsed synth_1]"
 
 open_run synth_1 -name synth_1
 validate_io_constraints
@@ -883,6 +919,7 @@ close_design
 
 if {$run_to eq "synth"} {
     close_project
+    print_flow_elapsed $flow_started_ms
     exit 0
 }
 
@@ -921,7 +958,7 @@ foreach run_name $implementation_runs {
         }
     }
     set status [get_property STATUS [get_runs $run_name]]
-    puts "$run_name status: $status"
+    puts "$run_name status: $status elapsed=[get_run_elapsed $run_name]"
     if {[regexp -nocase {fail|error} $status] &&
         ![regexp -nocase {complete.*failed timing} $status]} {
         puts "INFO: implementation sweep run $run_name failed; remaining runs will still be evaluated"
@@ -980,3 +1017,4 @@ archive_run_artifacts $best_impl_run $artifact_dir $pll_freq_mhz $run_to $report
 
 puts "Reports written to $report_dir"
 close_project
+print_flow_elapsed $flow_started_ms

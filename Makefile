@@ -366,7 +366,7 @@ SYN_TIMING_PATH_MAX_PATHS ?= 5000
 SYN_TIMING_NWORST ?= 1
 SYN_JOBS ?= $(shell nproc)
 ifeq ($(HOSTNAME),servera437)
-SYN_IMPL_RUNS ?= 4
+SYN_IMPL_RUNS ?= 5
 SYN_THREADS_PER_RUN ?= 8
 else
 SYN_IMPL_RUNS ?= 1
@@ -970,7 +970,7 @@ synf: SYN_RUN_TO := bitstream
 ifeq ($(HOSTNAME),servera437)
 synf: SYN_IMPL_MODE := sweep
 synf: SYN_JOBS := 40
-synf: SYN_IMPL_RUNS := 4
+synf: SYN_IMPL_RUNS := 5
 synf: SYN_THREADS_PER_RUN := 8
 else
 synf: SYN_IMPL_MODE := extreme
@@ -1000,9 +1000,15 @@ syn225: SYN_PLL_FREQ_MHZ := 225
 syn240: SYN_PLL_FREQ_MHZ := 240
 syn250: SYN_PLL_FREQ_MHZ := 250
 syn225 syn240 syn250: SYN_RUN_TO := bitstream
+ifeq ($(HOSTNAME),servera437)
 syn225 syn240 syn250: SYN_JOBS := 40
-syn225 syn240 syn250: SYN_IMPL_RUNS := 4
+syn225 syn240 syn250: SYN_IMPL_RUNS := 5
 syn225 syn240 syn250: SYN_THREADS_PER_RUN := 8
+else
+syn225 syn240 syn250: SYN_JOBS := 1
+syn225 syn240 syn250: SYN_IMPL_RUNS := 1
+syn225 syn240 syn250: SYN_THREADS_PER_RUN := 1
+endif
 syn225 syn240 syn250: syn-vivado
 	@src="$(SYN_ARTIFACT_DIR)/$(SYN_TOP).bit"; \
 	if [ ! -f "$$src" ]; then \

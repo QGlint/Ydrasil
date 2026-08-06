@@ -7,7 +7,7 @@ make syn
 ```
 
 The Makefile uses `vivado -mode batch`, so no GUI is started. On `servera437`,
-the default flow synthesizes once and launches four independent implementation
+the default flow synthesizes once and launches five independent implementation
 run processes with different performance strategies. The run with the highest
 WNS supplies the final reports, checkpoint, and artifacts. Other hosts default
 to one implementation run. The flow keeps
@@ -65,6 +65,14 @@ because Vivado 2024.2 has a reproducible post-route `phys_opt_design` crash in
 testing a Vivado update or a workaround. A failed implementation child is
 reported and ignored so completed sweep runs can still produce the final
 reports and artifacts.
+
+The enabled sweep strategies are `Performance_Explore`,
+`Performance_ExplorePostRoutePhysOpt`, `Performance_NetDelay_high`,
+`Performance_ExtraNetDelay_high`, and `Performance_ExploreWithRemap`.
+`Performance_ExtraTimingOpt`, `Performance_Retiming`, and
+`Performance_RefinePlacement` are kept in the disabled candidate list in
+`run_vivado.tcl` for later tuning. The log prints synthesis and implementation
+run times, followed by the total Vivado flow time as its final line.
 
 `make syn-extreme` runs only `impl_1` with the aggressive per-step directives
 stored in the checked-in GUI project. Sweep results are recorded in

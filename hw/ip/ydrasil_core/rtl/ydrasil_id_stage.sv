@@ -166,7 +166,6 @@ import ydrasil_pkg::*;
     );
 
     wire decode_valid = if_id_valid_i;
-    wire decode_valid1 = if_id1_valid_i;
     wire decoded0_memory = (decoded0.op_class == UOP_CLASS_LOAD) ||
         (decoded0.op_class == UOP_CLASS_STORE);
     wire decoded1_memory = (decoded1.op_class == UOP_CLASS_LOAD) ||
@@ -177,6 +176,10 @@ import ydrasil_pkg::*;
     wire decoded1_serial = (decoded1.op_class == UOP_CLASS_CSR) ||
         (decoded1.op_class == UOP_CLASS_SYS) || decoded1.fence_i ||
         decoded1.illegal_instr;
+    // A younger instruction must remain in FetchQ while slot 0 establishes a
+    // serializing redirect or CSR boundary. This keeps FetchQ pop, Issue FIFO
+    // push, and ROB allocation on the same one-entry transaction.
+    wire decode_valid1 = if_id1_valid_i && !decoded0_serial;
     wire slot0_writes = (decoded0.rd_addr != '0) &&
 		(decoded0.rd_wen || (decoded0.op_class == UOP_CLASS_LOAD));
     wire slot1_writes = (decoded1.rd_addr != '0) &&

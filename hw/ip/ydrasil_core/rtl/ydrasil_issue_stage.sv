@@ -123,9 +123,9 @@ import ydrasil_pkg::*;
     // at this registered ID/Issue boundary and cannot depend on head pairing.
     wire issue_pipe_has_room = dispatch_ready_i &&
         (issue_pipe_count_q <= 3'd2);
-    wire issue_pipe_push_two = issue_pipe_has_room &&
-        decode_pkt_i.valid && decode_pkt1_i.valid;
-    wire issue_pipe_push = issue_pipe_has_room && decode_pkt_i.valid;
+    wire issue_pipe_push = !flush_id_i && issue_pipe_has_room &&
+        decode_pkt_i.valid;
+    wire issue_pipe_push_two = issue_pipe_push && decode_pkt1_i.valid;
     wire [1:0] issue_pipe_push_count = issue_pipe_push ?
         (issue_pipe_push_two ? 2'd2 : 2'd1) : 2'd0;
 
@@ -336,11 +336,9 @@ import ydrasil_pkg::*;
     endfunction
 
     // Completion state is committed into the producer file on the same edge
-    // that the global completion bus is observed. Early ALU wakeup carries
-    // only a producer token through Issue; the corresponding safe result is
-    // selected after each FU input cell. This keeps the full completion bus
-    // and its slow bitmanip paths out of the Issue operand cone. DTCM wakeup
-    // remains a narrow tagged reservation with the same local-data pattern.
+    // that the global completion bus is observed. Early ALU data is available
+    // at the Issue/EX capture edge. DTCM reservation arrives before its data,
+    // so only its narrow selector crosses that edge.
     reg lsu_idle_q;
     reg issue_at_rob_head_q;
     reg early_wakeup_valid_q [0:1];
@@ -382,42 +380,17 @@ import ydrasil_pkg::*;
     reg mul_in_operand_a_dtcm_q, mul_in_operand_b_dtcm_q;
     reg dual_in_operand_a_dtcm_q, dual_in_operand_b_dtcm_q;
     reg dual_in_branch_operand_a_dtcm_q, dual_in_branch_operand_b_dtcm_q;
-    reg alu_in_operand_a_early_main_q, alu_in_operand_a_early_dual_q;
-    reg alu_in_operand_b_early_main_q, alu_in_operand_b_early_dual_q;
-    reg agu_in_operand_a_early_main_q, agu_in_operand_a_early_dual_q;
-    reg agu_in_store_data_early_main_q, agu_in_store_data_early_dual_q;
-    reg csr_in_operand_a_early_main_q, csr_in_operand_a_early_dual_q;
-    reg mul_in_operand_a_early_main_q, mul_in_operand_a_early_dual_q;
-    reg mul_in_operand_b_early_main_q, mul_in_operand_b_early_dual_q;
-    reg dual_in_operand_a_early_main_q, dual_in_operand_a_early_dual_q;
-    reg dual_in_operand_b_early_main_q, dual_in_operand_b_early_dual_q;
-    reg dual_in_branch_operand_a_early_main_q;
-    reg dual_in_branch_operand_a_early_dual_q;
-    reg dual_in_branch_operand_b_early_main_q;
-    reg dual_in_branch_operand_b_early_dual_q;
-    // DTCM data normally comes straight from the LSU response FF.  The Issue
-    // cells can be held for backend backpressure, however, while a later load
-    // replaces that response. Snapshot the selected response on the first
-    // held edge so an accepted request keeps its original load data.
     reg [DATA_WIDTH-1:0] dtcm_stall_data_q;
     reg dtcm_stall_data_valid_q;
-    // Each bank captures the result associated with the prior-cycle wakeup
-    // token on the same edge that its consumer selector is accepted. The
-    // bank then stays stable while Issue is stalled.
-    reg [DATA_WIDTH-1:0] early_main_data_q;
-    reg [DATA_WIDTH-1:0] early_dual_data_q;
     wire dtcm_bypass_active_q =
         alu_in_operand_a_dtcm_q || alu_in_operand_b_dtcm_q ||
-        agu_in_operand_a_dtcm_q ||
-        agu_in_store_data_dtcm_q || csr_in_operand_a_dtcm_q ||
-		mul_in_operand_a_dtcm_q || mul_in_operand_b_dtcm_q ||
-		dual_in_operand_a_dtcm_q ||
-		dual_in_operand_b_dtcm_q || dual_in_branch_operand_a_dtcm_q ||
-		dual_in_branch_operand_b_dtcm_q;
+        agu_in_operand_a_dtcm_q || agu_in_store_data_dtcm_q ||
+        csr_in_operand_a_dtcm_q || mul_in_operand_a_dtcm_q ||
+        mul_in_operand_b_dtcm_q || dual_in_operand_a_dtcm_q ||
+        dual_in_operand_b_dtcm_q || dual_in_branch_operand_a_dtcm_q ||
+        dual_in_branch_operand_b_dtcm_q;
     wire [DATA_WIDTH-1:0] dtcm_bypass_data = dtcm_stall_data_valid_q ?
         dtcm_stall_data_q : dtcm_resp_data_i;
-    wire [DATA_WIDTH-1:0] early_main_bypass_data = early_main_data_q;
-    wire [DATA_WIDTH-1:0] early_dual_bypass_data = early_dual_data_q;
     wire src0_ready;
     wire src1_ready;
     wire src2_ready;
@@ -603,18 +576,20 @@ import ydrasil_pkg::*;
         end
     end
 
-    wire [DATA_WIDTH-1:0] slot0_src0_local = slot0_src0;
-    wire [DATA_WIDTH-1:0] slot0_src1_local = slot0_src1;
-    wire [DATA_WIDTH-1:0] slot1_src0_local = slot1_src0;
-    wire [DATA_WIDTH-1:0] slot1_src1_local = slot1_src1;
-    wire [DATA_WIDTH-1:0] lane_a_src0 = swap_pair ? slot1_src0 : slot0_src0;
-    wire [DATA_WIDTH-1:0] lane_a_src1 = swap_pair ? slot1_src1 : slot0_src1;
+    wire [DATA_WIDTH-1:0] slot0_src0_local = slot0_src0_early_main_hit ?
+        early_main_bypass_data_i : slot0_src0_early_dual_hit ?
+        early_dual_bypass_data_i : slot0_src0;
+    wire [DATA_WIDTH-1:0] slot0_src1_local = slot0_src1_early_main_hit ?
+        early_main_bypass_data_i : slot0_src1_early_dual_hit ?
+        early_dual_bypass_data_i : slot0_src1;
+    wire [DATA_WIDTH-1:0] slot1_src0_local = slot1_src0_early_main_hit ?
+        early_main_bypass_data_i : slot1_src0_early_dual_hit ?
+        early_dual_bypass_data_i : slot1_src0;
+    wire [DATA_WIDTH-1:0] slot1_src1_local = slot1_src1_early_main_hit ?
+        early_main_bypass_data_i : slot1_src1_early_dual_hit ?
+        early_dual_bypass_data_i : slot1_src1;
     wire lane_b_uses_slot0 = head0_b_only || swap_pair;
     wire lane_b_src1_ready = lane_b_uses_slot0 ? src1_ready : src3_ready;
-    wire [DATA_WIDTH-1:0] lane_b_src0 = lane_b_uses_slot0 ?
-        slot0_src0 : slot1_src0;
-    wire [DATA_WIDTH-1:0] lane_b_src1 = lane_b_uses_slot0 ?
-        slot0_src1 : slot1_src1;
     wire [DATA_WIDTH-1:0] lane_a_src0_local = swap_pair ?
         slot1_src0_local : slot0_src0_local;
     wire [DATA_WIDTH-1:0] lane_a_src1_local = swap_pair ?
@@ -623,10 +598,6 @@ import ydrasil_pkg::*;
         slot0_src0_local : slot1_src0_local;
     wire [DATA_WIDTH-1:0] lane_b_src1_local = lane_b_uses_slot0 ?
         slot0_src1_local : slot1_src1_local;
-
-    // DTCM data is deliberately not substituted into the source table above.
-    // Capture only these compact, generation-qualified selectors on the Issue
-    // edge, then use the LSU response FF after each execution input cell.
     wire lane_a_src0_dtcm_hit = swap_pair ?
         slot1_src0_dtcm_hit : slot0_src0_dtcm_hit;
     wire lane_a_src1_dtcm_hit = swap_pair ?
@@ -635,22 +606,7 @@ import ydrasil_pkg::*;
         slot0_src0_dtcm_hit : slot1_src0_dtcm_hit;
     wire lane_b_src1_dtcm_hit = lane_b_uses_slot0 ?
         slot0_src1_dtcm_hit : slot1_src1_dtcm_hit;
-    wire lane_a_src0_early_main_hit = swap_pair ?
-        slot1_src0_early_main_hit : slot0_src0_early_main_hit;
-    wire lane_a_src1_early_main_hit = swap_pair ?
-        slot1_src1_early_main_hit : slot0_src1_early_main_hit;
-    wire lane_b_src0_early_main_hit = lane_b_uses_slot0 ?
-        slot0_src0_early_main_hit : slot1_src0_early_main_hit;
-    wire lane_b_src1_early_main_hit = lane_b_uses_slot0 ?
-        slot0_src1_early_main_hit : slot1_src1_early_main_hit;
-    wire lane_a_src0_early_dual_hit = swap_pair ?
-        slot1_src0_early_dual_hit : slot0_src0_early_dual_hit;
-    wire lane_a_src1_early_dual_hit = swap_pair ?
-        slot1_src1_early_dual_hit : slot0_src1_early_dual_hit;
-    wire lane_b_src0_early_dual_hit = lane_b_uses_slot0 ?
-        slot0_src0_early_dual_hit : slot1_src0_early_dual_hit;
-    wire lane_b_src1_early_dual_hit = lane_b_uses_slot0 ?
-        slot0_src1_early_dual_hit : slot1_src1_early_dual_hit;
+
     wire lane_a_accept = id_advance && lane_a_valid;
     wire lane_b_accept = id_advance && lane_b_valid;
     wire lane_a_op_a_src = !lane_a_uop.operand_a_pc_sel &&
@@ -664,7 +620,6 @@ import ydrasil_pkg::*;
     wire lane_a_alu_exec =
         (lane_a_uop.op_class == UOP_CLASS_ALU) ||
         (lane_a_uop.op_class == UOP_CLASS_BITMANIP);
-
     wire [OPERATOR_WIDTH-1:0] lane_a_operator_info =
         uop_operator_info(lane_a_uop);
     wire [OPERATOR_TYPE_WIDTH-1:0] lane_a_operator_type =
@@ -823,33 +778,13 @@ import ydrasil_pkg::*;
             dual_alu_payload_q <= '0;
             dual_bru_valid_q <= 1'b0;
             dual_bru_payload_q <= '0;
-            alu_in_operand_a_dtcm_q <= 1'b0;
-            alu_in_operand_b_dtcm_q <= 1'b0;
-            agu_in_operand_a_dtcm_q <= 1'b0;
-            agu_in_store_data_dtcm_q <= 1'b0;
-            csr_in_operand_a_dtcm_q <= 1'b0;
-            mul_in_operand_a_dtcm_q <= 1'b0;
-            mul_in_operand_b_dtcm_q <= 1'b0;
-            dual_in_operand_a_dtcm_q <= 1'b0;
-            dual_in_operand_b_dtcm_q <= 1'b0;
-            dual_in_branch_operand_a_dtcm_q <= 1'b0;
-            dual_in_branch_operand_b_dtcm_q <= 1'b0;
-            {alu_in_operand_a_early_main_q, alu_in_operand_a_early_dual_q,
-             alu_in_operand_b_early_main_q, alu_in_operand_b_early_dual_q,
-             agu_in_operand_a_early_main_q, agu_in_operand_a_early_dual_q,
-             agu_in_store_data_early_main_q,
-             agu_in_store_data_early_dual_q,
-             csr_in_operand_a_early_main_q, csr_in_operand_a_early_dual_q,
-             mul_in_operand_a_early_main_q, mul_in_operand_a_early_dual_q,
-			 mul_in_operand_b_early_main_q, mul_in_operand_b_early_dual_q,
-             dual_in_operand_a_early_main_q,
-             dual_in_operand_a_early_dual_q,
-             dual_in_operand_b_early_main_q,
-             dual_in_operand_b_early_dual_q,
-             dual_in_branch_operand_a_early_main_q,
-             dual_in_branch_operand_a_early_dual_q,
-             dual_in_branch_operand_b_early_main_q,
-             dual_in_branch_operand_b_early_dual_q} <= '0;
+            {alu_in_operand_a_dtcm_q, alu_in_operand_b_dtcm_q,
+             agu_in_operand_a_dtcm_q, agu_in_store_data_dtcm_q,
+             csr_in_operand_a_dtcm_q, mul_in_operand_a_dtcm_q,
+             mul_in_operand_b_dtcm_q, dual_in_operand_a_dtcm_q,
+             dual_in_operand_b_dtcm_q,
+             dual_in_branch_operand_a_dtcm_q,
+             dual_in_branch_operand_b_dtcm_q} <= '0;
             dtcm_stall_data_valid_q <= 1'b0;
         end else begin
             lsu_idle_q <= lsu_idle_i;
@@ -871,7 +806,6 @@ import ydrasil_pkg::*;
                 early_wakeup_rd_q[1] <= '0;
             end else begin
                 if (bubble_id_i) begin
-                    dtcm_stall_data_valid_q <= 1'b0;
 					illegal_instr_q <= 1'b0;
                     early_wakeup_valid_q[0] <= 1'b0;
                     early_wakeup_valid_q[1] <= 1'b0;
@@ -886,43 +820,16 @@ import ydrasil_pkg::*;
                     mul_in_valid_q <= 1'b0;
                     dual_alu_valid_q <= 1'b0;
                     dual_bru_valid_q <= 1'b0;
-                    alu_in_operand_a_dtcm_q <= 1'b0;
-                    alu_in_operand_b_dtcm_q <= 1'b0;
-                    agu_in_operand_a_dtcm_q <= 1'b0;
-                    agu_in_store_data_dtcm_q <= 1'b0;
-                    csr_in_operand_a_dtcm_q <= 1'b0;
-                    mul_in_operand_a_dtcm_q <= 1'b0;
-                    mul_in_operand_b_dtcm_q <= 1'b0;
-                    dual_in_operand_a_dtcm_q <= 1'b0;
-                    dual_in_operand_b_dtcm_q <= 1'b0;
-                    dual_in_branch_operand_a_dtcm_q <= 1'b0;
-                    dual_in_branch_operand_b_dtcm_q <= 1'b0;
-                    {alu_in_operand_a_early_main_q, alu_in_operand_a_early_dual_q,
-                     alu_in_operand_b_early_main_q, alu_in_operand_b_early_dual_q,
-                     agu_in_operand_a_early_main_q,
-                     agu_in_operand_a_early_dual_q,
-                     agu_in_store_data_early_main_q,
-                     agu_in_store_data_early_dual_q,
-                     csr_in_operand_a_early_main_q,
-                     csr_in_operand_a_early_dual_q,
-                     mul_in_operand_a_early_main_q,
-                     mul_in_operand_a_early_dual_q,
-					 mul_in_operand_b_early_main_q,
-					 mul_in_operand_b_early_dual_q,
-                     dual_in_operand_a_early_main_q,
-                     dual_in_operand_a_early_dual_q,
-                     dual_in_operand_b_early_main_q,
-                     dual_in_operand_b_early_dual_q,
-                     dual_in_branch_operand_a_early_main_q,
-                     dual_in_branch_operand_a_early_dual_q,
-                     dual_in_branch_operand_b_early_main_q,
-                     dual_in_branch_operand_b_early_dual_q} <= '0;
-                end else begin
+                    {alu_in_operand_a_dtcm_q, alu_in_operand_b_dtcm_q,
+                     agu_in_operand_a_dtcm_q, agu_in_store_data_dtcm_q,
+                     csr_in_operand_a_dtcm_q, mul_in_operand_a_dtcm_q,
+                     mul_in_operand_b_dtcm_q, dual_in_operand_a_dtcm_q,
+                     dual_in_operand_b_dtcm_q,
+                     dual_in_branch_operand_a_dtcm_q,
+                     dual_in_branch_operand_b_dtcm_q} <= '0;
                     dtcm_stall_data_valid_q <= 1'b0;
-                    if (early_wakeup_valid_q[0])
-                        early_main_data_q <= early_main_bypass_data_i;
-                    if (early_wakeup_valid_q[1])
-                        early_dual_data_q <= early_dual_bypass_data_i;
+                end else begin
+					dtcm_stall_data_valid_q <= 1'b0;
 					illegal_instr_q <= lane_a_accept && lane_a_uop.illegal_instr;
                     alu_in_operand_a_dtcm_q <= lane_a_accept &&
                         lane_a_alu_exec && lane_a_op_a_src &&
@@ -955,86 +862,6 @@ import ydrasil_pkg::*;
                     dual_in_branch_operand_b_dtcm_q <= lane_b_accept &&
                         (lane_b_uop.op_class == UOP_CLASS_BJP) &&
                         lane_b_src1_dtcm_hit;
-                    {alu_in_operand_a_early_main_q,
-                     alu_in_operand_a_early_dual_q} <= {
-                        lane_a_accept && lane_a_alu_exec && lane_a_op_a_src &&
-                        lane_a_src0_early_main_hit,
-                        lane_a_accept && lane_a_alu_exec && lane_a_op_a_src &&
-                        lane_a_src0_early_dual_hit};
-                    {alu_in_operand_b_early_main_q,
-                     alu_in_operand_b_early_dual_q} <= {
-                        lane_a_accept && lane_a_alu_exec && lane_a_op_b_src &&
-                        lane_a_src1_early_main_hit,
-                        lane_a_accept && lane_a_alu_exec && lane_a_op_b_src &&
-                        lane_a_src1_early_dual_hit};
-                    {agu_in_operand_a_early_main_q,
-                     agu_in_operand_a_early_dual_q} <= {
-                        lane_b_agu_accept && lane_b_op_a_src &&
-                        lane_b_src0_early_main_hit,
-                        lane_b_agu_accept && lane_b_op_a_src &&
-                        lane_b_src0_early_dual_hit};
-                    {agu_in_store_data_early_main_q,
-                     agu_in_store_data_early_dual_q} <= {
-                        lane_b_agu_accept &&
-                        (lane_b_uop.op_class == UOP_CLASS_STORE) &&
-                        lane_b_src1_early_main_hit,
-                        lane_b_agu_accept &&
-                        (lane_b_uop.op_class == UOP_CLASS_STORE) &&
-                        lane_b_src1_early_dual_hit};
-                    {csr_in_operand_a_early_main_q,
-                     csr_in_operand_a_early_dual_q} <= {
-                        lane_a_accept &&
-                        ((lane_a_uop.op_class == UOP_CLASS_CSR) ||
-                         (lane_a_uop.op_class == UOP_CLASS_SYS)) &&
-                        lane_a_op_a_src && lane_a_src0_early_main_hit,
-                        lane_a_accept &&
-                        ((lane_a_uop.op_class == UOP_CLASS_CSR) ||
-                         (lane_a_uop.op_class == UOP_CLASS_SYS)) &&
-                        lane_a_op_a_src && lane_a_src0_early_dual_hit};
-                    {mul_in_operand_a_early_main_q,
-                     mul_in_operand_a_early_dual_q} <= {
-                        lane_a_accept &&
-                        (lane_a_uop.op_class == UOP_CLASS_MUL) &&
-                        lane_a_op_a_src && lane_a_src0_early_main_hit,
-                        lane_a_accept &&
-                        (lane_a_uop.op_class == UOP_CLASS_MUL) &&
-                        lane_a_op_a_src && lane_a_src0_early_dual_hit};
-                    {mul_in_operand_b_early_main_q,
-                     mul_in_operand_b_early_dual_q} <= {
-                        lane_a_accept &&
-                        (lane_a_uop.op_class == UOP_CLASS_MUL) &&
-                        lane_a_op_b_src && lane_a_src1_early_main_hit,
-                        lane_a_accept &&
-                        (lane_a_uop.op_class == UOP_CLASS_MUL) &&
-                        lane_a_op_b_src && lane_a_src1_early_dual_hit};
-                    {dual_in_operand_a_early_main_q,
-                     dual_in_operand_a_early_dual_q} <= {
-                        lane_b_alu_accept && lane_b_op_a_src &&
-                        lane_b_src0_early_main_hit,
-                        lane_b_alu_accept && lane_b_op_a_src &&
-                        lane_b_src0_early_dual_hit};
-                    {dual_in_operand_b_early_main_q,
-                     dual_in_operand_b_early_dual_q} <= {
-                        lane_b_alu_accept && lane_b_op_b_src &&
-                        lane_b_src1_early_main_hit,
-                        lane_b_alu_accept && lane_b_op_b_src &&
-                        lane_b_src1_early_dual_hit};
-                    {dual_in_branch_operand_a_early_main_q,
-                     dual_in_branch_operand_a_early_dual_q} <= {
-                        lane_b_accept &&
-                        (lane_b_uop.op_class == UOP_CLASS_BJP) &&
-                        lane_b_src0_early_main_hit,
-                        lane_b_accept &&
-                        (lane_b_uop.op_class == UOP_CLASS_BJP) &&
-                        lane_b_src0_early_dual_hit};
-                    {dual_in_branch_operand_b_early_main_q,
-                     dual_in_branch_operand_b_early_dual_q} <= {
-                        lane_b_accept &&
-                        (lane_b_uop.op_class == UOP_CLASS_BJP) &&
-                        lane_b_src1_early_main_hit,
-                        lane_b_accept &&
-                        (lane_b_uop.op_class == UOP_CLASS_BJP) &&
-                        lane_b_src1_early_dual_hit};
                     // Wakeup qualification is a control token, not execution
                     // payload.  Derive it directly from the selected lane so
                     // LSU request/credit fields cannot re-enter this D cone.
@@ -1100,66 +927,12 @@ import ydrasil_pkg::*;
         end
     end
 
-    // DTCM data starts at the LSU response FF, not at the BRAM. Early ALU
-    // data comes from the token-aligned safe result banks above. Every mux
-    // sits after its matching Issue/FU input cell, preserving zero-bubble
-	// wakeup without placing wide completion data in the Issue operand cone.
-	wire [DATA_WIDTH-1:0] bypass_base [0:10];
-	wire [DATA_WIDTH-1:0] bypass_result [0:10];
-	wire [10:0] bypass_dtcm_select;
-	wire [10:0] bypass_main_select;
-	wire [10:0] bypass_dual_select;
-	assign bypass_base[0] = agu_in_req_q.store_data;
-	assign bypass_base[1] = dual_bru_payload_q.operand_a;
-	assign bypass_base[2] = dual_bru_payload_q.operand_b;
-	assign bypass_base[3] = dual_alu_payload_q.operand_a;
-	assign bypass_base[4] = dual_alu_payload_q.operand_b;
-	assign bypass_base[5] = alu_in_operand_a_q;
-	assign bypass_base[6] = alu_in_operand_b_q;
-	assign bypass_base[7] = agu_in_operand_a_q;
-	assign bypass_base[8] = csr_in_operand_a_q;
-	assign bypass_base[9] = mul_in_operand_a_q;
-	assign bypass_base[10] = mul_in_operand_b_q;
-	assign bypass_dtcm_select = {
-		mul_in_operand_b_dtcm_q, mul_in_operand_a_dtcm_q,
-		csr_in_operand_a_dtcm_q, agu_in_operand_a_dtcm_q,
-		alu_in_operand_b_dtcm_q,
-		alu_in_operand_a_dtcm_q, dual_in_operand_b_dtcm_q,
-		dual_in_operand_a_dtcm_q, dual_in_branch_operand_b_dtcm_q,
-		dual_in_branch_operand_a_dtcm_q, agu_in_store_data_dtcm_q};
-	assign bypass_main_select = {
-        mul_in_operand_b_early_main_q, mul_in_operand_a_early_main_q,
-        csr_in_operand_a_early_main_q, agu_in_operand_a_early_main_q,
-		alu_in_operand_b_early_main_q,
-		alu_in_operand_a_early_main_q, dual_in_operand_b_early_main_q,
-		dual_in_operand_a_early_main_q,
-		dual_in_branch_operand_b_early_main_q,
-		dual_in_branch_operand_a_early_main_q,
-		agu_in_store_data_early_main_q};
-	assign bypass_dual_select = {
-        mul_in_operand_b_early_dual_q, mul_in_operand_a_early_dual_q,
-        csr_in_operand_a_early_dual_q, agu_in_operand_a_early_dual_q,
-		alu_in_operand_b_early_dual_q,
-		alu_in_operand_a_early_dual_q, dual_in_operand_b_early_dual_q,
-		dual_in_operand_a_early_dual_q,
-		dual_in_branch_operand_b_early_dual_q,
-		dual_in_branch_operand_a_early_dual_q,
-		agu_in_store_data_early_dual_q};
-	genvar bypass_index;
-	generate
-		for (bypass_index = 0; bypass_index < 11; bypass_index++) begin : g_bypass
-            assign bypass_result[bypass_index] =
-                bypass_dtcm_select[bypass_index] ? dtcm_bypass_data :
-                bypass_main_select[bypass_index] ? early_main_bypass_data :
-                bypass_dual_select[bypass_index] ? early_dual_bypass_data :
-                bypass_base[bypass_index];
-        end
-    endgenerate
-
 	assign illegal_instr_o = illegal_instr_q;
 	assign alu_in_valid_o = alu_in_valid_q;
-	assign alu_in_operand_a_o = bypass_result[5];
-	assign alu_in_operand_b_o = bypass_result[6];
+	assign alu_in_operand_a_o = alu_in_operand_a_dtcm_q ?
+        dtcm_bypass_data : alu_in_operand_a_q;
+	assign alu_in_operand_b_o = alu_in_operand_b_dtcm_q ?
+        dtcm_bypass_data : alu_in_operand_b_q;
     assign alu_in_operator_o = alu_in_operator_q;
     assign alu_in_operator_type_o = alu_in_operator_type_q;
     assign alu_in_rd_wen_o = alu_in_rd_wen_q;
@@ -1167,31 +940,40 @@ import ydrasil_pkg::*;
     assign alu_in_producer_id_o = alu_in_producer_id_q;
 	assign lane_a_pc_o = lane_a_pc_q;
     assign agu_in_valid_o = agu_in_valid_q;
-	assign agu_in_operand_a_o = bypass_result[7];
+	assign agu_in_operand_a_o = agu_in_operand_a_dtcm_q ?
+        dtcm_bypass_data : agu_in_operand_a_q;
     assign agu_in_operand_b_o = agu_in_operand_b_q;
 	assign agu_in_req_o = agu_in_req_q;
-	assign agu_in_store_data_o = bypass_result[0];
+	assign agu_in_store_data_o = agu_in_store_data_dtcm_q ?
+        dtcm_bypass_data : agu_in_req_q.store_data;
     assign csr_in_valid_o = csr_in_valid_q;
-	assign csr_in_operand_a_o = bypass_result[8];
+	assign csr_in_operand_a_o = csr_in_operand_a_dtcm_q ?
+        dtcm_bypass_data : csr_in_operand_a_q;
     assign csr_in_operator_type_o = csr_in_operator_type_q;
     assign csr_in_raddr_o = csr_in_raddr_q;
     assign csr_in_waddr_o = csr_in_waddr_q;
     assign csr_in_op_info_o = csr_in_op_info_q;
     assign csr_in_sys_info_o = csr_in_sys_info_q;
     assign mul_in_valid_o = mul_in_valid_q;
-	assign mul_in_operand_a_o = bypass_result[9];
-	assign mul_in_operand_b_o = bypass_result[10];
+	assign mul_in_operand_a_o = mul_in_operand_a_dtcm_q ?
+        dtcm_bypass_data : mul_in_operand_a_q;
+	assign mul_in_operand_b_o = mul_in_operand_b_dtcm_q ?
+        dtcm_bypass_data : mul_in_operand_b_q;
     assign mul_in_operator_o = mul_in_operator_q;
     assign mul_in_operator_type_o = mul_in_operator_type_q;
 	assign dual_meta_o = dual_meta_q;
 	assign dual_alu_valid_o = dual_alu_valid_q;
 	assign dual_alu_payload_o = dual_alu_payload_q;
-	assign dual_alu_operand_a_o = bypass_result[3];
-	assign dual_alu_operand_b_o = bypass_result[4];
+	assign dual_alu_operand_a_o = dual_in_operand_a_dtcm_q ?
+        dtcm_bypass_data : dual_alu_payload_q.operand_a;
+	assign dual_alu_operand_b_o = dual_in_operand_b_dtcm_q ?
+        dtcm_bypass_data : dual_alu_payload_q.operand_b;
 	assign dual_bru_valid_o = dual_bru_valid_q;
 	assign dual_bru_payload_o = dual_bru_payload_q;
-	assign dual_bru_operand_a_o = bypass_result[1];
-	assign dual_bru_operand_b_o = bypass_result[2];
+	assign dual_bru_operand_a_o = dual_in_branch_operand_a_dtcm_q ?
+        dtcm_bypass_data : dual_bru_payload_q.operand_a;
+	assign dual_bru_operand_b_o = dual_in_branch_operand_b_dtcm_q ?
+        dtcm_bypass_data : dual_bru_payload_q.operand_b;
 
 `ifndef SYNTHESIS
     wire issue_valid_ff = issue_pkt_i.valid;
