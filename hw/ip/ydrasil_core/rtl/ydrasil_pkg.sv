@@ -187,6 +187,20 @@ package ydrasil_pkg;
 		localparam logic [RESOURCE_WIDTH-1:0] RESOURCE_EXCLUSIVE_MASK = 6'b11_1100;
 
 	localparam int OPERATOR_WIDTH = 40;
+	localparam int UOP_CLASS_WIDTH = 4;
+	localparam int UOP_SUBOP_WIDTH = 6;
+	localparam int UOP_LSU_SUBOP_WIDTH = 3;
+	localparam logic [UOP_CLASS_WIDTH-1:0] UOP_CLASS_ALU       = 4'd0;
+	localparam logic [UOP_CLASS_WIDTH-1:0] UOP_CLASS_BJP       = 4'd1;
+	localparam logic [UOP_CLASS_WIDTH-1:0] UOP_CLASS_LOAD      = 4'd2;
+	localparam logic [UOP_CLASS_WIDTH-1:0] UOP_CLASS_STORE     = 4'd3;
+	localparam logic [UOP_CLASS_WIDTH-1:0] UOP_CLASS_CSR       = 4'd4;
+	localparam logic [UOP_CLASS_WIDTH-1:0] UOP_CLASS_SYS       = 4'd5;
+	localparam logic [UOP_CLASS_WIDTH-1:0] UOP_CLASS_MUL       = 4'd6;
+	localparam logic [UOP_CLASS_WIDTH-1:0] UOP_CLASS_BITMANIP  = 4'd7;
+	localparam logic [UOP_CLASS_WIDTH-1:0] UOP_CLASS_FPU       = 4'd8;
+	localparam logic [UOP_CLASS_WIDTH-1:0] UOP_CLASS_FP_LOAD   = 4'd9;
+	localparam logic [UOP_CLASS_WIDTH-1:0] UOP_CLASS_FP_STORE  = 4'd10;
 
 	localparam int OP_ALU_INFO_WIDTH = 12;
 	localparam int OP_ALU_LUI   = 0;
@@ -361,7 +375,6 @@ package ydrasil_pkg;
 	typedef struct packed {
 		logic                         live;
 		logic                         done;
-		logic [REGS_DATA_WIDTH-1:0]   result;
 	} ydrasil_rob_source_state_t;
 	typedef enum logic [1:0] {
 		BYPASS_NONE  = 2'b00,
@@ -577,6 +590,9 @@ package ydrasil_pkg;
 		logic                                  memory_op;
 		logic [1:0]                            lane_mask;
 		logic                                  static_pair;
+		logic [UOP_CLASS_WIDTH-1:0]            uop_class;
+		logic [UOP_SUBOP_WIDTH-1:0]            uop_subop;
+		logic [UOP_LSU_SUBOP_WIDTH-1:0]        uop_lsu_subop;
 		ydrasil_source_desc_t                  src0;
 		ydrasil_source_desc_t                  src1;
 		ydrasil_dest_desc_t                    dst;
@@ -585,6 +601,53 @@ package ydrasil_pkg;
 		ydrasil_id_ctrl_pkt_t                  ctrl;
 		ydrasil_decode_pkt_t                   decode;
 	} ydrasil_issue_pkt_t;
+
+	// The decoded elastic boundary stores only execution class and class-local
+	// sub-op. Fields duplicated by source/destination descriptors or derived
+	// from PC/class are reconstructed at the two-entry Issue skid output.
+	typedef struct packed {
+		logic                                  valid;
+		logic                                  lane1;
+		logic                                  pair_eligible;
+		logic [1:0]                            lane_mask;
+		ydrasil_source_desc_t                  src0;
+		ydrasil_source_desc_t                  src1;
+		ydrasil_dest_desc_t                    dst;
+		logic [UOP_CLASS_WIDTH-1:0]            op_class;
+		logic [UOP_SUBOP_WIDTH-1:0]            subop;
+		logic [UOP_LSU_SUBOP_WIDTH-1:0]        lsu_subop;
+		logic [INST_ADDR_WIDTH-1:0]            pc;
+		logic [INST_DATA_WIDTH-1:0]            instr;
+		logic [REGS_DATA_WIDTH-1:0]            imm;
+		logic                                  operand_b_rs_sel;
+		logic                                  operand_a_pc_sel;
+		logic                                  operand_a_imm_sel;
+		logic                                  bt_a_rs_sel;
+		logic                                  operand_b_jump_sel;
+		logic                                  pred_hit;
+		logic                                  pred_taken;
+		logic [INST_ADDR_WIDTH-1:0]            pred_target;
+		logic [1:0]                            pred_counter;
+		bp_bht_index_t                         pred_bht_index;
+		logic [CSR_ADDR_WIDTH-1:0]             csr_raddr;
+		logic [CSR_ADDR_WIDTH-1:0]             csr_waddr;
+		logic [OP_CSR_INFO_WIDTH-1:0]          csr_op_info;
+		logic [OP_SYS_INFO_WIDTH-1:0]          sys_op_info;
+		logic                                  fence_i;
+		logic                                  fp_valid;
+		logic                                  fp_illegal;
+		ydrasil_fpu_op_t                       fp_op;
+		logic [2:0]                            fp_rm;
+		logic [REGS_ADDR_WIDTH-1:0]            fp_rs1_addr;
+		logic [REGS_ADDR_WIDTH-1:0]            fp_rs2_addr;
+		logic [REGS_ADDR_WIDTH-1:0]            fp_rs3_addr;
+		logic [REGS_ADDR_WIDTH-1:0]            fp_rd_addr;
+		logic                                  fp_rs1_fpr;
+		logic                                  fp_rs2_fpr;
+		logic                                  fp_rs3_fpr;
+		logic                                  fp_rd_fpr;
+		logic                                  fp_rd_gpr;
+	} ydrasil_compact_uop_t;
 
 	// Registered Issue/EX contract. Operand selection, typed result lookup and
 	// final lane steering terminate before this packet is produced.
@@ -647,32 +710,57 @@ package ydrasil_pkg;
 
 	// Lane-B has its own Issue/EX holding cell.  Keeping this payload separate
 	// prevents the dual ALU/branch/AGU fanout from reopening issue_ex_pkt.
+	localparam logic [1:0] LANE_B_ALU = 2'd0;
+	localparam logic [1:0] LANE_B_BRU = 2'd1;
+	localparam logic [1:0] LANE_B_AGU = 2'd2;
+	localparam int LANE_B_PAYLOAD_WIDTH = 145;
+
 	typedef struct packed {
-		logic [REGS_DATA_WIDTH-1:0]           operand_a;
-		logic [REGS_DATA_WIDTH-1:0]           operand_b;
-		logic [REGS_DATA_WIDTH-1:0]           branch_operand_a;
-		logic [REGS_DATA_WIDTH-1:0]           branch_operand_b;
-		logic [REGS_DATA_WIDTH-1:0]           branch_imm;
-		logic [OPERATOR_WIDTH-1:0]            operator_info;
-		logic [OPERATOR_TYPE_WIDTH-1:0]       operator_type;
-		logic [OP_LSU_INFO_WIDTH-1:0]         operator_lsu;
-		logic [REGS_DATA_WIDTH-1:0]            store_data;
-		logic                                  store_data_valid;
+		logic [80:0]                         unused;
+		logic [REGS_DATA_WIDTH-1:0]          operand_a;
+		logic [REGS_DATA_WIDTH-1:0]          operand_b;
+	} ydrasil_lane_b_alu_payload_t;
+	typedef struct packed {
+		logic [44:0]                         unused;
+		logic [REGS_DATA_WIDTH-1:0]          operand_a;
+		logic [REGS_DATA_WIDTH-1:0]          operand_b;
+		logic [REGS_DATA_WIDTH-1:0]          store_data;
+		logic                                store_data_valid;
+		logic [UOP_LSU_SUBOP_WIDTH-1:0]      lsu_subop;
+	} ydrasil_lane_b_agu_payload_t;
+	typedef struct packed {
+		logic [REGS_DATA_WIDTH-1:0]          operand_a;
+		logic [REGS_DATA_WIDTH-1:0]          operand_b;
+		logic [REGS_DATA_WIDTH-1:0]          imm;
+		logic                                jalr;
+		logic                                pred_hit;
+		logic                                pred_taken;
+		logic [INST_ADDR_WIDTH-1:0]          pred_target;
+		logic [1:0]                          pred_counter;
+		bp_bht_index_t                       pred_bht_index;
+	} ydrasil_lane_b_bru_payload_t;
+	typedef union packed {
+		logic [LANE_B_PAYLOAD_WIDTH-1:0]     raw;
+		ydrasil_lane_b_alu_payload_t         alu;
+		ydrasil_lane_b_agu_payload_t         agu;
+		ydrasil_lane_b_bru_payload_t         bru;
+	} ydrasil_lane_b_payload_t;
+
+	// Exactly one class-specific payload crosses the Lane-B input cell.
+	// Target/next-PC and all one-hot controls are reconstructed locally.
+	typedef struct packed {
+		logic                                  valid;
+		logic [1:0]                            unit;
+		logic                                  bitmanip;
+		logic                                  load;
+		logic [UOP_SUBOP_WIDTH-1:0]            subop;
 		logic [REGS_ADDR_WIDTH-1:0]            rd_addr;
 		logic                                  rd_wen;
 		producer_id_t                          producer_id;
 		logic                                  producer_tracked;
-		logic                                  valid;
 		logic [INST_ADDR_WIDTH-1:0]            pc;
 		logic [INST_DATA_WIDTH-1:0]            instr;
-		logic                                  jalr;
-		logic [INST_ADDR_WIDTH-1:0]            branch_target;
-		logic [INST_ADDR_WIDTH-1:0]            branch_next_pc;
-		logic                                  pred_hit;
-		logic                                  pred_taken;
-		logic [INST_ADDR_WIDTH-1:0]            pred_target;
-		logic [1:0]                            pred_counter;
-		bp_bht_index_t                        pred_bht_index;
+		ydrasil_lane_b_payload_t              payload;
 	} ydrasil_dual_issue_pkt_t;
 
 endpackage

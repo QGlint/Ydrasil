@@ -29,17 +29,44 @@ import ydrasil_pkg::*;
     localparam int BANK_DEPTH = DEPTH / 2;
     localparam int BANK_ADDR_WIDTH = (BANK_DEPTH > 1) ? $clog2(BANK_DEPTH) : 1;
     localparam int COUNT_EXT_WIDTH = COUNT_WIDTH + 1;
+    localparam int INDEX_EXT_WIDTH = INDEX_WIDTH + 1;
+    localparam logic [INDEX_EXT_WIDTH-1:0] DEPTH_EXT =
+        INDEX_EXT_WIDTH'(DEPTH);
 
     reg [COUNT_WIDTH-1:0] count_q;
     reg [INDEX_WIDTH-1:0] head_q;
     reg [INDEX_WIDTH-1:0] tail_q;
 
-    wire [INDEX_WIDTH-1:0] head1 = head_q + INDEX_WIDTH'(1);
-    wire [INDEX_WIDTH-1:0] head_after_pop =
-        head_q + INDEX_WIDTH'(read_pop_count_i);
+    wire [INDEX_EXT_WIDTH-1:0] head1_sum =
+        INDEX_EXT_WIDTH'(head_q) + INDEX_EXT_WIDTH'(1);
+    wire [INDEX_WIDTH-1:0] head1 = (head1_sum >= DEPTH_EXT) ?
+        INDEX_WIDTH'(head1_sum - DEPTH_EXT) : INDEX_WIDTH'(head1_sum);
+    wire [INDEX_EXT_WIDTH-1:0] read_head_sum =
+        INDEX_EXT_WIDTH'(head_q) + INDEX_EXT_WIDTH'(read_pop_count_i);
+    wire [INDEX_WIDTH-1:0] head_after_pop = (read_head_sum >= DEPTH_EXT) ?
+        INDEX_WIDTH'(read_head_sum - DEPTH_EXT) : INDEX_WIDTH'(read_head_sum);
+    wire [INDEX_EXT_WIDTH-1:0] read_head1_sum =
+        INDEX_EXT_WIDTH'(head_after_pop) + INDEX_EXT_WIDTH'(1);
     wire [INDEX_WIDTH-1:0] head_after_pop1 =
-        head_after_pop + INDEX_WIDTH'(1);
-    wire [INDEX_WIDTH-1:0] tail1 = tail_q + INDEX_WIDTH'(1);
+        (read_head1_sum >= DEPTH_EXT) ?
+        INDEX_WIDTH'(read_head1_sum - DEPTH_EXT) :
+        INDEX_WIDTH'(read_head1_sum);
+    wire [INDEX_EXT_WIDTH-1:0] tail1_sum =
+        INDEX_EXT_WIDTH'(tail_q) + INDEX_EXT_WIDTH'(1);
+    wire [INDEX_WIDTH-1:0] tail1 = (tail1_sum >= DEPTH_EXT) ?
+        INDEX_WIDTH'(tail1_sum - DEPTH_EXT) : INDEX_WIDTH'(tail1_sum);
+    wire [INDEX_EXT_WIDTH-1:0] state_head_sum =
+        INDEX_EXT_WIDTH'(head_q) + INDEX_EXT_WIDTH'(pop_count_i);
+    wire [INDEX_WIDTH-1:0] state_head_next =
+        (state_head_sum >= DEPTH_EXT) ?
+        INDEX_WIDTH'(state_head_sum - DEPTH_EXT) :
+        INDEX_WIDTH'(state_head_sum);
+    wire [INDEX_EXT_WIDTH-1:0] state_tail_sum =
+        INDEX_EXT_WIDTH'(tail_q) + INDEX_EXT_WIDTH'(push_count_i);
+    wire [INDEX_WIDTH-1:0] state_tail_next =
+        (state_tail_sum >= DEPTH_EXT) ?
+        INDEX_WIDTH'(state_tail_sum - DEPTH_EXT) :
+        INDEX_WIDTH'(state_tail_sum);
     wire [BANK_ADDR_WIDTH-1:0] head_after_pop_addr =
         head_after_pop[INDEX_WIDTH-1:1];
     wire [BANK_ADDR_WIDTH-1:0] head_after_pop1_addr =
@@ -187,18 +214,26 @@ import ydrasil_pkg::*;
             count_q <= count_q - COUNT_WIDTH'(pop_count_i) +
                 COUNT_WIDTH'(push_count_i);
             if (pop_count_i != 2'd0)
-                head_q <= head_q + INDEX_WIDTH'(pop_count_i);
+                head_q <= state_head_next;
             if (push_count_i != 2'd0)
-                tail_q <= tail_q + INDEX_WIDTH'(push_count_i);
+                tail_q <= state_tail_next;
         end
     end
 
 `ifndef SYNTHESIS
+    initial begin
+        assert ((DEPTH >= 2) && ((DEPTH % 2) == 0))
+            else $fatal(1, "fetch queue depth must be positive and even");
+    end
     always_ff @(posedge clk) begin
-        if (rst_n && !flush_i)
+        if (rst_n && !flush_i) begin
+            assert ((head_q < INDEX_WIDTH'(DEPTH)) &&
+                    (tail_q < INDEX_WIDTH'(DEPTH)))
+                else $fatal(1, "fetch queue ring pointer out of range");
             assert (count_q - COUNT_WIDTH'(pop_count_i) +
                     COUNT_WIDTH'(push_count_i) <= COUNT_WIDTH'(DEPTH))
                 else $fatal(1, "fetch queue ring overflow");
+        end
     end
 `endif
 endmodule
@@ -276,25 +311,6 @@ import ydrasil_pkg::*;
     } fetch_payload_t;
     localparam int FETCH_PAYLOAD_WIDTH = $bits(fetch_payload_t);
 
-    function automatic fetch_addr_token_t pack_fetch_addr(input logic [31:0] addr);
-        logic is_dtcm;
-        begin
-            is_dtcm = addr[31:ITCM_ADDR_WIDTH+2] ==
-                DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2];
-            pack_fetch_addr = {is_dtcm, addr[ITCM_ADDR_WIDTH+1:2]};
-        end
-    endfunction
-
-    function automatic logic [31:0] unpack_fetch_addr(input fetch_addr_token_t token);
-        begin
-            unpack_fetch_addr = {
-                token[FETCH_ADDR_TOKEN_WIDTH-1] ?
-                    DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2] :
-                    ITCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2],
-                token[ITCM_ADDR_WIDTH-1:0], 2'b00};
-        end
-    endfunction
-
     reg [31:0] pc_q;
     reg        mem_req_valid_q;
     reg        mem_req_two_q;
@@ -325,12 +341,18 @@ import ydrasil_pkg::*;
 	wire [TARGET_FF_LANE_WIDTH-1:0] target_ff_lane1 =
 		target_ff_word[TARGET_FF_DATA_WIDTH-1:TARGET_FF_LANE_WIDTH];
 	fetch_addr_token_t target_ff_train_pc_token;
-	assign target_ff_train_pc_token = pack_fetch_addr(target_ff_train_i.pc);
+	assign target_ff_train_pc_token = {
+		target_ff_train_i.pc[31:ITCM_ADDR_WIDTH+2] ==
+			DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2],
+		target_ff_train_i.pc[ITCM_ADDR_WIDTH+1:2]};
 	wire [TARGET_FF_TAG_WIDTH-1:0] target_ff_train_tag =
 		target_ff_train_pc_token[FETCH_ADDR_TOKEN_WIDTH-1:6];
 	wire [TARGET_FF_LANE_WIDTH-1:0] target_ff_train_lane =
 		{{(TARGET_FF_LANE_WIDTH-TARGET_FF_LANE_DATA_WIDTH){1'b0}},
-		 target_ff_train_tag, pack_fetch_addr(target_ff_train_i.target)};
+		 target_ff_train_tag,
+		 {target_ff_train_i.target[31:ITCM_ADDR_WIDTH+2] ==
+			DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2],
+		  target_ff_train_i.target[ITCM_ADDR_WIDTH+1:2]}};
 	wire [TARGET_FF_DATA_WIDTH-1:0] target_ff_write_data =
 		target_ff_train_i.pc[2] ?
 		{target_ff_train_lane, {TARGET_FF_LANE_WIDTH{1'b0}}} :
@@ -420,22 +442,35 @@ import ydrasil_pkg::*;
 
     fetch_payload_t fetchq_push_payload0;
     fetch_payload_t fetchq_push_payload1;
+    wire [31:0] mem_req_pc_plus4 = mem_req_pc_q + 32'd4;
     always_comb begin
         fetchq_push_payload0 = '0;
-        fetchq_push_payload0.pc = pack_fetch_addr(mem_req_pc_q);
+        fetchq_push_payload0.pc = {
+            mem_req_pc_q[31:ITCM_ADDR_WIDTH+2] ==
+                DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2],
+            mem_req_pc_q[ITCM_ADDR_WIDTH+1:2]};
         fetchq_push_payload0.instr = if_mem_rdata_i;
         fetchq_push_payload0.pred_hit = bp_predict_hit_i;
         fetchq_push_payload0.pred_taken = bp_predict_taken_i;
-        fetchq_push_payload0.pred_target = pack_fetch_addr(bp_predict_target_i);
+        fetchq_push_payload0.pred_target = {
+            bp_predict_target_i[31:ITCM_ADDR_WIDTH+2] ==
+                DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2],
+            bp_predict_target_i[ITCM_ADDR_WIDTH+1:2]};
         fetchq_push_payload0.pred_counter = bp_predict_counter_i;
         fetchq_push_payload0.pred_bht_index = bp_predict_bht_index_i;
 
         fetchq_push_payload1 = '0;
-        fetchq_push_payload1.pc = pack_fetch_addr(mem_req_pc_q + 32'd4);
+        fetchq_push_payload1.pc = {
+            mem_req_pc_plus4[31:ITCM_ADDR_WIDTH+2] ==
+                DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2],
+            mem_req_pc_plus4[ITCM_ADDR_WIDTH+1:2]};
         fetchq_push_payload1.instr = if_mem_rdata1_i;
         fetchq_push_payload1.pred_hit = bp_predict1_hit_i;
         fetchq_push_payload1.pred_taken = bp_predict1_taken_i;
-        fetchq_push_payload1.pred_target = pack_fetch_addr(bp_predict1_target_i);
+        fetchq_push_payload1.pred_target = {
+            bp_predict1_target_i[31:ITCM_ADDR_WIDTH+2] ==
+                DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2],
+            bp_predict1_target_i[ITCM_ADDR_WIDTH+1:2]};
         fetchq_push_payload1.pred_counter = bp_predict1_counter_i;
         fetchq_push_payload1.pred_bht_index = bp_predict1_bht_index_i;
     end
@@ -467,7 +502,10 @@ import ydrasil_pkg::*;
 	wire fetch_two = !fetch_addr_is_dtcm && !fetch_addr[2];
 	assign fetch_addr1 = fetch_addr + 32'd4;
 	fetch_addr_token_t target_ff_lookup_token;
-	assign target_ff_lookup_token = pack_fetch_addr(fetch_addr);
+	assign target_ff_lookup_token = {
+		fetch_addr[31:ITCM_ADDR_WIDTH+2] ==
+			DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2],
+		fetch_addr[ITCM_ADDR_WIDTH+1:2]};
 	wire [TARGET_FF_TAG_WIDTH-1:0] target_ff_lookup_tag =
 		target_ff_lookup_token[FETCH_ADDR_TOKEN_WIDTH-1:6];
 	wire [TARGET_FF_TAG_WIDTH-1:0] target_ff_tag0 = fetch_addr[2] ?
@@ -475,11 +513,21 @@ import ydrasil_pkg::*;
 		target_ff_lane0[TARGET_FF_LANE_DATA_WIDTH-1:FETCH_ADDR_TOKEN_WIDTH];
 	wire [TARGET_FF_TAG_WIDTH-1:0] target_ff_tag1 =
 		target_ff_lane1[TARGET_FF_LANE_DATA_WIDTH-1:FETCH_ADDR_TOKEN_WIDTH];
-	wire [31:0] target_ff_target0 = unpack_fetch_addr(fetch_addr[2] ?
+	wire fetch_addr_token_t target_ff_target0_token = fetch_addr[2] ?
 		target_ff_lane1[FETCH_ADDR_TOKEN_WIDTH-1:0] :
-		target_ff_lane0[FETCH_ADDR_TOKEN_WIDTH-1:0]);
-	wire [31:0] target_ff_target1 =
-		unpack_fetch_addr(target_ff_lane1[FETCH_ADDR_TOKEN_WIDTH-1:0]);
+		target_ff_lane0[FETCH_ADDR_TOKEN_WIDTH-1:0];
+	wire fetch_addr_token_t target_ff_target1_token =
+		target_ff_lane1[FETCH_ADDR_TOKEN_WIDTH-1:0];
+	wire [31:0] target_ff_target0 = {
+		target_ff_target0_token[FETCH_ADDR_TOKEN_WIDTH-1] ?
+			DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2] :
+			ITCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2],
+		target_ff_target0_token[ITCM_ADDR_WIDTH-1:0], 2'b00};
+	wire [31:0] target_ff_target1 = {
+		target_ff_target1_token[FETCH_ADDR_TOKEN_WIDTH-1] ?
+			DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2] :
+			ITCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2],
+		target_ff_target1_token[ITCM_ADDR_WIDTH-1:0], 2'b00};
     wire target_ff_hit0 =
 		(fetch_addr[2] ? target_ff_valid1_q[target_ff_index] :
 		 target_ff_valid0_q[target_ff_index]) &&
@@ -505,12 +553,32 @@ import ydrasil_pkg::*;
     assign bp_lookup_pc_o = fetch_addr;
 
     assign if_id_valid_o = fetchq_valid0;
-    assign if_id_pc_o = fetchq_valid0 ? unpack_fetch_addr(fetchq_payload0.pc) : RESET_INS;
+    wire [31:0] fetchq_pc0 = {
+        fetchq_payload0.pc[FETCH_ADDR_TOKEN_WIDTH-1] ?
+            DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2] :
+            ITCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2],
+        fetchq_payload0.pc[ITCM_ADDR_WIDTH-1:0], 2'b00};
+    wire [31:0] fetchq_pred_target0 = {
+        fetchq_payload0.pred_target[FETCH_ADDR_TOKEN_WIDTH-1] ?
+            DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2] :
+            ITCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2],
+        fetchq_payload0.pred_target[ITCM_ADDR_WIDTH-1:0], 2'b00};
+    wire [31:0] fetchq_pc1 = {
+        fetchq_payload1.pc[FETCH_ADDR_TOKEN_WIDTH-1] ?
+            DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2] :
+            ITCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2],
+        fetchq_payload1.pc[ITCM_ADDR_WIDTH-1:0], 2'b00};
+    wire [31:0] fetchq_pred_target1 = {
+        fetchq_payload1.pred_target[FETCH_ADDR_TOKEN_WIDTH-1] ?
+            DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2] :
+            ITCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2],
+        fetchq_payload1.pred_target[ITCM_ADDR_WIDTH-1:0], 2'b00};
+    assign if_id_pc_o = fetchq_valid0 ? fetchq_pc0 : RESET_INS;
     assign if_id_instr_o = fetchq_valid0 ? fetchq_payload0.instr : RV32I_INS_NOP;
     assign if_id_pred_hit_o = fetchq_valid0 && fetchq_payload0.pred_hit;
     assign if_id_pred_taken_o = fetchq_valid0 && fetchq_payload0.pred_taken;
     assign if_id_pred_target_o = (fetchq_valid0 && fetchq_payload0.pred_hit) ?
-        unpack_fetch_addr(fetchq_payload0.pred_target) : '0;
+        fetchq_pred_target0 : '0;
     assign if_id_pred_counter_o = fetchq_valid0 ?
         fetchq_payload0.pred_counter : 2'b01;
     assign if_id_pred_bht_index_o = fetchq_valid0 ?
@@ -518,12 +586,12 @@ import ydrasil_pkg::*;
 
     assign if_id1_valid_o = fetchq_valid1;
     assign if_id1_pc_o = fetchq_valid1 ?
-        unpack_fetch_addr(fetchq_payload1.pc) : (RESET_INS + 32'd4);
+        fetchq_pc1 : (RESET_INS + 32'd4);
     assign if_id1_instr_o = fetchq_valid1 ? fetchq_payload1.instr : RV32I_INS_NOP;
     assign if_id1_pred_hit_o = fetchq_valid1 && fetchq_payload1.pred_hit;
     assign if_id1_pred_taken_o = fetchq_valid1 && fetchq_payload1.pred_taken;
     assign if_id1_pred_target_o = (fetchq_valid1 && fetchq_payload1.pred_hit) ?
-        unpack_fetch_addr(fetchq_payload1.pred_target) : '0;
+        fetchq_pred_target1 : '0;
     assign if_id1_pred_counter_o = fetchq_valid1 ?
         fetchq_payload1.pred_counter : 2'b01;
     assign if_id1_pred_bht_index_o = fetchq_valid1 ?

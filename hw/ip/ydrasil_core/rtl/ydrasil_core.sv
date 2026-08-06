@@ -345,6 +345,14 @@ import ydrasil_axi_pkg::*;
 	ydrasil_rob_source_state_t      issue_src1_state;
 	ydrasil_rob_source_state_t      issue_src2_state;
 	ydrasil_rob_source_state_t      issue_src3_state;
+	wire [REGS_DATA_WIDTH-1:0]      issue_src0_value;
+	wire [REGS_DATA_WIDTH-1:0]      issue_src1_value;
+	wire [REGS_DATA_WIDTH-1:0]      issue_src2_value;
+	wire [REGS_DATA_WIDTH-1:0]      issue_src3_value;
+	producer_slot_t                 retire_value_slot0;
+	producer_slot_t                 retire_value_slot1;
+	wire [REGS_DATA_WIDTH-1:0]      retire_value0;
+	wire [REGS_DATA_WIDTH-1:0]      retire_value1;
 	wire                            issue_at_rob_head;
 	wire [ydrasil_pkg::PRODUCER_NUM-1:0]
 	                                branch_recovery_keep_mask;
@@ -353,13 +361,14 @@ import ydrasil_axi_pkg::*;
 	ydrasil_issue_pkt_t             id_issue_pkt1;
 	ydrasil_issue_pkt_t             dispatch_issue_pkt;
 	ydrasil_issue_pkt_t             dispatch_issue_pkt1;
-	// ID and issue are separated by a packed, four-entry elastic pipeline.
-	// Its input-ready signal comes only from registered occupancy, never from
-	// the current scoreboard result, so decode FIFO state is off the EX->ID
-	// combinational path.
-	ydrasil_issue_pkt_t             issue_pipe_q [0:3];
-	reg [1:0]                       issue_pipe_head_q;
-	reg [1:0]                       issue_pipe_tail_q;
+	// Decode capacity lives primarily in the narrow fetch-word queue. Only two
+	// compact uops remain here as the Issue skid boundary.
+	ydrasil_compact_uop_t           issue_pipe_q0;
+	ydrasil_compact_uop_t           issue_pipe_q1;
+	ydrasil_compact_uop_t           dispatch_compact_uop;
+	ydrasil_compact_uop_t           dispatch_compact_uop1;
+	ydrasil_compact_uop_t           issue_head_compact_uop;
+	ydrasil_compact_uop_t           issue_head_compact_uop1;
 	reg [2:0]                       issue_pipe_count_q;
 	wire                            issue_ready;
 	wire                            issue_consume_two;
@@ -376,65 +385,85 @@ import ydrasil_axi_pkg::*;
 	wire                            dispatch_ready;
 	wire                            issue_pair_execute = issue_consume_two &&
 		!issue_slot1_replay;
-	// Reserve space for the largest (two instruction) ID transfer. The ready
-	// decision is entirely registered-state based.
-	wire                            issue_pipe_has_room =
-		(issue_pipe_count_q <= 3'd2) && dispatch_ready;
+	wire [1:0]                      issue_pipe_pop_count =
+		(issue_ready && (issue_pipe_count_q != '0)) ?
+		(issue_pair_execute ? 2'd2 : 2'd1) : '0;
+	wire [2:0]                      issue_pipe_post_pop_count =
+		issue_pipe_count_q - 3'(issue_pipe_pop_count);
+	// A refill may use slots released on this edge. The stored head is
+	// independent of decode, so this elastic ready path cannot feed its source.
+	wire                            issue_pipe_has_room = dispatch_ready &&
+		(id_issue_pkt.valid && id_issue_pkt.pair_eligible ?
+		 (issue_pipe_post_pop_count == '0) :
+		 (issue_pipe_post_pop_count <= 3'd1));
 	wire                            issue_pipe_push_two = issue_pipe_has_room &&
 		id_issue_pkt.valid && id_issue_pkt.pair_eligible;
 	wire                            issue_pipe_push = issue_pipe_has_room &&
 		id_issue_pkt.valid;
 	wire [1:0]                      issue_pipe_push_count = issue_pipe_push ?
 		(issue_pipe_push_two ? 2'd2 : 2'd1) : '0;
-	wire [1:0]                      issue_pipe_pop_count =
-		(issue_ready && (issue_pipe_count_q != '0)) ?
-		(issue_pair_execute ? 2'd2 : 2'd1) : '0;
-	wire [1:0]                      issue_pipe_head1 = issue_pipe_head_q + 2'd1;
-	wire [1:0]                      issue_pipe_tail1 = issue_pipe_tail_q + 2'd1;
+
+	ydrasil_issue_compactor u_issue_compactor0 (
+		.issue_pkt_i   (dispatch_issue_pkt),
+		.compact_uop_o (dispatch_compact_uop)
+	);
+	ydrasil_issue_compactor u_issue_compactor1 (
+		.issue_pkt_i   (dispatch_issue_pkt1),
+		.compact_uop_o (dispatch_compact_uop1)
+	);
+	ydrasil_issue_expander u_issue_expander0 (
+		.compact_uop_i (issue_head_compact_uop),
+		.issue_pkt_o   (issue_pkt)
+	);
+	ydrasil_issue_expander u_issue_expander1 (
+		.compact_uop_i (issue_head_compact_uop1),
+		.issue_pkt_o   (issue_pkt1)
+	);
+
 	always_comb begin
-		issue_pkt = issue_pipe_q[issue_pipe_head_q];
+		issue_head_compact_uop = issue_pipe_q0;
 		if (issue_pipe_count_q == '0) begin
-			// Keep occupancy out of the payload cone. Only unguarded control
-			// fields are cleared for an empty slot; valid gates the payload.
-			issue_pkt.valid = 1'b0;
-			issue_pkt.pair_eligible = 1'b0;
-			issue_pkt.lane_mask = '0;
-			issue_pkt.ctrl.lsu_req = 1'b0;
-			issue_pkt.ctrl.serialize_before = 1'b0;
+			issue_head_compact_uop.valid = 1'b0;
+			issue_head_compact_uop.pair_eligible = 1'b0;
+			issue_head_compact_uop.lane_mask = '0;
 		end
-		issue_pkt1 = issue_pipe_q[issue_pipe_head1];
+		issue_head_compact_uop1 = issue_pipe_q1;
 		if (issue_pipe_count_q < 3'd2) begin
-			issue_pkt1.valid = 1'b0;
-			issue_pkt1.lane_mask = '0;
-			issue_pkt1.ctrl.lsu_req = 1'b0;
+			issue_head_compact_uop1.valid = 1'b0;
+			issue_head_compact_uop1.lane_mask = '0;
 		end
 	end
+
 	always_ff @(posedge clk) begin
 		if (!rst_n) begin
-			issue_pipe_head_q <= '0;
-			issue_pipe_tail_q <= '0;
 			issue_pipe_count_q <= '0;
-			issue_pipe_q[0] <= '0;
-			issue_pipe_q[1] <= '0;
-			issue_pipe_q[2] <= '0;
-			issue_pipe_q[3] <= '0;
 		end else if (pipeline_flush) begin
-			issue_pipe_head_q <= '0;
-			issue_pipe_tail_q <= '0;
 			issue_pipe_count_q <= '0;
 		end else begin
 			if (issue_pipe_push) begin
-					issue_pipe_q[issue_pipe_tail_q] <= dispatch_issue_pkt;
+				if (issue_pipe_post_pop_count == '0) begin
+					issue_pipe_q0 <= dispatch_compact_uop;
 					if (issue_pipe_push_two)
-						issue_pipe_q[issue_pipe_tail1] <= dispatch_issue_pkt1;
-				issue_pipe_tail_q <= issue_pipe_tail_q + issue_pipe_push_count;
+						issue_pipe_q1 <= dispatch_compact_uop1;
+				end else begin
+					if (issue_pipe_pop_count == 2'd1)
+						issue_pipe_q0 <= issue_pipe_q1;
+					issue_pipe_q1 <= dispatch_compact_uop;
+				end
+			end else if (issue_pipe_pop_count == 2'd1) begin
+				issue_pipe_q0 <= issue_pipe_q1;
 			end
-			if (issue_pipe_pop_count != '0)
-				issue_pipe_head_q <= issue_pipe_head_q + issue_pipe_pop_count;
 			issue_pipe_count_q <= issue_pipe_count_q + issue_pipe_push_count -
 				issue_pipe_pop_count;
 		end
 	end
+`ifndef SYNTHESIS
+	always_ff @(posedge clk) begin
+		if (rst_n)
+			assert (issue_pipe_count_q <= 3'd2)
+				else $fatal(1, "compact issue skid occupancy overflow");
+	end
+`endif
 	wire                            decode_valid = issue_pkt.valid;
 	assign fence_resume_pc = issue_fence_next_pc;
 	assign pipeline_flush = flush_id | id_fence_i;
@@ -503,9 +532,9 @@ import ydrasil_axi_pkg::*;
 	wire                             dual_instret_inc;
 	wire [31:0]                      dual_operand_a;
 	wire [31:0]                      dual_operand_b;
-	wire [ydrasil_pkg::OPERATOR_WIDTH-1:0] dual_operator;
-	wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] dual_operator_type;
-	wire [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0] dual_operator_lsu;
+	logic [ydrasil_pkg::OPERATOR_WIDTH-1:0] dual_operator;
+	logic [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] dual_operator_type;
+	logic [ydrasil_pkg::OP_LSU_INFO_WIDTH-1:0] dual_operator_lsu;
 	wire [31:0]                      dual_store_data;
 	wire                             dual_store_data_valid;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] dual_rf_waddr;
@@ -558,13 +587,36 @@ import ydrasil_axi_pkg::*;
 	assign id_ex_producer_tracked = alu_in_valid;
 	assign id_alu_rf_wen_rd = alu_in_rd_wen;
 	assign id_rf_waddr_rd = alu_in_rd_addr;
-	assign dual_operand_a = dual_in.operand_a;
-	assign dual_operand_b = dual_in.operand_b;
-	assign dual_operator = dual_in.operator_info;
-	assign dual_operator_type = dual_in.operator_type;
-	assign dual_operator_lsu = dual_in.operator_lsu;
-	assign dual_store_data = dual_in.store_data;
-	assign dual_store_data_valid = dual_in.store_data_valid;
+	assign dual_operand_a = (dual_in.unit == LANE_B_ALU) ?
+		dual_in.payload.alu.operand_a :
+		(dual_in.unit == LANE_B_AGU) ?
+		dual_in.payload.agu.operand_a : dual_in.pc;
+	assign dual_operand_b = (dual_in.unit == LANE_B_ALU) ?
+		dual_in.payload.alu.operand_b :
+		(dual_in.unit == LANE_B_AGU) ?
+		dual_in.payload.agu.operand_b : 32'd4;
+	always_comb begin
+		dual_operator = '0;
+		dual_operator_type = '0;
+		dual_operator_lsu = '0;
+		if (dual_in.subop < UOP_SUBOP_WIDTH'(OPERATOR_WIDTH))
+			dual_operator[dual_in.subop] = 1'b1;
+		unique case (dual_in.unit)
+			LANE_B_BRU:
+				dual_operator_type[OPERATOR_TYPE_BJP] = 1'b1;
+			LANE_B_AGU: begin
+				dual_operator_type[OPERATOR_TYPE_LOAD] = dual_in.load;
+				dual_operator_type[OPERATOR_TYPE_STORE] = !dual_in.load;
+				dual_operator_lsu[dual_in.payload.agu.lsu_subop] = 1'b1;
+			end
+			default: begin
+				dual_operator_type[OPERATOR_TYPE_ALU] = !dual_in.bitmanip;
+				dual_operator_type[OPERATOR_TYPE_BITMANIP] = dual_in.bitmanip;
+			end
+		endcase
+	end
+	assign dual_store_data = dual_in.payload.agu.store_data;
+	assign dual_store_data_valid = dual_in.payload.agu.store_data_valid;
 	assign dual_rf_waddr = dual_in.rd_addr;
 	assign dual_id_ex_producer_id = dual_in.producer_id;
 	assign dual_id_ex_producer_tracked = dual_in.producer_tracked;
@@ -994,7 +1046,7 @@ import ydrasil_axi_pkg::*;
 	assign bp_predict1_counter = bp_bram_predict1_counter;
 	assign bp_predict1_bht_index = bp_bram_predict1_bht_index;
 
-		ydrasil_if_stage #(.FETCHQ_DEPTH(8)) u_ydrasil_if_stage (
+		ydrasil_if_stage #(.FETCHQ_DEPTH(10)) u_ydrasil_if_stage (
 			.clk           (clk),
 			.rst_n         (rst_n),
 			.stall_if_i      (!decode_if_ready),
@@ -1081,6 +1133,10 @@ import ydrasil_axi_pkg::*;
 		.issue_src1_state_i  (issue_src1_state),
 		.issue_src2_state_i  (issue_src2_state),
 		.issue_src3_state_i  (issue_src3_state),
+		.issue_src0_value_i  (issue_src0_value),
+		.issue_src1_value_i  (issue_src1_value),
+		.issue_src2_value_i  (issue_src2_value),
+		.issue_src3_value_i  (issue_src3_value),
 			.early_main_bypass_data_i(main_early_bypass_data),
 			.early_dual_bypass_data_i(dual_early_bypass_data),
 			.lsu_idle_i          (lsu_status_pkt.idle),
@@ -1258,30 +1314,30 @@ import ydrasil_axi_pkg::*;
 		.flush_i             (flush_ex),
 		.interrupt_i         (interrupt),
 		.valid_i             (ex_accept_valid1),
-			.operand_a_i         (dual_in.operand_a),
-			.operand_b_i         (dual_in.operand_b),
-			.branch_operand_a_i  (dual_in.branch_operand_a),
-			.branch_operand_b_i  (dual_in.branch_operand_b),
-			.branch_imm_i        (dual_in.branch_imm),
-			.operator_i          (dual_in.operator_info),
-			.operator_type_i     (dual_in.operator_type),
-			.operator_lsu_i      (dual_in.operator_lsu),
-			.store_data_i        (dual_in.store_data),
-			.store_data_valid_i  (dual_in.store_data_valid),
+			.operand_a_i         (dual_operand_a),
+			.operand_b_i         (dual_operand_b),
+			.branch_operand_a_i  (dual_in.payload.bru.operand_a),
+			.branch_operand_b_i  (dual_in.payload.bru.operand_b),
+			.branch_imm_i        (dual_in.payload.bru.imm),
+			.operator_i          (dual_operator),
+			.operator_type_i     (dual_operator_type),
+			.operator_lsu_i      (dual_operator_lsu),
+			.store_data_i        (dual_store_data),
+			.store_data_valid_i  (dual_store_data_valid),
 			.rd_addr_i           (dual_in.rd_addr),
 			.rd_wen_i            (dual_in.rd_wen),
 			.producer_id_i       (dual_in.producer_id),
 			.producer_tracked_i  (dual_in.producer_tracked),
 			.pc_i                (dual_in.pc),
 			.instr_i             (dual_in.instr),
-			.jalr_i              (dual_in.jalr),
-			.branch_target_i     (dual_in.branch_target),
-			.branch_next_pc_i    (dual_in.branch_next_pc),
-			.pred_hit_i          (dual_in.pred_hit),
-			.pred_taken_i        (dual_in.pred_taken),
-			.pred_target_i       (dual_in.pred_target),
-			.pred_counter_i      (dual_in.pred_counter),
-			.pred_bht_index_i    (dual_in.pred_bht_index),
+			.jalr_i              (dual_in.payload.bru.jalr),
+			.branch_target_i     (dual_in.pc + dual_in.payload.bru.imm),
+			.branch_next_pc_i    (dual_in.pc + 32'd4),
+			.pred_hit_i          (dual_in.payload.bru.pred_hit),
+			.pred_taken_i        (dual_in.payload.bru.pred_taken),
+			.pred_target_i       (dual_in.payload.bru.pred_target),
+			.pred_counter_i      (dual_in.payload.bru.pred_counter),
+			.pred_bht_index_i    (dual_in.payload.bru.pred_bht_index),
 		.trap_redirect_addr_i(trap_redirect_addr),
 		.completion_o        (dual_alu_fwd_pkt),
 		.early_bypass_data_o(dual_early_bypass_data),
@@ -1343,6 +1399,27 @@ import ydrasil_axi_pkg::*;
 		,.rf_rdata_rs4_o(rf_rdata_rs4)
 	);
 
+	ydrasil_value_file u_ydrasil_value_file (
+		.clk               (clk),
+		.completion_bus_i  (completion_bus),
+		.read_slot0_i      (issue_pkt.src0.producer_tag[
+			PRODUCER_SLOT_WIDTH-1:0]),
+		.read_slot1_i      (issue_pkt.src1.producer_tag[
+			PRODUCER_SLOT_WIDTH-1:0]),
+		.read_slot2_i      (issue_pkt1.src0.producer_tag[
+			PRODUCER_SLOT_WIDTH-1:0]),
+		.read_slot3_i      (issue_pkt1.src1.producer_tag[
+			PRODUCER_SLOT_WIDTH-1:0]),
+		.retire_slot0_i    (retire_value_slot0),
+		.retire_slot1_i    (retire_value_slot1),
+		.read_data0_o      (issue_src0_value),
+		.read_data1_o      (issue_src1_value),
+		.read_data2_o      (issue_src2_value),
+		.read_data3_o      (issue_src3_value),
+		.retire_data0_o    (retire_value0),
+		.retire_data1_o    (retire_value1)
+	);
+
 		ydrasil_ctrl u_ctrl (
 			.clk               (clk),
 			.rst_n             (rst_n),
@@ -1364,6 +1441,8 @@ import ydrasil_axi_pkg::*;
 			.completion_bus_i  (completion_bus),
 			.trap_stall_i      (trap_stall),
 			.ex_mul_stall_i     (ex_backend_stall),
+			.retire_value0_i   (retire_value0),
+			.retire_value1_i   (retire_value1),
 			.dispatch_pkt_o    (dispatch_issue_pkt),
 			.dispatch_pkt1_o   (dispatch_issue_pkt1),
 			.dispatch_ready_o  (dispatch_ready),
@@ -1377,6 +1456,8 @@ import ydrasil_axi_pkg::*;
 			.ex_accept_valid1_o(ex_accept_valid1),
 			.retire_commit_o  (commit_pkt),
 			.retire_commit1_o (commit_pkt1),
+			.retire_value_slot0_o(retire_value_slot0),
+			.retire_value_slot1_o(retire_value_slot1),
 		.stall_if_o        (stall_if),
 		.stall_id_o        (stall_id),
 		.bubble_id_o       (bubble_id),

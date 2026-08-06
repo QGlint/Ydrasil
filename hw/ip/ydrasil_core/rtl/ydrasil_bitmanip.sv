@@ -1,3 +1,51 @@
+module ydrasil_clmul_karatsuba #(
+    parameter int WIDTH = 32
+) (
+    input  wire [WIDTH-1:0]     operand_a_i,
+    input  wire [WIDTH-1:0]     operand_b_i,
+    output wire [(2*WIDTH)-1:0] product_o
+);
+    generate
+        if (WIDTH == 2) begin : g_base
+            assign product_o = {
+                1'b0,
+                operand_a_i[1] & operand_b_i[1],
+                (operand_a_i[1] & operand_b_i[0]) ^
+                    (operand_a_i[0] & operand_b_i[1]),
+                operand_a_i[0] & operand_b_i[0]
+            };
+        end else begin : g_recursive
+            localparam int HALF_WIDTH = WIDTH / 2;
+            wire [WIDTH-1:0] product_low;
+            wire [WIDTH-1:0] product_high;
+            wire [WIDTH-1:0] product_cross_raw;
+            wire [WIDTH-1:0] product_cross =
+                product_cross_raw ^ product_low ^ product_high;
+
+            ydrasil_clmul_karatsuba #(.WIDTH(HALF_WIDTH)) u_low (
+                .operand_a_i(operand_a_i[HALF_WIDTH-1:0]),
+                .operand_b_i(operand_b_i[HALF_WIDTH-1:0]),
+                .product_o(product_low)
+            );
+            ydrasil_clmul_karatsuba #(.WIDTH(HALF_WIDTH)) u_high (
+                .operand_a_i(operand_a_i[WIDTH-1:HALF_WIDTH]),
+                .operand_b_i(operand_b_i[WIDTH-1:HALF_WIDTH]),
+                .product_o(product_high)
+            );
+            ydrasil_clmul_karatsuba #(.WIDTH(HALF_WIDTH)) u_cross (
+                .operand_a_i(operand_a_i[HALF_WIDTH-1:0] ^
+                    operand_a_i[WIDTH-1:HALF_WIDTH]),
+                .operand_b_i(operand_b_i[HALF_WIDTH-1:0] ^
+                    operand_b_i[WIDTH-1:HALF_WIDTH]),
+                .product_o(product_cross_raw)
+            );
+            assign product_o = {{WIDTH{1'b0}}, product_low} ^
+                {{HALF_WIDTH{1'b0}}, product_cross, {HALF_WIDTH{1'b0}}} ^
+                {product_high, {WIDTH{1'b0}}};
+        end
+    endgenerate
+endmodule
+
 module ydrasil_bitmanip
 import ydrasil_pkg::*;
 (
@@ -19,95 +67,12 @@ import ydrasil_pkg::*;
 
     wire [REGS_DATA_WIDTH-1:0] bit_index_mask = {{(REGS_DATA_WIDTH-1){1'b0}}, 1'b1} << shamt;
 
-    // Recursive GF(2) Karatsuba product.  The base case is two bits so the
-    // 32-bit product uses 3^4 small partial products instead of 32 64-bit
-    // conditional shifts and their reduction tree.
-    function automatic [3:0] clmul2;
-        input [1:0] operand_a;
-        input [1:0] operand_b;
-        begin
-            clmul2 = {
-                1'b0,
-                operand_a[1] & operand_b[1],
-                (operand_a[1] & operand_b[0]) ^ (operand_a[0] & operand_b[1]),
-                operand_a[0] & operand_b[0]
-            };
-        end
-    endfunction
-
-    function automatic [7:0] clmul4;
-        input [3:0] operand_a;
-        input [3:0] operand_b;
-        reg [3:0] product_low;
-        reg [3:0] product_cross;
-        reg [3:0] product_high;
-        begin
-            product_low = clmul2(operand_a[1:0], operand_b[1:0]);
-            product_high = clmul2(operand_a[3:2], operand_b[3:2]);
-            product_cross = clmul2(operand_a[1:0] ^ operand_a[3:2],
-                                   operand_b[1:0] ^ operand_b[3:2]) ^
-                            product_low ^ product_high;
-            clmul4 = {4'b0, product_low} ^
-                     {2'b0, product_cross, 2'b0} ^
-                     {product_high, 4'b0};
-        end
-    endfunction
-
-    function automatic [15:0] clmul8;
-        input [7:0] operand_a;
-        input [7:0] operand_b;
-        reg [7:0] product_low;
-        reg [7:0] product_cross;
-        reg [7:0] product_high;
-        begin
-            product_low = clmul4(operand_a[3:0], operand_b[3:0]);
-            product_high = clmul4(operand_a[7:4], operand_b[7:4]);
-            product_cross = clmul4(operand_a[3:0] ^ operand_a[7:4],
-                                   operand_b[3:0] ^ operand_b[7:4]) ^
-                            product_low ^ product_high;
-            clmul8 = {8'b0, product_low} ^
-                     {4'b0, product_cross, 4'b0} ^
-                     {product_high, 8'b0};
-        end
-    endfunction
-
-    function automatic [31:0] clmul16;
-        input [15:0] operand_a;
-        input [15:0] operand_b;
-        reg [15:0] product_low;
-        reg [15:0] product_cross;
-        reg [15:0] product_high;
-        begin
-            product_low = clmul8(operand_a[7:0], operand_b[7:0]);
-            product_high = clmul8(operand_a[15:8], operand_b[15:8]);
-            product_cross = clmul8(operand_a[7:0] ^ operand_a[15:8],
-                                    operand_b[7:0] ^ operand_b[15:8]) ^
-                            product_low ^ product_high;
-            clmul16 = {16'b0, product_low} ^
-                      {8'b0, product_cross, 8'b0} ^
-                      {product_high, 16'b0};
-        end
-    endfunction
-
-    function automatic [63:0] clmul32;
-        input [31:0] operand_a;
-        input [31:0] operand_b;
-        reg [31:0] product_low;
-        reg [31:0] product_cross;
-        reg [31:0] product_high;
-        begin
-            product_low = clmul16(operand_a[15:0], operand_b[15:0]);
-            product_high = clmul16(operand_a[31:16], operand_b[31:16]);
-            product_cross = clmul16(operand_a[15:0] ^ operand_a[31:16],
-                                    operand_b[15:0] ^ operand_b[31:16]) ^
-                            product_low ^ product_high;
-            clmul32 = {32'b0, product_low} ^
-                      {16'b0, product_cross, 16'b0} ^
-                      {product_high, 32'b0};
-        end
-    endfunction
-
-    wire [DOUBLE_REGS_WIDTH-1:0] clmul_full = clmul32(operand_a_i, operand_b_i);
+    wire [DOUBLE_REGS_WIDTH-1:0] clmul_full;
+    ydrasil_clmul_karatsuba #(.WIDTH(REGS_DATA_WIDTH)) u_clmul (
+        .operand_a_i(operand_a_i),
+        .operand_b_i(operand_b_i),
+        .product_o(clmul_full)
+    );
     reg [REGS_DATA_WIDTH-1:0] clz_result;
     reg [REGS_DATA_WIDTH-1:0] ctz_result;
     reg [REGS_DATA_WIDTH-1:0] cpop_result;

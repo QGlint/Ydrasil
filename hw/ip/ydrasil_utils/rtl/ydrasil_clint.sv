@@ -20,21 +20,21 @@ import ydrasil_apb_pkg::*;
     logic [63:0] mtime_q;
     logic [63:0] mtimecmp_q;
     wire apb_access = apb_req_i.psel && apb_req_i.penable;
-
-    function automatic [31:0] apply_strobe(
-        input [31:0] old_value,
-        input [31:0] new_value,
-        input [3:0] strobe
-    );
-        integer byte_idx;
-        begin
-            apply_strobe = old_value;
-            for (byte_idx = 0; byte_idx < 4; byte_idx = byte_idx + 1)
-                if (strobe[byte_idx])
-                    apply_strobe[byte_idx*8 +: 8] =
-                        new_value[byte_idx*8 +: 8];
-        end
-    endfunction
+    wire [31:0] apb_write_mask = {
+        {8{apb_req_i.pstrb[3]}}, {8{apb_req_i.pstrb[2]}},
+        {8{apb_req_i.pstrb[1]}}, {8{apb_req_i.pstrb[0]}}};
+    wire [31:0] mtimecmp_lo_write =
+        (mtimecmp_q[31:0] & ~apb_write_mask) |
+        (apb_req_i.pwdata & apb_write_mask);
+    wire [31:0] mtimecmp_hi_write =
+        (mtimecmp_q[63:32] & ~apb_write_mask) |
+        (apb_req_i.pwdata & apb_write_mask);
+    wire [31:0] mtime_lo_write =
+        (mtime_q[31:0] & ~apb_write_mask) |
+        (apb_req_i.pwdata & apb_write_mask);
+    wire [31:0] mtime_hi_write =
+        (mtime_q[63:32] & ~apb_write_mask) |
+        (apb_req_i.pwdata & apb_write_mask);
 
     wire address_valid =
         (apb_req_i.paddr == MSIP_ADDR) ||
@@ -71,21 +71,13 @@ import ydrasil_apb_pkg::*;
                             msip_q <= apb_req_i.pwdata[0];
                     end
                     MTIMECMP_LO_ADDR:
-                        mtimecmp_q[31:0] <= apply_strobe(
-                            mtimecmp_q[31:0], apb_req_i.pwdata,
-                            apb_req_i.pstrb);
+                        mtimecmp_q[31:0] <= mtimecmp_lo_write;
                     MTIMECMP_HI_ADDR:
-                        mtimecmp_q[63:32] <= apply_strobe(
-                            mtimecmp_q[63:32], apb_req_i.pwdata,
-                            apb_req_i.pstrb);
+                        mtimecmp_q[63:32] <= mtimecmp_hi_write;
                     MTIME_LO_ADDR:
-                        mtime_q[31:0] <= apply_strobe(
-                            mtime_q[31:0], apb_req_i.pwdata,
-                            apb_req_i.pstrb);
+                        mtime_q[31:0] <= mtime_lo_write;
                     MTIME_HI_ADDR:
-                        mtime_q[63:32] <= apply_strobe(
-                            mtime_q[63:32], apb_req_i.pwdata,
-                            apb_req_i.pstrb);
+                        mtime_q[63:32] <= mtime_hi_write;
                     default: begin
                     end
                 endcase

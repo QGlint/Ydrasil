@@ -16,6 +16,8 @@ sources:
       - rtl/ydrasil_alu.sv
       - rtl/ydrasil_if_stage.sv
       - rtl/ydrasil_id_stage.sv
+      - rtl/ydrasil_issue_compact.sv
+      - rtl/ydrasil_issue_source_resolver.sv
       - rtl/ydrasil_issue_stage.sv
       - rtl/ydrasil_ins_decoder.sv
       - rtl/ydrasil_mul.sv
@@ -29,6 +31,7 @@ sources:
       - rtl/ydrasil_registers.sv
       - rtl/ydrasil_registers_csr.sv
       - rtl/ydrasil_exception_ctrl.sv
+      - rtl/ydrasil_value_file.sv
       - rtl/ydrasil_ctrl.sv
       - rtl/ydrasil_core.sv
 

@@ -62,29 +62,6 @@ import ydrasil_pkg::*;
         initial $fatal(1, "BHT_ENTRIES exceeds the carried BHT index width");
     end
 
-    function automatic logic [BTB_LOCAL_ADDR_WIDTH-1:0] pack_btb_addr(
-        input logic [ydrasil_pkg::INST_ADDR_WIDTH-1:0] addr
-    );
-        logic is_dtcm;
-        begin
-            is_dtcm = addr[ydrasil_pkg::INST_ADDR_WIDTH-1:ydrasil_pkg::ITCM_ADDR_WIDTH+2] ==
-                ydrasil_pkg::DTCM_BASE_ADDR[ydrasil_pkg::INST_ADDR_WIDTH-1:ydrasil_pkg::ITCM_ADDR_WIDTH+2];
-            pack_btb_addr = {is_dtcm, addr[ydrasil_pkg::ITCM_ADDR_WIDTH+1:2]};
-        end
-    endfunction
-
-    function automatic logic [ydrasil_pkg::INST_ADDR_WIDTH-1:0] unpack_btb_addr(
-        input logic [BTB_LOCAL_ADDR_WIDTH-1:0] token
-    );
-        begin
-            unpack_btb_addr = {
-                token[BTB_LOCAL_ADDR_WIDTH-1] ?
-                    ydrasil_pkg::DTCM_BASE_ADDR[ydrasil_pkg::INST_ADDR_WIDTH-1:ydrasil_pkg::ITCM_ADDR_WIDTH+2] :
-                    ydrasil_pkg::ITCM_BASE_ADDR[ydrasil_pkg::INST_ADDR_WIDTH-1:ydrasil_pkg::ITCM_ADDR_WIDTH+2],
-                token[ydrasil_pkg::ITCM_ADDR_WIDTH-1:0], 2'b00};
-        end
-    endfunction
-
     wire [GHR_WIDTH-1:0] ghr_value;
     wire [GHR_WIDTH-1:0] lane1_ghr =
         (predict0_spec_valid_i && predict0_spec_conditional_i) ?
@@ -94,8 +71,18 @@ import ydrasil_pkg::*;
     wire [BHT_ROW_WIDTH-1:0] lane1_ghr_row_mask = USE_GSHARE ?
         BHT_ROW_WIDTH'(lane1_ghr) : '0;
 
-    wire [BTB_LOCAL_ADDR_WIDTH-1:0] predict_btb_addr = pack_btb_addr(predict_pc_i);
-    wire [BTB_LOCAL_ADDR_WIDTH-1:0] predict_btb_addr1 = pack_btb_addr(predict_pc1_i);
+    wire [BTB_LOCAL_ADDR_WIDTH-1:0] predict_btb_addr = {
+        predict_pc_i[ydrasil_pkg::INST_ADDR_WIDTH-1:
+            ydrasil_pkg::ITCM_ADDR_WIDTH+2] ==
+            ydrasil_pkg::DTCM_BASE_ADDR[ydrasil_pkg::INST_ADDR_WIDTH-1:
+            ydrasil_pkg::ITCM_ADDR_WIDTH+2],
+        predict_pc_i[ydrasil_pkg::ITCM_ADDR_WIDTH+1:2]};
+    wire [BTB_LOCAL_ADDR_WIDTH-1:0] predict_btb_addr1 = {
+        predict_pc1_i[ydrasil_pkg::INST_ADDR_WIDTH-1:
+            ydrasil_pkg::ITCM_ADDR_WIDTH+2] ==
+            ydrasil_pkg::DTCM_BASE_ADDR[ydrasil_pkg::INST_ADDR_WIDTH-1:
+            ydrasil_pkg::ITCM_ADDR_WIDTH+2],
+        predict_pc1_i[ydrasil_pkg::ITCM_ADDR_WIDTH+1:2]};
     wire predict_btb_bank = predict_btb_addr[0];
     wire predict_btb_bank1 = predict_btb_addr1[0];
     wire [BTB_ROW_WIDTH-1:0] predict_btb_row =
@@ -120,7 +107,12 @@ import ydrasil_pkg::*;
     wire [BHT_INDEX_WIDTH-1:0] predict_bht_index1 =
         {predict_bht_row1, predict_bht_bank1};
 
-    wire [BTB_LOCAL_ADDR_WIDTH-1:0] train_btb_addr = pack_btb_addr(train_i.pc);
+    wire [BTB_LOCAL_ADDR_WIDTH-1:0] train_btb_addr = {
+        train_i.pc[ydrasil_pkg::INST_ADDR_WIDTH-1:
+            ydrasil_pkg::ITCM_ADDR_WIDTH+2] ==
+            ydrasil_pkg::DTCM_BASE_ADDR[ydrasil_pkg::INST_ADDR_WIDTH-1:
+            ydrasil_pkg::ITCM_ADDR_WIDTH+2],
+        train_i.pc[ydrasil_pkg::ITCM_ADDR_WIDTH+1:2]};
     wire train_btb_bank = train_btb_addr[0];
     wire [BTB_ROW_WIDTH-1:0] train_btb_row =
         train_btb_addr[BTB_INDEX_WIDTH-1:1];
@@ -153,7 +145,12 @@ import ydrasil_pkg::*;
         ((train_i.counter == 2'b00) ? train_i.counter : train_i.counter - 2'b01);
     wire [1:0] bht_next_counter = train_i.conditional ?
         conditional_next_counter : 2'b11;
-    wire [BTB_LOCAL_ADDR_WIDTH-1:0] btb_train_target = pack_btb_addr(train_i.target);
+    wire [BTB_LOCAL_ADDR_WIDTH-1:0] btb_train_target = {
+        train_i.target[ydrasil_pkg::INST_ADDR_WIDTH-1:
+            ydrasil_pkg::ITCM_ADDR_WIDTH+2] ==
+            ydrasil_pkg::DTCM_BASE_ADDR[ydrasil_pkg::INST_ADDR_WIDTH-1:
+            ydrasil_pkg::ITCM_ADDR_WIDTH+2],
+        train_i.target[ydrasil_pkg::ITCM_ADDR_WIDTH+1:2]};
     wire [BTB_DATA_WIDTH-1:0] btb_write_payload =
         {1'b1, epoch_q, train_btb_tag, btb_train_target};
     wire [BTB_MEM_DATA_WIDTH-1:0] btb_train_data =
@@ -305,10 +302,20 @@ import ydrasil_pkg::*;
         lane0_btb_data;
     assign {lane1_btb_valid, lane1_btb_epoch, lane1_btb_tag, lane1_btb_target_token} =
         lane1_btb_data;
-    wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] lane0_btb_target =
-        unpack_btb_addr(lane0_btb_target_token);
-    wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] lane1_btb_target =
-        unpack_btb_addr(lane1_btb_target_token);
+    wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] lane0_btb_target = {
+        lane0_btb_target_token[BTB_LOCAL_ADDR_WIDTH-1] ?
+            ydrasil_pkg::DTCM_BASE_ADDR[ydrasil_pkg::INST_ADDR_WIDTH-1:
+                ydrasil_pkg::ITCM_ADDR_WIDTH+2] :
+            ydrasil_pkg::ITCM_BASE_ADDR[ydrasil_pkg::INST_ADDR_WIDTH-1:
+                ydrasil_pkg::ITCM_ADDR_WIDTH+2],
+        lane0_btb_target_token[ydrasil_pkg::ITCM_ADDR_WIDTH-1:0], 2'b00};
+    wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] lane1_btb_target = {
+        lane1_btb_target_token[BTB_LOCAL_ADDR_WIDTH-1] ?
+            ydrasil_pkg::DTCM_BASE_ADDR[ydrasil_pkg::INST_ADDR_WIDTH-1:
+                ydrasil_pkg::ITCM_ADDR_WIDTH+2] :
+            ydrasil_pkg::ITCM_BASE_ADDR[ydrasil_pkg::INST_ADDR_WIDTH-1:
+                ydrasil_pkg::ITCM_ADDR_WIDTH+2],
+        lane1_btb_target_token[ydrasil_pkg::ITCM_ADDR_WIDTH-1:0], 2'b00};
 
     wire [BHT_DATA_WIDTH-1:0] lane0_bht_data = predict_bht_index_q[0] ?
         bht_mem_rdata1[BHT_DATA_WIDTH-1:0] : bht_mem_rdata0[BHT_DATA_WIDTH-1:0];
