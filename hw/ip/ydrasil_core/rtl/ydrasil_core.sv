@@ -285,11 +285,15 @@ import ydrasil_axi_pkg::*;
 	// compact uops remain here as the Issue skid boundary.
 	ydrasil_compact_uop_t           issue_pipe_q0;
 	ydrasil_compact_uop_t           issue_pipe_q1;
+	ydrasil_compact_uop_t           issue_pipe_q2;
+	ydrasil_compact_uop_t           issue_pipe_q3;
 	ydrasil_compact_uop_t           dispatch_compact_uop;
 	ydrasil_compact_uop_t           dispatch_compact_uop1;
 	ydrasil_compact_uop_t           issue_head_compact_uop;
 	ydrasil_compact_uop_t           issue_head_compact_uop1;
 	reg [2:0]                       issue_pipe_count_q;
+	reg [1:0]                       issue_pipe_head_q;
+	reg [1:0]                       issue_pipe_tail_q;
 	wire                            issue_ready;
 	wire                            issue_consume_two;
 	wire                            issue_slot1_replay;
@@ -308,14 +312,11 @@ import ydrasil_axi_pkg::*;
 	wire [1:0]                      issue_pipe_pop_count =
 		(issue_ready && (issue_pipe_count_q != '0)) ?
 		(issue_pair_execute ? 2'd2 : 2'd1) : '0;
-	wire [2:0]                      issue_pipe_post_pop_count =
-		issue_pipe_count_q - 3'(issue_pipe_pop_count);
-	// A refill may use slots released on this edge. The stored head is
-	// independent of decode, so this elastic ready path cannot feed its source.
+	// Four entries absorb one cycle of returned Issue credit. Decode sees only
+	// registered capacity and always reserves room for a pair, so neither the
+	// current instruction nor the backend ready cone can feed FetchQ pop.
 	wire                            issue_pipe_has_room = dispatch_ready &&
-		(id_issue_pkt.valid && id_issue_pkt.pair_eligible ?
-		 (issue_pipe_post_pop_count == '0) :
-		 (issue_pipe_post_pop_count <= 3'd1));
+		(issue_pipe_count_q <= 3'd2);
 	wire                            issue_pipe_push_two = issue_pipe_has_room &&
 		id_issue_pkt.valid && id_issue_pkt.pair_eligible;
 	wire                            issue_pipe_push = issue_pipe_has_room &&
@@ -332,13 +333,29 @@ import ydrasil_axi_pkg::*;
 		.compact_uop_o (dispatch_compact_uop1)
 	);
 	always_comb begin
-		issue_head_compact_uop = issue_pipe_q0;
+		unique case (issue_pipe_head_q)
+			2'd0: begin
+				issue_head_compact_uop = issue_pipe_q0;
+				issue_head_compact_uop1 = issue_pipe_q1;
+			end
+			2'd1: begin
+				issue_head_compact_uop = issue_pipe_q1;
+				issue_head_compact_uop1 = issue_pipe_q2;
+			end
+			2'd2: begin
+				issue_head_compact_uop = issue_pipe_q2;
+				issue_head_compact_uop1 = issue_pipe_q3;
+			end
+			default: begin
+				issue_head_compact_uop = issue_pipe_q3;
+				issue_head_compact_uop1 = issue_pipe_q0;
+			end
+		endcase
 		if (issue_pipe_count_q == '0) begin
 			issue_head_compact_uop.valid = 1'b0;
 			issue_head_compact_uop.pair_eligible = 1'b0;
 			issue_head_compact_uop.lane_mask = '0;
 		end
-		issue_head_compact_uop1 = issue_pipe_q1;
 		if (issue_pipe_count_q < 3'd2) begin
 			issue_head_compact_uop1.valid = 1'b0;
 			issue_head_compact_uop1.lane_mask = '0;
@@ -348,22 +365,39 @@ import ydrasil_axi_pkg::*;
 	always_ff @(posedge clk) begin
 		if (!rst_n) begin
 			issue_pipe_count_q <= '0;
+			issue_pipe_head_q <= '0;
+			issue_pipe_tail_q <= '0;
 		end else if (pipeline_flush) begin
 			issue_pipe_count_q <= '0;
+			issue_pipe_head_q <= '0;
+			issue_pipe_tail_q <= '0;
 		end else begin
 			if (issue_pipe_push) begin
-				if (issue_pipe_post_pop_count == '0) begin
-					issue_pipe_q0 <= dispatch_compact_uop;
-					if (issue_pipe_push_two)
-						issue_pipe_q1 <= dispatch_compact_uop1;
-				end else begin
-					if (issue_pipe_pop_count == 2'd1)
-						issue_pipe_q0 <= issue_pipe_q1;
-					issue_pipe_q1 <= dispatch_compact_uop;
-				end
-			end else if (issue_pipe_pop_count == 2'd1) begin
-				issue_pipe_q0 <= issue_pipe_q1;
+				unique case (issue_pipe_tail_q)
+					2'd0: begin
+						issue_pipe_q0 <= dispatch_compact_uop;
+						if (issue_pipe_push_two)
+							issue_pipe_q1 <= dispatch_compact_uop1;
+					end
+					2'd1: begin
+						issue_pipe_q1 <= dispatch_compact_uop;
+						if (issue_pipe_push_two)
+							issue_pipe_q2 <= dispatch_compact_uop1;
+					end
+					2'd2: begin
+						issue_pipe_q2 <= dispatch_compact_uop;
+						if (issue_pipe_push_two)
+							issue_pipe_q3 <= dispatch_compact_uop1;
+					end
+					default: begin
+						issue_pipe_q3 <= dispatch_compact_uop;
+						if (issue_pipe_push_two)
+							issue_pipe_q0 <= dispatch_compact_uop1;
+					end
+				endcase
 			end
+			issue_pipe_head_q <= issue_pipe_head_q + 2'(issue_pipe_pop_count);
+			issue_pipe_tail_q <= issue_pipe_tail_q + 2'(issue_pipe_push_count);
 			issue_pipe_count_q <= issue_pipe_count_q + issue_pipe_push_count -
 				issue_pipe_pop_count;
 		end
@@ -371,8 +405,8 @@ import ydrasil_axi_pkg::*;
 `ifndef SYNTHESIS
 	always_ff @(posedge clk) begin
 		if (rst_n)
-			assert (issue_pipe_count_q <= 3'd2)
-				else $fatal(1, "compact issue skid occupancy overflow");
+				assert (issue_pipe_count_q <= 3'd4)
+					else $fatal(1, "compact issue skid occupancy overflow");
 	end
 `endif
 	wire                            decode_valid = issue_head_compact_uop.valid;

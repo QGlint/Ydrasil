@@ -151,9 +151,12 @@ import ydrasil_pkg::*;
     wire producer_has_two_free = queue_count_q <=
         QUEUE_COUNT_WIDTH'(PRODUCER_NUM - 2);
     wire branch_has_room = branch_count_q < 3'(BRANCH_DEPTH);
+    // Dispatch credit is a registered-state contract. Branch/trap recovery has
+    // priority in the sequential state update, while backend stalls are
+    // absorbed by the four-entry Issue queue. Keeping those current-cycle
+    // signals out of ready prevents execution feedback from reaching FetchQ.
     assign dispatch_ready_o = producer_has_two_free && branch_has_room &&
-        !serial_pending_q && !trap_stall_i && !ex_branch_jump_i &&
-        !recovering_q;
+        !serial_pending_q && !recovering_q;
     wire queue_alloc0 = dispatch_accept_i && dispatch_pkt_i.valid;
     wire queue_alloc1 = dispatch_accept1_i && dispatch_pkt1_i.valid;
     wire [1:0] queue_alloc_count = {1'b0, queue_alloc0} +

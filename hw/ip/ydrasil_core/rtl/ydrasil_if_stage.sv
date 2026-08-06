@@ -549,33 +549,29 @@ import ydrasil_pkg::*;
             DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2] :
             ITCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2],
         fetchq_payload1.pred_target[ITCM_ADDR_WIDTH-1:0], 2'b00};
-    assign if_id_pc_o = fetchq_valid0 ? fetchq_pc0 : RESET_INS;
-    assign if_id_instr_o = fetchq_valid0 ? fetchq_payload0.instr : RV32I_INS_NOP;
-    assign if_id_pred_hit_o = fetchq_valid0 && fetchq_payload0.pred_taken;
-    assign if_id_pred_taken_o = fetchq_valid0 && fetchq_payload0.pred_taken;
-    assign if_id_pred_target_o = (fetchq_valid0 && fetchq_payload0.pred_taken) ?
-        fetchq_pred_target0 : '0;
-    assign if_id_pred_counter_o = fetchq_valid0 ?
-        fetchq_payload0.pred_counter : 2'b01;
+    // Valid qualifies the complete payload at Decode. Do not spread queue
+    // occupancy into every data bit by substituting NOP/zero values while the
+    // head is invalid; stale payload is architecturally invisible.
+    assign if_id_pc_o = fetchq_pc0;
+    assign if_id_instr_o = fetchq_payload0.instr;
+    assign if_id_pred_hit_o = fetchq_payload0.pred_taken;
+    assign if_id_pred_taken_o = fetchq_payload0.pred_taken;
+    assign if_id_pred_target_o = fetchq_pred_target0;
+    assign if_id_pred_counter_o = fetchq_payload0.pred_counter;
     wire [BHT_INDEX_WIDTH-1:0] fetchq_bht_index0 =
         BHT_INDEX_WIDTH'(fetchq_pc0 >> 2);
-    assign if_id_pred_bht_index_o = fetchq_valid0 ?
-        BP_BHT_INDEX_WIDTH'(fetchq_bht_index0) : '0;
+    assign if_id_pred_bht_index_o = BP_BHT_INDEX_WIDTH'(fetchq_bht_index0);
 
     assign if_id1_valid_o = fetchq_valid1;
-    assign if_id1_pc_o = fetchq_valid1 ?
-        fetchq_pc1 : (RESET_INS + 32'd4);
-    assign if_id1_instr_o = fetchq_valid1 ? fetchq_payload1.instr : RV32I_INS_NOP;
-    assign if_id1_pred_hit_o = fetchq_valid1 && fetchq_payload1.pred_taken;
-    assign if_id1_pred_taken_o = fetchq_valid1 && fetchq_payload1.pred_taken;
-    assign if_id1_pred_target_o = (fetchq_valid1 && fetchq_payload1.pred_taken) ?
-        fetchq_pred_target1 : '0;
-    assign if_id1_pred_counter_o = fetchq_valid1 ?
-        fetchq_payload1.pred_counter : 2'b01;
+    assign if_id1_pc_o = fetchq_pc1;
+    assign if_id1_instr_o = fetchq_payload1.instr;
+    assign if_id1_pred_hit_o = fetchq_payload1.pred_taken;
+    assign if_id1_pred_taken_o = fetchq_payload1.pred_taken;
+    assign if_id1_pred_target_o = fetchq_pred_target1;
+    assign if_id1_pred_counter_o = fetchq_payload1.pred_counter;
     wire [BHT_INDEX_WIDTH-1:0] fetchq_bht_index1 =
         BHT_INDEX_WIDTH'(fetchq_pc1 >> 2);
-    assign if_id1_pred_bht_index_o = fetchq_valid1 ?
-        BP_BHT_INDEX_WIDTH'(fetchq_bht_index1) : '0;
+    assign if_id1_pred_bht_index_o = BP_BHT_INDEX_WIDTH'(fetchq_bht_index1);
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
