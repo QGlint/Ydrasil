@@ -14,8 +14,8 @@ import ydrasil_pkg::*;
     input  ydrasil_issue_pkt_t          dispatch_pkt1_i,
     input  wire                         dispatch_accept_i,
     input  wire                         dispatch_accept1_i,
-    input  ydrasil_issue_pkt_t          issue_pkt_i,
-    input  ydrasil_issue_pkt_t          issue_pkt1_i,
+    input  ydrasil_compact_uop_t        issue_pkt_i,
+    input  ydrasil_compact_uop_t        issue_pkt1_i,
     input  wire                         issue_fence_i,
     input  producer_id_t                issue_fence_tag_i,
     input  ydrasil_completion_bus_t     completion_bus_i,
@@ -207,13 +207,11 @@ import ydrasil_pkg::*;
         latest_class_q[dispatch_pkt1_i.src1.arch_addr];
     wire ydrasil_result_class_t dispatch_result_class =
         dispatch_pkt_i.decode.operator_type[OPERATOR_TYPE_LOAD] ? RESULT_LSU :
-        (dispatch_pkt_i.decode.operator_type[OPERATOR_TYPE_MUL] ||
-         dispatch_pkt_i.decode.operator_type[OPERATOR_TYPE_FPU]) ?
+		dispatch_pkt_i.decode.operator_type[OPERATOR_TYPE_MUL] ?
         RESULT_MDU : RESULT_ALU;
     wire ydrasil_result_class_t dispatch1_result_class =
         dispatch_pkt1_i.decode.operator_type[OPERATOR_TYPE_LOAD] ? RESULT_LSU :
-        (dispatch_pkt1_i.decode.operator_type[OPERATOR_TYPE_MUL] ||
-         dispatch_pkt1_i.decode.operator_type[OPERATOR_TYPE_FPU]) ?
+		dispatch_pkt1_i.decode.operator_type[OPERATOR_TYPE_MUL] ?
         RESULT_MDU : RESULT_ALU;
 
     always_comb begin

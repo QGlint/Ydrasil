@@ -17,7 +17,6 @@ RVTESTS_TARGETS := $(addprefix rv_comp_,$(subst /,_,$(RVTESTS_ALL)))
 RVTESTS_INCLUDES := -I$(PROJECT_ROOT)/sw/include -I$(RVTESTS_DIR)/env -I$(RVTESTS_DIR)/isa/macros/scalar
 
 YDRASIL_TESTS_DIR := $(PROJECT_ROOT)/verif/tests/ydrasil-tests/rv32ui
-YDRASIL_FPU_TESTS_DIR := $(PROJECT_ROOT)/verif/tests/ydrasil-tests/rv32uf
 SW_ALIGNED_TESTS := \
     sw_data_boundary \
     sw_immediate_boundary \
@@ -64,11 +63,7 @@ SW_ALL_TESTS := $(SW_FORMAL_TESTS)
 YDRASIL_TEST_EXCLUDE ?= $(SW_NEW_ONLY_TESTS)
 YDRASIL_TESTS := $(filter-out $(YDRASIL_TEST_EXCLUDE),\
     $(sort $(basename $(notdir $(wildcard $(YDRASIL_TESTS_DIR)/*.S)))))
-ifeq ($(FPU),1)
-YDRASIL_TESTS += $(sort $(basename $(notdir $(wildcard $(YDRASIL_FPU_TESTS_DIR)/*.S))))
-endif
 YDRASIL_TEST_SPIKE_SKIP_TESTS := $(filter $(SW_NEW_ONLY_TESTS),$(YDRASIL_TESTS))
-YDRASIL_TEST_SPIKE_SKIP_TESTS += sw_fpu_fs_off_illegal
 YDRASIL_TEST_SIM_TARGETS := $(addprefix ydrasil_test_sim_,$(YDRASIL_TESTS))
 YDRASIL_TEST_RESULT_DIR ?= $(RESULT_DIR)/ydrasil-tests
 YDRASIL_TEST_TIMEOUT ?= 100000
@@ -76,7 +71,7 @@ YDRASIL_TEST_JOBS ?= $(shell nproc)
 YDRASIL_TEST_REUSE_MODEL ?= 0
 VERIF_YDRASIL_TEST_LOG ?= $(VERIF_STATS_DIR)/ydrasil_tests_summary.log
 SW_TEST_TARGETS := $(addprefix sw_comp_,$(SW_FORMAL_TESTS))
-SW_TEST_INCLUDES := $(RVTESTS_INCLUDES) -I$(YDRASIL_TESTS_DIR) -I$(YDRASIL_FPU_TESTS_DIR)
+SW_TEST_INCLUDES := $(RVTESTS_INCLUDES) -I$(YDRASIL_TESTS_DIR)
 SW_SINGLE_DB_COUNT := $(shell expr 1 + $(words $(SW_FORMAL_TESTS)))
 
 RVBENCH_DIR := $(PROJECT_ROOT)/verif/tests/riscv-tests/benchmarks
@@ -189,7 +184,7 @@ sw_comp_%:
 		ARCH=$(ARCH) \
 		ABI=$(ABI) \
 		NAME=$* \
-		SRC=$(firstword $(wildcard $(YDRASIL_TESTS_DIR)/$*.S $(YDRASIL_FPU_TESTS_DIR)/$*.S)) \
+		SRC=$(firstword $(wildcard $(YDRASIL_TESTS_DIR)/$*.S)) \
 		OUT_DIR=$(SW_TEST_OUT_ROOT) \
 		COMP_MODE=rvtest \
 		INCLUDES="$(SW_TEST_INCLUDES)"

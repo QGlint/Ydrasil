@@ -291,8 +291,6 @@ import ydrasil_apb_pkg::*;
     ydrasil_irq_pkt_t trap_irq;
     ydrasil_csr_trap_state_pkt_t trap_csr_state;
     wire [31:0] csr_ex_data;
-    wire [2:0] csr_frm;
-    wire csr_fp_enabled;
     ydrasil_exception_req_pkt_t exception_req;
     ydrasil_trap_ctrl_pkt_t trap_ctrl;
     logic [31:0] async_pc;
@@ -306,12 +304,7 @@ import ydrasil_apb_pkg::*;
         .ex_csr_waddr_i(ex_csr_waddr),
         .ex_csr_data_i(ex_csr_wdata),
         .trap_csr_write_i(trap_csr_write),
-        .irq_i(trap_irq),
-        .fp_flags_valid_i(1'b0),
-        .fp_flags_i(5'b0),
-        .fp_state_dirty_i(1'b0),
-        .frm_o(csr_frm),
-        .fp_enabled_o(csr_fp_enabled),
+		.irq_i(trap_irq),
         .trap_state_o(trap_csr_state),
         .csr_ex_data_o(csr_ex_data)
     );

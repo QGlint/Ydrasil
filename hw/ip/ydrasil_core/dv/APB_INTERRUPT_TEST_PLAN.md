@@ -4,8 +4,7 @@
 
 This plan verifies the path from the core memory request packet through
 AXI4-Lite and the asynchronous AXI-to-APB bridge, plus the machine-mode
-interrupt path used by RT-Thread. The FPU is outside this change and remains
-covered by the existing FPU tests.
+interrupt path used by RT-Thread.
 
 The production clock path is:
 

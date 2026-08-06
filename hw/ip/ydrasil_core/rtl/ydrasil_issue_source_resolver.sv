@@ -21,16 +21,14 @@ import ydrasil_pkg::*;
     output wire                          early_dual_hit_o
 );
     wire source_nonzero = source_i.arch_addr != '0;
+    // The generation-qualified producer ID is the functional identity. Class
+    // and architectural destination are metadata checks, not mux selectors.
     wire source_dtcm_key_match =
-        {source_i.producer_class, source_i.producer_tag, source_i.arch_addr} ==
-        {dtcm_reservation_i.result_class, dtcm_reservation_i.producer_id,
-         dtcm_reservation_i.arch_addr};
+        source_i.producer_tag == dtcm_reservation_i.producer_id;
     wire source_main_key_match =
-        {source_i.producer_class, source_i.producer_tag, source_i.arch_addr} ==
-        {RESULT_ALU, early_main_id_i, early_main_rd_i};
+        source_i.producer_tag == early_main_id_i;
     wire source_dual_key_match =
-        {source_i.producer_class, source_i.producer_tag, source_i.arch_addr} ==
-        {RESULT_ALU, early_dual_id_i, early_dual_rd_i};
+        source_i.producer_tag == early_dual_id_i;
     assign dtcm_hit_o = &{source_i.used, source_nonzero, source_i.tag_valid,
         dtcm_reservation_i.valid, dtcm_reservation_i.producer_tracked,
         source_dtcm_key_match};
@@ -43,4 +41,27 @@ import ydrasil_pkg::*;
         early_main_hit_o || early_dual_hit_o;
     assign data_o = (source_i.used && (source_i.arch_addr != '0) &&
         state_i.live) ? value_i : arf_i;
+
+`ifndef SYNTHESIS
+    always_comb begin
+        if (dtcm_hit_o) begin
+            assert (source_i.producer_class == dtcm_reservation_i.result_class)
+                else $fatal(1, "DTCM wakeup producer class mismatch");
+            assert (source_i.arch_addr == dtcm_reservation_i.arch_addr)
+                else $fatal(1, "DTCM wakeup destination mismatch");
+        end
+        if (early_main_hit_o) begin
+            assert (source_i.producer_class == RESULT_ALU)
+                else $fatal(1, "main ALU wakeup producer class mismatch");
+            assert (source_i.arch_addr == early_main_rd_i)
+                else $fatal(1, "main ALU wakeup destination mismatch");
+        end
+        if (early_dual_hit_o) begin
+            assert (source_i.producer_class == RESULT_ALU)
+                else $fatal(1, "dual ALU wakeup producer class mismatch");
+            assert (source_i.arch_addr == early_dual_rd_i)
+                else $fatal(1, "dual ALU wakeup destination mismatch");
+        end
+    end
+`endif
 endmodule

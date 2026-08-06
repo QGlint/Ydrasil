@@ -993,14 +993,14 @@ end
                     u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL])) ? 32'd1 : 32'd0);
             if ((u_dut.rs1_pending_stall | u_dut.rs2_pending_stall) &&
                 !(u_dut.rs1_issue_hzd | u_dut.rs2_issue_hzd)) begin
-                if ((u_dut.rs1_pending_stall && u_dut.issue_pkt.src0.producer_class == ydrasil_pkg::RESULT_LSU) ||
-                    (u_dut.rs2_pending_stall && u_dut.issue_pkt.src1.producer_class == ydrasil_pkg::RESULT_LSU))
+                if ((u_dut.rs1_pending_stall && u_dut.issue_head_compact_uop.src0.producer_class == ydrasil_pkg::RESULT_LSU) ||
+                    (u_dut.rs2_pending_stall && u_dut.issue_head_compact_uop.src1.producer_class == ydrasil_pkg::RESULT_LSU))
                     sb_pending_load_count <= sb_pending_load_count + 1'b1;
-                else if ((u_dut.rs1_pending_stall && u_dut.issue_pkt.src0.producer_class == ydrasil_pkg::RESULT_MDU) ||
-                         (u_dut.rs2_pending_stall && u_dut.issue_pkt.src1.producer_class == ydrasil_pkg::RESULT_MDU))
+                else if ((u_dut.rs1_pending_stall && u_dut.issue_head_compact_uop.src0.producer_class == ydrasil_pkg::RESULT_MDU) ||
+                         (u_dut.rs2_pending_stall && u_dut.issue_head_compact_uop.src1.producer_class == ydrasil_pkg::RESULT_MDU))
                     sb_pending_mul_count <= sb_pending_mul_count + 1'b1;
-                else if ((u_dut.rs1_pending_stall && u_dut.issue_pkt.src0.producer_class == ydrasil_pkg::RESULT_ALU) ||
-                         (u_dut.rs2_pending_stall && u_dut.issue_pkt.src1.producer_class == ydrasil_pkg::RESULT_ALU))
+                else if ((u_dut.rs1_pending_stall && u_dut.issue_head_compact_uop.src0.producer_class == ydrasil_pkg::RESULT_ALU) ||
+                         (u_dut.rs2_pending_stall && u_dut.issue_head_compact_uop.src1.producer_class == ydrasil_pkg::RESULT_ALU))
                     sb_pending_alu_count <= sb_pending_alu_count + 1'b1;
                 else
                     sb_pending_other_count <= sb_pending_other_count + 1'b1;
@@ -1142,14 +1142,15 @@ end
             endcase
             if (u_dut.issue_pair_execute) begin
                 dual_issue_count <= dual_issue_count + 1'b1;
-                if (u_dut.issue_pkt.decode.resources[RESOURCE_BRU])
+                if (u_dut.issue_head_compact_uop.op_class == ydrasil_pkg::UOP_CLASS_BJP)
                     dual_bru_alu_count <= dual_bru_alu_count + 1'b1;
-                else if (u_dut.issue_pkt.decode.resources[RESOURCE_LSU])
+                else if ((u_dut.issue_head_compact_uop.op_class == ydrasil_pkg::UOP_CLASS_LOAD) ||
+                         (u_dut.issue_head_compact_uop.op_class == ydrasil_pkg::UOP_CLASS_STORE))
                     dual_lsu_alu_count <= dual_lsu_alu_count + 1'b1;
-                else if (u_dut.issue_pkt.decode.resources[RESOURCE_MULDIV])
+                else if (u_dut.issue_head_compact_uop.op_class == ydrasil_pkg::UOP_CLASS_MUL)
                     dual_muldiv_alu_count <= dual_muldiv_alu_count + 1'b1;
-                else if (u_dut.issue_pkt.decode.resources[RESOURCE_ALU] ||
-                         u_dut.issue_pkt.decode.resources[RESOURCE_FULL_BITMANIP])
+                else if ((u_dut.issue_head_compact_uop.op_class == ydrasil_pkg::UOP_CLASS_ALU) ||
+                         (u_dut.issue_head_compact_uop.op_class == ydrasil_pkg::UOP_CLASS_BITMANIP))
                     dual_alu_alu_count <= dual_alu_alu_count + 1'b1;
                 else
                     dual_other_count <= dual_other_count + 1'b1;

@@ -1,23 +1,17 @@
-// The fetch queue is a two-bank ring.  Consecutive logical entries land in
-// opposite banks, so one read port per bank is sufficient for the two fetch
-// lanes and one write port per bank is sufficient for a two-entry response.
-// The queue metadata is resettable FF state; payload storage is intentionally
-// not reset so it can map to distributed RAM.
+// The two visible entries are FFs. Older entries live in a two-bank backing
+// ring, whose read addresses depend only on the registered backing head.
 module ydrasil_fetch_queue
 import ydrasil_pkg::*;
 #(
-    parameter int DEPTH = 8,
+    parameter int DEPTH = 10,
     parameter int COUNT_WIDTH = $clog2(DEPTH + 1),
-    parameter int INDEX_WIDTH = $clog2(DEPTH),
     parameter int PAYLOAD_WIDTH = 80
 ) (
     input  wire                         clk,
     input  wire                         rst_n,
     input  wire                         flush_i,
     input  wire [1:0]                   pop_count_i,
-    input  wire [1:0]                   read_pop_count_i,
     input  wire [1:0]                   push_count_i,
-    input  wire [1:0]                   read_push_count_i,
     input  wire [PAYLOAD_WIDTH-1:0]      push_payload0_i,
     input  wire [PAYLOAD_WIDTH-1:0]      push_payload1_i,
     output wire [COUNT_WIDTH-1:0]       count_o,
@@ -26,66 +20,87 @@ import ydrasil_pkg::*;
     output wire [PAYLOAD_WIDTH-1:0]      payload0_o,
     output wire [PAYLOAD_WIDTH-1:0]      payload1_o
 );
-    localparam int BANK_DEPTH = DEPTH / 2;
+    localparam int BACK_DEPTH = DEPTH - 2;
+    localparam int BANK_DEPTH = BACK_DEPTH / 2;
+    localparam int BACK_INDEX_WIDTH = (BACK_DEPTH > 1) ? $clog2(BACK_DEPTH) : 1;
     localparam int BANK_ADDR_WIDTH = (BANK_DEPTH > 1) ? $clog2(BANK_DEPTH) : 1;
-    localparam int COUNT_EXT_WIDTH = COUNT_WIDTH + 1;
-    localparam int INDEX_EXT_WIDTH = INDEX_WIDTH + 1;
-    localparam logic [INDEX_EXT_WIDTH-1:0] DEPTH_EXT =
-        INDEX_EXT_WIDTH'(DEPTH);
 
     reg [COUNT_WIDTH-1:0] count_q;
-    reg [INDEX_WIDTH-1:0] head_q;
-    reg [INDEX_WIDTH-1:0] tail_q;
+    reg [BACK_INDEX_WIDTH-1:0] back_head_q;
+    reg [BACK_INDEX_WIDTH-1:0] back_tail_q;
+    reg [PAYLOAD_WIDTH-1:0] payload0_q;
+    reg [PAYLOAD_WIDTH-1:0] payload1_q;
 
-    wire [INDEX_EXT_WIDTH-1:0] head1_sum =
-        INDEX_EXT_WIDTH'(head_q) + INDEX_EXT_WIDTH'(1);
-    wire [INDEX_WIDTH-1:0] head1 = (head1_sum >= DEPTH_EXT) ?
-        INDEX_WIDTH'(head1_sum - DEPTH_EXT) : INDEX_WIDTH'(head1_sum);
-    wire [INDEX_EXT_WIDTH-1:0] read_head_sum =
-        INDEX_EXT_WIDTH'(head_q) + INDEX_EXT_WIDTH'(read_pop_count_i);
-    wire [INDEX_WIDTH-1:0] head_after_pop = (read_head_sum >= DEPTH_EXT) ?
-        INDEX_WIDTH'(read_head_sum - DEPTH_EXT) : INDEX_WIDTH'(read_head_sum);
-    wire [INDEX_EXT_WIDTH-1:0] read_head1_sum =
-        INDEX_EXT_WIDTH'(head_after_pop) + INDEX_EXT_WIDTH'(1);
-    wire [INDEX_WIDTH-1:0] head_after_pop1 =
-        (read_head1_sum >= DEPTH_EXT) ?
-        INDEX_WIDTH'(read_head1_sum - DEPTH_EXT) :
-        INDEX_WIDTH'(read_head1_sum);
-    wire [INDEX_EXT_WIDTH-1:0] tail1_sum =
-        INDEX_EXT_WIDTH'(tail_q) + INDEX_EXT_WIDTH'(1);
-    wire [INDEX_WIDTH-1:0] tail1 = (tail1_sum >= DEPTH_EXT) ?
-        INDEX_WIDTH'(tail1_sum - DEPTH_EXT) : INDEX_WIDTH'(tail1_sum);
-    wire [INDEX_EXT_WIDTH-1:0] state_head_sum =
-        INDEX_EXT_WIDTH'(head_q) + INDEX_EXT_WIDTH'(pop_count_i);
-    wire [INDEX_WIDTH-1:0] state_head_next =
-        (state_head_sum >= DEPTH_EXT) ?
-        INDEX_WIDTH'(state_head_sum - DEPTH_EXT) :
-        INDEX_WIDTH'(state_head_sum);
-    wire [INDEX_EXT_WIDTH-1:0] state_tail_sum =
-        INDEX_EXT_WIDTH'(tail_q) + INDEX_EXT_WIDTH'(push_count_i);
-    wire [INDEX_WIDTH-1:0] state_tail_next =
-        (state_tail_sum >= DEPTH_EXT) ?
-        INDEX_WIDTH'(state_tail_sum - DEPTH_EXT) :
-        INDEX_WIDTH'(state_tail_sum);
-    wire [BANK_ADDR_WIDTH-1:0] head_after_pop_addr =
-        head_after_pop[INDEX_WIDTH-1:1];
-    wire [BANK_ADDR_WIDTH-1:0] head_after_pop1_addr =
-        head_after_pop1[INDEX_WIDTH-1:1];
-    wire [BANK_ADDR_WIDTH-1:0] tail_addr = tail_q[INDEX_WIDTH-1:1];
-    wire [BANK_ADDR_WIDTH-1:0] tail1_addr = tail1[INDEX_WIDTH-1:1];
+    function automatic [BACK_INDEX_WIDTH-1:0] advance_back_ptr(
+        input [BACK_INDEX_WIDTH-1:0] ptr,
+        input [1:0] amount
+    );
+        logic [BACK_INDEX_WIDTH:0] sum;
+        begin
+            sum = {1'b0, ptr} + (BACK_INDEX_WIDTH + 1)'(amount);
+            advance_back_ptr = (sum >= (BACK_INDEX_WIDTH + 1)'(BACK_DEPTH)) ?
+                BACK_INDEX_WIDTH'(sum - (BACK_INDEX_WIDTH + 1)'(BACK_DEPTH)) :
+                BACK_INDEX_WIDTH'(sum);
+        end
+    endfunction
 
-    // Read-ahead is independent of flush qualification. The output valid bits
-    // are discarded on a redirect, keeping redirect control out of the LUTRAM
-    // data path while architectural head/count still use pop_count_i and
-    // push_count_i below.
-    // Each bank reads whichever lane has the matching parity. Since the two
-    // lanes have opposite parity, no read port is shared by both lanes.
-    wire [BANK_ADDR_WIDTH-1:0] read_addr_even = head_after_pop[0] ?
-        head_after_pop1_addr : head_after_pop_addr;
-    wire [BANK_ADDR_WIDTH-1:0] read_addr_odd  = head_after_pop[0] ?
-        head_after_pop_addr : head_after_pop1_addr;
+    wire [COUNT_WIDTH-1:0] old_remaining =
+        count_q - COUNT_WIDTH'(pop_count_i);
+    reg [1:0] back_head_advance;
+    always_comb begin
+        // Advance once for each backing entry promoted into the FF head. A
+        // direct push is a physical backing write promoted on the same edge.
+        unique case (count_q)
+            COUNT_WIDTH'(0): back_head_advance = push_count_i;
+            COUNT_WIDTH'(1): begin
+                if (pop_count_i != 2'd0)
+                    back_head_advance = push_count_i;
+                else
+                    back_head_advance = (push_count_i != 2'd0) ? 2'd1 : 2'd0;
+            end
+            COUNT_WIDTH'(2): begin
+                unique case (pop_count_i)
+                    2'd0: back_head_advance = 2'd0;
+                    2'd1: back_head_advance =
+                        (push_count_i != 2'd0) ? 2'd1 : 2'd0;
+                    default: back_head_advance = push_count_i;
+                endcase
+            end
+            COUNT_WIDTH'(3): begin
+                if (pop_count_i == 2'd0)
+                    back_head_advance = 2'd0;
+                else if (pop_count_i == 2'd1)
+                    back_head_advance = 2'd1;
+                else
+                    back_head_advance = (push_count_i != 2'd0) ? 2'd2 : 2'd1;
+            end
+            default: back_head_advance = pop_count_i;
+        endcase
+    end
+
+    wire [BACK_INDEX_WIDTH-1:0] back_head1 =
+        advance_back_ptr(back_head_q, 2'd1);
+    wire [BACK_INDEX_WIDTH-1:0] back_tail1 =
+        advance_back_ptr(back_tail_q, 2'd1);
+    wire [BANK_ADDR_WIDTH-1:0] back_head_addr =
+        back_head_q[BACK_INDEX_WIDTH-1:1];
+    wire [BANK_ADDR_WIDTH-1:0] back_head1_addr =
+        back_head1[BACK_INDEX_WIDTH-1:1];
+    wire [BANK_ADDR_WIDTH-1:0] back_tail_addr =
+        back_tail_q[BACK_INDEX_WIDTH-1:1];
+    wire [BANK_ADDR_WIDTH-1:0] back_tail1_addr =
+        back_tail1[BACK_INDEX_WIDTH-1:1];
+
+    wire [BANK_ADDR_WIDTH-1:0] read_addr_even = back_head_q[0] ?
+        back_head1_addr : back_head_addr;
+    wire [BANK_ADDR_WIDTH-1:0] read_addr_odd = back_head_q[0] ?
+        back_head_addr : back_head1_addr;
     wire [PAYLOAD_WIDTH-1:0] payload_even;
     wire [PAYLOAD_WIDTH-1:0] payload_odd;
+    wire [PAYLOAD_WIDTH-1:0] backing_payload0 = back_head_q[0] ?
+        payload_odd : payload_even;
+    wire [PAYLOAD_WIDTH-1:0] backing_payload1 = back_head_q[0] ?
+        payload_even : payload_odd;
 
     reg                         write_even;
     reg                         write_odd;
@@ -95,35 +110,17 @@ import ydrasil_pkg::*;
     reg [PAYLOAD_WIDTH-1:0]     write_data_odd;
 
     always_comb begin
-        write_even = 1'b0;
-        write_odd = 1'b0;
-        write_addr_even = '0;
-        write_addr_odd = '0;
-        write_data_even = '0;
-        write_data_odd = '0;
-
-        if (push_count_i != 2'd0) begin
-            if (!tail_q[0]) begin
-                write_even = 1'b1;
-                write_addr_even = tail_addr;
-                write_data_even = push_payload0_i;
-            end else begin
-                write_odd = 1'b1;
-                write_addr_odd = tail_addr;
-                write_data_odd = push_payload0_i;
-            end
-        end
-        if (push_count_i == 2'd2) begin
-            if (!tail1[0]) begin
-                write_even = 1'b1;
-                write_addr_even = tail1_addr;
-                write_data_even = push_payload1_i;
-            end else begin
-                write_odd = 1'b1;
-                write_addr_odd = tail1_addr;
-                write_data_odd = push_payload1_i;
-            end
-        end
+        // Every response is physically written. Entries sent directly to the
+        // FF head advance both backing pointers on this edge, so the backing
+        // RAM pins never depend on current-cycle pop/stall control.
+        write_even = (push_count_i == 2'd2) ||
+            ((push_count_i != 2'd0) && !back_tail_q[0]);
+        write_odd = (push_count_i == 2'd2) ||
+            ((push_count_i != 2'd0) && back_tail_q[0]);
+        write_addr_even = back_tail_q[0] ? back_tail1_addr : back_tail_addr;
+        write_addr_odd = back_tail_q[0] ? back_tail_addr : back_tail1_addr;
+        write_data_even = back_tail_q[0] ? push_payload1_i : push_payload0_i;
+        write_data_odd = back_tail_q[0] ? push_payload0_i : push_payload1_i;
     end
 
     ydrasil_1r1w_ram #(
@@ -155,84 +152,80 @@ import ydrasil_pkg::*;
         .wdata_i(write_data_odd)
     );
 
-    wire [COUNT_EXT_WIDTH-1:0] count_after_op =
-        COUNT_EXT_WIDTH'(count_q) - COUNT_EXT_WIDTH'(read_pop_count_i) +
-        COUNT_EXT_WIDTH'(read_push_count_i);
-    wire [COUNT_EXT_WIDTH-1:0] old_remaining =
-        COUNT_EXT_WIDTH'(count_q) - COUNT_EXT_WIDTH'(read_pop_count_i);
-    wire [PAYLOAD_WIDTH-1:0] memory_payload0 = head_after_pop[0] ?
-        payload_odd : payload_even;
-    wire [PAYLOAD_WIDTH-1:0] memory_payload1 = head_after_pop[0] ?
-        payload_even : payload_odd;
+    reg [PAYLOAD_WIDTH-1:0] payload0_d;
+    reg [PAYLOAD_WIDTH-1:0] payload1_d;
+    always_comb begin
+        payload0_d = payload0_q;
+        payload1_d = payload1_q;
 
-    // A synchronous output boundary captures the post-pop head.  When the
-    // address is also written in this cycle (empty queue, or a refill behind a
-    // one-entry queue), use the request payload directly because distributed
-    // RAM is read-first at the write edge.
-    wire payload0_push_bypass = (old_remaining == '0) &&
-        (read_push_count_i != 2'd0);
-    wire payload1_push_bypass =
-        ((old_remaining == '0) && (read_push_count_i == 2'd2)) ||
-        ((old_remaining == COUNT_EXT_WIDTH'(1)) && (read_push_count_i != 2'd0));
-    wire next_valid0 = !flush_i && (count_after_op != '0);
-    wire next_valid1 = !flush_i && (count_after_op > COUNT_EXT_WIDTH'(1));
-    wire [PAYLOAD_WIDTH-1:0] next_payload0 = payload0_push_bypass ?
-        push_payload0_i : memory_payload0;
-    wire [PAYLOAD_WIDTH-1:0] next_payload1 = payload1_push_bypass ?
-        ((old_remaining == '0) ? push_payload1_i : push_payload0_i) :
-        memory_payload1;
-    reg valid0_q;
-    reg valid1_q;
-    reg [PAYLOAD_WIDTH-1:0] payload0_q;
-    reg [PAYLOAD_WIDTH-1:0] payload1_q;
-    assign valid0_o = valid0_q;
-    assign valid1_o = valid1_q;
+        if (old_remaining != '0) begin
+            unique case (pop_count_i)
+                2'd0: payload0_d = payload0_q;
+                2'd1: payload0_d = payload1_q;
+                default: payload0_d = backing_payload0;
+            endcase
+        end else if (push_count_i != 2'd0) begin
+            payload0_d = push_payload0_i;
+        end
+
+        if (old_remaining > COUNT_WIDTH'(1)) begin
+            unique case (pop_count_i)
+                2'd0: payload1_d = payload1_q;
+                2'd1: payload1_d = backing_payload0;
+                default: payload1_d = backing_payload1;
+            endcase
+        end else if ((old_remaining == COUNT_WIDTH'(1)) &&
+                     (push_count_i != 2'd0)) begin
+            payload1_d = push_payload0_i;
+        end else if ((old_remaining == '0) && (push_count_i == 2'd2)) begin
+            payload1_d = push_payload1_i;
+        end
+    end
+
+    assign valid0_o = count_q != '0;
+    assign valid1_o = count_q > COUNT_WIDTH'(1);
     assign payload0_o = payload0_q;
     assign payload1_o = payload1_q;
     assign count_o = count_q;
 
-    // This is the IF/ID queue boundary. Payload has no reset mux; valid alone
-    // suppresses stale LUTRAM data after reset or redirect.
+    // Payload has no reset mux; count suppresses stale data after reset/flush.
     always_ff @(posedge clk) begin
-        payload0_q <= next_payload0;
-        payload1_q <= next_payload1;
-        if (!rst_n) begin
-            valid0_q <= 1'b0;
-            valid1_q <= 1'b0;
-        end else begin
-            valid0_q <= next_valid0;
-            valid1_q <= next_valid1;
-        end
+        payload0_q <= payload0_d;
+        payload1_q <= payload1_d;
     end
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n || flush_i) begin
             count_q <= '0;
-            head_q <= '0;
-            tail_q <= '0;
+            back_head_q <= '0;
+            back_tail_q <= '0;
         end else begin
             count_q <= count_q - COUNT_WIDTH'(pop_count_i) +
                 COUNT_WIDTH'(push_count_i);
-            if (pop_count_i != 2'd0)
-                head_q <= state_head_next;
+            if (back_head_advance != 2'd0)
+                back_head_q <= advance_back_ptr(back_head_q, back_head_advance);
             if (push_count_i != 2'd0)
-                tail_q <= state_tail_next;
+                back_tail_q <= advance_back_ptr(back_tail_q, push_count_i);
         end
     end
 
 `ifndef SYNTHESIS
     initial begin
-        assert ((DEPTH >= 2) && ((DEPTH % 2) == 0))
-            else $fatal(1, "fetch queue depth must be positive and even");
+        assert ((DEPTH >= 4) && ((DEPTH % 2) == 0))
+            else $fatal(1, "fetch queue depth must be even and at least four");
     end
     always_ff @(posedge clk) begin
         if (rst_n && !flush_i) begin
-            assert ((head_q < INDEX_WIDTH'(DEPTH)) &&
-                    (tail_q < INDEX_WIDTH'(DEPTH)))
-                else $fatal(1, "fetch queue ring pointer out of range");
+			assert (({1'b0, back_head_q} <
+					 (BACK_INDEX_WIDTH + 1)'(BACK_DEPTH)) &&
+					({1'b0, back_tail_q} <
+					 (BACK_INDEX_WIDTH + 1)'(BACK_DEPTH)))
+                else $fatal(1, "fetch queue backing pointer out of range");
+            assert (COUNT_WIDTH'(pop_count_i) <= count_q)
+                else $fatal(1, "fetch queue underflow");
             assert (count_q - COUNT_WIDTH'(pop_count_i) +
                     COUNT_WIDTH'(push_count_i) <= COUNT_WIDTH'(DEPTH))
-                else $fatal(1, "fetch queue ring overflow");
+                else $fatal(1, "fetch queue overflow");
         end
     end
 `endif
@@ -241,7 +234,8 @@ endmodule
 module ydrasil_if_stage
 import ydrasil_pkg::*;
 #(
-    parameter int FETCHQ_DEPTH = 4
+    parameter int FETCHQ_DEPTH = 4,
+    parameter int BHT_ENTRIES = BP_BHT_ENTRIES
 ) (
     input  wire        clk,
     input  wire        rst_n,
@@ -252,16 +246,12 @@ import ydrasil_pkg::*;
     input  wire        branch_jump_i,
     input  wire [31:0] branch_target_i,
 
-    input  wire        bp_predict_hit_i,
     input  wire        bp_predict_taken_i,
     input  wire [31:0] bp_predict_target_i,
     input  wire [1:0]  bp_predict_counter_i,
-    input  bp_bht_index_t bp_predict_bht_index_i,
-    input  wire        bp_predict1_hit_i,
     input  wire        bp_predict1_taken_i,
     input  wire [31:0] bp_predict1_target_i,
     input  wire [1:0]  bp_predict1_counter_i,
-    input  bp_bht_index_t bp_predict1_bht_index_i,
     input  wire        bp_invalidate_i,
     input  wire [31:0] bp_invalidate_target_i,
     // Install L0 entries only after EX has resolved real control flow.
@@ -298,16 +288,15 @@ import ydrasil_pkg::*;
     localparam int COUNT_WIDTH = $clog2(FETCHQ_DEPTH + 1);
     localparam int RESERVED_WIDTH = $clog2(FETCHQ_DEPTH + 3);
     localparam int FETCH_ADDR_TOKEN_WIDTH = ITCM_ADDR_WIDTH + 1;
+    localparam int BHT_INDEX_WIDTH = $clog2(BHT_ENTRIES);
 
     typedef logic [FETCH_ADDR_TOKEN_WIDTH-1:0] fetch_addr_token_t;
     typedef struct packed {
         fetch_addr_token_t pc;
         logic [31:0] instr;
-        logic pred_hit;
         logic pred_taken;
         fetch_addr_token_t pred_target;
         logic [1:0] pred_counter;
-        bp_bht_index_t pred_bht_index;
     } fetch_payload_t;
     localparam int FETCH_PAYLOAD_WIDTH = $bits(fetch_payload_t);
 
@@ -391,11 +380,6 @@ import ydrasil_pkg::*;
     wire [31:0] flush_target = branch_jump_i ? branch_target_i : pc_plus4;
     wire [1:0] pop_count = (!flush_fetch && !stall_if_i && fetchq_valid0) ?
         ((consume_two_i && fetchq_valid1) ? 2'd2 : 2'd1) : 2'd0;
-    // The ring state consumes only flush-qualified entries. The read-ahead
-    // peek intentionally remains independent so redirect control does not
-    // fan into the LUTRAM data pins; its valid bits are discarded below.
-    wire [1:0] read_pop_count = (!stall_if_i && fetchq_valid0) ?
-        ((consume_two_i && fetchq_valid1) ? 2'd2 : 2'd1) : 2'd0;
     wire mem_resp_valid = !flush_fetch && mem_req_valid_q;
     wire [31:0] sequential_next_pc =
         mem_req_pc_q + (mem_req_two_q ? 32'd8 : 32'd4);
@@ -425,8 +409,6 @@ import ydrasil_pkg::*;
         bram_next_pc_mismatch;
     wire [1:0] push_count = mem_resp_valid ?
         ((bp_predict_taken_i || !mem_req_two_q) ? 2'd1 : 2'd2) : 2'd0;
-    wire [1:0] read_push_count = mem_req_valid_q ?
-        ((bp_predict_taken_i || !mem_req_two_q) ? 2'd1 : 2'd2) : 2'd0;
     wire [RESERVED_WIDTH-1:0] reserved_count =
         RESERVED_WIDTH'(fetchq_count_q) +
         (mem_req_valid_q ? (mem_req_two_q ? RESERVED_WIDTH'(2) :
@@ -450,14 +432,12 @@ import ydrasil_pkg::*;
                 DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2],
             mem_req_pc_q[ITCM_ADDR_WIDTH+1:2]};
         fetchq_push_payload0.instr = if_mem_rdata_i;
-        fetchq_push_payload0.pred_hit = bp_predict_hit_i;
         fetchq_push_payload0.pred_taken = bp_predict_taken_i;
         fetchq_push_payload0.pred_target = {
             bp_predict_target_i[31:ITCM_ADDR_WIDTH+2] ==
                 DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2],
             bp_predict_target_i[ITCM_ADDR_WIDTH+1:2]};
         fetchq_push_payload0.pred_counter = bp_predict_counter_i;
-        fetchq_push_payload0.pred_bht_index = bp_predict_bht_index_i;
 
         fetchq_push_payload1 = '0;
         fetchq_push_payload1.pc = {
@@ -465,14 +445,12 @@ import ydrasil_pkg::*;
                 DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2],
             mem_req_pc_plus4[ITCM_ADDR_WIDTH+1:2]};
         fetchq_push_payload1.instr = if_mem_rdata1_i;
-        fetchq_push_payload1.pred_hit = bp_predict1_hit_i;
         fetchq_push_payload1.pred_taken = bp_predict1_taken_i;
         fetchq_push_payload1.pred_target = {
             bp_predict1_target_i[31:ITCM_ADDR_WIDTH+2] ==
                 DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2],
             bp_predict1_target_i[ITCM_ADDR_WIDTH+1:2]};
         fetchq_push_payload1.pred_counter = bp_predict1_counter_i;
-        fetchq_push_payload1.pred_bht_index = bp_predict1_bht_index_i;
     end
     ydrasil_fetch_queue #(
         .DEPTH      (FETCHQ_DEPTH),
@@ -483,9 +461,7 @@ import ydrasil_pkg::*;
         .rst_n          (rst_n),
         .flush_i        (flush_fetch || bp_invalidate_i),
         .pop_count_i    (pop_count),
-        .read_pop_count_i(read_pop_count),
         .push_count_i   (push_count),
-        .read_push_count_i(read_push_count),
         .push_payload0_i(fetchq_push_payload0),
         .push_payload1_i(fetchq_push_payload1),
         .count_o        (fetchq_count_q),
@@ -575,27 +551,31 @@ import ydrasil_pkg::*;
         fetchq_payload1.pred_target[ITCM_ADDR_WIDTH-1:0], 2'b00};
     assign if_id_pc_o = fetchq_valid0 ? fetchq_pc0 : RESET_INS;
     assign if_id_instr_o = fetchq_valid0 ? fetchq_payload0.instr : RV32I_INS_NOP;
-    assign if_id_pred_hit_o = fetchq_valid0 && fetchq_payload0.pred_hit;
+    assign if_id_pred_hit_o = fetchq_valid0 && fetchq_payload0.pred_taken;
     assign if_id_pred_taken_o = fetchq_valid0 && fetchq_payload0.pred_taken;
-    assign if_id_pred_target_o = (fetchq_valid0 && fetchq_payload0.pred_hit) ?
+    assign if_id_pred_target_o = (fetchq_valid0 && fetchq_payload0.pred_taken) ?
         fetchq_pred_target0 : '0;
     assign if_id_pred_counter_o = fetchq_valid0 ?
         fetchq_payload0.pred_counter : 2'b01;
+    wire [BHT_INDEX_WIDTH-1:0] fetchq_bht_index0 =
+        BHT_INDEX_WIDTH'(fetchq_pc0 >> 2);
     assign if_id_pred_bht_index_o = fetchq_valid0 ?
-        fetchq_payload0.pred_bht_index : '0;
+        BP_BHT_INDEX_WIDTH'(fetchq_bht_index0) : '0;
 
     assign if_id1_valid_o = fetchq_valid1;
     assign if_id1_pc_o = fetchq_valid1 ?
         fetchq_pc1 : (RESET_INS + 32'd4);
     assign if_id1_instr_o = fetchq_valid1 ? fetchq_payload1.instr : RV32I_INS_NOP;
-    assign if_id1_pred_hit_o = fetchq_valid1 && fetchq_payload1.pred_hit;
+    assign if_id1_pred_hit_o = fetchq_valid1 && fetchq_payload1.pred_taken;
     assign if_id1_pred_taken_o = fetchq_valid1 && fetchq_payload1.pred_taken;
-    assign if_id1_pred_target_o = (fetchq_valid1 && fetchq_payload1.pred_hit) ?
+    assign if_id1_pred_target_o = (fetchq_valid1 && fetchq_payload1.pred_taken) ?
         fetchq_pred_target1 : '0;
     assign if_id1_pred_counter_o = fetchq_valid1 ?
         fetchq_payload1.pred_counter : 2'b01;
+    wire [BHT_INDEX_WIDTH-1:0] fetchq_bht_index1 =
+        BHT_INDEX_WIDTH'(fetchq_pc1 >> 2);
     assign if_id1_pred_bht_index_o = fetchq_valid1 ?
-        fetchq_payload1.pred_bht_index : '0;
+        BP_BHT_INDEX_WIDTH'(fetchq_bht_index1) : '0;
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin

@@ -8,13 +8,8 @@ import ydrasil_pkg::*;
     input  wire                            rst_n,
     input  wire                            flush_ex_i,
 
-    input  wire [DATA_WIDTH-1:0]           bt_a_operand_i,
-    input  wire [DATA_WIDTH-1:0]           bt_b_operand_i,
-
-    input  wire [DATA_WIDTH-1:0]           alu_operand_a_i,
-    input  wire [DATA_WIDTH-1:0]           alu_operand_b_i,
-    input  wire [DATA_WIDTH-1:0]           bru_operand_a_i,
-    input  wire [DATA_WIDTH-1:0]           bru_operand_b_i,
+	input  wire [DATA_WIDTH-1:0]           alu_operand_a_i,
+	input  wire [DATA_WIDTH-1:0]           alu_operand_b_i,
     input  wire [DATA_WIDTH-1:0]           lsu_operand_a_i,
     input  wire [DATA_WIDTH-1:0]           lsu_operand_b_i,
     input  wire [DATA_WIDTH-1:0]           lsu_store_data_i,
@@ -24,25 +19,14 @@ import ydrasil_pkg::*;
     input  wire [OPERATOR_WIDTH-1:0]       operator_i,
     input  wire [OPERATOR_TYPE_WIDTH-1:0]  operator_type_i,
     input  wire                            alu_valid_i,
-    input  wire                            bru_valid_i,
     input  wire                            lsu_valid_i,
     input  wire                            lsu_is_load_i,
     input  wire                            lsu_is_store_i,
     input  wire                            mul_valid_i,
     input  wire                            csr_valid_i,
-    input  wire [OPERATOR_WIDTH-1:0]       bru_operator_i,
-    input  wire [OPERATOR_TYPE_WIDTH-1:0]  bru_operator_type_i,
     input  wire [OPERATOR_WIDTH-1:0]       mul_operator_i,
     input  wire [OPERATOR_TYPE_WIDTH-1:0]  mul_operator_type_i,
     input  wire [OPERATOR_TYPE_WIDTH-1:0]  csr_operator_type_i,
-    input  wire                            id_ex_jalr_i,
-    input  wire [DATA_WIDTH-1:0]           id_ex_branch_target_i,
-    input  wire [DATA_WIDTH-1:0]           id_ex_branch_next_pc_i,
-    input  wire                            id_ex_pred_hit_i,
-    input  wire                            id_ex_pred_taken_i,
-    input  wire [DATA_WIDTH-1:0]           id_ex_pred_target_i,
-    input  wire [1:0]                      id_ex_pred_counter_i,
-    input  bp_bht_index_t                  id_ex_pred_bht_index_i,
     input  wire [REGS_ADDR_WIDTH-1:0]      id_rf_waddr_rd_i,
     input  wire                            id_alu_rf_wen_rd_i,
     input  producer_id_t                   id_ex_producer_id_i,
@@ -56,18 +40,10 @@ import ydrasil_pkg::*;
     input  wire [DATA_WIDTH-1:0]           csr_ex_rdata_i,
 
     output wire                            ex_csr_wen_o,
-    output wire [DATA_WIDTH-1:0]           ex_csr_wdata_o,
-    output wire [1:0]                      ex_csr_fs_wdata_o,
-    output wire                            ex_csr_mstatus_wen_o,
+	output wire [DATA_WIDTH-1:0]           ex_csr_wdata_o,
     output wire [CSR_ADDR_WIDTH-1:0]       ex_csr_waddr_o,
 
-    output wire                            ex_branch_jump_o,
-    output wire [DATA_WIDTH-1:0]           ex_branch_target_o,
-    output wire                            ex_pc_redirect_o,
-    output wire [DATA_WIDTH-1:0]           ex_pc_redirect_target_o,
-    output ydrasil_bp_train_pkt_t          ex_bp_train_o,
-    output wire                            ex_branch_mispredict_o,
-    output wire [BUS_ADDR_WIDTH-1:0]       ex_lsu_mem_addr_o,
+	output wire [BUS_ADDR_WIDTH-1:0]       ex_lsu_mem_addr_o,
 
     output wire [DATA_WIDTH-1:0]           ex_lsu_result_o,
 
@@ -86,21 +62,8 @@ import ydrasil_pkg::*;
     output producer_id_t                   mul_producer_id_o,
     output wire                            mul_result_valid_o,
 
-    output wire                            ex_instret_inc_o,
-    output wire                            ex_mul_stall_o
-`ifndef SYNTHESIS
-    ,output wire                           dbg_bp_resolve_valid_o
-    ,output wire [DATA_WIDTH-1:0]          dbg_bp_resolve_pc_o
-    ,output wire                           dbg_bp_actual_taken_o
-    ,output wire [DATA_WIDTH-1:0]          dbg_bp_actual_target_o
-    ,output wire [DATA_WIDTH-1:0]          dbg_bp_actual_next_pc_o
-    ,output wire                           dbg_bp_pred_hit_o
-    ,output wire                           dbg_bp_pred_taken_o
-    ,output wire [DATA_WIDTH-1:0]          dbg_bp_pred_target_o
-    ,output wire [1:0]                     dbg_bp_pred_counter_o
-    ,output wire [DATA_WIDTH-1:0]          dbg_bp_pred_next_pc_o
-    ,output wire                           dbg_bp_mispredict_o
-`endif
+	output wire                            ex_instret_inc_o,
+	output wire                            ex_mul_stall_o
 );
 
     wire [REGS_DATA_WIDTH-1:0] alu_result;
@@ -111,7 +74,6 @@ import ydrasil_pkg::*;
     wire op_bitmanip;
     wire op_load;
     wire op_store;
-    wire op_bjp;
     wire op_mul;
     wire op_div;
 
@@ -160,29 +122,20 @@ import ydrasil_pkg::*;
     wire [31:0] operand_b;
     wire [31:0] bitmanip_operand_a;
     wire [31:0] bitmanip_operand_b;
-    wire [31:0] bru_operand_a;
-    wire [31:0] bru_operand_b;
     wire [31:0] lsu_operand_b;
     wire [31:0] lsu_store_data;
     wire [31:0] mul_operand_a;
     wire [31:0] mul_operand_b;
     wire [31:0] csr_operand_a;
-    wire [31:0] bt_a_operand;
-    wire [31:0] bt_b_operand;
     wire [31:0] fast_add_result;
     wire [31:0] lsu_fast_add_result;
     wire [31:0] lsu_base_add_result;
-    assign bt_a_operand = bt_a_operand_i;
-    assign bt_b_operand = bt_b_operand_i;
-
     // JALR uses rs1 only for the BRU target. Its architectural rd value is
     // always PC+4, so the ALU link operand must remain the registered PC.
     assign operand_a = alu_operand_a_i;
     assign operand_b = alu_operand_b_i;
     assign bitmanip_operand_a = alu_operand_a_i;
     assign bitmanip_operand_b = alu_operand_b_i;
-    assign bru_operand_a = bru_operand_a_i;
-    assign bru_operand_b = bru_operand_b_i;
     assign lsu_operand_b = lsu_operand_b_i;
     assign lsu_store_data = lsu_store_data_i;
     assign mul_operand_a = mul_operand_a_i;
@@ -194,56 +147,10 @@ import ydrasil_pkg::*;
     assign ex_lsu_mem_addr_o = lsu_fast_add_result;
     assign ex_lsu_result_o = lsu_store_data;
 
-    ydrasil_bru #(
-        .DATA_WIDTH(DATA_WIDTH)
-    ) u_ydrasil_bru (
-        .clk                         (clk),
-        .rst_n                       (rst_n),
-        .flush_i                     (flush_ex_i),
-        .operand_a_i                 (bru_operand_a),
-        .operand_b_i                 (bru_operand_b),
-        .bt_a_operand_i              (bt_a_operand),
-        .bt_b_operand_i              (bt_b_operand),
-        .operator_i                  (bru_operator_i),
-        .operator_type_i             (bru_operator_type_i),
-        .id_ex_valid_i               (bru_valid_i),
-        .id_ex_jalr_i                (id_ex_jalr_i),
-        .id_ex_branch_target_i       (id_ex_branch_target_i),
-        .id_ex_branch_next_pc_i      (id_ex_branch_next_pc_i),
-        .id_ex_pred_hit_i            (id_ex_pred_hit_i),
-        .id_ex_pred_taken_i          (id_ex_pred_taken_i),
-        .id_ex_pred_target_i         (id_ex_pred_target_i),
-        .id_ex_pred_counter_i        (id_ex_pred_counter_i),
-        .id_ex_pred_bht_index_i      (id_ex_pred_bht_index_i),
-        .id_ex_producer_id_i         (id_ex_producer_id_i),
-        .trap_redirect_i             (trap_redirect_i),
-        .trap_redirect_addr_i        (trap_redirect_addr_i),
-        .ex_branch_jump_o            (ex_branch_jump_o),
-        .ex_branch_target_o          (ex_branch_target_o),
-        .ex_pc_redirect_o            (ex_pc_redirect_o),
-        .ex_pc_redirect_target_o     (ex_pc_redirect_target_o),
-        .ex_bp_train_o               (ex_bp_train_o),
-        .ex_branch_mispredict_o      (ex_branch_mispredict_o)
-`ifndef SYNTHESIS
-        ,.dbg_bp_resolve_valid_o     (dbg_bp_resolve_valid_o)
-        ,.dbg_bp_resolve_pc_o        (dbg_bp_resolve_pc_o)
-        ,.dbg_bp_actual_taken_o      (dbg_bp_actual_taken_o)
-        ,.dbg_bp_actual_target_o     (dbg_bp_actual_target_o)
-        ,.dbg_bp_actual_next_pc_o    (dbg_bp_actual_next_pc_o)
-        ,.dbg_bp_pred_hit_o          (dbg_bp_pred_hit_o)
-        ,.dbg_bp_pred_taken_o        (dbg_bp_pred_taken_o)
-        ,.dbg_bp_pred_target_o       (dbg_bp_pred_target_o)
-        ,.dbg_bp_pred_counter_o      (dbg_bp_pred_counter_o)
-        ,.dbg_bp_pred_next_pc_o      (dbg_bp_pred_next_pc_o)
-        ,.dbg_bp_mispredict_o        (dbg_bp_mispredict_o)
-`endif
-    );
-
     assign op_m_unit = mul_operator_type_i[OPERATOR_TYPE_MUL];
     assign op_bitmanip = operator_type_i[OPERATOR_TYPE_BITMANIP];
     assign op_load = lsu_valid_i & lsu_is_load_i;
     assign op_store = lsu_valid_i & lsu_is_store_i;
-    assign op_bjp = bru_operator_type_i[OPERATOR_TYPE_BJP];
     assign op_mul =
         op_m_unit &
         (mul_operator_i[OP_MUL_MUL]    |
@@ -340,8 +247,7 @@ import ydrasil_pkg::*;
         normal_alu_rf_wen_rd | op_csr;
     assign mul_result_valid_o = mul_result_valid | div_complete;
     assign ex_instret_inc_o =
-        (alu_valid_i & !trap_redirect_i & !flush_ex_i & !op_load & !op_mul & !op_div &
-         !operator_type_i[OPERATOR_TYPE_FPU]) |
+			(alu_valid_i & !trap_redirect_i & !flush_ex_i & !op_mul & !op_div) |
         div_complete;
 
     wire fast_alu_op =
@@ -355,9 +261,8 @@ import ydrasil_pkg::*;
          operator_i[OP_ALU_AND]  |
          operator_i[OP_ALU_LUI]  |
          operator_i[OP_ALU_AUIPC]);
-    wire fast_result_wen =
-        (alu_valid_i & !trap_redirect_i & !flush_ex_i & !op_m_unit &
-         !op_bitmanip & (fast_alu_op | op_load | op_store | op_bjp));
+    wire fast_result_wen = alu_valid_i && !trap_redirect_i && !flush_ex_i &&
+        !op_m_unit && !op_bitmanip && fast_alu_op;
     assign fast_add_result = operand_a + operand_b;
     wire [32:0] fast_sub_result_ext = {1'b0, operand_a} + {1'b0, ~operand_b} + 33'd1;
     wire        fast_signs_differ = operand_a[31] ^ operand_b[31];
@@ -391,8 +296,7 @@ import ydrasil_pkg::*;
         fast_alu_result : alu_result;
     assign early_bypass_data_o = early_lite_bitmanip_op ?
         early_lite_bitmanip_result :
-        operator_type_i[OPERATOR_TYPE_ALU] ? early_plain_alu_result :
-        operator_type_i[OPERATOR_TYPE_BJP] ? fast_add_result : '0;
+		operator_type_i[OPERATOR_TYPE_ALU] ? early_plain_alu_result : '0;
 
     ydrasil_alu #(
         .DATAWIDTH(DATA_WIDTH)
@@ -493,8 +397,6 @@ import ydrasil_pkg::*;
     wire [31:0] csr_wdata;
 
     reg [REGS_DATA_WIDTH-1:0] ex_csr_wdata_o_ff;
-    (* dont_touch = "yes" *) reg [1:0] ex_csr_fs_wdata_o_ff;
-    (* dont_touch = "yes" *) reg ex_csr_mstatus_wen_o_ff;
     reg                       ex_csr_wen_o_ff;
     reg [CSR_ADDR_WIDTH-1:0]  ex_csr_waddr_o_ff;
 
@@ -521,8 +423,6 @@ import ydrasil_pkg::*;
             alu_rf_waddr_rd_ff  <= '0;
             alu_producer_id_ff  <= '0;
             ex_csr_wdata_o_ff   <= '0;
-            ex_csr_fs_wdata_o_ff <= '0;
-            ex_csr_mstatus_wen_o_ff <= 1'b0;
             ex_csr_wen_o_ff     <= 1'b0;
             ex_csr_waddr_o_ff   <= '0;
         end else if (flush_ex_i) begin
@@ -533,8 +433,6 @@ import ydrasil_pkg::*;
             alu_rf_waddr_rd_ff  <= '0;
             alu_producer_id_ff  <= '0;
             ex_csr_wdata_o_ff   <= '0;
-            ex_csr_fs_wdata_o_ff <= '0;
-            ex_csr_mstatus_wen_o_ff <= 1'b0;
             ex_csr_wen_o_ff     <= 1'b0;
             ex_csr_waddr_o_ff   <= '0;
         end else begin
@@ -548,8 +446,6 @@ import ydrasil_pkg::*;
             alu_rf_waddr_rd_ff <= alu_rf_waddr_rd;
             alu_producer_id_ff <= id_ex_producer_id_i;
             ex_csr_wdata_o_ff  <= csr_wdata;
-            ex_csr_fs_wdata_o_ff <= csr_wdata[14:13];
-            ex_csr_mstatus_wen_o_ff <= csr_wen && (id_ex_csr_waddr_i == CSR_MSTATUS);
             ex_csr_wen_o_ff    <= csr_wen;
             ex_csr_waddr_o_ff  <= id_ex_csr_waddr_i;
 
@@ -597,8 +493,6 @@ import ydrasil_pkg::*;
     end
 
     assign ex_csr_wdata_o = ex_csr_wdata_o_ff;
-    assign ex_csr_fs_wdata_o = ex_csr_fs_wdata_o_ff;
-    assign ex_csr_mstatus_wen_o = ex_csr_mstatus_wen_o_ff;
     assign ex_csr_wen_o = ex_csr_wen_o_ff;
     assign ex_csr_waddr_o = ex_csr_waddr_o_ff;
     assign slow_result_wen = op_csr;

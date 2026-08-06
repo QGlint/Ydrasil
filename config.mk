@@ -11,7 +11,6 @@ USE_BENDER ?= 1
 BENDER ?= bender
 VERILATOR_TRACE ?= 1
 DIV_IMPL ?= lzc
-FPU ?= 0
 YDRASIL_PRODUCER_NUM ?= 12
 PYTHON ?= python3
 export PYTHONPYCACHEPREFIX ?= $(BUILD_DIR)/pycache
@@ -264,8 +263,8 @@ VERILATOR_STRICT ?= verilator
 VERILATOR_STRICT_FLAGS ?= --lint-only --sv -Wall --report-unoptflat --error-limit $(RTL_QC_ERROR_LIMIT)
 # The RTL strict pass remains fatal for width, loop, latch and timing-shape
 # diagnostics. These categories are pre-existing compatibility-only signals
-# (FPU-disabled ports, DV observability pins, and package constants) that do
-# not enter synthesized logic; keep the list explicit rather than using the
+# (DV observability pins and package constants) that do not enter synthesized
+# logic; keep the list explicit rather than using the
 # broad VERILATOR_IGNORE_FULL escape hatch.
 VERILATOR_STRICT_WNO ?= DECLFILENAME PINCONNECTEMPTY UNUSEDSIGNAL UNUSEDPARAM SYMRSVDWORD SYNCASYNCNET
 # Keep structural diagnostics in the same log as the elaborated tree.  The
@@ -310,15 +309,8 @@ VIVADO_OOC_DEFINES ?= SYNTHESIS TARGET_SYNTHESIS TARGET_VIVADO TARGET_XILINX
 VIVADO_OOC_ISSUE_MODULES ?= ydrasil_id_stage ydrasil_issue_stage ydrasil_ctrl ydrasil_ex_block
 VIVADO_OOC_ISSUE_DIR ?= $(BUILD_DIR)/vivado-ooc/issue
 
-ifeq ($(FPU),1)
-ARCH := rv32imf_zicsr_zifencei_zba_zbb_zbc_zbkb_zbkx_zbs
-ABI  := ilp32f
-else ifeq ($(FPU),0)
 ARCH := rv32im_zicsr_zifencei_zba_zbb_zbc_zbkb_zbkx_zbs
 ABI  := ilp32
-else
-$(error Unsupported FPU '$(FPU)'. Use FPU=0 or FPU=1)
-endif
 PRIV := m
 
 RISCV_CFLAGS := \
@@ -334,9 +326,6 @@ RISCV_CFLAGS := \
     -falign-loops=8
 
 RVTESTS_TYPE := rv32ui rv32um rv32uzba rv32uzbb rv32uzbc rv32uzbkb rv32uzbkx rv32uzbs rv32mi
-ifeq ($(FPU),1)
-RVTESTS_TYPE += rv32uf
-endif
 RV32MI_TESTS ?= csr mcsr
 RVTESTS_EXCLUDE ?= rv32ui/ma_data
 
