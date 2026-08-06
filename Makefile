@@ -402,7 +402,7 @@ endif
 .PHONY: coremark coremark_sim coremark_run coremark_result coremark-rebuild coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map coremark_swopt_show coremark_opt_all coremark_opt_build_all coremark_opt_sim_all coremark_opt_report coremark_opt_clean $(COREMARK_OPT_BUILD_TARGETS) $(COREMARK_OPT_SIM_TARGETS) sort_app sort_all sort_sim_all sort_report sort_app_sim sort_app-rebuild sort_app-clean sort_opt_all sort_opt_build_all sort_opt_sim_all sort_opt_report sort_opt_clean $(SORT_OPT_BUILD_TARGETS) $(SORT_OPT_SIM_TARGETS) boundary_app boundary_all boundary_sim_all boundary_report boundary_app-rebuild boundary_app-clean boundary_opt_all boundary_opt_build_all boundary_opt_sim_all boundary_opt_report boundary_opt_clean $(BOUNDARY_OPT_BUILD_TARGETS) $(BOUNDARY_OPT_SIM_TARGETS) coe_m3_force coe_loop2_gen coe_loop5 coe_loop5_gen coe_loop_lina coe_loop_lina_gen loop_lina coe_MFlina coe_MFlina_gen coe_mflina coe_mflina_gen rtthread rtthread-build rtthread-clean rtthread-coremark rtthread-coremark-build rtthread-coremark-build-all rtthread-coremark-sim rtthread-coremark-sim-all rtthread-coremark-report rtthread-coremark-compare rtthread-coremark-clean rtthread-utest rtthread-utest-build rtthread-utest-sim rtthread-utest-report rtthread-utest-clean $(RTTHREAD_COREMARK_PROFILE_BUILD_TARGETS) $(RTTHREAD_COREMARK_PROFILE_SIM_TARGETS)
 .PHONY: riscv_dv_venv riscv_dv_model riscv_dv_prepare riscv_dv_run riscv_dv_random riscv_dv_random_status riscv_dv_regression riscv_dv_count riscv_dv_repro riscv_dv_estimate riscv_dv_stop riscv_dv_coverage_report riscv_dv_cleanup riscv_dv_distclean
 .PHONY: syn synf syn225 syn240 syn250 syn-board synf-board syn-extreme syn-reports syn-dedup syn-lowmem-synth syn-lowmem-impl syn-venv syn-prep syn-stage-xpr syn-stage-memory syn-reuse-stage-check syn-vivado syn-analyze syn-clean
-.PHONY: rtl-quickcheck rtl-strict rtl-xml rtl-structure rtl-vivado-compare rtl-vivado-archive verilator-strict verilator-xml slang-ast
+.PHONY: rtl-quickcheck rtl-strict rtl-xml rtl-structure-report rtl-structure rtl-vivado-compare rtl-vivado-cross-validate rtl-vivado-archive verilator-strict verilator-xml slang-ast
 .PHONY: yosys-slang yosys-slang-gate yosys-slang-baseline yosys-slang-quick vivado-ooc vivado-ooc-synth vivado-ooc-issue
 
 .SECONDEXPANSION:
@@ -1214,10 +1214,11 @@ rtl-xml: $(RTL_QC_FLIST)
 		cp "$$final" "$(RTL_QC_TREE_JSON)"; \
 		echo "[RTL] tree JSON: $(RTL_QC_TREE_JSON)"; exit 0
 
-rtl-structure: rtl-xml
+rtl-structure-report: rtl-xml
 	$(PYTHON) "$(SYN_DIR)/analyze_rtl_structure.py" \
 		--input "$(RTL_QC_TREE_JSON)" --output "$(RTL_QC_STRUCTURE_JSON)" --top "$(RTL_QC_TOP)" \
 		--source-metadata "$(RTL_QC_METADATA)" \
+		--calibration-history "$(RTL_QC_CALIBRATION_HISTORY)" \
 		--target-period-ns "$(RTL_QC_TARGET_PERIOD_NS)" \
 		--timing-possible-depth "$(RTL_QC_TIMING_POSSIBLE_DEPTH)" \
 		--timing-definite-depth "$(RTL_QC_TIMING_DEFINITE_DEPTH)" \
@@ -1227,7 +1228,11 @@ rtl-structure: rtl-xml
 		--bram-clock-to-out-ns "$(RTL_QC_BRAM_CLOCK_TO_OUT_NS)" \
 		--lutram-arc-ns "$(RTL_QC_LUTRAM_ARC_NS)"
 
-rtl-vivado-compare: rtl-structure
+rtl-structure: rtl-structure-report
+	$(PYTHON) "$(SYN_DIR)/analyze_rtl_structure.py" \
+		--check-output "$(RTL_QC_STRUCTURE_JSON)"
+
+rtl-vivado-compare: rtl-structure-report
 	@test -f "$(RTL_QC_VIVADO_UTILIZATION)" || { echo "Vivado utilization report not found: $(RTL_QC_VIVADO_UTILIZATION)" >&2; exit 2; }
 	$(PYTHON) "$(SYN_DIR)/compare_rtl_vivado.py" \
 		--structure "$(RTL_QC_STRUCTURE_JSON)" \
@@ -1239,6 +1244,13 @@ rtl-vivado-compare: rtl-structure
 		--history-root "$(RTL_QC_CALIBRATION_HISTORY)" \
 		--output "$(RTL_QC_VIVADO_COMPARE_JSON)" \
 		--summary-output "$(RTL_QC_RELIABILITY_SUMMARY)"
+
+rtl-vivado-cross-validate:
+	$(PYTHON) "$(RTL_QC_CROSS_VALIDATE_SCRIPT)" \
+		--archive-root "$(RTL_QC_CALIBRATION_HISTORY)" \
+		--target-period-ns "$(RTL_QC_TARGET_PERIOD_NS)" \
+		--output "$(RTL_QC_CROSS_VALIDATE_JSON)" \
+		--summary-output "$(RTL_QC_CROSS_VALIDATE_SUMMARY)"
 
 rtl-vivado-archive: rtl-vivado-compare
 	$(PYTHON) "$(RTL_QC_ARCHIVE_SCRIPT)" \

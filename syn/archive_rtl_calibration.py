@@ -97,7 +97,7 @@ def main() -> int:
     provenance = structure.get("provenance", {})
     copied_files = sorted(path for path in archive_dir.rglob("*") if path.is_file())
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "archived_at_utc": datetime.now(timezone.utc).isoformat(),
         "git_commit": git_output(repo_root, "rev-parse", "HEAD"),
         "git_describe": git_output(repo_root, "describe", "--always", "--dirty"),
@@ -106,6 +106,12 @@ def main() -> int:
         "source_count": provenance.get("source_count"),
         "top": structure.get("top"),
         "target_period_ns": structure.get("summary", {}).get("target_period_ns"),
+        "memory_geometry_profile": structure.get("memory_geometry_profile"),
+        "timing_path_fail_count": structure.get("summary", {}).get("timing_path_fail_count", 0),
+        "path_family_training": {
+            key: comparison.get("path_family_training", {}).get(key)
+            for key in ("schema_version", "dataset_count", "path_count", "family_count")
+        },
         "reports_source": str(args.reports.resolve()),
         "comparison_freshness_status": freshness,
         "calibration_compatibility": compatibility,

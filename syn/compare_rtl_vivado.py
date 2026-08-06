@@ -20,6 +20,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from rtl_timing_families import path_family, summarize_families
+
 
 RESOURCE_KEYS = ("lut", "logic_lut", "lutram", "srl", "ff", "ramb36", "ramb18", "dsp")
 EXCLUDED_MODULES = {"dtcm", "itcm"}
@@ -1161,6 +1163,96 @@ def timing_risk_validation(
     }
 
 
+def timing_path_family_validation(
+    structure: dict[str, Any],
+    report: dict[str, Any],
+) -> dict[str, Any]:
+    """Measure path-level coverage instead of broad module-level recall."""
+    period_ns = float(structure.get("summary", {}).get("target_period_ns", 5.0))
+    predicted = {
+        str(item.get("key")): item
+        for item in structure.get("hierarchical", {}).get("timing_path_risks", [])
+        if item.get("key")
+    }
+    violations = []
+    out_of_scope: Counter[str] = Counter()
+    missed: Counter[str] = Counter()
+    covered_by_severity: Counter[str] = Counter()
+    family_counts: Counter[str] = Counter()
+    missed_examples: dict[str, dict[str, Any]] = {}
+    for path in report.get("paths", []):
+        delay = float(path.get("data_path_delay_ns", 0.0))
+        slack = path.get("slack_ns")
+        violated = (
+            (slack is not None and float(slack) < 0.0)
+            or delay >= period_ns
+            or str(path.get("status", "")).upper() == "VIOLATED"
+        )
+        if not violated:
+            continue
+        family = path_family(path)
+        key = family["key"]
+        if (
+            "other" in {
+                family.get("source_owner"),
+                family.get("destination_owner"),
+                family.get("endpoint_kind"),
+            }
+        ):
+            out_of_scope[key] += 1
+            continue
+        family_counts[key] += 1
+        prediction = predicted.get(key)
+        if prediction:
+            covered_by_severity[str(prediction.get("severity", "WARN"))] += 1
+        else:
+            missed[key] += 1
+            missed_examples.setdefault(key, {
+                "source": path.get("source"),
+                "destination": path.get("destination"),
+                "data_path_delay_ns": delay,
+                "slack_ns": slack,
+            })
+        violations.append(path)
+    covered = len(violations) - sum(missed.values())
+    fail_covered = int(covered_by_severity.get("FAIL", 0))
+    return {
+        "target_period_ns": period_ns,
+        "violating_path_count": len(violations),
+        "predicted_family_count": len(predicted),
+        "observed_family_count": len(family_counts),
+        "covered_path_count": covered,
+        "fail_covered_path_count": fail_covered,
+        "path_recall": covered / len(violations) if violations else None,
+        "fail_path_recall": fail_covered / len(violations) if violations else None,
+        "covered_by_severity": dict(sorted(covered_by_severity.items())),
+        "missed_path_count": sum(missed.values()),
+        "out_of_scope_path_count": sum(out_of_scope.values()),
+        "out_of_scope_families": [
+            {"key": key, "path_count": count}
+            for key, count in out_of_scope.most_common()
+        ],
+        "missed_families": [
+            {
+                "key": key,
+                "path_count": count,
+                "example": missed_examples[key],
+            }
+            for key, count in missed.most_common()
+        ],
+        "observed_families": [
+            {"key": key, "path_count": count, "predicted": key in predicted}
+            for key, count in family_counts.most_common()
+        ],
+        "interpretation": (
+            "Every selected violated Vivado path must map to a pre-synthesis structural path family. "
+            "This metric does not grant coverage merely because one module on the path was flagged. "
+            "Paths with a source, destination, or endpoint outside the analyzed RTL top are reported "
+            "separately and are not included in core path-family recall."
+        ),
+    }
+
+
 def render_summary(result: dict[str, Any]) -> str:
     provenance = result.get("provenance", {})
     lines = [
@@ -1184,6 +1276,7 @@ def render_summary(result: dict[str, Any]) -> str:
         route = comparison.get("route_delay_calibration", {})
         possible = risk.get("possible_flag_validation", {})
         definite = risk.get("definite_flag_validation", {})
+        path_family = comparison.get("timing_path_family_validation", {})
         lines.extend([
             f"REPORT {comparison.get('report')}",
             f"format={comparison.get('format')} wns_ns={comparison.get('wns_ns')} "
@@ -1210,6 +1303,11 @@ def render_summary(result: dict[str, Any]) -> str:
             f"missed={possible.get('observed_not_flagged_modules', [])}",
             f"definite_5ns_observed_recall={definite.get('observed_module_recall')} "
             f"matched={definite.get('flagged_and_observed_modules', [])}",
+            f"path_family_recall={path_family.get('path_recall')} "
+            f"fail_path_family_recall={path_family.get('fail_path_recall')} "
+            f"covered={path_family.get('covered_path_count')}/{path_family.get('violating_path_count')} "
+            f"missed_families={len(path_family.get('missed_families', []))} "
+            f"out_of_scope_paths={path_family.get('out_of_scope_path_count', 0)}",
         ])
         for primitive, memory in comparison.get("memory_primitive_calibration", {}).items():
             lines.append(
@@ -1225,6 +1323,7 @@ def render_summary(result: dict[str, Any]) -> str:
         "- route-dominated paths require fanout and FPGA-memory warnings in addition to structural depth.",
         "- local primitive ownership is hierarchy-name based and can move after Vivado flattening.",
         "- possible is a conservative design-time warning; definite requires a loop or the configured high-depth threshold.",
+        "- path-family recall is the timing guard metric; module-level recall is retained only for compatibility.",
         "- ydrmem storage is a simulation model and is excluded from synthesis-risk and FF correlation.",
     ])
     fanout = result.get("fanout_calibration_summary", {})
@@ -1433,6 +1532,7 @@ def main() -> int:
                 args.route_dominated_fraction,
             ),
             "timing_risk_validation": timing_risk_validation(structure, report, module_names),
+            "timing_path_family_validation": timing_path_family_validation(structure, report),
             "module_path_counts": {
                 module: len(paths)
                 for module, paths in sorted(report_paths.items())
@@ -1502,6 +1602,14 @@ def main() -> int:
         ),
     }
 
+    family_training = summarize_families(
+        (
+            (str(report.get("report")), report.get("paths", []))
+            for report in timing
+            if report.get("format") == "vivado_timing_csv"
+        ),
+        target_period_ns,
+    )
     result = {
         "structure": str(args.structure),
         "provenance": comparison_provenance(
@@ -1512,6 +1620,7 @@ def main() -> int:
         "utilization": str(args.utilization),
         "timing": timing,
         "timing_report_comparisons": timing_report_comparisons,
+        "path_family_training": family_training,
         "modules": rows,
         "fanout_calibration": fanout_calibration[:100],
         "fanout_calibration_summary": fanout_calibration_summary,

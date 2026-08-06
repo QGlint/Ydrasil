@@ -237,6 +237,8 @@ RTL_QC_VIVADO_POST_ROUTE_TIMING ?= $(RTL_QC_VIVADO_REPORT_DIR)/post_route_timing
 RTL_QC_VIVADO_TIMING_PATHS_CSV ?= $(RTL_QC_VIVADO_REPORT_DIR)/cpu200_timing_paths.csv
 RTL_QC_VIVADO_COMPARE_JSON ?= $(RTL_QC_DIR)/$(RTL_QC_TOP).vivado-compare.json
 RTL_QC_RELIABILITY_SUMMARY ?= $(RTL_QC_DIR)/reliability-summary.txt
+RTL_QC_CROSS_VALIDATE_JSON ?= $(RTL_QC_DIR)/archive-cross-validation.json
+RTL_QC_CROSS_VALIDATE_SUMMARY ?= $(RTL_QC_DIR)/archive-cross-validation.txt
 RTL_QC_CALIBRATION_ROOT ?= $(BUILD_DIR)/rtl-calibration
 RTL_QC_CALIBRATION_HISTORY ?= $(RTL_QC_CALIBRATION_ROOT)
 RTL_QC_GIT_SHORT := $(shell git -C $(PROJECT_ROOT) rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
@@ -244,6 +246,7 @@ RTL_QC_CALIBRATION_TIMESTAMP := $(shell date -u +%Y%m%d-%H%M%S)
 RTL_QC_CALIBRATION_TAG ?= $(RTL_QC_GIT_SHORT)-pll200m-$(RTL_QC_CALIBRATION_TIMESTAMP)
 RTL_QC_CALIBRATION_DIR ?= $(RTL_QC_CALIBRATION_ROOT)/$(RTL_QC_CALIBRATION_TAG)
 RTL_QC_ARCHIVE_SCRIPT ?= $(SYN_DIR)/archive_rtl_calibration.py
+RTL_QC_CROSS_VALIDATE_SCRIPT ?= $(SYN_DIR)/cross_validate_rtl_timing.py
 RTL_QC_ERROR_LIMIT ?= 50
 # Structural timing warning policy, calibrated against the current xc7
 # synth/post-route reports.  The BRAM reference includes both cascaded RAMB

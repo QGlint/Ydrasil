@@ -18,6 +18,8 @@ from collections import Counter, defaultdict, deque
 from pathlib import Path
 from typing import Any, Iterable
 
+from rtl_timing_families import family_key, load_archive_training, normalize_owner
+
 
 ASSIGN_TYPES = {"ASSIGN", "ASSIGNW", "ASSIGNDLY"}
 PSEUDO_PREFIX = "@cell:"
@@ -514,6 +516,7 @@ def loop_bound(loop: dict[str, Any], index: dict[str, dict[str, Any]]) -> dict[s
 
 def module_report(module: dict[str, Any], index: dict[str, dict[str, Any]], module_status: dict[str, dict[str, Any]]) -> dict[str, Any]:
     module_name = node_name(module) or "<unknown>"
+    elaborated_name = str(module.get("name") or module_name)
     module_nodes = list(walk(module))
     # A Verilator MODULE owns declarations in its statement tree.  De-duplicate
     # by address because declarations can be reached through pin metadata too.
@@ -668,6 +671,11 @@ def module_report(module: dict[str, Any], index: dict[str, dict[str, Any]], modu
                     "addr": assignment.get("addr"),
                     "lhs": [item["addr"] for item in lhs if item.get("addr") in variables_by_addr],
                     "rhs": [item["addr"] for item in rhs if item.get("addr") in variables_by_addr],
+                    "control_addrs": sorted(
+                        control
+                        for control in guard_controls.get(assignment.get("addr"), ())
+                        if control in variables_by_addr
+                    ),
                     "controls": sorted(
                         var_names.get(control, control)
                         for control in guard_controls.get(assignment.get("addr"), ())
@@ -726,6 +734,7 @@ def module_report(module: dict[str, Any], index: dict[str, dict[str, Any]], modu
         instance_name = cell.get("origName") or cell.get("name") or "<cell>"
         child_module = index.get(cell.get("modp", ""), {})
         child_name = node_name(child_module) or instance_name
+        child_elaborated_name = str(child_module.get("name") or child_name)
         for pin in cell.get("pinsp", []):
             child_var = index.get(pin.get("modVarp", ""), {})
             direction = child_var.get("direction")
@@ -735,6 +744,7 @@ def module_report(module: dict[str, Any], index: dict[str, dict[str, Any]], modu
             cell_bindings.append({
                 "instance": instance_name,
                 "child": child_name,
+                "child_elaborated_name": child_elaborated_name,
                 "pin": pin_name,
                 "direction": direction or "unknown",
                 "child_var_addr": pin.get("modVarp", ""),
@@ -753,6 +763,7 @@ def module_report(module: dict[str, Any], index: dict[str, dict[str, Any]], modu
             if direction == "OUTPUT":
                 cell_outputs[pseudo] = {
                     "child": child_name,
+                    "child_elaborated_name": child_elaborated_name,
                     "pin": pin_name,
                     "signals": sorted(ref["name"] for ref in refs if ref.get("name")),
                 }
@@ -1219,11 +1230,16 @@ def module_report(module: dict[str, Any], index: dict[str, dict[str, Any]], modu
 
     def child_output_is_cut(pseudo: str) -> bool:
         child = cell_outputs.get(pseudo, {})
-        child_report = resolve_child_report(child.get("child", ""))
+        child_report = resolve_child_report(
+            child.get("child", ""), child.get("child_elaborated_name")
+        )
         return child.get("pin") in set(child_report.get("registered_outputs", []))
 
-    def resolve_child_report(child_name: str) -> dict[str, Any]:
-        report = module_status.get(child_name)
+    def resolve_child_report(
+        child_name: str,
+        child_elaborated_name: str | None = None,
+    ) -> dict[str, Any]:
+        report = module_status.get(child_elaborated_name or "") or module_status.get(child_name)
         if report:
             return report
         # Parameterized Verilator module names commonly have ``__`` suffixes.
@@ -1238,7 +1254,9 @@ def module_report(module: dict[str, Any], index: dict[str, dict[str, Any]], modu
     boundary_depths: dict[str, int] = {}
     boundary_output_info: dict[str, dict[str, Any]] = {}
     for pseudo, child in cell_outputs.items():
-        child_report = resolve_child_report(child.get("child", ""))
+        child_report = resolve_child_report(
+            child.get("child", ""), child.get("child_elaborated_name")
+        )
         child_output = next(
             (item for item in child_report.get("outputs", []) if item.get("name") == child.get("pin")),
             None,
@@ -1589,6 +1607,12 @@ def module_report(module: dict[str, Any], index: dict[str, dict[str, Any]], modu
             "writes": writes[addr],
             "reset_like": name in reset_lhs,
         })
+    multiwrite_register_arrays = [
+        item for item in register_reports
+        if (item.get("array_elements") or 0) >= 2
+        and int(item.get("writes", 0)) >= 2
+        and (item.get("width_bits") or 0) >= 64
+    ]
 
     signal_reports = []
     for addr, var in sorted(variables_by_addr.items(), key=lambda item: var_names[item[0]]):
@@ -1601,6 +1625,39 @@ def module_report(module: dict[str, Any], index: dict[str, dict[str, Any]], modu
             **dtype_shape(dtype, index),
             "register": addr in seq_lhs,
         })
+
+    def signal_width(*names: str) -> int | None:
+        wanted = set(names)
+        return next(
+            (int(item["width_bits"]) for item in signal_reports
+             if item.get("name") in wanted and item.get("width_bits") is not None),
+            None,
+        )
+
+    memory_geometry = None
+    geometry_ports: tuple[tuple[str, ...], tuple[str, ...]] | None = None
+    if module_name == "ydrasil_itcm":
+        geometry_ports = (("itcm_addr",), ("itcm_data_o",))
+    elif module_name == "ydrasil_dtcm":
+        geometry_ports = (("dtcm_raddr", "dtcm_waddr"), ("dtcm_data_o", "dtcm_data_i"))
+    elif module_name in {"ydrasil_1r1w_bram", "ydrasil_1r1w_ram", "ydrasil_1r1w_masked_ram"}:
+        geometry_ports = (("raddr_i", "waddr_i"), ("rdata_o", "wdata_i"))
+    if geometry_ports:
+        address_width = signal_width(*geometry_ports[0])
+        data_width = signal_width(*geometry_ports[1])
+        if address_width is not None and data_width is not None:
+            depth_words = 1 << address_width
+            capacity_bits = depth_words * data_width
+            memory_geometry = {
+                "instance_model": elaborated_name,
+                "address_width_bits": address_width,
+                "data_width_bits": data_width,
+                "depth_words": depth_words,
+                "capacity_bits": capacity_bits,
+                "capacity_bytes": capacity_bits // 8,
+                "capacity_kib": capacity_bits / (8 * 1024),
+                "derivation": "per_elaborated_instance_port_widths",
+            }
 
     fanout_reports = []
     def transitive_read_estimate(addr: str) -> int:
@@ -1774,10 +1831,21 @@ def module_report(module: dict[str, Any], index: dict[str, dict[str, Any]], modu
                 for source in assignment["rhs"]
                 if source in nodes
             ],
+            "sequential_endpoints": [
+                {
+                    "targets": sorted(assignment["lhs"]),
+                    "sources": sorted(assignment["rhs"]),
+                    "controls": sorted(assignment.get("control_addrs", [])),
+                    "operator_depth": int(assignment.get("operator_depth", 0)),
+                    "loc": assignment.get("loc"),
+                }
+                for assignment in sequential_assignments
+            ],
             "sequential_controls": sorted(sequential_control_registers),
             "cell_bindings": cell_bindings,
         },
         "name": module_name,
+        "elaborated_name": elaborated_name,
         "loc": module.get("loc"),
         "output_count": len(output_reports),
         "outputs": output_reports,
@@ -1789,8 +1857,10 @@ def module_report(module: dict[str, Any], index: dict[str, dict[str, Any]], modu
         "register_count": len(register_reports),
         "register_bits": sum(item["width_bits"] or 0 for item in register_reports),
         "registers": register_reports,
+        "multiwrite_register_arrays": multiwrite_register_arrays,
         "signal_count": len(signal_reports),
         "signals": signal_reports,
+        "memory_geometry": memory_geometry,
         "cell_connections": cell_connections,
         "always_blocks": dict(Counter(item["keyword"] for item in always_summary)),
         "always_details": always_summary,
@@ -1811,6 +1881,11 @@ def module_report(module: dict[str, Any], index: dict[str, dict[str, Any]], modu
             # fanout signals.  Width-weighted work is reported separately;
             # otherwise every 450-bit packet would look like a 450-way net.
             "high_fanout_over_32": any(item["fanout"] > 32 or item["unique_consumers"] > 32 for item in fanout_reports),
+            "wide_physical_load": any(
+                item["estimated_bit_fanout"] >= 2048
+                and item["unique_consumers"] >= 4
+                for item in fanout_reports
+            ),
             "deep_combination_over_8": max_depth > 8,
             "long_register_to_boundary_over_8": combination["register_to_boundary_max_depth"] > 8,
             "long_register_to_output_over_8": combination["register_q_to_any_boundary_max_depth"] > 8,
@@ -1819,11 +1894,18 @@ def module_report(module: dict[str, Any], index: dict[str, dict[str, Any]], modu
             "cross_module_combination_not_cut": any(item["child_output_status"] == "combinational" for item in boundary_paths),
             "wide_mux_or_work": combination["weighted_combination_work"] > 4096 or combination["packed_consumer_work"] > 8192 or combination["conditional_count"] > 64,
             "large_register_array": any((item.get("array_elements") or 0) >= 16 and (item.get("width_bits") or 0) >= 256 for item in register_reports),
+            "multiwrite_register_array": bool(multiwrite_register_arrays),
         },
     }
 
 
-def hierarchical_report(top_name: str, reports: list[dict[str, Any]]) -> dict[str, Any]:
+def hierarchical_report(
+    top_name: str,
+    reports: list[dict[str, Any]],
+    training: dict[str, Any] | None = None,
+    target_period_ns: float = 5.0,
+    bram_clock_to_out_ns: float = 2.45,
+) -> dict[str, Any]:
     """Flatten combinational CELL connections for top-level feedback analysis.
 
     Local reports deliberately stop at module boundaries.  That is useful for
@@ -1834,7 +1916,12 @@ def hierarchical_report(top_name: str, reports: list[dict[str, Any]]) -> dict[st
     an SCC as a path list; all depth work is done on the global condensation
     DAG and bounded walks.
     """
-    by_name = {report.get("name"): report for report in reports if report.get("name")}
+    by_name: dict[str, dict[str, Any]] = {}
+    for report in reports:
+        if report.get("elaborated_name"):
+            by_name[str(report["elaborated_name"])] = report
+        if report.get("name"):
+            by_name.setdefault(str(report["name"]), report)
 
     def resolve(name: str) -> dict[str, Any] | None:
         report = by_name.get(name)
@@ -1847,6 +1934,8 @@ def hierarchical_report(top_name: str, reports: list[dict[str, Any]]) -> dict[st
     sensitivity_edges: set[tuple[str, str]] = set()
     node_info: dict[str, tuple[str, str, str]] = {}
     terminal_nodes: set[str] = set()
+    launch_nodes: dict[str, dict[str, Any]] = {}
+    endpoint_nodes: dict[str, dict[str, Any]] = {}
     visited_instances = 0
     max_instances = 20000
 
@@ -1874,12 +1963,34 @@ def hierarchical_report(top_name: str, reports: list[dict[str, Any]]) -> dict[st
         path, module_name, local_name = node_info.get(identifier, ("?", "?", identifier))
         return f"{path}.{local_name}"
 
+    def owner_for(path: str, module_name: str) -> str:
+        return normalize_owner(f"{path}/{module_name}")
+
+    def memory_role_for(owner: str) -> str:
+        if owner == "branch_predictor":
+            return "predictor_bram"
+        if owner in {"itcm", "dtcm"}:
+            return owner
+        return "other_bram"
+
+    def memory_endpoint_kind(name: str) -> str | None:
+        lowered = name.lower()
+        if re.search(r"(?:^|_)(?:raddr|waddr|addr)(?:_|$)", lowered):
+            return "ram_address"
+        if re.search(r"(?:^|_)(?:wen|we|wstrb|mask)(?:_|$)", lowered):
+            return "ram_write_enable"
+        if re.search(r"(?:^|_)(?:wdata|din|data_i)(?:_|$)", lowered):
+            return "ram_write_data"
+        return None
+
     def visit(report: dict[str, Any], path: str, stack: tuple[str, ...]) -> None:
         nonlocal visited_instances
         if visited_instances >= max_instances:
             return
         visited_instances += 1
         module_name = str(report.get("name", "<unknown>"))
+        module_id = str(report.get("elaborated_name") or module_name)
+        active_stack = stack + (module_id,)
         analysis = report.get("_analysis", {})
         local_names = analysis.get("var_names", {})
         for address in analysis.get("nodes", []):
@@ -1898,23 +2009,120 @@ def hierarchical_report(top_name: str, reports: list[dict[str, Any]]) -> dict[st
             target_node = node_id(path, target)
             if target_node in graph.get(source_node, set()):
                 sensitivity_edges.add((source_node, target_node))
-        for item in analysis.get("sequential_rhs", []):
-            source = item.get("source")
-            if source in local_names:
-                terminal_nodes.add(node_id(path, source))
-        for control in analysis.get("sequential_controls", []):
-            if control in local_names:
-                terminal_nodes.add(node_id(path, control))
+        owner = owner_for(path, module_name)
+        multiwrite_names = {
+            str(item.get("name")) for item in report.get("multiwrite_register_arrays", [])
+        }
+        for address in analysis.get("seq_lhs", []):
+            if address in local_names:
+                identifier = ensure_node(path, module_name, address, local_names[address])
+                launch_nodes[identifier] = {
+                    "kind": "register_q",
+                    "owner": owner,
+                    "signal": local_names[address],
+                }
+        for number, item in enumerate(analysis.get("sequential_endpoints", [])):
+            for target in item.get("targets", []):
+                target_name = local_names.get(target, target)
+                endpoint = ensure_node(
+                    path,
+                    module_name,
+                    f"@endpoint:{number}:{target}:D",
+                    f"{target_name}/D",
+                )
+                terminal_nodes.add(endpoint)
+                endpoint_nodes[endpoint] = {
+                    "kind": "register_d",
+                    "owner": owner,
+                    "signal": target_name,
+                    "multiwrite_array": target_name in multiwrite_names,
+                    "loc": item.get("loc"),
+                }
+                for source in item.get("sources", []):
+                    if source in local_names:
+                        source_node = ensure_node(
+                            path, module_name, source, local_names[source]
+                        )
+                        add_edge(
+                            source_node,
+                            endpoint,
+                            max(0, int(item.get("operator_depth", 0))),
+                        )
+                for control in item.get("controls", []):
+                    if control not in local_names:
+                        continue
+                    control_name = local_names[control]
+                    control_kind = (
+                        "register_control"
+                        if re.search(r"(?:^|_)(?:rst|reset|flush)(?:_|$)", control_name, re.I)
+                        else "register_ce"
+                    )
+                    control_endpoint = ensure_node(
+                        path,
+                        module_name,
+                        f"@endpoint:{number}:{target}:{control_kind}",
+                        f"{target_name}/{'S/R' if control_kind == 'register_control' else 'CE'}",
+                    )
+                    terminal_nodes.add(control_endpoint)
+                    endpoint_nodes[control_endpoint] = {
+                        "kind": control_kind,
+                        "owner": owner,
+                        "signal": target_name,
+                        "multiwrite_array": target_name in multiwrite_names,
+                        "loc": item.get("loc"),
+                    }
+                    control_node = ensure_node(
+                        path, module_name, control, control_name
+                    )
+                    add_edge(control_node, control_endpoint, 1)
+
+        if module_name in {"ydrasil_1r1w_bram", "ydrasil_dtcm", "ydrasil_itcm", "dtcm", "itcm"}:
+            for output in analysis.get("outputs", []):
+                if output in local_names:
+                    identifier = ensure_node(path, module_name, output, local_names[output])
+                    launch_nodes[identifier] = {
+                        "kind": "bram_output",
+                        "owner": owner,
+                        "memory_role": memory_role_for(owner),
+                        "signal": local_names[output],
+                    }
+        if module_name in {
+            "ydrasil_1r1w_bram",
+            "ydrasil_1r1w_ram",
+            "ydrasil_1r1w_masked_ram",
+            "ydrasil_dtcm",
+            "ydrasil_itcm",
+            "dtcm",
+            "itcm",
+        }:
+            for address in analysis.get("inputs", []):
+                name = local_names.get(address, address)
+                kind = memory_endpoint_kind(name)
+                if kind is None:
+                    continue
+                identifier = ensure_node(path, module_name, address, name)
+                terminal_nodes.add(identifier)
+                endpoint_nodes[identifier] = {
+                    "kind": kind,
+                    "owner": owner,
+                    "signal": name,
+                    "multiwrite_array": False,
+                }
         if path == top_name:
             for output in analysis.get("outputs", []):
                 terminal_nodes.add(node_id(path, output))
 
+        child_instances: dict[tuple[str, str], dict[str, Any]] = {}
         for binding in analysis.get("cell_bindings", []):
-            child = resolve(str(binding.get("child", "")))
+            child = resolve(str(
+                binding.get("child_elaborated_name") or binding.get("child", "")
+            ))
             if not child or is_timing_cut_pin(binding):
                 continue
             child_name = str(child.get("name", "<unknown>"))
+            child_id = str(child.get("elaborated_name") or child_name)
             child_path = f"{path}/{binding.get('instance', '<cell>')}"
+            child_instances[(child_path, child_id)] = child
             child_address = str(binding.get("child_var_addr", ""))
             if not child_address:
                 continue
@@ -1935,8 +2143,9 @@ def hierarchical_report(top_name: str, reports: list[dict[str, Any]]) -> dict[st
                     parent_node = ensure_node(path, module_name, target, local_names.get(target, target))
                     add_edge(child_node, parent_node, 0)
 
-            if child_name not in stack:
-                visit(child, child_path, stack + (module_name,))
+        for (child_path, child_id), child in child_instances.items():
+            if child_id not in active_stack:
+                visit(child, child_path, active_stack)
 
     top_report = resolve(top_name)
     if not top_report:
@@ -2192,6 +2401,385 @@ def hierarchical_report(top_name: str, reports: list[dict[str, Any]]) -> dict[st
         )
         if (path := named_path(source_pattern, target_pattern)) is not None
     }
+
+    def best_endpoint_path(
+        source_owner: str,
+        launch_kind: str,
+        destination_owner: str,
+        endpoint_kind: str,
+        launch_memory_role: str = "none",
+        require_multiwrite: bool = False,
+    ) -> dict[str, Any] | None:
+        source_nodes = [
+            node for node, info in launch_nodes.items()
+            if node in component_of
+            and info.get("owner") == source_owner
+            and info.get("kind") == launch_kind
+            and (
+                launch_kind != "bram_output"
+                or info.get("memory_role") == launch_memory_role
+            )
+        ]
+        target_nodes = [
+            node for node, info in endpoint_nodes.items()
+            if node in component_of
+            and info.get("owner") == destination_owner
+            and info.get("kind") == endpoint_kind
+            and (not require_multiwrite or info.get("multiwrite_array"))
+        ]
+        if not source_nodes or not target_nodes:
+            return None
+        target_components = {component_of[node] for node in target_nodes}
+        best_depth: dict[int, int] = {}
+        parents: dict[int, int] = {}
+        source_for: dict[int, str] = {}
+        for source in source_nodes:
+            component = component_of[source]
+            if best_depth.get(component, -1) < 0:
+                best_depth[component] = 0
+                source_for[component] = source
+        for current in topo_order:
+            if current not in best_depth:
+                continue
+            for target in dag.get(current, ()):
+                candidate = best_depth[current] + component_cost(current, target)
+                if candidate > best_depth.get(target, -1):
+                    best_depth[target] = candidate
+                    parents[target] = current
+                    source_for[target] = source_for[current]
+        reachable = [component for component in target_components if component in best_depth]
+        if not reachable:
+            return None
+        end = max(reachable, key=lambda component: best_depth[component])
+        path_components = [end]
+        while path_components[-1] in parents:
+            path_components.append(parents[path_components[-1]])
+        path_components.reverse()
+        target = next(node for node in target_nodes if component_of[node] == end)
+        source = source_for[path_components[0]]
+        signals = [display(sorted(components[item])[0]) for item in path_components]
+        path_owners = [
+            owner_for(node_info.get(sorted(components[item])[0], ("", "", ""))[0],
+                      node_info.get(sorted(components[item])[0], ("", "", ""))[1])
+            for item in path_components
+        ]
+        owner_crossings = sum(
+            left != right for left, right in zip(path_owners, path_owners[1:])
+        )
+        return {
+            "source": display(source),
+            "destination": display(target),
+            "source_signal": launch_nodes[source].get("signal"),
+            "destination_signal": endpoint_nodes[target].get("signal"),
+            "depth": best_depth[end],
+            "signals": signals,
+            "owner_crossings": owner_crossings,
+            "multiwrite_array": bool(endpoint_nodes[target].get("multiwrite_array")),
+        }
+
+    timing_path_risks: dict[str, dict[str, Any]] = {}
+
+    def structural_upper_delay(
+        path: dict[str, Any],
+        launch_kind: str,
+        endpoint_kind: str,
+    ) -> float:
+        launch_ns = bram_clock_to_out_ns if launch_kind == "bram_output" else 0.35
+        logic_ns = 0.18 * float(path.get("depth", 0))
+        route_upper_ns = (
+            0.65
+            + 0.30 * float(path.get("owner_crossings", 0))
+            + 0.08 * max(0.0, float(path.get("depth", 0)) - 2.0)
+        )
+        endpoint_ns = 0.25 if endpoint_kind.startswith("ram_") else 0.15
+        return launch_ns + logic_ns + route_upper_ns + endpoint_ns
+
+    def record_path_risk(
+        key: str,
+        path: dict[str, Any],
+        source_owner: str,
+        destination_owner: str,
+        launch_kind: str,
+        endpoint_kind: str,
+        launch_memory_role: str,
+        reasons: list[str],
+        trained: dict[str, Any] | None = None,
+        force_fail: bool = False,
+    ) -> None:
+        structural_upper_ns = structural_upper_delay(path, launch_kind, endpoint_kind)
+        trained_p95_ns = float(trained.get("delay_ns_p95", 0.0)) if trained else 0.0
+        estimated_upper_ns = max(structural_upper_ns, trained_p95_ns)
+        if force_fail or estimated_upper_ns >= target_period_ns:
+            severity = "FAIL"
+        elif estimated_upper_ns >= max(0.0, target_period_ns - 0.7):
+            severity = "HIGH"
+        else:
+            severity = "WARN"
+        candidate = {
+            "key": key,
+            "severity": severity,
+            "source_owner": source_owner,
+            "destination_owner": destination_owner,
+            "launch_kind": launch_kind,
+            "launch_memory_role": launch_memory_role,
+            "endpoint_kind": endpoint_kind,
+            "source": path.get("source"),
+            "destination": path.get("destination"),
+            "source_signal": path.get("source_signal"),
+            "destination_signal": path.get("destination_signal"),
+            "structural_depth": path.get("depth", 0),
+            "owner_crossings": path.get("owner_crossings", 0),
+            "structural_upper_delay_ns": round(structural_upper_ns, 3),
+            "trained_p95_delay_ns": round(trained_p95_ns, 3) if trained else None,
+            "estimated_upper_delay_ns": round(estimated_upper_ns, 3),
+            "estimated_slack_ns": round(target_period_ns - estimated_upper_ns, 3),
+            "training_sample_count": int(trained.get("sample_count", 0)) if trained else 0,
+            "training_design_count": int(trained.get("design_count", 0)) if trained else 0,
+            "reasons": sorted(set(reasons)),
+            "signals": path.get("signals", []),
+        }
+        previous = timing_path_risks.get(key)
+        severity_rank = {"WARN": 0, "HIGH": 1, "FAIL": 2}
+        if previous is None or (
+            severity_rank[candidate["severity"]], candidate["estimated_upper_delay_ns"]
+        ) > (
+            severity_rank[previous["severity"]], previous["estimated_upper_delay_ns"]
+        ):
+            timing_path_risks[key] = candidate
+        elif previous is not None:
+            previous["reasons"] = sorted(set(previous["reasons"]) | set(reasons))
+
+    trained_families = (training or {}).get("families", [])
+    for trained in trained_families:
+        if "other" in {
+            trained.get("source_owner"), trained.get("destination_owner"),
+            trained.get("endpoint_kind"),
+        }:
+            continue
+        requested_endpoint_kind = str(trained.get("endpoint_kind"))
+        path = best_endpoint_path(
+            str(trained.get("source_owner")),
+            str(trained.get("launch_kind")),
+            str(trained.get("destination_owner")),
+            requested_endpoint_kind,
+            str(trained.get("launch_memory_role", "none")),
+        )
+        fallback_endpoint_kind = None
+        if path is None and requested_endpoint_kind in {
+            "register_d", "register_ce", "register_control",
+        }:
+            for candidate_kind in ("register_d", "register_ce", "register_control"):
+                if candidate_kind == requested_endpoint_kind:
+                    continue
+                path = best_endpoint_path(
+                    str(trained.get("source_owner")),
+                    str(trained.get("launch_kind")),
+                    str(trained.get("destination_owner")),
+                    candidate_kind,
+                    str(trained.get("launch_memory_role", "none")),
+                )
+                if path is not None:
+                    fallback_endpoint_kind = candidate_kind
+                    break
+        if path is None:
+            continue
+        reasons = ["reachable_path_family_failed_in_archived_vivado"]
+        if fallback_endpoint_kind is not None:
+            reasons.append(
+                f"implementation_control_pin_fallback_{fallback_endpoint_kind}"
+            )
+        record_path_risk(
+            str(trained.get("key")), path,
+            str(trained.get("source_owner")),
+            str(trained.get("destination_owner")),
+            str(trained.get("launch_kind")),
+            requested_endpoint_kind,
+            str(trained.get("launch_memory_role", "none")),
+            reasons,
+            trained=trained,
+            force_fail=float(trained.get("worst_slack_ns", 0.0)) < 0.0,
+        )
+        if requested_endpoint_kind in {
+            "register_d", "register_ce", "register_control",
+        }:
+            for sibling_kind in ("register_d", "register_ce", "register_control"):
+                if sibling_kind == requested_endpoint_kind:
+                    continue
+                sibling_key = family_key(
+                    str(trained.get("source_owner")),
+                    str(trained.get("destination_owner")),
+                    str(trained.get("launch_kind")),
+                    sibling_kind,
+                    str(trained.get("launch_memory_role", "none")),
+                )
+                if sibling_key in timing_path_risks:
+                    continue
+                sibling_path = best_endpoint_path(
+                    str(trained.get("source_owner")),
+                    str(trained.get("launch_kind")),
+                    str(trained.get("destination_owner")),
+                    sibling_kind,
+                    str(trained.get("launch_memory_role", "none")),
+                )
+                sibling_reasons = ["trained_register_endpoint_implementation_variant"]
+                if sibling_path is None:
+                    sibling_path = path
+                    sibling_reasons.append(
+                        f"implementation_control_pin_fallback_{requested_endpoint_kind}"
+                    )
+                record_path_risk(
+                    sibling_key,
+                    sibling_path,
+                    str(trained.get("source_owner")),
+                    str(trained.get("destination_owner")),
+                    str(trained.get("launch_kind")),
+                    sibling_kind,
+                    str(trained.get("launch_memory_role", "none")),
+                    sibling_reasons,
+                    trained=trained,
+                    force_fail=float(trained.get("worst_slack_ns", 0.0)) < 0.0,
+                )
+
+    launch_groups = sorted({
+        (
+            str(info.get("owner")), str(info.get("kind")),
+            str(info.get("memory_role", "none")),
+        )
+        for info in launch_nodes.values()
+    })
+    endpoint_groups = sorted({
+        (str(info.get("owner")), str(info.get("kind")))
+        for info in endpoint_nodes.values()
+    })
+    for source_owner, launch_kind, launch_memory_role in launch_groups:
+        if source_owner == "other":
+            continue
+        for destination_owner, endpoint_kind in endpoint_groups:
+            if destination_owner == "other":
+                continue
+            path = best_endpoint_path(
+                source_owner,
+                launch_kind,
+                destination_owner,
+                endpoint_kind,
+                launch_memory_role,
+            )
+            if path is None:
+                continue
+            estimated = structural_upper_delay(path, launch_kind, endpoint_kind)
+            warning_margin_ns = 1.5 if launch_kind == "bram_output" else 0.7
+            if estimated < max(0.0, target_period_ns - warning_margin_ns):
+                continue
+            key = family_key(
+                source_owner,
+                destination_owner,
+                launch_kind,
+                endpoint_kind,
+                launch_memory_role,
+            )
+            record_path_risk(
+                key,
+                path,
+                source_owner,
+                destination_owner,
+                launch_kind,
+                endpoint_kind,
+                launch_memory_role,
+                ["independent_structural_path_upper_bound"],
+            )
+            if endpoint_kind in {"register_d", "register_ce", "register_control"}:
+                for sibling_kind in ("register_d", "register_ce", "register_control"):
+                    if sibling_kind == endpoint_kind:
+                        continue
+                    sibling_path = best_endpoint_path(
+                        source_owner,
+                        launch_kind,
+                        destination_owner,
+                        sibling_kind,
+                        launch_memory_role,
+                    )
+                    sibling_reasons = [
+                        "independent_structural_register_endpoint_variant"
+                    ]
+                    if sibling_path is None:
+                        sibling_path = path
+                        sibling_reasons.append(
+                            f"implementation_control_pin_fallback_{endpoint_kind}"
+                        )
+                    sibling_key = family_key(
+                        source_owner,
+                        destination_owner,
+                        launch_kind,
+                        sibling_kind,
+                        launch_memory_role,
+                    )
+                    record_path_risk(
+                        sibling_key,
+                        sibling_path,
+                        source_owner,
+                        destination_owner,
+                        launch_kind,
+                        sibling_kind,
+                        launch_memory_role,
+                        sibling_reasons,
+                    )
+    for source_owner, launch_kind, launch_memory_role in launch_groups:
+        if launch_kind != "bram_output":
+            continue
+        for destination_owner, endpoint_kind in endpoint_groups:
+            if not endpoint_kind.startswith("ram_"):
+                continue
+            path = best_endpoint_path(
+                source_owner, launch_kind, destination_owner, endpoint_kind,
+                launch_memory_role
+            )
+            if path is None:
+                continue
+            key = family_key(
+                source_owner, destination_owner, launch_kind, endpoint_kind,
+                launch_memory_role,
+            )
+            record_path_risk(
+                key, path, source_owner, destination_owner, launch_kind, endpoint_kind,
+                launch_memory_role,
+                ["bram_clock_to_out_to_unregistered_ram_pin"],
+                force_fail=True,
+            )
+
+    multiwrite_owners = sorted({
+        str(info.get("owner")) for info in endpoint_nodes.values()
+        if info.get("multiwrite_array")
+    })
+    for destination_owner in multiwrite_owners:
+        for source_owner, launch_kind, launch_memory_role in launch_groups:
+            if launch_kind != "register_q":
+                continue
+            path = best_endpoint_path(
+                source_owner,
+                launch_kind,
+                destination_owner,
+                "register_d",
+                launch_memory_role,
+                require_multiwrite=True,
+            )
+            if path is None:
+                continue
+            key = family_key(source_owner, destination_owner, launch_kind, "register_d")
+            record_path_risk(
+                key, path, source_owner, destination_owner, launch_kind, "register_d",
+                launch_memory_role,
+                ["multiwrite_register_array_endpoint"],
+                force_fail=True,
+            )
+
+    ordered_path_risks = sorted(
+        timing_path_risks.values(),
+        key=lambda item: (
+            {"FAIL": 0, "HIGH": 1, "WARN": 2}[item["severity"]],
+            item["estimated_slack_ns"],
+            item["key"],
+        ),
+    )
     meaningful_cycles = [item for item in cycles if item.get("size", 0) > 1]
     critical_timing_path = [display(sorted(components[item])[0]) for item in critical_components]
     return {
@@ -2206,6 +2794,44 @@ def hierarchical_report(top_name: str, reports: list[dict[str, Any]]) -> dict[st
         "timing_endpoint_max_depth": max(endpoint_depths.values(), default=0),
         "critical_timing_path": critical_timing_path,
         "named_paths": named_paths,
+        "timing_launch_count": len(launch_nodes),
+        "timing_launch_count_by_owner_kind": dict(Counter(
+            f"{item.get('owner')}|{item.get('kind')}"
+            for item in launch_nodes.values()
+        )),
+        "timing_endpoint_count_by_kind": dict(Counter(
+            str(item.get("kind")) for item in endpoint_nodes.values()
+        )),
+        "timing_endpoint_count_by_owner_kind": dict(Counter(
+            f"{item.get('owner')}|{item.get('kind')}"
+            for item in endpoint_nodes.values()
+        )),
+        "timing_path_risks": ordered_path_risks,
+        "timing_path_fail_count": sum(
+            item["severity"] == "FAIL" for item in ordered_path_risks
+        ),
+        "timing_path_high_count": sum(
+            item["severity"] == "HIGH" for item in ordered_path_risks
+        ),
+        "timing_training": {
+            "archive_root": (training or {}).get("archive_root"),
+            "dataset_count": (training or {}).get("dataset_count", 0),
+            "path_count": (training or {}).get("path_count", 0),
+            "family_count": (training or {}).get("family_count", 0),
+            "skipped": (training or {}).get("skipped", []),
+            "bram_eligible_dataset_count": (training or {}).get(
+                "bram_eligible_dataset_count", 0
+            ),
+            "bram_accepted_path_count": (training or {}).get(
+                "bram_accepted_path_count", 0
+            ),
+            "bram_excluded_path_count": (training or {}).get(
+                "bram_excluded_path_count", 0
+            ),
+            "bram_geometry_compatibility": (training or {}).get(
+                "bram_geometry_compatibility", []
+            ),
+        },
         # A one-node SCC is useful detail (often a procedural temporary), but
         # it should not trip the architectural loop gate by itself.
         "cycle_count": len(meaningful_cycles),
@@ -2305,6 +2931,41 @@ def memory_timing_profile(
     }
 
 
+def memory_geometry_profile(reports: list[dict[str, Any]]) -> dict[str, Any]:
+    """Keep memory geometry per elaborated instance; never merge by maximum."""
+    roles = {
+        "ydrasil_itcm": "itcm",
+        "ydrasil_dtcm": "dtcm",
+        "ydrasil_1r1w_bram": "generic_bram",
+        "ydrasil_1r1w_ram": "generic_lutram",
+        "ydrasil_1r1w_masked_ram": "generic_lutram",
+    }
+    instances = []
+    for report in reports:
+        geometry = report.get("memory_geometry")
+        role = roles.get(str(report.get("name")))
+        if not geometry or not role:
+            continue
+        instances.append({
+            "role": role,
+            "module": report.get("name"),
+            "elaborated_name": report.get("elaborated_name"),
+            "address_width_bits": geometry.get("address_width_bits"),
+            "data_width_bits": geometry.get("data_width_bits"),
+            "depth_words": geometry.get("depth_words"),
+            "capacity_bytes": geometry.get("capacity_bytes"),
+        })
+    instances.sort(key=lambda item: (
+        str(item.get("role")), str(item.get("elaborated_name")),
+        int(item.get("capacity_bytes") or 0),
+    ))
+    return {
+        "schema_version": 1,
+        "aggregation": "per_elaborated_instance_no_maximum",
+        "instances": instances,
+    }
+
+
 def apply_timing_risk_policy(
     report: dict[str, Any],
     hierarchy: dict[str, Any] | None,
@@ -2350,12 +3011,20 @@ def apply_timing_risk_policy(
     excluded = bool(memory.get("simulation_model_excluded_from_synthesis_risk"))
     reasons = []
     high_fanout_timing = (
-        bool(report.get("risk_flags", {}).get("high_fanout_over_32"))
+        bool(
+            report.get("risk_flags", {}).get("high_fanout_over_32")
+            or report.get("risk_flags", {}).get("wide_physical_load")
+        )
         and base_depth >= fanout_timing_min_depth
+    )
+    multiwrite_array = bool(
+        report.get("risk_flags", {}).get("multiwrite_register_array")
     )
     routing_sensitivity_reasons = []
     if high_fanout_timing:
         routing_sensitivity_reasons.append("rtl_fanout_estimate")
+    if multiwrite_array:
+        routing_sensitivity_reasons.append("multiwrite_register_array")
     if memory.get("asynchronous_lutram_boundary"):
         routing_sensitivity_reasons.append("asynchronous_lutram_boundary")
     elif memory.get("contains_lutram_boundary"):
@@ -2374,6 +3043,8 @@ def apply_timing_risk_policy(
             reasons.append("endpoint_depth_at_or_above_possible_threshold")
         if high_fanout_timing:
             reasons.append("high_fanout_with_nontrivial_combination")
+        if multiwrite_array:
+            reasons.append("multiwrite_register_array_endpoint")
         if memory.get("asynchronous_lutram_boundary") and base_depth >= lutram_possible_depth:
             reasons.append("asynchronous_lutram_on_unregistered_path")
         elif memory.get("contains_lutram_boundary") and base_depth >= lutram_possible_depth:
@@ -2391,6 +3062,7 @@ def apply_timing_risk_policy(
             definite
             or adjusted_depth >= possible_depth
             or high_fanout_timing
+            or multiwrite_array
             or memory.get("contains_bram_boundary")
             or (
                 memory.get("contains_lutram_boundary")
@@ -2444,10 +3116,13 @@ def apply_timing_risk_policy(
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input", type=Path, required=True)
-    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--input", type=Path, default=None)
+    parser.add_argument("--output", type=Path, default=None)
+    parser.add_argument("--check-output", type=Path, default=None)
     parser.add_argument("--source-metadata", type=Path, default=None)
     parser.add_argument("--top", default=None)
+    parser.add_argument("--calibration-history", type=Path, default=None)
+    parser.add_argument("--fail-on-timing-path", action="store_true")
     parser.add_argument("--target-period-ns", type=float, default=5.0)
     parser.add_argument("--timing-possible-depth", type=int, default=9)
     parser.add_argument("--timing-definite-depth", type=int, default=32)
@@ -2457,6 +3132,41 @@ def main() -> int:
     parser.add_argument("--bram-clock-to-out-ns", type=float, default=2.45)
     parser.add_argument("--lutram-arc-ns", type=float, default=0.06)
     args = parser.parse_args()
+    if args.check_output:
+        try:
+            checked = json.loads(args.check_output.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"error: cannot read structure report {args.check_output}: {exc}", file=sys.stderr)
+            return 2
+        failures = checked.get("hierarchical", {}).get("timing_path_risks", [])
+        failures = [item for item in failures if item.get("severity") == "FAIL"]
+        cycles = checked.get("hierarchical", {}).get("meaningful_cycles", [])
+        for item in failures:
+            print(
+                f"FAIL {item.get('key')}: estimated={item.get('estimated_upper_delay_ns')}ns "
+                f"slack={item.get('estimated_slack_ns')}ns "
+                f"{item.get('source')} -> {item.get('destination')} "
+                f"reasons={','.join(item.get('reasons', []))}"
+            )
+        for index, cycle in enumerate(cycles):
+            witness = cycle.get("sensitivity_witness_path", [])
+            print(
+                f"FAIL combinational_loop[{index}]: kind={cycle.get('kind')} "
+                f"timing-depth={cycle.get('timing_path_depth')} "
+                f"bounded-depth={cycle.get('bounded_path_depth')} "
+                f"witness={witness[:2]}"
+            )
+        if failures or cycles:
+            print(
+                f"error: {len(failures)} structural timing path families and "
+                f"{len(cycles)} combinational loops fail the gate",
+                file=sys.stderr,
+            )
+            return 1
+        print("no structural timing path FAIL warnings")
+        return 0
+    if args.input is None or args.output is None:
+        parser.error("--input and --output are required unless --check-output is used")
     try:
         tree = json.loads(args.input.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -2479,15 +3189,29 @@ def main() -> int:
     for module in modules:
         report = module_report(module, index, status)
         reports.append(report)
-        status[report["name"]] = report
+        status[report["elaborated_name"]] = report
+        status.setdefault(report["name"], report)
     for report, module in zip(reports, modules):
         refreshed = module_report(module, index, status)
         report.clear()
         report.update(refreshed)
-        status[report["name"]] = report
+        status[report["elaborated_name"]] = report
+        status.setdefault(report["name"], report)
 
     hierarchy_top = args.top or "ydrasil_core"
-    hierarchy = hierarchical_report(hierarchy_top, reports)
+    geometry_profile = memory_geometry_profile(reports)
+    training = load_archive_training(
+        args.calibration_history,
+        args.target_period_ns,
+        memory_geometry_profile=geometry_profile,
+    )
+    hierarchy = hierarchical_report(
+        hierarchy_top,
+        reports,
+        training=training,
+        target_period_ns=args.target_period_ns,
+        bram_clock_to_out_ns=args.bram_clock_to_out_ns,
+    )
     for report in reports:
         report_hierarchy = hierarchy if report.get("name") == hierarchy_top else None
         apply_timing_risk_policy(
@@ -2545,6 +3269,12 @@ def main() -> int:
         "target_period_ns": args.target_period_ns,
         "timing_possible_depth_threshold": args.timing_possible_depth,
         "timing_definite_depth_threshold": args.timing_definite_depth,
+        "timing_path_fail_count": hierarchy.get("timing_path_fail_count", 0),
+        "timing_path_high_count": hierarchy.get("timing_path_high_count", 0),
+        "timing_path_fail_families": [
+            item.get("key") for item in hierarchy.get("timing_path_risks", [])
+            if item.get("severity") == "FAIL"
+        ],
     }
     for report in reports:
         report.pop("_analysis", None)
@@ -2561,11 +3291,20 @@ def main() -> int:
         "module_count": len(reports),
         "summary": summary,
         "hierarchical": hierarchy,
+        "memory_geometry_profile": geometry_profile,
         "modules": reports,
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(f"wrote {args.output} ({len(reports)} modules)")
+    for item in hierarchy.get("timing_path_risks", []):
+        print(
+            f"{item.get('severity')} {item.get('key')}: "
+            f"estimated={item.get('estimated_upper_delay_ns')}ns "
+            f"slack={item.get('estimated_slack_ns')}ns depth={item.get('structural_depth')} "
+            f"{item.get('source')} -> {item.get('destination')} "
+            f"reasons={','.join(item.get('reasons', []))}"
+        )
     for report in reports:
         flags = report["risk_flags"]
         if flags["combinational_loop"] or flags["hierarchical_combinational_loop"] or flags["self_feedback"] or flags["high_fanout_over_32"] or flags["deep_combination_over_8"] or flags["long_register_to_boundary_over_8"] or flags.get("long_input_to_control_over_8") or flags["wide_mux_or_work"] or flags["cross_module_combination_not_cut"]:
@@ -2593,6 +3332,8 @@ def main() -> int:
                   f"hierarchical-cycle-path={report['combination']['hierarchical'].get('cycle_max_timing_path_depth', 0)}")
         if report["combinational_outputs"]:
             print(f"{report['name']}: combinational outputs: {', '.join(report['combinational_outputs'])}")
+    if args.fail_on_timing_path and hierarchy.get("timing_path_fail_count", 0):
+        return 1
     return 0
 
 
