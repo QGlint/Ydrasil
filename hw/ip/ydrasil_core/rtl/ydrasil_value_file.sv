@@ -2,7 +2,8 @@ module ydrasil_value_file
 import ydrasil_pkg::*;
 (
     input  wire                         clk,
-    input  ydrasil_completion_bus_t     completion_bus_i,
+	    input  ydrasil_completion_meta_t    completion_meta_i [COMPLETION_LANES],
+	    input  wire [REGS_DATA_WIDTH-1:0]   completion_data_i [COMPLETION_LANES],
     input  producer_slot_t              read_slot0_i,
     input  producer_slot_t              read_slot1_i,
     input  producer_slot_t              read_slot2_i,
@@ -31,23 +32,23 @@ import ydrasil_pkg::*;
     producer_slot_t completion_slot1;
     producer_slot_t completion_slot2;
     producer_slot_t completion_slot3;
-    assign completion_slot0 = completion_bus_i[COMPLETION_ALU].producer_id[
-        PRODUCER_SLOT_WIDTH-1:0];
-    assign completion_slot1 = completion_bus_i[COMPLETION_LSU].producer_id[
-        PRODUCER_SLOT_WIDTH-1:0];
-    assign completion_slot2 = completion_bus_i[COMPLETION_MUL].producer_id[
-        PRODUCER_SLOT_WIDTH-1:0];
-    assign completion_slot3 = completion_bus_i[COMPLETION_DUAL_ALU].producer_id[
-        PRODUCER_SLOT_WIDTH-1:0];
+	    assign completion_slot0 = completion_meta_i[COMPLETION_ALU].producer_id[
+	        PRODUCER_SLOT_WIDTH-1:0];
+	    assign completion_slot1 = completion_meta_i[COMPLETION_LSU].producer_id[
+	        PRODUCER_SLOT_WIDTH-1:0];
+	    assign completion_slot2 = completion_meta_i[COMPLETION_MUL].producer_id[
+	        PRODUCER_SLOT_WIDTH-1:0];
+	    assign completion_slot3 = completion_meta_i[COMPLETION_DUAL_ALU].producer_id[
+	        PRODUCER_SLOT_WIDTH-1:0];
 
-    wire completion_write0 = completion_bus_i[COMPLETION_ALU].valid &&
-        completion_bus_i[COMPLETION_ALU].producer_tracked;
-    wire completion_write1 = completion_bus_i[COMPLETION_LSU].valid &&
-        completion_bus_i[COMPLETION_LSU].producer_tracked;
-    wire completion_write2 = completion_bus_i[COMPLETION_MUL].valid &&
-        completion_bus_i[COMPLETION_MUL].producer_tracked;
-    wire completion_write3 = completion_bus_i[COMPLETION_DUAL_ALU].valid &&
-        completion_bus_i[COMPLETION_DUAL_ALU].producer_tracked;
+	    wire completion_write0 = completion_meta_i[COMPLETION_ALU].valid &&
+	        completion_meta_i[COMPLETION_ALU].producer_tracked;
+	    wire completion_write1 = completion_meta_i[COMPLETION_LSU].valid &&
+	        completion_meta_i[COMPLETION_LSU].producer_tracked;
+	    wire completion_write2 = completion_meta_i[COMPLETION_MUL].valid &&
+	        completion_meta_i[COMPLETION_MUL].producer_tracked;
+	    wire completion_write3 = completion_meta_i[COMPLETION_DUAL_ALU].valid &&
+	        completion_meta_i[COMPLETION_DUAL_ALU].producer_tracked;
 
     // Slow completion lanes are assigned first. ALU lanes are last so their
     // same-edge write path has the highest FF D-input priority.
@@ -58,43 +59,43 @@ import ydrasil_pkg::*;
                 (completion_slot1[PRODUCER_SLOT_WIDTH-1:1] ==
                  BANK_INDEX_WIDTH'(value_slot)))
                 value_even_q[value_slot] <=
-                    completion_bus_i[COMPLETION_LSU].data;
+	                    completion_data_i[COMPLETION_LSU];
             if (completion_write2 && !completion_slot2[0] &&
                 (completion_slot2[PRODUCER_SLOT_WIDTH-1:1] ==
                  BANK_INDEX_WIDTH'(value_slot)))
                 value_even_q[value_slot] <=
-                    completion_bus_i[COMPLETION_MUL].data;
+	                    completion_data_i[COMPLETION_MUL];
             if (completion_write0 && !completion_slot0[0] &&
                 (completion_slot0[PRODUCER_SLOT_WIDTH-1:1] ==
                  BANK_INDEX_WIDTH'(value_slot)))
                 value_even_q[value_slot] <=
-                    completion_bus_i[COMPLETION_ALU].data;
+	                    completion_data_i[COMPLETION_ALU];
             if (completion_write3 && !completion_slot3[0] &&
                 (completion_slot3[PRODUCER_SLOT_WIDTH-1:1] ==
                  BANK_INDEX_WIDTH'(value_slot)))
                 value_even_q[value_slot] <=
-                    completion_bus_i[COMPLETION_DUAL_ALU].data;
+	                    completion_data_i[COMPLETION_DUAL_ALU];
 
             if (completion_write1 && completion_slot1[0] &&
                 (completion_slot1[PRODUCER_SLOT_WIDTH-1:1] ==
                  BANK_INDEX_WIDTH'(value_slot)))
                 value_odd_q[value_slot] <=
-                    completion_bus_i[COMPLETION_LSU].data;
+	                    completion_data_i[COMPLETION_LSU];
             if (completion_write2 && completion_slot2[0] &&
                 (completion_slot2[PRODUCER_SLOT_WIDTH-1:1] ==
                  BANK_INDEX_WIDTH'(value_slot)))
                 value_odd_q[value_slot] <=
-                    completion_bus_i[COMPLETION_MUL].data;
+	                    completion_data_i[COMPLETION_MUL];
             if (completion_write0 && completion_slot0[0] &&
                 (completion_slot0[PRODUCER_SLOT_WIDTH-1:1] ==
                  BANK_INDEX_WIDTH'(value_slot)))
                 value_odd_q[value_slot] <=
-                    completion_bus_i[COMPLETION_ALU].data;
+	                    completion_data_i[COMPLETION_ALU];
             if (completion_write3 && completion_slot3[0] &&
                 (completion_slot3[PRODUCER_SLOT_WIDTH-1:1] ==
                  BANK_INDEX_WIDTH'(value_slot)))
                 value_odd_q[value_slot] <=
-                    completion_bus_i[COMPLETION_DUAL_ALU].data;
+	                    completion_data_i[COMPLETION_DUAL_ALU];
         end
     end
 

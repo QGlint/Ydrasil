@@ -51,7 +51,11 @@ import ydrasil_pkg::*;
     output wire                            alu_rf_wen_rd_o,
     output wire [REGS_ADDR_WIDTH-1:0]      alu_rf_waddr_rd_o,
     output producer_id_t                   alu_producer_id_o,
-    output ydrasil_gpr_fwd_pkt_t           completion_o,
+    output wire                            completion_valid_o,
+    output producer_id_t                   completion_producer_id_o,
+    output wire                            completion_producer_tracked_o,
+    output wire [REGS_ADDR_WIDTH-1:0]      completion_addr_o,
+    output wire [REGS_DATA_WIDTH-1:0]      completion_data_o,
     output wire [REGS_DATA_WIDTH-1:0]      early_bypass_data_o,
 
     output wire                            mul_issue_o,
@@ -498,12 +502,12 @@ import ydrasil_pkg::*;
     assign slow_result_wen = op_csr;
     assign slow_result = ({32{op_csr}} & csr_reg_wdata);
 
-    assign completion_o.valid = ex_rf_wen_rd && (id_rf_waddr_rd_i != '0);
-    assign completion_o.producer_id = id_ex_producer_id_i;
-    assign completion_o.producer_tracked = ex_rf_wen_rd &&
+    assign completion_valid_o = ex_rf_wen_rd && (id_rf_waddr_rd_i != '0);
+    assign completion_producer_id_o = id_ex_producer_id_i;
+    assign completion_producer_tracked_o = ex_rf_wen_rd &&
         (id_rf_waddr_rd_i != '0);
-    assign completion_o.addr = id_rf_waddr_rd_i;
-    assign completion_o.data = fast_bitmanip_rf_wen_rd ?
+    assign completion_addr_o = id_rf_waddr_rd_i;
+    assign completion_data_o = fast_bitmanip_rf_wen_rd ?
         fast_bitmanip_result : bitmanip_rf_wen_rd ?
         bitmanip_result : slow_result_wen ? slow_result :
         fast_result_wen ? fast_result : alu_result;

@@ -436,6 +436,12 @@ package ydrasil_pkg;
 		logic [REGS_DATA_WIDTH-1:0]          data;
 	} ydrasil_gpr_fwd_pkt_t;
 
+	typedef struct packed {
+		logic                                valid;
+		producer_id_t                        producer_id;
+		logic                                producer_tracked;
+	} ydrasil_completion_meta_t;
+
 	typedef ydrasil_gpr_fwd_pkt_t ydrasil_completion_bus_t [COMPLETION_LANES];
 
 	typedef struct packed {

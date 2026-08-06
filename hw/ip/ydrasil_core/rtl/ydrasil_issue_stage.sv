@@ -54,6 +54,7 @@ import ydrasil_pkg::*;
     output wire [DATA_WIDTH-1:0]       agu_in_operand_a_o,
     output wire [DATA_WIDTH-1:0]       agu_in_operand_b_o,
     output ydrasil_lsu_req_pkt_t       agu_in_req_o,
+    output wire [DATA_WIDTH-1:0]       agu_in_store_data_o,
     output wire                        csr_in_valid_o,
     output wire [DATA_WIDTH-1:0]       csr_in_operand_a_o,
     output wire [OPERATOR_TYPE_WIDTH-1:0] csr_in_operator_type_o,
@@ -69,8 +70,12 @@ import ydrasil_pkg::*;
     output ydrasil_lane_b_meta_t       dual_meta_o,
     output wire                        dual_alu_valid_o,
     output ydrasil_lane_b_alu_payload_t dual_alu_payload_o,
+    output wire [DATA_WIDTH-1:0]       dual_alu_operand_a_o,
+    output wire [DATA_WIDTH-1:0]       dual_alu_operand_b_o,
     output wire                        dual_bru_valid_o,
     output ydrasil_lane_b_bru_payload_t dual_bru_payload_o,
+    output wire [DATA_WIDTH-1:0]       dual_bru_operand_a_o,
+    output wire [DATA_WIDTH-1:0]       dual_bru_operand_b_o,
     output wire [4:0]                  rf_addr_rs1_o,
     output wire [4:0]                  rf_addr_rs2_o,
     output wire [4:0]                  rf_addr_rs3_o,
@@ -314,10 +319,12 @@ import ydrasil_pkg::*;
     wire slot1_store = issue_pkt1_i.op_class == UOP_CLASS_STORE;
     wire slot1_scoreboard_stall = slot1_active &&
         (!src2_ready || (!src3_ready && !slot1_store));
+    wire [1:0] lsu_credit_available = agu_in_valid_q ?
+        ((lsu_credit_i != '0) ? lsu_credit_i - 1'b1 : '0) : lsu_credit_i;
     wire slot0_lsu_stall = uop_memory(issue_pkt_i) &&
-        (lsu_credit_i == 2'd0);
+	        (lsu_credit_available == 2'd0);
     wire slot1_lsu_stall = slot1_active && uop_memory(issue_pkt1_i) &&
-        (lsu_credit_i == 2'd0);
+	        (lsu_credit_available == 2'd0);
     wire serialize_stall = ((issue_pkt_i.op_class == UOP_CLASS_CSR) ||
         (issue_pkt_i.op_class == UOP_CLASS_SYS) || issue_pkt_i.fence_i) &&
         (!lsu_idle_q || !issue_at_rob_head_q);
@@ -897,9 +904,6 @@ import ydrasil_pkg::*;
     // data comes from the token-aligned safe result banks above. Every mux
     // sits after its matching Issue/FU input cell, preserving zero-bubble
 	// wakeup without placing wide completion data in the Issue operand cone.
-	ydrasil_lsu_req_pkt_t agu_in_req_mux;
-	ydrasil_lane_b_alu_payload_t dual_alu_payload_mux;
-	ydrasil_lane_b_bru_payload_t dual_bru_payload_mux;
 	wire [DATA_WIDTH-1:0] bypass_base [0:10];
 	wire [DATA_WIDTH-1:0] bypass_result [0:10];
 	wire [10:0] bypass_dtcm_select;
@@ -952,17 +956,6 @@ import ydrasil_pkg::*;
         end
     endgenerate
 
-	always_comb begin
-		agu_in_req_mux = agu_in_req_q;
-		agu_in_req_mux.store_data = bypass_result[0];
-		dual_alu_payload_mux = dual_alu_payload_q;
-		dual_alu_payload_mux.operand_a = bypass_result[3];
-		dual_alu_payload_mux.operand_b = bypass_result[4];
-		dual_bru_payload_mux = dual_bru_payload_q;
-		dual_bru_payload_mux.operand_a = bypass_result[1];
-		dual_bru_payload_mux.operand_b = bypass_result[2];
-	end
-
 	assign illegal_instr_o = illegal_instr_q;
 	assign alu_in_valid_o = alu_in_valid_q;
 	assign alu_in_operand_a_o = bypass_result[5];
@@ -976,7 +969,8 @@ import ydrasil_pkg::*;
     assign agu_in_valid_o = agu_in_valid_q;
 	assign agu_in_operand_a_o = bypass_result[7];
     assign agu_in_operand_b_o = agu_in_operand_b_q;
-    assign agu_in_req_o = agu_in_req_mux;
+	assign agu_in_req_o = agu_in_req_q;
+	assign agu_in_store_data_o = bypass_result[0];
     assign csr_in_valid_o = csr_in_valid_q;
 	assign csr_in_operand_a_o = bypass_result[8];
     assign csr_in_operator_type_o = csr_in_operator_type_q;
@@ -991,9 +985,13 @@ import ydrasil_pkg::*;
     assign mul_in_operator_type_o = mul_in_operator_type_q;
 	assign dual_meta_o = dual_meta_q;
 	assign dual_alu_valid_o = dual_alu_valid_q;
-	assign dual_alu_payload_o = dual_alu_payload_mux;
+	assign dual_alu_payload_o = dual_alu_payload_q;
+	assign dual_alu_operand_a_o = bypass_result[3];
+	assign dual_alu_operand_b_o = bypass_result[4];
 	assign dual_bru_valid_o = dual_bru_valid_q;
-	assign dual_bru_payload_o = dual_bru_payload_mux;
+	assign dual_bru_payload_o = dual_bru_payload_q;
+	assign dual_bru_operand_a_o = bypass_result[1];
+	assign dual_bru_operand_b_o = bypass_result[2];
 
 `ifndef SYNTHESIS
     wire issue_valid_ff = issue_pkt_i.valid;
@@ -1046,7 +1044,11 @@ import ydrasil_pkg::*;
     input  wire [1:0]                     pred_counter_i,
     input  bp_bht_index_t                 pred_bht_index_i,
     input  wire [INST_ADDR_WIDTH-1:0]     trap_redirect_addr_i,
-    output ydrasil_gpr_fwd_pkt_t          completion_o,
+    output wire                           completion_valid_o,
+    output producer_id_t                  completion_producer_id_o,
+    output wire                           completion_producer_tracked_o,
+    output wire [REGS_ADDR_WIDTH-1:0]     completion_addr_o,
+    output wire [REGS_DATA_WIDTH-1:0]     completion_data_o,
     output wire [REGS_DATA_WIDTH-1:0]     early_bypass_data_o,
     output wire                           ex_branch_jump_o,
     output wire [INST_ADDR_WIDTH-1:0]     ex_branch_target_o,
@@ -1208,12 +1210,12 @@ import ydrasil_pkg::*;
 
     // Lane B completion is captured by the typed ALU result array at WB. The
     // remaining q state is commit trace metadata, not an execution bypass.
-    assign completion_o.valid = valid_i && rd_wen_i && !interrupt_i &&
+    assign completion_valid_o = valid_i && rd_wen_i && !interrupt_i &&
         (rd_addr_i != '0);
-    assign completion_o.producer_id = producer_id_i;
-    assign completion_o.producer_tracked = producer_tracked_i;
-    assign completion_o.addr = rd_addr_i;
-    assign completion_o.data = operator_type_i[OPERATOR_TYPE_BITMANIP] ?
+    assign completion_producer_id_o = producer_id_i;
+    assign completion_producer_tracked_o = producer_tracked_i;
+    assign completion_addr_o = rd_addr_i;
+    assign completion_data_o = operator_type_i[OPERATOR_TYPE_BITMANIP] ?
         fast_bitmanip_result : alu_result;
     assign instret_valid_o = valid_q;
     assign commit_pc_o = pc_q;

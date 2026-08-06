@@ -18,7 +18,8 @@ import ydrasil_pkg::*;
     input  ydrasil_compact_uop_t        issue_pkt1_i,
     input  wire                         issue_fence_i,
     input  producer_id_t                issue_fence_tag_i,
-    input  ydrasil_completion_bus_t     completion_bus_i,
+	    input  ydrasil_completion_meta_t    completion_meta_i [COMPLETION_LANES],
+	    input  wire [REGS_ADDR_WIDTH-1:0]   completion_rd_i [COMPLETION_LANES],
     input  wire                         trap_stall_i,
     input  wire                         ex_mul_stall_i,
     input  wire [REGS_DATA_WIDTH-1:0]   retire_value0_i,
@@ -345,34 +346,34 @@ import ydrasil_pkg::*;
     producer_slot_t completion_slot1;
     producer_slot_t completion_slot2;
     producer_slot_t completion_slot3;
-    assign completion_slot0 = completion_bus_i[COMPLETION_ALU].producer_id[
-        PRODUCER_SLOT_WIDTH-1:0];
-    assign completion_slot1 = completion_bus_i[COMPLETION_LSU].producer_id[
-        PRODUCER_SLOT_WIDTH-1:0];
-    assign completion_slot2 = completion_bus_i[COMPLETION_MUL].producer_id[
-        PRODUCER_SLOT_WIDTH-1:0];
-    assign completion_slot3 = completion_bus_i[COMPLETION_DUAL_ALU].producer_id[
-        PRODUCER_SLOT_WIDTH-1:0];
-    wire completion_hit0 = completion_bus_i[COMPLETION_ALU].valid &&
-        completion_bus_i[COMPLETION_ALU].producer_tracked &&
-        producer_valid_q[completion_slot0] &&
-        (producer_epoch_q[completion_slot0] ==
-         completion_bus_i[COMPLETION_ALU].producer_id[PRODUCER_ID_WIDTH-1]);
-    wire completion_hit1 = completion_bus_i[COMPLETION_LSU].valid &&
-        completion_bus_i[COMPLETION_LSU].producer_tracked &&
-        producer_valid_q[completion_slot1] &&
-        (producer_epoch_q[completion_slot1] ==
-         completion_bus_i[COMPLETION_LSU].producer_id[PRODUCER_ID_WIDTH-1]);
-    wire completion_hit2 = completion_bus_i[COMPLETION_MUL].valid &&
-        completion_bus_i[COMPLETION_MUL].producer_tracked &&
-        producer_valid_q[completion_slot2] &&
-        (producer_epoch_q[completion_slot2] ==
-         completion_bus_i[COMPLETION_MUL].producer_id[PRODUCER_ID_WIDTH-1]);
-    wire completion_hit3 = completion_bus_i[COMPLETION_DUAL_ALU].valid &&
-        completion_bus_i[COMPLETION_DUAL_ALU].producer_tracked &&
-        producer_valid_q[completion_slot3] &&
-        (producer_epoch_q[completion_slot3] ==
-         completion_bus_i[COMPLETION_DUAL_ALU].producer_id[PRODUCER_ID_WIDTH-1]);
+	    assign completion_slot0 = completion_meta_i[COMPLETION_ALU].producer_id[
+	        PRODUCER_SLOT_WIDTH-1:0];
+	    assign completion_slot1 = completion_meta_i[COMPLETION_LSU].producer_id[
+	        PRODUCER_SLOT_WIDTH-1:0];
+	    assign completion_slot2 = completion_meta_i[COMPLETION_MUL].producer_id[
+	        PRODUCER_SLOT_WIDTH-1:0];
+	    assign completion_slot3 = completion_meta_i[COMPLETION_DUAL_ALU].producer_id[
+	        PRODUCER_SLOT_WIDTH-1:0];
+	    wire completion_hit0 = completion_meta_i[COMPLETION_ALU].valid &&
+	        completion_meta_i[COMPLETION_ALU].producer_tracked &&
+	        producer_valid_q[completion_slot0] &&
+	        (producer_epoch_q[completion_slot0] ==
+	         completion_meta_i[COMPLETION_ALU].producer_id[PRODUCER_ID_WIDTH-1]);
+	    wire completion_hit1 = completion_meta_i[COMPLETION_LSU].valid &&
+	        completion_meta_i[COMPLETION_LSU].producer_tracked &&
+	        producer_valid_q[completion_slot1] &&
+	        (producer_epoch_q[completion_slot1] ==
+	         completion_meta_i[COMPLETION_LSU].producer_id[PRODUCER_ID_WIDTH-1]);
+	    wire completion_hit2 = completion_meta_i[COMPLETION_MUL].valid &&
+	        completion_meta_i[COMPLETION_MUL].producer_tracked &&
+	        producer_valid_q[completion_slot2] &&
+	        (producer_epoch_q[completion_slot2] ==
+	         completion_meta_i[COMPLETION_MUL].producer_id[PRODUCER_ID_WIDTH-1]);
+	    wire completion_hit3 = completion_meta_i[COMPLETION_DUAL_ALU].valid &&
+	        completion_meta_i[COMPLETION_DUAL_ALU].producer_tracked &&
+	        producer_valid_q[completion_slot3] &&
+	        (producer_epoch_q[completion_slot3] ==
+	         completion_meta_i[COMPLETION_DUAL_ALU].producer_id[PRODUCER_ID_WIDTH-1]);
 `ifndef SYNTHESIS
     wire [PRODUCER_NUM-1:0] producer_complete_mask =
         (completion_hit0 ? (PRODUCER_NUM'(1) << completion_slot0) : '0) |
@@ -386,22 +387,22 @@ import ydrasil_pkg::*;
         if (rst_n) begin
             if (completion_hit0) begin
                 assert (producer_rd_q[completion_slot0] ==
-                        completion_bus_i[COMPLETION_ALU].addr)
+	                        completion_rd_i[COMPLETION_ALU])
                     else $fatal(1, "ALU completion rd/tag mismatch");
             end
             if (completion_hit1) begin
                 assert (producer_rd_q[completion_slot1] ==
-                        completion_bus_i[COMPLETION_LSU].addr)
+	                        completion_rd_i[COMPLETION_LSU])
                     else $fatal(1, "LSU completion rd/tag mismatch");
             end
             if (completion_hit2) begin
                 assert (producer_rd_q[completion_slot2] ==
-                        completion_bus_i[COMPLETION_MUL].addr)
+	                        completion_rd_i[COMPLETION_MUL])
                     else $fatal(1, "MUL completion rd/tag mismatch");
             end
             if (completion_hit3) begin
                 assert (producer_rd_q[completion_slot3] ==
-                        completion_bus_i[COMPLETION_DUAL_ALU].addr)
+	                        completion_rd_i[COMPLETION_DUAL_ALU])
                     else $fatal(1, "dual completion rd/tag mismatch");
             end
         end

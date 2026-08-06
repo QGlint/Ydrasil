@@ -204,6 +204,11 @@ import ydrasil_pkg::*;
         decoded1.resources[RESOURCE_SERIAL];
     wire pair_control_memory =
         decoded0.resources[RESOURCE_BRU] && decoded1.resources[RESOURCE_LSU];
+    wire pair_mul_memory =
+        (decoded0.resources[RESOURCE_MULDIV] &&
+         decoded1.resources[RESOURCE_LSU]) ||
+        (decoded0.resources[RESOURCE_LSU] &&
+         decoded1.resources[RESOURCE_MULDIV]);
     wire slot0_a_capable = !decoded0.resources[RESOURCE_BRU] &&
         !decoded0.resources[RESOURCE_LSU];
     wire slot0_b_capable = !decoded0.resources[RESOURCE_MULDIV] &&
@@ -219,7 +224,7 @@ import ydrasil_pkg::*;
         (slot0_b_capable && slot1_a_capable);
     wire pair_eligible = decode_valid && decode_valid1 && pair_lane_assignable &&
         !pair_resource_conflict && !pair_raw && !pair_waw && !pair_serialize &&
-        !pair_control_memory;
+	        !pair_control_memory && !pair_mul_memory;
 
     assign if_id_ready_o = issue_ready_i;
     assign if_id_consume_two_o = issue_ready_i && pair_eligible;

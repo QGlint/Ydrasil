@@ -4,7 +4,8 @@ import ydrasil_pkg::*;
     input  wire                            clk,
 	    input  wire                            rst_n,
 	    input  ydrasil_lsu_req_pkt_t           req_i,
-	    input  ydrasil_completion_bus_t        completion_bus_i,
+		    input  ydrasil_completion_meta_t       completion_meta_i [COMPLETION_LANES],
+		    input  wire [REGS_DATA_WIDTH-1:0]      completion_data_i [COMPLETION_LANES],
     input  wire [BUS_DATA_WIDTH-1:0]       dtcm_rdata_i,
     output ydrasil_dtcm_req_pkt_t          dtcm_req_o,
     input  ydrasil_mem_rsp_pkt_t           mmio_rsp_i,
@@ -13,7 +14,11 @@ import ydrasil_pkg::*;
     output wire [1:0]                     issue_credit_o,
     output ydrasil_reservation_pkt_t      dtcm_reservation_o,
 	output wire [REGS_DATA_WIDTH-1:0]     dtcm_resp_data_o,
-	output ydrasil_gpr_fwd_pkt_t           completion_o
+	output wire                            completion_valid_o,
+	output wire [REGS_DATA_WIDTH-1:0]      completion_data_o,
+	output wire [REGS_ADDR_WIDTH-1:0]      completion_addr_o,
+	output producer_id_t                   completion_producer_id_o,
+	output wire                            completion_producer_tracked_o
 );
     localparam int QUEUE_DEPTH = 2;
     localparam int STORE_BUFFER_DEPTH = 2;
@@ -84,12 +89,12 @@ import ydrasil_pkg::*;
 	                for (completion_idx = 0;
 	                     completion_idx < COMPLETION_LANES;
 	                     completion_idx = completion_idx + 1) begin
-	                    if (completion_bus_i[completion_idx].valid &&
-	                        completion_bus_i[completion_idx].producer_tracked &&
-	                        (completion_bus_i[completion_idx].producer_id ==
-	                         entry.store_producer_id)) begin
-	                        patch_queue_store.store_data =
-	                            completion_bus_i[completion_idx].data;
+		                    if (completion_meta_i[completion_idx].valid &&
+		                        completion_meta_i[completion_idx].producer_tracked &&
+		                        (completion_meta_i[completion_idx].producer_id ==
+		                         entry.store_producer_id)) begin
+		                        patch_queue_store.store_data =
+		                            completion_data_i[completion_idx];
 	                        patch_queue_store.store_data_valid = 1'b1;
 	                        patch_queue_store.store_producer_tracked = 1'b0;
 	                    end
@@ -109,12 +114,12 @@ import ydrasil_pkg::*;
 	                for (completion_idx = 0;
 	                     completion_idx < COMPLETION_LANES;
 	                     completion_idx = completion_idx + 1) begin
-	                    if (completion_bus_i[completion_idx].valid &&
-	                        completion_bus_i[completion_idx].producer_tracked &&
-	                        (completion_bus_i[completion_idx].producer_id ==
-	                         entry.store_producer_id)) begin
-	                        patch_buffer_store.store_data = align_store_data(
-	                            completion_bus_i[completion_idx].data,
+		                    if (completion_meta_i[completion_idx].valid &&
+		                        completion_meta_i[completion_idx].producer_tracked &&
+		                        (completion_meta_i[completion_idx].producer_id ==
+		                         entry.store_producer_id)) begin
+		                        patch_buffer_store.store_data = align_store_data(
+		                            completion_data_i[completion_idx],
 	                            entry.store_mask);
 	                        patch_buffer_store.store_data_valid = 1'b1;
 	                        patch_buffer_store.store_producer_tracked = 1'b0;
@@ -272,14 +277,10 @@ import ydrasil_pkg::*;
     assign status_o.idle = queue_empty && !req_i.valid && store_buf_empty &&
         !mmio_busy && !load_s1_valid_q;
     assign status_o.fast_load = 1'b0;
-    // Reserve the E-stage request unconditionally.  Whether an empty queue
-    // happens to launch it directly depends on the AGU address, DTCM/MMIO
-    // decode, and forwarding state; feeding that decision into Issue formed
-    // the long EX-to-Issue backpressure arc.  A direct request temporarily
-    // costs one conservative credit, while queue accounting remains exact.
-    wire issue_credit_reserved = req_i.valid;
-    assign issue_credit_o = issue_credit_reserved ?
-        ((issue_credit_q != '0) ? issue_credit_q - 1'b1 : '0) : issue_credit_q;
+    // Export only registered queue capacity. Issue locally reserves its
+    // registered AGU request, keeping request payload and DTCM decisions out
+    // of the next Issue selection cone.
+    assign issue_credit_o = issue_credit_q;
 
     always_comb begin
         dtcm_req_o = '0;
@@ -348,16 +349,16 @@ import ydrasil_pkg::*;
     // cycle before the value becomes usable.
     wire dtcm_wb_valid = load_s1_valid_q;
     wire mmio_wb_out_valid = mmio_wb_valid_q && !dtcm_wb_valid;
-    assign completion_o.valid = dtcm_wb_valid ?
+    assign completion_valid_o = dtcm_wb_valid ?
         load_s1_producer_tracked_q :
         (mmio_wb_out_valid && mmio_wb_producer_tracked_q);
-    assign completion_o.data = dtcm_wb_valid ?
+    assign completion_data_o = dtcm_wb_valid ?
         dtcm_load_result : mmio_wb_result_q;
-    assign completion_o.addr = dtcm_wb_valid ?
+    assign completion_addr_o = dtcm_wb_valid ?
         load_s1_rd_addr_q : mmio_wb_rd_addr_q;
-    assign completion_o.producer_id = dtcm_wb_valid ?
+    assign completion_producer_id_o = dtcm_wb_valid ?
         load_s1_producer_id_q : mmio_wb_producer_id_q;
-    assign completion_o.producer_tracked = dtcm_wb_valid ?
+    assign completion_producer_tracked_o = dtcm_wb_valid ?
         load_s1_producer_tracked_q : mmio_wb_producer_tracked_q;
 
     // DTCM is fixed-latency. Its registered identity is separate from the
@@ -476,27 +477,27 @@ import ydrasil_pkg::*;
 `endif
 	        end else begin
 	            completion_shadow_q[0].valid <=
-	                completion_bus_i[COMPLETION_ALU].valid &&
-	                completion_bus_i[COMPLETION_ALU].producer_tracked;
-	            completion_shadow_q[0].producer_id <=
-	                completion_bus_i[COMPLETION_ALU].producer_id;
-	            completion_shadow_q[0].data <=
-	                completion_bus_i[COMPLETION_ALU].data;
-	            completion_shadow_q[1].valid <=
-	                completion_bus_i[COMPLETION_MUL].valid &&
-	                completion_bus_i[COMPLETION_MUL].producer_tracked;
-	            completion_shadow_q[1].producer_id <=
-	                completion_bus_i[COMPLETION_MUL].producer_id;
-	            completion_shadow_q[1].data <=
-	                completion_bus_i[COMPLETION_MUL].data;
+		                completion_meta_i[COMPLETION_ALU].valid &&
+		                completion_meta_i[COMPLETION_ALU].producer_tracked;
+		            completion_shadow_q[0].producer_id <=
+		                completion_meta_i[COMPLETION_ALU].producer_id;
+		            completion_shadow_q[0].data <=
+		                completion_data_i[COMPLETION_ALU];
+		            completion_shadow_q[1].valid <=
+		                completion_meta_i[COMPLETION_MUL].valid &&
+		                completion_meta_i[COMPLETION_MUL].producer_tracked;
+		            completion_shadow_q[1].producer_id <=
+		                completion_meta_i[COMPLETION_MUL].producer_id;
+		            completion_shadow_q[1].data <=
+		                completion_data_i[COMPLETION_MUL];
 	            completion_shadow_q[3] <= completion_shadow_q[2];
 	            completion_shadow_q[2].valid <=
-	                completion_bus_i[COMPLETION_DUAL_ALU].valid &&
-	                completion_bus_i[COMPLETION_DUAL_ALU].producer_tracked;
-	            completion_shadow_q[2].producer_id <=
-	                completion_bus_i[COMPLETION_DUAL_ALU].producer_id;
-	            completion_shadow_q[2].data <=
-	                completion_bus_i[COMPLETION_DUAL_ALU].data;
+		                completion_meta_i[COMPLETION_DUAL_ALU].valid &&
+		                completion_meta_i[COMPLETION_DUAL_ALU].producer_tracked;
+		            completion_shadow_q[2].producer_id <=
+		                completion_meta_i[COMPLETION_DUAL_ALU].producer_id;
+		            completion_shadow_q[2].data <=
+		                completion_data_i[COMPLETION_DUAL_ALU];
 	            for (queue_idx = 0; queue_idx < QUEUE_DEPTH; queue_idx++)
 	                queue_q[queue_idx] <= patch_queue_store(queue_q[queue_idx]);
 	            if (queue_dequeue) begin

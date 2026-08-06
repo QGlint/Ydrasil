@@ -104,6 +104,7 @@ import ydrasil_axi_pkg::*;
 	wire [31:0]                    agu_in_operand_a;
 	wire [31:0]                    agu_in_operand_b;
 	ydrasil_lsu_req_pkt_t          agu_in_req;
+	wire [31:0]                    agu_in_store_data;
 	wire                           csr_in_valid;
 	wire [31:0]                    csr_in_operand_a;
 	wire [ydrasil_pkg::OPERATOR_TYPE_WIDTH-1:0] csr_in_operator_type;
@@ -119,8 +120,12 @@ import ydrasil_axi_pkg::*;
 	ydrasil_lane_b_meta_t               dual_meta;
 	wire                                dual_alu_valid;
 	ydrasil_lane_b_alu_payload_t        dual_alu_payload;
+	wire [31:0]                         dual_alu_operand_a;
+	wire [31:0]                         dual_alu_operand_b;
 	wire                                dual_bru_valid;
 	ydrasil_lane_b_bru_payload_t        dual_bru_payload;
+	wire [31:0]                         dual_bru_operand_a;
+	wire [31:0]                         dual_bru_operand_b;
 	wire [ydrasil_pkg::OPERATOR_WIDTH-1:0]     operator;
 	ydrasil_lsu_req_pkt_t         id_lsu_req_pkt;
 	ydrasil_lsu_req_pkt_t         lsu_req_pkt;
@@ -262,6 +267,24 @@ import ydrasil_axi_pkg::*;
 	ydrasil_gpr_fwd_pkt_t           mul_fwd_pkt;
 	ydrasil_gpr_fwd_pkt_t           dual_alu_fwd_pkt;
 	ydrasil_completion_bus_t        completion_bus;
+	ydrasil_completion_meta_t       completion_meta [COMPLETION_LANES];
+	wire [REGS_DATA_WIDTH-1:0]      completion_data [COMPLETION_LANES];
+	wire [REGS_ADDR_WIDTH-1:0]      completion_rd [COMPLETION_LANES];
+	wire                            alu_completion_valid;
+	producer_id_t                   alu_completion_producer_id;
+	wire                            alu_completion_producer_tracked;
+	wire [REGS_ADDR_WIDTH-1:0]      alu_completion_addr;
+	wire [REGS_DATA_WIDTH-1:0]      alu_completion_data;
+	wire                            lsu_completion_valid;
+	producer_id_t                   lsu_completion_producer_id;
+	wire                            lsu_completion_producer_tracked;
+	wire [REGS_ADDR_WIDTH-1:0]      lsu_completion_addr;
+	wire [REGS_DATA_WIDTH-1:0]      lsu_completion_data;
+	wire                            dual_completion_valid;
+	producer_id_t                   dual_completion_producer_id;
+	wire                            dual_completion_producer_tracked;
+	wire [REGS_ADDR_WIDTH-1:0]      dual_completion_addr;
+	wire [REGS_DATA_WIDTH-1:0]      dual_completion_data;
 	ydrasil_rob_source_state_t      issue_src0_state;
 	ydrasil_rob_source_state_t      issue_src1_state;
 	ydrasil_rob_source_state_t      issue_src2_state;
@@ -513,9 +536,9 @@ import ydrasil_axi_pkg::*;
 	assign id_alu_rf_wen_rd = alu_in_rd_wen;
 	assign id_rf_waddr_rd = alu_in_rd_addr;
 	assign dual_operand_a = dual_bru_valid ? dual_meta.pc :
-		dual_alu_payload.operand_a;
+		dual_alu_operand_a;
 	assign dual_operand_b = dual_bru_valid ? 32'd4 :
-		dual_alu_payload.operand_b;
+		dual_alu_operand_b;
 	always_comb begin
 		dual_operator = '0;
 		dual_operator_type = '0;
@@ -677,11 +700,53 @@ import ydrasil_axi_pkg::*;
 	assign mul_fwd_pkt.producer_tracked = mul_fwd_pkt.valid && (mul_fwd_pkt.addr != '0);
 	assign mul_fwd_pkt.addr = slow_rf_waddr_rd;
 	assign mul_fwd_pkt.data = slow_wb_result;
+	assign alu_fwd_pkt.valid = alu_completion_valid;
+	assign alu_fwd_pkt.producer_id = alu_completion_producer_id;
+	assign alu_fwd_pkt.producer_tracked = alu_completion_producer_tracked;
+	assign alu_fwd_pkt.addr = alu_completion_addr;
+	assign alu_fwd_pkt.data = alu_completion_data;
+	assign lsu_fwd_pkt.valid = lsu_completion_valid;
+	assign lsu_fwd_pkt.producer_id = lsu_completion_producer_id;
+	assign lsu_fwd_pkt.producer_tracked = lsu_completion_producer_tracked;
+	assign lsu_fwd_pkt.addr = lsu_completion_addr;
+	assign lsu_fwd_pkt.data = lsu_completion_data;
+	assign dual_alu_fwd_pkt.valid = dual_completion_valid;
+	assign dual_alu_fwd_pkt.producer_id = dual_completion_producer_id;
+	assign dual_alu_fwd_pkt.producer_tracked = dual_completion_producer_tracked;
+	assign dual_alu_fwd_pkt.addr = dual_completion_addr;
+	assign dual_alu_fwd_pkt.data = dual_completion_data;
 	assign completion_bus[ydrasil_pkg::COMPLETION_ALU] = alu_fwd_pkt;
 	assign lsu_wb_fwd_pkt = lsu_fwd_pkt;
 	assign completion_bus[ydrasil_pkg::COMPLETION_LSU] = lsu_wb_fwd_pkt;
 	assign completion_bus[ydrasil_pkg::COMPLETION_MUL] = mul_fwd_pkt;
 	assign completion_bus[ydrasil_pkg::COMPLETION_DUAL_ALU] = dual_alu_fwd_pkt;
+	assign completion_meta[COMPLETION_ALU].valid = alu_completion_valid;
+	assign completion_meta[COMPLETION_ALU].producer_id =
+		alu_completion_producer_id;
+	assign completion_meta[COMPLETION_ALU].producer_tracked =
+		alu_completion_producer_tracked;
+	assign completion_data[COMPLETION_ALU] = alu_completion_data;
+	assign completion_rd[COMPLETION_ALU] = alu_completion_addr;
+	assign completion_meta[COMPLETION_LSU].valid = lsu_completion_valid;
+	assign completion_meta[COMPLETION_LSU].producer_id =
+		lsu_completion_producer_id;
+	assign completion_meta[COMPLETION_LSU].producer_tracked =
+		lsu_completion_producer_tracked;
+	assign completion_data[COMPLETION_LSU] = lsu_completion_data;
+	assign completion_rd[COMPLETION_LSU] = lsu_completion_addr;
+	assign completion_meta[COMPLETION_MUL].valid = slow_rf_wen_rd;
+	assign completion_meta[COMPLETION_MUL].producer_id = slow_producer_id;
+	assign completion_meta[COMPLETION_MUL].producer_tracked =
+		slow_rf_wen_rd && (slow_rf_waddr_rd != '0);
+	assign completion_data[COMPLETION_MUL] = slow_wb_result;
+	assign completion_rd[COMPLETION_MUL] = slow_rf_waddr_rd;
+	assign completion_meta[COMPLETION_DUAL_ALU].valid = dual_completion_valid;
+	assign completion_meta[COMPLETION_DUAL_ALU].producer_id =
+		dual_completion_producer_id;
+	assign completion_meta[COMPLETION_DUAL_ALU].producer_tracked =
+		dual_completion_producer_tracked;
+	assign completion_data[COMPLETION_DUAL_ALU] = dual_completion_data;
+	assign completion_rd[COMPLETION_DUAL_ALU] = dual_completion_addr;
 	assign id_ctrl_rs1_addr = issue_head_compact_uop.src0.arch_addr;
 	assign id_ctrl_rs2_addr = issue_head_compact_uop.src1.arch_addr;
 	assign id_ctrl_rs1_ren = issue_head_compact_uop.src0.used;
@@ -695,9 +760,11 @@ import ydrasil_axi_pkg::*;
 		issue_head_compact_uop.op_class == UOP_CLASS_STORE;
 	always_comb begin
 		main_lsu_req_pkt = id_lsu_req_pkt;
-		main_lsu_req_pkt.valid = id_lsu_req_pkt.valid & ex_accept_valid1;
+		// Memory never pairs with MULDIV, so divider backpressure cannot coincide
+		// with a live AGU cell. A redirect remains the only same-cycle kill.
+		main_lsu_req_pkt.valid = id_lsu_req_pkt.valid & !ex_branch_jump;
 		main_lsu_req_pkt.addr = ex_lsu_mem_addr;
-		main_lsu_req_pkt.store_data = ex_lsu_result;
+		main_lsu_req_pkt.store_data = agu_in_store_data;
 		main_lsu_req_pkt.addr_is_dtcm =
 			(ex_lsu_mem_addr[31:ydrasil_pkg::DTCM_ADDR_WIDTH+2] ==
 			 ydrasil_pkg::DTCM_BASE_ADDR[31:ydrasil_pkg::DTCM_ADDR_WIDTH+2]);
@@ -787,7 +854,8 @@ import ydrasil_axi_pkg::*;
 		.clk               (clk),
 		.rst_n             (rst_n),
 		.req_i             (lsu_req_pkt),
-		.completion_bus_i  (completion_bus),
+		.completion_meta_i (completion_meta),
+		.completion_data_i (completion_data),
 		.dtcm_rdata_i      (dtcm_rdata),
 		.dtcm_req_o        (dtcm_req_pkt),
 		.mmio_rsp_i        (mmio_rsp_pkt),
@@ -796,7 +864,11 @@ import ydrasil_axi_pkg::*;
 		.issue_credit_o     (lsu_issue_credit),
 		.dtcm_reservation_o(dtcm_reservation),
 		.dtcm_resp_data_o   (dtcm_resp_data),
-		.completion_o      (lsu_fwd_pkt)
+		.completion_valid_o (lsu_completion_valid),
+		.completion_data_o  (lsu_completion_data),
+		.completion_addr_o  (lsu_completion_addr),
+		.completion_producer_id_o(lsu_completion_producer_id),
+		.completion_producer_tracked_o(lsu_completion_producer_tracked)
 	);
 
 	ydrasil_axi_lite_master u_ydrasil_axi_lite_master (
@@ -973,6 +1045,7 @@ import ydrasil_axi_pkg::*;
 			.agu_in_operand_a_o (agu_in_operand_a),
 			.agu_in_operand_b_o (agu_in_operand_b),
 			.agu_in_req_o       (agu_in_req),
+			.agu_in_store_data_o(agu_in_store_data),
 			.csr_in_valid_o     (csr_in_valid),
 			.csr_in_operand_a_o (csr_in_operand_a),
 			.csr_in_operator_type_o(csr_in_operator_type),
@@ -988,8 +1061,12 @@ import ydrasil_axi_pkg::*;
 			.dual_meta_o       (dual_meta),
 			.dual_alu_valid_o  (dual_alu_valid),
 			.dual_alu_payload_o(dual_alu_payload),
+			.dual_alu_operand_a_o(dual_alu_operand_a),
+			.dual_alu_operand_b_o(dual_alu_operand_b),
 			.dual_bru_valid_o  (dual_bru_valid),
 			.dual_bru_payload_o(dual_bru_payload),
+			.dual_bru_operand_a_o(dual_bru_operand_a),
+			.dual_bru_operand_b_o(dual_bru_operand_b),
 		.rf_addr_rs1_o       (rf_raddr_rs1),
 		.rf_addr_rs2_o      (rf_raddr_rs2),
 		.rf_addr_rs3_o      (rf_raddr_rs3),
@@ -1008,7 +1085,7 @@ import ydrasil_axi_pkg::*;
 		.alu_operand_b_i    (alu_operand_b),
 		.lsu_operand_a_i    (lsu_operand_a),
 		.lsu_operand_b_i    (lsu_operand_b),
-		.lsu_store_data_i   (id_lsu_req_pkt.store_data),
+		.lsu_store_data_i   (agu_in_store_data),
 		.mul_operand_a_i    (mul_operand_a),
 		.mul_operand_b_i    (mul_operand_b),
 		.csr_operand_a_i    (csr_operand_a),
@@ -1042,7 +1119,11 @@ import ydrasil_axi_pkg::*;
 		.alu_rf_wen_rd_o    (alu_rf_wen_rd),
 		.alu_rf_waddr_rd_o  (alu_rf_waddr_rd),
 			.alu_producer_id_o  (alu_producer_id),
-			.completion_o       (alu_fwd_pkt),
+			.completion_valid_o (alu_completion_valid),
+			.completion_producer_id_o(alu_completion_producer_id),
+			.completion_producer_tracked_o(alu_completion_producer_tracked),
+			.completion_addr_o  (alu_completion_addr),
+			.completion_data_o  (alu_completion_data),
 			.early_bypass_data_o(main_early_bypass_data),
 		.mul_issue_o        (ex_mul_issue),
 		.mul_issue_waddr_o  (ex_mul_issue_waddr),
@@ -1063,8 +1144,8 @@ import ydrasil_axi_pkg::*;
 		.valid_i             (ex_accept_valid1 && !agu_in_valid),
 			.operand_a_i         (dual_operand_a),
 			.operand_b_i         (dual_operand_b),
-			.branch_operand_a_i  (dual_bru_payload.operand_a),
-			.branch_operand_b_i  (dual_bru_payload.operand_b),
+			.branch_operand_a_i  (dual_bru_operand_a),
+			.branch_operand_b_i  (dual_bru_operand_b),
 			.branch_imm_i        (dual_bru_payload.imm),
 			.operator_i          (dual_operator),
 			.operator_type_i     (dual_operator_type),
@@ -1083,7 +1164,11 @@ import ydrasil_axi_pkg::*;
 			.pred_counter_i      (dual_bru_payload.pred_counter),
 			.pred_bht_index_i    (dual_bru_payload.pred_bht_index),
 		.trap_redirect_addr_i(trap_redirect_addr),
-		.completion_o        (dual_alu_fwd_pkt),
+		.completion_valid_o  (dual_completion_valid),
+		.completion_producer_id_o(dual_completion_producer_id),
+		.completion_producer_tracked_o(dual_completion_producer_tracked),
+		.completion_addr_o   (dual_completion_addr),
+		.completion_data_o   (dual_completion_data),
 		.early_bypass_data_o(dual_early_bypass_data),
 		.ex_branch_jump_o    (ex_branch_jump),
 		.ex_branch_target_o  (ex_branch_target),
@@ -1144,7 +1229,8 @@ import ydrasil_axi_pkg::*;
 
 	ydrasil_value_file u_ydrasil_value_file (
 		.clk               (clk),
-		.completion_bus_i  (completion_bus),
+		.completion_meta_i (completion_meta),
+		.completion_data_i (completion_data),
 		.read_slot0_i      (issue_head_compact_uop.src0.producer_tag[
 			PRODUCER_SLOT_WIDTH-1:0]),
 		.read_slot1_i      (issue_head_compact_uop.src1.producer_tag[
@@ -1181,7 +1267,8 @@ import ydrasil_axi_pkg::*;
 			.issue_pkt1_i      (issue_head_compact_uop1),
 				.issue_fence_i     (id_fence_i),
 			.issue_fence_tag_i (issue_fence_tag),
-			.completion_bus_i  (completion_bus),
+			.completion_meta_i (completion_meta),
+			.completion_rd_i   (completion_rd),
 			.trap_stall_i      (trap_stall),
 			.ex_mul_stall_i     (ex_backend_stall),
 			.retire_value0_i   (retire_value0),
