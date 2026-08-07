@@ -970,7 +970,7 @@ synf: SYN_RUN_TO := bitstream
 ifeq ($(HOSTNAME),servera437)
 synf: SYN_IMPL_MODE := sweep
 synf: SYN_JOBS := 40
-synf: SYN_IMPL_RUNS := 5
+synf: SYN_IMPL_RUNS := 4
 synf: SYN_THREADS_PER_RUN := 8
 else
 synf: SYN_IMPL_MODE := extreme

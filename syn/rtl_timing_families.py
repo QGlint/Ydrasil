@@ -22,7 +22,7 @@ OWNER_PATTERNS = (
     ("value_file", r"(?:^|/)u_ydrasil_value_file(?:/|$)|(?:^|/)ydrasil_value_file(?:/|$)"),
     ("ctrl", r"(?:^|/)u_ctrl(?:/|$)|(?:^|/)ydrasil_ctrl(?:/|$)"),
     ("load_store_unit", r"(?:^|/)u_ydrasil_load_store_unit(?:/|$)|(?:^|/)ydrasil_load_store_unit(?:/|$)"),
-    ("ex_block", r"(?:^|/)u_ydrasil_ex_block(?:/|$)|(?:^|/)ydrasil_ex_block(?:/|$)"),
+    ("ex_block", r"(?:^|/)u_(?:ydrasil_ex_block|main_ex)(?:/|$)|(?:^|/)ydrasil_ex_block(?:/|$)"),
     ("id_stage", r"(?:^|/)u_ydrasil_id_stage(?:/|$)|(?:^|/)ydrasil_id_stage(?:/|$)"),
     ("register_file", r"(?:^|/)u_ydrasil_registers(?:/|$)|(?:^|/)ydrasil_registers(?:/|$)"),
     ("csr", r"(?:^|/)u_ydrasil_registers_csr(?:/|$)|(?:^|/)ydrasil_registers_csr(?:/|$)"),
@@ -178,7 +178,10 @@ def summarize_families(
 
     families = []
     for key, samples in grouped.items():
-        delays = [float(item[1].get("data_delay_ns", 0.0)) for item in samples]
+        delays = [
+            float(item[1].get("data_delay_ns", item[1].get("data_path_delay_ns", 0.0)))
+            for item in samples
+        ]
         slacks = [float(item[1].get("slack_ns", target_period_ns - delays[index])) for index, item in enumerate(samples)]
         levels = [float(item[1].get("logic_levels", 0)) for item in samples]
         routes = [float(item[1].get("route_fraction", 0.0)) for item in samples]

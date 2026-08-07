@@ -114,7 +114,6 @@ proc prepare_implementation_runs {count mode sweep_post_route_physopt} {
         Performance_Explore \
         Performance_ExplorePostRoutePhysOpt \
         Performance_NetDelay_high \
-        Performance_ExtraNetDelay_high \
         Performance_ExploreWithRemap]
     set candidate_strategies [list \
         Performance_ExtraTimingOpt \
