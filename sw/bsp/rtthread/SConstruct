@@ -2,9 +2,13 @@ import os
 import sys
 
 BSP_ROOT = os.path.abspath(os.getcwd())
-RTT_ROOT = os.path.abspath(os.path.join(BSP_ROOT, '..', '..', 'rt-thread-5.2.2'))
+RTT_ROOT = os.path.abspath(os.path.join(BSP_ROOT, '..', '..', 'rt-thread-nano-4.1.1'))
+# The Nano source subset intentionally carries only the runtime files. Reuse
+# the repository's established SCons integration helpers for build logic.
+RTT_TOOLS_ROOT = os.path.abspath(os.path.join(
+    BSP_ROOT, '..', '..', 'rt-thread-5.2.2', 'tools'))
 
-sys.path.insert(0, os.path.join(RTT_ROOT, 'tools'))
+sys.path.insert(0, RTT_TOOLS_ROOT)
 
 from building import *
 from SCons import SConsign
@@ -13,10 +17,8 @@ os.makedirs(rtconfig.OUTPUT_DIR, exist_ok=True)
 os.environ.setdefault('RTT_BUILD_DIR', os.path.join(rtconfig.OUTPUT_DIR, 'objects'))
 SConsign.File(os.path.join(rtconfig.OUTPUT_DIR, '.sconsign.dblite'))
 
-# RT-Thread 5.2.2's stock building.py uses fixed `build` and
-# `build/kernel` variant directories. Redirect those calls here so the
-# decompressed RT-Thread tree remains unmodified and all intermediates stay
-# with the selected application output.
+# Redirect the RT-Thread build helpers' fixed variant directories so all
+# intermediates stay with the selected application output.
 import inspect
 import building as _building
 

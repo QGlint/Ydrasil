@@ -127,7 +127,7 @@ RTTHREAD_SCONS ?= $(if $(strip $(SCONS)),$(SCONS),scons)
 RTTHREAD_JOBS ?= $(shell nproc 2>/dev/null || echo 1)
 RTTHREAD_APP ?= rtthread-coremark
 RTTHREAD_PROFILE ?= monitor
-RTTHREAD_OPT ?= -O2
+RTTHREAD_OPT ?= -Os
 RTTHREAD_ITERATIONS ?= 10000
 RTTHREAD_CPU_FREQ_HZ ?= 150000000
 RTTHREAD_OUTPUT_DIR ?= $(PROJECT_ROOT)/build/app/rtthread
@@ -162,7 +162,10 @@ RTTHREAD_COREMARK_BEST_CFLAGS ?= -O3 -funroll-loops \
 	-fno-if-conversion -fno-if-conversion2 -fno-code-hoisting \
 	-fno-tree-dse -fno-section-anchors \
 	-fno-tree-forwprop -fno-tree-partial-pre
-RTTHREAD_COREMARK_CORE_CFLAGS ?= $(RTTHREAD_COREMARK_BEST_CFLAGS)
+# Nano's default profile favors ITCM capacity. The former aggressive CoreMark
+# tuning remains available through RTTHREAD_COREMARK_BEST_CFLAGS when a
+# performance-only build is required.
+RTTHREAD_COREMARK_CORE_CFLAGS ?= -Os
 RTTHREAD_COREMARK_OUTPUT_ROOT ?= $(PROJECT_ROOT)/build/app/rtthread-coremark
 RTTHREAD_COREMARK_LINKER ?= $(BSP_LINKER_SCRIPT)
 RTTHREAD_COREMARK_ITERATIONS ?= 10000

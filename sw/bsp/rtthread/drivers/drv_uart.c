@@ -85,8 +85,8 @@ static rt_err_t uart_close(rt_device_t device)
     return RT_EOK;
 }
 
-static rt_ssize_t uart_read(rt_device_t device, rt_off_t position,
-                            void *buffer, rt_size_t size)
+static rt_size_t uart_read(rt_device_t device, rt_off_t position,
+                           void *buffer, rt_size_t size)
 {
     struct ydrasil_uart_device *uart =
         rt_container_of(device, struct ydrasil_uart_device, parent);
@@ -99,11 +99,11 @@ static rt_ssize_t uart_read(rt_device_t device, rt_off_t position,
         bytes[count++] = uart->rx_buffer[uart->rx_tail];
         uart->rx_tail = (uart->rx_tail + 1U) & (UART_RX_BUFFER_SIZE - 1U);
     }
-    return (rt_ssize_t)count;
+    return count;
 }
 
-static rt_ssize_t uart_write(rt_device_t device, rt_off_t position,
-                             const void *buffer, rt_size_t size)
+static rt_size_t uart_write(rt_device_t device, rt_off_t position,
+                            const void *buffer, rt_size_t size)
 {
     const rt_uint8_t *bytes = buffer;
     rt_size_t index;
@@ -118,7 +118,7 @@ static rt_ssize_t uart_write(rt_device_t device, rt_off_t position,
         }
         ydrasil_console_putc((char)bytes[index]);
     }
-    return (rt_ssize_t)size;
+    return size;
 }
 
 static rt_err_t uart_control(rt_device_t device, int command, void *argument)

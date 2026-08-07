@@ -35,12 +35,17 @@ profile = os.getenv('RTT_APP_PROFILE',
                     os.getenv('RTT_COREMARK_PROFILE', 'custom'))
 iterations = int(os.getenv('RTT_APP_ITERATIONS',
                            os.getenv('RTT_COREMARK_ITERATIONS', '10000')))
+has_float = int(os.getenv('RTT_COREMARK_HAS_FLOAT', '0'))
+if has_float not in (0, 1):
+    raise ValueError('RTT_COREMARK_HAS_FLOAT must be 0 or 1')
 
 defines = [
     ('ITERATIONS', iterations),
     ('PERFORMANCE_RUN', 1),
     ('COREMARK_IGNORE_10S_ERROR', 1),
-    ('HAS_FLOAT', 1),
+    # Ydrasil is RV32IM, so CoreMark must not pull in software floating point
+    # unless a caller explicitly requests that larger compatibility build.
+    ('HAS_FLOAT', has_float),
     ('MAIN_HAS_NORETURN', 0),
     ('FLAGS_STR', '\\"RT-Thread-' + profile + '\\"'),
 ]
