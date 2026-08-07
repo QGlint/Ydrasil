@@ -6,23 +6,35 @@ from building import *
 app_root = GetCurrentDir()
 sw_root = os.path.abspath(os.path.join(app_root, '..', '..'))
 coremark_root = os.path.join(sw_root, 'coremark')
+driver_root = os.path.join(sw_root, 'app', 'driver')
+sensor_root = os.path.join(sw_root, 'app', 'sensor')
+board_root = os.path.join(sw_root, 'bsp', 'rtthread', 'board')
 build_root = os.path.abspath(os.getenv('RTT_BUILD_DIR', 'build'))
 coremark_variant = os.path.join(build_root, 'app-sources', 'coremark')
 app_variant = os.path.join(build_root, 'app-sources', 'rtthread-coremark')
+driver_variant = os.path.join(build_root, 'app-sources', 'driver')
+sensor_variant = os.path.join(build_root, 'app-sources', 'sensor')
 
 VariantDir(coremark_variant, coremark_root, duplicate=0)
 VariantDir(app_variant, app_root, duplicate=0)
+VariantDir(driver_variant, driver_root, duplicate=0)
+VariantDir(sensor_variant, sensor_root, duplicate=0)
 
 algorithm_sources = [
     os.path.join(coremark_variant, name + '.c')
     for name in ('core_list_join', 'core_matrix', 'core_state', 'core_util')
 ]
 core_main_source = os.path.join(coremark_variant, 'core_main.c')
+driver_sources = [
+    os.path.join(driver_variant, name + '.c')
+    for name in ('monitor_bus', 'lm75b', 'atk_ms601m', 'font_small', 'ssd1306')
+]
+sensor_sources = [os.path.join(sensor_variant, 'sensor.c')]
 
 profile = os.getenv('RTT_APP_PROFILE',
                     os.getenv('RTT_COREMARK_PROFILE', 'custom'))
 iterations = int(os.getenv('RTT_APP_ITERATIONS',
-                           os.getenv('RTT_COREMARK_ITERATIONS', '1')))
+                           os.getenv('RTT_COREMARK_ITERATIONS', '10000')))
 
 defines = [
     ('ITERATIONS', iterations),
@@ -63,6 +75,18 @@ port_group = DefineGroup(
      os.path.join(app_variant, 'core_portme.c')],
     **common_group
 )
+driver_group = DefineGroup(
+    'RT-Thread App: Monitor drivers',
+    driver_sources,
+    depend=[''],
+    LOCAL_CPPPATH=[driver_root, board_root],
+)
+sensor_group = DefineGroup(
+    'RT-Thread App: Sensor monitor',
+    sensor_sources,
+    depend=[''],
+    LOCAL_CPPPATH=[driver_root, sensor_root],
+)
 
-group = [algorithm_group, entry_group, port_group]
+group = [algorithm_group, entry_group, port_group, driver_group, sensor_group]
 Return('group')

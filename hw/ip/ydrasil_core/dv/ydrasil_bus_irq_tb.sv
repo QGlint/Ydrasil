@@ -294,6 +294,7 @@ import ydrasil_apb_pkg::*;
     ydrasil_exception_req_pkt_t exception_req;
     ydrasil_trap_ctrl_pkt_t trap_ctrl;
     logic [31:0] async_pc;
+    logic backend_idle;
 
     ydrasil_registers_csr u_csr (
         .clk(clk),
@@ -315,7 +316,7 @@ import ydrasil_apb_pkg::*;
         .exception_req_i(exception_req),
         .irq_i(trap_irq),
         .csr_state_i(trap_csr_state),
-        .backend_idle_i(1'b1),
+        .backend_idle_i(backend_idle),
         .async_pc_i(async_pc),
         .csr_write_o(trap_csr_write),
         .trap_ctrl_o(trap_ctrl)
@@ -336,11 +337,13 @@ import ydrasil_apb_pkg::*;
     task automatic run_interrupt(
         input ydrasil_irq_pkt_t request,
         input [31:0] expected_cause,
-        input [31:0] expected_target
+        input [31:0] expected_target,
+        input integer drain_cycles
     );
         integer timeout;
         begin
             @(negedge clk);
+            backend_idle = (drain_cycles == 0);
             trap_irq = request;
             timeout = 0;
             while (!trap_ctrl.stall && timeout < 20) begin
@@ -351,6 +354,13 @@ import ydrasil_apb_pkg::*;
                 $fatal(1, "enabled IRQ was not accepted");
             @(negedge clk);
             trap_irq = '0;
+            repeat (drain_cycles) begin
+                @(posedge clk);
+                if (!trap_ctrl.stall || trap_ctrl.redirect)
+                    $fatal(1, "IRQ trap did not wait for backend drain");
+            end
+            @(negedge clk);
+            backend_idle = 1'b1;
             timeout = 0;
             while (!trap_ctrl.redirect && timeout < 30) begin
                 @(posedge clk);
@@ -412,6 +422,7 @@ import ydrasil_apb_pkg::*;
         trap_irq = '0;
         exception_req = '0;
         async_pc = 32'h8000_0100;
+        backend_idle = 1'b1;
         wait (rst_n);
         repeat (3) @(posedge clk);
 
@@ -487,17 +498,17 @@ import ydrasil_apb_pkg::*;
         irq_request.software = 1'b1;
         irq_request.timer = 1'b1;
         irq_request.external = 1'b1;
-        run_interrupt(irq_request, 32'h8000_000b, 32'h0000_012c);
+        run_interrupt(irq_request, 32'h8000_000b, 32'h0000_012c, 4);
 
         csr_write(CSR_MSTATUS, 32'h0000_0008);
         irq_request = '0;
         irq_request.timer = 1'b1;
-        run_interrupt(irq_request, 32'h8000_0007, 32'h0000_011c);
+        run_interrupt(irq_request, 32'h8000_0007, 32'h0000_011c, 0);
 
         csr_write(CSR_MSTATUS, 32'h0000_0008);
         irq_request = '0;
         irq_request.software = 1'b1;
-        run_interrupt(irq_request, 32'h8000_0003, 32'h0000_010c);
+        run_interrupt(irq_request, 32'h8000_0003, 32'h0000_010c, 0);
 
         csr_write(CSR_MIE, 32'h0);
         csr_write(CSR_MSTATUS, 32'h8);

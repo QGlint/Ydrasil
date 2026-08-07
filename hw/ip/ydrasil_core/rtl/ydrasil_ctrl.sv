@@ -35,6 +35,7 @@ import ydrasil_pkg::*;
     output ydrasil_rob_source_state_t   issue_src3_state_o,
     output wire                         issue_at_rob_head_o,
     output wire [REGS_NUM-1:0]          gpr_pending_o,
+    output wire                         retire_pending_o,
     output wire                         ex_accept_valid_o,
     output wire                         ex_accept_valid1_o,
     output ydrasil_commit_pkt_t         retire_commit_o,
@@ -150,8 +151,11 @@ import ydrasil_pkg::*;
     // priority in the sequential state update, while backend stalls are
     // absorbed by the four-entry Issue queue. Keeping those current-cycle
     // signals out of ready prevents execution feedback from reaching FetchQ.
+    // A trap request may be accepted on the same edge as a final dispatch.
+    // Stop adding work while the trap FSM drains, but keep Issue running so
+    // every producer already allocated before that edge can complete.
     assign dispatch_ready_o = producer_has_two_free && !serial_pending_q &&
-        !recovering_q;
+        !recovering_q && !trap_stall_i;
     wire queue_alloc0 = dispatch_accept_i && dispatch_pkt_i.valid;
     wire queue_alloc1 = dispatch_accept1_i && dispatch_pkt1_i.valid;
     wire [1:0] queue_alloc_count = {1'b0, queue_alloc0} +
@@ -291,14 +295,12 @@ import ydrasil_pkg::*;
     assign issue_src1_state_o.done = producer_ready_q[issue_src1_slot];
     assign issue_src2_state_o.done = producer_ready_q[issue_src2_slot];
     assign issue_src3_state_o.done = producer_ready_q[issue_src3_slot];
-    wire decode_bubble_stall = trap_stall_i;
-
     assign ex_accept_valid_o = ex_hzd_i.valid && !ex_branch_jump_i &&
         !ex_mul_stall_i;
     assign ex_accept_valid1_o = ex_hzd1_i.valid && !ex_branch_jump_i &&
         !ex_mul_stall_i;
     assign stall_id_o = ex_mul_stall_i;
-    assign bubble_id_o = decode_bubble_stall;
+    assign bubble_id_o = 1'b0;
     assign stall_if_o = 1'b0;
     assign branch_jump_o = ex_branch_jump_i;
     assign branch_target_o = ex_branch_target_i;
@@ -349,6 +351,7 @@ import ydrasil_pkg::*;
         latest_valid_q[retire_rd1] &&
         (latest_id_q[retire_rd1] == queue_head1_id);
     assign gpr_pending_o = latest_valid_q;
+    assign retire_pending_o = (queue_count_q != '0);
 
     producer_slot_t completion_slot0;
     producer_slot_t completion_slot1;

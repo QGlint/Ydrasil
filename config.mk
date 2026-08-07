@@ -190,10 +190,16 @@ endif
 # toolchain
 #------------------------------------------
 
-# RISC-V software must use the toolchain checked into this repository. Keep
-# the target prefix separate from the absolute executable prefix: tools such
-# as Spike expect the former to be a canonical target triplet.
-RISCV_TOOLCHAIN_ROOT ?= $(PROJECT_ROOT)/tools/riscv
+# RISC-V software must use the repository toolchain. Linked worktrees share
+# the primary worktree's tool directory instead of duplicating it.
+GIT_COMMON_DIR := $(shell git -C "$(PROJECT_ROOT)" rev-parse \
+	--path-format=absolute --git-common-dir 2>/dev/null)
+PRIMARY_WORKTREE_ROOT := $(patsubst %/.git,%,$(GIT_COMMON_DIR))
+LOCAL_RISCV_TOOLCHAIN := $(PROJECT_ROOT)/tools/riscv
+PRIMARY_RISCV_TOOLCHAIN := $(PRIMARY_WORKTREE_ROOT)/tools/riscv
+RISCV_TOOLCHAIN_ROOT ?= $(if \
+	$(wildcard $(LOCAL_RISCV_TOOLCHAIN)/bin/riscv64-unknown-elf-gcc), \
+	$(LOCAL_RISCV_TOOLCHAIN),$(PRIMARY_RISCV_TOOLCHAIN))
 RISCV_TOOLCHAIN_BIN ?= $(RISCV_TOOLCHAIN_ROOT)/bin
 RISCV_TOOLCHAIN_TRIPLE ?= riscv64-unknown-elf
 override RISCV_PREFIX := $(RISCV_TOOLCHAIN_TRIPLE)

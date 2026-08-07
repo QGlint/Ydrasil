@@ -49,10 +49,14 @@ DEVICE = ' -march=rv32im_zicsr_zifencei_zba_zbb_zbc_zbkb_zbkx_zbs -mabi=ilp32 -m
 COMMON = DEVICE + ' --specs=nosys.specs -ffunction-sections -fdata-sections -fno-common -fno-zero-initialized-in-bss'
 CONTROL_FLOW_ALIGNMENT = ' -falign-functions=8 -falign-jumps=8 -falign-labels=8 -falign-loops=8'
 
-OPTIMIZATION = os.getenv('RTT_OPT', '-Os')
+OPTIMIZATION = os.getenv('RTT_OPT', '-O2')
 LINK_SCRIPT = os.path.abspath(os.getenv('RTT_LINKER', '../link.lds'))
+CPU_FREQ_HZ = int(os.getenv('RTT_CPU_FREQ_HZ', '150000000'), 10)
+if CPU_FREQ_HZ <= 0 or CPU_FREQ_HZ > 0xffffffff:
+    raise ValueError('RTT_CPU_FREQ_HZ must be in the range 1..4294967295')
 
 CFLAGS = COMMON + ' ' + OPTIMIZATION + CONTROL_FLOW_ALIGNMENT + ' -g -Wall -Wno-unused-function -fno-builtin'
+CFLAGS += ' -DYDRASIL_CPU_FREQ_HZ={}UL'.format(CPU_FREQ_HZ)
 if os.getenv('RTT_APP') == 'rtthread-coremark' or os.getenv('RTT_COREMARK') == '1':
     CFLAGS += ' -DRTT_COREMARK_BUILD=1'
 AFLAGS = COMMON + ' -x assembler-with-cpp -DRTOS_RTTHREAD'

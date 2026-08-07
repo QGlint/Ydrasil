@@ -1,7 +1,6 @@
 #include "coremark.h"
+#include <rthw.h>
 #include "board.h"
-
-#define CLINT_MTIME_LO (*(volatile ee_u32 *)(YDRASIL_CLINT_BASE + 0xbff8UL))
 
 #if VALIDATION_RUN
 volatile ee_s32 seed1_volatile = 0x3415;
@@ -23,28 +22,66 @@ ee_u32 default_num_contexts = 1;
 
 static CORETIMETYPE start_ticks;
 static CORETIMETYPE stop_ticks;
+static rt_base_t benchmark_irq_level;
+static rt_bool_t benchmark_irq_locked;
+static rt_bool_t monitor_started;
+static ee_u32 cpu_frequency_hz = YDRASIL_CPU_FREQ_HZ;
 
-static void set_monitor_state(ee_u32 control, ee_u32 expected)
+static int set_monitor_state(ee_u32 control, ee_u32 expected)
 {
-    ee_u32 timeout = 10000U;
+    ee_u32 timeout = 1000000U;
 
     YDRASIL_SYSCTRL_CM_CTRL = control;
     while ((YDRASIL_SYSCTRL_CM_STATUS & 1U) != expected && timeout != 0U)
     {
         timeout--;
     }
+    return timeout == 0U ? -RT_ETIMEOUT : RT_EOK;
+}
+
+static CORETIMETYPE read_monitor_cycles(void)
+{
+    ee_u32 high_before;
+    ee_u32 low;
+    ee_u32 high_after;
+
+    do
+    {
+        high_before = YDRASIL_SYSCTRL_CM_CYC_HI;
+        low = YDRASIL_SYSCTRL_CM_CYC_LO;
+        high_after = YDRASIL_SYSCTRL_CM_CYC_HI;
+    } while (high_before != high_after);
+
+    return ((CORETIMETYPE)high_after << 32) | low;
 }
 
 void start_time(void)
 {
-    set_monitor_state(1U, 1U);
-    start_ticks = CLINT_MTIME_LO;
+    benchmark_irq_level = rt_hw_interrupt_disable();
+    benchmark_irq_locked = RT_TRUE;
+    monitor_started = set_monitor_state(1U, 1U) == RT_EOK;
+    start_ticks = 0U;
 }
 
 void stop_time(void)
 {
-    stop_ticks = CLINT_MTIME_LO;
-    set_monitor_state(2U, 0U);
+    if (monitor_started)
+    {
+        (void)set_monitor_state(2U, 0U);
+        stop_ticks = read_monitor_cycles();
+    }
+    else
+    {
+        YDRASIL_SYSCTRL_CM_CTRL = 2U;
+        stop_ticks = 0U;
+    }
+    monitor_started = RT_FALSE;
+
+    if (benchmark_irq_locked)
+    {
+        benchmark_irq_locked = RT_FALSE;
+        rt_hw_interrupt_enable(benchmark_irq_level);
+    }
 }
 
 CORE_TICKS get_time(void)
@@ -54,7 +91,12 @@ CORE_TICKS get_time(void)
 
 secs_ret time_in_secs(CORE_TICKS ticks)
 {
-    return (secs_ret)ticks / (secs_ret)YDRASIL_TIMER_FREQ_HZ;
+    return (secs_ret)ticks / (secs_ret)cpu_frequency_hz;
+}
+
+void coremark_set_cpu_frequency(ee_u32 frequency_hz)
+{
+    cpu_frequency_hz = frequency_hz;
 }
 
 void portable_init(core_portable *port, int *argc, char *argv[])

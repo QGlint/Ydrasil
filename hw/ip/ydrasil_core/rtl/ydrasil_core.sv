@@ -47,6 +47,7 @@ import ydrasil_axi_pkg::*;
 	wire [ydrasil_pkg::INST_DATA_WIDTH-1:0] if_mem_rdata1;
 
 	// IF/ID pipeline
+	wire [31:0] if_resume_pc;
 	wire [31:0] if_id_pc;
 	wire [31:0] if_id_instr;
 	wire        if_id_pred_hit;
@@ -303,6 +304,7 @@ import ydrasil_axi_pkg::*;
 	wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_issue_mask;
 	wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_for_hazard;
 	wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_q;
+	wire                            retire_pending;
 	wire                            rs1_pending_stall;
 	wire                            rs2_pending_stall;
 	wire                            rd_waw_stall;
@@ -457,6 +459,7 @@ import ydrasil_axi_pkg::*;
 			.bp_lookup_pc_o   (bp_lookup_pc),
 			.if_mem_rdata_i  (if_mem_rdata),
 			.if_mem_rdata1_i (if_mem_rdata1),
+			.if_resume_pc_o  (if_resume_pc),
 			.if_id_pc_o      (if_id_pc),
 			.if_id_pred_hit_o(if_id_pred_hit),
 			.if_id_pred_taken_o(if_id_pred_taken),
@@ -743,6 +746,7 @@ import ydrasil_axi_pkg::*;
 			.issue_src3_state_o(issue_src3_state),
 			.issue_at_rob_head_o(issue_at_rob_head),
 			.gpr_pending_o     (gpr_pending_q),
+			.retire_pending_o  (retire_pending),
 			.ex_accept_valid_o (ex_accept_valid),
 			.ex_accept_valid1_o(ex_accept_valid1),
 			.retire_commit_o  (commit_pkt),
@@ -789,10 +793,11 @@ import ydrasil_axi_pkg::*;
 		.lane_a_pc_i       (id_instr_addr),
 		.lane_b_valid_i    (dual_id_ex_valid),
 		.lane_b_pc_i       (dual_id_ex_pc),
-		.frontend_pc_i     (if_id_pc),
+		.frontend_pc_i     (if_resume_pc),
 		.lsu_idle_i        (lsu_status_pkt.idle),
-		.gpr_pending_i     (gpr_pending_q),
+		.retire_pending_i  (retire_pending),
 		.mul_stall_i       (ex_mul_stall),
+		.redirect_pending_i(ex_pc_redirect || id_fence_i),
 		.csr_write_o       (trap_csr_write_pkt),
 		.trap_ctrl_o       (trap_ctrl_pkt)
 	);

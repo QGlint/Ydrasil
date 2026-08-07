@@ -1,25 +1,36 @@
 # RT-Thread CoreMark application
 
-This directory is an RT-Thread application manifest. It lists the CoreMark
-sources and the existing Ydrasil console adapter directly; it does not include
-one C source file from another C source file.
+This application manifest builds the upstream CoreMark sources directly and
+renames its entry point for the MSH `coremark` command.
 
-To add another RT-Thread application, create `sw/apps/<name>/SConscript`, list
-its source files in `DefineGroup`, and build it with:
-
-```sh
-make -C sw rtthread RTT_APP=<name> \
-  RTTHREAD_OUTPUT_DIR="$PWD/build/app/<name>"
-```
-
-For a size-conscious CoreMark build, keep RT-Thread and the application glue
-at `-Os` while optimizing only the five CoreMark algorithm sources:
+The default monitor build keeps RT-Thread and application glue at `-O2`, runs
+10000 iterations and applies the repository's measured best compiler flag set
+only to the five CoreMark sources:
 
 ```sh
-make -C sw rtthread RTTHREAD_APP=rtthread-coremark \
-  RTTHREAD_OPT=-Os RTTHREAD_COREMARK_CORE_CFLAGS='-O3'
+make -C sw rtthread
 ```
 
-`-funroll-loops` can be added to the per-CoreMark setting when benchmark score
-is more important than ITCM usage. The linker map and the `.itcm` artifact are
-the authoritative size checks.
+`RTTHREAD_CPU_FREQ_HZ` sets the image's default CPU frequency used to convert
+the CPU-domain monitor count to seconds. For example:
+
+```sh
+make -C sw rtthread RTTHREAD_CPU_FREQ_HZ=200000000
+```
+
+For board overclock sweeps, `coremark 10000 225000000` overrides that default
+for one run without rebuilding the image. The raw 64-bit cycle count is always
+printed, so results can be recalculated if the applied clock is later found to
+differ from the requested clock.
+
+The tuned set includes `-O3 -funroll-loops`, aggressive inlining and the
+project's tested loop/control/tree shaping options. The final 8-byte alignment
+flags remain in force. Override `RTTHREAD_COREMARK_CORE_CFLAGS` only for an
+explicit compiler sweep; the linker map and `.itcm` artifact remain the
+authoritative size checks.
+
+The monitor manifest also links the reusable device drivers from
+`sw/app/driver` and the `sensor` MSH application from `sw/app/sensor`.
+
+To select another RT-Thread application, create `sw/apps/<name>/SConscript`
+and build with `RTTHREAD_APP=<name>`.

@@ -15,8 +15,9 @@ import ydrasil_pkg::*;
     input  wire [INST_ADDR_WIDTH-1:0]     lane_b_pc_i,
     input  wire [INST_ADDR_WIDTH-1:0]     frontend_pc_i,
     input  wire                           lsu_idle_i,
-    input  wire [REGS_NUM-1:0]           gpr_pending_i,
+    input  wire                           retire_pending_i,
     input  wire                           mul_stall_i,
+    input  wire                           redirect_pending_i,
     output ydrasil_csr_write_pkt_t        csr_write_o,
     output ydrasil_trap_ctrl_pkt_t        trap_ctrl_o
 );
@@ -38,8 +39,12 @@ import ydrasil_pkg::*;
 
     assign async_pc = lane_b_valid_i ? (lane_b_pc_i + 32'd4) :
         lane_a_valid_i ? (lane_a_pc_i + 32'd4) : frontend_pc_i;
-    assign backend_idle = lsu_idle_i && !(|gpr_pending_i) &&
-        !lane_a_valid_i && !lane_b_valid_i && !mul_stall_i;
+    // The RAT only covers GPR-writing instructions. Wait for the complete
+    // retirement queue so unresolved control flow and stores cannot leave the
+    // frontend resume PC speculative when an asynchronous EPC is captured.
+    assign backend_idle = lsu_idle_i && !retire_pending_i &&
+        !lane_a_valid_i && !lane_b_valid_i && !mul_stall_i &&
+        !redirect_pending_i;
 
     ydrasil_exception_ctrl u_exception_ctrl (
         .clk            (clk),
