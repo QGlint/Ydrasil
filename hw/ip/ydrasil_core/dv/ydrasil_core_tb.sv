@@ -120,13 +120,27 @@ end
     wire        dbg_bp_mispredict;
     reg         raw_debug_en;
     reg         lsu_local_debug_en;
+    reg         perf_local_debug_en;
+    reg         perf_event_scan_en;
     integer     raw_debug_cycle;
     integer     lsu_local_debug_cycle;
+    integer     perf_local_debug_cycle;
+    integer     perf_local_start;
+    integer     perf_local_end;
     initial begin
         raw_debug_en = $test$plusargs("raw_debug");
         lsu_local_debug_en = $test$plusargs("lsu_local_debug");
+        perf_local_debug_en = $test$plusargs("perf_local_debug");
+        perf_event_scan_en = $test$plusargs("perf_event_scan");
         raw_debug_cycle = 0;
         lsu_local_debug_cycle = 0;
+        perf_local_debug_cycle = 0;
+        perf_local_start = 0;
+        perf_local_end = 32'h7fffffff;
+        if (!$value$plusargs("perf_local_start=%d", perf_local_start))
+            perf_local_start = 0;
+        if (!$value$plusargs("perf_local_end=%d", perf_local_end))
+            perf_local_end = 32'h7fffffff;
     end
 
     wire bp_branch_valid = dbg_bp_resolve_valid;
@@ -301,6 +315,43 @@ end
     reg [31:0] producer_wait_ready_count;
     reg [31:0] producer_both_ready_count;
     reg [31:0] producer_retire_held_count;
+    // Current six-stage backend statistics. Every histogram below is
+    // mutually exclusive within its own family and checked for closure.
+    reg [31:0] perf_rob_occ_count [0:PRODUCER_NUM];
+    reg [31:0] perf_rs_occ_count [0:10];
+    reg [31:0] perf_dispatch_count [0:2];
+    reg [31:0] perf_select_count [0:3];
+    reg [31:0] perf_execute_count [0:2];
+    reg [31:0] perf_complete_count [0:4];
+    reg [31:0] perf_retire_count [0:2];
+    reg [31:0] perf_candidate_mask_count [0:15];
+    reg [31:0] perf_head_empty_count;
+    reg [31:0] perf_head_retire1_count;
+    reg [31:0] perf_head_retire2_count;
+    reg [31:0] perf_head_complete_visible_count;
+    reg [31:0] perf_head_not_issued_count;
+    reg [31:0] perf_head_wait_alu_count;
+    reg [31:0] perf_head_wait_load_count;
+    reg [31:0] perf_head_wait_mdu_count;
+    reg [31:0] perf_head_wait_store_count;
+    reg [31:0] perf_head_wait_branch_count;
+    reg [31:0] perf_head_wait_other_count;
+    reg [31:0] perf_loss_flush_slots;
+    reg [31:0] perf_loss_operand_block_slots;
+    reg [31:0] perf_loss_single_bundle_slots;
+    reg [31:0] perf_loss_select_refill_slots;
+    reg [31:0] perf_loss_rs_dependency_slots;
+    reg [31:0] perf_loss_rs_order_slots;
+    reg [31:0] perf_loss_rs_resource_slots;
+    reg [31:0] perf_loss_rs_other_slots;
+    reg [31:0] perf_loss_rob_full_slots;
+    reg [31:0] perf_loss_rs_refill_slots;
+    reg [31:0] perf_loss_decode_refill_slots;
+    reg [31:0] perf_loss_frontend_slots;
+    reg [31:0] perf_loss_other_slots;
+    reg [PRODUCER_NUM-1:0] perf_producer_issued_q;
+    reg perf_producer_full_q;
+    integer perf_producer_full_start_q;
     reg [31:0] producer_normal_drain_count;
     reg [31:0] producer_flush_drain_count;
     reg [31:0] producer_trap_free_count;
@@ -352,6 +403,87 @@ end
         {1'b0, u_dut.ex_accept_valid} + {1'b0, u_dut.ex_accept_valid1};
     wire [2:0] perf_lost_slots = 3'd2 - {1'b0, perf_executed_slots};
     wire [31:0] perf_lost_slots_ext = {{29{1'b0}}, perf_lost_slots};
+    wire [1:0] perf_issue_admit_slots =
+        {1'b0, u_dut.u_ydrasil_issue_stage.lane_a_accept} +
+        {1'b0, u_dut.u_ydrasil_issue_stage.lane_b_accept};
+    wire [2:0] perf_backend_lost_slots =
+        3'd2 - {1'b0, perf_issue_admit_slots};
+    wire [31:0] perf_backend_lost_slots_ext =
+        {{29{1'b0}}, perf_backend_lost_slots};
+    wire [2:0] perf_select_admit_slots =
+        (u_dut.u_ydrasil_issue_stage.select_buf_push ?
+         (3'd1 + {2'b0, u_dut.u_ydrasil_issue_stage.selected_valid1}) :
+         3'd0) +
+        {2'b0, u_dut.u_ydrasil_issue_stage.serial_bundle_push};
+    wire [2:0] perf_complete_slots =
+        3'($countones(u_dut.u_ctrl.producer_complete_mask));
+    wire [1:0] perf_retire_slots =
+        {1'b0, u_dut.commit_pkt.valid} +
+        {1'b0, u_dut.commit_pkt1.valid};
+    wire [3:0] perf_candidate_mask = {
+        |u_dut.u_ydrasil_issue_stage.p1_serial_select_local,
+        u_dut.u_ydrasil_issue_stage.p1_select_valid,
+        u_dut.u_ydrasil_issue_stage.p0_select_valid,
+        u_dut.u_ydrasil_issue_stage.alu_select0_valid};
+    wire perf_head_issued_now =
+        (u_dut.u_ydrasil_issue_stage.lane_a_accept &&
+         (u_dut.u_ydrasil_issue_stage.lane_a_uop.dst.rob_tag ==
+          u_dut.u_ctrl.queue_head_id)) ||
+        (u_dut.u_ydrasil_issue_stage.lane_b_accept &&
+         (u_dut.u_ydrasil_issue_stage.lane_b_uop.dst.rob_tag ==
+          u_dut.u_ctrl.queue_head_id));
+    reg perf_rs_dependency_wait;
+    reg perf_rs_order_wait;
+    reg perf_rs_resource_wait;
+    integer perf_rs_reason_idx;
+    always_comb begin
+        perf_rs_dependency_wait = 1'b0;
+        perf_rs_order_wait = 1'b0;
+        perf_rs_resource_wait = 1'b0;
+        for (perf_rs_reason_idx = 0; perf_rs_reason_idx < 10;
+             perf_rs_reason_idx = perf_rs_reason_idx + 1) begin
+            if (u_dut.u_ydrasil_issue_stage.issue_window_valid_q[
+                    perf_rs_reason_idx]) begin
+                if (!u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[
+                        perf_rs_reason_idx] ||
+                    (!u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[
+                         perf_rs_reason_idx] &&
+                     !u_dut.u_ydrasil_issue_stage.issue_store_q[
+                         perf_rs_reason_idx])) begin
+                    perf_rs_dependency_wait = 1'b1;
+                end else if (|u_dut.u_ydrasil_issue_stage.issue_order_mask_q[
+                                 perf_rs_reason_idx]) begin
+                    perf_rs_order_wait = 1'b1;
+                end else if ((perf_rs_reason_idx >= 4) &&
+                             (perf_rs_reason_idx <= 6) &&
+                             u_dut.u_ydrasil_issue_stage.issue_memory_q[
+                                 perf_rs_reason_idx] &&
+                             ({1'b0, u_dut.lsu_issue_credit} <=
+                              ({1'b0, u_dut.u_ydrasil_issue_stage.
+                                  lsu_select_reserved_q} +
+                               u_dut.u_ydrasil_issue_stage.agu_in_valid_q))) begin
+                    perf_rs_resource_wait = 1'b1;
+                end else if ((perf_rs_reason_idx >= 7) &&
+                             u_dut.u_ydrasil_issue_stage.issue_divrem_q[
+                                 perf_rs_reason_idx] &&
+                             (!u_dut.u_ydrasil_issue_stage.mdu_div_available_q ||
+                              u_dut.u_ydrasil_issue_stage.
+                                  div_select_reserved_q)) begin
+                    perf_rs_resource_wait = 1'b1;
+                end else if ((perf_rs_reason_idx >= 7) &&
+                             u_dut.u_ydrasil_issue_stage.issue_serial_q[
+                                 perf_rs_reason_idx] &&
+                             ((u_dut.u_ydrasil_issue_stage.issue_window_q[
+                                   perf_rs_reason_idx].dst.rob_tag !=
+                               u_dut.u_ydrasil_issue_stage.rob_head_select_q) ||
+                              !u_dut.u_ydrasil_issue_stage.lsu_idle_select_q ||
+                              u_dut.u_ydrasil_issue_stage.
+                                  serial_bundle_valid_q)) begin
+                    perf_rs_resource_wait = 1'b1;
+                end
+            end
+        end
+    end
     wire        retire0_valid;
     wire [31:0] retire0_pc;
     wire        retire1_valid;
@@ -876,6 +1008,109 @@ end
 
     always_ff @(posedge clk) begin
         if (!rst_n) begin
+            perf_local_debug_cycle <= 0;
+            perf_producer_full_q <= 1'b0;
+            perf_producer_full_start_q <= 0;
+        end else begin
+            perf_local_debug_cycle <= perf_local_debug_cycle + 1;
+            perf_producer_full_q <= u_dut.u_ctrl.producer_full_stall;
+            if (perf_event_scan_en &&
+                (perf_local_debug_cycle >= perf_local_start) &&
+                (perf_local_debug_cycle <= perf_local_end) &&
+                u_dut.u_ctrl.producer_full_stall && !perf_producer_full_q) begin
+                perf_producer_full_start_q <= perf_local_debug_cycle;
+                $display("PERFEVT cyc=%0d PRODUCER_FULL_BEGIN head_pc=0x%08h head=%0d count=%0d valid=0x%0h ready=0x%0h issued=0x%0h rs=0x%0h",
+                         perf_local_debug_cycle,
+                         u_dut.u_ctrl.producer_pc_q[u_dut.u_ctrl.queue_head_q],
+                         u_dut.u_ctrl.queue_head_id,
+                         u_dut.u_ctrl.queue_count_q,
+                         u_dut.u_ctrl.producer_valid_q,
+                         u_dut.u_ctrl.producer_ready_q,
+                         perf_producer_issued_q,
+                         u_dut.u_ydrasil_issue_stage.issue_window_valid_q);
+            end
+            if (perf_event_scan_en &&
+                (perf_local_debug_cycle >= perf_local_start) &&
+                (perf_local_debug_cycle <= perf_local_end) &&
+                !u_dut.u_ctrl.producer_full_stall && perf_producer_full_q)
+                $display("PERFEVT cyc=%0d PRODUCER_FULL_END start=%0d length=%0d retire=%0b/%0b complete=0x%0h",
+                         perf_local_debug_cycle,
+                         perf_producer_full_start_q,
+                         perf_local_debug_cycle - perf_producer_full_start_q,
+                         u_dut.commit_pkt.valid,
+                         u_dut.commit_pkt1.valid,
+                         u_dut.u_ctrl.producer_complete_mask);
+            if (perf_local_debug_en &&
+                (perf_local_debug_cycle >= perf_local_start) &&
+                (perf_local_debug_cycle <= perf_local_end)) begin
+                $display("PERFLOC cyc=%0d FE if=%0b/0x%08h dec=%0b/%0b disp=%0b/%0b rob=head%0d/pc0x%08h/count%0d/v0x%0h/r0x%0h/issued0x%0h alloc=%0b/%0b retire=%0b/%0b comp=0x%0h RS v=0x%0h src0=0x%0h src1=0x%0h cand=a0x%0h/p00x%0h/p10x%0h/s0x%0h sel=push%0b/%0b/count%0d op=v%0b/pair%0b/pc0x%08h,0x%08h/advance%0b lane=%0b/%0b cids=%0b/%0d,%0b/%0d,%0b/%0d,%0b/%0d",
+                         perf_local_debug_cycle,
+                         u_dut.if_id_valid,
+                         u_dut.if_id_pc,
+                         u_dut.id_issue_pkt.valid,
+                         u_dut.id_issue_pkt1.valid,
+                         u_dut.issue_pipe_push,
+                         u_dut.issue_pipe_push_two,
+                         u_dut.u_ctrl.queue_head_id,
+                         u_dut.u_ctrl.producer_pc_q[u_dut.u_ctrl.queue_head_q],
+                         u_dut.u_ctrl.queue_count_q,
+                         u_dut.u_ctrl.producer_valid_q,
+                         u_dut.u_ctrl.producer_ready_q,
+                         perf_producer_issued_q,
+                         u_dut.u_ctrl.queue_alloc0,
+                         u_dut.u_ctrl.queue_alloc1,
+                         u_dut.commit_pkt.valid,
+                         u_dut.commit_pkt1.valid,
+                         u_dut.u_ctrl.producer_complete_mask,
+                         u_dut.u_ydrasil_issue_stage.issue_window_valid_q,
+                         {u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[9],
+                          u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[8],
+                          u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[7],
+                          u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[6],
+                          u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[5],
+                          u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[4],
+                          u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[3],
+                          u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[2],
+                          u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[1],
+                          u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[0]},
+                         {u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[9],
+                          u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[8],
+                          u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[7],
+                          u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[6],
+                          u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[5],
+                          u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[4],
+                          u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[3],
+                          u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[2],
+                          u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[1],
+                          u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[0]},
+                         u_dut.u_ydrasil_issue_stage.alu_candidate_local,
+                         u_dut.u_ydrasil_issue_stage.p0_candidate_local,
+                         u_dut.u_ydrasil_issue_stage.p1_candidate_local,
+                         u_dut.u_ydrasil_issue_stage.p1_serial_candidate_local,
+                         u_dut.u_ydrasil_issue_stage.select_buf_push,
+                         u_dut.u_ydrasil_issue_stage.selected_valid1,
+                         u_dut.u_ydrasil_issue_stage.select_buf_count_q,
+                         u_dut.u_ydrasil_issue_stage.issue_pkt_i.valid,
+                         u_dut.u_ydrasil_issue_stage.issue_pair_execute,
+                         u_dut.u_ydrasil_issue_stage.issue_pkt_i.pc,
+                         u_dut.u_ydrasil_issue_stage.issue_pkt1_i.pc,
+                         u_dut.u_ydrasil_issue_stage.id_advance,
+                         u_dut.u_ydrasil_issue_stage.lane_a_accept,
+                         u_dut.u_ydrasil_issue_stage.lane_b_accept,
+                         u_dut.completion_meta[0].valid,
+                         u_dut.completion_meta[0].producer_id,
+                         u_dut.completion_meta[1].valid,
+                         u_dut.completion_meta[1].producer_id,
+                         u_dut.completion_meta[2].valid,
+                         u_dut.completion_meta[2].producer_id,
+                         u_dut.completion_meta[3].valid,
+                         u_dut.completion_meta[3].producer_id);
+            end
+        end
+    end
+
+    always_ff @(posedge clk) begin
+        if (!rst_n) begin
             raw_debug_cycle <= 0;
         end else if (raw_debug_en && (raw_debug_cycle < 700)) begin
             raw_debug_cycle <= raw_debug_cycle + 1;
@@ -1366,6 +1601,52 @@ end
             producer_wait_ready_count <= 32'b0;
             producer_both_ready_count <= 32'b0;
             producer_retire_held_count <= 32'b0;
+            for (perf_stat_idx = 0; perf_stat_idx <= PRODUCER_NUM;
+                 perf_stat_idx = perf_stat_idx + 1)
+                perf_rob_occ_count[perf_stat_idx] <= 32'b0;
+            for (perf_stat_idx = 0; perf_stat_idx <= 10;
+                 perf_stat_idx = perf_stat_idx + 1)
+                perf_rs_occ_count[perf_stat_idx] <= 32'b0;
+            for (perf_stat_idx = 0; perf_stat_idx <= 2;
+                 perf_stat_idx = perf_stat_idx + 1) begin
+                perf_dispatch_count[perf_stat_idx] <= 32'b0;
+                perf_execute_count[perf_stat_idx] <= 32'b0;
+                perf_retire_count[perf_stat_idx] <= 32'b0;
+            end
+            for (perf_stat_idx = 0; perf_stat_idx <= 3;
+                 perf_stat_idx = perf_stat_idx + 1)
+                perf_select_count[perf_stat_idx] <= 32'b0;
+            for (perf_stat_idx = 0; perf_stat_idx <= 4;
+                 perf_stat_idx = perf_stat_idx + 1)
+                perf_complete_count[perf_stat_idx] <= 32'b0;
+            for (perf_stat_idx = 0; perf_stat_idx <= 15;
+                 perf_stat_idx = perf_stat_idx + 1)
+                perf_candidate_mask_count[perf_stat_idx] <= 32'b0;
+            perf_head_empty_count <= 32'b0;
+            perf_head_retire1_count <= 32'b0;
+            perf_head_retire2_count <= 32'b0;
+            perf_head_complete_visible_count <= 32'b0;
+            perf_head_not_issued_count <= 32'b0;
+            perf_head_wait_alu_count <= 32'b0;
+            perf_head_wait_load_count <= 32'b0;
+            perf_head_wait_mdu_count <= 32'b0;
+            perf_head_wait_store_count <= 32'b0;
+            perf_head_wait_branch_count <= 32'b0;
+            perf_head_wait_other_count <= 32'b0;
+            perf_loss_flush_slots <= 32'b0;
+            perf_loss_operand_block_slots <= 32'b0;
+            perf_loss_single_bundle_slots <= 32'b0;
+            perf_loss_select_refill_slots <= 32'b0;
+            perf_loss_rs_dependency_slots <= 32'b0;
+            perf_loss_rs_order_slots <= 32'b0;
+            perf_loss_rs_resource_slots <= 32'b0;
+            perf_loss_rs_other_slots <= 32'b0;
+            perf_loss_rob_full_slots <= 32'b0;
+            perf_loss_rs_refill_slots <= 32'b0;
+            perf_loss_decode_refill_slots <= 32'b0;
+            perf_loss_frontend_slots <= 32'b0;
+            perf_loss_other_slots <= 32'b0;
+            perf_producer_issued_q <= '0;
             producer_normal_drain_count <= 32'b0;
             producer_flush_drain_count <= 32'b0;
             producer_trap_free_count <= 32'b0;
@@ -1412,6 +1693,149 @@ end
             perf_sample_cycle_count <= perf_sample_cycle_count + 1'b1;
             perf_productive_slot_count <= perf_productive_slot_count +
                 {30'b0, perf_executed_slots};
+            perf_rob_occ_count[u_dut.u_ctrl.queue_count_q] <=
+                perf_rob_occ_count[u_dut.u_ctrl.queue_count_q] + 1'b1;
+            perf_rs_occ_count[$countones(
+                u_dut.u_ydrasil_issue_stage.issue_window_valid_q)] <=
+                perf_rs_occ_count[$countones(
+                    u_dut.u_ydrasil_issue_stage.issue_window_valid_q)] + 1'b1;
+            perf_dispatch_count[u_dut.u_ctrl.queue_alloc_count] <=
+                perf_dispatch_count[u_dut.u_ctrl.queue_alloc_count] + 1'b1;
+            perf_select_count[perf_select_admit_slots[1:0]] <=
+                perf_select_count[perf_select_admit_slots[1:0]] + 1'b1;
+            perf_execute_count[perf_issue_admit_slots] <=
+                perf_execute_count[perf_issue_admit_slots] + 1'b1;
+            perf_complete_count[perf_complete_slots] <=
+                perf_complete_count[perf_complete_slots] + 1'b1;
+            perf_retire_count[perf_retire_slots] <=
+                perf_retire_count[perf_retire_slots] + 1'b1;
+            perf_candidate_mask_count[perf_candidate_mask] <=
+                perf_candidate_mask_count[perf_candidate_mask] + 1'b1;
+
+            if (u_dut.u_ctrl.queue_count_q == '0) begin
+                perf_head_empty_count <= perf_head_empty_count + 1'b1;
+            end else if (u_dut.commit_pkt1.valid) begin
+                perf_head_retire2_count <= perf_head_retire2_count + 1'b1;
+            end else if (u_dut.commit_pkt.valid) begin
+                perf_head_retire1_count <= perf_head_retire1_count + 1'b1;
+            end else if (u_dut.u_ctrl.producer_complete_mask[
+                             u_dut.u_ctrl.queue_head_q]) begin
+                perf_head_complete_visible_count <=
+                    perf_head_complete_visible_count + 1'b1;
+            end else if (!perf_producer_issued_q[
+                              u_dut.u_ctrl.queue_head_q] &&
+                         !perf_head_issued_now) begin
+                perf_head_not_issued_count <=
+                    perf_head_not_issued_count + 1'b1;
+            end else if (u_dut.u_ctrl.producer_op_class_q[
+                             u_dut.u_ctrl.queue_head_q][2]) begin
+                perf_head_wait_branch_count <=
+                    perf_head_wait_branch_count + 1'b1;
+            end else if (u_dut.u_ctrl.producer_op_class_q[
+                             u_dut.u_ctrl.queue_head_q][1]) begin
+                perf_head_wait_store_count <=
+                    perf_head_wait_store_count + 1'b1;
+            end else if (u_dut.u_ctrl.producer_op_class_q[
+                             u_dut.u_ctrl.queue_head_q][0]) begin
+                perf_head_wait_load_count <=
+                    perf_head_wait_load_count + 1'b1;
+            end else if (u_dut.u_ctrl.producer_result_class_q[
+                             u_dut.u_ctrl.queue_head_q] == RESULT_MDU) begin
+                perf_head_wait_mdu_count <=
+                    perf_head_wait_mdu_count + 1'b1;
+            end else if (u_dut.u_ctrl.producer_result_class_q[
+                             u_dut.u_ctrl.queue_head_q] == RESULT_ALU) begin
+                perf_head_wait_alu_count <=
+                    perf_head_wait_alu_count + 1'b1;
+            end else begin
+                perf_head_wait_other_count <=
+                    perf_head_wait_other_count + 1'b1;
+            end
+
+            if (perf_backend_lost_slots != '0) begin
+                if (u_dut.flush_ex) begin
+                    perf_loss_flush_slots <= perf_loss_flush_slots +
+                        perf_backend_lost_slots_ext;
+                end else if (u_dut.u_ydrasil_issue_stage.issue_pkt_i.valid &&
+                             !u_dut.u_ydrasil_issue_stage.id_advance) begin
+                    perf_loss_operand_block_slots <=
+                        perf_loss_operand_block_slots +
+                        perf_backend_lost_slots_ext;
+                end else if (u_dut.u_ydrasil_issue_stage.issue_pkt_i.valid) begin
+                    perf_loss_single_bundle_slots <=
+                        perf_loss_single_bundle_slots +
+                        perf_backend_lost_slots_ext;
+                end else if (u_dut.u_ydrasil_issue_stage.select_buf_push ||
+                             u_dut.u_ydrasil_issue_stage.
+                                 serial_bundle_push) begin
+                    perf_loss_select_refill_slots <=
+                        perf_loss_select_refill_slots +
+                        perf_backend_lost_slots_ext;
+                end else if (|u_dut.u_ydrasil_issue_stage.
+                                  issue_window_valid_q) begin
+                    if (perf_rs_dependency_wait)
+                        perf_loss_rs_dependency_slots <=
+                            perf_loss_rs_dependency_slots +
+                            perf_backend_lost_slots_ext;
+                    else if (perf_rs_order_wait)
+                        perf_loss_rs_order_slots <=
+                            perf_loss_rs_order_slots +
+                            perf_backend_lost_slots_ext;
+                    else if (perf_rs_resource_wait)
+                        perf_loss_rs_resource_slots <=
+                            perf_loss_rs_resource_slots +
+                            perf_backend_lost_slots_ext;
+                    else
+                        perf_loss_rs_other_slots <=
+                            perf_loss_rs_other_slots +
+                            perf_backend_lost_slots_ext;
+                end else if (u_dut.u_ctrl.producer_full_stall) begin
+                    perf_loss_rob_full_slots <= perf_loss_rob_full_slots +
+                        perf_backend_lost_slots_ext;
+                end else if (u_dut.issue_pipe_push ||
+                             u_dut.id_issue_pkt.valid) begin
+                    perf_loss_rs_refill_slots <= perf_loss_rs_refill_slots +
+                        perf_backend_lost_slots_ext;
+                end else if (u_dut.if_id_valid) begin
+                    perf_loss_decode_refill_slots <=
+                        perf_loss_decode_refill_slots +
+                        perf_backend_lost_slots_ext;
+                end else if (!u_dut.if_id_valid) begin
+                    perf_loss_frontend_slots <= perf_loss_frontend_slots +
+                        perf_backend_lost_slots_ext;
+                end else begin
+                    perf_loss_other_slots <= perf_loss_other_slots +
+                        perf_backend_lost_slots_ext;
+                end
+            end
+
+            if (u_dut.ex_hzd_pkt.interrupt_pending) begin
+                perf_producer_issued_q <= '0;
+            end else if (u_dut.ex_pc_redirect) begin
+                perf_producer_issued_q <= perf_producer_issued_q &
+                    u_dut.branch_recovery_keep_mask;
+            end else begin
+                perf_producer_issued_q <= perf_producer_issued_q &
+                    u_dut.u_ctrl.producer_valid_q;
+                if (u_dut.commit_pkt.valid)
+                    perf_producer_issued_q[u_dut.u_ctrl.queue_head_q] <=
+                        1'b0;
+                if (u_dut.commit_pkt1.valid)
+                    perf_producer_issued_q[u_dut.u_ctrl.queue_head1] <=
+                        1'b0;
+                if (u_dut.u_ydrasil_issue_stage.lane_a_accept)
+                    perf_producer_issued_q[
+                        u_dut.u_ydrasil_issue_stage.lane_a_uop.dst.rob_tag[
+                            PRODUCER_SLOT_WIDTH-1:0]] <= 1'b1;
+                if (u_dut.u_ydrasil_issue_stage.lane_b_accept)
+                    perf_producer_issued_q[
+                        u_dut.u_ydrasil_issue_stage.lane_b_uop.dst.rob_tag[
+                            PRODUCER_SLOT_WIDTH-1:0]] <= 1'b1;
+                if (u_dut.u_ctrl.queue_alloc0)
+                    perf_producer_issued_q[u_dut.u_ctrl.alloc_slot0] <= 1'b0;
+                if (u_dut.u_ctrl.queue_alloc1)
+                    perf_producer_issued_q[u_dut.u_ctrl.alloc_slot1] <= 1'b0;
+            end
             issue_fence_count <= issue_fence_count + {31'b0, u_dut.id_fence_i};
             issue_slot1_replay_count <= issue_slot1_replay_count +
                 {31'b0, u_dut.issue_slot1_replay};
@@ -2336,6 +2760,100 @@ end
                 producer_wait_ready_count,
                 producer_both_ready_count,
                 producer_retire_held_count);
+            $display("PERF_ROB_OCCUPANCY: O0=%-d O1=%-d O2=%-d O3=%-d O4=%-d O5=%-d O6=%-d O7=%-d O8=%-d O9=%-d O10=%-d O11=%-d O12=%-d ACCOUNTED=%-d SAMPLE=%-d",
+                perf_rob_occ_count[0], perf_rob_occ_count[1],
+                perf_rob_occ_count[2], perf_rob_occ_count[3],
+                perf_rob_occ_count[4], perf_rob_occ_count[5],
+                perf_rob_occ_count[6], perf_rob_occ_count[7],
+                perf_rob_occ_count[8], perf_rob_occ_count[9],
+                perf_rob_occ_count[10], perf_rob_occ_count[11],
+                perf_rob_occ_count[12],
+                perf_rob_occ_count[0] + perf_rob_occ_count[1] +
+                    perf_rob_occ_count[2] + perf_rob_occ_count[3] +
+                    perf_rob_occ_count[4] + perf_rob_occ_count[5] +
+                    perf_rob_occ_count[6] + perf_rob_occ_count[7] +
+                    perf_rob_occ_count[8] + perf_rob_occ_count[9] +
+                    perf_rob_occ_count[10] + perf_rob_occ_count[11] +
+                    perf_rob_occ_count[12],
+                perf_sample_cycle_count);
+            $display("PERF_RS_OCCUPANCY: O0=%-d O1=%-d O2=%-d O3=%-d O4=%-d O5=%-d O6=%-d O7=%-d O8=%-d O9=%-d O10=%-d ACCOUNTED=%-d SAMPLE=%-d",
+                perf_rs_occ_count[0], perf_rs_occ_count[1],
+                perf_rs_occ_count[2], perf_rs_occ_count[3],
+                perf_rs_occ_count[4], perf_rs_occ_count[5],
+                perf_rs_occ_count[6], perf_rs_occ_count[7],
+                perf_rs_occ_count[8], perf_rs_occ_count[9],
+                perf_rs_occ_count[10],
+                perf_rs_occ_count[0] + perf_rs_occ_count[1] +
+                    perf_rs_occ_count[2] + perf_rs_occ_count[3] +
+                    perf_rs_occ_count[4] + perf_rs_occ_count[5] +
+                    perf_rs_occ_count[6] + perf_rs_occ_count[7] +
+                    perf_rs_occ_count[8] + perf_rs_occ_count[9] +
+                    perf_rs_occ_count[10],
+                perf_sample_cycle_count);
+            $display("PERF_PIPE_FLOW: DISPATCH0=%-d DISPATCH1=%-d DISPATCH2=%-d SELECT0=%-d SELECT1=%-d SELECT2=%-d SELECT3=%-d ISSUE0=%-d ISSUE1=%-d ISSUE2=%-d COMPLETE0=%-d COMPLETE1=%-d COMPLETE2=%-d COMPLETE3=%-d COMPLETE4=%-d RETIRE0=%-d RETIRE1=%-d RETIRE2=%-d SAMPLE=%-d",
+                perf_dispatch_count[0], perf_dispatch_count[1],
+                perf_dispatch_count[2], perf_select_count[0],
+                perf_select_count[1], perf_select_count[2],
+                perf_select_count[3], perf_execute_count[0],
+                perf_execute_count[1], perf_execute_count[2],
+                perf_complete_count[0], perf_complete_count[1],
+                perf_complete_count[2], perf_complete_count[3],
+                perf_complete_count[4], perf_retire_count[0],
+                perf_retire_count[1], perf_retire_count[2],
+                perf_sample_cycle_count);
+            $display("PERF_ROB_HEAD_STATE: EMPTY=%-d RETIRE1=%-d RETIRE2=%-d COMPLETE_VISIBLE=%-d NOT_ISSUED=%-d WAIT_ALU=%-d WAIT_LOAD=%-d WAIT_MDU=%-d WAIT_STORE=%-d WAIT_BRANCH=%-d WAIT_OTHER=%-d ACCOUNTED=%-d SAMPLE=%-d",
+                perf_head_empty_count, perf_head_retire1_count,
+                perf_head_retire2_count, perf_head_complete_visible_count,
+                perf_head_not_issued_count, perf_head_wait_alu_count,
+                perf_head_wait_load_count, perf_head_wait_mdu_count,
+                perf_head_wait_store_count, perf_head_wait_branch_count,
+                perf_head_wait_other_count,
+                perf_head_empty_count + perf_head_retire1_count +
+                    perf_head_retire2_count +
+                    perf_head_complete_visible_count +
+                    perf_head_not_issued_count + perf_head_wait_alu_count +
+                    perf_head_wait_load_count + perf_head_wait_mdu_count +
+                    perf_head_wait_store_count +
+                    perf_head_wait_branch_count +
+                    perf_head_wait_other_count,
+                perf_sample_cycle_count);
+            $display("PERF_BACKEND_LOSS: FLUSH=%-d OPERAND_BLOCK=%-d SINGLE_BUNDLE=%-d SELECT_REFILL=%-d RS_DEPENDENCY=%-d RS_ORDER=%-d RS_RESOURCE=%-d RS_OTHER=%-d ROB_FULL=%-d RS_REFILL=%-d DECODE_REFILL=%-d FRONTEND=%-d OTHER=%-d ACCOUNTED=%-d EXPECTED=%-d",
+                perf_loss_flush_slots, perf_loss_operand_block_slots,
+                perf_loss_single_bundle_slots,
+                perf_loss_select_refill_slots,
+                perf_loss_rs_dependency_slots, perf_loss_rs_order_slots,
+                perf_loss_rs_resource_slots, perf_loss_rs_other_slots,
+                perf_loss_rob_full_slots, perf_loss_rs_refill_slots,
+                perf_loss_decode_refill_slots, perf_loss_frontend_slots,
+                perf_loss_other_slots,
+                perf_loss_flush_slots + perf_loss_operand_block_slots +
+                    perf_loss_single_bundle_slots +
+                    perf_loss_select_refill_slots +
+                    perf_loss_rs_dependency_slots +
+                    perf_loss_rs_order_slots +
+                    perf_loss_rs_resource_slots + perf_loss_rs_other_slots +
+                    perf_loss_rob_full_slots + perf_loss_rs_refill_slots +
+                    perf_loss_decode_refill_slots +
+                    perf_loss_frontend_slots + perf_loss_other_slots,
+                (perf_sample_cycle_count << 1) - perf_execute_count[1] -
+                    (perf_execute_count[2] << 1));
+            $display("PERF_SELECT_CANDIDATES: M0=%-d M1=%-d M2=%-d M3=%-d M4=%-d M5=%-d M6=%-d M7=%-d M8=%-d M9=%-d M10=%-d M11=%-d M12=%-d M13=%-d M14=%-d M15=%-d",
+                perf_candidate_mask_count[0],
+                perf_candidate_mask_count[1],
+                perf_candidate_mask_count[2],
+                perf_candidate_mask_count[3],
+                perf_candidate_mask_count[4],
+                perf_candidate_mask_count[5],
+                perf_candidate_mask_count[6],
+                perf_candidate_mask_count[7],
+                perf_candidate_mask_count[8],
+                perf_candidate_mask_count[9],
+                perf_candidate_mask_count[10],
+                perf_candidate_mask_count[11],
+                perf_candidate_mask_count[12],
+                perf_candidate_mask_count[13],
+                perf_candidate_mask_count[14],
+                perf_candidate_mask_count[15]);
             $display("PERF_LSU_STRUCT_DETAIL: MMIO=%-d PENDING_STORE=%-d STORE_CAPTURE=%-d OTHER=%-d",
                 lsu_struct_mmio_count,
                 lsu_struct_pending_store_count,
