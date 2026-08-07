@@ -2,6 +2,11 @@ module ydrasil_value_file
 import ydrasil_pkg::*;
 (
     input  wire                         clk,
+	    input  wire                         rst_n,
+	    input  wire                         alloc0_valid_i,
+	    input  producer_id_t                alloc0_id_i,
+	    input  wire                         alloc1_valid_i,
+	    input  producer_id_t                alloc1_id_i,
 	    input  ydrasil_completion_meta_t    completion_meta_i [COMPLETION_LANES],
 	    input  wire [REGS_DATA_WIDTH-1:0]   completion_data_i [COMPLETION_LANES],
     input  producer_slot_t              read_slot0_i,
@@ -18,6 +23,10 @@ import ydrasil_pkg::*;
     output wire                         read_epoch1_o,
     output wire                         read_epoch2_o,
     output wire                         read_epoch3_o,
+	    output wire                         read_valid0_o,
+	    output wire                         read_valid1_o,
+	    output wire                         read_valid2_o,
+	    output wire                         read_valid3_o,
     output wire [REGS_DATA_WIDTH-1:0]   retire_data0_o,
     output wire [REGS_DATA_WIDTH-1:0]   retire_data1_o
 );
@@ -33,6 +42,8 @@ import ydrasil_pkg::*;
         value_odd_q [0:BANK_DEPTH-1];
     reg [BANK_DEPTH-1:0] value_epoch_even_q;
     reg [BANK_DEPTH-1:0] value_epoch_odd_q;
+	    reg [BANK_DEPTH-1:0] value_valid_even_q;
+	    reg [BANK_DEPTH-1:0] value_valid_odd_q;
 
     producer_slot_t completion_slot0;
     producer_slot_t completion_slot1;
@@ -55,6 +66,69 @@ import ydrasil_pkg::*;
 	        completion_meta_i[COMPLETION_MUL].producer_tracked;
 	    wire completion_write3 = completion_meta_i[COMPLETION_DUAL_ALU].valid &&
 	        completion_meta_i[COMPLETION_DUAL_ALU].producer_tracked;
+
+	    // Validity follows actual data completion, not the earlier ROB due token.
+	    // Allocation clears the physical slot so a store cannot accept data from
+	    // the same full producer ID after two generation wraps.
+	    integer valid_slot;
+	    always_ff @(posedge clk) begin
+	        if (!rst_n) begin
+	            value_valid_even_q <= '0;
+	            value_valid_odd_q <= '0;
+	        end else begin
+	            for (valid_slot = 0; valid_slot < BANK_DEPTH;
+	                 valid_slot = valid_slot + 1) begin
+	                if (completion_write0 && !completion_slot0[0] &&
+	                    (completion_slot0[PRODUCER_SLOT_WIDTH-1:1] ==
+	                     BANK_INDEX_WIDTH'(valid_slot)))
+	                    value_valid_even_q[valid_slot] <= 1'b1;
+	                if (completion_write1 && !completion_slot1[0] &&
+	                    (completion_slot1[PRODUCER_SLOT_WIDTH-1:1] ==
+	                     BANK_INDEX_WIDTH'(valid_slot)))
+	                    value_valid_even_q[valid_slot] <= 1'b1;
+	                if (completion_write2 && !completion_slot2[0] &&
+	                    (completion_slot2[PRODUCER_SLOT_WIDTH-1:1] ==
+	                     BANK_INDEX_WIDTH'(valid_slot)))
+	                    value_valid_even_q[valid_slot] <= 1'b1;
+	                if (completion_write3 && !completion_slot3[0] &&
+	                    (completion_slot3[PRODUCER_SLOT_WIDTH-1:1] ==
+	                     BANK_INDEX_WIDTH'(valid_slot)))
+	                    value_valid_even_q[valid_slot] <= 1'b1;
+	                if (completion_write0 && completion_slot0[0] &&
+	                    (completion_slot0[PRODUCER_SLOT_WIDTH-1:1] ==
+	                     BANK_INDEX_WIDTH'(valid_slot)))
+	                    value_valid_odd_q[valid_slot] <= 1'b1;
+	                if (completion_write1 && completion_slot1[0] &&
+	                    (completion_slot1[PRODUCER_SLOT_WIDTH-1:1] ==
+	                     BANK_INDEX_WIDTH'(valid_slot)))
+	                    value_valid_odd_q[valid_slot] <= 1'b1;
+	                if (completion_write2 && completion_slot2[0] &&
+	                    (completion_slot2[PRODUCER_SLOT_WIDTH-1:1] ==
+	                     BANK_INDEX_WIDTH'(valid_slot)))
+	                    value_valid_odd_q[valid_slot] <= 1'b1;
+	                if (completion_write3 && completion_slot3[0] &&
+	                    (completion_slot3[PRODUCER_SLOT_WIDTH-1:1] ==
+	                     BANK_INDEX_WIDTH'(valid_slot)))
+	                    value_valid_odd_q[valid_slot] <= 1'b1;
+	                if (alloc0_valid_i && !alloc0_id_i[0] &&
+	                    (alloc0_id_i[PRODUCER_SLOT_WIDTH-1:1] ==
+	                     BANK_INDEX_WIDTH'(valid_slot)))
+	                    value_valid_even_q[valid_slot] <= 1'b0;
+	                if (alloc1_valid_i && !alloc1_id_i[0] &&
+	                    (alloc1_id_i[PRODUCER_SLOT_WIDTH-1:1] ==
+	                     BANK_INDEX_WIDTH'(valid_slot)))
+	                    value_valid_even_q[valid_slot] <= 1'b0;
+	                if (alloc0_valid_i && alloc0_id_i[0] &&
+	                    (alloc0_id_i[PRODUCER_SLOT_WIDTH-1:1] ==
+	                     BANK_INDEX_WIDTH'(valid_slot)))
+	                    value_valid_odd_q[valid_slot] <= 1'b0;
+	                if (alloc1_valid_i && alloc1_id_i[0] &&
+	                    (alloc1_id_i[PRODUCER_SLOT_WIDTH-1:1] ==
+	                     BANK_INDEX_WIDTH'(valid_slot)))
+	                    value_valid_odd_q[valid_slot] <= 1'b0;
+	            end
+	        end
+	    end
 
     // Slow completion lanes are assigned first. ALU lanes are last so their
     // same-edge write path has the highest FF D-input priority.
@@ -206,6 +280,14 @@ import ydrasil_pkg::*;
         value_epoch_odd_q[read_index2] : value_epoch_even_q[read_index2];
     assign read_epoch3_o = read_slot3_i[0] ?
         value_epoch_odd_q[read_index3] : value_epoch_even_q[read_index3];
+	    assign read_valid0_o = read_slot0_i[0] ?
+	        value_valid_odd_q[read_index0] : value_valid_even_q[read_index0];
+	    assign read_valid1_o = read_slot1_i[0] ?
+	        value_valid_odd_q[read_index1] : value_valid_even_q[read_index1];
+	    assign read_valid2_o = read_slot2_i[0] ?
+	        value_valid_odd_q[read_index2] : value_valid_even_q[read_index2];
+	    assign read_valid3_o = read_slot3_i[0] ?
+	        value_valid_odd_q[read_index3] : value_valid_even_q[read_index3];
     // Ready is captured from raw narrow metadata on the same edge that the
     // registered completion lane captures data. Retire therefore bypasses the
     // just-registered lane by full producer identity instead of reading the

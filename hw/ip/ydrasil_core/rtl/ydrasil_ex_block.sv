@@ -273,7 +273,7 @@ import ydrasil_pkg::*;
         div_producer_id_q : mul_pipe_producer_id;
     assign mul_wdata_rd_o = div_rf_wen_rd ? div_result_q : mul_pipe_wdata;
 
-    always_comb begin
+	    always_comb begin
         mdu_due_o = '0;
         // Wake consumers only once the MDU result is on the architectural
         // completion boundary. The earlier s2 "due" token is an internal
@@ -287,13 +287,16 @@ import ydrasil_pkg::*;
         mdu_due_o.result_class = RESULT_MDU;
 
         mdu_result_reservation_o = '0;
-        mdu_result_reservation_o.valid = mul_pipe_wen || div_rf_wen_rd;
-        mdu_result_reservation_o.producer_tracked =
-            mdu_result_reservation_o.valid;
-        mdu_result_reservation_o.producer_id = div_rf_wen_rd ?
-            div_producer_id_q : mul_pipe_producer_id;
-        mdu_result_reservation_o.arch_addr = div_rf_wen_rd ?
-            div_waddr_q : mul_pipe_waddr;
+	        mdu_result_reservation_o.valid = mul_pipe_wen ||
+	            (div_pending_q && !mul_pipe_wen);
+	        mdu_result_reservation_o.producer_tracked =
+	            mdu_result_reservation_o.valid;
+	        mdu_result_reservation_o.producer_id =
+	            (div_pending_q && !mul_pipe_wen) ?
+	            div_producer_id_q : mul_pipe_producer_id;
+	        mdu_result_reservation_o.arch_addr =
+	            (div_pending_q && !mul_pipe_wen) ?
+	            div_waddr_q : mul_pipe_waddr;
         mdu_result_reservation_o.result_class = RESULT_MDU;
     end
     assign mdu_bypass_data_o = mul_wdata_rd_o;

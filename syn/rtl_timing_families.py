@@ -148,8 +148,6 @@ def read_timing_csv(path: Path) -> list[dict[str, Any]]:
         except (TypeError, ValueError):
             continue
         status = str(row.get("status", ""))
-        if status and status.upper() != "VIOLATED" and delay < requirement:
-            continue
         records.append({
             "source": str(row.get("source", "")).strip(),
             "destination": str(row.get("destination", "")).strip(),

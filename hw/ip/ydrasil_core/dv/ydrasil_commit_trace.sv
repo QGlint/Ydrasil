@@ -36,14 +36,16 @@ import ydrasil_pkg::*;
     wire [INST_ADDR_WIDTH-1:0] id_instr_addr =
         $root.ydrasil_core_tb.u_dut.id_instr_addr;
     wire [BUS_ADDR_WIDTH-1:0] dtcm_addr =
-        $root.ydrasil_core_tb.u_dut.dtcm_req_pkt.store.addr;
+        $root.ydrasil_core_tb.u_dut.dtcm_store_valid ?
+        $root.ydrasil_core_tb.u_dut.dtcm_store_addr :
+        $root.ydrasil_core_tb.u_dut.dtcm_load_addr;
     wire dtcm_we =
-        $root.ydrasil_core_tb.u_dut.dtcm_req_pkt.store.valid;
+        $root.ydrasil_core_tb.u_dut.dtcm_store_valid;
     wire dtcm_req =
-        $root.ydrasil_core_tb.u_dut.dtcm_req_pkt.load.valid |
-        $root.ydrasil_core_tb.u_dut.dtcm_req_pkt.store.valid;
+        $root.ydrasil_core_tb.u_dut.dtcm_load_valid |
+        $root.ydrasil_core_tb.u_dut.dtcm_store_valid;
     wire [3:0] dtcm_wmask =
-        $root.ydrasil_core_tb.u_dut.dtcm_req_pkt.store.wmask;
+        $root.ydrasil_core_tb.u_dut.dtcm_store_mask;
     wire [BUS_ADDR_WIDTH-1:0] mmio_addr =
         $root.ydrasil_core_tb.u_dut.mmio_req_pkt.addr;
     wire mmio_we = $root.ydrasil_core_tb.u_dut.mmio_req_pkt.write;
@@ -104,23 +106,22 @@ import ydrasil_pkg::*;
         $root.ydrasil_core_tb.u_dut.ex_accept_valid &&
         $root.ydrasil_core_tb.u_dut.ex_hzd_pkt.producer_tracked;
     wire [1:0] select_buf_count =
-        $root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.select_buf_count_q;
-    wire select_buf_head =
-        $root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.select_buf_head_q;
+        {1'b0, $root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.
+            select_head_valid_q} +
+        {1'b0, $root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.
+            select_skid_valid_q};
     wire select_bundle0_pair =
-        $root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.select_bundle0_pair_q;
+        $root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.select_head_pair_q;
     wire select_bundle1_pair =
-        $root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.select_bundle1_pair_q;
-    wire serial_bundle_valid =
-        $root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.serial_bundle_valid_q;
-    wire [2:0] select_buf_uop_count = (select_buf_count == 2'd0) ? 3'd0 :
-        (select_buf_count == 2'd1) ?
-        (select_buf_head ? (3'd1 + {2'b0, select_bundle1_pair}) :
-                           (3'd1 + {2'b0, select_bundle0_pair})) :
-        (3'd2 + {2'b0, select_bundle0_pair} +
-                {2'b0, select_bundle1_pair});
-    wire [3:0] issue_pending_uop_count =
-        {1'b0, select_buf_uop_count} + {3'b0, serial_bundle_valid};
+        $root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.select_skid_pair_q;
+    wire [2:0] select_buf_uop_count =
+        ($root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.
+            select_head_valid_q ?
+         (3'd1 + {2'b0, select_bundle0_pair}) : 3'd0) +
+        ($root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.
+            select_skid_valid_q ?
+         (3'd1 + {2'b0, select_bundle1_pair}) : 3'd0);
+    wire [3:0] issue_pending_uop_count = {1'b0, select_buf_uop_count};
     wire [2:0] issue_pipe_count_q = (issue_pending_uop_count >= 4) ?
         3'd4 : issue_pending_uop_count[2:0];
     wire issue_pair_execute =

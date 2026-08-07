@@ -410,11 +410,36 @@ end
         3'd2 - {1'b0, perf_issue_admit_slots};
     wire [31:0] perf_backend_lost_slots_ext =
         {{29{1'b0}}, perf_backend_lost_slots};
+    wire perf_select_head_serial =
+        u_dut.u_ydrasil_issue_stage.select_head_valid_q &&
+        ((u_dut.u_ydrasil_issue_stage.select_head_uop0_q.op_class ==
+          UOP_CLASS_CSR) ||
+         (u_dut.u_ydrasil_issue_stage.select_head_uop0_q.op_class ==
+          UOP_CLASS_SYS) ||
+         u_dut.u_ydrasil_issue_stage.select_head_uop0_q.fence_i);
+    wire perf_select_skid_serial =
+        u_dut.u_ydrasil_issue_stage.select_skid_valid_q &&
+        ((u_dut.u_ydrasil_issue_stage.select_skid_uop0_q.op_class ==
+          UOP_CLASS_CSR) ||
+         (u_dut.u_ydrasil_issue_stage.select_skid_uop0_q.op_class ==
+          UOP_CLASS_SYS) ||
+         u_dut.u_ydrasil_issue_stage.select_skid_uop0_q.fence_i);
+    wire perf_serial_pending = perf_select_head_serial ||
+        perf_select_skid_serial;
+    producer_id_t perf_serial_tag;
+    assign perf_serial_tag = perf_select_head_serial ?
+        u_dut.u_ydrasil_issue_stage.select_head_uop0_q.dst.rob_tag :
+        u_dut.u_ydrasil_issue_stage.select_skid_uop0_q.dst.rob_tag;
+    wire [INST_ADDR_WIDTH-1:0] perf_serial_pc = perf_select_head_serial ?
+        u_dut.u_ydrasil_issue_stage.select_head_uop0_q.pc :
+        u_dut.u_ydrasil_issue_stage.select_skid_uop0_q.pc;
+    wire [1:0] perf_select_buf_count =
+        {1'b0, u_dut.u_ydrasil_issue_stage.select_head_valid_q} +
+        {1'b0, u_dut.u_ydrasil_issue_stage.select_skid_valid_q};
     wire [2:0] perf_select_admit_slots =
         (u_dut.u_ydrasil_issue_stage.select_buf_push ?
          (3'd1 + {2'b0, u_dut.u_ydrasil_issue_stage.selected_valid1}) :
-         3'd0) +
-        {2'b0, u_dut.u_ydrasil_issue_stage.serial_bundle_push};
+         3'd0);
     wire [2:0] perf_complete_slots =
         3'($countones(u_dut.u_ctrl.producer_complete_mask));
     wire [1:0] perf_retire_slots =
@@ -477,8 +502,7 @@ end
                                    perf_rs_reason_idx].dst.rob_tag !=
                                u_dut.u_ydrasil_issue_stage.rob_head_select_q) ||
                               !u_dut.u_ydrasil_issue_stage.lsu_idle_select_q ||
-                              u_dut.u_ydrasil_issue_stage.
-                                  serial_bundle_valid_q)) begin
+                              perf_serial_pending)) begin
                     perf_rs_resource_wait = 1'b1;
                 end
             end
@@ -522,16 +546,58 @@ end
 `ifndef SYNTHESIS
     logic interrupt_q;
     logic early_clear_q;
+    logic [(1 << ydrasil_pkg::PRODUCER_ID_WIDTH)-1:0]
+        squashed_completion_pending_q;
     integer completion_assert_lane;
     integer completion_assert_other_lane;
+    integer completion_squash_slot;
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             interrupt_q <= 1'b0;
             early_clear_q <= 1'b0;
+            squashed_completion_pending_q <= '0;
         end else begin
             interrupt_q <= u_dut.u_ydrasil_commit_trace.interrupt;
             early_clear_q <= u_dut.flush_id || u_dut.bubble_id;
+
+            // Fixed-latency EX results may drain after recovery has removed
+            // their ROB entries. Keep the killed full tags as tombstones so
+            // only those proven stale completions are accepted below.
+            if (u_dut.u_ctrl.recovery_event) begin
+                for (completion_squash_slot = 0;
+                     completion_squash_slot < ydrasil_pkg::PRODUCER_NUM;
+                     completion_squash_slot = completion_squash_slot + 1) begin
+                    if (u_dut.u_ctrl.producer_valid_q[completion_squash_slot] &&
+                        !u_dut.u_ctrl.recovery_live_mask[
+                            completion_squash_slot]) begin
+                        squashed_completion_pending_q[{
+                            u_dut.u_ctrl.producer_epoch_q[
+                                completion_squash_slot],
+                            ydrasil_pkg::PRODUCER_SLOT_WIDTH'(
+                                completion_squash_slot)}] <= 1'b1;
+                    end
+                end
+            end
+            if (u_dut.u_ydrasil_commit_trace.interrupt) begin
+                for (completion_squash_slot = 0;
+                     completion_squash_slot < ydrasil_pkg::PRODUCER_NUM;
+                     completion_squash_slot = completion_squash_slot + 1) begin
+                    if (u_dut.u_ctrl.producer_valid_q[completion_squash_slot]) begin
+                        squashed_completion_pending_q[{
+                            u_dut.u_ctrl.producer_epoch_q[
+                                completion_squash_slot],
+                            ydrasil_pkg::PRODUCER_SLOT_WIDTH'(
+                                completion_squash_slot)}] <= 1'b1;
+                    end
+                end
+            end
+            if (u_dut.u_ctrl.queue_alloc0)
+                squashed_completion_pending_q[
+                    u_dut.u_ctrl.producer_alloc_id] <= 1'b0;
+            if (u_dut.u_ctrl.queue_alloc1)
+                squashed_completion_pending_q[
+                    u_dut.u_ctrl.producer_alloc_id1] <= 1'b0;
 
             if (u_dut.u_ydrasil_issue_stage.issue_early_alu_valid_ff) begin
                 assert ($onehot(u_dut.u_ydrasil_issue_stage.issue_early_kind_ff))
@@ -605,19 +671,32 @@ end
                     (u_dut.u_ydrasil_commit_trace.completion_bus[completion_assert_lane].addr != '0)) begin
                     assert (u_dut.u_ctrl.producer_valid_q[
                                 u_dut.u_ydrasil_commit_trace.completion_bus[completion_assert_lane].producer_id[
-                                    ydrasil_pkg::PRODUCER_SLOT_WIDTH-1:0]] ||
+                                    ydrasil_pkg::PRODUCER_SLOT_WIDTH-1:0]] &&
+                            (u_dut.u_ctrl.producer_epoch_q[
+                                u_dut.u_ydrasil_commit_trace.completion_bus[
+                                    completion_assert_lane].producer_id[
+                                        ydrasil_pkg::PRODUCER_SLOT_WIDTH-1:0]] ==
+                             u_dut.u_ydrasil_commit_trace.completion_bus[
+                                completion_assert_lane].producer_id[
+                                    ydrasil_pkg::PRODUCER_ID_WIDTH-1]) ||
                             (u_dut.u_ctrl.producer_alloc_ex &&
                              (u_dut.ex_hzd_pkt.producer_id ==
                               u_dut.u_ydrasil_commit_trace.completion_bus[completion_assert_lane].producer_id)) ||
                             (u_dut.u_ctrl.producer_alloc_ex1 &&
                              (u_dut.ex_hzd_pkt1.producer_id ==
-                              u_dut.u_ydrasil_commit_trace.completion_bus[completion_assert_lane].producer_id)))
+                              u_dut.u_ydrasil_commit_trace.completion_bus[completion_assert_lane].producer_id)) ||
+                            squashed_completion_pending_q[
+                                u_dut.u_ydrasil_commit_trace.completion_bus[
+                                    completion_assert_lane].producer_id])
                         else $fatal(1,
                             "ASSERT_COMPLETION_FOR_FREE_TOKEN lane=%0d id=%0d rd=%0d data=0x%08h",
                             completion_assert_lane,
                             u_dut.u_ydrasil_commit_trace.completion_bus[completion_assert_lane].producer_id,
                             u_dut.u_ydrasil_commit_trace.completion_bus[completion_assert_lane].addr,
                             u_dut.u_ydrasil_commit_trace.completion_bus[completion_assert_lane].data);
+                    squashed_completion_pending_q[
+                        u_dut.u_ydrasil_commit_trace.completion_bus[
+                            completion_assert_lane].producer_id] <= 1'b0;
                 end
                 for (completion_assert_other_lane = completion_assert_lane + 1;
                      completion_assert_other_lane < ydrasil_pkg::COMPLETION_LANES;
@@ -940,19 +1019,19 @@ end
                              u_dut.u_ydrasil_issue_stage.dtcm_operand_reservation_q.valid,
                              u_dut.u_ydrasil_issue_stage.dtcm_operand_reservation_q.producer_id,
                              u_dut.u_ydrasil_issue_stage.dtcm_operand_reservation_q.arch_addr,
-                             u_dut.u_ydrasil_issue_stage.dtcm_operand_data_q,
+                             u_dut.dtcm_resp_data,
                              u_dut.dtcm_reservation.valid,
                              u_dut.dtcm_reservation.producer_id,
                              u_dut.dtcm_reservation.arch_addr,
                              u_dut.dtcm_resp_data,
                              u_dut.u_ydrasil_issue_stage.agu_in_valid_q,
                              u_dut.u_ydrasil_issue_stage.lane_a_pc_q,
-                             u_dut.u_ydrasil_issue_stage.agu_in_store_data_dtcm_q,
+                             1'b0,
                              u_dut.u_ydrasil_issue_stage.agu_in_req_q.store_data,
                              u_dut.u_ydrasil_issue_stage.agu_in_store_data_o,
                              u_dut.u_ydrasil_issue_stage.agu_in_req_q.store_data_valid,
-                             u_dut.u_ydrasil_issue_stage.dtcm_stall_data_valid_q,
-                             u_dut.u_ydrasil_issue_stage.dtcm_stall_data_q,
+                             1'b0,
+                             32'b0,
                              u_dut.completion_meta[COMPLETION_LSU].valid,
                              u_dut.completion_meta[COMPLETION_LSU].producer_id,
                              u_dut.completion_data[COMPLETION_LSU]);
@@ -1089,7 +1168,7 @@ end
                          u_dut.u_ydrasil_issue_stage.p1_serial_candidate_local,
                          u_dut.u_ydrasil_issue_stage.select_buf_push,
                          u_dut.u_ydrasil_issue_stage.selected_valid1,
-                         u_dut.u_ydrasil_issue_stage.select_buf_count_q,
+                         perf_select_buf_count,
                          u_dut.u_ydrasil_issue_stage.issue_pkt_i.valid,
                          u_dut.u_ydrasil_issue_stage.issue_pair_execute,
                          u_dut.u_ydrasil_issue_stage.issue_pkt_i.pc,
@@ -1172,7 +1251,7 @@ end
                          u_dut.u_ydrasil_load_store_unit.active_store_data_valid,
                          u_dut.u_ydrasil_load_store_unit.active_pkt.store_producer_tracked,
                          u_dut.u_ydrasil_load_store_unit.active_pkt.store_producer_id,
-                         u_dut.u_ydrasil_load_store_unit.direct_dtcm_load_candidate,
+                         1'b0,
                          u_dut.u_ydrasil_load_store_unit.queued_dtcm_load_candidate,
                          u_dut.u_ydrasil_load_store_unit.load_store_data_block,
                          u_dut.u_ydrasil_load_store_unit.store_buf_count_q,
@@ -1201,7 +1280,7 @@ end
                 if (u_dut.u_ydrasil_issue_stage.issue_pkt_i.valid &&
                     (u_dut.u_ydrasil_issue_stage.issue_pkt_i.op_class ==
                      UOP_CLASS_STORE))
-                    $display("PERFSTORE cyc=%0d tag=%0d src=%0d ready=%0b state=live%0b/done%0b vf_epoch=%0b vf_match=%0b local_epoch_match=%0b early=main%0b/dual%0b data=0x%08h",
+                    $display("PERFSTORE cyc=%0d tag=%0d src=%0d ready=%0b state=live%0b/done%0b vf_epoch=%0b vf_match=%0b tracked_late=%0b early=main%0b/dual%0b data=0x%08h",
                              perf_local_debug_cycle,
                              u_dut.u_ydrasil_issue_stage.issue_pkt_i.dst.rob_tag,
                              u_dut.u_ydrasil_issue_stage.issue_pkt_i.src1.producer_tag,
@@ -1212,7 +1291,8 @@ end
                              u_dut.u_ydrasil_issue_stage.issue_src1_epoch_i ==
                                  u_dut.u_ydrasil_issue_stage.issue_pkt_i.src1.producer_tag[
                                      PRODUCER_ID_WIDTH-1],
-                             u_dut.u_ydrasil_issue_stage.lane_a_src1_epoch_match,
+                             u_dut.u_ydrasil_issue_stage.shared_agu_req_d.
+                                 store_producer_tracked,
                              u_dut.u_ydrasil_issue_stage.slot0_src1_early_main_hit,
                              u_dut.u_ydrasil_issue_stage.slot0_src1_early_dual_hit,
                              u_dut.u_ydrasil_issue_stage.slot0_src1_local);
@@ -1235,8 +1315,8 @@ end
             if (u_dut.ex_pc_redirect)
                 $display("RAWDBG cyc=%0d KILL flush_ex=%0b mul_redirect=%0b mul_keep=0x%0h s2=%0b/%0d",
                          raw_debug_cycle, u_dut.flush_ex,
-                         u_dut.u_ydrasil_execute_stage.u_main_ex.u_ydrasil_mul.redirect_i,
-                         u_dut.u_ydrasil_execute_stage.u_main_ex.u_ydrasil_mul.redirect_keep_mask_i,
+                         1'b0,
+                         {PRODUCER_NUM{1'b0}},
                          u_dut.u_ydrasil_execute_stage.u_main_ex.u_ydrasil_mul.s2_valid_q,
                          u_dut.u_ydrasil_execute_stage.u_main_ex.u_ydrasil_mul.s2_producer_id_q);
             if (u_dut.u_ydrasil_issue_stage.lane_b_accept &&
@@ -1356,7 +1436,7 @@ end
                          u_dut.lsu_req_pkt.valid,
                          u_dut.lsu_req_pkt.producer_id,
                          u_dut.u_ydrasil_load_store_unit.dtcm_load_fire,
-                         u_dut.u_ydrasil_load_store_unit.direct_dtcm_load_fire,
+                         1'b0,
                          u_dut.u_ydrasil_load_store_unit.queued_dtcm_load_fire,
                          u_dut.u_ydrasil_load_store_unit.load_s1_valid_q,
                          u_dut.u_ydrasil_load_store_unit.load_s1_producer_id_q,
@@ -1369,7 +1449,7 @@ end
             if (u_dut.id_fence_i ||
                 u_dut.u_ydrasil_issue_stage.issue_fence_accept ||
                 u_dut.pipeline_flush ||
-                u_dut.u_ydrasil_issue_stage.serial_bundle_valid_q)
+                perf_serial_pending)
                 $display("RAWDBG cyc=%0d FENCE accept=%0b pulse=%0b tag=%0d next=0x%08h pipe_flush=%0b serial=%0b/%0d/%08h head=%0d lsu_idle=%0b",
                          raw_debug_cycle,
                          u_dut.u_ydrasil_issue_stage.issue_fence_accept,
@@ -1377,9 +1457,9 @@ end
                          u_dut.issue_fence_tag,
                          u_dut.issue_fence_next_pc,
                          u_dut.pipeline_flush,
-                         u_dut.u_ydrasil_issue_stage.serial_bundle_valid_q,
-                         u_dut.u_ydrasil_issue_stage.serial_bundle_uop_q.dst.rob_tag,
-                         u_dut.u_ydrasil_issue_stage.serial_bundle_uop_q.pc,
+                         perf_serial_pending,
+                         perf_serial_tag,
+                         perf_serial_pc,
                          u_dut.rob_head_id,
                          u_dut.lsu_status_pkt.idle);
             if ((raw_debug_cycle >= 190) && (raw_debug_cycle <= 220))
@@ -1876,9 +1956,7 @@ end
                     perf_loss_single_bundle_slots <=
                         perf_loss_single_bundle_slots +
                         perf_backend_lost_slots_ext;
-                end else if (u_dut.u_ydrasil_issue_stage.select_buf_push ||
-                             u_dut.u_ydrasil_issue_stage.
-                                 serial_bundle_push) begin
+                end else if (u_dut.u_ydrasil_issue_stage.select_buf_push) begin
                     perf_loss_select_refill_slots <=
                         perf_loss_select_refill_slots +
                         perf_backend_lost_slots_ext;

@@ -11,6 +11,11 @@ import ydrasil_pkg::*;
     input  wire [INST_ADDR_WIDTH-1:0]   ex_pc1_i,
     input  ydrasil_ex_hzd_pkt_t         ex_hzd_i,
     input  ydrasil_ex_hzd_pkt_t         ex_hzd1_i,
+	input  wire                         ex_no_result_due0_valid_i,
+	input  producer_id_t                ex_no_result_due0_id_i,
+	input  wire                         ex_no_result_due1_valid_i,
+	input  producer_id_t                ex_no_result_due1_id_i,
+	input  wire                         serial_complete_i,
 	    input  ydrasil_issue_pkt_t          dispatch_pkt_i,
 	    input  ydrasil_issue_pkt_t          dispatch_pkt1_i,
 	    input  ydrasil_source_desc_t        decode_src0_i,
@@ -60,6 +65,8 @@ import ydrasil_pkg::*;
     output wire                         ex_accept_valid1_o,
     output ydrasil_commit_pkt_t         retire_commit_o,
     output ydrasil_commit_pkt_t         retire_commit1_o,
+    output wire                         retire_valid_o,
+    output wire                         retire_valid1_o,
     output producer_id_t                retire_value_id0_o,
     output producer_id_t                retire_value_id1_o,
     output wire                         stall_if_o,
@@ -77,12 +84,24 @@ import ydrasil_pkg::*;
 
     reg [PRODUCER_NUM-1:0] producer_valid_q;
     reg [PRODUCER_NUM-1:0] producer_ready_q;
+	reg [PRODUCER_NUM-1:0] producer_ready_epoch_q;
     reg [PRODUCER_NUM-1:0] producer_writes_gpr_q;
     reg [REGS_ADDR_WIDTH-1:0] producer_rd_q [0:PRODUCER_NUM-1];
     // A producer ID is the physical slot plus one generation bit.  The slot
     // is implicit when indexing this table, so only store the generation bit
     // rather than replicating a full tag in every producer entry.
     reg [PRODUCER_NUM-1:0] producer_epoch_q;
+	wire [PRODUCER_NUM-1:0] producer_ready_effective;
+	genvar ready_slot_idx;
+	generate
+		for (ready_slot_idx = 0; ready_slot_idx < PRODUCER_NUM;
+		     ready_slot_idx++) begin : g_ready_epoch
+			assign producer_ready_effective[ready_slot_idx] =
+				producer_ready_q[ready_slot_idx] &&
+				(producer_ready_epoch_q[ready_slot_idx] ==
+				 producer_epoch_q[ready_slot_idx]);
+		end
+	endgenerate
     reg [INST_ADDR_WIDTH-1:0] producer_pc_q [0:PRODUCER_NUM-1];
     reg [2:0] producer_op_class_q [0:PRODUCER_NUM-1];
     ydrasil_result_class_t producer_result_class_q [0:PRODUCER_NUM-1];
@@ -123,10 +142,12 @@ import ydrasil_pkg::*;
         producer_slot_t'(queue_head2_sum - PRODUCER_NUM_EXT) :
         producer_slot_t'(queue_head2_sum);
     wire queue_commit0 = (queue_count_q != '0) &&
-        producer_valid_q[queue_head_q] && producer_ready_q[queue_head_q];
+        producer_valid_q[queue_head_q] &&
+		producer_ready_effective[queue_head_q];
     wire queue_commit1 = queue_commit0 &&
         (queue_count_q > QUEUE_COUNT_WIDTH'(1)) &&
-        producer_valid_q[queue_head1] && producer_ready_q[queue_head1];
+        producer_valid_q[queue_head1] &&
+		producer_ready_effective[queue_head1];
     wire [1:0] queue_commit_count = queue_commit1 ? 2'd2 :
         (queue_commit0 ? 2'd1 : 2'd0);
     wire producer_slot_t queue_head_after_commit =
@@ -164,6 +185,8 @@ import ydrasil_pkg::*;
     assign retire_commit1_o.rd_addr = producer_rd_q[queue_head1];
     assign retire_commit1_o.value = retire_value1_i;
     assign retire_commit1_o.pc = producer_pc_q[queue_head1];
+    assign retire_valid_o = queue_commit0;
+    assign retire_valid1_o = queue_commit1;
     assign retire_value_id0_o = queue_head_id;
     assign retire_value_id1_o = queue_head1_id;
 
@@ -185,13 +208,7 @@ import ydrasil_pkg::*;
     wire serial_alloc =
         (queue_alloc0 && dispatch_serial_i) ||
         (queue_alloc1 && dispatch_serial1_i);
-    wire serial_accept = issue_fence_i ||
-        (ex_accept_valid_o &&
-         (ex_hzd_i.operator_type[OPERATOR_TYPE_CSR] &&
-          !ex_hzd_i.operator_type[OPERATOR_TYPE_SYS])) ||
-        (ex_accept_valid1_o &&
-         (ex_hzd1_i.operator_type[OPERATOR_TYPE_CSR] &&
-          !ex_hzd1_i.operator_type[OPERATOR_TYPE_SYS]));
+    wire serial_accept = issue_fence_i || serial_complete_i;
 
     producer_slot_t alloc_slot0;
     producer_slot_t alloc_slot1;
@@ -263,16 +280,18 @@ import ydrasil_pkg::*;
 	        (decode_src3_i.used && (decode_src3_i.arch_addr != '0) &&
 	         latest_valid_q[decode_src3_i.arch_addr]);
 	    assign renamed_src0_ready_o = !renamed_src0_tag_valid ||
-	        producer_ready_q[dispatch_src0_latest_id[PRODUCER_SLOT_WIDTH-1:0]];
+	        producer_ready_effective[
+			dispatch_src0_latest_id[PRODUCER_SLOT_WIDTH-1:0]];
 	    assign renamed_src1_ready_o = !renamed_src1_tag_valid ||
-	        producer_ready_q[dispatch_src1_latest_id[PRODUCER_SLOT_WIDTH-1:0]];
+	        producer_ready_effective[
+			dispatch_src1_latest_id[PRODUCER_SLOT_WIDTH-1:0]];
 	    assign renamed_src2_ready_o = !renamed_src2_tag_valid ||
 	        (!dispatch1_src0_from_slot0 &&
-	         producer_ready_q[dispatch1_src0_latest_id[
+	         producer_ready_effective[dispatch1_src0_latest_id[
 	             PRODUCER_SLOT_WIDTH-1:0]]);
 	    assign renamed_src3_ready_o = !renamed_src3_tag_valid ||
 	        (!dispatch1_src1_from_slot0 &&
-	         producer_ready_q[dispatch1_src1_latest_id[
+	         producer_ready_effective[dispatch1_src1_latest_id[
 	             PRODUCER_SLOT_WIDTH-1:0]]);
 
 	    always_comb begin
@@ -344,10 +363,10 @@ import ydrasil_pkg::*;
         producer_valid_q[issue_src3_slot] &&
         (producer_epoch_q[issue_src3_slot] ==
          issue_pkt1_i.src1.producer_tag[PRODUCER_ID_WIDTH-1]);
-    assign issue_src0_state_o.done = producer_ready_q[issue_src0_slot];
-    assign issue_src1_state_o.done = producer_ready_q[issue_src1_slot];
-    assign issue_src2_state_o.done = producer_ready_q[issue_src2_slot];
-    assign issue_src3_state_o.done = producer_ready_q[issue_src3_slot];
+    assign issue_src0_state_o.done = producer_ready_effective[issue_src0_slot];
+    assign issue_src1_state_o.done = producer_ready_effective[issue_src1_slot];
+    assign issue_src2_state_o.done = producer_ready_effective[issue_src2_slot];
+    assign issue_src3_state_o.done = producer_ready_effective[issue_src3_slot];
     wire decode_bubble_stall = trap_stall_i;
 
     assign ex_accept_valid_o = ex_hzd_i.valid && !ex_branch_jump_i &&
@@ -409,10 +428,10 @@ import ydrasil_pkg::*;
         (latest_id_q[retire_rd1] == queue_head1_id);
     assign gpr_pending_o = latest_valid_q;
 
-    producer_slot_t completion_slot0;
-    producer_slot_t completion_slot1;
-    producer_slot_t completion_slot2;
-    producer_slot_t completion_slot3;
+	    producer_slot_t completion_slot0;
+	    producer_slot_t completion_slot1;
+	    producer_slot_t completion_slot2;
+	    producer_slot_t completion_slot3;
 	    assign completion_slot0 = completion_meta_i[COMPLETION_ALU].producer_id[
 	        PRODUCER_SLOT_WIDTH-1:0];
 	    assign completion_slot1 = completion_meta_i[COMPLETION_LSU].producer_id[
@@ -421,28 +440,33 @@ import ydrasil_pkg::*;
 	        PRODUCER_SLOT_WIDTH-1:0];
 	    assign completion_slot3 = completion_meta_i[COMPLETION_DUAL_ALU].producer_id[
 	        PRODUCER_SLOT_WIDTH-1:0];
-	    wire completion_hit0 = completion_meta_i[COMPLETION_ALU].valid &&
+	    wire completion_write0 = completion_meta_i[COMPLETION_ALU].valid &&
+	        completion_meta_i[COMPLETION_ALU].producer_tracked;
+	    wire completion_write1 = completion_meta_i[COMPLETION_LSU].valid &&
+	        completion_meta_i[COMPLETION_LSU].producer_tracked;
+	    wire completion_write2 = completion_meta_i[COMPLETION_MUL].valid &&
+	        completion_meta_i[COMPLETION_MUL].producer_tracked;
+	    wire completion_write3 = completion_meta_i[COMPLETION_DUAL_ALU].valid &&
+	        completion_meta_i[COMPLETION_DUAL_ALU].producer_tracked;
+`ifndef SYNTHESIS
+	    wire completion_hit0 = completion_write0 &&
 	        completion_meta_i[COMPLETION_ALU].producer_tracked &&
 	        producer_valid_q[completion_slot0] &&
 	        (producer_epoch_q[completion_slot0] ==
 	         completion_meta_i[COMPLETION_ALU].producer_id[PRODUCER_ID_WIDTH-1]);
-	    wire completion_hit1 = completion_meta_i[COMPLETION_LSU].valid &&
-	        completion_meta_i[COMPLETION_LSU].producer_tracked &&
+	    wire completion_hit1 = completion_write1 &&
 	        producer_valid_q[completion_slot1] &&
 	        (producer_epoch_q[completion_slot1] ==
 	         completion_meta_i[COMPLETION_LSU].producer_id[PRODUCER_ID_WIDTH-1]);
-	    wire completion_hit2 = completion_meta_i[COMPLETION_MUL].valid &&
-	        completion_meta_i[COMPLETION_MUL].producer_tracked &&
+	    wire completion_hit2 = completion_write2 &&
 	        producer_valid_q[completion_slot2] &&
 	        (producer_epoch_q[completion_slot2] ==
 	         completion_meta_i[COMPLETION_MUL].producer_id[PRODUCER_ID_WIDTH-1]);
-	    wire completion_hit3 = completion_meta_i[COMPLETION_DUAL_ALU].valid &&
-	        completion_meta_i[COMPLETION_DUAL_ALU].producer_tracked &&
+	    wire completion_hit3 = completion_write3 &&
 	        producer_valid_q[completion_slot3] &&
 	        (producer_epoch_q[completion_slot3] ==
 	         completion_meta_i[COMPLETION_DUAL_ALU].producer_id[PRODUCER_ID_WIDTH-1]);
-`ifndef SYNTHESIS
-    wire [PRODUCER_NUM-1:0] producer_complete_mask =
+	    wire [PRODUCER_NUM-1:0] producer_complete_mask =
         (completion_hit0 ? (PRODUCER_NUM'(1) << completion_slot0) : '0) |
         (completion_hit1 ? (PRODUCER_NUM'(1) << completion_slot1) : '0) |
         (completion_hit2 ? (PRODUCER_NUM'(1) << completion_slot2) : '0) |
@@ -452,22 +476,22 @@ import ydrasil_pkg::*;
         (queue_commit1 ? (PRODUCER_NUM'(1) << queue_head1) : '0);
     always_ff @(posedge clk) begin
         if (rst_n) begin
-            if (completion_hit0) begin
+	            if (completion_hit0) begin
                 assert (producer_rd_q[completion_slot0] ==
 	                        completion_rd_i[COMPLETION_ALU])
                     else $fatal(1, "ALU completion rd/tag mismatch");
             end
-            if (completion_hit1) begin
+	            if (completion_hit1) begin
                 assert (producer_rd_q[completion_slot1] ==
 	                        completion_rd_i[COMPLETION_LSU])
                     else $fatal(1, "LSU completion rd/tag mismatch");
             end
-            if (completion_hit2) begin
+	            if (completion_hit2) begin
                 assert (producer_rd_q[completion_slot2] ==
 	                        completion_rd_i[COMPLETION_MUL])
                     else $fatal(1, "MUL completion rd/tag mismatch");
             end
-            if (completion_hit3) begin
+	            if (completion_hit3) begin
                 assert (producer_rd_q[completion_slot3] ==
 	                        completion_rd_i[COMPLETION_DUAL_ALU])
                     else $fatal(1, "dual completion rd/tag mismatch");
@@ -513,6 +537,7 @@ import ydrasil_pkg::*;
         recovery_count_before_commit -
         QUEUE_COUNT_WIDTH'(queue_commit_count);
     wire recovery_window_wrap = queue_head_q > recovery_slot;
+    wire [PRODUCER_NUM-1:0] recovery_window_mask;
     wire [PRODUCER_NUM-1:0] recovery_live_mask;
 
     // Each slot independently checks the circular [head, branch] window.
@@ -540,13 +565,19 @@ import ydrasil_pkg::*;
                  (queue_head_q == producer_slot_t'(recovery_slot_idx))) ||
                 (queue_commit1 &&
                  (queue_head1 == producer_slot_t'(recovery_slot_idx)));
-            assign recovery_live_mask[recovery_slot_idx] =
+            assign recovery_window_mask[recovery_slot_idx] =
                 recovery_event &&
-                producer_valid_q[recovery_slot_idx] && slot_in_window &&
-                !slot_retires;
+                producer_valid_q[recovery_slot_idx] && slot_in_window;
+            assign recovery_live_mask[recovery_slot_idx] =
+                recovery_window_mask[recovery_slot_idx] && !slot_retires;
         end
     endgenerate
-    assign branch_recovery_keep_mask_o = recovery_live_mask;
+    // Consumers receive the inclusive pre-edge window.  A slot retiring on
+    // the recovery edge may still own an LSU store that must drain after its
+    // delayed commit tag arrives.  Only the ROB's next-state mask removes the
+    // retiring slots, keeping ready/commit out of the cross-module recovery
+    // control path.
+    assign branch_recovery_keep_mask_o = recovery_window_mask;
 
     // Rebuild two producer slots per cycle, oldest first. A mapping written
     // by the second (younger) slot intentionally wins for same-register WAW.
@@ -600,6 +631,7 @@ import ydrasil_pkg::*;
         if (!rst_n || ex_hzd_i.interrupt_pending) begin
             producer_valid_q <= '0;
             producer_ready_q <= '0;
+			producer_ready_epoch_q <= '0;
             producer_writes_gpr_q <= '0;
             producer_epoch_q <= '0;
             latest_valid_q <= '0;
@@ -653,41 +685,63 @@ import ydrasil_pkg::*;
                 producer_writes_gpr_q[queue_head1] <= 1'b0;
             end
 
-            if (completion_hit0) begin
-                if (!producer_op_class_q[completion_slot0][2])
-                    producer_ready_q[completion_slot0] <= 1'b1;
-            end
-            if (completion_hit1) begin
-                producer_ready_q[completion_slot1] <= 1'b1;
-            end
-            if (completion_hit2) begin
-                producer_ready_q[completion_slot2] <= 1'b1;
-            end
-            if (completion_hit3) begin
-                if (!producer_op_class_q[completion_slot3][2])
-                    producer_ready_q[completion_slot3] <= 1'b1;
-            end
+            if (completion_write0) begin
+				producer_ready_q[completion_slot0] <= 1'b1;
+				producer_ready_epoch_q[completion_slot0] <=
+					completion_meta_i[COMPLETION_ALU].producer_id[
+						PRODUCER_ID_WIDTH-1];
+			end
+	            if (completion_write1) begin
+	                producer_ready_q[completion_slot1] <= 1'b1;
+				producer_ready_epoch_q[completion_slot1] <=
+					completion_meta_i[COMPLETION_LSU].producer_id[
+						PRODUCER_ID_WIDTH-1];
+			end
+	            if (completion_write2) begin
+	                producer_ready_q[completion_slot2] <= 1'b1;
+				producer_ready_epoch_q[completion_slot2] <=
+					completion_meta_i[COMPLETION_MUL].producer_id[
+						PRODUCER_ID_WIDTH-1];
+			end
+	            if (completion_write3) begin
+				producer_ready_q[completion_slot3] <= 1'b1;
+				producer_ready_epoch_q[completion_slot3] <=
+					completion_meta_i[COMPLETION_DUAL_ALU].producer_id[
+						PRODUCER_ID_WIDTH-1];
+			end
 
-            if (ex_accept_valid_o && ex_hzd_i.producer_tracked &&
-                !ex_hzd_i.alu_rf_wen &&
-                !ex_hzd_i.operator_type[OPERATOR_TYPE_BJP])
-                producer_ready_q[ex_hzd_i.producer_id[
-                    PRODUCER_SLOT_WIDTH-1:0]] <= 1'b1;
-            if (ex_accept_valid1_o && ex_hzd1_i.producer_tracked &&
-                !ex_hzd1_i.alu_rf_wen &&
-                !ex_hzd1_i.operator_type[OPERATOR_TYPE_BJP])
-                producer_ready_q[ex_hzd1_i.producer_id[
-                    PRODUCER_SLOT_WIDTH-1:0]] <= 1'b1;
+	            if (ex_no_result_due0_valid_i)
+	                producer_ready_q[ex_no_result_due0_id_i[
+	                    PRODUCER_SLOT_WIDTH-1:0]] <= 1'b1;
+	            if (ex_no_result_due0_valid_i)
+				producer_ready_epoch_q[ex_no_result_due0_id_i[
+					PRODUCER_SLOT_WIDTH-1:0]] <=
+					ex_no_result_due0_id_i[PRODUCER_ID_WIDTH-1];
+	            if (ex_no_result_due1_valid_i)
+	                producer_ready_q[ex_no_result_due1_id_i[
+	                    PRODUCER_SLOT_WIDTH-1:0]] <= 1'b1;
+	            if (ex_no_result_due1_valid_i)
+				producer_ready_epoch_q[ex_no_result_due1_id_i[
+					PRODUCER_SLOT_WIDTH-1:0]] <=
+					ex_no_result_due1_id_i[PRODUCER_ID_WIDTH-1];
             if (ex_branch_resolve_i && resolved_branch_live)
                 producer_ready_q[resolved_branch_slot] <= 1'b1;
+			if (ex_branch_resolve_i && resolved_branch_live)
+				producer_ready_epoch_q[resolved_branch_slot] <=
+					resolved_branch_tag[PRODUCER_ID_WIDTH-1];
             for (fence_idx = 0; fence_idx < PRODUCER_NUM; fence_idx++) begin
                 if (issue_fence_i && issue_fence_hit_mask[fence_idx])
                     producer_ready_q[fence_idx] <= 1'b1;
+				if (issue_fence_i && issue_fence_hit_mask[fence_idx])
+					producer_ready_epoch_q[fence_idx] <=
+						issue_fence_tag_i[PRODUCER_ID_WIDTH-1];
             end
 
             if (queue_alloc0) begin
                 producer_valid_q[alloc_slot0] <= 1'b1;
                 producer_ready_q[alloc_slot0] <= 1'b0;
+				producer_ready_epoch_q[alloc_slot0] <=
+					~producer_epoch_q[alloc_slot0];
                 producer_writes_gpr_q[alloc_slot0] <=
                     dispatch_pkt_i.dst.writes_gpr;
                 producer_rd_q[alloc_slot0] <= dispatch_pkt_i.dst.rd_addr;
@@ -720,6 +774,8 @@ import ydrasil_pkg::*;
             if (queue_alloc1) begin
                 producer_valid_q[alloc_slot1] <= 1'b1;
                 producer_ready_q[alloc_slot1] <= 1'b0;
+				producer_ready_epoch_q[alloc_slot1] <=
+					~producer_epoch_q[alloc_slot1];
                 producer_writes_gpr_q[alloc_slot1] <=
                     dispatch_pkt1_i.dst.writes_gpr;
                 producer_rd_q[alloc_slot1] <= dispatch_pkt1_i.dst.rd_addr;

@@ -92,21 +92,15 @@ import ydrasil_pkg::*;
         endcase
     end
 
-    always_comb begin
-        trap_ctrl_o = '0;
-        // Requests enter the registered drain state at the next edge. Keeping
-        // request detection out of stall prevents CSR/IRQ state from feeding
-        // combinationally back into Issue and the fetch controls.
-        trap_ctrl_o.stall = (state_q != S_IDLE);
-        trap_ctrl_o.retire = (state_q == S_MRET_REDIRECT);
-        if (state_q == S_REDIRECT) begin
-            trap_ctrl_o.redirect = 1'b1;
-            trap_ctrl_o.redirect_addr = trap_target;
-        end else if (state_q == S_MRET_REDIRECT) begin
-            trap_ctrl_o.redirect = 1'b1;
-            trap_ctrl_o.redirect_addr = csr_state_i.mepc;
-        end
-    end
+    // Keep control bits structurally independent from the redirect target.
+    // Requests enter the registered drain state at the next edge, so request
+    // detection does not feed combinationally back into Issue/Fetch control.
+    assign trap_ctrl_o.stall = state_q != S_IDLE;
+    assign trap_ctrl_o.retire = state_q == S_MRET_REDIRECT;
+    assign trap_ctrl_o.redirect =
+        (state_q == S_REDIRECT) || (state_q == S_MRET_REDIRECT);
+    assign trap_ctrl_o.redirect_addr = (state_q == S_MRET_REDIRECT) ?
+        csr_state_i.mepc : trap_target;
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin

@@ -47,27 +47,35 @@ import ydrasil_pkg::*;
     // keeps branch comparison and LSU address logic out of both ALU lanes.
     always_comb begin
         selected_result = '0;
-        unique case (1'b1)
-            jump_class,
-            operator_i[OP_ALU_ADD],
-            operator_i[OP_ALU_AUIPC]: selected_result = add_result;
-            operator_i[OP_ALU_SUB]: selected_result = sub_result[DATAWIDTH-1:0];
-            operator_i[OP_ALU_SLL]: selected_result = sll_result;
-            operator_i[OP_ALU_SLT]: selected_result = {{(DATAWIDTH-1){1'b0}}, slt_result};
-            operator_i[OP_ALU_SLTU]: selected_result = {{(DATAWIDTH-1){1'b0}}, sltu_result};
-            operator_i[OP_ALU_XOR]: selected_result = operand_a_i ^ operand_b_i;
-            operator_i[OP_ALU_SRL]: selected_result = srl_result;
-            operator_i[OP_ALU_SRA]: selected_result = sra_result;
-            operator_i[OP_ALU_OR]: selected_result = operand_a_i | operand_b_i;
-            operator_i[OP_ALU_AND]: selected_result = operand_a_i & operand_b_i;
-            operator_i[OP_ALU_LUI]: selected_result = operand_b_i;
-            default: selected_result = '0;
-        endcase
+        if (jump_class) begin
+            selected_result = add_result;
+        end else if (alu_class) begin
+            unique case (1'b1)
+                operator_i[OP_ALU_ADD],
+                operator_i[OP_ALU_AUIPC]: selected_result = add_result;
+                operator_i[OP_ALU_SUB]: selected_result =
+                    sub_result[DATAWIDTH-1:0];
+                operator_i[OP_ALU_SLL]: selected_result = sll_result;
+                operator_i[OP_ALU_SLT]: selected_result =
+                    {{(DATAWIDTH-1){1'b0}}, slt_result};
+                operator_i[OP_ALU_SLTU]: selected_result =
+                    {{(DATAWIDTH-1){1'b0}}, sltu_result};
+                operator_i[OP_ALU_XOR]: selected_result =
+                    operand_a_i ^ operand_b_i;
+                operator_i[OP_ALU_SRL]: selected_result = srl_result;
+                operator_i[OP_ALU_SRA]: selected_result = sra_result;
+                operator_i[OP_ALU_OR]: selected_result =
+                    operand_a_i | operand_b_i;
+                operator_i[OP_ALU_AND]: selected_result =
+                    operand_a_i & operand_b_i;
+                operator_i[OP_ALU_LUI]: selected_result = operand_b_i;
+                default: selected_result = '0;
+            endcase
+        end
     end
 
     assign comp_result_o = 1'b0;
-    assign alu_result_o = (!interrupt_i && (alu_class || jump_class)) ?
-        selected_result : '0;
+    assign alu_result_o = !interrupt_i ? selected_result : '0;
     assign alu_rf_wen_rd_o = id_alu_rf_wen_rd_i && !interrupt_i;
     assign alu_rf_waddr_rd_o = id_rf_waddr_rd_i;
 endmodule

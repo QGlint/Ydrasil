@@ -278,6 +278,8 @@ import ydrasil_axi_pkg::*;
 	wire [REGS_DATA_WIDTH-1:0]      dual_completion_data;
 	producer_id_t                   retire_value_id0;
 	producer_id_t                   retire_value_id1;
+	wire                            retire_valid;
+	wire                            retire_valid1;
 	wire [REGS_DATA_WIDTH-1:0]      retire_value0;
 	wire [REGS_DATA_WIDTH-1:0]      retire_value1;
 	wire                            issue_at_rob_head;
@@ -391,35 +393,57 @@ import ydrasil_axi_pkg::*;
 
 	wire [ydrasil_pkg::BUS_ADDR_WIDTH-1:0] id_instr_addr;
 
-	// Completion data remains behind completion_ctrl. Only identity metadata
-	// reaches the ready table on the raw FU boundary, so no wide result bus can
-	// feed back into dispatch or retirement control.
+	// Fixed-latency due tokens come directly from the registered Operand cells.
+	// Result qualification remains local to EX and data is captured by
+	// completion_ctrl at the same edge. Recovery/epoch qualification belongs to
+	// the ROB, so trap and result mux logic cannot re-enter the ready-token cone.
+	wire main_alu_due_valid = alu_in_valid && alu_in_rd_wen &&
+		(alu_in_rd_addr != '0) &&
+		alu_in_operator_type[OPERATOR_TYPE_ALU];
+	wire main_csr_due_valid = csr_in_valid && dual_meta.rd_wen &&
+		(dual_meta.rd_addr != '0) &&
+		csr_in_operator_type[OPERATOR_TYPE_CSR];
+	wire lane_b_due_valid = dual_meta.rd_wen &&
+		(dual_meta.rd_addr != '0) &&
+		(dual_alu_valid || dual_bit_valid);
+	wire ex_no_result_due0_valid = alu_in_valid && !alu_in_rd_wen &&
+		!alu_in_operator_type[OPERATOR_TYPE_BJP];
+	wire ex_no_result_due1_valid = !dual_meta.rd_wen &&
+		(dual_alu_valid || dual_bit_valid || mul_in_valid || csr_in_valid);
+	wire serial_complete = csr_in_valid &&
+		csr_in_operator_type[OPERATOR_TYPE_CSR] &&
+		!csr_in_operator_type[OPERATOR_TYPE_SYS];
 	assign completion_ready_meta[COMPLETION_ALU].valid =
-		alu_completion_valid;
+		main_alu_due_valid || main_csr_due_valid;
 	assign completion_ready_meta[COMPLETION_ALU].producer_id =
-		alu_completion_producer_id;
+		main_csr_due_valid ? dual_meta.producer_id : alu_in_producer_id;
 	assign completion_ready_meta[COMPLETION_ALU].producer_tracked =
-		alu_completion_producer_tracked;
-	assign completion_ready_rd[COMPLETION_ALU] = alu_completion_addr;
-	assign completion_ready_meta[COMPLETION_LSU].valid =
-		lsu_completion_valid;
-	assign completion_ready_meta[COMPLETION_LSU].producer_id =
-		lsu_completion_producer_id;
-	assign completion_ready_meta[COMPLETION_LSU].producer_tracked =
-		lsu_completion_producer_tracked;
-	assign completion_ready_rd[COMPLETION_LSU] = lsu_completion_addr;
-	assign completion_ready_meta[COMPLETION_MUL].valid = mul_rf_wen_rd;
-	assign completion_ready_meta[COMPLETION_MUL].producer_id = mul_producer_id;
+		main_alu_due_valid || main_csr_due_valid;
+	assign completion_ready_rd[COMPLETION_ALU] = main_csr_due_valid ?
+		dual_meta.rd_addr : alu_in_rd_addr;
+	// LSU result and readiness cross the same EX/WB boundary.  Feeding the
+	// pre-register response into Ctrl reconnects LSU recovery/MMIO control to
+	// the ROB ready array even though the data already stops in completion_ctrl.
+	assign completion_ready_meta[COMPLETION_LSU] =
+		completion_meta[COMPLETION_LSU];
+	assign completion_ready_rd[COMPLETION_LSU] =
+		completion_rd[COMPLETION_LSU];
+	assign completion_ready_meta[COMPLETION_MUL].valid =
+		mdu_result_reservation.valid;
+	assign completion_ready_meta[COMPLETION_MUL].producer_id =
+		mdu_result_reservation.producer_id;
 	assign completion_ready_meta[COMPLETION_MUL].producer_tracked =
-		mul_rf_wen_rd && (mul_rf_waddr_rd != '0);
-	assign completion_ready_rd[COMPLETION_MUL] = mul_rf_waddr_rd;
+		mdu_result_reservation.producer_tracked &&
+		(mdu_result_reservation.arch_addr != '0);
+	assign completion_ready_rd[COMPLETION_MUL] =
+		mdu_result_reservation.arch_addr;
 	assign completion_ready_meta[COMPLETION_DUAL_ALU].valid =
-		dual_completion_valid;
+		lane_b_due_valid;
 	assign completion_ready_meta[COMPLETION_DUAL_ALU].producer_id =
-		dual_completion_producer_id;
+		dual_meta.producer_id;
 	assign completion_ready_meta[COMPLETION_DUAL_ALU].producer_tracked =
-		dual_completion_producer_tracked;
-	assign completion_ready_rd[COMPLETION_DUAL_ALU] = dual_completion_addr;
+		lane_b_due_valid;
+	assign completion_ready_rd[COMPLETION_DUAL_ALU] = dual_meta.rd_addr;
 
 	ydrasil_completion_ctrl u_completion_ctrl (
 		.clk               (clk),
@@ -451,8 +475,10 @@ import ydrasil_axi_pkg::*;
 		.clk               (clk),
 		.rst_n             (rst_n),
 			.req_i             (lsu_req_pkt),
-			.commit_pkt_i      (commit_pkt),
-			.commit_pkt1_i     (commit_pkt1),
+				.commit0_valid_i   (retire_valid),
+				.commit0_id_i      (retire_value_id0),
+				.commit1_valid_i   (retire_valid1),
+				.commit1_id_i      (retire_value_id1),
 			.branch_recovery_i (ex_pc_redirect),
 			.trap_flush_i      (trap_ctrl_pkt.redirect),
 			.recovery_keep_mask_i(branch_recovery_keep_mask),
@@ -876,6 +902,11 @@ import ydrasil_axi_pkg::*;
 			.ex_pc1_i          (dual_id_ex_pc),
 			.ex_hzd_i          (ex_hzd_pkt),
 			.ex_hzd1_i         (ex_hzd_pkt1),
+			.ex_no_result_due0_valid_i(ex_no_result_due0_valid),
+			.ex_no_result_due0_id_i(alu_in_producer_id),
+			.ex_no_result_due1_valid_i(ex_no_result_due1_valid),
+			.ex_no_result_due1_id_i(dual_meta.producer_id),
+			.serial_complete_i (serial_complete),
 			.dispatch_pkt_i    (id_issue_pkt),
 			.dispatch_pkt1_i   (id_issue_pkt1),
 			.decode_src0_i     (id_decode_src0),
@@ -924,6 +955,8 @@ import ydrasil_axi_pkg::*;
 			.ex_accept_valid1_o(ex_accept_valid1),
 			.retire_commit_o  (commit_pkt),
 			.retire_commit1_o (commit_pkt1),
+			.retire_valid_o   (retire_valid),
+			.retire_valid1_o  (retire_valid1),
 				.retire_value_id0_o(retire_value_id0),
 				.retire_value_id1_o(retire_value_id1),
 		.stall_if_o        (stall_if),

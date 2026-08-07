@@ -1176,8 +1176,9 @@ syn-analyze: syn-venv
 	@if [ -f "$(SYN_REPORT_DIR)/cpu$(subst .,p,$(SYN_PLL_FREQ_MHZ))_timing_violations.rpt" ]; then \
 		$(SYN_PYTHON) $(SYN_DIR)/analyze_timing.py \
 			--report-dir $(SYN_REPORT_DIR) \
-			--timing-report $(SYN_REPORT_DIR)/cpu$(subst .,p,$(SYN_PLL_FREQ_MHZ))_timing_violations.rpt \
-			--violation-report $(SYN_REPORT_DIR)/cpu$(subst .,p,$(SYN_PLL_FREQ_MHZ))_timing_violations.rpt \
+				--timing-report $(SYN_REPORT_DIR)/post_route_timing_summary.rpt \
+				--violation-report $(SYN_REPORT_DIR)/cpu$(subst .,p,$(SYN_PLL_FREQ_MHZ))_timing_violations.rpt \
+				--path-group cpu_clk_mmcm \
 			--csv $(SYN_REPORT_DIR)/cpu$(subst .,p,$(SYN_PLL_FREQ_MHZ))_timing_groups.csv \
 			--paths-csv $(SYN_REPORT_DIR)/cpu$(subst .,p,$(SYN_PLL_FREQ_MHZ))_timing_paths.csv \
 			--violations-csv $(SYN_REPORT_DIR)/cpu$(subst .,p,$(SYN_PLL_FREQ_MHZ))_timing_violations.csv \
@@ -1208,10 +1209,10 @@ rtl-xml: $(RTL_QC_FLIST)
 		>"$(RTL_QC_DIR)/verilator-tree.log" 2>&1; rc=$$?; \
 		final=$$(find "$(RTL_QC_TREE_DIR)" -type f -name '*_990_final.tree.json' -print -quit); \
 		module_count=$$(grep -Eo '"type"[[:space:]]*:[[:space:]]*"MODULE"' "$$final" 2>/dev/null | wc -l); \
-		if [ -n "$$final" ] && [ "$$module_count" -lt 3 ]; then \
+		if [ -n "$$final" ] && [ "$$module_count" -lt 10 ]; then \
 			for candidate in $$(find "$(RTL_QC_TREE_DIR)" -type f -name 'V*.tree.json' | sort -Vr); do \
 				module_count=$$(grep -Eo '"type"[[:space:]]*:[[:space:]]*"MODULE"' "$$candidate" 2>/dev/null | wc -l); \
-				if [ "$$module_count" -ge 3 ]; then final="$$candidate"; break; fi; \
+				if [ "$$module_count" -ge 10 ]; then final="$$candidate"; break; fi; \
 			done; \
 		fi; \
 		if [ -z "$$final" ]; then echo "Verilator did not produce a tree JSON (rc=$$rc)" >&2; exit $$rc; fi; \
@@ -1253,6 +1254,10 @@ rtl-vivado-cross-validate:
 	$(PYTHON) "$(RTL_QC_CROSS_VALIDATE_SCRIPT)" \
 		--archive-root "$(RTL_QC_CALIBRATION_HISTORY)" \
 		--target-period-ns "$(RTL_QC_TARGET_PERIOD_NS)" \
+		--min-aggregate-path-recall "$(RTL_QC_CV_MIN_AGGREGATE_PATH_RECALL)" \
+		--min-aggregate-family-recall "$(RTL_QC_CV_MIN_AGGREGATE_FAMILY_RECALL)" \
+		--min-holdout-path-recall "$(RTL_QC_CV_MIN_HOLDOUT_PATH_RECALL)" \
+		--min-holdout-scored-paths "$(RTL_QC_CV_MIN_HOLDOUT_SCORED_PATHS)" \
 		--output "$(RTL_QC_CROSS_VALIDATE_JSON)" \
 		--summary-output "$(RTL_QC_CROSS_VALIDATE_SUMMARY)"
 

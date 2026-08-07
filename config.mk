@@ -246,11 +246,19 @@ RTL_QC_CALIBRATION_TAG ?= $(RTL_QC_GIT_SHORT)-pll200m-$(RTL_QC_CALIBRATION_TIMES
 RTL_QC_CALIBRATION_DIR ?= $(RTL_QC_CALIBRATION_ROOT)/$(RTL_QC_CALIBRATION_TAG)
 RTL_QC_ARCHIVE_SCRIPT ?= $(SYN_DIR)/archive_rtl_calibration.py
 RTL_QC_CROSS_VALIDATE_SCRIPT ?= $(SYN_DIR)/cross_validate_rtl_timing.py
+RTL_QC_CV_MIN_AGGREGATE_PATH_RECALL ?= 0.95
+RTL_QC_CV_MIN_AGGREGATE_FAMILY_RECALL ?= 0.80
+RTL_QC_CV_MIN_HOLDOUT_PATH_RECALL ?= 0.90
+RTL_QC_CV_MIN_HOLDOUT_SCORED_PATHS ?= 100
 RTL_QC_ERROR_LIMIT ?= 50
 # Structural timing warning policy, calibrated against the current xc7
 # synth/post-route reports.  The BRAM reference includes both cascaded RAMB
 # propagation arcs, which Vivado reports as one logic level.
-RTL_QC_TARGET_PERIOD_NS ?= 5.0
+# Reserve ten percent of the 200 MHz cycle for placement, routing and clock
+# uncertainty.  Vivado still implements against 5.0 ns; the structural gate is
+# intentionally tighter so a route-strategy-only pass is not accepted as RTL
+# closure.
+RTL_QC_TARGET_PERIOD_NS ?= 4.5
 RTL_QC_TIMING_POSSIBLE_DEPTH ?= 9
 RTL_QC_TIMING_DEFINITE_DEPTH ?= 32
 RTL_QC_LUTRAM_POSSIBLE_DEPTH ?= 6

@@ -138,16 +138,15 @@ import ydrasil_pkg::*;
     ydrasil_compact_uop_t dispatch_compact_uop1;
     ydrasil_compact_uop_t issue_pkt_i;
     ydrasil_compact_uop_t issue_pkt1_i;
-    ydrasil_compact_uop_t select_bundle0_uop0_q;
-    ydrasil_compact_uop_t select_bundle0_uop1_q;
-    ydrasil_compact_uop_t select_bundle1_uop0_q;
-    ydrasil_compact_uop_t select_bundle1_uop1_q;
+    ydrasil_compact_uop_t select_head_uop0_q;
+    ydrasil_compact_uop_t select_head_uop1_q;
+    ydrasil_compact_uop_t select_skid_uop0_q;
+    ydrasil_compact_uop_t select_skid_uop1_q;
     ydrasil_compact_uop_t select_head_uop1;
-    reg select_bundle0_pair_q;
-    reg select_bundle1_pair_q;
-    reg select_buf_head_q;
-    reg select_buf_tail_q;
-    reg [1:0] select_buf_count_q;
+    reg select_head_pair_q;
+    reg select_skid_pair_q;
+    reg select_head_valid_q;
+    reg select_skid_valid_q;
     wire [REGS_ADDR_WIDTH-1:0] rf_addr_rs1;
     wire [REGS_ADDR_WIDTH-1:0] rf_addr_rs2;
     wire [REGS_ADDR_WIDTH-1:0] rf_addr_rs3;
@@ -164,12 +163,15 @@ import ydrasil_pkg::*;
     wire issue_src1_epoch_i;
     wire issue_src2_epoch_i;
     wire issue_src3_epoch_i;
+	    wire issue_src0_value_valid_i;
+	    wire issue_src1_value_valid_i;
+	    wire issue_src2_value_valid_i;
+	    wire issue_src3_value_valid_i;
 
-    wire issue_pair_execute = (select_buf_count_q != 2'd0) &&
-        (select_buf_head_q ? select_bundle1_pair_q : select_bundle0_pair_q);
+    wire issue_pair_execute = select_head_valid_q && select_head_pair_q;
     wire select_buf_replay = issue_ready_o && issue_pair_execute &&
         slot1_blocked;
-    wire select_buf_pop = issue_ready_o && (select_buf_count_q != 2'd0) &&
+    wire select_buf_pop = issue_ready_o && select_head_valid_q &&
         !select_buf_replay;
 
     // Capacity feedback depends only on registered occupancy. Selection does
@@ -188,25 +190,17 @@ import ydrasil_pkg::*;
     assign issue_pkt1_o = issue_pkt1_i;
 
     always_comb begin
-        if (select_buf_head_q) begin
-            issue_pkt_i = select_bundle1_uop0_q;
-            issue_pkt1_i = select_bundle1_uop1_q;
-        end else begin
-            issue_pkt_i = select_bundle0_uop0_q;
-            issue_pkt1_i = select_bundle0_uop1_q;
-        end
-        issue_pkt_i.valid = select_buf_count_q != 2'd0;
+        issue_pkt_i = select_head_uop0_q;
+        issue_pkt1_i = select_head_uop1_q;
+        issue_pkt_i.valid = select_head_valid_q;
         issue_pkt1_i.valid = issue_pkt_i.valid && issue_pair_execute;
     end
 
-    // Slot 1 exists only in the Select ring.  Read its narrow Operand inputs
-    // directly from that registered cell so replay/serial slot-0 control does
-    // not enter the lane-B RF and value-file address cones.
+    // Operand reads only the fixed head cell.  Skid movement and replay are
+    // completed at the preceding clock edge, so neither a pointer nor tail
+    // occupancy can select an RF or value-file address.
     always_comb begin
-        if (select_buf_head_q)
-            select_head_uop1 = select_bundle1_uop1_q;
-        else
-            select_head_uop1 = select_bundle0_uop1_q;
+        select_head_uop1 = select_head_uop1_q;
         select_head_uop1.valid = issue_pair_execute;
     end
 
@@ -732,7 +726,7 @@ import ydrasil_pkg::*;
     // The ring payload is written only by Select. Operand pop updates only the
     // narrow head/count state, so neither replay nor FU backpressure selects a
     // new value for a payload D pin.
-    wire select_buf_has_room = select_buf_count_q != 2'd2;
+    wire select_buf_has_room = !select_skid_valid_q;
     wire select_buf_push = select_buf_has_room && selected_valid0 &&
         !branch_recovery_i && !recovery_pending_q;
 
@@ -939,55 +933,64 @@ import ydrasil_pkg::*;
 
     always_ff @(posedge clk) begin
         if (!rst_n) begin
-            select_buf_head_q <= '0;
-            select_buf_tail_q <= '0;
-            select_buf_count_q <= '0;
-            select_bundle0_uop0_q <= '0;
-            select_bundle0_uop1_q <= '0;
-            select_bundle1_uop0_q <= '0;
-            select_bundle1_uop1_q <= '0;
-            select_bundle0_pair_q <= 1'b0;
-            select_bundle1_pair_q <= 1'b0;
+            select_head_uop0_q <= '0;
+            select_head_uop1_q <= '0;
+            select_skid_uop0_q <= '0;
+            select_skid_uop1_q <= '0;
+            select_head_pair_q <= 1'b0;
+            select_skid_pair_q <= 1'b0;
+            select_head_valid_q <= 1'b0;
+            select_skid_valid_q <= 1'b0;
         end else if (flush_id_i || trap_flush_i || branch_recovery_i) begin
-            select_buf_head_q <= '0;
-            select_buf_tail_q <= '0;
-            select_buf_count_q <= '0;
-            select_bundle0_pair_q <= 1'b0;
-            select_bundle1_pair_q <= 1'b0;
+            select_head_pair_q <= 1'b0;
+            select_skid_pair_q <= 1'b0;
+            select_head_valid_q <= 1'b0;
+            select_skid_valid_q <= 1'b0;
         end else begin
-            if (select_buf_pop)
-                select_buf_head_q <= ~select_buf_head_q;
-            if (select_buf_replay) begin
-                if (select_buf_head_q) begin
-                    select_bundle1_uop0_q <= select_bundle1_uop1_q;
-                    select_bundle1_pair_q <= 1'b0;
+            if (select_buf_pop) begin
+                if (select_skid_valid_q) begin
+                    select_head_uop0_q <= select_skid_uop0_q;
+                    select_head_uop1_q <= select_skid_uop1_q;
+                    select_head_pair_q <= select_skid_pair_q;
+                    select_head_valid_q <= 1'b1;
+                    select_skid_pair_q <= 1'b0;
+                    select_skid_valid_q <= 1'b0;
+                end else if (select_buf_push) begin
+                    select_head_uop0_q <= selected_uop0;
+                    select_head_uop1_q <= selected_uop1;
+                    select_head_pair_q <= selected_valid1;
+                    select_head_valid_q <= 1'b1;
                 end else begin
-                    select_bundle0_uop0_q <= select_bundle0_uop1_q;
-                    select_bundle0_pair_q <= 1'b0;
+                    select_head_pair_q <= 1'b0;
+                    select_head_valid_q <= 1'b0;
+                end
+            end else begin
+                if (select_buf_replay) begin
+                    select_head_uop0_q <= select_head_uop1_q;
+                    select_head_pair_q <= 1'b0;
+                end
+                if (select_buf_push) begin
+                    if (!select_head_valid_q) begin
+                        select_head_uop0_q <= selected_uop0;
+                        select_head_uop1_q <= selected_uop1;
+                        select_head_pair_q <= selected_valid1;
+                        select_head_valid_q <= 1'b1;
+                    end else begin
+                        select_skid_uop0_q <= selected_uop0;
+                        select_skid_uop1_q <= selected_uop1;
+                        select_skid_pair_q <= selected_valid1;
+                        select_skid_valid_q <= 1'b1;
+                    end
                 end
             end
-            if (select_buf_push) begin
-                if (select_buf_tail_q) begin
-                    select_bundle1_uop0_q <= selected_uop0;
-                    select_bundle1_uop1_q <= selected_uop1;
-                    select_bundle1_pair_q <= selected_valid1;
-                end else begin
-                    select_bundle0_uop0_q <= selected_uop0;
-                    select_bundle0_uop1_q <= selected_uop1;
-                    select_bundle0_pair_q <= selected_valid1;
-                end
-                select_buf_tail_q <= ~select_buf_tail_q;
-            end
-            select_buf_count_q <= select_buf_count_q -
-                {1'b0, select_buf_pop} + {1'b0, select_buf_push};
         end
     end
 
 `ifndef SYNTHESIS
     always_ff @(posedge clk) begin
         if (rst_n)
-            assert (select_buf_count_q <= 2'd2)
-                else $fatal(1, "Select/Operand queue overflow");
+            assert (!(select_skid_valid_q && !select_head_valid_q))
+                else $fatal(1, "Select/Operand skid without head");
     end
 `endif
 
@@ -1008,6 +1011,11 @@ import ydrasil_pkg::*;
 
     ydrasil_value_file u_value_file (
         .clk               (clk),
+	        .rst_n             (rst_n),
+	        .alloc0_valid_i    (issue_pipe_push),
+	        .alloc0_id_i       (dispatch_compact_uop.dst.rob_tag),
+	        .alloc1_valid_i    (issue_pipe_push_two),
+	        .alloc1_id_i       (dispatch_compact_uop1.dst.rob_tag),
         .completion_meta_i (completion_meta_i),
         .completion_data_i (completion_data_i),
         .read_slot0_i      (issue_pkt_i.src0.producer_tag[
@@ -1028,6 +1036,10 @@ import ydrasil_pkg::*;
         .read_epoch1_o     (issue_src1_epoch_i),
         .read_epoch2_o     (issue_src2_epoch_i),
         .read_epoch3_o     (issue_src3_epoch_i),
+	        .read_valid0_o     (issue_src0_value_valid_i),
+	        .read_valid1_o     (issue_src1_value_valid_i),
+	        .read_valid2_o     (issue_src2_value_valid_i),
+	        .read_valid3_o     (issue_src3_value_valid_i),
         .retire_data0_o    (retire_value0_o),
         .retire_data1_o    (retire_value1_o)
     );
@@ -1099,6 +1111,7 @@ import ydrasil_pkg::*;
     wire slot0_src1_early_dual_hit;
     wire slot1_src0_early_dual_hit;
     wire slot1_src1_early_dual_hit;
+	    wire slot0_src1_mdu_hit;
 
     ydrasil_issue_source_resolver #(.DATA_WIDTH(DATA_WIDTH)) u_source0 (
         .source_i(issue_pkt_i.src0),
@@ -1133,7 +1146,8 @@ import ydrasil_pkg::*;
         .ready_o(src1_ready), .data_o(slot0_src1),
         .dtcm_hit_o(slot0_src1_dtcm_hit),
         .early_main_hit_o(slot0_src1_early_main_hit),
-        .early_dual_hit_o(slot0_src1_early_dual_hit), .mdu_hit_o());
+        .early_dual_hit_o(slot0_src1_early_dual_hit),
+	        .mdu_hit_o(slot0_src1_mdu_hit));
     ydrasil_issue_source_resolver #(.DATA_WIDTH(DATA_WIDTH)) u_source2 (
         .source_i(select_head_uop1.src0),
         .value_i(issue_src2_value_i), .value_epoch_i(issue_src2_epoch_i),
@@ -1316,14 +1330,21 @@ import ydrasil_pkg::*;
         early_replay_data_q[1] : slot1_src1;
     wire lane_b_uses_slot0 = head0_b_only;
     wire lane_a_src1_ready = src1_ready;
-    // A store may issue while its source scoreboard bit is stale, but the
-    // Future File still contains a usable value when the producer generation
-    // matches. Capture that value now so a retired store never carries a
-    // recyclable producer tag into the LSU store buffer.
-    wire lane_a_src1_epoch_match = lane_a_uop.src1.tag_valid &&
-        (issue_src1_state_i.done || !issue_src1_state_i.live) &&
-        (issue_src1_epoch_i ==
-         lane_a_uop.src1.producer_tag[PRODUCER_ID_WIDTH-1]);
+	    // Once the tagged producer is no longer live, in-order retirement has
+	    // made its value architectural.  Read the ARF and stop carrying the
+	    // recyclable producer tag into the LSU.
+	    wire lane_a_src1_arf_ready = lane_a_uop.src1.used &&
+	        (lane_a_uop.src1.arch_addr != '0) &&
+	        lane_a_uop.src1.tag_valid && !issue_src1_state_i.live;
+	    wire lane_a_src1_value_ready = !lane_a_uop.src1.used ||
+	        (lane_a_uop.src1.arch_addr == '0) ||
+	        !lane_a_uop.src1.tag_valid ||
+	        (issue_src1_value_valid_i &&
+	         (issue_src1_epoch_i ==
+	          lane_a_uop.src1.producer_tag[PRODUCER_ID_WIDTH-1])) ||
+	        lane_a_src1_arf_ready || lane_a_src1_dtcm_hit ||
+	        slot0_src1_mdu_hit ||
+	        slot0_src1_early_main_hit || slot0_src1_early_dual_hit;
     wire lane_b_src1_ready = lane_b_uses_slot0 ? src1_ready : src3_ready;
     wire [DATA_WIDTH-1:0] lane_a_src0_local = slot0_src0_local;
     wire [DATA_WIDTH-1:0] lane_a_src1_local = slot0_src1_local;
@@ -1482,17 +1503,16 @@ import ydrasil_pkg::*;
         shared_agu_req_d.rd_addr = lane_a_uop.dst.rd_addr;
         shared_agu_req_d.producer_id = lane_a_uop.dst.rob_tag;
         shared_agu_req_d.producer_tracked = lane_a_agu_accept;
-        shared_agu_req_d.store_data = lane_a_src1_dtcm_hit ?
+        shared_agu_req_d.store_data = lane_a_src1_arf_ready ?
+            rf_rdata_rs2_i : lane_a_src1_dtcm_hit ?
             dtcm_resp_data_i : lane_a_src1_local;
         shared_agu_req_d.store_data_valid = lane_a_agu_accept &&
-            (!shared_agu_req_d.is_store || lane_a_src1_ready ||
-             lane_a_src1_epoch_match);
+            (!shared_agu_req_d.is_store || lane_a_src1_value_ready);
         shared_agu_req_d.store_producer_id =
             lane_a_uop.src1.producer_tag;
         shared_agu_req_d.store_producer_tracked = lane_a_agu_accept &&
             shared_agu_req_d.is_store &&
-            !lane_a_src1_ready && !lane_a_src1_epoch_match &&
-            lane_a_uop.src1.tag_valid;
+	        !lane_a_src1_value_ready && lane_a_uop.src1.tag_valid;
         shared_agu_req_d.retired = 1'b0;
     end
 

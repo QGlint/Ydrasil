@@ -4,8 +4,10 @@ import ydrasil_pkg::*;
     input  wire                            clk,
 	    input  wire                            rst_n,
 	    input  ydrasil_lsu_req_pkt_t           req_i,
-	    input  ydrasil_commit_pkt_t            commit_pkt_i,
-	    input  ydrasil_commit_pkt_t            commit_pkt1_i,
+	    input  wire                            commit0_valid_i,
+	    input  producer_id_t                   commit0_id_i,
+	    input  wire                            commit1_valid_i,
+	    input  producer_id_t                   commit1_id_i,
 	    input  wire                            branch_recovery_i,
 	    input  wire                            trap_flush_i,
 	    input  wire [PRODUCER_NUM-1:0]         recovery_keep_mask_i,
@@ -74,6 +76,8 @@ import ydrasil_pkg::*;
 	        [0:STORE_COMPLETION_SHADOWS-1];
 	    logic commit_valid_q [0:1];
 	    producer_id_t commit_id_q [0:1];
+	    reg recovery_pending_q;
+	    reg [PRODUCER_NUM-1:0] recovery_keep_mask_q;
 
 	    ydrasil_lsu_req_pkt_t patched_queue0;
 	    ydrasil_lsu_req_pkt_t patched_queue1;
@@ -274,12 +278,6 @@ import ydrasil_pkg::*;
     reg [BUS_ADDR_WIDTH-1:0] store_launch_addr_q;
     reg [BUS_DATA_WIDTH-1:0] store_launch_data_q;
     reg [3:0] store_launch_mask_q;
-    // Recovery clears the producer table at the clock edge where a response
-    // is still visible combinationally. Keep a local kill bit for that one
-    // boundary cycle so a flushed response cannot reach the broadcast bus
-    // after its producer token has been recycled.
-    reg load_s1_killed_q;
-    reg mmio_wb_killed_q;
     // This is the only wide DTCM response boundary.  Issue receives the
     // matching tag through dtcm_reservation_o and selects this registered
     // data only after its own FU input cells.
@@ -432,9 +430,8 @@ import ydrasil_pkg::*;
     // response visible on that edge crosses the registered completion bus once
     // and is accepted only if the post-recovery producer valid/epoch matches.
     // Do not feed the combinational recovery mask back through completion.
-    wire dtcm_wb_valid = load_s1_valid_q && !load_s1_killed_q;
-    wire mmio_wb_out_valid = mmio_wb_valid_q && !mmio_wb_killed_q &&
-        !dtcm_wb_valid;
+    wire dtcm_wb_valid = load_s1_valid_q;
+    wire mmio_wb_out_valid = mmio_wb_valid_q && !dtcm_wb_valid;
     assign completion_valid_o = dtcm_wb_valid ?
         load_s1_producer_tracked_q :
         (mmio_wb_out_valid && mmio_wb_producer_tracked_q);
@@ -503,7 +500,8 @@ import ydrasil_pkg::*;
 	always_comb begin
         store_enqueue_pkt = '0;
 	        store_enqueue_pkt.valid = 1'b1;
-	        store_enqueue_pkt.retired = active_pkt.retired;
+		        store_enqueue_pkt.retired = queue_head_q[0] ?
+		            patched_queue1.retired : patched_queue0.retired;
 	        store_enqueue_pkt.producer_id = active_pkt.producer_id;
         store_enqueue_pkt.addr = active_addr;
         store_enqueue_pkt.store_data = active_aligned_store_data;
@@ -559,49 +557,59 @@ import ydrasil_pkg::*;
 	    wire [$clog2(QUEUE_DEPTH)-1:0] recovery_queue_second =
 	        queue_head_q + 1'b1;
 	    wire ydrasil_lsu_req_pkt_t recovery_queue_pkt0 =
-	        queue_head_q[0] ? queue_q[1] : queue_q[0];
+	        queue_head_q[0] ? patched_queue1 : patched_queue0;
 	    wire ydrasil_lsu_req_pkt_t recovery_queue_pkt1 =
-	        recovery_queue_second[0] ? queue_q[1] : queue_q[0];
+	        recovery_queue_second[0] ? patched_queue1 : patched_queue0;
 	    wire recovery_queue_keep0 = (queue_count_q > 0) &&
 	        recovery_queue_pkt0.valid &&
-	        (recovery_keep_mask_i[
+	        (recovery_keep_mask_q[
 	             recovery_queue_pkt0.producer_id[PRODUCER_SLOT_WIDTH-1:0]] ||
 	         (recovery_queue_pkt0.is_store && recovery_queue_pkt0.retired));
 	    wire recovery_queue_keep1 = (queue_count_q > 1) &&
 	        recovery_queue_pkt1.valid &&
-	        (recovery_keep_mask_i[
+	        (recovery_keep_mask_q[
 	             recovery_queue_pkt1.producer_id[PRODUCER_SLOT_WIDTH-1:0]] ||
 	         (recovery_queue_pkt1.is_store && recovery_queue_pkt1.retired));
 	    wire [QUEUE_COUNT_WIDTH-1:0] recovery_queue_count =
 	        QUEUE_COUNT_WIDTH'(recovery_queue_keep0) +
 	        QUEUE_COUNT_WIDTH'(recovery_queue_keep1);
 	    wire recovery_store_keep0 = (store_buf_count_q > 0) &&
-	        store_buf0_q.valid &&
-	        (recovery_keep_mask_i[
-	             store_buf0_q.producer_id[PRODUCER_SLOT_WIDTH-1:0]] ||
-	         store_buf0_q.retired);
+	        patched_store_buf0.valid &&
+	        (recovery_keep_mask_q[
+	             patched_store_buf0.producer_id[PRODUCER_SLOT_WIDTH-1:0]] ||
+	         patched_store_buf0.retired);
 	    wire recovery_store_keep1 = (store_buf_count_q > 1) &&
-	        store_buf1_q.valid &&
-	        (recovery_keep_mask_i[
-	             store_buf1_q.producer_id[PRODUCER_SLOT_WIDTH-1:0]] ||
-	         store_buf1_q.retired);
+	        patched_store_buf1.valid &&
+	        (recovery_keep_mask_q[
+	             patched_store_buf1.producer_id[PRODUCER_SLOT_WIDTH-1:0]] ||
+	         patched_store_buf1.retired);
 	    wire [STORE_COUNT_WIDTH-1:0] recovery_store_count =
 	        STORE_COUNT_WIDTH'(recovery_store_keep0) +
 	        STORE_COUNT_WIDTH'(recovery_store_keep1);
 
 	    always_ff @(posedge clk or negedge rst_n) begin
-	        if (!rst_n) begin
-	            commit_valid_q[0] <= 1'b0;
-	            commit_valid_q[1] <= 1'b0;
-	            commit_id_q[0] <= '0;
-	            commit_id_q[1] <= '0;
-	        end else begin
-	            commit_valid_q[0] <= commit_pkt_i.valid;
-	            commit_valid_q[1] <= commit_pkt1_i.valid;
-	            commit_id_q[0] <= commit_pkt_i.producer_id;
-	            commit_id_q[1] <= commit_pkt1_i.producer_id;
-	        end
-	    end
+		    if (!rst_n) begin
+		        commit_valid_q[0] <= 1'b0;
+		        commit_valid_q[1] <= 1'b0;
+		        commit_id_q[0] <= '0;
+		        commit_id_q[1] <= '0;
+		        recovery_pending_q <= 1'b0;
+		        recovery_keep_mask_q <= '0;
+		    end else if (trap_flush_i) begin
+		        commit_valid_q[0] <= 1'b0;
+		        commit_valid_q[1] <= 1'b0;
+		        recovery_pending_q <= 1'b0;
+		        recovery_keep_mask_q <= '0;
+		    end else begin
+			        commit_valid_q[0] <= commit0_valid_i;
+			        commit_valid_q[1] <= commit1_valid_i;
+			        commit_id_q[0] <= commit0_id_i;
+			        commit_id_q[1] <= commit1_id_i;
+		        recovery_pending_q <= branch_recovery_i;
+		        if (branch_recovery_i)
+		            recovery_keep_mask_q <= recovery_keep_mask_i;
+		    end
+		end
 
 	integer queue_idx;
 	always_ff @(posedge clk or negedge rst_n) begin
@@ -650,7 +658,6 @@ import ydrasil_pkg::*;
             store_launch_addr_q <= '0;
             store_launch_data_q <= '0;
             store_launch_mask_q <= '0;
-            load_s1_killed_q <= 1'b0;
             mmio_req_valid_q <= 1'b0;
             mmio_is_load_q <= 1'b0;
             mmio_addr_q <= '0;
@@ -666,7 +673,6 @@ import ydrasil_pkg::*;
             mmio_wb_rd_addr_q <= '0;
             mmio_wb_producer_id_q <= '0;
             mmio_wb_producer_tracked_q <= 1'b0;
-            mmio_wb_killed_q <= 1'b0;
 `ifndef SYNTHESIS
             perf_stb_lookup_q <= '0;
             perf_stb_hit_q <= '0;
@@ -688,14 +694,12 @@ import ydrasil_pkg::*;
             store_launch_valid_q <= 1'b0;
             mmio_req_valid_q <= 1'b0;
             mmio_wb_valid_q <= 1'b0;
-            load_s1_killed_q <= 1'b0;
-            mmio_wb_killed_q <= 1'b0;
 	            completion_shadow_valid_q[0] <= 1'b0;
 	            completion_shadow_valid_q[1] <= 1'b0;
 	            completion_shadow_valid_q[2] <= 1'b0;
 	            completion_shadow_valid_q[3] <= 1'b0;
 	            completion_shadow_valid_q[4] <= 1'b0;
-	        end else if (branch_recovery_i) begin
+		        end else if (recovery_pending_q) begin
 	            queue_head_q <= '0;
 	            queue_tail_q <= recovery_queue_count[
 	                $clog2(QUEUE_DEPTH)-1:0];
@@ -707,10 +711,10 @@ import ydrasil_pkg::*;
 	            queue_q[1] <= (recovery_queue_keep0 && recovery_queue_keep1) ?
 	                recovery_queue_pkt1 : '0;
 	            store_buf_count_q <= recovery_store_count;
-	            store_buf0_q <= recovery_store_keep0 ? store_buf0_q :
-	                recovery_store_keep1 ? store_buf1_q : '0;
-	            store_buf1_q <= (recovery_store_keep0 && recovery_store_keep1) ?
-	                store_buf1_q : '0;
+		            store_buf0_q <= recovery_store_keep0 ? patched_store_buf0 :
+		                recovery_store_keep1 ? patched_store_buf1 : '0;
+		            store_buf1_q <= (recovery_store_keep0 && recovery_store_keep1) ?
+		                patched_store_buf1 : '0;
 		            // The current S1 response is sampled by completion_ctrl on
 		            // this edge.  Keeping it across recovery would broadcast the
 		            // same producer a second time on the following cycle.
@@ -718,14 +722,10 @@ import ydrasil_pkg::*;
 		            load_launch_valid_q <= 1'b0;
 		            store_launch_valid_q <= 1'b0;
 	            mmio_req_valid_q <= mmio_req_valid_q &&
-	                recovery_keep_mask_i[mmio_producer_id_q[
+		                recovery_keep_mask_q[mmio_producer_id_q[
 	                    PRODUCER_SLOT_WIDTH-1:0]];
             mmio_wb_valid_q <= 1'b0;
-            load_s1_killed_q <= 1'b0;
-            mmio_wb_killed_q <= 1'b0;
         end else begin
-            load_s1_killed_q <= 1'b0;
-            mmio_wb_killed_q <= 1'b0;
             completion_shadow_valid_q[0] <=
 		                completion_meta_i[COMPLETION_ALU].valid &&
 		                completion_meta_i[COMPLETION_ALU].producer_tracked;
