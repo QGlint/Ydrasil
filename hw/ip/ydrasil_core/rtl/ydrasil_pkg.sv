@@ -546,6 +546,12 @@ package ydrasil_pkg;
 		logic                                fast_load;
 	} ydrasil_lsu_status_pkt_t;
 
+	typedef enum logic [1:0] {
+		DISPATCH_DOMAIN_ALU = 2'b00,
+		DISPATCH_DOMAIN_P0  = 2'b01,
+		DISPATCH_DOMAIN_P1  = 2'b10
+	} ydrasil_dispatch_domain_t;
+
 	typedef struct packed {
 		logic                                  valid;
 		logic [1:0]                            lane_mask;
@@ -604,11 +610,16 @@ package ydrasil_pkg;
 	} ydrasil_lane_b_meta_t;
 
 	typedef struct packed {
-		logic                                bitmanip;
 		logic [UOP_SUBOP_WIDTH-1:0]          subop;
 		logic [REGS_DATA_WIDTH-1:0]          operand_a;
 		logic [REGS_DATA_WIDTH-1:0]          operand_b;
 	} ydrasil_lane_b_alu_payload_t;
+
+	typedef struct packed {
+		logic [UOP_SUBOP_WIDTH-1:0]          subop;
+		logic [REGS_DATA_WIDTH-1:0]          operand_a;
+		logic [REGS_DATA_WIDTH-1:0]          operand_b;
+	} ydrasil_lane_b_bit_payload_t;
 
 	typedef struct packed {
 		logic [UOP_SUBOP_WIDTH-1:0]          subop;

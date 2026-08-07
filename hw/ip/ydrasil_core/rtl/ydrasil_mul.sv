@@ -4,8 +4,6 @@ import ydrasil_pkg::*;
     input  wire                         clk,
     input  wire                         rst_n,
     input  wire                         flush_i,
-    input  wire                         redirect_i,
-    input  wire [PRODUCER_NUM-1:0]      redirect_keep_mask_i,
 
     input  wire                         issue_valid_i,
     output wire                         issue_ready_o,
@@ -144,7 +142,7 @@ import ydrasil_pkg::*;
             s2_wen_q    <= 1'b0;
             s3_wen_q    <= 1'b0;
         end else begin
-            s0_valid_q <= issue_valid_i & issue_ready_o & !redirect_i;
+            s0_valid_q <= issue_valid_i & issue_ready_o;
             s0_operand_a_q <= operand_a_ext;
             s0_operand_b_q <= operand_b_ext;
             s0_high_q <= select_high;
@@ -152,9 +150,7 @@ import ydrasil_pkg::*;
             s0_waddr_q <= issue_waddr_i;
             s0_producer_id_q <= issue_producer_id_i;
 
-            s1_valid_q <= s0_valid_q &&
-                (!redirect_i || redirect_keep_mask_i[
-                    s0_producer_id_q[PRODUCER_SLOT_WIDTH-1:0]]);
+            s1_valid_q <= s0_valid_q;
             s1_p00_q   <= p00;
             s1_p01_q   <= p01;
             s1_p10_q   <= p10;
@@ -164,9 +160,7 @@ import ydrasil_pkg::*;
             s1_waddr_q <= s0_waddr_q;
             s1_producer_id_q <= s0_producer_id_q;
 
-            s2_valid_q <= s1_valid_q &&
-                (!redirect_i || redirect_keep_mask_i[
-                    s1_producer_id_q[PRODUCER_SLOT_WIDTH-1:0]]);
+            s2_valid_q <= s1_valid_q;
             s2_sum_a_q <= p00_ext + p01_ext;
             s2_sum_b_q <= p10_ext + p11_ext;
             s2_high_q  <= s1_high_q;
@@ -174,9 +168,7 @@ import ydrasil_pkg::*;
             s2_waddr_q <= s1_waddr_q;
             s2_producer_id_q <= s1_producer_id_q;
 
-            s3_valid_q   <= s2_valid_q &&
-                (!redirect_i || redirect_keep_mask_i[
-                    s2_producer_id_q[PRODUCER_SLOT_WIDTH-1:0]]);
+            s3_valid_q   <= s2_valid_q;
             s3_product_q <= product;
             s3_high_q    <= s2_high_q;
             s3_wen_q     <= s2_wen_q;

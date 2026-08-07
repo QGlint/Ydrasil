@@ -320,21 +320,32 @@ import ydrasil_pkg::*;
 	assign is_xperm4 = is_op_r_m & (funct3 == 3'b010) & funct7_is_0010100;
 	assign is_xperm8 = is_op_r_m & (funct3 == 3'b100) & funct7_is_0010100;
 
-	wire is_r_alu_use = is_add | is_sub | is_sll | is_slt | is_sltu |
-	                    is_xor | is_srl | is_sra | is_or | is_and;
-	wire is_mul_use = is_mul | is_mulh | is_mulhsu | is_mulhu |
-	                  is_div | is_divu | is_rem | is_remu;
-	wire is_bitmanip_rs2_use = is_sh1add | is_sh2add | is_sh3add |
-	                           is_andn | is_max | is_maxu | is_min | is_minu |
-	                           is_orn | is_rol | is_ror | is_xnor | is_clmul |
-	                           is_clmulh | is_clmulr | is_bclr | is_bext |
-	                           is_binv | is_bset | is_pack | is_packh |
-	                           is_xperm4 | is_xperm8;
-	wire is_bitmanip_use = is_bitmanip_rs2_use | is_clz | is_cpop | is_ctz |
-	                       is_orc_b | is_rev8 | is_rori | is_sext_b |
-	                       is_sext_h | is_zext_h | is_bclri | is_bexti |
-	                       is_binvi | is_bseti | is_brev8 | is_zip |
-	                       is_unzip;
+	wire r_alu_group0 = is_add | is_sub | is_sll | is_slt;
+	wire r_alu_group1 = is_sltu | is_xor | is_srl | is_sra;
+	wire r_alu_group2 = is_or | is_and;
+	wire is_r_alu_use = (r_alu_group0 | r_alu_group1) | r_alu_group2;
+	wire mul_group0 = is_mul | is_mulh | is_mulhsu | is_mulhu;
+	wire mul_group1 = is_div | is_divu | is_rem | is_remu;
+	wire is_mul_use = mul_group0 | mul_group1;
+	wire bitmanip_rs2_group0 = is_sh1add | is_sh2add | is_sh3add | is_andn;
+	wire bitmanip_rs2_group1 = is_max | is_maxu | is_min | is_minu;
+	wire bitmanip_rs2_group2 = is_orn | is_rol | is_ror | is_xnor;
+	wire bitmanip_rs2_group3 = is_clmul | is_clmulh | is_clmulr | is_bclr;
+	wire bitmanip_rs2_group4 = is_bext | is_binv | is_bset | is_pack;
+	wire bitmanip_rs2_group5 = is_packh | is_xperm4 | is_xperm8;
+	wire bitmanip_rs2_half0 = bitmanip_rs2_group0 |
+		bitmanip_rs2_group1 | bitmanip_rs2_group2;
+	wire bitmanip_rs2_half1 = bitmanip_rs2_group3 |
+		bitmanip_rs2_group4 | bitmanip_rs2_group5;
+	wire is_bitmanip_rs2_use = bitmanip_rs2_half0 | bitmanip_rs2_half1;
+	wire bitmanip_other_group0 = is_clz | is_cpop | is_ctz | is_orc_b;
+	wire bitmanip_other_group1 = is_rev8 | is_rori | is_sext_b | is_sext_h;
+	wire bitmanip_other_group2 = is_zext_h | is_bclri | is_bexti | is_binvi;
+	wire bitmanip_other_group3 = is_bseti | is_brev8 | is_zip | is_unzip;
+	wire bitmanip_other_use = (bitmanip_other_group0 |
+		bitmanip_other_group1) | (bitmanip_other_group2 |
+		bitmanip_other_group3);
+	wire is_bitmanip_use = is_bitmanip_rs2_use | bitmanip_other_use;
 
 	wire is_fence  ;
 	wire is_fence_i;
@@ -467,7 +478,11 @@ import ydrasil_pkg::*;
 						(~is_nop) 	& (~is_fence_i) & (~csr_imm);// U类型指令不需要rs1
 	wire rf_ren_rs2 = is_r_alu_use | is_mul_use | is_branch | is_bitmanip_rs2_use; // R类型和分支指令需要rs2
 
-	wire rf_wen_rd = is_lui | is_auipc | is_jal | is_jalr | is_op_imm | is_r_alu_use | is_mul_use | is_bitmanip_use | is_csr ; // 需要写回寄存器的指令类型
+	wire rf_wen_group0 = is_lui | is_auipc | is_jal | is_jalr;
+	wire rf_wen_group1 = is_op_imm | is_r_alu_use;
+	wire rf_wen_group2 = is_mul_use | is_bitmanip_use;
+	wire rf_wen_rd = (rf_wen_group0 | rf_wen_group1) |
+		(rf_wen_group2 | is_csr); // 需要写回寄存器的指令类型
 
 	wire is_alu_use = is_op_imm | is_r_alu_use | is_lui | is_auipc;
 	wire is_bjp_use = is_branch | is_jal | is_jalr;

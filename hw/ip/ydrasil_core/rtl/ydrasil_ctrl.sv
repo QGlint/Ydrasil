@@ -11,8 +11,16 @@ import ydrasil_pkg::*;
     input  wire [INST_ADDR_WIDTH-1:0]   ex_pc1_i,
     input  ydrasil_ex_hzd_pkt_t         ex_hzd_i,
     input  ydrasil_ex_hzd_pkt_t         ex_hzd1_i,
-    input  ydrasil_issue_pkt_t          dispatch_pkt_i,
-    input  ydrasil_issue_pkt_t          dispatch_pkt1_i,
+	    input  ydrasil_issue_pkt_t          dispatch_pkt_i,
+	    input  ydrasil_issue_pkt_t          dispatch_pkt1_i,
+	    input  ydrasil_source_desc_t        decode_src0_i,
+	    input  ydrasil_source_desc_t        decode_src1_i,
+	    input  ydrasil_source_desc_t        decode_src2_i,
+	    input  ydrasil_source_desc_t        decode_src3_i,
+	    input  wire                         decode_dst0_writes_i,
+	    input  wire [REGS_ADDR_WIDTH-1:0]  decode_dst0_addr_i,
+    input  wire                         dispatch_serial_i,
+    input  wire                         dispatch_serial1_i,
     input  wire                         dispatch_accept_i,
     input  wire                         dispatch_accept1_i,
     input  ydrasil_compact_uop_t        issue_pkt_i,
@@ -26,8 +34,20 @@ import ydrasil_pkg::*;
     input  wire [REGS_DATA_WIDTH-1:0]   retire_value0_i,
     input  wire [REGS_DATA_WIDTH-1:0]   retire_value1_i,
 
-    output ydrasil_issue_pkt_t          dispatch_pkt_o,
-    output ydrasil_issue_pkt_t          dispatch_pkt1_o,
+	    output ydrasil_issue_pkt_t          dispatch_pkt_o,
+	    output ydrasil_issue_pkt_t          dispatch_pkt1_o,
+	    output ydrasil_source_desc_t        renamed_src0_o,
+	    output ydrasil_source_desc_t        renamed_src1_o,
+	    output ydrasil_source_desc_t        renamed_src2_o,
+	    output ydrasil_source_desc_t        renamed_src3_o,
+	    output producer_id_t                renamed_src0_tag_o,
+	    output producer_id_t                renamed_src1_tag_o,
+	    output producer_id_t                renamed_src2_tag_o,
+	    output producer_id_t                renamed_src3_tag_o,
+	    output wire                         renamed_src0_ready_o,
+	    output wire                         renamed_src1_ready_o,
+	    output wire                         renamed_src2_ready_o,
+	    output wire                         renamed_src3_ready_o,
     output wire                         dispatch_ready_o,
     output ydrasil_rob_source_state_t   issue_src0_state_o,
     output ydrasil_rob_source_state_t   issue_src1_state_o,
@@ -155,17 +175,16 @@ import ydrasil_pkg::*;
     // signals out of ready prevents execution feedback from reaching FetchQ.
     assign dispatch_ready_o = producer_has_two_free && !serial_pending_q &&
         !recovering_q;
-    wire queue_alloc0 = dispatch_accept_i && dispatch_pkt_i.valid;
-    wire queue_alloc1 = dispatch_accept1_i && dispatch_pkt1_i.valid;
+    wire queue_alloc0 = dispatch_accept_i;
+    wire queue_alloc1 = dispatch_accept1_i;
     wire [1:0] queue_alloc_count = {1'b0, queue_alloc0} +
         {1'b0, queue_alloc1};
 `ifndef SYNTHESIS
     wire producer_full_stall = dispatch_pkt_i.valid && !producer_has_two_free;
 `endif
-    wire producer_pair_stall = dispatch_pkt1_i.valid && !producer_has_two_free;
     wire serial_alloc =
-        (queue_alloc0 && dispatch_pkt_i.ctrl.serialize_before) ||
-        (queue_alloc1 && dispatch_pkt1_i.ctrl.serialize_before);
+        (queue_alloc0 && dispatch_serial_i) ||
+        (queue_alloc1 && dispatch_serial1_i);
     wire serial_accept = issue_fence_i ||
         (ex_accept_valid_o &&
          (ex_hzd_i.operator_type[OPERATOR_TYPE_CSR] &&
@@ -194,22 +213,22 @@ import ydrasil_pkg::*;
     // Name each RAT read once.  Besides making the tag/class relationship
     // explicit, this gives synthesis one consumer per source instead of
     // duplicating an unpacked-array lookup in the packet assembly below.
-    wire producer_id_t dispatch_src0_latest_id =
-        latest_id_q[dispatch_pkt_i.src0.arch_addr];
-    wire producer_id_t dispatch_src1_latest_id =
-        latest_id_q[dispatch_pkt_i.src1.arch_addr];
-    wire producer_id_t dispatch1_src0_latest_id =
-        latest_id_q[dispatch_pkt1_i.src0.arch_addr];
-    wire producer_id_t dispatch1_src1_latest_id =
-        latest_id_q[dispatch_pkt1_i.src1.arch_addr];
-    wire ydrasil_result_class_t dispatch_src0_latest_class =
-        latest_class_q[dispatch_pkt_i.src0.arch_addr];
-    wire ydrasil_result_class_t dispatch_src1_latest_class =
-        latest_class_q[dispatch_pkt_i.src1.arch_addr];
-    wire ydrasil_result_class_t dispatch1_src0_latest_class =
-        latest_class_q[dispatch_pkt1_i.src0.arch_addr];
-    wire ydrasil_result_class_t dispatch1_src1_latest_class =
-        latest_class_q[dispatch_pkt1_i.src1.arch_addr];
+	    wire producer_id_t dispatch_src0_latest_id =
+	        latest_id_q[decode_src0_i.arch_addr];
+	    wire producer_id_t dispatch_src1_latest_id =
+	        latest_id_q[decode_src1_i.arch_addr];
+	    wire producer_id_t dispatch1_src0_latest_id =
+	        latest_id_q[decode_src2_i.arch_addr];
+	    wire producer_id_t dispatch1_src1_latest_id =
+	        latest_id_q[decode_src3_i.arch_addr];
+	    wire ydrasil_result_class_t dispatch_src0_latest_class =
+	        latest_class_q[decode_src0_i.arch_addr];
+	    wire ydrasil_result_class_t dispatch_src1_latest_class =
+	        latest_class_q[decode_src1_i.arch_addr];
+	    wire ydrasil_result_class_t dispatch1_src0_latest_class =
+	        latest_class_q[decode_src2_i.arch_addr];
+	    wire ydrasil_result_class_t dispatch1_src1_latest_class =
+	        latest_class_q[decode_src3_i.arch_addr];
     wire ydrasil_result_class_t dispatch_result_class =
         (dispatch_pkt_i.uop_class == UOP_CLASS_LOAD) ? RESULT_LSU :
 		(dispatch_pkt_i.uop_class == UOP_CLASS_MUL) ?
@@ -218,59 +237,78 @@ import ydrasil_pkg::*;
         (dispatch_pkt1_i.uop_class == UOP_CLASS_LOAD) ? RESULT_LSU :
 		(dispatch_pkt1_i.uop_class == UOP_CLASS_MUL) ?
         RESULT_MDU : RESULT_ALU;
-    wire dispatch1_src0_from_slot0 = dispatch_pkt1_i.src0.used &&
-        dispatch_pkt_i.dst.writes_gpr && (dispatch_pkt_i.dst.rd_addr != '0) &&
-        (dispatch_pkt1_i.src0.arch_addr == dispatch_pkt_i.dst.rd_addr);
-    wire dispatch1_src1_from_slot0 = dispatch_pkt1_i.src1.used &&
-        dispatch_pkt_i.dst.writes_gpr && (dispatch_pkt_i.dst.rd_addr != '0) &&
-        (dispatch_pkt1_i.src1.arch_addr == dispatch_pkt_i.dst.rd_addr);
+	    wire dispatch1_src0_from_slot0 = decode_src2_i.used &&
+	        decode_dst0_writes_i &&
+	        (decode_src2_i.arch_addr == decode_dst0_addr_i);
+	    wire dispatch1_src1_from_slot0 = decode_src3_i.used &&
+	        decode_dst0_writes_i &&
+	        (decode_src3_i.arch_addr == decode_dst0_addr_i);
 
-    always_comb begin
-        dispatch_pkt_o = dispatch_pkt_i;
-        dispatch_pkt1_o = dispatch_pkt1_i;
+	    assign renamed_src0_tag_o = dispatch_src0_latest_id;
+	    assign renamed_src1_tag_o = dispatch_src1_latest_id;
+	    assign renamed_src2_tag_o = dispatch1_src0_from_slot0 ?
+	        producer_alloc_id : dispatch1_src0_latest_id;
+	    assign renamed_src3_tag_o = dispatch1_src1_from_slot0 ?
+	        producer_alloc_id : dispatch1_src1_latest_id;
+	    wire renamed_src0_tag_valid = decode_src0_i.used &&
+	        (decode_src0_i.arch_addr != '0) &&
+	        latest_valid_q[decode_src0_i.arch_addr];
+	    wire renamed_src1_tag_valid = decode_src1_i.used &&
+	        (decode_src1_i.arch_addr != '0) &&
+	        latest_valid_q[decode_src1_i.arch_addr];
+	    wire renamed_src2_tag_valid = dispatch1_src0_from_slot0 ||
+	        (decode_src2_i.used && (decode_src2_i.arch_addr != '0) &&
+	         latest_valid_q[decode_src2_i.arch_addr]);
+	    wire renamed_src3_tag_valid = dispatch1_src1_from_slot0 ||
+	        (decode_src3_i.used && (decode_src3_i.arch_addr != '0) &&
+	         latest_valid_q[decode_src3_i.arch_addr]);
+	    assign renamed_src0_ready_o = !renamed_src0_tag_valid ||
+	        producer_ready_q[dispatch_src0_latest_id[PRODUCER_SLOT_WIDTH-1:0]];
+	    assign renamed_src1_ready_o = !renamed_src1_tag_valid ||
+	        producer_ready_q[dispatch_src1_latest_id[PRODUCER_SLOT_WIDTH-1:0]];
+	    assign renamed_src2_ready_o = !renamed_src2_tag_valid ||
+	        (!dispatch1_src0_from_slot0 &&
+	         producer_ready_q[dispatch1_src0_latest_id[
+	             PRODUCER_SLOT_WIDTH-1:0]]);
+	    assign renamed_src3_ready_o = !renamed_src3_tag_valid ||
+	        (!dispatch1_src1_from_slot0 &&
+	         producer_ready_q[dispatch1_src1_latest_id[
+	             PRODUCER_SLOT_WIDTH-1:0]]);
 
-        dispatch_pkt_o.src0.tag_valid = dispatch_pkt_i.src0.used &&
-            (dispatch_pkt_i.src0.arch_addr != '0) &&
-            latest_valid_q[dispatch_pkt_i.src0.arch_addr];
-        dispatch_pkt_o.src0.producer_tag = dispatch_src0_latest_id;
-        dispatch_pkt_o.src0.producer_class = dispatch_src0_latest_class;
-        dispatch_pkt_o.src0.ready = !dispatch_pkt_o.src0.tag_valid ||
-            producer_ready_q[dispatch_src0_latest_id[PRODUCER_SLOT_WIDTH-1:0]];
-        dispatch_pkt_o.src1.tag_valid = dispatch_pkt_i.src1.used &&
-            (dispatch_pkt_i.src1.arch_addr != '0) &&
-            latest_valid_q[dispatch_pkt_i.src1.arch_addr];
-        dispatch_pkt_o.src1.producer_tag = dispatch_src1_latest_id;
-        dispatch_pkt_o.src1.producer_class = dispatch_src1_latest_class;
-        dispatch_pkt_o.src1.ready = !dispatch_pkt_o.src1.tag_valid ||
-            producer_ready_q[dispatch_src1_latest_id[PRODUCER_SLOT_WIDTH-1:0]];
-        dispatch_pkt_o.dst.rob_tag = producer_alloc_id;
-        dispatch_pkt_o.dst.result_class = dispatch_result_class;
+	    always_comb begin
+	        dispatch_pkt_o = dispatch_pkt_i;
+	        dispatch_pkt1_o = dispatch_pkt1_i;
 
-        dispatch_pkt1_o.src0.tag_valid = dispatch1_src0_from_slot0 ||
-            (dispatch_pkt1_i.src0.used &&
-             (dispatch_pkt1_i.src0.arch_addr != '0) &&
-             latest_valid_q[dispatch_pkt1_i.src0.arch_addr]);
-        dispatch_pkt1_o.src0.producer_tag = dispatch1_src0_from_slot0 ?
-            producer_alloc_id : dispatch1_src0_latest_id;
-        dispatch_pkt1_o.src0.producer_class = dispatch1_src0_from_slot0 ?
-            dispatch_result_class : dispatch1_src0_latest_class;
-        dispatch_pkt1_o.src0.ready = !dispatch_pkt1_o.src0.tag_valid ||
-            (!dispatch1_src0_from_slot0 &&
-             producer_ready_q[dispatch1_src0_latest_id[
-                 PRODUCER_SLOT_WIDTH-1:0]]);
-        dispatch_pkt1_o.src1.tag_valid = dispatch1_src1_from_slot0 ||
-            (dispatch_pkt1_i.src1.used &&
-             (dispatch_pkt1_i.src1.arch_addr != '0) &&
-             latest_valid_q[dispatch_pkt1_i.src1.arch_addr]);
-        dispatch_pkt1_o.src1.producer_tag = dispatch1_src1_from_slot0 ?
-            producer_alloc_id : dispatch1_src1_latest_id;
-        dispatch_pkt1_o.src1.producer_class = dispatch1_src1_from_slot0 ?
-            dispatch_result_class : dispatch1_src1_latest_class;
-        dispatch_pkt1_o.src1.ready = !dispatch_pkt1_o.src1.tag_valid ||
-            (!dispatch1_src1_from_slot0 &&
-             producer_ready_q[dispatch1_src1_latest_id[
-                 PRODUCER_SLOT_WIDTH-1:0]]);
-        dispatch_pkt1_o.dst.rob_tag = producer_alloc_id1;
+	        renamed_src0_o = decode_src0_i;
+	        renamed_src0_o.tag_valid = renamed_src0_tag_valid;
+	        renamed_src0_o.producer_tag = renamed_src0_tag_o;
+	        renamed_src0_o.producer_class = dispatch_src0_latest_class;
+	        renamed_src0_o.ready = renamed_src0_ready_o;
+	        renamed_src1_o = decode_src1_i;
+	        renamed_src1_o.tag_valid = renamed_src1_tag_valid;
+	        renamed_src1_o.producer_tag = renamed_src1_tag_o;
+	        renamed_src1_o.producer_class = dispatch_src1_latest_class;
+	        renamed_src1_o.ready = renamed_src1_ready_o;
+	        renamed_src2_o = decode_src2_i;
+	        renamed_src2_o.tag_valid = renamed_src2_tag_valid;
+	        renamed_src2_o.producer_tag = renamed_src2_tag_o;
+	        renamed_src2_o.producer_class = dispatch1_src0_from_slot0 ?
+	            dispatch_result_class : dispatch1_src0_latest_class;
+	        renamed_src2_o.ready = renamed_src2_ready_o;
+	        renamed_src3_o = decode_src3_i;
+	        renamed_src3_o.tag_valid = renamed_src3_tag_valid;
+	        renamed_src3_o.producer_tag = renamed_src3_tag_o;
+	        renamed_src3_o.producer_class = dispatch1_src1_from_slot0 ?
+	            dispatch_result_class : dispatch1_src1_latest_class;
+	        renamed_src3_o.ready = renamed_src3_ready_o;
+
+	        dispatch_pkt_o.src0 = renamed_src0_o;
+	        dispatch_pkt_o.src1 = renamed_src1_o;
+	        dispatch_pkt_o.dst.rob_tag = producer_alloc_id;
+	        dispatch_pkt_o.dst.result_class = dispatch_result_class;
+	        dispatch_pkt1_o.src0 = renamed_src2_o;
+	        dispatch_pkt1_o.src1 = renamed_src3_o;
+	        dispatch_pkt1_o.dst.rob_tag = producer_alloc_id1;
         dispatch_pkt1_o.dst.result_class = dispatch1_result_class;
     end
 

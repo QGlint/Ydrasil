@@ -243,6 +243,72 @@ import ydrasil_pkg::*;
 `endif
 endmodule
 
+module ydrasil_dispatch_predecode
+import ydrasil_pkg::*;
+(
+    input  wire [31:0] instr_i,
+    output ydrasil_dispatch_domain_t domain_o,
+    output wire serial_o,
+    output wire src0_used_o,
+    output wire src1_used_o,
+    output wire dst_writes_o
+);
+    wire [6:0] opcode = instr_i[6:0];
+    wire [2:0] funct3 = instr_i[14:12];
+    wire [6:0] funct7 = instr_i[31:25];
+    wire type_r = opcode == RV32I_INS_TYPE_R_M;
+    wire type_i = opcode == RV32I_INS_TYPE_I;
+    wire load = opcode == RV32I_INS_TYPE_L;
+    wire store = opcode == RV32I_INS_TYPE_S;
+    wire branch = opcode == RV32I_INS_TYPE_B;
+    wire jal = opcode == RV32I_INS_JAL;
+    wire jalr = (opcode == RV32I_INS_JALR) && (funct3 == 3'b000);
+    wire lui = opcode == RV32I_INS_LUI;
+    wire auipc = opcode == RV32I_INS_AUIPC;
+    wire csr = opcode == RV32I_INS_CSR;
+    wire csr_register = csr && !funct3[2] && (funct3 != 3'b000);
+    wire fence = opcode == RV32I_INS_FENCE;
+    wire base_r = (opcode == RV32I_INS_TYPE_R_M) &&
+        ((funct7 == 7'b0000000) ||
+         ((funct7 == 7'b0100000) &&
+          ((funct3 == 3'b000) || (funct3 == 3'b101))));
+    wire base_i = (opcode == RV32I_INS_TYPE_I) &&
+        (((funct3 != 3'b001) && (funct3 != 3'b101)) ||
+         ((funct3 == 3'b001) && (funct7 == 7'b0000000)) ||
+         ((funct3 == 3'b101) &&
+          ((funct7 == 7'b0000000) || (funct7 == 7'b0100000))));
+    wire base_alu = base_r || base_i ||
+        (opcode == RV32I_INS_LUI) || (opcode == RV32I_INS_AUIPC);
+    wire memory = load || store;
+    wire explicit_illegal =
+        (opcode == 7'b0000111) || (opcode == 7'b0100111) ||
+        (opcode == 7'b1000011) || (opcode == 7'b1000111) ||
+        (opcode == 7'b1001011) || (opcode == 7'b1001111) ||
+        (opcode == 7'b1010011);
+
+    always_comb begin
+        domain_o = DISPATCH_DOMAIN_P1;
+        if (memory)
+            domain_o = DISPATCH_DOMAIN_P0;
+        else if (base_alu)
+            domain_o = DISPATCH_DOMAIN_ALU;
+    end
+
+    assign serial_o = (opcode == RV32I_INS_CSR) || explicit_illegal ||
+        ((opcode == RV32I_INS_FENCE) && (funct3 == 3'b001));
+    // Rename only needs architectural source/destination presence.  All
+    // supported R-type extensions consume both encoded sources; unary Zb
+    // operations use the I-type opcode, so this classification is independent
+    // of the long per-operation Zb decoder.
+    assign src0_used_o = !explicit_illegal &&
+        (type_r || type_i || load || store || branch || jalr || csr_register);
+    assign src1_used_o = !explicit_illegal && (type_r || store || branch);
+    assign dst_writes_o = !explicit_illegal &&
+        (type_r || type_i || load || jal || jalr || lui || auipc || csr);
+
+    wire unused = &{1'b0, fence};
+endmodule
+
 module ydrasil_if_stage
 import ydrasil_pkg::*;
 #(
@@ -283,6 +349,11 @@ import ydrasil_pkg::*;
     output bp_bht_index_t if_id_pred_bht_index_o,
     output wire        if_id_valid_o,
     output wire [31:0] if_id_instr_o,
+    output ydrasil_dispatch_domain_t if_id_domain_o,
+    output wire        if_id_serial_o,
+    output wire        if_id_src0_used_o,
+    output wire        if_id_src1_used_o,
+    output wire        if_id_dst_writes_o,
 
     output wire [31:0] if_id1_pc_o,
     output wire        if_id1_pred_hit_o,
@@ -292,6 +363,11 @@ import ydrasil_pkg::*;
     output bp_bht_index_t if_id1_pred_bht_index_o,
     output wire        if_id1_valid_o,
     output wire [31:0] if_id1_instr_o,
+    output ydrasil_dispatch_domain_t if_id1_domain_o,
+    output wire        if_id1_serial_o,
+    output wire        if_id1_src0_used_o,
+    output wire        if_id1_src1_used_o,
+    output wire        if_id1_dst_writes_o,
     output wire        target_ff_hit_o,
     output wire        target_ff_hit1_o,
     output wire        target_ff_correction_o
@@ -569,6 +645,14 @@ import ydrasil_pkg::*;
     // head is invalid; stale payload is architecturally invisible.
     assign if_id_pc_o = fetchq_pc0;
     assign if_id_instr_o = fetchq_payload0.instr;
+    ydrasil_dispatch_predecode u_predecode0 (
+        .instr_i(fetchq_payload0.instr),
+        .domain_o(if_id_domain_o),
+        .serial_o(if_id_serial_o),
+        .src0_used_o(if_id_src0_used_o),
+        .src1_used_o(if_id_src1_used_o),
+        .dst_writes_o(if_id_dst_writes_o)
+    );
     assign if_id_pred_hit_o = fetchq_payload0.pred_taken;
     assign if_id_pred_taken_o = fetchq_payload0.pred_taken;
     assign if_id_pred_target_o = fetchq_pred_target0;
@@ -580,6 +664,14 @@ import ydrasil_pkg::*;
     assign if_id1_valid_o = fetchq_valid1;
     assign if_id1_pc_o = fetchq_pc1;
     assign if_id1_instr_o = fetchq_payload1.instr;
+    ydrasil_dispatch_predecode u_predecode1 (
+        .instr_i(fetchq_payload1.instr),
+        .domain_o(if_id1_domain_o),
+        .serial_o(if_id1_serial_o),
+        .src0_used_o(if_id1_src0_used_o),
+        .src1_used_o(if_id1_src1_used_o),
+        .dst_writes_o(if_id1_dst_writes_o)
+    );
     assign if_id1_pred_hit_o = fetchq_payload1.pred_taken;
     assign if_id1_pred_taken_o = fetchq_payload1.pred_taken;
     assign if_id1_pred_target_o = fetchq_pred_target1;

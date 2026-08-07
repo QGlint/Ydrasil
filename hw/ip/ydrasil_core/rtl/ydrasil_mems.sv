@@ -12,7 +12,12 @@ import ydrasil_pkg::*;
     output wire [ydrasil_pkg::INST_DATA_WIDTH-1:0] if_mem_rdata1_o,
 
     // LSU data-memory request
-    input  ydrasil_dtcm_req_pkt_t lsu_mem_req_i,
+    input  wire                         lsu_load_valid_i,
+    input  wire [BUS_ADDR_WIDTH-1:0]   lsu_load_addr_i,
+    input  wire                         lsu_store_valid_i,
+    input  wire [BUS_ADDR_WIDTH-1:0]   lsu_store_addr_i,
+    input  wire [BUS_DATA_WIDTH-1:0]   lsu_store_data_i,
+    input  wire [3:0]                  lsu_store_mask_i,
     output wire [ydrasil_pkg::BUS_DATA_WIDTH-1:0] lsu_mem_data_o,  
 
     input  wire                         dram_sel_i       // 来自EXU的DRAM访问选择信号
@@ -41,7 +46,11 @@ import ydrasil_pkg::*;
 `ifdef TARGET_SYNTHESIS
     localparam bit IF_DTCM_FETCH_ENABLE = 1'b0;
 `else
+`ifdef SYNTHESIS
+    localparam bit IF_DTCM_FETCH_ENABLE = 1'b0;
+`else
     localparam bit IF_DTCM_FETCH_ENABLE = 1'b1;
+`endif
 `endif
 `endif
 
@@ -57,7 +66,7 @@ import ydrasil_pkg::*;
                           (if_mem_addr1_i < (DTCM_BASE_ADDR + DTCM_BYTE_SIZE));
     assign if_dtcm_access = IF_DTCM_FETCH_ENABLE & if_dtcm_sel;
     assign if_dtcm_addr = if_mem_addr_i[DTCM_ADDR_WIDTH+1:2];
-    assign lsu_dtcm_addr = lsu_mem_req_i.load.addr[DTCM_ADDR_WIDTH+1:2];
+    assign lsu_dtcm_addr = lsu_load_addr_i[DTCM_ADDR_WIDTH+1:2];
 
     assign itcm_addr = if_mem_addr_i[ITCM_ADDR_WIDTH+1:3];
     assign itcm_instr = itcm_addr_odd_q ?
@@ -65,14 +74,13 @@ import ydrasil_pkg::*;
         itcm_rdata[INST_DATA_WIDTH-1:0];
     assign itcm_instr1 = itcm_addr_odd_q ? RV32I_INS_NOP :
         itcm_rdata[(2*INST_DATA_WIDTH)-1:INST_DATA_WIDTH];
-    assign dtcm_wdata = lsu_mem_req_i.store.wdata;
-    assign dtcm_wmask = lsu_mem_req_i.store.valid ?
-        lsu_mem_req_i.store.wmask : 4'b0000;
+    assign dtcm_wdata = lsu_store_data_i;
+    assign dtcm_wmask = lsu_store_mask_i;
 
     // FPGA/synthesis builds never fetch instructions from DTCM. Express that
     // constant here so LSU request valid is not part of every BRAM address bit.
     assign dtcm_addr = IF_DTCM_FETCH_ENABLE ?
-        (lsu_mem_req_i.load.valid ? lsu_dtcm_addr : if_dtcm_addr) : lsu_dtcm_addr;
+        (lsu_load_valid_i ? lsu_dtcm_addr : if_dtcm_addr) : lsu_dtcm_addr;
     assign if_mem_rdata_o = if_dtcm_access ? dtcm_rdata : itcm_instr;
     // DTCM self-modifying execution is a simulation aid only.  The second
     // fetch lane is deliberately suppressed there because DTCM has one port.
@@ -80,8 +88,8 @@ import ydrasil_pkg::*;
         RV32I_INS_NOP : itcm_instr1;
     assign lsu_mem_data_o = dtcm_rdata;
     assign dtcm_ren = IF_DTCM_FETCH_ENABLE ?
-        (lsu_mem_req_i.load.valid | if_dtcm_access) : lsu_mem_req_i.load.valid;
-    assign dtcm_wen = lsu_mem_req_i.store.valid;
+        (lsu_load_valid_i | if_dtcm_access) : lsu_load_valid_i;
+    assign dtcm_wen = lsu_store_valid_i;
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n)
@@ -113,7 +121,7 @@ import ydrasil_pkg::*;
         .dtcm_wen(dtcm_wen),
         .dtcm_mask(dtcm_wmask),
         .dtcm_raddr(dtcm_addr),
-        .dtcm_waddr(lsu_mem_req_i.store.addr[DTCM_ADDR_WIDTH+1:2]),
+        .dtcm_waddr(lsu_store_addr_i[DTCM_ADDR_WIDTH+1:2]),
         .dtcm_data_i(dtcm_wdata),
         .dtcm_data_o(dtcm_rdata)
     );

@@ -6,8 +6,6 @@ import ydrasil_pkg::*;
     input  wire flush_i,
     input  wire trap_redirect_i,
     input  wire [INST_ADDR_WIDTH-1:0] trap_redirect_addr_i,
-    input  wire [PRODUCER_NUM-1:0] branch_recovery_keep_mask_i,
-    input  wire ex_accept_valid1_i,
 
     input  wire alu_valid_i,
     input  wire [REGS_DATA_WIDTH-1:0] alu_operand_a_i,
@@ -44,6 +42,10 @@ import ydrasil_pkg::*;
     input  ydrasil_lane_b_alu_payload_t dual_alu_payload_i,
     input  wire [REGS_DATA_WIDTH-1:0] dual_alu_operand_a_i,
     input  wire [REGS_DATA_WIDTH-1:0] dual_alu_operand_b_i,
+    input  wire dual_bit_valid_i,
+    input  ydrasil_lane_b_bit_payload_t dual_bit_payload_i,
+    input  wire [REGS_DATA_WIDTH-1:0] dual_bit_operand_a_i,
+    input  wire [REGS_DATA_WIDTH-1:0] dual_bit_operand_b_i,
     input  wire dual_bru_valid_i,
     input  ydrasil_lane_b_bru_payload_t dual_bru_payload_i,
     input  wire [REGS_DATA_WIDTH-1:0] dual_bru_operand_a_i,
@@ -113,35 +115,31 @@ import ydrasil_pkg::*;
     ,output wire dbg_bp_mispredict_o
 `endif
 );
-    logic [OPERATOR_WIDTH-1:0] dual_operator;
-    logic [OPERATOR_TYPE_WIDTH-1:0] dual_operator_type;
-    wire [REGS_DATA_WIDTH-1:0] dual_operand_a = dual_bru_valid_i ?
-        dual_meta_i.pc : dual_alu_operand_a_i;
-    wire [REGS_DATA_WIDTH-1:0] dual_operand_b = dual_bru_valid_i ?
-        32'd4 : dual_alu_operand_b_i;
-    wire dual_valid = dual_alu_valid_i || dual_bru_valid_i || mul_valid_i ||
-        csr_valid_i;
+    logic [OPERATOR_WIDTH-1:0] dual_hzd_operator;
+    logic [OPERATOR_TYPE_WIDTH-1:0] dual_hzd_operator_type;
+    wire dual_valid = dual_alu_valid_i || dual_bit_valid_i ||
+        dual_bru_valid_i || mul_valid_i || csr_valid_i;
     wire [BUS_ADDR_WIDTH-1:0] lsu_mem_addr;
     wire [REGS_DATA_WIDTH-1:0] lsu_store_result;
     wire unused_instret;
 
     always_comb begin
-        dual_operator = '0;
-        dual_operator_type = '0;
+        dual_hzd_operator = '0;
+        dual_hzd_operator_type = '0;
         if (dual_bru_valid_i) begin
-            dual_operator[dual_bru_payload_i.subop] = 1'b1;
-            dual_operator_type[OPERATOR_TYPE_BJP] = 1'b1;
+            dual_hzd_operator[dual_bru_payload_i.subop] = 1'b1;
+            dual_hzd_operator_type[OPERATOR_TYPE_BJP] = 1'b1;
         end else if (mul_valid_i) begin
-            dual_operator = mul_operator_i;
-            dual_operator_type = mul_operator_type_i;
+            dual_hzd_operator = mul_operator_i;
+            dual_hzd_operator_type = mul_operator_type_i;
         end else if (csr_valid_i) begin
-            dual_operator_type = csr_operator_type_i;
+            dual_hzd_operator_type = csr_operator_type_i;
+        end else if (dual_bit_valid_i) begin
+            dual_hzd_operator[dual_bit_payload_i.subop] = 1'b1;
+            dual_hzd_operator_type[OPERATOR_TYPE_BITMANIP] = 1'b1;
         end else if (dual_alu_valid_i) begin
-            dual_operator[dual_alu_payload_i.subop] = 1'b1;
-            dual_operator_type[OPERATOR_TYPE_ALU] =
-                !dual_alu_payload_i.bitmanip;
-            dual_operator_type[OPERATOR_TYPE_BITMANIP] =
-                dual_alu_payload_i.bitmanip;
+            dual_hzd_operator[dual_alu_payload_i.subop] = 1'b1;
+            dual_hzd_operator_type[OPERATOR_TYPE_ALU] = 1'b1;
         end
     end
 
@@ -163,8 +161,8 @@ import ydrasil_pkg::*;
         ex_hzd1_o.producer_tracked = dual_meta_i.producer_tracked;
         ex_hzd1_o.rd_addr = dual_meta_i.rd_addr;
         ex_hzd1_o.alu_rf_wen = dual_meta_i.rd_wen;
-        ex_hzd1_o.operator_type = dual_operator_type;
-        ex_hzd1_o.operator_info = dual_operator;
+        ex_hzd1_o.operator_type = dual_hzd_operator_type;
+        ex_hzd1_o.operator_info = dual_hzd_operator;
     end
 
     always_comb begin
@@ -224,8 +222,6 @@ import ydrasil_pkg::*;
         .id_rf_waddr_rd_i       (alu_rd_addr_i),
         .id_alu_rf_wen_rd_i     (alu_rd_wen_i),
         .id_ex_producer_id_i    (alu_producer_id_i),
-        .redirect_valid_i       (ex_bp_train_o.valid),
-        .redirect_keep_mask_i   (branch_recovery_keep_mask_i),
         .trap_redirect_i        (trap_redirect_i),
         .trap_redirect_addr_i   (trap_redirect_addr_i),
         .id_ex_csr_waddr_i      (csr_waddr_i),
@@ -266,15 +262,19 @@ import ydrasil_pkg::*;
         .rst_n                  (rst_n),
         .flush_i                (flush_i),
         .interrupt_i            (trap_redirect_i),
-        .valid_i                (ex_accept_valid1_i &&
-                                 (dual_alu_valid_i || dual_bru_valid_i)),
-        .operand_a_i            (dual_operand_a),
-        .operand_b_i            (dual_operand_b),
+        .alu_valid_i            (dual_alu_valid_i),
+        .alu_operand_a_i        (dual_alu_operand_a_i),
+        .alu_operand_b_i        (dual_alu_operand_b_i),
+        .alu_subop_i            (dual_alu_payload_i.subop),
+        .bit_valid_i            (dual_bit_valid_i),
+        .bit_operand_a_i        (dual_bit_operand_a_i),
+        .bit_operand_b_i        (dual_bit_operand_b_i),
+        .bit_subop_i            (dual_bit_payload_i.subop),
+        .bru_valid_i            (dual_bru_valid_i),
         .branch_operand_a_i     (dual_bru_operand_a_i),
         .branch_operand_b_i     (dual_bru_operand_b_i),
         .branch_imm_i           (dual_bru_payload_i.imm),
-        .operator_i             (dual_operator),
-        .operator_type_i        (dual_operator_type),
+        .bru_subop_i            (dual_bru_payload_i.subop),
         .rd_addr_i              (dual_meta_i.rd_addr),
         .rd_wen_i               (dual_meta_i.rd_wen),
         .producer_id_i          (dual_meta_i.producer_id),

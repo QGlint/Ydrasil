@@ -36,8 +36,6 @@ import ydrasil_pkg::*;
     input  wire [REGS_ADDR_WIDTH-1:0]      id_rf_waddr_rd_i,
     input  wire                            id_alu_rf_wen_rd_i,
     input  producer_id_t                   id_ex_producer_id_i,
-    input  wire                            redirect_valid_i,
-    input  wire [PRODUCER_NUM-1:0]         redirect_keep_mask_i,
     input  wire                            trap_redirect_i,
     input  wire [INST_ADDR_WIDTH-1:0]      trap_redirect_addr_i,
 
@@ -85,7 +83,6 @@ import ydrasil_pkg::*;
     wire [REGS_ADDR_WIDTH-1:0] alu_rf_waddr_rd;
 
     wire op_m_unit;
-    wire op_bitmanip;
     wire op_load;
     wire op_store;
     wire op_mul;
@@ -108,8 +105,6 @@ import ydrasil_pkg::*;
     wire [REGS_ADDR_WIDTH-1:0] mul_due_waddr;
     producer_id_t              mul_due_producer_id;
 
-    wire [REGS_DATA_WIDTH-1:0] bitmanip_result;
-    wire                       bitmanip_rf_wen_rd;
     wire                       normal_alu_rf_wen_rd;
     wire                       div_rf_wen_rd;
     wire                       div_complete;
@@ -123,36 +118,30 @@ import ydrasil_pkg::*;
     reg [OPERATOR_WIDTH-1:0]   div_operator_q;
     reg [REGS_DATA_WIDTH-1:0]  div_result_q;
 
-    wire div_kill = trap_redirect_i ||
-        (flush_ex_i &&
-         !redirect_keep_mask_i[
-             div_producer_id_q[PRODUCER_SLOT_WIDTH-1:0]]);
+    // Producer identity includes the allocation epoch. A result from a
+    // squashed long-latency operation is harmless: ROB qualification rejects
+    // it even after the physical slot has been reused. Keeping MDU state
+    // independent of recovery also removes the recovery-to-completion loop.
+    wire div_kill = trap_redirect_i;
 
     reg [REGS_DATA_WIDTH-1:0] alu_result_ff;
-    reg [REGS_DATA_WIDTH-1:0] bitmanip_result_ff;
-    reg                       bitmanip_result_valid_ff;
     reg                       alu_rf_wen_rd_ff;
     producer_id_t             alu_producer_id_ff;
     (* max_fanout = 8 *) reg [REGS_ADDR_WIDTH-1:0] alu_rf_waddr_rd_ff;
 
     wire [31:0] operand_a;
     wire [31:0] operand_b;
-    wire [31:0] bitmanip_operand_a;
-    wire [31:0] bitmanip_operand_b;
     wire [31:0] lsu_operand_b;
     wire [31:0] lsu_store_data;
     wire [31:0] mul_operand_a;
     wire [31:0] mul_operand_b;
     wire [31:0] csr_operand_a;
-    wire [31:0] fast_add_result;
     wire [31:0] lsu_fast_add_result;
     wire [31:0] lsu_base_add_result;
     // JALR uses rs1 only for the BRU target. Its architectural rd value is
     // always PC+4, so the ALU link operand must remain the registered PC.
     assign operand_a = alu_operand_a_i;
     assign operand_b = alu_operand_b_i;
-    assign bitmanip_operand_a = alu_operand_a_i;
-    assign bitmanip_operand_b = alu_operand_b_i;
     assign lsu_operand_b = lsu_operand_b_i;
     assign lsu_store_data = lsu_store_data_i;
     assign mul_operand_a = mul_operand_a_i;
@@ -170,7 +159,6 @@ import ydrasil_pkg::*;
     // suppressed whenever the stale MDU class is still present.
     assign op_m_unit = mul_valid_i &&
         mul_operator_type_i[OPERATOR_TYPE_MUL];
-    assign op_bitmanip = operator_type_i[OPERATOR_TYPE_BITMANIP];
     assign op_load = lsu_valid_i & lsu_is_load_i;
     assign op_store = lsu_valid_i & lsu_is_store_i;
     assign op_mul =
@@ -203,10 +191,6 @@ import ydrasil_pkg::*;
         (div_active_q | div_pending_q | div_busy | div_done) & !flush_ex_i;
     assign div_available_o = !div_active_q && !div_pending_q &&
         !div_busy && !div_done;
-    wire mul_pipe_survives_redirect = !flush_ex_i ||
-        redirect_keep_mask_i[mul_pipe_producer_id[
-            PRODUCER_SLOT_WIDTH-1:0]];
-
 `ifndef SYNTHESIS
     always_ff @(posedge clk) begin
         if (rst_n && !flush_ex_i)
@@ -215,124 +199,20 @@ import ydrasil_pkg::*;
     end
 `endif
 
-    wire [4:0] fast_b_shamt = bitmanip_operand_b[4:0];
-    wire [31:0] fast_b_mask = 32'h1 << fast_b_shamt;
-    wire [31:0] fast_b_shadd_result =
-        ({32{operator_i[OP_B_SH1ADD]}} &
-         ((bitmanip_operand_a << 1) + bitmanip_operand_b)) |
-        ({32{operator_i[OP_B_SH2ADD]}} &
-         ((bitmanip_operand_a << 2) + bitmanip_operand_b)) |
-        ({32{operator_i[OP_B_SH3ADD]}} &
-         ((bitmanip_operand_a << 3) + bitmanip_operand_b));
-    wire [31:0] fast_b_logic_result =
-        ({32{operator_i[OP_B_ANDN]}} &
-         (bitmanip_operand_a & ~bitmanip_operand_b)) |
-        ({32{operator_i[OP_B_ORN]}} &
-         (bitmanip_operand_a | ~bitmanip_operand_b)) |
-        ({32{operator_i[OP_B_XNOR]}} &
-         ~(bitmanip_operand_a ^ bitmanip_operand_b));
-    wire [31:0] fast_b_bit_result =
-        ({32{operator_i[OP_B_BCLR] | operator_i[OP_B_BCLRI]}} &
-         (bitmanip_operand_a & ~fast_b_mask)) |
-        ({32{operator_i[OP_B_BEXT] | operator_i[OP_B_BEXTI]}} &
-         {31'b0, |(bitmanip_operand_a & fast_b_mask)}) |
-        ({32{operator_i[OP_B_BINV] | operator_i[OP_B_BINVI]}} &
-         (bitmanip_operand_a ^ fast_b_mask)) |
-        ({32{operator_i[OP_B_BSET] | operator_i[OP_B_BSETI]}} &
-         (bitmanip_operand_a | fast_b_mask));
-    wire [31:0] fast_b_pack_result =
-        ({32{operator_i[OP_B_PACK]}} &
-         {bitmanip_operand_b[15:0], bitmanip_operand_a[15:0]}) |
-        ({32{operator_i[OP_B_PACKH]}} &
-         {16'b0, bitmanip_operand_b[7:0], bitmanip_operand_a[7:0]});
-    wire [31:0] fast_b_extend_result =
-        ({32{operator_i[OP_B_REV8]}} &
-         {bitmanip_operand_a[7:0], bitmanip_operand_a[15:8],
-          bitmanip_operand_a[23:16], bitmanip_operand_a[31:24]}) |
-        ({32{operator_i[OP_B_SEXT_B]}} &
-         {{24{bitmanip_operand_a[7]}}, bitmanip_operand_a[7:0]}) |
-        ({32{operator_i[OP_B_SEXT_H]}} &
-         {{16{bitmanip_operand_a[15]}}, bitmanip_operand_a[15:0]}) |
-        ({32{operator_i[OP_B_ZEXT_H]}} &
-         {16'b0, bitmanip_operand_a[15:0]});
-    wire fast_bitmanip_op = op_bitmanip &
-        (operator_i[OP_B_SH1ADD] | operator_i[OP_B_SH2ADD] | operator_i[OP_B_SH3ADD] |
-         operator_i[OP_B_ANDN]   | operator_i[OP_B_ORN]    | operator_i[OP_B_XNOR]   |
-         operator_i[OP_B_BCLR]   | operator_i[OP_B_BCLRI]  | operator_i[OP_B_BEXT]   |
-         operator_i[OP_B_BEXTI]  | operator_i[OP_B_BINV]   | operator_i[OP_B_BINVI]  |
-         operator_i[OP_B_BSET]   | operator_i[OP_B_BSETI]  | operator_i[OP_B_PACK]   |
-         operator_i[OP_B_PACKH]  | operator_i[OP_B_REV8]   | operator_i[OP_B_SEXT_B] |
-         operator_i[OP_B_SEXT_H] | operator_i[OP_B_ZEXT_H]);
-    wire [31:0] fast_bitmanip_result =
-        fast_b_shadd_result | fast_b_logic_result | fast_b_bit_result |
-        fast_b_pack_result | fast_b_extend_result;
-    wire fast_bitmanip_rf_wen_rd =
-        alu_valid_i & fast_bitmanip_op & id_alu_rf_wen_rd_i & !trap_redirect_i & !flush_ex_i;
     wire op_csr = csr_valid_i & csr_operator_type_i[OPERATOR_TYPE_CSR] &
         !trap_redirect_i & !flush_ex_i;
 
-    assign bitmanip_rf_wen_rd =
-        alu_valid_i & op_bitmanip & !fast_bitmanip_op & id_alu_rf_wen_rd_i &
-        !trap_redirect_i & !flush_ex_i;
     assign normal_alu_rf_wen_rd = alu_valid_i & alu_rf_wen_rd &
         (operator_type_i[OPERATOR_TYPE_ALU] | operator_type_i[OPERATOR_TYPE_BJP]) &
-        !op_bitmanip & !flush_ex_i;
-    assign ex_rf_wen_rd =
-        bitmanip_rf_wen_rd | fast_bitmanip_rf_wen_rd |
-        normal_alu_rf_wen_rd | op_csr;
-    assign mul_result_valid_o = (mul_result_valid &&
-        mul_pipe_survives_redirect) | div_complete;
+        !flush_ex_i;
+    assign ex_rf_wen_rd = normal_alu_rf_wen_rd | op_csr;
+    assign mul_result_valid_o = mul_result_valid | div_complete;
     assign ex_instret_inc_o =
 			(alu_valid_i & !trap_redirect_i & !flush_ex_i) |
         div_complete;
 
-    wire fast_alu_op =
-        operator_type_i[OPERATOR_TYPE_ALU] & !op_bitmanip &
-        (operator_i[OP_ALU_ADD]  |
-         operator_i[OP_ALU_SUB]  |
-         operator_i[OP_ALU_SLT]  |
-         operator_i[OP_ALU_SLTU] |
-         operator_i[OP_ALU_XOR]  |
-         operator_i[OP_ALU_OR]   |
-         operator_i[OP_ALU_AND]  |
-         operator_i[OP_ALU_LUI]  |
-         operator_i[OP_ALU_AUIPC]);
-    wire fast_result_wen = alu_valid_i && !trap_redirect_i && !flush_ex_i &&
-        !op_bitmanip && fast_alu_op;
-    assign fast_add_result = operand_a + operand_b;
-    wire [32:0] fast_sub_result_ext = {1'b0, operand_a} + {1'b0, ~operand_b} + 33'd1;
-    wire        fast_signs_differ = operand_a[31] ^ operand_b[31];
-    wire        fast_slt_signed = fast_signs_differ ? operand_a[31] : fast_sub_result_ext[31];
-    wire        fast_slt_unsigned = ~fast_sub_result_ext[32];
-    wire [31:0] fast_logic_result =
-        ({32{operator_i[OP_ALU_XOR]}} & (operand_a ^ operand_b)) |
-        ({32{operator_i[OP_ALU_OR]}}  & (operand_a | operand_b)) |
-        ({32{operator_i[OP_ALU_AND]}} & (operand_a & operand_b));
-    wire [31:0] fast_alu_result =
-        ({32{operator_i[OP_ALU_SUB]}}  & fast_sub_result_ext[31:0]) |
-        ({32{operator_i[OP_ALU_SLT]}}  & {31'b0, fast_slt_signed}) |
-        ({32{operator_i[OP_ALU_SLTU]}} & {31'b0, fast_slt_unsigned}) |
-        ({32{operator_i[OP_ALU_XOR] | operator_i[OP_ALU_OR] | operator_i[OP_ALU_AND]}} & fast_logic_result) |
-        ({32{operator_i[OP_ALU_LUI]}}  & operand_b) |
-        ({32{operator_i[OP_ALU_ADD] | operator_i[OP_ALU_AUIPC]}} & fast_add_result);
-    wire [31:0] fast_result =
-        fast_alu_op ? fast_alu_result : fast_add_result;
-    // This is intentionally a restricted result cone. Issue uses it only
-    // after recording a matching early-wakeup token, so slow bitmanip logic
-    // never reaches the next instruction's operand capture path.
-    wire early_lite_bitmanip_op = op_bitmanip &
-        (operator_i[OP_B_SH1ADD] | operator_i[OP_B_SH2ADD] |
-         operator_i[OP_B_SH3ADD] | operator_i[OP_B_PACK] |
-         operator_i[OP_B_PACKH]  | operator_i[OP_B_REV8] |
-         operator_i[OP_B_SEXT_B] | operator_i[OP_B_SEXT_H] |
-         operator_i[OP_B_ZEXT_H]);
-    wire [31:0] early_lite_bitmanip_result =
-        fast_b_shadd_result | fast_b_pack_result | fast_b_extend_result;
-    wire [31:0] early_plain_alu_result = fast_alu_op ?
-        fast_alu_result : alu_result;
-    assign early_bypass_data_o = early_lite_bitmanip_op ?
-        early_lite_bitmanip_result :
-		operator_type_i[OPERATOR_TYPE_ALU] ? early_plain_alu_result : '0;
+    assign early_bypass_data_o = operator_type_i[OPERATOR_TYPE_ALU] ?
+        alu_result : '0;
 
     ydrasil_alu #(
         .DATAWIDTH(DATA_WIDTH)
@@ -367,8 +247,6 @@ import ydrasil_pkg::*;
         .clk             (clk),
         .rst_n           (rst_n),
         .flush_i         (trap_redirect_i),
-        .redirect_i      (flush_ex_i),
-        .redirect_keep_mask_i(redirect_keep_mask_i),
         .issue_valid_i   (mul_issue_valid),
         .issue_ready_o   (mul_issue_ready),
         .operand_a_i     (mul_operand_a),
@@ -389,8 +267,7 @@ import ydrasil_pkg::*;
 
     // The raw s3 value remains available for same-cycle MDU reservation and
     // bypass. Redirect filtering applies only to architectural completion/WB.
-    assign mul_rf_wen_rd_o = (mul_pipe_wen && mul_pipe_survives_redirect) |
-        div_rf_wen_rd;
+    assign mul_rf_wen_rd_o = mul_pipe_wen | div_rf_wen_rd;
     assign mul_rf_waddr_rd_o = div_rf_wen_rd ? div_waddr_q : mul_pipe_waddr;
     assign mul_producer_id_o = div_rf_wen_rd ?
         div_producer_id_q : mul_pipe_producer_id;
@@ -421,40 +298,6 @@ import ydrasil_pkg::*;
     end
     assign mdu_bypass_data_o = mul_wdata_rd_o;
 
-    logic [OPERATOR_WIDTH-1:0] slow_bitmanip_operator;
-
-    always_comb begin
-        slow_bitmanip_operator = operator_i;
-        slow_bitmanip_operator[OP_B_SH1ADD] = 1'b0;
-        slow_bitmanip_operator[OP_B_SH2ADD] = 1'b0;
-        slow_bitmanip_operator[OP_B_SH3ADD] = 1'b0;
-        slow_bitmanip_operator[OP_B_ANDN]   = 1'b0;
-        slow_bitmanip_operator[OP_B_ORN]    = 1'b0;
-        slow_bitmanip_operator[OP_B_REV8]   = 1'b0;
-        slow_bitmanip_operator[OP_B_SEXT_B] = 1'b0;
-        slow_bitmanip_operator[OP_B_SEXT_H] = 1'b0;
-        slow_bitmanip_operator[OP_B_XNOR]   = 1'b0;
-        slow_bitmanip_operator[OP_B_ZEXT_H] = 1'b0;
-        slow_bitmanip_operator[OP_B_BCLR]   = 1'b0;
-        slow_bitmanip_operator[OP_B_BCLRI]  = 1'b0;
-        slow_bitmanip_operator[OP_B_BEXT]   = 1'b0;
-        slow_bitmanip_operator[OP_B_BEXTI]  = 1'b0;
-        slow_bitmanip_operator[OP_B_BINV]   = 1'b0;
-        slow_bitmanip_operator[OP_B_BINVI]  = 1'b0;
-        slow_bitmanip_operator[OP_B_BSET]   = 1'b0;
-        slow_bitmanip_operator[OP_B_BSETI]  = 1'b0;
-        slow_bitmanip_operator[OP_B_PACK]   = 1'b0;
-        slow_bitmanip_operator[OP_B_PACKH]  = 1'b0;
-    end
-
-    ydrasil_bitmanip u_ydrasil_bitmanip (
-        .operand_a_i     (bitmanip_operand_a),
-        .operand_b_i     (bitmanip_operand_b),
-        .operator_i      (slow_bitmanip_operator),
-        .operator_type_i (operator_type_i),
-        .result_o        (bitmanip_result)
-    );
-
     wire [31:0] slow_result;
     wire        slow_result_wen;
     wire csr_csrrw = op_csr & id_op_csr_info_i[OP_CSR_CSRRW];
@@ -476,7 +319,7 @@ import ydrasil_pkg::*;
     // CSRRS/CSRRC with rs1 (or zimm) equal to zero are reads only.
     assign csr_wen = op_csr & id_op_csr_info_i[OP_CSR_WRITE];
 
-    assign alu_result_o = bitmanip_result_valid_ff ? bitmanip_result_ff : alu_result_ff;
+    assign alu_result_o = alu_result_ff;
     assign alu_rf_wen_rd_o = alu_rf_wen_rd_ff;
     assign alu_rf_waddr_rd_o = alu_rf_waddr_rd_ff;
     assign alu_producer_id_o = alu_producer_id_ff;
@@ -484,8 +327,6 @@ import ydrasil_pkg::*;
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             alu_result_ff       <= '0;
-            bitmanip_result_ff  <= '0;
-            bitmanip_result_valid_ff <= 1'b0;
             alu_rf_wen_rd_ff    <= 1'b0;
             alu_rf_waddr_rd_ff  <= '0;
             alu_producer_id_ff  <= '0;
@@ -494,8 +335,6 @@ import ydrasil_pkg::*;
             ex_csr_waddr_o_ff   <= '0;
         end else if (flush_ex_i) begin
             alu_result_ff       <= '0;
-            bitmanip_result_ff  <= '0;
-            bitmanip_result_valid_ff <= 1'b0;
             alu_rf_wen_rd_ff    <= 1'b0;
             alu_rf_waddr_rd_ff  <= '0;
             alu_producer_id_ff  <= '0;
@@ -503,12 +342,7 @@ import ydrasil_pkg::*;
             ex_csr_wen_o_ff     <= 1'b0;
             ex_csr_waddr_o_ff   <= '0;
         end else begin
-            alu_result_ff      <= fast_result_wen ? fast_result :
-                                  slow_result_wen ? slow_result : alu_result;
-            bitmanip_result_ff <= fast_bitmanip_rf_wen_rd ?
-                                  fast_bitmanip_result : bitmanip_result;
-            bitmanip_result_valid_ff <=
-                bitmanip_rf_wen_rd | fast_bitmanip_rf_wen_rd;
+            alu_result_ff      <= slow_result_wen ? slow_result : alu_result;
             alu_rf_wen_rd_ff   <= ex_rf_wen_rd;
             alu_rf_waddr_rd_ff <= op_csr ? csr_rf_waddr_i : alu_rf_waddr_rd;
             alu_producer_id_ff <= op_csr ? csr_producer_id_i :
@@ -574,9 +408,6 @@ import ydrasil_pkg::*;
     assign completion_producer_tracked_o = ex_rf_wen_rd &&
         (completion_waddr != '0);
     assign completion_addr_o = completion_waddr;
-    assign completion_data_o = fast_bitmanip_rf_wen_rd ?
-        fast_bitmanip_result : bitmanip_rf_wen_rd ?
-        bitmanip_result : slow_result_wen ? slow_result :
-        fast_result_wen ? fast_result : alu_result;
+    assign completion_data_o = slow_result_wen ? slow_result : alu_result;
 
 endmodule

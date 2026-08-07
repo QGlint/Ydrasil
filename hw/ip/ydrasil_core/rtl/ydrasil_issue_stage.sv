@@ -13,8 +13,30 @@ import ydrasil_pkg::*;
     input  wire [PRODUCER_NUM-1:0]     recovery_keep_mask_i,
     input  ydrasil_issue_pkt_t         decode_pkt_i,
     input  ydrasil_issue_pkt_t         decode_pkt1_i,
+    input  wire                        decode_valid_i,
+    input  wire                        decode_valid1_i,
+    input  ydrasil_dispatch_domain_t   decode_domain_i,
+    input  ydrasil_dispatch_domain_t   decode_domain1_i,
+    input  wire [31:0]                 decode_instr_i,
+    input  wire [31:0]                 decode_instr1_i,
+    input  wire                        decode_serial_i,
+    input  wire                        decode_serial1_i,
+    input  wire                        decode_dst_writes_i,
+    input  wire                        decode_dst_writes1_i,
     input  ydrasil_issue_pkt_t         dispatch_pkt_i,
     input  ydrasil_issue_pkt_t         dispatch_pkt1_i,
+    input  ydrasil_source_desc_t       renamed_src0_i,
+    input  ydrasil_source_desc_t       renamed_src1_i,
+    input  ydrasil_source_desc_t       renamed_src2_i,
+    input  ydrasil_source_desc_t       renamed_src3_i,
+    input  producer_id_t               renamed_src0_tag_i,
+    input  producer_id_t               renamed_src1_tag_i,
+    input  producer_id_t               renamed_src2_tag_i,
+    input  producer_id_t               renamed_src3_tag_i,
+    input  wire                        renamed_src0_ready_i,
+    input  wire                        renamed_src1_ready_i,
+    input  wire                        renamed_src2_ready_i,
+    input  wire                        renamed_src3_ready_i,
     input  wire                        dispatch_ready_i,
     input  ydrasil_completion_meta_t   completion_meta_i [COMPLETION_LANES],
     input  wire [REGS_DATA_WIDTH-1:0]  completion_data_i [COMPLETION_LANES],
@@ -90,6 +112,10 @@ import ydrasil_pkg::*;
     output ydrasil_lane_b_alu_payload_t dual_alu_payload_o,
     output wire [DATA_WIDTH-1:0]       dual_alu_operand_a_o,
     output wire [DATA_WIDTH-1:0]       dual_alu_operand_b_o,
+    output wire                        dual_bit_valid_o,
+    output ydrasil_lane_b_bit_payload_t dual_bit_payload_o,
+    output wire [DATA_WIDTH-1:0]       dual_bit_operand_a_o,
+    output wire [DATA_WIDTH-1:0]       dual_bit_operand_b_o,
     output wire                        dual_bru_valid_o,
     output ydrasil_lane_b_bru_payload_t dual_bru_payload_o,
     output wire [DATA_WIDTH-1:0]       dual_bru_operand_a_o,
@@ -107,6 +133,7 @@ import ydrasil_pkg::*;
     wire [ISSUE_WINDOW_DEPTH-1:0] issue_serial_q;
     wire [ISSUE_WINDOW_DEPTH-1:0] issue_store_q;
     wire [ISSUE_WINDOW_DEPTH-1:0] issue_divrem_q;
+    wire [ISSUE_WINDOW_DEPTH-1:0] issue_early_writes_q;
     ydrasil_compact_uop_t dispatch_compact_uop;
     ydrasil_compact_uop_t dispatch_compact_uop1;
     ydrasil_compact_uop_t issue_pkt_i;
@@ -115,13 +142,12 @@ import ydrasil_pkg::*;
     ydrasil_compact_uop_t select_bundle0_uop1_q;
     ydrasil_compact_uop_t select_bundle1_uop0_q;
     ydrasil_compact_uop_t select_bundle1_uop1_q;
-    ydrasil_compact_uop_t serial_bundle_uop_q;
+    ydrasil_compact_uop_t select_head_uop1;
     reg select_bundle0_pair_q;
     reg select_bundle1_pair_q;
     reg select_buf_head_q;
     reg select_buf_tail_q;
     reg [1:0] select_buf_count_q;
-    reg serial_bundle_valid_q;
     wire [REGS_ADDR_WIDTH-1:0] rf_addr_rs1;
     wire [REGS_ADDR_WIDTH-1:0] rf_addr_rs2;
     wire [REGS_ADDR_WIDTH-1:0] rf_addr_rs3;
@@ -139,20 +165,20 @@ import ydrasil_pkg::*;
     wire issue_src2_epoch_i;
     wire issue_src3_epoch_i;
 
-    wire issue_pair_execute = !serial_bundle_valid_q &&
-        (select_buf_count_q != 2'd0) &&
+    wire issue_pair_execute = (select_buf_count_q != 2'd0) &&
         (select_buf_head_q ? select_bundle1_pair_q : select_bundle0_pair_q);
-    wire serial_bundle_pop = issue_ready_o && serial_bundle_valid_q;
-    wire select_buf_pop = issue_ready_o && !serial_bundle_valid_q &&
-        (select_buf_count_q != 2'd0);
+    wire select_buf_replay = issue_ready_o && issue_pair_execute &&
+        slot1_blocked;
+    wire select_buf_pop = issue_ready_o && (select_buf_count_q != 2'd0) &&
+        !select_buf_replay;
 
     // Capacity feedback depends only on registered occupancy. Selection does
     // not feed Fetch/Decode ready in the same cycle.
     wire dispatch_slots_available;
     wire issue_pipe_has_room = dispatch_ready_i && dispatch_slots_available;
     wire issue_pipe_push = !flush_id_i && issue_pipe_has_room &&
-        decode_pkt_i.valid;
-    wire issue_pipe_push_two = issue_pipe_push && decode_pkt1_i.valid;
+        decode_valid_i;
+    wire issue_pipe_push_two = issue_pipe_push && decode_valid1_i;
 
     assign decode_ready_o = issue_pipe_has_room;
     assign decode_consume_two_o = issue_pipe_push_two;
@@ -162,19 +188,26 @@ import ydrasil_pkg::*;
     assign issue_pkt1_o = issue_pkt1_i;
 
     always_comb begin
-        if (serial_bundle_valid_q) begin
-            issue_pkt_i = serial_bundle_uop_q;
-            issue_pkt1_i = '0;
-        end else if (select_buf_head_q) begin
+        if (select_buf_head_q) begin
             issue_pkt_i = select_bundle1_uop0_q;
             issue_pkt1_i = select_bundle1_uop1_q;
         end else begin
             issue_pkt_i = select_bundle0_uop0_q;
             issue_pkt1_i = select_bundle0_uop1_q;
         end
-        issue_pkt_i.valid = serial_bundle_valid_q ||
-            (select_buf_count_q != 2'd0);
+        issue_pkt_i.valid = select_buf_count_q != 2'd0;
         issue_pkt1_i.valid = issue_pkt_i.valid && issue_pair_execute;
+    end
+
+    // Slot 1 exists only in the Select ring.  Read its narrow Operand inputs
+    // directly from that registered cell so replay/serial slot-0 control does
+    // not enter the lane-B RF and value-file address cones.
+    always_comb begin
+        if (select_buf_head_q)
+            select_head_uop1 = select_bundle1_uop1_q;
+        else
+            select_head_uop1 = select_bundle0_uop1_q;
+        select_head_uop1.valid = issue_pair_execute;
     end
 
     ydrasil_issue_compactor u_issue_compactor0 (
@@ -187,34 +220,28 @@ import ydrasil_pkg::*;
         .compact_uop_o (dispatch_compact_uop1)
     );
 
-    wire selected0_early = (issue_pkt_i.op_class == UOP_CLASS_ALU) ||
-        (issue_pkt_i.op_class == UOP_CLASS_BJP) ||
-        ((issue_pkt_i.op_class == UOP_CLASS_BITMANIP) &&
-         ((issue_pkt_i.subop == UOP_SUBOP_WIDTH'(OP_B_SH1ADD)) ||
-          (issue_pkt_i.subop == UOP_SUBOP_WIDTH'(OP_B_SH2ADD)) ||
-          (issue_pkt_i.subop == UOP_SUBOP_WIDTH'(OP_B_SH3ADD)) ||
-          (issue_pkt_i.subop == UOP_SUBOP_WIDTH'(OP_B_PACK)) ||
-          (issue_pkt_i.subop == UOP_SUBOP_WIDTH'(OP_B_PACKH)) ||
-          (issue_pkt_i.subop == UOP_SUBOP_WIDTH'(OP_B_REV8)) ||
-          (issue_pkt_i.subop == UOP_SUBOP_WIDTH'(OP_B_SEXT_B)) ||
-          (issue_pkt_i.subop == UOP_SUBOP_WIDTH'(OP_B_SEXT_H)) ||
-          (issue_pkt_i.subop == UOP_SUBOP_WIDTH'(OP_B_ZEXT_H))));
-    wire selected1_early = (issue_pkt1_i.op_class == UOP_CLASS_ALU) ||
-        (issue_pkt1_i.op_class == UOP_CLASS_BJP);
-    wire selected0_due_valid = issue_ready_o && issue_pkt_i.valid &&
-        selected0_early && issue_pkt_i.dst.writes_gpr;
-    wire selected1_due_valid = issue_ready_o && issue_pkt1_i.valid &&
-        issue_pair_execute && selected1_early && issue_pkt1_i.dst.writes_gpr;
     producer_id_t rob_head_select_q;
     reg lsu_idle_select_q;
     reg [ISSUE_WINDOW_DEPTH-1:0] issued_slot_mask_q;
+    reg select_wakeup_valid_q [0:1];
+    producer_id_t select_wakeup_id_q [0:1];
+    ydrasil_reservation_pkt_t dtcm_select_wakeup_q;
+    ydrasil_reservation_pkt_t mdu_select_wakeup_q;
     reg mdu_div_available_q;
     reg div_select_reserved_q;
     reg div_busy_seen_q;
     reg [1:0] lsu_select_reserved_q;
+    reg recovery_pending_q;
+    reg [PRODUCER_NUM-1:0] recovery_keep_mask_q;
+    reg [2:0] alu_free_credit_q;
+    reg [1:0] p0_free_credit_q;
+    reg [1:0] p1_free_credit_q;
+    reg [1:0] credit_resync_q;
     wire p0_select_valid, p1_select_valid;
     wire alu_select0_valid, alu_select1_valid;
     logic [ISSUE_WINDOW_DEPTH-1:0] issue_select_mask;
+    logic [ISSUE_WINDOW_DEPTH-1:0] selected0_mask;
+    logic [ISSUE_WINDOW_DEPTH-1:0] selected1_mask;
     ydrasil_compact_uop_t selected_uop0, selected_uop1;
     logic selected_valid0, selected_valid1;
     wire free_valid0, free_valid1;
@@ -232,45 +259,91 @@ import ydrasil_pkg::*;
     ydrasil_compact_uop_t p0_selected_uop, p1_selected_uop;
     ydrasil_compact_uop_t p1_serial_selected_uop;
     logic p0_selected_src1_due;
-    // RS payload and all class-local control must cross the same Dispatch
-    // boundary. Using the live Decode packet here associates the following
-    // instruction's serial/order metadata with the registered uop.
-    wire dispatch0_memory =
-        (dispatch_pkt_i.uop_class == UOP_CLASS_LOAD) ||
-        (dispatch_pkt_i.uop_class == UOP_CLASS_STORE);
-    wire dispatch1_memory =
-        (dispatch_pkt1_i.uop_class == UOP_CLASS_LOAD) ||
-        (dispatch_pkt1_i.uop_class == UOP_CLASS_STORE);
-    wire dispatch0_store = dispatch_pkt_i.uop_class == UOP_CLASS_STORE;
-    wire dispatch1_store = dispatch_pkt1_i.uop_class == UOP_CLASS_STORE;
-    wire dispatch0_branch = dispatch_pkt_i.uop_class == UOP_CLASS_BJP;
-    wire dispatch1_branch = dispatch_pkt1_i.uop_class == UOP_CLASS_BJP;
-    wire dispatch0_mul = dispatch_pkt_i.uop_class == UOP_CLASS_MUL;
-    wire dispatch1_mul = dispatch_pkt1_i.uop_class == UOP_CLASS_MUL;
-    wire dispatch0_serial =
-        (dispatch_pkt_i.uop_class == UOP_CLASS_CSR) ||
-        (dispatch_pkt_i.uop_class == UOP_CLASS_SYS) ||
-        dispatch_pkt_i.decode.fence_i ||
-        dispatch_pkt_i.decode.illegal_instr;
-    wire dispatch1_serial =
-        (dispatch_pkt1_i.uop_class == UOP_CLASS_CSR) ||
-        (dispatch_pkt1_i.uop_class == UOP_CLASS_SYS) ||
-        dispatch_pkt1_i.decode.fence_i ||
-        dispatch_pkt1_i.decode.illegal_instr;
-    wire dispatch0_divrem = dispatch0_mul &&
-        (dispatch_pkt_i.uop_subop >= UOP_SUBOP_WIDTH'(OP_MUL_DIV));
-    wire dispatch1_divrem = dispatch1_mul &&
-        (dispatch_pkt1_i.uop_subop >= UOP_SUBOP_WIDTH'(OP_MUL_DIV));
+    wire [COMPLETION_LANES-1:0] dispatch0_src0_completion_hit;
+    wire [COMPLETION_LANES-1:0] dispatch0_src1_completion_hit;
+    wire [COMPLETION_LANES-1:0] dispatch1_src0_completion_hit;
+    wire [COMPLETION_LANES-1:0] dispatch1_src1_completion_hit;
+    // RS control is predecoded from narrow instruction fields.  The complete
+    // execution packet crosses the same edge as data only; its long Zb decode
+    // cone is not allowed to drive RS valid/order/resource control.
+    wire [6:0] dispatch0_opcode = decode_instr_i[6:0];
+    wire [6:0] dispatch1_opcode = decode_instr1_i[6:0];
+    wire [2:0] dispatch0_funct3 = decode_instr_i[14:12];
+    wire [2:0] dispatch1_funct3 = decode_instr1_i[14:12];
+    wire [6:0] dispatch0_funct7 = decode_instr_i[31:25];
+    wire [6:0] dispatch1_funct7 = decode_instr1_i[31:25];
+    wire dispatch0_memory = decode_domain_i == DISPATCH_DOMAIN_P0;
+    wire dispatch1_memory = decode_domain1_i == DISPATCH_DOMAIN_P0;
+    wire dispatch0_store = dispatch0_opcode == RV32I_INS_TYPE_S;
+    wire dispatch1_store = dispatch1_opcode == RV32I_INS_TYPE_S;
+    wire dispatch0_branch = (dispatch0_opcode == RV32I_INS_TYPE_B) ||
+        (dispatch0_opcode == RV32I_INS_JAL) ||
+        (dispatch0_opcode == RV32I_INS_JALR);
+    wire dispatch1_branch = (dispatch1_opcode == RV32I_INS_TYPE_B) ||
+        (dispatch1_opcode == RV32I_INS_JAL) ||
+        (dispatch1_opcode == RV32I_INS_JALR);
+    wire dispatch0_mul = (dispatch0_opcode == RV32I_INS_TYPE_R_M) &&
+        (dispatch0_funct7 == 7'b0000001);
+    wire dispatch1_mul = (dispatch1_opcode == RV32I_INS_TYPE_R_M) &&
+        (dispatch1_funct7 == 7'b0000001);
+    wire dispatch0_serial = decode_serial_i;
+    wire dispatch1_serial = decode_serial1_i;
+    wire dispatch0_divrem = dispatch0_mul && dispatch0_funct3[2];
+    wire dispatch1_divrem = dispatch1_mul && dispatch1_funct3[2];
+    wire dispatch0_early_bit_group0 =
+        (dispatch0_opcode == RV32I_INS_TYPE_R_M) &&
+        (dispatch0_funct7 == 7'b0010000) &&
+        ((dispatch0_funct3 == 3'b010) ||
+         (dispatch0_funct3 == 3'b100) ||
+         (dispatch0_funct3 == 3'b110));
+    wire dispatch1_early_bit_group0 =
+        (dispatch1_opcode == RV32I_INS_TYPE_R_M) &&
+        (dispatch1_funct7 == 7'b0010000) &&
+        ((dispatch1_funct3 == 3'b010) ||
+         (dispatch1_funct3 == 3'b100) ||
+         (dispatch1_funct3 == 3'b110));
+    wire dispatch0_early_bit_group1 =
+        (dispatch0_opcode == RV32I_INS_TYPE_R_M) &&
+        (dispatch0_funct7 == 7'b0000100) &&
+        ((dispatch0_funct3 == 3'b100) ||
+         (dispatch0_funct3 == 3'b111));
+    wire dispatch1_early_bit_group1 =
+        (dispatch1_opcode == RV32I_INS_TYPE_R_M) &&
+        (dispatch1_funct7 == 7'b0000100) &&
+        ((dispatch1_funct3 == 3'b100) ||
+         (dispatch1_funct3 == 3'b111));
+    wire dispatch0_early_bit_group2 =
+        (dispatch0_opcode == RV32I_INS_TYPE_I) &&
+        (((dispatch0_funct7 == 7'b0110000) &&
+          (dispatch0_funct3 == 3'b001) &&
+          ((decode_instr_i[24:20] == 5'b00100) ||
+           (decode_instr_i[24:20] == 5'b00101))) ||
+         ((dispatch0_funct7 == 7'b0110100) &&
+          (dispatch0_funct3 == 3'b101) &&
+          (decode_instr_i[24:20] == 5'b11000)));
+    wire dispatch1_early_bit_group2 =
+        (dispatch1_opcode == RV32I_INS_TYPE_I) &&
+        (((dispatch1_funct7 == 7'b0110000) &&
+          (dispatch1_funct3 == 3'b001) &&
+          ((decode_instr1_i[24:20] == 5'b00100) ||
+           (decode_instr1_i[24:20] == 5'b00101))) ||
+         ((dispatch1_funct7 == 7'b0110100) &&
+          (dispatch1_funct3 == 3'b101) &&
+          (decode_instr1_i[24:20] == 5'b11000)));
+    wire dispatch0_early = (decode_domain_i == DISPATCH_DOMAIN_ALU) ||
+        dispatch0_branch || dispatch0_early_bit_group0 ||
+        dispatch0_early_bit_group1 || dispatch0_early_bit_group2;
+    wire dispatch1_early = (decode_domain1_i == DISPATCH_DOMAIN_ALU) ||
+        dispatch1_branch || dispatch1_early_bit_group0 ||
+        dispatch1_early_bit_group1 || dispatch1_early_bit_group2;
+    wire dispatch0_early_writes = dispatch0_early && decode_dst_writes_i;
+    wire dispatch1_early_writes = dispatch1_early && decode_dst_writes1_i;
     // Fence and illegal encodings retain an ALU base class from Decode, but
     // their serial attribute owns the P1 path and must win RS-domain routing.
-    wire dispatch0_alu =
-        (dispatch_pkt_i.uop_class == UOP_CLASS_ALU) && !dispatch0_serial;
-    wire dispatch1_alu =
-        (dispatch_pkt1_i.uop_class == UOP_CLASS_ALU) && !dispatch1_serial;
-    wire dispatch0_p0 = !dispatch0_alu &&
-        (dispatch_pkt_i.lane_mask == 2'b01);
-    wire dispatch1_p0 = !dispatch1_alu &&
-        (dispatch_pkt1_i.lane_mask == 2'b01);
+    wire dispatch0_alu = decode_domain_i == DISPATCH_DOMAIN_ALU;
+    wire dispatch1_alu = decode_domain1_i == DISPATCH_DOMAIN_ALU;
+    wire dispatch0_p0 = decode_domain_i == DISPATCH_DOMAIN_P0;
+    wire dispatch1_p0 = decode_domain1_i == DISPATCH_DOMAIN_P0;
     wire [3:0] alu_free_local = ~issue_window_valid_q[3:0];
     wire [2:0] p0_free_local = ~issue_window_valid_q[6:4];
     wire [2:0] p1_free_local = ~issue_window_valid_q[9:7];
@@ -304,6 +377,86 @@ import ydrasil_pkg::*;
         dispatch1_divrem ? ((issue_window_valid_q & issue_mul_q) |
                             (dispatch0_mul ? dispatch1_prior_mask : '0)) : '0;
 
+    // A new source needs same-cycle completion qualification only once per
+    // dispatch lane. Replicating these comparisons in every RS entry makes the
+    // completion broadcast part of all ready D cones and multiplies its fanout.
+    genvar dispatch_completion_idx;
+    generate
+        for (dispatch_completion_idx = 0;
+             dispatch_completion_idx < COMPLETION_LANES;
+             dispatch_completion_idx = dispatch_completion_idx + 1) begin :
+                g_dispatch_completion_hit
+            assign dispatch0_src0_completion_hit[dispatch_completion_idx] =
+                completion_meta_i[dispatch_completion_idx].valid &&
+                completion_meta_i[dispatch_completion_idx].producer_tracked &&
+                (completion_meta_i[dispatch_completion_idx].producer_id ==
+                 renamed_src0_tag_i);
+            assign dispatch0_src1_completion_hit[dispatch_completion_idx] =
+                completion_meta_i[dispatch_completion_idx].valid &&
+                completion_meta_i[dispatch_completion_idx].producer_tracked &&
+                (completion_meta_i[dispatch_completion_idx].producer_id ==
+                 renamed_src1_tag_i);
+            assign dispatch1_src0_completion_hit[dispatch_completion_idx] =
+                completion_meta_i[dispatch_completion_idx].valid &&
+                completion_meta_i[dispatch_completion_idx].producer_tracked &&
+                (completion_meta_i[dispatch_completion_idx].producer_id ==
+                 renamed_src2_tag_i);
+            assign dispatch1_src1_completion_hit[dispatch_completion_idx] =
+                completion_meta_i[dispatch_completion_idx].valid &&
+                completion_meta_i[dispatch_completion_idx].producer_tracked &&
+                (completion_meta_i[dispatch_completion_idx].producer_id ==
+                 renamed_src3_tag_i);
+        end
+    endgenerate
+    wire dispatch0_src0_ready = renamed_src0_ready_i ||
+        (select_wakeup_valid_q[0] &&
+         (select_wakeup_id_q[0] == renamed_src0_tag_i)) ||
+        (select_wakeup_valid_q[1] &&
+         (select_wakeup_id_q[1] == renamed_src0_tag_i)) ||
+        (dtcm_select_wakeup_q.valid &&
+         (dtcm_select_wakeup_q.producer_id ==
+          renamed_src0_tag_i)) ||
+        (mdu_select_wakeup_q.valid &&
+         (mdu_select_wakeup_q.producer_id ==
+          renamed_src0_tag_i)) ||
+        (|dispatch0_src0_completion_hit);
+    wire dispatch0_src1_ready = renamed_src1_ready_i ||
+        (select_wakeup_valid_q[0] &&
+         (select_wakeup_id_q[0] == renamed_src1_tag_i)) ||
+        (select_wakeup_valid_q[1] &&
+         (select_wakeup_id_q[1] == renamed_src1_tag_i)) ||
+        (dtcm_select_wakeup_q.valid &&
+         (dtcm_select_wakeup_q.producer_id ==
+          renamed_src1_tag_i)) ||
+        (mdu_select_wakeup_q.valid &&
+         (mdu_select_wakeup_q.producer_id ==
+          renamed_src1_tag_i)) ||
+        (|dispatch0_src1_completion_hit);
+    wire dispatch1_src0_ready = renamed_src2_ready_i ||
+        (select_wakeup_valid_q[0] &&
+         (select_wakeup_id_q[0] == renamed_src2_tag_i)) ||
+        (select_wakeup_valid_q[1] &&
+         (select_wakeup_id_q[1] == renamed_src2_tag_i)) ||
+        (dtcm_select_wakeup_q.valid &&
+         (dtcm_select_wakeup_q.producer_id ==
+          renamed_src2_tag_i)) ||
+        (mdu_select_wakeup_q.valid &&
+         (mdu_select_wakeup_q.producer_id ==
+          renamed_src2_tag_i)) ||
+        (|dispatch1_src0_completion_hit);
+    wire dispatch1_src1_ready = renamed_src3_ready_i ||
+        (select_wakeup_valid_q[0] &&
+         (select_wakeup_id_q[0] == renamed_src3_tag_i)) ||
+        (select_wakeup_valid_q[1] &&
+         (select_wakeup_id_q[1] == renamed_src3_tag_i)) ||
+        (dtcm_select_wakeup_q.valid &&
+         (dtcm_select_wakeup_q.producer_id ==
+          renamed_src3_tag_i)) ||
+        (mdu_select_wakeup_q.valid &&
+         (mdu_select_wakeup_q.producer_id ==
+          renamed_src3_tag_i)) ||
+        (|dispatch1_src1_completion_hit);
+
     // The three RS domains have physically separate candidate networks. The
     // ALU bank can provide both lanes; P0 and P1 each provide at most one.
     assign alu_candidate_local[0] = issue_window_valid_q[0] &&
@@ -334,22 +487,19 @@ import ydrasil_pkg::*;
         issue_window_src0_ready_q[4] &&
         (issue_window_src1_ready_q[4] || issue_store_q[4]) &&
         (!issue_memory_q[4] ||
-         ({1'b0, lsu_credit_i} >
-          ({1'b0, lsu_select_reserved_q} + agu_in_valid_q))) &&
+         ({1'b0, lsu_credit_i} > {1'b0, lsu_select_reserved_q})) &&
         !(|issue_order_mask_q[4]);
     assign p0_candidate_local[1] = issue_window_valid_q[5] &&
         issue_window_src0_ready_q[5] &&
         (issue_window_src1_ready_q[5] || issue_store_q[5]) &&
         (!issue_memory_q[5] ||
-         ({1'b0, lsu_credit_i} >
-          ({1'b0, lsu_select_reserved_q} + agu_in_valid_q))) &&
+         ({1'b0, lsu_credit_i} > {1'b0, lsu_select_reserved_q})) &&
         !(|issue_order_mask_q[5]);
     assign p0_candidate_local[2] = issue_window_valid_q[6] &&
         issue_window_src0_ready_q[6] &&
         (issue_window_src1_ready_q[6] || issue_store_q[6]) &&
         (!issue_memory_q[6] ||
-         ({1'b0, lsu_credit_i} >
-          ({1'b0, lsu_select_reserved_q} + agu_in_valid_q))) &&
+         ({1'b0, lsu_credit_i} > {1'b0, lsu_select_reserved_q})) &&
         !(|issue_order_mask_q[6]);
     assign p0_select_local[0] = p0_candidate_local[0];
     assign p0_select_local[1] = p0_candidate_local[1] &&
@@ -385,17 +535,17 @@ import ydrasil_pkg::*;
         issue_window_src0_ready_q[7] && issue_window_src1_ready_q[7] &&
         issue_serial_q[7] && !(|issue_order_mask_q[7]) &&
         (issue_window_q[7].dst.rob_tag == rob_head_select_q) &&
-        lsu_idle_select_q && !serial_bundle_valid_q;
+        lsu_idle_select_q;
     assign p1_serial_candidate_local[1] = issue_window_valid_q[8] &&
         issue_window_src0_ready_q[8] && issue_window_src1_ready_q[8] &&
         issue_serial_q[8] && !(|issue_order_mask_q[8]) &&
         (issue_window_q[8].dst.rob_tag == rob_head_select_q) &&
-        lsu_idle_select_q && !serial_bundle_valid_q;
+        lsu_idle_select_q;
     assign p1_serial_candidate_local[2] = issue_window_valid_q[9] &&
         issue_window_src0_ready_q[9] && issue_window_src1_ready_q[9] &&
         issue_serial_q[9] && !(|issue_order_mask_q[9]) &&
         (issue_window_q[9].dst.rob_tag == rob_head_select_q) &&
-        lsu_idle_select_q && !serial_bundle_valid_q;
+        lsu_idle_select_q;
     assign p1_serial_select_local[0] = p1_serial_candidate_local[0];
     assign p1_serial_select_local[1] = p1_serial_candidate_local[1] &&
         !p1_serial_candidate_local[0];
@@ -499,73 +649,161 @@ import ydrasil_pkg::*;
 
     assign free_valid0 = |free_select0_vec;
     assign free_valid1 = |free_select1_vec;
+    wire [2:0] alu_free_count =
+        3'(alu_free_local[0]) + 3'(alu_free_local[1]) +
+        3'(alu_free_local[2]) + 3'(alu_free_local[3]);
+    wire [1:0] p0_free_count =
+        2'(p0_free_local[0]) + 2'(p0_free_local[1]) +
+        2'(p0_free_local[2]);
+    wire [1:0] p1_free_count =
+        2'(p1_free_local[0]) + 2'(p1_free_local[1]) +
+        2'(p1_free_local[2]);
+    wire [1:0] alu_dispatch_demand =
+        {1'b0, decode_valid_i && dispatch0_alu} +
+        {1'b0, decode_valid1_i && dispatch1_alu};
+    wire [1:0] p0_dispatch_demand =
+        {1'b0, decode_valid_i && !dispatch0_alu && dispatch0_p0} +
+        {1'b0, decode_valid1_i && !dispatch1_alu && dispatch1_p0};
+    wire [1:0] p1_dispatch_demand =
+        {1'b0, decode_valid_i && !dispatch0_alu && !dispatch0_p0} +
+        {1'b0, decode_valid1_i && !dispatch1_alu && !dispatch1_p0};
     assign dispatch_slots_available =
-        (!decode_pkt_i.valid || free_valid0) &&
-        (!decode_pkt1_i.valid || free_valid1);
+        (alu_free_credit_q >= {1'b0, alu_dispatch_demand}) &&
+        (p0_free_credit_q >= p0_dispatch_demand) &&
+        (p1_free_credit_q >= p1_dispatch_demand) &&
+        (credit_resync_q == '0);
 
     always_comb begin
         selected_uop0 = '0;
         selected_uop1 = '0;
         selected_valid0 = 1'b0;
         selected_valid1 = 1'b0;
-        issue_select_mask = '0;
-        if (p0_select_valid) begin
+        selected0_mask = '0;
+        selected1_mask = '0;
+        if (|p1_serial_select_local) begin
+            selected_uop0 = p1_serial_selected_uop;
+            selected_valid0 = 1'b1;
+            selected0_mask[9:7] = p1_serial_select_local;
+        end else if (p0_select_valid) begin
             selected_uop0 = p0_selected_uop;
             selected_valid0 = 1'b1;
-            issue_select_mask[6:4] = p0_select_local;
+            selected0_mask[6:4] = p0_select_local;
             if (p1_select_valid) begin
                 selected_uop1 = p1_selected_uop;
                 selected_valid1 = 1'b1;
-                issue_select_mask[9:7] = p1_select_local;
+                selected1_mask[9:7] = p1_select_local;
             end else if (alu_select0_valid) begin
                 selected_uop1 = alu_selected_uop0;
                 selected_uop1.lane_mask = 2'b10;
                 selected_valid1 = 1'b1;
-                issue_select_mask[3:0] = alu_select0_local;
+                selected1_mask[3:0] = alu_select0_local;
             end
         end else if (p1_select_valid) begin
             if (alu_select0_valid) begin
                 selected_uop0 = alu_selected_uop0;
                 selected_uop0.lane_mask = 2'b01;
                 selected_valid0 = 1'b1;
-                issue_select_mask[3:0] = alu_select0_local;
+                selected0_mask[3:0] = alu_select0_local;
                 selected_uop1 = p1_selected_uop;
                 selected_valid1 = 1'b1;
-                issue_select_mask[9:7] = p1_select_local;
+                selected1_mask[9:7] = p1_select_local;
             end else begin
                 selected_uop0 = p1_selected_uop;
                 selected_valid0 = 1'b1;
-                issue_select_mask[9:7] = p1_select_local;
+                selected0_mask[9:7] = p1_select_local;
             end
         end else if (alu_select0_valid) begin
             selected_uop0 = alu_selected_uop0;
             selected_uop0.lane_mask = 2'b01;
             selected_valid0 = 1'b1;
-            issue_select_mask[3:0] = alu_select0_local;
+            selected0_mask[3:0] = alu_select0_local;
             if (alu_select1_valid) begin
                 selected_uop1 = alu_selected_uop1;
                 selected_uop1.lane_mask = 2'b10;
                 selected_valid1 = 1'b1;
-                issue_select_mask[3:0] =
-                    alu_select0_local | alu_select1_local;
+                selected1_mask[3:0] = alu_select1_local;
             end
         end
         selected_uop0.valid = selected_valid0;
         selected_uop1.valid = selected_valid1;
+        issue_select_mask = selected0_mask | selected1_mask;
     end
 
     // The ring payload is written only by Select. Operand pop updates only the
     // narrow head/count state, so neither replay nor FU backpressure selects a
     // new value for a payload D pin.
     wire select_buf_has_room = select_buf_count_q != 2'd2;
-    wire select_buf_push = select_buf_has_room && selected_valid0;
-    wire serial_bundle_push = |p1_serial_select_local;
-    wire [ISSUE_WINDOW_DEPTH-1:0] serial_select_mask =
-        {p1_serial_select_local, 7'b0};
+    wire select_buf_push = select_buf_has_room && selected_valid0 &&
+        !branch_recovery_i && !recovery_pending_q;
+
+    // Wake dependents when Select has committed the producer to the local
+    // Operand queue. A dependent selected on the next cycle is ordered behind
+    // that producer by the queue, while the global completion/resolver cone no
+    // longer feeds back into every RS entry's ready D/CE pins.
+    wire selected0_due_valid = select_buf_push &&
+        (|(selected0_mask & issue_early_writes_q));
+    wire selected1_due_valid = select_buf_push && selected_valid1 &&
+        (|(selected1_mask & issue_early_writes_q));
     wire div_select_pick = select_buf_push &&
         (|(issue_select_mask[9:7] & issue_divrem_q[9:7]));
+    // Every P0 entry is an LSU operation.  Its credit reservation is local to
+    // the P0 pick and must not depend on the combined P0/P1/ALU select mask.
     wire lsu_select_pick = select_buf_push &&
-        (|(issue_select_mask[6:4] & issue_memory_q[6:4]));
+        (|issue_select_mask[6:4]);
+
+    // Release credits from the prior cycle's registered removal mask.  This is
+    // deliberately one cycle pessimistic; current LSU/DIV/Select decisions do
+    // not cross back into the Dispatch credit register D pins.
+    wire [2:0] alu_remove_count =
+        3'(issued_slot_mask_q[0]) + 3'(issued_slot_mask_q[1]) +
+        3'(issued_slot_mask_q[2]) + 3'(issued_slot_mask_q[3]);
+    wire [1:0] p0_remove_count =
+        2'(issued_slot_mask_q[4]) + 2'(issued_slot_mask_q[5]) +
+        2'(issued_slot_mask_q[6]);
+    wire [1:0] p1_remove_count =
+        2'(issued_slot_mask_q[7]) + 2'(issued_slot_mask_q[8]) +
+        2'(issued_slot_mask_q[9]);
+    wire [2:0] alu_alloc_count =
+        3'(issue_pipe_push && dispatch0_alu) +
+        3'(issue_pipe_push_two && dispatch1_alu);
+    wire [1:0] p0_alloc_count =
+        2'(issue_pipe_push && dispatch0_p0) +
+        2'(issue_pipe_push_two && dispatch1_p0);
+    wire [1:0] p1_alloc_count =
+        2'(issue_pipe_push && !dispatch0_alu && !dispatch0_p0) +
+        2'(issue_pipe_push_two && !dispatch1_alu && !dispatch1_p0);
+
+    // Dispatch sees only registered per-domain credits.  Select removes and ID
+    // allocations update the mirror on the same edge as the RS entries, so
+    // live RS valid bits never form a combinational ready path back to FetchQ.
+    always_ff @(posedge clk) begin
+        if (!rst_n || trap_flush_i ||
+            (flush_id_i && !branch_recovery_i)) begin
+            alu_free_credit_q <= 3'd4;
+            p0_free_credit_q <= 2'd3;
+            p1_free_credit_q <= 2'd3;
+            credit_resync_q <= '0;
+        end else if (branch_recovery_i) begin
+            alu_free_credit_q <= '0;
+            p0_free_credit_q <= '0;
+            p1_free_credit_q <= '0;
+            credit_resync_q <= 2'd2;
+        end else if (credit_resync_q != '0) begin
+            credit_resync_q <= credit_resync_q - 1'b1;
+            if (credit_resync_q == 2'd1) begin
+                alu_free_credit_q <= alu_free_count;
+                p0_free_credit_q <= p0_free_count;
+                p1_free_credit_q <= p1_free_count;
+            end
+        end else begin
+            alu_free_credit_q <= alu_free_credit_q + alu_remove_count -
+                alu_alloc_count;
+            p0_free_credit_q <= p0_free_credit_q + p0_remove_count -
+                p0_alloc_count;
+            p1_free_credit_q <= p1_free_credit_q + p1_remove_count -
+                p1_alloc_count;
+        end
+    end
 
     integer recovery_idx;
     logic [ISSUE_WINDOW_DEPTH-1:0] recovery_slot_mask;
@@ -574,10 +812,22 @@ import ydrasil_pkg::*;
         for (recovery_idx = 0; recovery_idx < ISSUE_WINDOW_DEPTH;
              recovery_idx = recovery_idx + 1) begin
             if (issue_window_valid_q[recovery_idx] &&
-                recovery_keep_mask_i[issue_window_q[recovery_idx].dst.rob_tag[
+                recovery_keep_mask_q[issue_window_q[recovery_idx].dst.rob_tag[
                     PRODUCER_SLOT_WIDTH-1:0]]) begin
                 recovery_slot_mask[recovery_idx] = 1'b1;
             end
+        end
+    end
+
+    always_ff @(posedge clk) begin
+        if (!rst_n || trap_flush_i ||
+            (flush_id_i && !branch_recovery_i)) begin
+            recovery_pending_q <= 1'b0;
+            recovery_keep_mask_q <= '0;
+        end else begin
+            recovery_pending_q <= branch_recovery_i;
+            if (branch_recovery_i)
+                recovery_keep_mask_q <= recovery_keep_mask_i;
         end
     end
 
@@ -587,6 +837,12 @@ import ydrasil_pkg::*;
             rob_head_select_q <= '0;
             lsu_idle_select_q <= 1'b0;
             issued_slot_mask_q <= '0;
+            select_wakeup_valid_q[0] <= 1'b0;
+            select_wakeup_valid_q[1] <= 1'b0;
+            select_wakeup_id_q[0] <= '0;
+            select_wakeup_id_q[1] <= '0;
+            dtcm_select_wakeup_q <= '0;
+            mdu_select_wakeup_q <= '0;
             mdu_div_available_q <= 1'b1;
             div_select_reserved_q <= 1'b0;
             div_busy_seen_q <= 1'b0;
@@ -594,8 +850,13 @@ import ydrasil_pkg::*;
             rob_head_select_q <= rob_head_id_i;
             lsu_idle_select_q <= lsu_idle_i;
             issued_slot_mask_q <=
-                (select_buf_push ? issue_select_mask : '0) |
-                (serial_bundle_push ? serial_select_mask : '0);
+                select_buf_push ? issue_select_mask : '0;
+            select_wakeup_valid_q[0] <= selected0_due_valid;
+            select_wakeup_valid_q[1] <= selected1_due_valid;
+            select_wakeup_id_q[0] <= selected_uop0.dst.rob_tag;
+            select_wakeup_id_q[1] <= selected_uop1.dst.rob_tag;
+            dtcm_select_wakeup_q <= dtcm_reservation_i;
+            mdu_select_wakeup_q <= mdu_due_i;
             mdu_div_available_q <= mdu_div_available_i;
             if (div_select_reserved_q && !mdu_div_available_q)
                 div_busy_seen_q <= 1'b1;
@@ -622,22 +883,24 @@ import ydrasil_pkg::*;
                 .rst_n(rst_n),
                 .hard_flush_i((flush_id_i && !branch_recovery_i) ||
                               trap_flush_i),
-                .branch_recovery_i(branch_recovery_i),
-                .recovery_keep_i(recovery_keep_mask_i[
+                .branch_recovery_i(recovery_pending_q),
+                .recovery_keep_i(recovery_keep_mask_q[
                     issue_window_q[rs_entry_idx].dst.rob_tag[
                         PRODUCER_SLOT_WIDTH-1:0]]),
                 .recovery_slot_mask_i(recovery_slot_mask),
                 .issued_slot_mask_i(issued_slot_mask_q),
-                .remove_i((select_buf_push &&
-                           issue_select_mask[rs_entry_idx]) ||
-                          (serial_bundle_push &&
-                           serial_select_mask[rs_entry_idx])),
+                .remove_i(select_buf_push &&
+                          issue_select_mask[rs_entry_idx]),
                 .dispatch0_write_i(issue_pipe_push && free_valid0 &&
                                    free_select0_vec[rs_entry_idx]),
                 .dispatch1_write_i(issue_pipe_push_two && free_valid1 &&
                                    free_select1_vec[rs_entry_idx]),
                 .dispatch0_uop_i(dispatch_compact_uop),
                 .dispatch1_uop_i(dispatch_compact_uop1),
+                .dispatch0_src0_ready_i(dispatch0_src0_ready),
+                .dispatch0_src1_ready_i(dispatch0_src1_ready),
+                .dispatch1_src0_ready_i(dispatch1_src0_ready),
+                .dispatch1_src1_ready_i(dispatch1_src1_ready),
                 .dispatch0_order_mask_i(dispatch0_order_mask),
                 .dispatch1_order_mask_i(dispatch1_order_mask),
                 .dispatch0_memory_i(dispatch0_memory),
@@ -650,12 +913,14 @@ import ydrasil_pkg::*;
                 .dispatch1_divrem_i(dispatch1_divrem),
                 .dispatch0_serial_i(dispatch0_serial),
                 .dispatch1_serial_i(dispatch1_serial),
-                .wakeup0_valid_i(selected0_due_valid),
-                .wakeup0_id_i(issue_pkt_i.dst.rob_tag),
-                .wakeup1_valid_i(selected1_due_valid),
-                .wakeup1_id_i(issue_pkt1_i.dst.rob_tag),
-                .dtcm_wakeup_i(dtcm_reservation_i),
-                .mdu_wakeup_i(mdu_due_i),
+                .dispatch0_early_writes_i(dispatch0_early_writes),
+                .dispatch1_early_writes_i(dispatch1_early_writes),
+                .wakeup0_valid_i(select_wakeup_valid_q[0]),
+                .wakeup0_id_i(select_wakeup_id_q[0]),
+                .wakeup1_valid_i(select_wakeup_valid_q[1]),
+                .wakeup1_id_i(select_wakeup_id_q[1]),
+                .dtcm_wakeup_i(dtcm_select_wakeup_q),
+                .mdu_wakeup_i(mdu_select_wakeup_q),
                 .completion_meta_i(completion_meta_i),
                 .uop_o(issue_window_q[rs_entry_idx]),
                 .valid_o(issue_window_valid_q[rs_entry_idx]),
@@ -666,7 +931,8 @@ import ydrasil_pkg::*;
                 .store_o(issue_store_q[rs_entry_idx]),
                 .mul_o(issue_mul_q[rs_entry_idx]),
                 .divrem_o(issue_divrem_q[rs_entry_idx]),
-                .serial_o(issue_serial_q[rs_entry_idx])
+                .serial_o(issue_serial_q[rs_entry_idx]),
+                .early_writes_o(issue_early_writes_q[rs_entry_idx])
             );
         end
     endgenerate
@@ -680,26 +946,26 @@ import ydrasil_pkg::*;
             select_bundle0_uop1_q <= '0;
             select_bundle1_uop0_q <= '0;
             select_bundle1_uop1_q <= '0;
-            serial_bundle_uop_q <= '0;
             select_bundle0_pair_q <= 1'b0;
             select_bundle1_pair_q <= 1'b0;
-            serial_bundle_valid_q <= 1'b0;
         end else if (flush_id_i || trap_flush_i || branch_recovery_i) begin
             select_buf_head_q <= '0;
             select_buf_tail_q <= '0;
             select_buf_count_q <= '0;
             select_bundle0_pair_q <= 1'b0;
             select_bundle1_pair_q <= 1'b0;
-            serial_bundle_valid_q <= 1'b0;
         end else begin
-            if (serial_bundle_pop)
-                serial_bundle_valid_q <= 1'b0;
-            if (serial_bundle_push) begin
-                serial_bundle_uop_q <= p1_serial_selected_uop;
-                serial_bundle_valid_q <= 1'b1;
-            end
             if (select_buf_pop)
                 select_buf_head_q <= ~select_buf_head_q;
+            if (select_buf_replay) begin
+                if (select_buf_head_q) begin
+                    select_bundle1_uop0_q <= select_bundle1_uop1_q;
+                    select_bundle1_pair_q <= 1'b0;
+                end else begin
+                    select_bundle0_uop0_q <= select_bundle0_uop1_q;
+                    select_bundle0_pair_q <= 1'b0;
+                end
+            end
             if (select_buf_push) begin
                 if (select_buf_tail_q) begin
                     select_bundle1_uop0_q <= selected_uop0;
@@ -748,9 +1014,9 @@ import ydrasil_pkg::*;
             PRODUCER_SLOT_WIDTH-1:0]),
         .read_slot1_i      (issue_pkt_i.src1.producer_tag[
             PRODUCER_SLOT_WIDTH-1:0]),
-        .read_slot2_i      (issue_pkt1_i.src0.producer_tag[
+        .read_slot2_i      (select_head_uop1.src0.producer_tag[
             PRODUCER_SLOT_WIDTH-1:0]),
-        .read_slot3_i      (issue_pkt1_i.src1.producer_tag[
+        .read_slot3_i      (select_head_uop1.src1.producer_tag[
             PRODUCER_SLOT_WIDTH-1:0]),
         .retire_id0_i      (retire_id0_i),
         .retire_id1_i      (retire_id1_i),
@@ -778,6 +1044,7 @@ import ydrasil_pkg::*;
     reg early_replay_valid_q [0:1];
     producer_id_t early_replay_id_q [0:1];
     reg [REGS_ADDR_WIDTH-1:0] early_replay_rd_q [0:1];
+    reg [DATA_WIDTH-1:0] early_replay_data_q [0:1];
     // Token identity is registered here. Its data is reconstructed from the
     // producer's registered FU input cell through a restricted result cone
     // during the following Issue cycle.
@@ -805,28 +1072,13 @@ import ydrasil_pkg::*;
     reg [OPERATOR_WIDTH-1:0] mul_in_operator_q;
     reg [OPERATOR_TYPE_WIDTH-1:0] mul_in_operator_type_q;
     ydrasil_lane_b_meta_t dual_meta_q;
-    reg dual_alu_valid_q, dual_bru_valid_q;
+    reg dual_alu_valid_q, dual_bit_valid_q, dual_bru_valid_q;
     ydrasil_lane_b_alu_payload_t dual_alu_payload_q;
+    ydrasil_lane_b_bit_payload_t dual_bit_payload_q;
     ydrasil_lane_b_bru_payload_t dual_bru_payload_q;
-    reg alu_in_operand_a_dtcm_q, alu_in_operand_b_dtcm_q;
-    reg agu_in_operand_a_dtcm_q, agu_in_store_data_dtcm_q;
-    reg csr_in_operand_a_dtcm_q;
-    reg mul_in_operand_a_dtcm_q, mul_in_operand_b_dtcm_q;
-    reg dual_in_operand_a_dtcm_q, dual_in_operand_b_dtcm_q;
-    reg dual_in_branch_operand_a_dtcm_q, dual_in_branch_operand_b_dtcm_q;
-    reg [DATA_WIDTH-1:0] dtcm_stall_data_q;
-    reg dtcm_stall_data_valid_q;
     ydrasil_reservation_pkt_t dtcm_operand_reservation_q;
-    reg [DATA_WIDTH-1:0] dtcm_operand_data_q;
-    wire dtcm_bypass_active_q =
-        alu_in_operand_a_dtcm_q || alu_in_operand_b_dtcm_q ||
-        agu_in_operand_a_dtcm_q || agu_in_store_data_dtcm_q ||
-        csr_in_operand_a_dtcm_q || mul_in_operand_a_dtcm_q ||
-        mul_in_operand_b_dtcm_q || dual_in_operand_a_dtcm_q ||
-        dual_in_operand_b_dtcm_q || dual_in_branch_operand_a_dtcm_q ||
-        dual_in_branch_operand_b_dtcm_q;
-    wire [DATA_WIDTH-1:0] dtcm_bypass_data = dtcm_stall_data_valid_q ?
-        dtcm_stall_data_q : dtcm_operand_data_q;
+    ydrasil_reservation_pkt_t mdu_operand_reservation_q;
+    reg [DATA_WIDTH-1:0] mdu_operand_data_q;
     wire src0_ready;
     wire src1_ready;
     wire src2_ready;
@@ -853,10 +1105,8 @@ import ydrasil_pkg::*;
         .value_i(issue_src0_value_i), .value_epoch_i(issue_src0_epoch_i),
         .arf_i(rf_rdata_rs1_i),
         .dtcm_reservation_i(dtcm_operand_reservation_q),
-        .mdu_reservation_i(mdu_result_reservation_i),
-        .mdu_bypass_data_i(mdu_bypass_data_i),
-        .mdu_completion_i(completion_meta_i[COMPLETION_MUL]),
-        .mdu_completion_data_i(completion_data_i[COMPLETION_MUL]),
+        .mdu_reservation_i(mdu_operand_reservation_q),
+        .mdu_bypass_data_i(mdu_operand_data_q),
         .early_main_valid_i(early_replay_valid_q[0]),
         .early_main_id_i(early_replay_id_q[0]),
         .early_main_rd_i(early_replay_rd_q[0]),
@@ -872,10 +1122,8 @@ import ydrasil_pkg::*;
         .value_i(issue_src1_value_i), .value_epoch_i(issue_src1_epoch_i),
         .arf_i(rf_rdata_rs2_i),
         .dtcm_reservation_i(dtcm_operand_reservation_q),
-        .mdu_reservation_i(mdu_result_reservation_i),
-        .mdu_bypass_data_i(mdu_bypass_data_i),
-        .mdu_completion_i(completion_meta_i[COMPLETION_MUL]),
-        .mdu_completion_data_i(completion_data_i[COMPLETION_MUL]),
+        .mdu_reservation_i(mdu_operand_reservation_q),
+        .mdu_bypass_data_i(mdu_operand_data_q),
         .early_main_valid_i(early_replay_valid_q[0]),
         .early_main_id_i(early_replay_id_q[0]),
         .early_main_rd_i(early_replay_rd_q[0]),
@@ -887,14 +1135,12 @@ import ydrasil_pkg::*;
         .early_main_hit_o(slot0_src1_early_main_hit),
         .early_dual_hit_o(slot0_src1_early_dual_hit), .mdu_hit_o());
     ydrasil_issue_source_resolver #(.DATA_WIDTH(DATA_WIDTH)) u_source2 (
-        .source_i(issue_pkt1_i.src0),
+        .source_i(select_head_uop1.src0),
         .value_i(issue_src2_value_i), .value_epoch_i(issue_src2_epoch_i),
         .arf_i(rf_rdata_rs3_i),
         .dtcm_reservation_i(dtcm_operand_reservation_q),
-        .mdu_reservation_i(mdu_result_reservation_i),
-        .mdu_bypass_data_i(mdu_bypass_data_i),
-        .mdu_completion_i(completion_meta_i[COMPLETION_MUL]),
-        .mdu_completion_data_i(completion_data_i[COMPLETION_MUL]),
+        .mdu_reservation_i(mdu_operand_reservation_q),
+        .mdu_bypass_data_i(mdu_operand_data_q),
         .early_main_valid_i(early_replay_valid_q[0]),
         .early_main_id_i(early_replay_id_q[0]),
         .early_main_rd_i(early_replay_rd_q[0]),
@@ -906,14 +1152,12 @@ import ydrasil_pkg::*;
         .early_main_hit_o(slot1_src0_early_main_hit),
         .early_dual_hit_o(slot1_src0_early_dual_hit), .mdu_hit_o());
     ydrasil_issue_source_resolver #(.DATA_WIDTH(DATA_WIDTH)) u_source3 (
-        .source_i(issue_pkt1_i.src1),
+        .source_i(select_head_uop1.src1),
         .value_i(issue_src3_value_i), .value_epoch_i(issue_src3_epoch_i),
         .arf_i(rf_rdata_rs4_i),
         .dtcm_reservation_i(dtcm_operand_reservation_q),
-        .mdu_reservation_i(mdu_result_reservation_i),
-        .mdu_bypass_data_i(mdu_bypass_data_i),
-        .mdu_completion_i(completion_meta_i[COMPLETION_MUL]),
-        .mdu_completion_data_i(completion_data_i[COMPLETION_MUL]),
+        .mdu_reservation_i(mdu_operand_reservation_q),
+        .mdu_bypass_data_i(mdu_operand_data_q),
         .early_main_valid_i(early_replay_valid_q[0]),
         .early_main_id_i(early_replay_id_q[0]),
         .early_main_rd_i(early_replay_rd_q[0]),
@@ -939,16 +1183,17 @@ import ydrasil_pkg::*;
         (issue_pkt_i.op_class == UOP_CLASS_SYS) || issue_pkt_i.fence_i) &&
         (!lsu_idle_q || !issue_at_rob_head_q);
     wire slot1_blocked = slot1_scoreboard_stall;
-    wire local_issue_stall = slot0_scoreboard_stall ||
-        serialize_stall || slot1_blocked;
-    wire id_advance = !stall_id_i && !bubble_id_i && !local_issue_stall;
+    wire local_issue_stall = slot0_scoreboard_stall || serialize_stall;
+    wire id_advance = !local_issue_stall;
     wire pair_issue = pair_eligible && !slot1_blocked;
     wire head0_b_only = issue_pkt_i.lane_mask[1] &&
         !issue_pkt_i.lane_mask[0];
 
     assign issue_ready_o = id_advance;
-    assign issue_consume_two_o = id_advance && pair_eligible;
-    assign issue_slot1_replay_o = 1'b0;
+    assign issue_consume_two_o = id_advance && pair_eligible &&
+        !slot1_blocked;
+    assign issue_slot1_replay_o = id_advance && pair_eligible &&
+        slot1_blocked;
     reg issue_fence_q;
     producer_id_t issue_fence_tag_q;
     reg [INST_ADDR_WIDTH-1:0] issue_fence_next_pc_q;
@@ -1058,17 +1303,17 @@ import ydrasil_pkg::*;
     end
 
     wire [DATA_WIDTH-1:0] slot0_src0_local = slot0_src0_early_main_hit ?
-        completion_data_i[COMPLETION_ALU] : slot0_src0_early_dual_hit ?
-        completion_data_i[COMPLETION_DUAL_ALU] : slot0_src0;
+        early_replay_data_q[0] : slot0_src0_early_dual_hit ?
+        early_replay_data_q[1] : slot0_src0;
     wire [DATA_WIDTH-1:0] slot0_src1_local = slot0_src1_early_main_hit ?
-        completion_data_i[COMPLETION_ALU] : slot0_src1_early_dual_hit ?
-        completion_data_i[COMPLETION_DUAL_ALU] : slot0_src1;
+        early_replay_data_q[0] : slot0_src1_early_dual_hit ?
+        early_replay_data_q[1] : slot0_src1;
     wire [DATA_WIDTH-1:0] slot1_src0_local = slot1_src0_early_main_hit ?
-        completion_data_i[COMPLETION_ALU] : slot1_src0_early_dual_hit ?
-        completion_data_i[COMPLETION_DUAL_ALU] : slot1_src0;
+        early_replay_data_q[0] : slot1_src0_early_dual_hit ?
+        early_replay_data_q[1] : slot1_src0;
     wire [DATA_WIDTH-1:0] slot1_src1_local = slot1_src1_early_main_hit ?
-        completion_data_i[COMPLETION_ALU] : slot1_src1_early_dual_hit ?
-        completion_data_i[COMPLETION_DUAL_ALU] : slot1_src1;
+        early_replay_data_q[0] : slot1_src1_early_dual_hit ?
+        early_replay_data_q[1] : slot1_src1;
     wire lane_b_uses_slot0 = head0_b_only;
     wire lane_a_src1_ready = src1_ready;
     // A store may issue while its source scoreboard bit is stale, but the
@@ -1092,9 +1337,6 @@ import ydrasil_pkg::*;
         slot0_src0_dtcm_hit : slot1_src0_dtcm_hit;
     wire lane_b_src1_dtcm_hit = lane_b_uses_slot0 ?
         slot0_src1_dtcm_hit : slot1_src1_dtcm_hit;
-    wire selected_dtcm_hit = lane_a_src0_dtcm_hit || lane_a_src1_dtcm_hit ||
-        lane_b_src0_dtcm_hit || lane_b_src1_dtcm_hit;
-
     wire lane_a_accept = id_advance && lane_a_valid;
     wire lane_b_accept = id_advance && lane_b_valid;
     wire lane_a_op_a_src = !lane_a_uop.operand_a_pc_sel &&
@@ -1105,13 +1347,10 @@ import ydrasil_pkg::*;
         !lane_b_uop.operand_a_imm_sel;
     wire lane_b_op_b_src = !lane_b_uop.operand_b_jump_sel &&
         lane_b_uop.operand_b_rs_sel;
-    wire lane_a_alu_exec =
-        (lane_a_uop.op_class == UOP_CLASS_ALU) ||
-        (lane_a_uop.op_class == UOP_CLASS_BITMANIP);
     assign rf_addr_rs1 = issue_pkt_i.src0.arch_addr;
     assign rf_addr_rs2 = issue_pkt_i.src1.arch_addr;
-    assign rf_addr_rs3 = issue_pkt1_i.src0.arch_addr;
-    assign rf_addr_rs4 = issue_pkt1_i.src1.arch_addr;
+    assign rf_addr_rs3 = select_head_uop1.src0.arch_addr;
+    assign rf_addr_rs4 = select_head_uop1.src1.arch_addr;
 
     wire [DATA_WIDTH-1:0] lane_b_operand_a_local =
         lane_b_uop.operand_a_pc_sel ? lane_b_uop.pc :
@@ -1129,6 +1368,25 @@ import ydrasil_pkg::*;
         lane_a_uop.operand_b_jump_sel ? 32'd4 :
         lane_a_uop.operand_b_rs_sel ? lane_a_src1_local :
         lane_a_uop.imm;
+    // DTCM identity is resolved in Operand. Select the matching registered LSU
+    // response on the FU input D side so no data or selector bypasses the
+    // Operand/EX register boundary.
+    wire [DATA_WIDTH-1:0] lane_a_operand_a_capture =
+        (lane_a_op_a_src && lane_a_src0_dtcm_hit) ?
+        dtcm_resp_data_i : lane_a_operand_a_local;
+    wire [DATA_WIDTH-1:0] lane_a_operand_b_capture =
+        (lane_a_op_b_src && lane_a_src1_dtcm_hit) ?
+        dtcm_resp_data_i : lane_a_operand_b_local;
+    wire [DATA_WIDTH-1:0] lane_b_operand_a_capture =
+        (lane_b_op_a_src && lane_b_src0_dtcm_hit) ?
+        dtcm_resp_data_i : lane_b_operand_a_local;
+    wire [DATA_WIDTH-1:0] lane_b_operand_b_capture =
+        (lane_b_op_b_src && lane_b_src1_dtcm_hit) ?
+        dtcm_resp_data_i : lane_b_operand_b_local;
+    wire [DATA_WIDTH-1:0] lane_b_src0_capture = lane_b_src0_dtcm_hit ?
+        dtcm_resp_data_i : lane_b_src0_local;
+    wire [DATA_WIDTH-1:0] lane_b_src1_capture = lane_b_src1_dtcm_hit ?
+        dtcm_resp_data_i : lane_b_src1_local;
     wire slot0_early_bitmanip_supported =
         (issue_pkt_i.subop == UOP_SUBOP_WIDTH'(OP_B_SH1ADD)) ||
         (issue_pkt_i.subop == UOP_SUBOP_WIDTH'(OP_B_SH2ADD)) ||
@@ -1184,6 +1442,8 @@ import ydrasil_pkg::*;
          (lane_a_uop.op_class == UOP_CLASS_STORE));
     wire lane_b_alu_accept = lane_b_accept &&
         (lane_b_uop.op_class == UOP_CLASS_ALU);
+    wire lane_b_bit_accept = lane_b_accept &&
+        (lane_b_uop.op_class == UOP_CLASS_BITMANIP);
     wire lane_b_bru_accept = lane_b_accept &&
         (lane_b_uop.op_class == UOP_CLASS_BJP);
     wire lane_b_mul_accept = lane_b_accept &&
@@ -1196,7 +1456,7 @@ import ydrasil_pkg::*;
         if (!rst_n || flush_id_i || trap_flush_i || branch_recovery_i) begin
             lsu_select_reserved_q <= '0;
         end else begin
-            unique case ({lsu_select_pick, lane_a_agu_accept})
+            unique case ({lsu_select_pick, agu_in_valid_q})
                 2'b10: lsu_select_reserved_q <= lsu_select_reserved_q + 1'b1;
                 2'b01: begin
                     if (lsu_select_reserved_q != '0)
@@ -1211,6 +1471,7 @@ import ydrasil_pkg::*;
     ydrasil_lsu_req_pkt_t shared_agu_req_d;
     ydrasil_lane_b_meta_t dual_meta_d;
     ydrasil_lane_b_alu_payload_t dual_alu_payload_d;
+    ydrasil_lane_b_bit_payload_t dual_bit_payload_d;
     ydrasil_lane_b_bru_payload_t dual_bru_payload_d;
     always_comb begin
         shared_agu_req_d = '0;
@@ -1221,7 +1482,8 @@ import ydrasil_pkg::*;
         shared_agu_req_d.rd_addr = lane_a_uop.dst.rd_addr;
         shared_agu_req_d.producer_id = lane_a_uop.dst.rob_tag;
         shared_agu_req_d.producer_tracked = lane_a_agu_accept;
-        shared_agu_req_d.store_data = lane_a_src1_local;
+        shared_agu_req_d.store_data = lane_a_src1_dtcm_hit ?
+            dtcm_resp_data_i : lane_a_src1_local;
         shared_agu_req_d.store_data_valid = lane_a_agu_accept &&
             (!shared_agu_req_d.is_store || lane_a_src1_ready ||
              lane_a_src1_epoch_match);
@@ -1244,15 +1506,19 @@ import ydrasil_pkg::*;
         dual_meta_d.instr = lane_b_uop.instr;
 
         dual_alu_payload_d = '0;
-        dual_alu_payload_d.bitmanip = 1'b0;
         dual_alu_payload_d.subop = lane_b_uop.subop;
-        dual_alu_payload_d.operand_a = lane_b_operand_a_local;
-        dual_alu_payload_d.operand_b = lane_b_operand_b_local;
+        dual_alu_payload_d.operand_a = lane_b_operand_a_capture;
+        dual_alu_payload_d.operand_b = lane_b_operand_b_capture;
+
+        dual_bit_payload_d = '0;
+        dual_bit_payload_d.subop = lane_b_uop.subop;
+        dual_bit_payload_d.operand_a = lane_b_operand_a_capture;
+        dual_bit_payload_d.operand_b = lane_b_operand_b_capture;
 
         dual_bru_payload_d = '0;
         dual_bru_payload_d.subop = lane_b_uop.subop;
-        dual_bru_payload_d.operand_a = lane_b_src0_local;
-        dual_bru_payload_d.operand_b = lane_b_src1_local;
+        dual_bru_payload_d.operand_a = lane_b_src0_capture;
+        dual_bru_payload_d.operand_b = lane_b_src1_capture;
         dual_bru_payload_d.imm = lane_b_uop.imm;
         dual_bru_payload_d.jalr = lane_b_uop.bt_a_rs_sel;
         dual_bru_payload_d.pred_hit = lane_b_uop.pred_hit;
@@ -1262,15 +1528,17 @@ import ydrasil_pkg::*;
         dual_bru_payload_d.pred_bht_index = lane_b_uop.pred_bht_index;
     end
 
-    // Preserve the fixed-latency DTCM identity/data for the following
-    // Operand/Bypass stage. Selection consumes only the current narrow token.
+    // Return-channel identity and data cross into Operand together. No live
+    // EX result qualification is allowed to feed Operand control or FU D pins.
     always_ff @(posedge clk) begin
         if (!rst_n || flush_id_i || trap_flush_i) begin
             dtcm_operand_reservation_q <= '0;
-            dtcm_operand_data_q <= '0;
+            mdu_operand_reservation_q <= '0;
+            mdu_operand_data_q <= '0;
         end else begin
             dtcm_operand_reservation_q <= dtcm_reservation_i;
-            dtcm_operand_data_q <= dtcm_resp_data_i;
+            mdu_operand_reservation_q <= mdu_result_reservation_i;
+            mdu_operand_data_q <= mdu_bypass_data_i;
         end
     end
 
@@ -1290,6 +1558,8 @@ import ydrasil_pkg::*;
             early_replay_id_q[1] <= '0;
             early_replay_rd_q[0] <= '0;
             early_replay_rd_q[1] <= '0;
+            early_replay_data_q[0] <= '0;
+            early_replay_data_q[1] <= '0;
 			illegal_instr_q <= 1'b0;
             alu_in_valid_q <= 1'b0;
             alu_in_operand_a_q <= '0;
@@ -1319,16 +1589,10 @@ import ydrasil_pkg::*;
             dual_meta_q <= '0;
             dual_alu_valid_q <= 1'b0;
             dual_alu_payload_q <= '0;
+            dual_bit_valid_q <= 1'b0;
+            dual_bit_payload_q <= '0;
             dual_bru_valid_q <= 1'b0;
             dual_bru_payload_q <= '0;
-            {alu_in_operand_a_dtcm_q, alu_in_operand_b_dtcm_q,
-             agu_in_operand_a_dtcm_q, agu_in_store_data_dtcm_q,
-             csr_in_operand_a_dtcm_q, mul_in_operand_a_dtcm_q,
-             mul_in_operand_b_dtcm_q, dual_in_operand_a_dtcm_q,
-             dual_in_operand_b_dtcm_q,
-             dual_in_branch_operand_a_dtcm_q,
-             dual_in_branch_operand_b_dtcm_q} <= '0;
-            dtcm_stall_data_valid_q <= 1'b0;
         end else begin
             lsu_idle_q <= lsu_idle_i;
             issue_at_rob_head_q <= issue_at_rob_head_i;
@@ -1342,79 +1606,10 @@ import ydrasil_pkg::*;
             early_replay_id_q[1] <= early_wakeup_id_q[1];
             early_replay_rd_q[0] <= early_wakeup_rd_q[0];
             early_replay_rd_q[1] <= early_wakeup_rd_q[1];
+            early_replay_data_q[0] <= early_main_bypass_data_i;
+            early_replay_data_q[1] <= early_dual_bypass_data_i;
 
-            if (stall_id_i) begin
-                if (!dtcm_stall_data_valid_q && dtcm_bypass_active_q) begin
-                    dtcm_stall_data_q <= dtcm_resp_data_i;
-                    dtcm_stall_data_valid_q <= 1'b1;
-                end
-                // A token is a one-cycle reservation. Holding it across an
-                // unrelated front-end stall could alias a recycled producer
-                // tag after the circular ROB wraps.
-                early_wakeup_valid_q[0] <= 1'b0;
-                early_wakeup_valid_q[1] <= 1'b0;
-                early_wakeup_id_q[0] <= '0;
-                early_wakeup_id_q[1] <= '0;
-                early_wakeup_rd_q[0] <= '0;
-                early_wakeup_rd_q[1] <= '0;
-            end else begin
-                if (bubble_id_i) begin
-					illegal_instr_q <= 1'b0;
-                    early_wakeup_valid_q[0] <= 1'b0;
-                    early_wakeup_valid_q[1] <= 1'b0;
-                    early_wakeup_id_q[0] <= '0;
-                    early_wakeup_id_q[1] <= '0;
-                    early_wakeup_rd_q[0] <= '0;
-                    early_wakeup_rd_q[1] <= '0;
-                    alu_in_valid_q <= 1'b0;
-                    agu_in_valid_q <= 1'b0;
-                    agu_in_req_q <= '0;
-                    csr_in_valid_q <= 1'b0;
-                    mul_in_valid_q <= 1'b0;
-                    dual_alu_valid_q <= 1'b0;
-                    dual_bru_valid_q <= 1'b0;
-                    {alu_in_operand_a_dtcm_q, alu_in_operand_b_dtcm_q,
-                     agu_in_operand_a_dtcm_q, agu_in_store_data_dtcm_q,
-                     csr_in_operand_a_dtcm_q, mul_in_operand_a_dtcm_q,
-                     mul_in_operand_b_dtcm_q, dual_in_operand_a_dtcm_q,
-                     dual_in_operand_b_dtcm_q,
-                     dual_in_branch_operand_a_dtcm_q,
-                     dual_in_branch_operand_b_dtcm_q} <= '0;
-                    dtcm_stall_data_valid_q <= 1'b0;
-                end else begin
-					dtcm_stall_data_valid_q <= 1'b0;
                     illegal_instr_q <= lane_b_accept && lane_b_uop.illegal_instr;
-                    alu_in_operand_a_dtcm_q <= lane_a_accept &&
-                        lane_a_alu_exec && lane_a_op_a_src &&
-                        lane_a_src0_dtcm_hit;
-                    alu_in_operand_b_dtcm_q <= lane_a_accept &&
-                        lane_a_alu_exec && lane_a_op_b_src &&
-                        lane_a_src1_dtcm_hit;
-                    agu_in_operand_a_dtcm_q <= lane_a_agu_accept &&
-                        lane_a_op_a_src && lane_a_src0_dtcm_hit;
-                    agu_in_store_data_dtcm_q <= lane_a_agu_accept &&
-                        (lane_a_uop.op_class == UOP_CLASS_STORE) &&
-                        lane_a_src1_dtcm_hit;
-                    csr_in_operand_a_dtcm_q <= lane_b_csr_accept &&
-                        lane_b_op_a_src && lane_b_src0_dtcm_hit;
-                    mul_in_operand_a_dtcm_q <= lane_b_mul_accept &&
-                        lane_b_op_a_src && lane_b_src0_dtcm_hit;
-                    mul_in_operand_b_dtcm_q <= lane_b_mul_accept &&
-                        lane_b_op_b_src && lane_b_src1_dtcm_hit;
-                    dual_in_operand_a_dtcm_q <= lane_b_alu_accept &&
-                        lane_b_op_a_src && lane_b_src0_dtcm_hit;
-                    dual_in_operand_b_dtcm_q <= lane_b_alu_accept &&
-                        lane_b_op_b_src && lane_b_src1_dtcm_hit;
-                    dual_in_branch_operand_a_dtcm_q <= lane_b_accept &&
-                        (lane_b_uop.op_class == UOP_CLASS_BJP) &&
-                        lane_b_src0_dtcm_hit;
-                    dual_in_branch_operand_b_dtcm_q <= lane_b_accept &&
-                        (lane_b_uop.op_class == UOP_CLASS_BJP) &&
-                        lane_b_src1_dtcm_hit;
-                    if (id_advance && selected_dtcm_hit) begin
-                        dtcm_stall_data_q <= dtcm_resp_data_i;
-                        dtcm_stall_data_valid_q <= 1'b1;
-                    end
                     // Wakeup qualification is a control token, not execution
                     // payload.  Derive it directly from the selected lane so
                     // LSU request/credit fields cannot re-enter this D cone.
@@ -1438,8 +1633,8 @@ import ydrasil_pkg::*;
 					// Their local completion result supplies
                     // the matching registered early token in the next cycle.
                     alu_in_valid_q <= lane_a_fu_valid;
-                    alu_in_operand_a_q <= lane_a_operand_a_local;
-                    alu_in_operand_b_q <= lane_a_operand_b_local;
+                    alu_in_operand_a_q <= lane_a_operand_a_capture;
+                    alu_in_operand_b_q <= lane_a_operand_b_capture;
                     alu_in_operator_q <= lane_a_operator_info;
                     alu_in_operator_type_q <= lane_a_operator_type;
                     alu_in_rd_wen_q <= lane_a_fu_valid &&
@@ -1449,43 +1644,46 @@ import ydrasil_pkg::*;
                     lane_a_pc_q <= lane_a_uop.pc;
                     agu_in_valid_q <= lane_a_agu_accept;
                     if (lane_a_agu_accept) begin
-                        agu_in_operand_a_q <= lane_a_operand_a_local;
-                        agu_in_operand_b_q <= lane_a_operand_b_local;
+                        agu_in_operand_a_q <= lane_a_operand_a_capture;
+                        agu_in_operand_b_q <= lane_a_operand_b_capture;
                         agu_in_req_q <= shared_agu_req_d;
                     end else begin
                         agu_in_req_q.valid <= 1'b0;
                     end
                     csr_in_valid_q <= lane_b_csr_accept;
-                    csr_in_operand_a_q <= lane_b_operand_a_local;
-                    csr_in_operator_type_q <= lane_b_operator_type;
-                    csr_in_raddr_q <= lane_b_uop.csr_raddr;
-                    csr_in_waddr_q <= lane_b_uop.csr_waddr;
-                    csr_in_op_info_q <= lane_b_uop.csr_op_info;
-                    csr_in_sys_info_q <= lane_b_uop.sys_op_info;
+                    if (lane_b_csr_accept) begin
+                        csr_in_operand_a_q <= lane_b_operand_a_capture;
+                        csr_in_operator_type_q <= lane_b_operator_type;
+                        csr_in_raddr_q <= lane_b_uop.csr_raddr;
+                        csr_in_waddr_q <= lane_b_uop.csr_waddr;
+                        csr_in_op_info_q <= lane_b_uop.csr_op_info;
+                        csr_in_sys_info_q <= lane_b_uop.sys_op_info;
+                    end
                     mul_in_valid_q <= lane_b_mul_accept;
-                    mul_in_operand_a_q <= lane_b_operand_a_local;
-                    mul_in_operand_b_q <= lane_b_operand_b_local;
-                    mul_in_operator_q <= lane_b_operator_info;
-                    mul_in_operator_type_q <= lane_b_operator_type;
+                    if (lane_b_mul_accept) begin
+                        mul_in_operand_a_q <= lane_b_operand_a_capture;
+                        mul_in_operand_b_q <= lane_b_operand_b_capture;
+                        mul_in_operator_q <= lane_b_operator_info;
+                        mul_in_operator_type_q <= lane_b_operator_type;
+                    end
                     dual_alu_valid_q <= lane_b_alu_accept;
+                    dual_bit_valid_q <= lane_b_bit_accept;
                     dual_bru_valid_q <= lane_b_bru_accept;
                     if (lane_b_accept)
                         dual_meta_q <= dual_meta_d;
                     if (lane_b_alu_accept)
                         dual_alu_payload_q <= dual_alu_payload_d;
+                    if (lane_b_bit_accept)
+                        dual_bit_payload_q <= dual_bit_payload_d;
                     if (lane_b_bru_accept)
                         dual_bru_payload_q <= dual_bru_payload_d;
-                end
-            end
         end
     end
 
 	assign illegal_instr_o = illegal_instr_q;
 	assign alu_in_valid_o = alu_in_valid_q;
-	assign alu_in_operand_a_o = alu_in_operand_a_dtcm_q ?
-        dtcm_bypass_data : alu_in_operand_a_q;
-	assign alu_in_operand_b_o = alu_in_operand_b_dtcm_q ?
-        dtcm_bypass_data : alu_in_operand_b_q;
+	assign alu_in_operand_a_o = alu_in_operand_a_q;
+	assign alu_in_operand_b_o = alu_in_operand_b_q;
     assign alu_in_operator_o = alu_in_operator_q;
     assign alu_in_operator_type_o = alu_in_operator_type_q;
     assign alu_in_rd_wen_o = alu_in_rd_wen_q;
@@ -1493,40 +1691,35 @@ import ydrasil_pkg::*;
     assign alu_in_producer_id_o = alu_in_producer_id_q;
 	assign lane_a_pc_o = lane_a_pc_q;
     assign agu_in_valid_o = agu_in_valid_q;
-	assign agu_in_operand_a_o = agu_in_operand_a_dtcm_q ?
-        dtcm_bypass_data : agu_in_operand_a_q;
+	assign agu_in_operand_a_o = agu_in_operand_a_q;
     assign agu_in_operand_b_o = agu_in_operand_b_q;
 	assign agu_in_req_o = agu_in_req_q;
-	assign agu_in_store_data_o = agu_in_store_data_dtcm_q ?
-        dtcm_bypass_data : agu_in_req_q.store_data;
+	assign agu_in_store_data_o = agu_in_req_q.store_data;
     assign csr_in_valid_o = csr_in_valid_q;
-	assign csr_in_operand_a_o = csr_in_operand_a_dtcm_q ?
-        dtcm_bypass_data : csr_in_operand_a_q;
+	assign csr_in_operand_a_o = csr_in_operand_a_q;
     assign csr_in_operator_type_o = csr_in_operator_type_q;
     assign csr_in_raddr_o = csr_in_raddr_q;
     assign csr_in_waddr_o = csr_in_waddr_q;
     assign csr_in_op_info_o = csr_in_op_info_q;
     assign csr_in_sys_info_o = csr_in_sys_info_q;
     assign mul_in_valid_o = mul_in_valid_q;
-	assign mul_in_operand_a_o = mul_in_operand_a_dtcm_q ?
-        dtcm_bypass_data : mul_in_operand_a_q;
-	assign mul_in_operand_b_o = mul_in_operand_b_dtcm_q ?
-        dtcm_bypass_data : mul_in_operand_b_q;
+	assign mul_in_operand_a_o = mul_in_operand_a_q;
+	assign mul_in_operand_b_o = mul_in_operand_b_q;
     assign mul_in_operator_o = mul_in_operator_q;
     assign mul_in_operator_type_o = mul_in_operator_type_q;
 	assign dual_meta_o = dual_meta_q;
 	assign dual_alu_valid_o = dual_alu_valid_q;
 	assign dual_alu_payload_o = dual_alu_payload_q;
-	assign dual_alu_operand_a_o = dual_in_operand_a_dtcm_q ?
-        dtcm_bypass_data : dual_alu_payload_q.operand_a;
-	assign dual_alu_operand_b_o = dual_in_operand_b_dtcm_q ?
-        dtcm_bypass_data : dual_alu_payload_q.operand_b;
+	assign dual_alu_operand_a_o = dual_alu_payload_q.operand_a;
+	assign dual_alu_operand_b_o = dual_alu_payload_q.operand_b;
+	assign dual_bit_valid_o = dual_bit_valid_q;
+	assign dual_bit_payload_o = dual_bit_payload_q;
+	assign dual_bit_operand_a_o = dual_bit_payload_q.operand_a;
+	assign dual_bit_operand_b_o = dual_bit_payload_q.operand_b;
 	assign dual_bru_valid_o = dual_bru_valid_q;
 	assign dual_bru_payload_o = dual_bru_payload_q;
-	assign dual_bru_operand_a_o = dual_in_branch_operand_a_dtcm_q ?
-        dtcm_bypass_data : dual_bru_payload_q.operand_a;
-	assign dual_bru_operand_b_o = dual_in_branch_operand_b_dtcm_q ?
-        dtcm_bypass_data : dual_bru_payload_q.operand_b;
+	assign dual_bru_operand_a_o = dual_bru_payload_q.operand_a;
+	assign dual_bru_operand_b_o = dual_bru_payload_q.operand_b;
 
 `ifndef SYNTHESIS
     wire issue_valid_ff = issue_pkt_i.valid;
@@ -1585,6 +1778,10 @@ import ydrasil_pkg::*;
     input  wire                         dispatch1_write_i,
     input  ydrasil_compact_uop_t        dispatch0_uop_i,
     input  ydrasil_compact_uop_t        dispatch1_uop_i,
+    input  wire                         dispatch0_src0_ready_i,
+    input  wire                         dispatch0_src1_ready_i,
+    input  wire                         dispatch1_src0_ready_i,
+    input  wire                         dispatch1_src1_ready_i,
     input  wire [SLOT_COUNT-1:0]        dispatch0_order_mask_i,
     input  wire [SLOT_COUNT-1:0]        dispatch1_order_mask_i,
     input  wire                         dispatch0_memory_i,
@@ -1597,6 +1794,8 @@ import ydrasil_pkg::*;
     input  wire                         dispatch1_divrem_i,
     input  wire                         dispatch0_serial_i,
     input  wire                         dispatch1_serial_i,
+    input  wire                         dispatch0_early_writes_i,
+    input  wire                         dispatch1_early_writes_i,
     input  wire                         wakeup0_valid_i,
     input  producer_id_t                wakeup0_id_i,
     input  wire                         wakeup1_valid_i,
@@ -1613,7 +1812,8 @@ import ydrasil_pkg::*;
     output wire                         store_o,
     output wire                         mul_o,
     output wire                         divrem_o,
-    output wire                         serial_o
+    output wire                         serial_o,
+    output wire                         early_writes_o
 );
     ydrasil_compact_uop_t uop_q;
     reg valid_q;
@@ -1625,12 +1825,9 @@ import ydrasil_pkg::*;
     reg mul_q;
     reg divrem_q;
     reg serial_q;
+    reg early_writes_q;
     wire [COMPLETION_LANES-1:0] current_src0_completion_hit;
     wire [COMPLETION_LANES-1:0] current_src1_completion_hit;
-    wire [COMPLETION_LANES-1:0] dispatch0_src0_completion_hit;
-    wire [COMPLETION_LANES-1:0] dispatch0_src1_completion_hit;
-    wire [COMPLETION_LANES-1:0] dispatch1_src0_completion_hit;
-    wire [COMPLETION_LANES-1:0] dispatch1_src1_completion_hit;
     genvar completion_hit_idx;
     generate
         for (completion_hit_idx = 0; completion_hit_idx < COMPLETION_LANES;
@@ -1645,26 +1842,6 @@ import ydrasil_pkg::*;
                 completion_meta_i[completion_hit_idx].producer_tracked &&
                 (completion_meta_i[completion_hit_idx].producer_id ==
                  uop_q.src1.producer_tag);
-            assign dispatch0_src0_completion_hit[completion_hit_idx] =
-                completion_meta_i[completion_hit_idx].valid &&
-                completion_meta_i[completion_hit_idx].producer_tracked &&
-                (completion_meta_i[completion_hit_idx].producer_id ==
-                 dispatch0_uop_i.src0.producer_tag);
-            assign dispatch0_src1_completion_hit[completion_hit_idx] =
-                completion_meta_i[completion_hit_idx].valid &&
-                completion_meta_i[completion_hit_idx].producer_tracked &&
-                (completion_meta_i[completion_hit_idx].producer_id ==
-                 dispatch0_uop_i.src1.producer_tag);
-            assign dispatch1_src0_completion_hit[completion_hit_idx] =
-                completion_meta_i[completion_hit_idx].valid &&
-                completion_meta_i[completion_hit_idx].producer_tracked &&
-                (completion_meta_i[completion_hit_idx].producer_id ==
-                 dispatch1_uop_i.src0.producer_tag);
-            assign dispatch1_src1_completion_hit[completion_hit_idx] =
-                completion_meta_i[completion_hit_idx].valid &&
-                completion_meta_i[completion_hit_idx].producer_tracked &&
-                (completion_meta_i[completion_hit_idx].producer_id ==
-                 dispatch1_uop_i.src1.producer_tag);
         end
     endgenerate
 
@@ -1684,47 +1861,6 @@ import ydrasil_pkg::*;
         (mdu_wakeup_i.valid &&
          (mdu_wakeup_i.producer_id == uop_q.src1.producer_tag)) ||
         (|current_src1_completion_hit);
-    wire dispatch0_src0_wakeup =
-        (wakeup0_valid_i &&
-         (wakeup0_id_i == dispatch0_uop_i.src0.producer_tag)) ||
-        (wakeup1_valid_i &&
-         (wakeup1_id_i == dispatch0_uop_i.src0.producer_tag)) ||
-        (dtcm_wakeup_i.valid &&
-         (dtcm_wakeup_i.producer_id == dispatch0_uop_i.src0.producer_tag)) ||
-        (mdu_wakeup_i.valid &&
-         (mdu_wakeup_i.producer_id == dispatch0_uop_i.src0.producer_tag)) ||
-        (|dispatch0_src0_completion_hit);
-    wire dispatch0_src1_wakeup =
-        (wakeup0_valid_i &&
-         (wakeup0_id_i == dispatch0_uop_i.src1.producer_tag)) ||
-        (wakeup1_valid_i &&
-         (wakeup1_id_i == dispatch0_uop_i.src1.producer_tag)) ||
-        (dtcm_wakeup_i.valid &&
-         (dtcm_wakeup_i.producer_id == dispatch0_uop_i.src1.producer_tag)) ||
-        (mdu_wakeup_i.valid &&
-         (mdu_wakeup_i.producer_id == dispatch0_uop_i.src1.producer_tag)) ||
-        (|dispatch0_src1_completion_hit);
-    wire dispatch1_src0_wakeup =
-        (wakeup0_valid_i &&
-         (wakeup0_id_i == dispatch1_uop_i.src0.producer_tag)) ||
-        (wakeup1_valid_i &&
-         (wakeup1_id_i == dispatch1_uop_i.src0.producer_tag)) ||
-        (dtcm_wakeup_i.valid &&
-         (dtcm_wakeup_i.producer_id == dispatch1_uop_i.src0.producer_tag)) ||
-        (mdu_wakeup_i.valid &&
-         (mdu_wakeup_i.producer_id == dispatch1_uop_i.src0.producer_tag)) ||
-        (|dispatch1_src0_completion_hit);
-    wire dispatch1_src1_wakeup =
-        (wakeup0_valid_i &&
-         (wakeup0_id_i == dispatch1_uop_i.src1.producer_tag)) ||
-        (wakeup1_valid_i &&
-         (wakeup1_id_i == dispatch1_uop_i.src1.producer_tag)) ||
-        (dtcm_wakeup_i.valid &&
-         (dtcm_wakeup_i.producer_id == dispatch1_uop_i.src1.producer_tag)) ||
-        (mdu_wakeup_i.valid &&
-         (mdu_wakeup_i.producer_id == dispatch1_uop_i.src1.producer_tag)) ||
-        (|dispatch1_src1_completion_hit);
-
     always_ff @(posedge clk) begin
         if (!rst_n || hard_flush_i) begin
             uop_q <= '0;
@@ -1737,6 +1873,7 @@ import ydrasil_pkg::*;
             mul_q <= 1'b0;
             divrem_q <= 1'b0;
             serial_q <= 1'b0;
+            early_writes_q <= 1'b0;
         end else if (branch_recovery_i) begin
             if (valid_q && recovery_keep_i) begin
                 order_mask_q <= order_mask_q & recovery_slot_mask_i;
@@ -1748,6 +1885,7 @@ import ydrasil_pkg::*;
                 mul_q <= 1'b0;
                 divrem_q <= 1'b0;
                 serial_q <= 1'b0;
+                early_writes_q <= 1'b0;
             end
         end else begin
             if (valid_q) begin
@@ -1762,29 +1900,27 @@ import ydrasil_pkg::*;
             if (dispatch0_write_i) begin
                 uop_q <= dispatch0_uop_i;
                 valid_q <= 1'b1;
-                src0_ready_q <= dispatch0_uop_i.src0.ready ||
-                    dispatch0_src0_wakeup;
-                src1_ready_q <= dispatch0_uop_i.src1.ready ||
-                    dispatch0_src1_wakeup;
+                src0_ready_q <= dispatch0_src0_ready_i;
+                src1_ready_q <= dispatch0_src1_ready_i;
                 order_mask_q <= dispatch0_order_mask_i;
                 memory_q <= dispatch0_memory_i;
                 store_q <= dispatch0_store_i;
                 mul_q <= dispatch0_mul_i;
                 divrem_q <= dispatch0_divrem_i;
                 serial_q <= dispatch0_serial_i;
+                early_writes_q <= dispatch0_early_writes_i;
             end else if (dispatch1_write_i) begin
                 uop_q <= dispatch1_uop_i;
                 valid_q <= 1'b1;
-                src0_ready_q <= dispatch1_uop_i.src0.ready ||
-                    dispatch1_src0_wakeup;
-                src1_ready_q <= dispatch1_uop_i.src1.ready ||
-                    dispatch1_src1_wakeup;
+                src0_ready_q <= dispatch1_src0_ready_i;
+                src1_ready_q <= dispatch1_src1_ready_i;
                 order_mask_q <= dispatch1_order_mask_i;
                 memory_q <= dispatch1_memory_i;
                 store_q <= dispatch1_store_i;
                 mul_q <= dispatch1_mul_i;
                 divrem_q <= dispatch1_divrem_i;
                 serial_q <= dispatch1_serial_i;
+                early_writes_q <= dispatch1_early_writes_i;
             end
         end
     end
@@ -1799,6 +1935,7 @@ import ydrasil_pkg::*;
     assign mul_o = mul_q;
     assign divrem_o = divrem_q;
     assign serial_o = serial_q;
+    assign early_writes_o = early_writes_q;
 endmodule
 
 
@@ -1811,14 +1948,19 @@ import ydrasil_pkg::*;
     input  wire                           rst_n,
     input  wire                           flush_i,
     input  wire                           interrupt_i,
-    input  wire                           valid_i,
-    input  wire [REGS_DATA_WIDTH-1:0]     operand_a_i,
-    input  wire [REGS_DATA_WIDTH-1:0]     operand_b_i,
+    input  wire                           alu_valid_i,
+    input  wire [REGS_DATA_WIDTH-1:0]     alu_operand_a_i,
+    input  wire [REGS_DATA_WIDTH-1:0]     alu_operand_b_i,
+    input  wire [UOP_SUBOP_WIDTH-1:0]     alu_subop_i,
+    input  wire                           bit_valid_i,
+    input  wire [REGS_DATA_WIDTH-1:0]     bit_operand_a_i,
+    input  wire [REGS_DATA_WIDTH-1:0]     bit_operand_b_i,
+    input  wire [UOP_SUBOP_WIDTH-1:0]     bit_subop_i,
+    input  wire                           bru_valid_i,
     input  wire [REGS_DATA_WIDTH-1:0]     branch_operand_a_i,
     input  wire [REGS_DATA_WIDTH-1:0]     branch_operand_b_i,
     input  wire [REGS_DATA_WIDTH-1:0]     branch_imm_i,
-    input  wire [OPERATOR_WIDTH-1:0]      operator_i,
-    input  wire [OPERATOR_TYPE_WIDTH-1:0] operator_type_i,
+    input  wire [UOP_SUBOP_WIDTH-1:0]     bru_subop_i,
     input  wire [REGS_ADDR_WIDTH-1:0]     rd_addr_i,
     input  wire                           rd_wen_i,
     input  producer_id_t                  producer_id_i,
@@ -1866,83 +2008,92 @@ import ydrasil_pkg::*;
     reg valid_q;
     reg [INST_ADDR_WIDTH-1:0] pc_q;
     reg [INST_DATA_WIDTH-1:0] instr_q;
-    wire [REGS_DATA_WIDTH-1:0] exec_operand_a = operand_a_i;
-    wire [REGS_DATA_WIDTH-1:0] exec_operand_b = operand_b_i;
+    logic [OPERATOR_WIDTH-1:0] alu_operator;
+    logic [OPERATOR_WIDTH-1:0] bit_operator;
+    logic [OPERATOR_WIDTH-1:0] bru_operator;
+    logic [OPERATOR_TYPE_WIDTH-1:0] alu_operator_type;
+    logic [OPERATOR_TYPE_WIDTH-1:0] bit_operator_type;
+    logic [OPERATOR_TYPE_WIDTH-1:0] bru_operator_type;
     wire [REGS_DATA_WIDTH-1:0] alu_result;
     wire [REGS_DATA_WIDTH-1:0] fast_b_shadd_result =
-        ({REGS_DATA_WIDTH{operator_i[OP_B_SH1ADD]}} &
-         ((exec_operand_a << 1) + exec_operand_b)) |
-        ({REGS_DATA_WIDTH{operator_i[OP_B_SH2ADD]}} &
-         ((exec_operand_a << 2) + exec_operand_b)) |
-        ({REGS_DATA_WIDTH{operator_i[OP_B_SH3ADD]}} &
-         ((exec_operand_a << 3) + exec_operand_b));
-    wire [REGS_DATA_WIDTH-1:0] fast_b_logic_result =
-        ({REGS_DATA_WIDTH{operator_i[OP_B_ANDN]}} &
-         (exec_operand_a & ~exec_operand_b)) |
-        ({REGS_DATA_WIDTH{operator_i[OP_B_ORN]}} &
-         (exec_operand_a | ~exec_operand_b)) |
-        ({REGS_DATA_WIDTH{operator_i[OP_B_XNOR]}} &
-         ~(exec_operand_a ^ exec_operand_b));
-    wire signed [REGS_DATA_WIDTH-1:0] signed_operand_a = exec_operand_a;
-    wire signed [REGS_DATA_WIDTH-1:0] signed_operand_b = exec_operand_b;
-    wire [REGS_DATA_WIDTH-1:0] fast_b_minmax_result =
-        ({REGS_DATA_WIDTH{operator_i[OP_B_MIN]}} &
-         ((signed_operand_a <= signed_operand_b) ? exec_operand_a : exec_operand_b)) |
-        ({REGS_DATA_WIDTH{operator_i[OP_B_MAX]}} &
-         ((signed_operand_a >= signed_operand_b) ? exec_operand_a : exec_operand_b)) |
-        ({REGS_DATA_WIDTH{operator_i[OP_B_MINU]}} &
-         ((exec_operand_a <= exec_operand_b) ? exec_operand_a : exec_operand_b)) |
-        ({REGS_DATA_WIDTH{operator_i[OP_B_MAXU]}} &
-         ((exec_operand_a >= exec_operand_b) ? exec_operand_a : exec_operand_b));
+        ({REGS_DATA_WIDTH{bit_operator[OP_B_SH1ADD]}} &
+         ((bit_operand_a_i << 1) + bit_operand_b_i)) |
+        ({REGS_DATA_WIDTH{bit_operator[OP_B_SH2ADD]}} &
+         ((bit_operand_a_i << 2) + bit_operand_b_i)) |
+        ({REGS_DATA_WIDTH{bit_operator[OP_B_SH3ADD]}} &
+         ((bit_operand_a_i << 3) + bit_operand_b_i));
     wire [REGS_DATA_WIDTH-1:0] fast_b_extend_result =
-        ({REGS_DATA_WIDTH{operator_i[OP_B_REV8]}} &
-         {exec_operand_a[7:0], exec_operand_a[15:8],
-          exec_operand_a[23:16], exec_operand_a[31:24]}) |
-        ({REGS_DATA_WIDTH{operator_i[OP_B_SEXT_B]}} &
-         {{24{exec_operand_a[7]}}, exec_operand_a[7:0]}) |
-        ({REGS_DATA_WIDTH{operator_i[OP_B_SEXT_H]}} &
-         {{16{exec_operand_a[15]}}, exec_operand_a[15:0]}) |
-        ({REGS_DATA_WIDTH{operator_i[OP_B_ZEXT_H]}} &
-         {16'b0, exec_operand_a[15:0]});
+        ({REGS_DATA_WIDTH{bit_operator[OP_B_REV8]}} &
+         {bit_operand_a_i[7:0], bit_operand_a_i[15:8],
+          bit_operand_a_i[23:16], bit_operand_a_i[31:24]}) |
+        ({REGS_DATA_WIDTH{bit_operator[OP_B_SEXT_B]}} &
+         {{24{bit_operand_a_i[7]}}, bit_operand_a_i[7:0]}) |
+        ({REGS_DATA_WIDTH{bit_operator[OP_B_SEXT_H]}} &
+         {{16{bit_operand_a_i[15]}}, bit_operand_a_i[15:0]}) |
+        ({REGS_DATA_WIDTH{bit_operator[OP_B_ZEXT_H]}} &
+         {16'b0, bit_operand_a_i[15:0]});
     wire [REGS_DATA_WIDTH-1:0] early_b_pack_result =
-        ({REGS_DATA_WIDTH{operator_i[OP_B_PACK]}} &
-         {exec_operand_b[15:0], exec_operand_a[15:0]}) |
-        ({REGS_DATA_WIDTH{operator_i[OP_B_PACKH]}} &
-         {16'b0, exec_operand_b[7:0], exec_operand_a[7:0]});
-    wire [REGS_DATA_WIDTH-1:0] fast_bitmanip_result =
-        fast_b_shadd_result | fast_b_logic_result | fast_b_minmax_result |
-        fast_b_extend_result;
+        ({REGS_DATA_WIDTH{bit_operator[OP_B_PACK]}} &
+         {bit_operand_b_i[15:0], bit_operand_a_i[15:0]}) |
+        ({REGS_DATA_WIDTH{bit_operator[OP_B_PACKH]}} &
+         {16'b0, bit_operand_b_i[7:0], bit_operand_a_i[7:0]});
+    wire [REGS_DATA_WIDTH-1:0] bitmanip_result;
+    wire [REGS_DATA_WIDTH-1:0] branch_link_result = pc_i + 32'd4;
+
+    always_comb begin
+        alu_operator = '0;
+        bit_operator = '0;
+        bru_operator = '0;
+        alu_operator_type = '0;
+        bit_operator_type = '0;
+        bru_operator_type = '0;
+        alu_operator[alu_subop_i] = alu_valid_i;
+        bit_operator[bit_subop_i] = bit_valid_i;
+        bru_operator[bru_subop_i] = bru_valid_i;
+        alu_operator_type[OPERATOR_TYPE_ALU] = alu_valid_i;
+        bit_operator_type[OPERATOR_TYPE_BITMANIP] = bit_valid_i;
+        bru_operator_type[OPERATOR_TYPE_BJP] = bru_valid_i;
+    end
 
     wire alu_unused_comp;
     wire alu_unused_wen;
     wire [REGS_ADDR_WIDTH-1:0] alu_unused_waddr;
     ydrasil_alu u_dual_alu (
-        .operand_a_i(exec_operand_a), .operand_b_i(exec_operand_b),
-        .operator_i(operator_i), .operator_type_i(operator_type_i),
-        .id_rf_waddr_rd_i(rd_addr_i), .id_alu_rf_wen_rd_i(rd_wen_i),
+        .operand_a_i(alu_operand_a_i), .operand_b_i(alu_operand_b_i),
+        .operator_i(alu_operator), .operator_type_i(alu_operator_type),
+        .id_rf_waddr_rd_i(rd_addr_i),
+        .id_alu_rf_wen_rd_i(rd_wen_i && alu_valid_i),
         .interrupt_i(interrupt_i), .comp_result_o(alu_unused_comp),
         .alu_result_o(alu_result), .alu_rf_wen_rd_o(alu_unused_wen),
         .alu_rf_waddr_rd_o(alu_unused_waddr)
+    );
+
+    // Zb owns a dedicated execution cone. It shares only the typed lane-B
+    // completion port with ALU/BRU; no Zb operand or result traverses the ALU.
+    ydrasil_bitmanip u_dual_bitmanip (
+        .operand_a_i     (bit_operand_a_i),
+        .operand_b_i     (bit_operand_b_i),
+        .operator_i      (bit_operator),
+        .operator_type_i (bit_operator_type),
+        .result_o        (bitmanip_result)
     );
 
     // Keep the early-return data cone separate from min/max and other
     // expensive bitmanip operations. The matching token is captured in
     // Issue, and this value is selected only at the consumer FU input.
     wire early_lite_bitmanip_op =
-        operator_type_i[OPERATOR_TYPE_BITMANIP] &&
-        (operator_i[OP_B_SH1ADD] | operator_i[OP_B_SH2ADD] |
-         operator_i[OP_B_SH3ADD] | operator_i[OP_B_PACK] |
-         operator_i[OP_B_PACKH]  | operator_i[OP_B_REV8] |
-         operator_i[OP_B_SEXT_B] | operator_i[OP_B_SEXT_H] |
-         operator_i[OP_B_ZEXT_H]);
+        bit_valid_i &&
+        (bit_operator[OP_B_SH1ADD] | bit_operator[OP_B_SH2ADD] |
+         bit_operator[OP_B_SH3ADD] | bit_operator[OP_B_PACK] |
+         bit_operator[OP_B_PACKH]  | bit_operator[OP_B_REV8] |
+         bit_operator[OP_B_SEXT_B] | bit_operator[OP_B_SEXT_H] |
+         bit_operator[OP_B_ZEXT_H]);
     wire [REGS_DATA_WIDTH-1:0] early_lite_bitmanip_result =
         fast_b_shadd_result | early_b_pack_result | fast_b_extend_result;
     assign early_bypass_data_o = early_lite_bitmanip_op ?
         early_lite_bitmanip_result :
-        (operator_type_i[OPERATOR_TYPE_ALU] &&
-         !operator_type_i[OPERATOR_TYPE_BITMANIP]) ? alu_result :
-        operator_type_i[OPERATOR_TYPE_BJP] ?
-        (exec_operand_a + exec_operand_b) : '0;
+        alu_valid_i ? alu_result :
+        bru_valid_i ? branch_link_result : '0;
 
     ydrasil_bru u_lane_b_bru (
         .clk(clk),
@@ -1952,9 +2103,9 @@ import ydrasil_pkg::*;
         .operand_b_i(branch_operand_b_i),
         .bt_a_operand_i(jalr_i ? branch_operand_a_i : pc_i),
         .bt_b_operand_i(branch_imm_i),
-        .operator_i(operator_i),
-        .operator_type_i(operator_type_i),
-        .id_ex_valid_i(valid_i),
+        .operator_i(bru_operator),
+        .operator_type_i(bru_operator_type),
+        .id_ex_valid_i(bru_valid_i),
         .id_ex_jalr_i(jalr_i),
         .id_ex_branch_target_i(branch_target_i),
         .id_ex_branch_next_pc_i(branch_next_pc_i),
@@ -1992,7 +2143,8 @@ import ydrasil_pkg::*;
             pc_q <= '0;
             instr_q <= RV32I_INS_NOP;
         end else begin
-            valid_q <= valid_i && !interrupt_i;
+            valid_q <= (alu_valid_i || bit_valid_i || bru_valid_i) &&
+                !interrupt_i;
             pc_q <= pc_i;
             instr_q <= instr_i;
         end
@@ -2000,13 +2152,15 @@ import ydrasil_pkg::*;
 
     // Lane B completion is captured by the typed ALU result array at WB. The
     // remaining q state is commit trace metadata, not an execution bypass.
-    assign completion_valid_o = valid_i && rd_wen_i && !interrupt_i &&
+    assign completion_valid_o =
+        (alu_valid_i || bit_valid_i || bru_valid_i) && rd_wen_i &&
+        !interrupt_i &&
         (rd_addr_i != '0);
     assign completion_producer_id_o = producer_id_i;
     assign completion_producer_tracked_o = producer_tracked_i;
     assign completion_addr_o = rd_addr_i;
-    assign completion_data_o = operator_type_i[OPERATOR_TYPE_BITMANIP] ?
-        fast_bitmanip_result : alu_result;
+    assign completion_data_o = bit_valid_i ? bitmanip_result :
+        bru_valid_i ? branch_link_result : alu_result;
     assign instret_valid_o = valid_q;
     assign commit_pc_o = pc_q;
     assign commit_instr_o = instr_q;

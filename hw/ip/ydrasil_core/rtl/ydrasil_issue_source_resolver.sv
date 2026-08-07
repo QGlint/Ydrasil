@@ -10,8 +10,6 @@ import ydrasil_pkg::*;
     input  ydrasil_reservation_pkt_t     dtcm_reservation_i,
     input  ydrasil_reservation_pkt_t     mdu_reservation_i,
     input  wire [DATA_WIDTH-1:0]         mdu_bypass_data_i,
-    input  ydrasil_completion_meta_t     mdu_completion_i,
-    input  wire [DATA_WIDTH-1:0]         mdu_completion_data_i,
     input  wire                          early_main_valid_i,
     input  producer_id_t                 early_main_id_i,
     input  wire [REGS_ADDR_WIDTH-1:0]    early_main_rd_i,
@@ -36,8 +34,6 @@ import ydrasil_pkg::*;
         source_i.producer_tag == early_dual_id_i;
     wire source_mdu_key_match =
         source_i.producer_tag == mdu_reservation_i.producer_id;
-    wire source_mdu_completion_key_match =
-        source_i.producer_tag == mdu_completion_i.producer_id;
     wire source_value_epoch_match = value_epoch_i ==
         source_i.producer_tag[PRODUCER_ID_WIDTH-1];
     assign dtcm_hit_o = &{source_i.used, source_nonzero, source_i.tag_valid,
@@ -50,15 +46,9 @@ import ydrasil_pkg::*;
     assign mdu_hit_o = &{source_i.used, source_nonzero, source_i.tag_valid,
         mdu_reservation_i.valid, mdu_reservation_i.producer_tracked,
         source_mdu_key_match};
-    wire mdu_completion_hit = &{source_i.used, source_nonzero,
-        source_i.tag_valid, mdu_completion_i.valid,
-        mdu_completion_i.producer_tracked, source_mdu_completion_key_match};
     assign ready_o = !source_i.used || (source_i.arch_addr == '0) ||
-        !source_i.tag_valid || source_i.ready || dtcm_hit_o ||
-        early_main_hit_o || early_dual_hit_o || mdu_hit_o ||
-        mdu_completion_hit;
-    assign data_o = mdu_completion_hit ? mdu_completion_data_i :
-        mdu_hit_o ? mdu_bypass_data_i :
+        !source_i.tag_valid || source_i.ready;
+    assign data_o = mdu_hit_o ? mdu_bypass_data_i :
         (source_i.used && (source_i.arch_addr != '0) &&
          source_i.tag_valid && source_value_epoch_match) ? value_i : arf_i;
 
@@ -87,10 +77,6 @@ import ydrasil_pkg::*;
                 else $fatal(1, "MDU bypass producer class mismatch");
             assert (source_i.arch_addr == mdu_reservation_i.arch_addr)
                 else $fatal(1, "MDU bypass destination mismatch");
-        end
-        if (mdu_completion_hit) begin
-            assert (source_i.producer_class == RESULT_MDU)
-                else $fatal(1, "MDU completion producer class mismatch");
         end
     end
 `endif

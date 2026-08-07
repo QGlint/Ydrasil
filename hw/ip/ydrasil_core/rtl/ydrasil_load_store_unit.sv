@@ -12,8 +12,13 @@ import ydrasil_pkg::*;
 	    input  producer_id_t                   rob_head_id_i,
 		    input  ydrasil_completion_meta_t       completion_meta_i [COMPLETION_LANES],
 		    input  wire [REGS_DATA_WIDTH-1:0]      completion_data_i [COMPLETION_LANES],
-    input  wire [BUS_DATA_WIDTH-1:0]       dtcm_rdata_i,
-    output ydrasil_dtcm_req_pkt_t          dtcm_req_o,
+	    input  wire [BUS_DATA_WIDTH-1:0]       dtcm_rdata_i,
+	    output wire                            dtcm_load_valid_o,
+	    output wire [BUS_ADDR_WIDTH-1:0]       dtcm_load_addr_o,
+	    output wire                            dtcm_store_valid_o,
+	    output wire [BUS_ADDR_WIDTH-1:0]       dtcm_store_addr_o,
+	    output wire [BUS_DATA_WIDTH-1:0]       dtcm_store_data_o,
+	    output wire [3:0]                      dtcm_store_mask_o,
     input  ydrasil_mem_rsp_pkt_t           mmio_rsp_i,
     output ydrasil_mem_req_pkt_t           mmio_req_o,
     output ydrasil_lsu_status_pkt_t        status_o,
@@ -67,6 +72,8 @@ import ydrasil_pkg::*;
 	    producer_id_t completion_shadow_id_q [0:STORE_COMPLETION_SHADOWS-1];
 	    logic [BUS_DATA_WIDTH-1:0] completion_shadow_data_q
 	        [0:STORE_COMPLETION_SHADOWS-1];
+	    logic commit_valid_q [0:1];
+	    producer_id_t commit_id_q [0:1];
 
 	    ydrasil_lsu_req_pkt_t patched_queue0;
 	    ydrasil_lsu_req_pkt_t patched_queue1;
@@ -80,28 +87,28 @@ import ydrasil_pkg::*;
 	        patched_store_buf1 = store_buf1_q;
 
 	        if (queue_q[0].valid && queue_q[0].is_store &&
-	            ((commit_pkt_i.valid &&
-	              (commit_pkt_i.producer_id == queue_q[0].producer_id)) ||
-	             (commit_pkt1_i.valid &&
-	              (commit_pkt1_i.producer_id == queue_q[0].producer_id))))
+	            ((commit_valid_q[0] &&
+	              (commit_id_q[0] == queue_q[0].producer_id)) ||
+	             (commit_valid_q[1] &&
+	              (commit_id_q[1] == queue_q[0].producer_id))))
 	            patched_queue0.retired = 1'b1;
 	        if (queue_q[1].valid && queue_q[1].is_store &&
-	            ((commit_pkt_i.valid &&
-	              (commit_pkt_i.producer_id == queue_q[1].producer_id)) ||
-	             (commit_pkt1_i.valid &&
-	              (commit_pkt1_i.producer_id == queue_q[1].producer_id))))
+	            ((commit_valid_q[0] &&
+	              (commit_id_q[0] == queue_q[1].producer_id)) ||
+	             (commit_valid_q[1] &&
+	              (commit_id_q[1] == queue_q[1].producer_id))))
 	            patched_queue1.retired = 1'b1;
 	        if (store_buf0_q.valid &&
-	            ((commit_pkt_i.valid &&
-	              (commit_pkt_i.producer_id == store_buf0_q.producer_id)) ||
-	             (commit_pkt1_i.valid &&
-	              (commit_pkt1_i.producer_id == store_buf0_q.producer_id))))
+	            ((commit_valid_q[0] &&
+	              (commit_id_q[0] == store_buf0_q.producer_id)) ||
+	             (commit_valid_q[1] &&
+	              (commit_id_q[1] == store_buf0_q.producer_id))))
 	            patched_store_buf0.retired = 1'b1;
 	        if (store_buf1_q.valid &&
-	            ((commit_pkt_i.valid &&
-	              (commit_pkt_i.producer_id == store_buf1_q.producer_id)) ||
-	             (commit_pkt1_i.valid &&
-	              (commit_pkt1_i.producer_id == store_buf1_q.producer_id))))
+	            ((commit_valid_q[0] &&
+	              (commit_id_q[0] == store_buf1_q.producer_id)) ||
+	             (commit_valid_q[1] &&
+	              (commit_id_q[1] == store_buf1_q.producer_id))))
 	            patched_store_buf1.retired = 1'b1;
 
 	        for (completion_patch_idx = 0;
@@ -204,7 +211,11 @@ import ydrasil_pkg::*;
     wire store_buf_dequeue = store_head_data_valid;
 
 	    ydrasil_lsu_req_pkt_t active_pkt;
-	    assign active_pkt = queue_head_q[0] ? patched_queue1 : patched_queue0;
+	    // Queue patching commits into queue_q at the clock edge. Execution and
+	    // DTCM launch consume only the previously registered queue image so ROB
+	    // retirement/completion data cannot cross the LSU and memory boundary in
+	    // one cycle.
+	    assign active_pkt = queue_head_q[0] ? queue_q[1] : queue_q[0];
 
     wire active_valid = !queue_empty && active_pkt.valid;
     wire active_is_load = active_pkt.is_load;
@@ -251,6 +262,18 @@ import ydrasil_pkg::*;
     reg [1:0] load_s1_addr_index_q;
     reg [3:0] load_s1_forward_mask_q;
     reg [31:0] load_s1_forward_data_q;
+    reg load_launch_valid_q;
+    reg [BUS_ADDR_WIDTH-1:0] load_launch_addr_q;
+    reg [REGS_ADDR_WIDTH-1:0] load_launch_rd_addr_q;
+    producer_id_t load_launch_producer_id_q;
+    reg load_launch_producer_tracked_q;
+    reg [OP_LSU_INFO_WIDTH-1:0] load_launch_op_q;
+    reg [3:0] load_launch_forward_mask_q;
+    reg [31:0] load_launch_forward_data_q;
+    reg store_launch_valid_q;
+    reg [BUS_ADDR_WIDTH-1:0] store_launch_addr_q;
+    reg [BUS_DATA_WIDTH-1:0] store_launch_data_q;
+    reg [3:0] store_launch_mask_q;
     // Recovery clears the producer table at the clock edge where a response
     // is still visible combinationally. Keep a local kill bit for that one
     // boundary cycle so a flushed response cannot reach the broadcast bus
@@ -264,24 +287,19 @@ import ydrasil_pkg::*;
 
     // Give a buffered peripheral response a bounded path to completion. At
     // most one already-issued DTCM response remains after this hold asserts.
-    wire load_issue_hold = mmio_wb_valid_q ||
-        (mmio_req_valid_q && mmio_rsp_i.valid && mmio_is_load_q);
-    // An empty queue gives DTCM loads a dedicated metadata fast path. Stores
-    // and MMIO always enter the request queue, keeping their readiness logic
-    // out of the E-stage request-to-enqueue path.
-	    wire direct_dtcm_load_candidate = queue_empty && req_i.valid &&
-	        req_i.addr_is_dtcm && req_i.is_load && !load_issue_hold;
+    // MMIO responses are buffered in mmio_wb_valid_q. If one arrives on the
+    // same edge as a DTCM launch, DTCM completes first and the buffered MMIO
+    // value follows; AXI r_fire must not control the DTCM BRAM port directly.
+    wire load_issue_hold = mmio_wb_valid_q;
+	    // Every memory request crosses the registered request queue. Allowing an
+	    // empty-queue load to bypass it reconnects Operand/EX address generation
+	    // to store forwarding and the DTCM BRAM launch in the same cycle.
 	    wire queued_dtcm_load_candidate = active_dtcm_load && !load_issue_hold;
-	    wire [BUS_ADDR_WIDTH-1:0] load_launch_addr = queue_empty ?
-	        req_i.addr : active_addr;
-    wire [REGS_ADDR_WIDTH-1:0] load_launch_rd_addr = queue_empty ?
-        req_i.rd_addr : active_rd_addr;
-    wire producer_id_t load_launch_producer_id = queue_empty ?
-        req_i.producer_id : active_producer_id;
-    wire load_launch_producer_tracked = queue_empty ?
-        req_i.producer_tracked : active_producer_tracked;
-    wire [OP_LSU_INFO_WIDTH-1:0] load_launch_op = queue_empty ?
-        req_i.op : active_op;
+	    wire [BUS_ADDR_WIDTH-1:0] load_launch_addr = active_addr;
+	    wire [REGS_ADDR_WIDTH-1:0] load_launch_rd_addr = active_rd_addr;
+	    wire producer_id_t load_launch_producer_id = active_producer_id;
+	    wire load_launch_producer_tracked = active_producer_tracked;
+	    wire [OP_LSU_INFO_WIDTH-1:0] load_launch_op = active_op;
 
     // Two age-ordered entries cover the measured forwarding use while
     // removing half of the address CAM and its newest-store priority tree.
@@ -297,11 +315,9 @@ import ydrasil_pkg::*;
 	    wire load_store_data_block =
 	        (store_hit0 && !store_buf0_q.store_data_valid) ||
 	        (store_hit1 && !store_buf1_q.store_data_valid);
-	    wire direct_dtcm_load_fire = direct_dtcm_load_candidate &&
-	        !load_store_data_block;
 	    wire queued_dtcm_load_fire = queued_dtcm_load_candidate &&
 	        !load_store_data_block;
-	    wire dtcm_load_fire = direct_dtcm_load_fire || queued_dtcm_load_fire;
+	    wire dtcm_load_fire = queued_dtcm_load_fire;
 	    wire [3:0] forward_mask0 = {4{store_hit0}} &
 	        store_buf0_q.store_mask;
 	    wire [3:0] forward_mask1 = {4{store_hit1}} &
@@ -327,8 +343,7 @@ import ydrasil_pkg::*;
         (!active_is_store || active_store_data_valid);
     wire queue_dequeue = queued_dtcm_load_fire || dtcm_store_fire || mmio_fire;
     wire queue_has_room_after_dequeue = !queue_full || queue_dequeue;
-    wire queue_enqueue = req_i.valid && !direct_dtcm_load_fire &&
-        queue_has_room_after_dequeue;
+    wire queue_enqueue = req_i.valid && queue_has_room_after_dequeue;
     wire store_buf_enqueue = dtcm_store_fire;
 `ifndef SYNTHESIS
     reg [31:0] perf_stb_lookup_q;
@@ -344,23 +359,20 @@ import ydrasil_pkg::*;
         (req_i.valid &&
          (queue_count_q >= QUEUE_COUNT_WIDTH'(QUEUE_DEPTH-1)));
     assign status_o.idle = queue_empty && !req_i.valid && store_buf_empty &&
-        !mmio_busy && !load_s1_valid_q;
+        !mmio_busy && !load_launch_valid_q && !store_launch_valid_q &&
+        !load_s1_valid_q;
     assign status_o.fast_load = 1'b0;
     // Export only registered queue capacity. Issue locally reserves its
     // registered AGU request, keeping request payload and DTCM decisions out
     // of the next Issue selection cone.
     assign issue_credit_o = issue_credit_q;
 
-    always_comb begin
-        dtcm_req_o = '0;
-        dtcm_req_o.load.valid = dtcm_load_fire;
-        dtcm_req_o.load.addr = load_launch_addr;
-        dtcm_req_o.store.valid = store_buf_dequeue;
-        dtcm_req_o.store.write = store_buf_dequeue;
-        dtcm_req_o.store.addr = store_buf0_q.addr;
-        dtcm_req_o.store.wdata = store_head_wdata;
-        dtcm_req_o.store.wmask = store_buf0_q.store_mask;
-    end
+	    assign dtcm_load_valid_o = load_launch_valid_q;
+	    assign dtcm_load_addr_o = load_launch_addr_q;
+	    assign dtcm_store_valid_o = store_launch_valid_q;
+	    assign dtcm_store_addr_o = store_launch_addr_q;
+	    assign dtcm_store_data_o = store_launch_data_q;
+	    assign dtcm_store_mask_o = store_launch_mask_q;
 
     assign mmio_req_o.valid = mmio_req_valid_q;
     assign mmio_req_o.write = mmio_req_valid_q && !mmio_is_load_q;
@@ -416,16 +428,13 @@ import ydrasil_pkg::*;
     // The BRAM output and S1 metadata are the LSU response. Future File is the
     // second response register; a separate load_s2 register would add a third
     // cycle before the value becomes usable.
-    wire dtcm_recovery_kill = branch_recovery_i && load_s1_valid_q &&
-        !recovery_keep_mask_i[load_s1_producer_id_q[
-            PRODUCER_SLOT_WIDTH-1:0]];
-    wire mmio_recovery_kill = branch_recovery_i && mmio_wb_valid_q &&
-        !recovery_keep_mask_i[mmio_wb_producer_id_q[
-            PRODUCER_SLOT_WIDTH-1:0]];
-    wire dtcm_wb_valid = load_s1_valid_q && !load_s1_killed_q &&
-        !dtcm_recovery_kill;
+    // Recovery clears both response-valid registers at its clock edge. A
+    // response visible on that edge crosses the registered completion bus once
+    // and is accepted only if the post-recovery producer valid/epoch matches.
+    // Do not feed the combinational recovery mask back through completion.
+    wire dtcm_wb_valid = load_s1_valid_q && !load_s1_killed_q;
     wire mmio_wb_out_valid = mmio_wb_valid_q && !mmio_wb_killed_q &&
-        !mmio_recovery_kill && !dtcm_wb_valid;
+        !dtcm_wb_valid;
     assign completion_valid_o = dtcm_wb_valid ?
         load_s1_producer_tracked_q :
         (mmio_wb_out_valid && mmio_wb_producer_tracked_q);
@@ -451,12 +460,6 @@ import ydrasil_pkg::*;
 	integer shadow_match_idx;
 	always_comb begin
 		enqueue_pkt = req_i;
-		if (req_i.valid && req_i.is_store &&
-		    ((commit_pkt_i.valid &&
-		      (commit_pkt_i.producer_id == req_i.producer_id)) ||
-		     (commit_pkt1_i.valid &&
-		      (commit_pkt1_i.producer_id == req_i.producer_id))))
-			enqueue_pkt.retired = 1'b1;
 		if (enqueue_pkt.valid && enqueue_pkt.is_store &&
 		    !enqueue_pkt.store_data_valid &&
 		    enqueue_pkt.store_producer_tracked) begin
@@ -500,11 +503,7 @@ import ydrasil_pkg::*;
 	always_comb begin
         store_enqueue_pkt = '0;
 	        store_enqueue_pkt.valid = 1'b1;
-	        store_enqueue_pkt.retired = active_pkt.retired ||
-	            (commit_pkt_i.valid &&
-	             (commit_pkt_i.producer_id == active_pkt.producer_id)) ||
-	            (commit_pkt1_i.valid &&
-	             (commit_pkt1_i.producer_id == active_pkt.producer_id));
+	        store_enqueue_pkt.retired = active_pkt.retired;
 	        store_enqueue_pkt.producer_id = active_pkt.producer_id;
         store_enqueue_pkt.addr = active_addr;
         store_enqueue_pkt.store_data = active_aligned_store_data;
@@ -560,9 +559,9 @@ import ydrasil_pkg::*;
 	    wire [$clog2(QUEUE_DEPTH)-1:0] recovery_queue_second =
 	        queue_head_q + 1'b1;
 	    wire ydrasil_lsu_req_pkt_t recovery_queue_pkt0 =
-	        queue_head_q[0] ? patched_queue1 : patched_queue0;
+	        queue_head_q[0] ? queue_q[1] : queue_q[0];
 	    wire ydrasil_lsu_req_pkt_t recovery_queue_pkt1 =
-	        recovery_queue_second[0] ? patched_queue1 : patched_queue0;
+	        recovery_queue_second[0] ? queue_q[1] : queue_q[0];
 	    wire recovery_queue_keep0 = (queue_count_q > 0) &&
 	        recovery_queue_pkt0.valid &&
 	        (recovery_keep_mask_i[
@@ -577,18 +576,32 @@ import ydrasil_pkg::*;
 	        QUEUE_COUNT_WIDTH'(recovery_queue_keep0) +
 	        QUEUE_COUNT_WIDTH'(recovery_queue_keep1);
 	    wire recovery_store_keep0 = (store_buf_count_q > 0) &&
-	        patched_store_buf0.valid &&
+	        store_buf0_q.valid &&
 	        (recovery_keep_mask_i[
-	             patched_store_buf0.producer_id[PRODUCER_SLOT_WIDTH-1:0]] ||
-	         patched_store_buf0.retired);
+	             store_buf0_q.producer_id[PRODUCER_SLOT_WIDTH-1:0]] ||
+	         store_buf0_q.retired);
 	    wire recovery_store_keep1 = (store_buf_count_q > 1) &&
-	        patched_store_buf1.valid &&
+	        store_buf1_q.valid &&
 	        (recovery_keep_mask_i[
-	             patched_store_buf1.producer_id[PRODUCER_SLOT_WIDTH-1:0]] ||
-	         patched_store_buf1.retired);
+	             store_buf1_q.producer_id[PRODUCER_SLOT_WIDTH-1:0]] ||
+	         store_buf1_q.retired);
 	    wire [STORE_COUNT_WIDTH-1:0] recovery_store_count =
 	        STORE_COUNT_WIDTH'(recovery_store_keep0) +
 	        STORE_COUNT_WIDTH'(recovery_store_keep1);
+
+	    always_ff @(posedge clk or negedge rst_n) begin
+	        if (!rst_n) begin
+	            commit_valid_q[0] <= 1'b0;
+	            commit_valid_q[1] <= 1'b0;
+	            commit_id_q[0] <= '0;
+	            commit_id_q[1] <= '0;
+	        end else begin
+	            commit_valid_q[0] <= commit_pkt_i.valid;
+	            commit_valid_q[1] <= commit_pkt1_i.valid;
+	            commit_id_q[0] <= commit_pkt_i.producer_id;
+	            commit_id_q[1] <= commit_pkt1_i.producer_id;
+	        end
+	    end
 
 	integer queue_idx;
 	always_ff @(posedge clk or negedge rst_n) begin
@@ -625,6 +638,18 @@ import ydrasil_pkg::*;
             load_s1_addr_index_q <= '0;
             load_s1_forward_mask_q <= '0;
             load_s1_forward_data_q <= '0;
+            load_launch_valid_q <= 1'b0;
+            load_launch_addr_q <= '0;
+            load_launch_rd_addr_q <= '0;
+            load_launch_producer_id_q <= '0;
+            load_launch_producer_tracked_q <= 1'b0;
+            load_launch_op_q <= '0;
+            load_launch_forward_mask_q <= '0;
+            load_launch_forward_data_q <= '0;
+            store_launch_valid_q <= 1'b0;
+            store_launch_addr_q <= '0;
+            store_launch_data_q <= '0;
+            store_launch_mask_q <= '0;
             load_s1_killed_q <= 1'b0;
             mmio_req_valid_q <= 1'b0;
             mmio_is_load_q <= 1'b0;
@@ -659,6 +684,8 @@ import ydrasil_pkg::*;
 	            store_buf0_q <= '0;
 	            store_buf1_q <= '0;
             load_s1_valid_q <= 1'b0;
+            load_launch_valid_q <= 1'b0;
+            store_launch_valid_q <= 1'b0;
             mmio_req_valid_q <= 1'b0;
             mmio_wb_valid_q <= 1'b0;
             load_s1_killed_q <= 1'b0;
@@ -680,25 +707,22 @@ import ydrasil_pkg::*;
 	            queue_q[1] <= (recovery_queue_keep0 && recovery_queue_keep1) ?
 	                recovery_queue_pkt1 : '0;
 	            store_buf_count_q <= recovery_store_count;
-	            store_buf0_q <= recovery_store_keep0 ? patched_store_buf0 :
-	                recovery_store_keep1 ? patched_store_buf1 : '0;
+	            store_buf0_q <= recovery_store_keep0 ? store_buf0_q :
+	                recovery_store_keep1 ? store_buf1_q : '0;
 	            store_buf1_q <= (recovery_store_keep0 && recovery_store_keep1) ?
-	                patched_store_buf1 : '0;
-	            load_s1_valid_q <= load_s1_valid_q &&
-	                recovery_keep_mask_i[load_s1_producer_id_q[
-	                    PRODUCER_SLOT_WIDTH-1:0]];
+	                store_buf1_q : '0;
+		            // The current S1 response is sampled by completion_ctrl on
+		            // this edge.  Keeping it across recovery would broadcast the
+		            // same producer a second time on the following cycle.
+		            load_s1_valid_q <= 1'b0;
+		            load_launch_valid_q <= 1'b0;
+		            store_launch_valid_q <= 1'b0;
 	            mmio_req_valid_q <= mmio_req_valid_q &&
 	                recovery_keep_mask_i[mmio_producer_id_q[
 	                    PRODUCER_SLOT_WIDTH-1:0]];
-            mmio_wb_valid_q <= mmio_wb_valid_q &&
-                recovery_keep_mask_i[mmio_wb_producer_id_q[
-                    PRODUCER_SLOT_WIDTH-1:0]];
-            load_s1_killed_q <= load_s1_valid_q &&
-                !recovery_keep_mask_i[load_s1_producer_id_q[
-                    PRODUCER_SLOT_WIDTH-1:0]];
-            mmio_wb_killed_q <= mmio_wb_valid_q &&
-                !recovery_keep_mask_i[mmio_wb_producer_id_q[
-                    PRODUCER_SLOT_WIDTH-1:0]];
+            mmio_wb_valid_q <= 1'b0;
+            load_s1_killed_q <= 1'b0;
+            mmio_wb_killed_q <= 1'b0;
         end else begin
             load_s1_killed_q <= 1'b0;
             mmio_wb_killed_q <= 1'b0;
@@ -790,18 +814,35 @@ import ydrasil_pkg::*;
                 default: store_buf_count_q <= store_buf_count_q;
             endcase
 
-            load_s1_valid_q <= dtcm_load_fire;
+            load_launch_valid_q <= dtcm_load_fire;
+            if (dtcm_load_fire) begin
+                load_launch_addr_q <= load_launch_addr;
+                load_launch_rd_addr_q <= load_launch_rd_addr;
+                load_launch_producer_id_q <= load_launch_producer_id;
+                load_launch_producer_tracked_q <=
+                    load_launch_producer_tracked;
+                load_launch_op_q <= load_launch_op;
+                load_launch_forward_mask_q <= load_forward_mask;
+                load_launch_forward_data_q <= load_forward_data;
+            end
+            store_launch_valid_q <= store_buf_dequeue;
+            if (store_buf_dequeue) begin
+                store_launch_addr_q <= store_buf0_q.addr;
+                store_launch_data_q <= store_head_wdata;
+                store_launch_mask_q <= store_buf0_q.store_mask;
+            end
+            load_s1_valid_q <= load_launch_valid_q;
             if (load_s1_valid_q)
                 dtcm_resp_data_q <= dtcm_load_result;
-            if (dtcm_load_fire) begin
-                load_s1_rd_addr_q <= load_launch_rd_addr;
-                load_s1_producer_id_q <= load_launch_producer_id;
+            if (load_launch_valid_q) begin
+                load_s1_rd_addr_q <= load_launch_rd_addr_q;
+                load_s1_producer_id_q <= load_launch_producer_id_q;
                 load_s1_producer_tracked_q <=
-                    load_launch_producer_tracked;
-                load_s1_op_q <= load_launch_op;
-                load_s1_addr_index_q <= load_launch_addr[1:0];
-                load_s1_forward_mask_q <= load_forward_mask;
-                load_s1_forward_data_q <= load_forward_data;
+                    load_launch_producer_tracked_q;
+                load_s1_op_q <= load_launch_op_q;
+                load_s1_addr_index_q <= load_launch_addr_q[1:0];
+                load_s1_forward_mask_q <= load_launch_forward_mask_q;
+                load_s1_forward_data_q <= load_launch_forward_data_q;
             end
             if (mmio_wb_valid_q && !load_s1_valid_q)
                 mmio_wb_valid_q <= 1'b0;
@@ -834,12 +875,12 @@ import ydrasil_pkg::*;
 	                if (|load_forward_mask)
 	                    perf_stb_hit_q <= perf_stb_hit_q + 1'b1;
 	            end
-	            if ((direct_dtcm_load_candidate || queued_dtcm_load_candidate) &&
+	            if (queued_dtcm_load_candidate &&
 	                load_store_data_block)
 	                perf_stb_block_q <= perf_stb_block_q + 1'b1;
             if (store_buf_dequeue)
                 perf_stb_drain_q <= perf_stb_drain_q + 1'b1;
-            if (req_i.valid && !queue_enqueue && !direct_dtcm_load_fire &&
+            if (req_i.valid && !queue_enqueue &&
                 !(queue_dequeue && queue_full)) begin
                 $fatal(1, "LSU two-entry load queue overflow");
             end
