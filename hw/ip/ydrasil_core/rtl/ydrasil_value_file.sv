@@ -8,8 +8,8 @@ import ydrasil_pkg::*;
     input  producer_slot_t              read_slot1_i,
     input  producer_slot_t              read_slot2_i,
     input  producer_slot_t              read_slot3_i,
-    input  producer_slot_t              retire_slot0_i,
-    input  producer_slot_t              retire_slot1_i,
+    input  producer_id_t                retire_id0_i,
+    input  producer_id_t                retire_id1_i,
     output wire [REGS_DATA_WIDTH-1:0]   read_data0_o,
     output wire [REGS_DATA_WIDTH-1:0]   read_data1_o,
     output wire [REGS_DATA_WIDTH-1:0]   read_data2_o,
@@ -161,10 +161,34 @@ import ydrasil_pkg::*;
         read_slot2_i[PRODUCER_SLOT_WIDTH-1:1];
     wire [BANK_INDEX_WIDTH-1:0] read_index3 =
         read_slot3_i[PRODUCER_SLOT_WIDTH-1:1];
+    wire producer_slot_t retire_slot0 =
+        retire_id0_i[PRODUCER_SLOT_WIDTH-1:0];
+    wire producer_slot_t retire_slot1 =
+        retire_id1_i[PRODUCER_SLOT_WIDTH-1:0];
     wire [BANK_INDEX_WIDTH-1:0] retire_index0 =
-        retire_slot0_i[PRODUCER_SLOT_WIDTH-1:1];
+        retire_slot0[PRODUCER_SLOT_WIDTH-1:1];
     wire [BANK_INDEX_WIDTH-1:0] retire_index1 =
-        retire_slot1_i[PRODUCER_SLOT_WIDTH-1:1];
+        retire_slot1[PRODUCER_SLOT_WIDTH-1:1];
+    wire retire_hit00 = completion_write0 &&
+        (completion_meta_i[COMPLETION_ALU].producer_id == retire_id0_i);
+    wire retire_hit01 = completion_write1 &&
+        (completion_meta_i[COMPLETION_LSU].producer_id == retire_id0_i);
+    wire retire_hit02 = completion_write2 &&
+        (completion_meta_i[COMPLETION_MUL].producer_id == retire_id0_i);
+    wire retire_hit03 = completion_write3 &&
+        (completion_meta_i[COMPLETION_DUAL_ALU].producer_id == retire_id0_i);
+    wire retire_hit10 = completion_write0 &&
+        (completion_meta_i[COMPLETION_ALU].producer_id == retire_id1_i);
+    wire retire_hit11 = completion_write1 &&
+        (completion_meta_i[COMPLETION_LSU].producer_id == retire_id1_i);
+    wire retire_hit12 = completion_write2 &&
+        (completion_meta_i[COMPLETION_MUL].producer_id == retire_id1_i);
+    wire retire_hit13 = completion_write3 &&
+        (completion_meta_i[COMPLETION_DUAL_ALU].producer_id == retire_id1_i);
+    wire [REGS_DATA_WIDTH-1:0] retire_stored_data0 = retire_slot0[0] ?
+        value_odd_q[retire_index0] : value_even_q[retire_index0];
+    wire [REGS_DATA_WIDTH-1:0] retire_stored_data1 = retire_slot1[0] ?
+        value_odd_q[retire_index1] : value_even_q[retire_index1];
 
     assign read_data0_o = read_slot0_i[0] ?
         value_odd_q[read_index0] : value_even_q[read_index0];
@@ -182,10 +206,18 @@ import ydrasil_pkg::*;
         value_epoch_odd_q[read_index2] : value_epoch_even_q[read_index2];
     assign read_epoch3_o = read_slot3_i[0] ?
         value_epoch_odd_q[read_index3] : value_epoch_even_q[read_index3];
-    assign retire_data0_o = retire_slot0_i[0] ?
-        value_odd_q[retire_index0] : value_even_q[retire_index0];
-    assign retire_data1_o = retire_slot1_i[0] ?
-        value_odd_q[retire_index1] : value_even_q[retire_index1];
+    // Ready is captured from raw narrow metadata on the same edge that the
+    // registered completion lane captures data. Retire therefore bypasses the
+    // just-registered lane by full producer identity instead of reading the
+    // Value File one edge too early. The lane priority matches the write order.
+    assign retire_data0_o = retire_hit03 ? completion_data_i[COMPLETION_DUAL_ALU] :
+        retire_hit00 ? completion_data_i[COMPLETION_ALU] :
+        retire_hit02 ? completion_data_i[COMPLETION_MUL] :
+        retire_hit01 ? completion_data_i[COMPLETION_LSU] : retire_stored_data0;
+    assign retire_data1_o = retire_hit13 ? completion_data_i[COMPLETION_DUAL_ALU] :
+        retire_hit10 ? completion_data_i[COMPLETION_ALU] :
+        retire_hit12 ? completion_data_i[COMPLETION_MUL] :
+        retire_hit11 ? completion_data_i[COMPLETION_LSU] : retire_stored_data1;
 
 `ifndef SYNTHESIS
     initial assert ((PRODUCER_NUM == 12) && ((PRODUCER_NUM % 2) == 0))

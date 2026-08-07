@@ -240,6 +240,8 @@ import ydrasil_axi_pkg::*;
 	ydrasil_completion_meta_t       completion_meta [COMPLETION_LANES];
 	wire [REGS_DATA_WIDTH-1:0]      completion_data [COMPLETION_LANES];
 	wire [REGS_ADDR_WIDTH-1:0]      completion_rd [COMPLETION_LANES];
+	ydrasil_completion_meta_t       completion_ready_meta [COMPLETION_LANES];
+	wire [REGS_ADDR_WIDTH-1:0]      completion_ready_rd [COMPLETION_LANES];
 	wire                            alu_completion_valid;
 	producer_id_t                   alu_completion_producer_id;
 	wire                            alu_completion_producer_tracked;
@@ -255,8 +257,8 @@ import ydrasil_axi_pkg::*;
 	wire                            dual_completion_producer_tracked;
 	wire [REGS_ADDR_WIDTH-1:0]      dual_completion_addr;
 	wire [REGS_DATA_WIDTH-1:0]      dual_completion_data;
-	producer_slot_t                 retire_value_slot0;
-	producer_slot_t                 retire_value_slot1;
+	producer_id_t                   retire_value_id0;
+	producer_id_t                   retire_value_id1;
 	wire [REGS_DATA_WIDTH-1:0]      retire_value0;
 	wire [REGS_DATA_WIDTH-1:0]      retire_value1;
 	wire                            issue_at_rob_head;
@@ -352,6 +354,35 @@ import ydrasil_axi_pkg::*;
 
 	wire [ydrasil_pkg::BUS_ADDR_WIDTH-1:0] id_instr_addr;
 
+	// Completion data remains behind completion_ctrl. Only identity metadata
+	// reaches the ready table on the raw FU boundary, so no wide result bus can
+	// feed back into dispatch or retirement control.
+	assign completion_ready_meta[COMPLETION_ALU].valid =
+		alu_completion_valid;
+	assign completion_ready_meta[COMPLETION_ALU].producer_id =
+		alu_completion_producer_id;
+	assign completion_ready_meta[COMPLETION_ALU].producer_tracked =
+		alu_completion_producer_tracked;
+	assign completion_ready_rd[COMPLETION_ALU] = alu_completion_addr;
+	assign completion_ready_meta[COMPLETION_LSU].valid =
+		lsu_completion_valid;
+	assign completion_ready_meta[COMPLETION_LSU].producer_id =
+		lsu_completion_producer_id;
+	assign completion_ready_meta[COMPLETION_LSU].producer_tracked =
+		lsu_completion_producer_tracked;
+	assign completion_ready_rd[COMPLETION_LSU] = lsu_completion_addr;
+	assign completion_ready_meta[COMPLETION_MUL].valid = mul_rf_wen_rd;
+	assign completion_ready_meta[COMPLETION_MUL].producer_id = mul_producer_id;
+	assign completion_ready_meta[COMPLETION_MUL].producer_tracked =
+		mul_rf_wen_rd && (mul_rf_waddr_rd != '0);
+	assign completion_ready_rd[COMPLETION_MUL] = mul_rf_waddr_rd;
+	assign completion_ready_meta[COMPLETION_DUAL_ALU].valid =
+		dual_completion_valid;
+	assign completion_ready_meta[COMPLETION_DUAL_ALU].producer_id =
+		dual_completion_producer_id;
+	assign completion_ready_meta[COMPLETION_DUAL_ALU].producer_tracked =
+		dual_completion_producer_tracked;
+	assign completion_ready_rd[COMPLETION_DUAL_ALU] = dual_completion_addr;
 
 	ydrasil_completion_ctrl u_completion_ctrl (
 		.clk               (clk),
@@ -538,8 +569,8 @@ import ydrasil_axi_pkg::*;
 			.completion_data_i   (completion_data),
 			.commit_pkt_i        (commit_pkt),
 			.commit_pkt1_i       (commit_pkt1),
-			.retire_slot0_i      (retire_value_slot0),
-			.retire_slot1_i      (retire_value_slot1),
+				.retire_id0_i        (retire_value_id0),
+				.retire_id1_i        (retire_value_id1),
 			.early_main_bypass_data_i(main_early_bypass_data),
 			.early_dual_bypass_data_i(dual_early_bypass_data),
 			.lsu_idle_i          (lsu_status_pkt.idle),
@@ -752,8 +783,8 @@ import ydrasil_axi_pkg::*;
 			.issue_pkt1_i      (issue_head_compact_uop1),
 				.issue_fence_i     (id_fence_i),
 			.issue_fence_tag_i (issue_fence_tag),
-			.completion_meta_i (completion_meta),
-			.completion_rd_i   (completion_rd),
+				.completion_meta_i (completion_ready_meta),
+				.completion_rd_i   (completion_ready_rd),
 				.trap_stall_i      (trap_ctrl_pkt.stall),
 				.ex_mul_stall_i     (ex_mul_stall),
 			.retire_value0_i   (retire_value0),
@@ -772,8 +803,8 @@ import ydrasil_axi_pkg::*;
 			.ex_accept_valid1_o(ex_accept_valid1),
 			.retire_commit_o  (commit_pkt),
 			.retire_commit1_o (commit_pkt1),
-			.retire_value_slot0_o(retire_value_slot0),
-			.retire_value_slot1_o(retire_value_slot1),
+				.retire_value_id0_o(retire_value_id0),
+				.retire_value_id1_o(retire_value_id1),
 		.stall_if_o        (stall_if),
 		.stall_id_o        (stall_id),
 		.bubble_id_o       (bubble_id),

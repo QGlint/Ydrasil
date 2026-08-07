@@ -40,8 +40,8 @@ import ydrasil_pkg::*;
     output wire                         ex_accept_valid1_o,
     output ydrasil_commit_pkt_t         retire_commit_o,
     output ydrasil_commit_pkt_t         retire_commit1_o,
-    output producer_slot_t              retire_value_slot0_o,
-    output producer_slot_t              retire_value_slot1_o,
+    output producer_id_t                retire_value_id0_o,
+    output producer_id_t                retire_value_id1_o,
     output wire                         stall_if_o,
     output wire                         stall_id_o,
     output wire                         bubble_id_o,
@@ -144,8 +144,8 @@ import ydrasil_pkg::*;
     assign retire_commit1_o.rd_addr = producer_rd_q[queue_head1];
     assign retire_commit1_o.value = retire_value1_i;
     assign retire_commit1_o.pc = producer_pc_q[queue_head1];
-    assign retire_value_slot0_o = queue_head_q;
-    assign retire_value_slot1_o = queue_head1;
+    assign retire_value_id0_o = queue_head_id;
+    assign retire_value_id1_o = queue_head1_id;
 
     wire producer_has_two_free = queue_count_q <=
         QUEUE_COUNT_WIDTH'(PRODUCER_NUM - 2);

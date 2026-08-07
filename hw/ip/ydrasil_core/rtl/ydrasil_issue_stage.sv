@@ -20,8 +20,8 @@ import ydrasil_pkg::*;
     input  wire [REGS_DATA_WIDTH-1:0]  completion_data_i [COMPLETION_LANES],
     input  ydrasil_commit_pkt_t        commit_pkt_i,
     input  ydrasil_commit_pkt_t        commit_pkt1_i,
-    input  producer_slot_t             retire_slot0_i,
-    input  producer_slot_t             retire_slot1_i,
+    input  producer_id_t               retire_id0_i,
+    input  producer_id_t               retire_id1_i,
     input  wire [DATA_WIDTH-1:0]       early_main_bypass_data_i,
     input  wire [DATA_WIDTH-1:0]       early_dual_bypass_data_i,
     input  wire                        lsu_idle_i,
@@ -752,8 +752,8 @@ import ydrasil_pkg::*;
             PRODUCER_SLOT_WIDTH-1:0]),
         .read_slot3_i      (issue_pkt1_i.src1.producer_tag[
             PRODUCER_SLOT_WIDTH-1:0]),
-        .retire_slot0_i    (retire_slot0_i),
-        .retire_slot1_i    (retire_slot1_i),
+        .retire_id0_i      (retire_id0_i),
+        .retire_id1_i      (retire_id1_i),
         .read_data0_o      (issue_src0_value_i),
         .read_data1_o      (issue_src1_value_i),
         .read_data2_o      (issue_src2_value_i),
@@ -1076,7 +1076,7 @@ import ydrasil_pkg::*;
     // matches. Capture that value now so a retired store never carries a
     // recyclable producer tag into the LSU store buffer.
     wire lane_a_src1_epoch_match = lane_a_uop.src1.tag_valid &&
-        issue_src1_state_i.done &&
+        (issue_src1_state_i.done || !issue_src1_state_i.live) &&
         (issue_src1_epoch_i ==
          lane_a_uop.src1.producer_tag[PRODUCER_ID_WIDTH-1]);
     wire lane_b_src1_ready = lane_b_uses_slot0 ? src1_ready : src3_ready;

@@ -1143,6 +1143,79 @@ end
                          u_dut.ex_bp_train_pkt.valid,
                          u_dut.ex_bp_train_pkt.producer_id,
                          u_dut.u_ctrl.producer_ready_q);
+                $display("PERFLSU cyc=%0d op=valid%0b/agu%0b/tag%0d/load%0b/store%0b/sdata%0b/sprod%0b:%0d ctrl=stall%0b/bubble%0b/flush%0b/recover%0b/redirect%0b/keep%0b ex=req%0b/tag%0d q=count%0d/head%0d/active%0b/tag%0d/load%0b/store%0b/sdata%0b/sprod%0b:%0d/direct%0b/queued%0b/block%0b sb=count%0d/e0%0b/data%0b/tag%0d/sprod%0b:%0d/ret%0b/e1%0b/data%0b/tag%0d/sprod%0b:%0d/ret%0b shadow=v0x%0h/id%0d,%0d,%0d,%0d,%0d",
+                         perf_local_debug_cycle,
+                         u_dut.u_ydrasil_issue_stage.issue_pkt_i.valid,
+                         u_dut.u_ydrasil_issue_stage.agu_in_valid_q,
+                         u_dut.u_ydrasil_issue_stage.agu_in_req_q.producer_id,
+                         u_dut.u_ydrasil_issue_stage.agu_in_req_q.is_load,
+                         u_dut.u_ydrasil_issue_stage.agu_in_req_q.is_store,
+                         u_dut.u_ydrasil_issue_stage.agu_in_req_q.store_data_valid,
+                         u_dut.u_ydrasil_issue_stage.agu_in_req_q.store_producer_tracked,
+                         u_dut.u_ydrasil_issue_stage.agu_in_req_q.store_producer_id,
+                         u_dut.stall_id,
+                         u_dut.bubble_id,
+                         u_dut.flush_id,
+                         u_dut.ex_pc_redirect,
+                         u_dut.ex_pc_redirect,
+                         u_dut.branch_recovery_keep_mask[
+                             u_dut.u_ydrasil_issue_stage.agu_in_req_q.producer_id[
+                                 PRODUCER_SLOT_WIDTH-1:0]],
+                         u_dut.lsu_req_pkt.valid,
+                         u_dut.lsu_req_pkt.producer_id,
+                         u_dut.u_ydrasil_load_store_unit.queue_count_q,
+                         u_dut.u_ydrasil_load_store_unit.queue_head_q,
+                         u_dut.u_ydrasil_load_store_unit.active_valid,
+                         u_dut.u_ydrasil_load_store_unit.active_producer_id,
+                         u_dut.u_ydrasil_load_store_unit.active_is_load,
+                         u_dut.u_ydrasil_load_store_unit.active_is_store,
+                         u_dut.u_ydrasil_load_store_unit.active_store_data_valid,
+                         u_dut.u_ydrasil_load_store_unit.active_pkt.store_producer_tracked,
+                         u_dut.u_ydrasil_load_store_unit.active_pkt.store_producer_id,
+                         u_dut.u_ydrasil_load_store_unit.direct_dtcm_load_candidate,
+                         u_dut.u_ydrasil_load_store_unit.queued_dtcm_load_candidate,
+                         u_dut.u_ydrasil_load_store_unit.load_store_data_block,
+                         u_dut.u_ydrasil_load_store_unit.store_buf_count_q,
+                         u_dut.u_ydrasil_load_store_unit.store_buf0_q.valid,
+                         u_dut.u_ydrasil_load_store_unit.store_buf0_q.store_data_valid,
+                         u_dut.u_ydrasil_load_store_unit.store_buf0_q.producer_id,
+                         u_dut.u_ydrasil_load_store_unit.store_buf0_q.store_producer_tracked,
+                         u_dut.u_ydrasil_load_store_unit.store_buf0_q.store_producer_id,
+                         u_dut.u_ydrasil_load_store_unit.store_buf0_q.retired,
+                         u_dut.u_ydrasil_load_store_unit.store_buf1_q.valid,
+                         u_dut.u_ydrasil_load_store_unit.store_buf1_q.store_data_valid,
+                         u_dut.u_ydrasil_load_store_unit.store_buf1_q.producer_id,
+                         u_dut.u_ydrasil_load_store_unit.store_buf1_q.store_producer_tracked,
+                         u_dut.u_ydrasil_load_store_unit.store_buf1_q.store_producer_id,
+                         u_dut.u_ydrasil_load_store_unit.store_buf1_q.retired,
+                         {u_dut.u_ydrasil_load_store_unit.completion_shadow_valid_q[4],
+                          u_dut.u_ydrasil_load_store_unit.completion_shadow_valid_q[3],
+                          u_dut.u_ydrasil_load_store_unit.completion_shadow_valid_q[2],
+                          u_dut.u_ydrasil_load_store_unit.completion_shadow_valid_q[1],
+                          u_dut.u_ydrasil_load_store_unit.completion_shadow_valid_q[0]},
+                         u_dut.u_ydrasil_load_store_unit.completion_shadow_id_q[0],
+                         u_dut.u_ydrasil_load_store_unit.completion_shadow_id_q[1],
+                         u_dut.u_ydrasil_load_store_unit.completion_shadow_id_q[2],
+                         u_dut.u_ydrasil_load_store_unit.completion_shadow_id_q[3],
+                         u_dut.u_ydrasil_load_store_unit.completion_shadow_id_q[4]);
+                if (u_dut.u_ydrasil_issue_stage.issue_pkt_i.valid &&
+                    (u_dut.u_ydrasil_issue_stage.issue_pkt_i.op_class ==
+                     UOP_CLASS_STORE))
+                    $display("PERFSTORE cyc=%0d tag=%0d src=%0d ready=%0b state=live%0b/done%0b vf_epoch=%0b vf_match=%0b local_epoch_match=%0b early=main%0b/dual%0b data=0x%08h",
+                             perf_local_debug_cycle,
+                             u_dut.u_ydrasil_issue_stage.issue_pkt_i.dst.rob_tag,
+                             u_dut.u_ydrasil_issue_stage.issue_pkt_i.src1.producer_tag,
+                             u_dut.u_ydrasil_issue_stage.src1_ready,
+                             u_dut.issue_src1_state.live,
+                             u_dut.issue_src1_state.done,
+                             u_dut.u_ydrasil_issue_stage.issue_src1_epoch_i,
+                             u_dut.u_ydrasil_issue_stage.issue_src1_epoch_i ==
+                                 u_dut.u_ydrasil_issue_stage.issue_pkt_i.src1.producer_tag[
+                                     PRODUCER_ID_WIDTH-1],
+                             u_dut.u_ydrasil_issue_stage.lane_a_src1_epoch_match,
+                             u_dut.u_ydrasil_issue_stage.slot0_src1_early_main_hit,
+                             u_dut.u_ydrasil_issue_stage.slot0_src1_early_dual_hit,
+                             u_dut.u_ydrasil_issue_stage.slot0_src1_local);
             end
         end
     end
@@ -2253,12 +2326,20 @@ end
             endcase
             if (u_dut.u_ydrasil_commit_trace.issue_pair_execute) begin
                 dual_issue_count <= dual_issue_count + 1'b1;
-                if (u_dut.issue_head_compact_uop.op_class == ydrasil_pkg::UOP_CLASS_BJP)
+                if ((u_dut.issue_head_compact_uop.op_class ==
+                     ydrasil_pkg::UOP_CLASS_BJP) ||
+                    (u_dut.issue_head_compact_uop1.op_class ==
+                     ydrasil_pkg::UOP_CLASS_BJP))
                     dual_bru_alu_count <= dual_bru_alu_count + 1'b1;
                 else if ((u_dut.issue_head_compact_uop.op_class == ydrasil_pkg::UOP_CLASS_LOAD) ||
-                         (u_dut.issue_head_compact_uop.op_class == ydrasil_pkg::UOP_CLASS_STORE))
+                         (u_dut.issue_head_compact_uop.op_class == ydrasil_pkg::UOP_CLASS_STORE) ||
+                         (u_dut.issue_head_compact_uop1.op_class == ydrasil_pkg::UOP_CLASS_LOAD) ||
+                         (u_dut.issue_head_compact_uop1.op_class == ydrasil_pkg::UOP_CLASS_STORE))
                     dual_lsu_alu_count <= dual_lsu_alu_count + 1'b1;
-                else if (u_dut.issue_head_compact_uop.op_class == ydrasil_pkg::UOP_CLASS_MUL)
+                else if ((u_dut.issue_head_compact_uop.op_class ==
+                          ydrasil_pkg::UOP_CLASS_MUL) ||
+                         (u_dut.issue_head_compact_uop1.op_class ==
+                          ydrasil_pkg::UOP_CLASS_MUL))
                     dual_muldiv_alu_count <= dual_muldiv_alu_count + 1'b1;
                 else if ((u_dut.issue_head_compact_uop.op_class == ydrasil_pkg::UOP_CLASS_ALU) ||
                          (u_dut.issue_head_compact_uop.op_class == ydrasil_pkg::UOP_CLASS_BITMANIP))
