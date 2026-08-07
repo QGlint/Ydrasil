@@ -20,7 +20,10 @@ import ydrasil_pkg::*;
     output wire                         result_wen_o,
     output wire [REGS_ADDR_WIDTH-1:0]   result_waddr_o,
     output producer_id_t                result_producer_id_o,
-    output wire [REGS_DATA_WIDTH-1:0]   result_wdata_o
+    output wire [REGS_DATA_WIDTH-1:0]   result_wdata_o,
+    output wire                         due_valid_o,
+    output wire [REGS_ADDR_WIDTH-1:0]   due_waddr_o,
+    output producer_id_t                due_producer_id_o
 );
 
     reg                         s0_valid_q;
@@ -94,6 +97,9 @@ import ydrasil_pkg::*;
     assign result_producer_id_o = s3_producer_id_q;
     assign result_wdata_o = s3_high_q ? s3_product_q[63:32] :
                                         s3_product_q[31:0];
+    assign due_valid_o = s2_valid_q && s2_wen_q;
+    assign due_waddr_o = s2_waddr_q;
+    assign due_producer_id_o = s2_producer_id_q;
 
     // Keep the DSP boundary free of asynchronous reset controls. Valid and
     // write-enable bits still provide the architectural flush contract.

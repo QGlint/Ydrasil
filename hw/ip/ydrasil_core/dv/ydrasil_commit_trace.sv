@@ -103,8 +103,26 @@ import ydrasil_pkg::*;
     wire id_ex_rd_issue =
         $root.ydrasil_core_tb.u_dut.ex_accept_valid &&
         $root.ydrasil_core_tb.u_dut.ex_hzd_pkt.producer_tracked;
-    wire [2:0] issue_pipe_count_q =
-        $root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.issue_pipe_count_q;
+    wire [1:0] select_buf_count =
+        $root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.select_buf_count_q;
+    wire select_buf_head =
+        $root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.select_buf_head_q;
+    wire select_bundle0_pair =
+        $root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.select_bundle0_pair_q;
+    wire select_bundle1_pair =
+        $root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.select_bundle1_pair_q;
+    wire serial_bundle_valid =
+        $root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.serial_bundle_valid_q;
+    wire [2:0] select_buf_uop_count = (select_buf_count == 2'd0) ? 3'd0 :
+        (select_buf_count == 2'd1) ?
+        (select_buf_head ? (3'd1 + {2'b0, select_bundle1_pair}) :
+                           (3'd1 + {2'b0, select_bundle0_pair})) :
+        (3'd2 + {2'b0, select_bundle0_pair} +
+                {2'b0, select_bundle1_pair});
+    wire [3:0] issue_pending_uop_count =
+        {1'b0, select_buf_uop_count} + {3'b0, serial_bundle_valid};
+    wire [2:0] issue_pipe_count_q = (issue_pending_uop_count >= 4) ?
+        3'd4 : issue_pending_uop_count[2:0];
     wire issue_pair_execute =
         $root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.issue_pair_execute;
 
@@ -189,22 +207,28 @@ import ydrasil_pkg::*;
     assign dbg_bp_mispredict_o =
         $root.ydrasil_core_tb.u_dut.dbg_bp_mispredict;
 
-    function automatic [INST_DATA_WIDTH-1:0] read_instr(
-        input [INST_ADDR_WIDTH-1:0] pc
-    );
-        begin
-            if ((pc >= DTCM_BASE_ADDR) &&
-                (pc < (DTCM_BASE_ADDR + ((32'd1 << DTCM_ADDR_WIDTH) << 2))))
-                read_instr = $root.ydrasil_core_tb.u_dut.u_ydrasil_mems.u_dtcm.u_impl.mem_r[
-                    pc[DTCM_ADDR_WIDTH+1:2]];
-            else if (pc[2])
-                read_instr = $root.ydrasil_core_tb.u_dut.u_ydrasil_mems.u_itcm.u_impl.mem_r[
-                    pc[ITCM_ADDR_WIDTH+1:3]][63:32];
-            else
-                read_instr = $root.ydrasil_core_tb.u_dut.u_ydrasil_mems.u_itcm.u_impl.mem_r[
-                    pc[ITCM_ADDR_WIDTH+1:3]][31:0];
-        end
-    endfunction
+    wire retire0_pc_is_dtcm =
+        (retire_i.pc >= DTCM_BASE_ADDR) &&
+        (retire_i.pc < (DTCM_BASE_ADDR +
+         ((32'd1 << DTCM_ADDR_WIDTH) << 2)));
+    wire retire1_pc_is_dtcm =
+        (retire1_i.pc >= DTCM_BASE_ADDR) &&
+        (retire1_i.pc < (DTCM_BASE_ADDR +
+         ((32'd1 << DTCM_ADDR_WIDTH) << 2)));
+    wire [INST_DATA_WIDTH-1:0] retire0_trace_instr = retire0_pc_is_dtcm ?
+        $root.ydrasil_core_tb.u_dut.u_ydrasil_mems.u_dtcm.u_impl.mem_r[
+            retire_i.pc[DTCM_ADDR_WIDTH+1:2]] : retire_i.pc[2] ?
+        $root.ydrasil_core_tb.u_dut.u_ydrasil_mems.u_itcm.u_impl.mem_r[
+            retire_i.pc[ITCM_ADDR_WIDTH+1:3]][63:32] :
+        $root.ydrasil_core_tb.u_dut.u_ydrasil_mems.u_itcm.u_impl.mem_r[
+            retire_i.pc[ITCM_ADDR_WIDTH+1:3]][31:0];
+    wire [INST_DATA_WIDTH-1:0] retire1_trace_instr = retire1_pc_is_dtcm ?
+        $root.ydrasil_core_tb.u_dut.u_ydrasil_mems.u_dtcm.u_impl.mem_r[
+            retire1_i.pc[DTCM_ADDR_WIDTH+1:2]] : retire1_i.pc[2] ?
+        $root.ydrasil_core_tb.u_dut.u_ydrasil_mems.u_itcm.u_impl.mem_r[
+            retire1_i.pc[ITCM_ADDR_WIDTH+1:3]][63:32] :
+        $root.ydrasil_core_tb.u_dut.u_ydrasil_mems.u_itcm.u_impl.mem_r[
+            retire1_i.pc[ITCM_ADDR_WIDTH+1:3]][31:0];
 
     task automatic print_register_commit;
         input [INST_ADDR_WIDTH-1:0] pc;
@@ -225,10 +249,10 @@ import ydrasil_pkg::*;
     always @(posedge clk) begin
         if (rst_n) begin
             if (retire_i.valid && retire_i.writes_gpr)
-                print_register_commit(retire_i.pc, read_instr(retire_i.pc),
+                print_register_commit(retire_i.pc, retire0_trace_instr,
                     retire_i.rd_addr, retire_i.value);
             if (retire1_i.valid && retire1_i.writes_gpr)
-                print_register_commit(retire1_i.pc, read_instr(retire1_i.pc),
+                print_register_commit(retire1_i.pc, retire1_trace_instr,
                     retire1_i.rd_addr, retire1_i.value);
         end
     end

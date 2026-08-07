@@ -118,6 +118,16 @@ end
     wire [1:0]  dbg_bp_pred_counter;
     wire [31:0] dbg_bp_pred_next_pc;
     wire        dbg_bp_mispredict;
+    reg         raw_debug_en;
+    reg         lsu_local_debug_en;
+    integer     raw_debug_cycle;
+    integer     lsu_local_debug_cycle;
+    initial begin
+        raw_debug_en = $test$plusargs("raw_debug");
+        lsu_local_debug_en = $test$plusargs("lsu_local_debug");
+        raw_debug_cycle = 0;
+        lsu_local_debug_cycle = 0;
+    end
 
     wire bp_branch_valid = dbg_bp_resolve_valid;
     wire bp_pred_hit = dbg_bp_pred_hit;
@@ -510,7 +520,646 @@ end
 		clk = 1'b0;
 		forever #10 clk = ~clk;
 	end
+	`endif
 
+`ifndef SYNTHESIS
+    always_ff @(posedge clk) begin
+        if (!rst_n) begin
+            lsu_local_debug_cycle <= 0;
+        end else begin
+            lsu_local_debug_cycle <= lsu_local_debug_cycle + 1;
+            if (lsu_local_debug_en) begin
+                if (u_dut.u_ydrasil_issue_stage.lane_a_agu_accept &&
+                    ((u_dut.u_ydrasil_issue_stage.lane_a_uop.pc ==
+                      32'h80003e9c) ||
+                     (u_dut.u_ydrasil_issue_stage.lane_a_uop.pc ==
+                      32'h80003fd8)))
+                    $display("LSULOC cyc=%0d LOADSEL pc=0x%08h id=%0d src0=%0d/tag=%0b/%0d/ready=%0b epoch=%0b values=ff:0x%08h arf:0x%08h resolved:0x%08h ready=%0b hit=dtcm:%0b/main:%0b/dual:%0b replay=main:%0b/%0d dual:%0b/%0d completion=alu:%0b/%0d/0x%08h dual:%0b/%0d/0x%08h",
+                             lsu_local_debug_cycle,
+                             u_dut.u_ydrasil_issue_stage.lane_a_uop.pc,
+                             u_dut.u_ydrasil_issue_stage.lane_a_uop.dst.rob_tag,
+                             u_dut.u_ydrasil_issue_stage.lane_a_uop.src0.arch_addr,
+                             u_dut.u_ydrasil_issue_stage.lane_a_uop.src0.tag_valid,
+                             u_dut.u_ydrasil_issue_stage.lane_a_uop.src0.producer_tag,
+                             u_dut.u_ydrasil_issue_stage.lane_a_uop.src0.ready,
+                             u_dut.u_ydrasil_issue_stage.issue_src0_epoch_i,
+                             u_dut.u_ydrasil_issue_stage.issue_src0_value_i,
+                             u_dut.u_ydrasil_issue_stage.rf_rdata_rs1_i,
+                             u_dut.u_ydrasil_issue_stage.lane_a_src0_local,
+                             u_dut.u_ydrasil_issue_stage.src0_ready,
+                             u_dut.u_ydrasil_issue_stage.slot0_src0_dtcm_hit,
+                             u_dut.u_ydrasil_issue_stage.slot0_src0_early_main_hit,
+                             u_dut.u_ydrasil_issue_stage.slot0_src0_early_dual_hit,
+                             u_dut.u_ydrasil_issue_stage.early_replay_valid_q[0],
+                             u_dut.u_ydrasil_issue_stage.early_replay_id_q[0],
+                             u_dut.u_ydrasil_issue_stage.early_replay_valid_q[1],
+                             u_dut.u_ydrasil_issue_stage.early_replay_id_q[1],
+                             u_dut.completion_meta[COMPLETION_ALU].valid,
+                             u_dut.completion_meta[COMPLETION_ALU].producer_id,
+                             u_dut.completion_data[COMPLETION_ALU],
+                             u_dut.completion_meta[COMPLETION_DUAL_ALU].valid,
+                             u_dut.completion_meta[COMPLETION_DUAL_ALU].producer_id,
+                             u_dut.completion_data[COMPLETION_DUAL_ALU]);
+                if ((lsu_local_debug_cycle >= 70190) &&
+                    (lsu_local_debug_cycle <= 70225) &&
+                    (u_dut.ex_pc_redirect || u_dut.branch_jump || u_dut.flush_ex))
+                    $display("LSULOC cyc=%0d BRANCH redirect=%0b jump=%0b flush_ex=%0b target=0x%08h train=%0b/0x%08h/id=%0d/taken=%0b keep=0x%0h sb=%0d/%0b/%0b/%0b/id=%0d/%0d",
+                             lsu_local_debug_cycle,
+                             u_dut.ex_pc_redirect,
+                             u_dut.branch_jump,
+                             u_dut.flush_ex,
+                             u_dut.ex_pc_redirect_target,
+                             u_dut.ex_bp_train_pkt.valid,
+                             u_dut.ex_bp_train_pkt.pc,
+                             u_dut.ex_bp_train_pkt.producer_id,
+                             u_dut.ex_bp_train_pkt.taken,
+                             u_dut.branch_recovery_keep_mask,
+                             u_dut.u_ydrasil_load_store_unit.store_buf_count_q,
+                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.valid,
+                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.retired,
+                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.store_data_valid,
+                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.producer_id,
+                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.store_producer_id);
+                if ((lsu_local_debug_cycle >= 70190) &&
+                    (lsu_local_debug_cycle <= 70225) &&
+                    ((u_dut.commit_pkt.valid &&
+                      (u_dut.commit_pkt.pc >= 32'h800030e0) &&
+                      (u_dut.commit_pkt.pc <= 32'h800030f4)) ||
+                     (u_dut.commit_pkt1.valid &&
+                      (u_dut.commit_pkt1.pc >= 32'h800030e0) &&
+                      (u_dut.commit_pkt1.pc <= 32'h800030f4))))
+                    $display("LSULOC cyc=%0d COMMIT v0=%0b/pc=0x%08h/id=%0d v1=%0b/pc=0x%08h/id=%0d sb=%0d/%0b/%0b/%0b/id=%0d",
+                             lsu_local_debug_cycle,
+                             u_dut.commit_pkt.valid,
+                             u_dut.commit_pkt.pc,
+                             u_dut.commit_pkt.producer_id,
+                             u_dut.commit_pkt1.valid,
+                             u_dut.commit_pkt1.pc,
+                             u_dut.commit_pkt1.producer_id,
+                             u_dut.u_ydrasil_load_store_unit.store_buf_count_q,
+                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.valid,
+                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.retired,
+                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.store_data_valid,
+                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.producer_id);
+                if (u_dut.u_ydrasil_issue_stage.agu_in_valid_q &&
+                    ((u_dut.u_ydrasil_issue_stage.agu_in_operand_a_q +
+                      u_dut.u_ydrasil_issue_stage.agu_in_operand_b_q) >=
+                     32'h80100c40) &&
+                    ((u_dut.u_ydrasil_issue_stage.agu_in_operand_a_q +
+                      u_dut.u_ydrasil_issue_stage.agu_in_operand_b_q) <
+                     32'h80100e80))
+                    $display("LSULOC cyc=%0d AGU pc=0x%08h id=%0d rd=%0d load=%0b store=%0b addr=0x%08h data=0x%08h data_valid=%0b data_id=%0d src1=0x%08h/%0b/%0b/%0d/%0d src_state=%0b/%0b prodpc=0x%08h prodclass=%0d",
+                             lsu_local_debug_cycle,
+                             u_dut.u_ydrasil_issue_stage.lane_a_pc_q,
+                             u_dut.u_ydrasil_issue_stage.agu_in_req_q.producer_id,
+                             u_dut.u_ydrasil_issue_stage.agu_in_req_q.rd_addr,
+                             u_dut.u_ydrasil_issue_stage.agu_in_req_q.is_load,
+                             u_dut.u_ydrasil_issue_stage.agu_in_req_q.is_store,
+                             u_dut.u_ydrasil_issue_stage.agu_in_operand_a_q +
+                             u_dut.u_ydrasil_issue_stage.agu_in_operand_b_q,
+                             u_dut.u_ydrasil_issue_stage.agu_in_req_q.store_data,
+                             u_dut.u_ydrasil_issue_stage.agu_in_req_q.store_data_valid,
+                             u_dut.u_ydrasil_issue_stage.agu_in_req_q.store_producer_id,
+                             u_dut.u_ydrasil_issue_stage.issue_pkt_i.src1.arch_addr,
+                             u_dut.u_ydrasil_issue_stage.issue_pkt_i.src1.tag_valid,
+                             u_dut.u_ydrasil_issue_stage.issue_pkt_i.src1.ready,
+                             u_dut.u_ydrasil_issue_stage.issue_pkt_i.src1.producer_tag,
+                             u_dut.u_ydrasil_issue_stage.issue_src1_epoch_i,
+                             u_dut.u_ydrasil_issue_stage.issue_src1_state_i.live,
+                             u_dut.u_ydrasil_issue_stage.issue_src1_state_i.done,
+                             u_dut.u_ctrl.producer_pc_q[
+                                 u_dut.u_ydrasil_issue_stage.issue_pkt_i.src1.producer_tag[
+                                     PRODUCER_SLOT_WIDTH-1:0]],
+                             u_dut.u_ctrl.producer_result_class_q[
+                                 u_dut.u_ydrasil_issue_stage.issue_pkt_i.src1.producer_tag[
+                                     PRODUCER_SLOT_WIDTH-1:0]]);
+                if (u_dut.lsu_req_pkt.valid &&
+                    (u_dut.lsu_req_pkt.addr >= 32'h80100c40) &&
+                    (u_dut.lsu_req_pkt.addr < 32'h80100e80))
+                    $display("LSULOC cyc=%0d REQ id=%0d rd=%0d load=%0b store=%0b addr=0x%08h data=0x%08h mask=0x%0h data_valid=%0b data_id=%0d qcount=%0d scount=%0d",
+                             lsu_local_debug_cycle,
+                             u_dut.lsu_req_pkt.producer_id,
+                             u_dut.lsu_req_pkt.rd_addr,
+                             u_dut.lsu_req_pkt.is_load,
+                             u_dut.lsu_req_pkt.is_store,
+                             u_dut.lsu_req_pkt.addr,
+                             u_dut.lsu_req_pkt.store_data,
+                             u_dut.lsu_req_pkt.store_mask,
+                             u_dut.lsu_req_pkt.store_data_valid,
+                             u_dut.lsu_req_pkt.store_producer_id,
+                             u_dut.u_ydrasil_load_store_unit.queue_count_q,
+                             u_dut.u_ydrasil_load_store_unit.store_buf_count_q);
+                if (u_dut.u_ydrasil_load_store_unit.dtcm_load_fire &&
+                    (u_dut.u_ydrasil_load_store_unit.load_launch_addr >=
+                     32'h80100c40) &&
+                    (u_dut.u_ydrasil_load_store_unit.load_launch_addr <
+                     32'h80100e80))
+                    $display("LSULOC cyc=%0d LOAD_FIRE id=%0d rd=%0d addr=0x%08h fmask=0x%0h fdata=0x%08h sb0=%0b/%0b/0x%08h/0x%08h/0x%0h sb1=%0b/%0b/0x%08h/0x%08h/0x%0h",
+                             lsu_local_debug_cycle,
+                             u_dut.u_ydrasil_load_store_unit.load_launch_producer_id,
+                             u_dut.u_ydrasil_load_store_unit.load_launch_rd_addr,
+                             u_dut.u_ydrasil_load_store_unit.load_launch_addr,
+                             u_dut.u_ydrasil_load_store_unit.load_forward_mask,
+                             u_dut.u_ydrasil_load_store_unit.load_forward_data,
+                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.valid,
+                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.store_data_valid,
+                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.addr,
+                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.store_data,
+                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.store_mask,
+                             u_dut.u_ydrasil_load_store_unit.store_buf1_q.valid,
+                             u_dut.u_ydrasil_load_store_unit.store_buf1_q.store_data_valid,
+                             u_dut.u_ydrasil_load_store_unit.store_buf1_q.addr,
+                             u_dut.u_ydrasil_load_store_unit.store_buf1_q.store_data,
+                             u_dut.u_ydrasil_load_store_unit.store_buf1_q.store_mask);
+                if (u_dut.u_ydrasil_load_store_unit.store_buf_enqueue &&
+                    (u_dut.u_ydrasil_load_store_unit.active_addr >=
+                     32'h80100c40) &&
+                    (u_dut.u_ydrasil_load_store_unit.active_addr <
+                     32'h80100e80))
+                    $display("LSULOC cyc=%0d STORE_BUF_IN id=%0d addr=0x%08h data=0x%08h mask=0x%0h valid=%0b data_id=%0d tracked=%0b scount=%0d deq=%0b",
+                             lsu_local_debug_cycle,
+                             u_dut.u_ydrasil_load_store_unit.active_producer_id,
+                             u_dut.u_ydrasil_load_store_unit.active_addr,
+                             u_dut.u_ydrasil_load_store_unit.patched_store_enqueue.store_data,
+                             u_dut.u_ydrasil_load_store_unit.patched_store_enqueue.store_mask,
+                             u_dut.u_ydrasil_load_store_unit.patched_store_enqueue.store_data_valid,
+                             u_dut.u_ydrasil_load_store_unit.patched_store_enqueue.store_producer_id,
+                             u_dut.u_ydrasil_load_store_unit.patched_store_enqueue.store_producer_tracked,
+                             u_dut.u_ydrasil_load_store_unit.store_buf_count_q,
+                             u_dut.u_ydrasil_load_store_unit.store_buf_dequeue);
+                if (u_dut.u_ydrasil_load_store_unit.store_buf_dequeue &&
+                    (u_dut.u_ydrasil_load_store_unit.store_buf0_q.addr >=
+                     32'h80100c40) &&
+                    (u_dut.u_ydrasil_load_store_unit.store_buf0_q.addr <
+                     32'h80100e80))
+                    $display("LSULOC cyc=%0d STORE_DRAIN id=%0d addr=0x%08h data=0x%08h mask=0x%0h scount=%0d",
+                             lsu_local_debug_cycle,
+                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.producer_id,
+                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.addr,
+                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.store_data,
+                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.store_mask,
+                             u_dut.u_ydrasil_load_store_unit.store_buf_count_q);
+                if (u_dut.u_ydrasil_load_store_unit.load_s1_valid_q)
+                    $display("LSULOC cyc=%0d LOAD_RESP id=%0d rd=%0d raw=0x%08h result=0x%08h fmask=0x%0h fdata=0x%08h completion=%0b/0x%08h",
+                             lsu_local_debug_cycle,
+                             u_dut.u_ydrasil_load_store_unit.load_s1_producer_id_q,
+                             u_dut.u_ydrasil_load_store_unit.load_s1_rd_addr_q,
+                             u_dut.u_ydrasil_load_store_unit.dtcm_rdata_i,
+                             u_dut.u_ydrasil_load_store_unit.dtcm_load_result,
+                             u_dut.u_ydrasil_load_store_unit.load_s1_forward_mask_q,
+                             u_dut.u_ydrasil_load_store_unit.load_s1_forward_data_q,
+                             u_dut.lsu_completion_valid,
+                             u_dut.lsu_completion_data);
+                if ((u_dut.u_ydrasil_load_store_unit.store_buf0_q.valid &&
+                     !u_dut.u_ydrasil_load_store_unit.store_buf0_q.store_data_valid) ||
+                    (u_dut.u_ydrasil_load_store_unit.store_buf1_q.valid &&
+                     !u_dut.u_ydrasil_load_store_unit.store_buf1_q.store_data_valid))
+                    $display("LSULOC cyc=%0d WAIT sb0=%0b/%0d/%0d/0x%08h sb1=%0b/%0d/%0d/0x%08h comp=0:%0b/%0d/0x%08h 1:%0b/%0d/0x%08h 2:%0b/%0d/0x%08h 3:%0b/%0d/0x%08h sh=0:%0b/%0d/0x%08h 1:%0b/%0d/0x%08h 2:%0b/%0d/0x%08h 3:%0b/%0d/0x%08h 4:%0b/%0d/0x%08h",
+                             lsu_local_debug_cycle,
+                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.valid,
+                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.producer_id,
+                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.store_producer_id,
+                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.store_data,
+                             u_dut.u_ydrasil_load_store_unit.store_buf1_q.valid,
+                             u_dut.u_ydrasil_load_store_unit.store_buf1_q.producer_id,
+                             u_dut.u_ydrasil_load_store_unit.store_buf1_q.store_producer_id,
+                             u_dut.u_ydrasil_load_store_unit.store_buf1_q.store_data,
+                             u_dut.completion_meta[0].valid,
+                             u_dut.completion_meta[0].producer_id,
+                             u_dut.completion_data[0],
+                             u_dut.completion_meta[1].valid,
+                             u_dut.completion_meta[1].producer_id,
+                             u_dut.completion_data[1],
+                             u_dut.completion_meta[2].valid,
+                             u_dut.completion_meta[2].producer_id,
+                             u_dut.completion_data[2],
+                             u_dut.completion_meta[3].valid,
+                             u_dut.completion_meta[3].producer_id,
+                             u_dut.completion_data[3],
+                             u_dut.u_ydrasil_load_store_unit.completion_shadow_valid_q[0],
+                             u_dut.u_ydrasil_load_store_unit.completion_shadow_id_q[0],
+                             u_dut.u_ydrasil_load_store_unit.completion_shadow_data_q[0],
+                             u_dut.u_ydrasil_load_store_unit.completion_shadow_valid_q[1],
+                             u_dut.u_ydrasil_load_store_unit.completion_shadow_id_q[1],
+                             u_dut.u_ydrasil_load_store_unit.completion_shadow_data_q[1],
+                             u_dut.u_ydrasil_load_store_unit.completion_shadow_valid_q[2],
+                             u_dut.u_ydrasil_load_store_unit.completion_shadow_id_q[2],
+                             u_dut.u_ydrasil_load_store_unit.completion_shadow_data_q[2],
+                             u_dut.u_ydrasil_load_store_unit.completion_shadow_valid_q[3],
+                             u_dut.u_ydrasil_load_store_unit.completion_shadow_id_q[3],
+                             u_dut.u_ydrasil_load_store_unit.completion_shadow_data_q[3],
+                             u_dut.u_ydrasil_load_store_unit.completion_shadow_valid_q[4],
+                             u_dut.u_ydrasil_load_store_unit.completion_shadow_id_q[4],
+                             u_dut.u_ydrasil_load_store_unit.completion_shadow_data_q[4]);
+                if ((retire0_valid && (retire0_pc >= 32'h80003e80) &&
+                     (retire0_pc <= 32'h80004010)) ||
+                    (retire1_valid && (retire1_pc >= 32'h80003e80) &&
+                     (retire1_pc <= 32'h80004010)))
+                    $display("LSULOC cyc=%0d RETIRE v0=%0b pc0=0x%08h v1=%0b pc1=0x%08h",
+                             lsu_local_debug_cycle, retire0_valid, retire0_pc,
+                             retire1_valid, retire1_pc);
+                if ((lsu_local_debug_cycle >= 217700) &&
+                    (lsu_local_debug_cycle <= 217750) &&
+                    ((u_dut.commit_pkt.valid &&
+                      ((u_dut.commit_pkt.pc == 32'h80003fd8) ||
+                       (u_dut.commit_pkt.pc == 32'h80003fdc))) ||
+                     (u_dut.commit_pkt1.valid &&
+                      ((u_dut.commit_pkt1.pc == 32'h80003fd8) ||
+                       (u_dut.commit_pkt1.pc == 32'h80003fdc)))))
+                    $display("LSULOC cyc=%0d COMMITVAL c0=%0b pc=0x%08h id=%0d wr=%0b rd=%0d val=0x%08h c1=%0b pc=0x%08h id=%0d wr=%0b rd=%0d val=0x%08h slots=%0d/%0d vf=0x%08h/0x%08h x16=0x%08h producer16=%0b/%0d/%0b/%0d",
+                             lsu_local_debug_cycle,
+                             u_dut.commit_pkt.valid,
+                             u_dut.commit_pkt.pc,
+                             u_dut.commit_pkt.producer_id,
+                             u_dut.commit_pkt.writes_gpr,
+                             u_dut.commit_pkt.rd_addr,
+                             u_dut.commit_pkt.value,
+                             u_dut.commit_pkt1.valid,
+                             u_dut.commit_pkt1.pc,
+                             u_dut.commit_pkt1.producer_id,
+                             u_dut.commit_pkt1.writes_gpr,
+                             u_dut.commit_pkt1.rd_addr,
+                             u_dut.commit_pkt1.value,
+                             u_dut.u_ctrl.queue_head_q,
+                             u_dut.u_ctrl.queue_head1,
+                             u_dut.u_ydrasil_issue_stage.u_value_file.retire_data0_o,
+                             u_dut.u_ydrasil_issue_stage.u_value_file.retire_data1_o,
+                             u_dut.u_ydrasil_issue_stage.u_registers.registers[16],
+                             u_dut.u_ctrl.latest_valid_q[16],
+                             u_dut.u_ctrl.latest_id_q[16],
+                             u_dut.u_ctrl.producer_valid_q[
+                                 u_dut.u_ctrl.latest_id_q[16][
+                                     PRODUCER_SLOT_WIDTH-1:0]],
+                             u_dut.u_ctrl.producer_epoch_q[
+                                 u_dut.u_ctrl.latest_id_q[16][
+                                     PRODUCER_SLOT_WIDTH-1:0]]);
+                if ((lsu_local_debug_cycle >= 10635) &&
+                    (lsu_local_debug_cycle <= 10645))
+                    $display("LSULOC cyc=%0d DTCM_STORE sel=%0b pc=0x%08h src1=x%0d/tag=%0b/%0d ready=%0b hit=%0b local=0x%08h opres=%0b/%0d/x%0d data=0x%08h inres=%0b/%0d/x%0d resp=0x%08h agu=%0b pc=0x%08h flag=%0b raw=0x%08h out=0x%08h valid=%0b stall=%0b/0x%08h lsucomp=%0b/%0d/0x%08h",
+                             lsu_local_debug_cycle,
+                             u_dut.u_ydrasil_issue_stage.lane_a_accept,
+                             u_dut.u_ydrasil_issue_stage.lane_a_uop.pc,
+                             u_dut.u_ydrasil_issue_stage.lane_a_uop.src1.arch_addr,
+                             u_dut.u_ydrasil_issue_stage.lane_a_uop.src1.tag_valid,
+                             u_dut.u_ydrasil_issue_stage.lane_a_uop.src1.producer_tag,
+                             u_dut.u_ydrasil_issue_stage.lane_a_src1_ready,
+                             u_dut.u_ydrasil_issue_stage.lane_a_src1_dtcm_hit,
+                             u_dut.u_ydrasil_issue_stage.lane_a_src1_local,
+                             u_dut.u_ydrasil_issue_stage.dtcm_operand_reservation_q.valid,
+                             u_dut.u_ydrasil_issue_stage.dtcm_operand_reservation_q.producer_id,
+                             u_dut.u_ydrasil_issue_stage.dtcm_operand_reservation_q.arch_addr,
+                             u_dut.u_ydrasil_issue_stage.dtcm_operand_data_q,
+                             u_dut.dtcm_reservation.valid,
+                             u_dut.dtcm_reservation.producer_id,
+                             u_dut.dtcm_reservation.arch_addr,
+                             u_dut.dtcm_resp_data,
+                             u_dut.u_ydrasil_issue_stage.agu_in_valid_q,
+                             u_dut.u_ydrasil_issue_stage.lane_a_pc_q,
+                             u_dut.u_ydrasil_issue_stage.agu_in_store_data_dtcm_q,
+                             u_dut.u_ydrasil_issue_stage.agu_in_req_q.store_data,
+                             u_dut.u_ydrasil_issue_stage.agu_in_store_data_o,
+                             u_dut.u_ydrasil_issue_stage.agu_in_req_q.store_data_valid,
+                             u_dut.u_ydrasil_issue_stage.dtcm_stall_data_valid_q,
+                             u_dut.u_ydrasil_issue_stage.dtcm_stall_data_q,
+                             u_dut.completion_meta[COMPLETION_LSU].valid,
+                             u_dut.completion_meta[COMPLETION_LSU].producer_id,
+                             u_dut.completion_data[COMPLETION_LSU]);
+                if ((lsu_local_debug_cycle >= 304715) &&
+                    (lsu_local_debug_cycle <= 304790))
+                    $display("LSULOC cyc=%0d MMIO_SERIAL if=%0b/0x%08h disp=%0b/%0b/0x%08h/ser=%0b issue=%0b/0x%08h/fence=%0b/%0d commit=%0b/0x%08h/%0d,%0b/0x%08h/%0d rob=head%0d/id%0d/count%0d/v=0x%0h/r=0x%0h/serial=%0b stall=%0b/%0b/%0b lsu=q%0d/active=%0b/id%0d/ret%0b/head%0b/0x%08h/store=%0b/data=%0b/%0d mmio=fire%0b/busy%0b/req%0b/%0b/0x%08h/0x%08h/rsp%0b sb=%0d",
+                             lsu_local_debug_cycle,
+                             u_dut.if_id_valid,
+                             u_dut.if_id_pc,
+                             u_dut.dispatch_ready,
+                             u_dut.id_issue_pkt.valid,
+                             u_dut.id_issue_pkt.decode.pc,
+                             u_dut.id_issue_pkt.ctrl.serialize_before,
+                             u_dut.issue_head_compact_uop.valid,
+                             u_dut.issue_head_compact_uop.pc,
+                             u_dut.id_fence_i,
+                             u_dut.issue_fence_tag,
+                             u_dut.commit_pkt.valid,
+                             u_dut.commit_pkt.pc,
+                             u_dut.commit_pkt.producer_id,
+                             u_dut.commit_pkt1.valid,
+                             u_dut.commit_pkt1.pc,
+                             u_dut.commit_pkt1.producer_id,
+                             u_dut.u_ctrl.queue_head_q,
+                             u_dut.rob_head_id,
+                             u_dut.u_ctrl.queue_count_q,
+                             u_dut.u_ctrl.producer_valid_q,
+                             u_dut.u_ctrl.producer_ready_q,
+                             u_dut.u_ctrl.serial_pending_q,
+                             u_dut.stall_if,
+                             u_dut.stall_id,
+                             u_dut.bubble_id,
+                             u_dut.u_ydrasil_load_store_unit.queue_count_q,
+                             u_dut.u_ydrasil_load_store_unit.active_valid,
+                             u_dut.u_ydrasil_load_store_unit.active_producer_id,
+                             u_dut.u_ydrasil_load_store_unit.active_pkt.retired,
+                             u_dut.u_ydrasil_load_store_unit.active_at_rob_head,
+                             u_dut.u_ydrasil_load_store_unit.active_addr,
+                             u_dut.u_ydrasil_load_store_unit.active_is_store,
+                             u_dut.u_ydrasil_load_store_unit.active_store_data_valid,
+                             u_dut.u_ydrasil_load_store_unit.active_pkt.store_producer_id,
+                             u_dut.u_ydrasil_load_store_unit.mmio_fire,
+                             u_dut.u_ydrasil_load_store_unit.mmio_busy,
+                             u_dut.mmio_req_pkt.valid,
+                             u_dut.mmio_req_pkt.write,
+                             u_dut.mmio_req_pkt.addr,
+                             u_dut.mmio_req_pkt.wdata,
+                             u_dut.mmio_rsp_pkt.valid,
+                             u_dut.u_ydrasil_load_store_unit.store_buf_count_q);
+            end
+        end
+    end
+
+    always_ff @(posedge clk) begin
+        if (!rst_n) begin
+            raw_debug_cycle <= 0;
+        end else if (raw_debug_en && (raw_debug_cycle < 700)) begin
+            raw_debug_cycle <= raw_debug_cycle + 1;
+            if (u_dut.ex_pc_redirect || u_dut.branch_jump)
+                $display("RAWDBG cyc=%0d REDIRECT ex=%0b branch=%0b target=0x%08h head=%0d valid=0x%0h keep=0x%0h",
+                         raw_debug_cycle, u_dut.ex_pc_redirect,
+                         u_dut.branch_jump, u_dut.ex_pc_redirect_target,
+                         u_dut.u_ctrl.queue_head_q,
+                         u_dut.u_ctrl.producer_valid_q,
+                         u_dut.branch_recovery_keep_mask);
+            if (u_dut.ex_pc_redirect)
+                $display("RAWDBG cyc=%0d KILL flush_ex=%0b mul_redirect=%0b mul_keep=0x%0h s2=%0b/%0d",
+                         raw_debug_cycle, u_dut.flush_ex,
+                         u_dut.u_ydrasil_execute_stage.u_main_ex.u_ydrasil_mul.redirect_i,
+                         u_dut.u_ydrasil_execute_stage.u_main_ex.u_ydrasil_mul.redirect_keep_mask_i,
+                         u_dut.u_ydrasil_execute_stage.u_main_ex.u_ydrasil_mul.s2_valid_q,
+                         u_dut.u_ydrasil_execute_stage.u_main_ex.u_ydrasil_mul.s2_producer_id_q);
+            if (u_dut.u_ydrasil_issue_stage.lane_b_accept &&
+                (u_dut.u_ydrasil_issue_stage.lane_b_uop.op_class == UOP_CLASS_MUL))
+                $display("RAWDBG cyc=%0d ACCEPT_MUL pc=0x%08h id=%0d rd=%0d op=0x%0h",
+                         raw_debug_cycle,
+                         u_dut.u_ydrasil_issue_stage.lane_b_uop.pc,
+                         u_dut.u_ydrasil_issue_stage.lane_b_uop.dst.rob_tag,
+                         u_dut.u_ydrasil_issue_stage.lane_b_uop.dst.rd_addr,
+                         u_dut.u_ydrasil_issue_stage.lane_b_uop.subop);
+            if (u_dut.u_ydrasil_issue_stage.lane_b_bru_accept)
+                $display("RAWDBG cyc=%0d ACCEPT_BR pc=0x%08h id=%0d a=0x%08h b=0x%08h src0=0x%08h src1=0x%08h tags=%0d/%0d dual=0x%08h/0x%08h cmul=%0b/%0d/0x%08h mdu_due=%0b/%0d mdu_res=%0b/%0d bypass=0x%08h",
+                         raw_debug_cycle,
+                         u_dut.u_ydrasil_issue_stage.lane_b_uop.pc,
+                         u_dut.u_ydrasil_issue_stage.lane_b_uop.dst.rob_tag,
+                         u_dut.u_ydrasil_issue_stage.lane_b_operand_a_local,
+                         u_dut.u_ydrasil_issue_stage.lane_b_operand_b_local,
+                         u_dut.u_ydrasil_issue_stage.lane_b_src0_local,
+                         u_dut.u_ydrasil_issue_stage.lane_b_src1_local,
+                         u_dut.u_ydrasil_issue_stage.lane_b_uop.src0.producer_tag,
+                         u_dut.u_ydrasil_issue_stage.lane_b_uop.src1.producer_tag,
+                         u_dut.dual_bru_operand_a,
+                         u_dut.dual_bru_operand_b,
+                         u_dut.completion_meta[COMPLETION_MUL].valid,
+                         u_dut.completion_meta[COMPLETION_MUL].producer_id,
+                         u_dut.completion_data[COMPLETION_MUL],
+                         u_dut.mdu_due.valid, u_dut.mdu_due.producer_id,
+                         u_dut.mdu_result_reservation.valid,
+                         u_dut.mdu_result_reservation.producer_id,
+                         u_dut.mdu_bypass_data);
+            if (u_dut.dual_bru_valid)
+                $display("RAWDBG cyc=%0d BRU_INPUT pc=0x%08h id=%0d subop=%0d op=0x%0h a=0x%08h b=0x%08h",
+                         raw_debug_cycle,
+                         u_dut.u_ydrasil_issue_stage.dual_meta_q.pc,
+                         u_dut.u_ydrasil_issue_stage.dual_meta_q.producer_id,
+                         u_dut.u_ydrasil_issue_stage.dual_bru_payload_q.subop,
+                         u_dut.u_ydrasil_issue_stage.lane_b_operator_info,
+                         u_dut.dual_bru_operand_a,
+                         u_dut.dual_bru_operand_b);
+            if (u_dut.mul_in_valid)
+                $display("RAWDBG cyc=%0d MUL_INPUT id=%0d rd=%0d op=0x%0h a=0x%08h b=0x%08h",
+                         raw_debug_cycle,
+                         u_dut.u_ydrasil_issue_stage.dual_meta_q.producer_id,
+                         u_dut.u_ydrasil_issue_stage.dual_meta_q.rd_addr,
+                         u_dut.mul_in_operator,
+                         u_dut.mul_in_operand_a, u_dut.mul_in_operand_b);
+            if (u_dut.alu_in_valid)
+                $display("RAWDBG cyc=%0d ALU_INPUT pc=0x%08h id=%0d rd=%0d op=0x%0h a=0x%08h b=0x%08h",
+                         raw_debug_cycle,
+                         u_dut.u_ydrasil_issue_stage.lane_a_pc_q,
+                         u_dut.alu_in_producer_id,
+                         u_dut.alu_in_rd_addr,
+                         u_dut.alu_in_operator,
+                         u_dut.alu_in_operand_a,
+                         u_dut.alu_in_operand_b);
+            if (u_dut.dual_alu_valid)
+                $display("RAWDBG cyc=%0d DUAL_ALU_INPUT pc=0x%08h id=%0d rd=%0d op=0x%0h a=0x%08h b=0x%08h",
+                         raw_debug_cycle,
+                         u_dut.u_ydrasil_issue_stage.dual_meta_q.pc,
+                         u_dut.u_ydrasil_issue_stage.dual_meta_q.producer_id,
+                         u_dut.u_ydrasil_issue_stage.dual_meta_q.rd_addr,
+                         u_dut.u_ydrasil_issue_stage.dual_alu_payload_q.subop,
+                         u_dut.dual_alu_operand_a,
+                         u_dut.dual_alu_operand_b);
+            if (u_dut.u_ydrasil_execute_stage.u_main_ex.u_ydrasil_mul.s0_valid_q ||
+                u_dut.u_ydrasil_execute_stage.u_main_ex.u_ydrasil_mul.s1_valid_q ||
+                u_dut.u_ydrasil_execute_stage.u_main_ex.u_ydrasil_mul.s2_valid_q ||
+                u_dut.u_ydrasil_execute_stage.u_main_ex.u_ydrasil_mul.s3_valid_q)
+                $display("RAWDBG cyc=%0d MUL_PIPE s0=%0b/%0d s1=%0b/%0d s2=%0b/%0d s3=%0b/%0d",
+                         raw_debug_cycle,
+                         u_dut.u_ydrasil_execute_stage.u_main_ex.u_ydrasil_mul.s0_valid_q,
+                         u_dut.u_ydrasil_execute_stage.u_main_ex.u_ydrasil_mul.s0_producer_id_q,
+                         u_dut.u_ydrasil_execute_stage.u_main_ex.u_ydrasil_mul.s1_valid_q,
+                         u_dut.u_ydrasil_execute_stage.u_main_ex.u_ydrasil_mul.s1_producer_id_q,
+                         u_dut.u_ydrasil_execute_stage.u_main_ex.u_ydrasil_mul.s2_valid_q,
+                         u_dut.u_ydrasil_execute_stage.u_main_ex.u_ydrasil_mul.s2_producer_id_q,
+                         u_dut.u_ydrasil_execute_stage.u_main_ex.u_ydrasil_mul.s3_valid_q,
+                         u_dut.u_ydrasil_execute_stage.u_main_ex.u_ydrasil_mul.s3_producer_id_q);
+            if (u_dut.completion_meta[COMPLETION_MUL].valid ||
+                u_dut.completion_meta[COMPLETION_LSU].valid)
+                $display("RAWDBG cyc=%0d COMPLETE mul=%0b/%0d/%0d lsu=%0b/%0d/%0d valid=0x%0h ready=0x%0h",
+                         raw_debug_cycle,
+                         u_dut.completion_meta[COMPLETION_MUL].valid,
+                         u_dut.completion_meta[COMPLETION_MUL].producer_id,
+                         u_dut.completion_rd[COMPLETION_MUL],
+                         u_dut.completion_meta[COMPLETION_LSU].valid,
+                         u_dut.completion_meta[COMPLETION_LSU].producer_id,
+                         u_dut.completion_rd[COMPLETION_LSU],
+                         u_dut.u_ctrl.producer_valid_q,
+                         u_dut.u_ctrl.producer_ready_q);
+            if (u_dut.completion_meta[COMPLETION_ALU].valid ||
+                u_dut.completion_meta[COMPLETION_DUAL_ALU].valid)
+                $display("RAWDBG cyc=%0d COMPLETE alu=%0b/%0d/%0d dual=%0b/%0d/%0d data=0x%08h/0x%08h",
+                         raw_debug_cycle,
+                         u_dut.completion_meta[COMPLETION_ALU].valid,
+                         u_dut.completion_meta[COMPLETION_ALU].producer_id,
+                         u_dut.completion_rd[COMPLETION_ALU],
+                         u_dut.completion_meta[COMPLETION_DUAL_ALU].valid,
+                         u_dut.completion_meta[COMPLETION_DUAL_ALU].producer_id,
+                         u_dut.completion_rd[COMPLETION_DUAL_ALU],
+                         u_dut.completion_data[COMPLETION_ALU],
+                         u_dut.completion_data[COMPLETION_DUAL_ALU]);
+            if (u_dut.u_ydrasil_issue_stage.agu_in_valid_q)
+                $display("RAWDBG cyc=%0d LSU_INPUT id=%0d rd=%0d load=%0b store=%0b addr=0x%08h",
+                         raw_debug_cycle,
+                         u_dut.u_ydrasil_issue_stage.agu_in_req_q.producer_id,
+                         u_dut.u_ydrasil_issue_stage.agu_in_req_q.rd_addr,
+                         u_dut.u_ydrasil_issue_stage.agu_in_req_q.is_load,
+                         u_dut.u_ydrasil_issue_stage.agu_in_req_q.is_store,
+                         u_dut.u_ydrasil_issue_stage.agu_in_operand_a_q +
+                         u_dut.u_ydrasil_issue_stage.agu_in_operand_b_q);
+            if (u_dut.u_ydrasil_load_store_unit.dtcm_load_fire ||
+                u_dut.u_ydrasil_load_store_unit.load_s1_valid_q ||
+                u_dut.ex_pc_redirect)
+                $display("RAWDBG cyc=%0d LSU_PIPE req=%0b/%0d fire=%0b direct=%0b queued=%0b s1=%0b/%0d keep=%0b recovery=%0b completion=%0b/%0d",
+                         raw_debug_cycle,
+                         u_dut.lsu_req_pkt.valid,
+                         u_dut.lsu_req_pkt.producer_id,
+                         u_dut.u_ydrasil_load_store_unit.dtcm_load_fire,
+                         u_dut.u_ydrasil_load_store_unit.direct_dtcm_load_fire,
+                         u_dut.u_ydrasil_load_store_unit.queued_dtcm_load_fire,
+                         u_dut.u_ydrasil_load_store_unit.load_s1_valid_q,
+                         u_dut.u_ydrasil_load_store_unit.load_s1_producer_id_q,
+                         u_dut.branch_recovery_keep_mask[
+                             u_dut.u_ydrasil_load_store_unit.load_s1_producer_id_q[
+                                 PRODUCER_SLOT_WIDTH-1:0]],
+                         u_dut.ex_pc_redirect,
+                         u_dut.lsu_completion_valid,
+                         u_dut.lsu_completion_producer_id);
+            if (u_dut.id_fence_i ||
+                u_dut.u_ydrasil_issue_stage.issue_fence_accept ||
+                u_dut.pipeline_flush ||
+                u_dut.u_ydrasil_issue_stage.serial_bundle_valid_q)
+                $display("RAWDBG cyc=%0d FENCE accept=%0b pulse=%0b tag=%0d next=0x%08h pipe_flush=%0b serial=%0b/%0d/%08h head=%0d lsu_idle=%0b",
+                         raw_debug_cycle,
+                         u_dut.u_ydrasil_issue_stage.issue_fence_accept,
+                         u_dut.id_fence_i,
+                         u_dut.issue_fence_tag,
+                         u_dut.issue_fence_next_pc,
+                         u_dut.pipeline_flush,
+                         u_dut.u_ydrasil_issue_stage.serial_bundle_valid_q,
+                         u_dut.u_ydrasil_issue_stage.serial_bundle_uop_q.dst.rob_tag,
+                         u_dut.u_ydrasil_issue_stage.serial_bundle_uop_q.pc,
+                         u_dut.rob_head_id,
+                         u_dut.lsu_status_pkt.idle);
+            if ((raw_debug_cycle >= 190) && (raw_debug_cycle <= 220))
+                $display("RAWDBG cyc=%0d IF pc=0x%08h mem=%0b/0x%08h pending=%0b/0x%08h fq=%0d id=%0b/0x%08h instr=0x%08h decode_ready=%0b flush=%0b bp_inv=%0b",
+                         raw_debug_cycle,
+                         u_dut.u_ydrasil_if_stage.pc_q,
+                         u_dut.u_ydrasil_if_stage.mem_req_valid_q,
+                         u_dut.u_ydrasil_if_stage.mem_req_pc_q,
+                         u_dut.u_ydrasil_if_stage.pending_redirect_valid_q,
+                         u_dut.u_ydrasil_if_stage.pending_redirect_target_q,
+                         u_dut.u_ydrasil_if_stage.fetchq_count_q,
+                         u_dut.if_id_valid,
+                         u_dut.if_id_pc,
+                         u_dut.if_id_instr,
+                         u_dut.decode_if_ready,
+                         u_dut.flush_if,
+                         u_dut.id_fence_i);
+            if ((raw_debug_cycle >= 206) && (raw_debug_cycle <= 235))
+                $display("RAWDBG cyc=%0d STATE issue=%0b/%0h/%0d ready=%0b waits=%0b%0b%0b%0b cand=%0b%0b/%0b/%0b qhead=%0d/0x%08h qcnt=%0d commit=%0b%0b disp=%0b valid=0x%0h readyq=0x%0h",
+                         raw_debug_cycle,
+                         u_dut.u_ydrasil_issue_stage.issue_pkt_i.valid,
+                         u_dut.u_ydrasil_issue_stage.issue_pkt_i.pc,
+                         u_dut.u_ydrasil_issue_stage.issue_pkt_i.dst.rob_tag,
+                         u_dut.u_ydrasil_issue_stage.issue_ready_o,
+                         u_dut.u_ydrasil_issue_stage.src0_wait_o,
+                         u_dut.u_ydrasil_issue_stage.src1_wait_o,
+                         u_dut.u_ydrasil_issue_stage.src2_wait_o,
+                         u_dut.u_ydrasil_issue_stage.src3_wait_o,
+                         u_dut.u_ydrasil_issue_stage.p0_select_valid,
+                         u_dut.u_ydrasil_issue_stage.p1_select_valid,
+                         u_dut.u_ydrasil_issue_stage.alu_select0_valid,
+                         u_dut.u_ydrasil_issue_stage.alu_select1_valid,
+                         u_dut.u_ctrl.queue_head_q,
+                         u_dut.u_ctrl.producer_pc_q[u_dut.u_ctrl.queue_head_q],
+                         u_dut.u_ctrl.queue_count_q,
+                         u_dut.u_ctrl.queue_commit0,
+                         u_dut.u_ctrl.queue_commit1,
+                         u_dut.u_ydrasil_issue_stage.dispatch_ready_i,
+                         u_dut.u_ctrl.producer_valid_q,
+                         u_dut.u_ctrl.producer_ready_q);
+            if ((raw_debug_cycle >= 194) && (raw_debug_cycle <= 205))
+                $display("RAWDBG cyc=%0d EXCTRL flush=%0b trap=%0b exv=%0b/%0b alucomp=%0b/%0d/%0d dualcomp=%0b/%0d/%0d",
+                         raw_debug_cycle,
+                         u_dut.flush_ex,
+                         u_dut.trap_ctrl_pkt.redirect,
+                         u_dut.ex_accept_valid,
+                         u_dut.ex_accept_valid1,
+                         u_dut.alu_completion_valid,
+                         u_dut.alu_completion_producer_id,
+                         u_dut.alu_completion_addr,
+                         u_dut.dual_completion_valid,
+                         u_dut.dual_completion_producer_id,
+                         u_dut.dual_completion_addr);
+            if ((raw_debug_cycle >= 208) && (raw_debug_cycle <= 212)) begin
+                $display("RAWDBG cyc=%0d RS0 v/r=%0b/%0b%0b pc=0x%08h tag=%0d ord=0x%0h",
+                         raw_debug_cycle,
+                         u_dut.u_ydrasil_issue_stage.issue_window_valid_q[0],
+                         u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[0],
+                         u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[0],
+                         u_dut.u_ydrasil_issue_stage.issue_window_q[0].pc,
+                         u_dut.u_ydrasil_issue_stage.issue_window_q[0].dst.rob_tag,
+                         u_dut.u_ydrasil_issue_stage.issue_order_mask_q[0]);
+                $display("RAWDBG cyc=%0d RS1 v/r=%0b/%0b%0b pc=0x%08h tag=%0d ord=0x%0h",
+                         raw_debug_cycle,
+                         u_dut.u_ydrasil_issue_stage.issue_window_valid_q[1],
+                         u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[1],
+                         u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[1],
+                         u_dut.u_ydrasil_issue_stage.issue_window_q[1].pc,
+                         u_dut.u_ydrasil_issue_stage.issue_window_q[1].dst.rob_tag,
+                         u_dut.u_ydrasil_issue_stage.issue_order_mask_q[1]);
+                $display("RAWDBG cyc=%0d RS2 v/r=%0b/%0b%0b pc=0x%08h tag=%0d ord=0x%0h",
+                         raw_debug_cycle,
+                         u_dut.u_ydrasil_issue_stage.issue_window_valid_q[2],
+                         u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[2],
+                         u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[2],
+                         u_dut.u_ydrasil_issue_stage.issue_window_q[2].pc,
+                         u_dut.u_ydrasil_issue_stage.issue_window_q[2].dst.rob_tag,
+                         u_dut.u_ydrasil_issue_stage.issue_order_mask_q[2]);
+                $display("RAWDBG cyc=%0d RS3 v/r=%0b/%0b%0b pc=0x%08h tag=%0d ord=0x%0h",
+                         raw_debug_cycle,
+                         u_dut.u_ydrasil_issue_stage.issue_window_valid_q[3],
+                         u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[3],
+                         u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[3],
+                         u_dut.u_ydrasil_issue_stage.issue_window_q[3].pc,
+                         u_dut.u_ydrasil_issue_stage.issue_window_q[3].dst.rob_tag,
+                         u_dut.u_ydrasil_issue_stage.issue_order_mask_q[3]);
+                $display("RAWDBG cyc=%0d RS4-6 v=0x%0b%0b%0b r0=%0b%0b%0b r1=%0b%0b%0b pc=0x%08h/0x%08h/0x%08h ord=0x%0h/0x%0h/0x%0h",
+                         raw_debug_cycle,
+                         u_dut.u_ydrasil_issue_stage.issue_window_valid_q[6],
+                         u_dut.u_ydrasil_issue_stage.issue_window_valid_q[5],
+                         u_dut.u_ydrasil_issue_stage.issue_window_valid_q[4],
+                         u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[6],
+                         u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[5],
+                         u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[4],
+                         u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[6],
+                         u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[5],
+                         u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[4],
+                         u_dut.u_ydrasil_issue_stage.issue_window_q[4].pc,
+                         u_dut.u_ydrasil_issue_stage.issue_window_q[5].pc,
+                         u_dut.u_ydrasil_issue_stage.issue_window_q[6].pc,
+                         u_dut.u_ydrasil_issue_stage.issue_order_mask_q[4],
+                         u_dut.u_ydrasil_issue_stage.issue_order_mask_q[5],
+                         u_dut.u_ydrasil_issue_stage.issue_order_mask_q[6]);
+                $display("RAWDBG cyc=%0d RS7-9 v=0x%0b%0b%0b r0=%0b%0b%0b r1=%0b%0b%0b pc=0x%08h/0x%08h/0x%08h ord=0x%0h/0x%0h/0x%0h",
+                         raw_debug_cycle,
+                         u_dut.u_ydrasil_issue_stage.issue_window_valid_q[9],
+                         u_dut.u_ydrasil_issue_stage.issue_window_valid_q[8],
+                         u_dut.u_ydrasil_issue_stage.issue_window_valid_q[7],
+                         u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[9],
+                         u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[8],
+                         u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[7],
+                         u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[9],
+                         u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[8],
+                         u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[7],
+                         u_dut.u_ydrasil_issue_stage.issue_window_q[7].pc,
+                         u_dut.u_ydrasil_issue_stage.issue_window_q[8].pc,
+                         u_dut.u_ydrasil_issue_stage.issue_window_q[9].pc,
+                         u_dut.u_ydrasil_issue_stage.issue_order_mask_q[7],
+                         u_dut.u_ydrasil_issue_stage.issue_order_mask_q[8],
+                         u_dut.u_ydrasil_issue_stage.issue_order_mask_q[9]);
+            end
+        end
+    end
+`endif
+
+	`ifndef VERILATOR_CC
 	initial begin
 		rst_n = 1'b0;
 		repeat (10) @(posedge clk);
@@ -1282,18 +1931,16 @@ end
         end
     end
 
-    wire lane0_finish_accept = u_dut.ex_accept_valid &&
-        ((u_dut.u_ydrasil_commit_trace.id_instr_addr == finish_pc) ||
-         ((u_dut.u_ydrasil_commit_trace.id_instr_addr + 32'd4) == finish_pc));
-    wire lane1_finish_accept = u_dut.ex_accept_valid1 &&
-        ((u_dut.dual_id_ex_pc == finish_pc) ||
-         ((u_dut.dual_id_ex_pc + 32'd4) == finish_pc));
+    wire lane0_finish_accept = retire0_valid &&
+        (retire0_pc == finish_pc);
+    wire lane1_finish_accept = retire1_valid &&
+        (retire1_pc == finish_pc);
     wire [1:0] finish_accept_count =
         {1'b0, lane0_finish_accept} + {1'b0, lane1_finish_accept};
 
-    // ID/Issue decoupling and dual issue can place write_tohost in either E
-    // lane. Count accepted instructions so a held packet is never counted
-    // twice and a lane1-only pass loop still terminates the simulation.
+    // Count committed write_tohost loop entries on either retire lane. Pairing
+    // retire validity with retire PC avoids crossing the EX and ROB stages in
+    // the monitor itself.
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             pc_write_to_host_cnt   <= 32'b0;
@@ -1451,7 +2098,7 @@ end
 
     // 对pc_write_to_host_cnt的变化进行监控
     always @(pc_write_to_host_cnt) begin
-        if (finish_on_tohost && (pc_write_to_host_cnt >= 32'd8)) begin
+        if (finish_on_tohost && (pc_write_to_host_cnt >= 32'd1)) begin
             ipc = (instruction_count > 0 && cycle_count > 0) ? (instruction_count * 1.0) / cycle_count : 0.0;
             bp_accuracy = (bp_branch_count > 0) ?
                 ((bp_branch_count - bp_mispredict_count) * 100.0) / bp_branch_count : 0.0;

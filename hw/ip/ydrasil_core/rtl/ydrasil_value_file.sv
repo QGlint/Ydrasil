@@ -14,6 +14,10 @@ import ydrasil_pkg::*;
     output wire [REGS_DATA_WIDTH-1:0]   read_data1_o,
     output wire [REGS_DATA_WIDTH-1:0]   read_data2_o,
     output wire [REGS_DATA_WIDTH-1:0]   read_data3_o,
+    output wire                         read_epoch0_o,
+    output wire                         read_epoch1_o,
+    output wire                         read_epoch2_o,
+    output wire                         read_epoch3_o,
     output wire [REGS_DATA_WIDTH-1:0]   retire_data0_o,
     output wire [REGS_DATA_WIDTH-1:0]   retire_data1_o
 );
@@ -27,6 +31,8 @@ import ydrasil_pkg::*;
         value_even_q [0:BANK_DEPTH-1];
     (* keep = "true" *) reg [REGS_DATA_WIDTH-1:0]
         value_odd_q [0:BANK_DEPTH-1];
+    reg [BANK_DEPTH-1:0] value_epoch_even_q;
+    reg [BANK_DEPTH-1:0] value_epoch_odd_q;
 
     producer_slot_t completion_slot0;
     producer_slot_t completion_slot1;
@@ -60,42 +66,90 @@ import ydrasil_pkg::*;
                  BANK_INDEX_WIDTH'(value_slot)))
                 value_even_q[value_slot] <=
 	                    completion_data_i[COMPLETION_LSU];
+            if (completion_write1 && !completion_slot1[0] &&
+                (completion_slot1[PRODUCER_SLOT_WIDTH-1:1] ==
+                 BANK_INDEX_WIDTH'(value_slot)))
+                value_epoch_even_q[value_slot] <=
+                    completion_meta_i[COMPLETION_LSU].producer_id[
+                        PRODUCER_ID_WIDTH-1];
             if (completion_write2 && !completion_slot2[0] &&
                 (completion_slot2[PRODUCER_SLOT_WIDTH-1:1] ==
                  BANK_INDEX_WIDTH'(value_slot)))
                 value_even_q[value_slot] <=
 	                    completion_data_i[COMPLETION_MUL];
+            if (completion_write2 && !completion_slot2[0] &&
+                (completion_slot2[PRODUCER_SLOT_WIDTH-1:1] ==
+                 BANK_INDEX_WIDTH'(value_slot)))
+                value_epoch_even_q[value_slot] <=
+                    completion_meta_i[COMPLETION_MUL].producer_id[
+                        PRODUCER_ID_WIDTH-1];
             if (completion_write0 && !completion_slot0[0] &&
                 (completion_slot0[PRODUCER_SLOT_WIDTH-1:1] ==
                  BANK_INDEX_WIDTH'(value_slot)))
                 value_even_q[value_slot] <=
 	                    completion_data_i[COMPLETION_ALU];
+            if (completion_write0 && !completion_slot0[0] &&
+                (completion_slot0[PRODUCER_SLOT_WIDTH-1:1] ==
+                 BANK_INDEX_WIDTH'(value_slot)))
+                value_epoch_even_q[value_slot] <=
+                    completion_meta_i[COMPLETION_ALU].producer_id[
+                        PRODUCER_ID_WIDTH-1];
             if (completion_write3 && !completion_slot3[0] &&
                 (completion_slot3[PRODUCER_SLOT_WIDTH-1:1] ==
                  BANK_INDEX_WIDTH'(value_slot)))
                 value_even_q[value_slot] <=
 	                    completion_data_i[COMPLETION_DUAL_ALU];
+            if (completion_write3 && !completion_slot3[0] &&
+                (completion_slot3[PRODUCER_SLOT_WIDTH-1:1] ==
+                 BANK_INDEX_WIDTH'(value_slot)))
+                value_epoch_even_q[value_slot] <=
+                    completion_meta_i[COMPLETION_DUAL_ALU].producer_id[
+                        PRODUCER_ID_WIDTH-1];
 
             if (completion_write1 && completion_slot1[0] &&
                 (completion_slot1[PRODUCER_SLOT_WIDTH-1:1] ==
                  BANK_INDEX_WIDTH'(value_slot)))
                 value_odd_q[value_slot] <=
 	                    completion_data_i[COMPLETION_LSU];
+            if (completion_write1 && completion_slot1[0] &&
+                (completion_slot1[PRODUCER_SLOT_WIDTH-1:1] ==
+                 BANK_INDEX_WIDTH'(value_slot)))
+                value_epoch_odd_q[value_slot] <=
+                    completion_meta_i[COMPLETION_LSU].producer_id[
+                        PRODUCER_ID_WIDTH-1];
             if (completion_write2 && completion_slot2[0] &&
                 (completion_slot2[PRODUCER_SLOT_WIDTH-1:1] ==
                  BANK_INDEX_WIDTH'(value_slot)))
                 value_odd_q[value_slot] <=
 	                    completion_data_i[COMPLETION_MUL];
+            if (completion_write2 && completion_slot2[0] &&
+                (completion_slot2[PRODUCER_SLOT_WIDTH-1:1] ==
+                 BANK_INDEX_WIDTH'(value_slot)))
+                value_epoch_odd_q[value_slot] <=
+                    completion_meta_i[COMPLETION_MUL].producer_id[
+                        PRODUCER_ID_WIDTH-1];
             if (completion_write0 && completion_slot0[0] &&
                 (completion_slot0[PRODUCER_SLOT_WIDTH-1:1] ==
                  BANK_INDEX_WIDTH'(value_slot)))
                 value_odd_q[value_slot] <=
 	                    completion_data_i[COMPLETION_ALU];
+            if (completion_write0 && completion_slot0[0] &&
+                (completion_slot0[PRODUCER_SLOT_WIDTH-1:1] ==
+                 BANK_INDEX_WIDTH'(value_slot)))
+                value_epoch_odd_q[value_slot] <=
+                    completion_meta_i[COMPLETION_ALU].producer_id[
+                        PRODUCER_ID_WIDTH-1];
             if (completion_write3 && completion_slot3[0] &&
                 (completion_slot3[PRODUCER_SLOT_WIDTH-1:1] ==
                  BANK_INDEX_WIDTH'(value_slot)))
                 value_odd_q[value_slot] <=
 	                    completion_data_i[COMPLETION_DUAL_ALU];
+            if (completion_write3 && completion_slot3[0] &&
+                (completion_slot3[PRODUCER_SLOT_WIDTH-1:1] ==
+                 BANK_INDEX_WIDTH'(value_slot)))
+                value_epoch_odd_q[value_slot] <=
+                    completion_meta_i[COMPLETION_DUAL_ALU].producer_id[
+                        PRODUCER_ID_WIDTH-1];
         end
     end
 
@@ -120,6 +174,14 @@ import ydrasil_pkg::*;
         value_odd_q[read_index2] : value_even_q[read_index2];
     assign read_data3_o = read_slot3_i[0] ?
         value_odd_q[read_index3] : value_even_q[read_index3];
+    assign read_epoch0_o = read_slot0_i[0] ?
+        value_epoch_odd_q[read_index0] : value_epoch_even_q[read_index0];
+    assign read_epoch1_o = read_slot1_i[0] ?
+        value_epoch_odd_q[read_index1] : value_epoch_even_q[read_index1];
+    assign read_epoch2_o = read_slot2_i[0] ?
+        value_epoch_odd_q[read_index2] : value_epoch_even_q[read_index2];
+    assign read_epoch3_o = read_slot3_i[0] ?
+        value_epoch_odd_q[read_index3] : value_epoch_even_q[read_index3];
     assign retire_data0_o = retire_slot0_i[0] ?
         value_odd_q[retire_index0] : value_even_q[retire_index0];
     assign retire_data1_o = retire_slot1_i[0] ?

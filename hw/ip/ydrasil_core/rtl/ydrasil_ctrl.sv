@@ -34,6 +34,7 @@ import ydrasil_pkg::*;
     output ydrasil_rob_source_state_t   issue_src2_state_o,
     output ydrasil_rob_source_state_t   issue_src3_state_o,
     output wire                         issue_at_rob_head_o,
+    output producer_id_t                rob_head_id_o,
     output wire [REGS_NUM-1:0]          gpr_pending_o,
     output wire                         ex_accept_valid_o,
     output wire                         ex_accept_valid1_o,
@@ -130,12 +131,14 @@ import ydrasil_pkg::*;
     endgenerate
 
     assign retire_commit_o.valid = queue_commit0;
+    assign retire_commit_o.producer_id = queue_head_id;
     assign retire_commit_o.writes_gpr = queue_commit0 &&
         producer_writes_gpr_q[queue_head_q];
     assign retire_commit_o.rd_addr = producer_rd_q[queue_head_q];
     assign retire_commit_o.value = retire_value0_i;
     assign retire_commit_o.pc = producer_pc_q[queue_head_q];
     assign retire_commit1_o.valid = queue_commit1;
+    assign retire_commit1_o.producer_id = queue_head1_id;
     assign retire_commit1_o.writes_gpr = queue_commit1 &&
         producer_writes_gpr_q[queue_head1];
     assign retire_commit1_o.rd_addr = producer_rd_q[queue_head1];
@@ -166,7 +169,10 @@ import ydrasil_pkg::*;
     wire serial_accept = issue_fence_i ||
         (ex_accept_valid_o &&
          (ex_hzd_i.operator_type[OPERATOR_TYPE_CSR] &&
-          !ex_hzd_i.operator_type[OPERATOR_TYPE_SYS]));
+          !ex_hzd_i.operator_type[OPERATOR_TYPE_SYS])) ||
+        (ex_accept_valid1_o &&
+         (ex_hzd1_i.operator_type[OPERATOR_TYPE_CSR] &&
+          !ex_hzd1_i.operator_type[OPERATOR_TYPE_SYS]));
 
     producer_slot_t alloc_slot0;
     producer_slot_t alloc_slot1;
@@ -228,11 +234,15 @@ import ydrasil_pkg::*;
             latest_valid_q[dispatch_pkt_i.src0.arch_addr];
         dispatch_pkt_o.src0.producer_tag = dispatch_src0_latest_id;
         dispatch_pkt_o.src0.producer_class = dispatch_src0_latest_class;
+        dispatch_pkt_o.src0.ready = !dispatch_pkt_o.src0.tag_valid ||
+            producer_ready_q[dispatch_src0_latest_id[PRODUCER_SLOT_WIDTH-1:0]];
         dispatch_pkt_o.src1.tag_valid = dispatch_pkt_i.src1.used &&
             (dispatch_pkt_i.src1.arch_addr != '0) &&
             latest_valid_q[dispatch_pkt_i.src1.arch_addr];
         dispatch_pkt_o.src1.producer_tag = dispatch_src1_latest_id;
         dispatch_pkt_o.src1.producer_class = dispatch_src1_latest_class;
+        dispatch_pkt_o.src1.ready = !dispatch_pkt_o.src1.tag_valid ||
+            producer_ready_q[dispatch_src1_latest_id[PRODUCER_SLOT_WIDTH-1:0]];
         dispatch_pkt_o.dst.rob_tag = producer_alloc_id;
         dispatch_pkt_o.dst.result_class = dispatch_result_class;
 
@@ -244,6 +254,10 @@ import ydrasil_pkg::*;
             producer_alloc_id : dispatch1_src0_latest_id;
         dispatch_pkt1_o.src0.producer_class = dispatch1_src0_from_slot0 ?
             dispatch_result_class : dispatch1_src0_latest_class;
+        dispatch_pkt1_o.src0.ready = !dispatch_pkt1_o.src0.tag_valid ||
+            (!dispatch1_src0_from_slot0 &&
+             producer_ready_q[dispatch1_src0_latest_id[
+                 PRODUCER_SLOT_WIDTH-1:0]]);
         dispatch_pkt1_o.src1.tag_valid = dispatch1_src1_from_slot0 ||
             (dispatch_pkt1_i.src1.used &&
              (dispatch_pkt1_i.src1.arch_addr != '0) &&
@@ -252,6 +266,10 @@ import ydrasil_pkg::*;
             producer_alloc_id : dispatch1_src1_latest_id;
         dispatch_pkt1_o.src1.producer_class = dispatch1_src1_from_slot0 ?
             dispatch_result_class : dispatch1_src1_latest_class;
+        dispatch_pkt1_o.src1.ready = !dispatch_pkt1_o.src1.tag_valid ||
+            (!dispatch1_src1_from_slot0 &&
+             producer_ready_q[dispatch1_src1_latest_id[
+                 PRODUCER_SLOT_WIDTH-1:0]]);
         dispatch_pkt1_o.dst.rob_tag = producer_alloc_id1;
         dispatch_pkt1_o.dst.result_class = dispatch1_result_class;
     end
@@ -263,6 +281,7 @@ import ydrasil_pkg::*;
     wire issue_at_rob_head = issue_pkt_i.dst.rob_tag ==
         queue_head_id;
     assign issue_at_rob_head_o = issue_at_rob_head;
+    assign rob_head_id_o = queue_head_id;
     wire producer_slot_t issue_src0_slot =
         issue_pkt_i.src0.producer_tag[PRODUCER_SLOT_WIDTH-1:0];
     wire producer_slot_t issue_src1_slot =
@@ -297,7 +316,9 @@ import ydrasil_pkg::*;
         !ex_mul_stall_i;
     assign ex_accept_valid1_o = ex_hzd1_i.valid && !ex_branch_jump_i &&
         !ex_mul_stall_i;
-    assign stall_id_o = ex_mul_stall_i;
+    // DIV admission is reserved in the P1 RS. A busy divider must not freeze
+    // unrelated Operand and lane-A traffic through a global feedback path.
+    assign stall_id_o = 1'b0;
     assign bubble_id_o = decode_bubble_stall;
     assign stall_if_o = 1'b0;
     assign branch_jump_o = ex_branch_jump_i;

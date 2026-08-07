@@ -184,14 +184,19 @@ import ydrasil_pkg::*;
 		(decoded0.rd_wen || (decoded0.op_class == UOP_CLASS_LOAD));
     wire slot1_writes = (decoded1.rd_addr != '0) &&
 		(decoded1.rd_wen || (decoded1.op_class == UOP_CLASS_LOAD));
-    wire slot0_a_capable = (decoded0.op_class != UOP_CLASS_BJP) &&
-        !decoded0_memory;
-    wire slot0_b_capable = (decoded0.op_class != UOP_CLASS_MUL) &&
-        !decoded0.full_bitmanip && !decoded0_serial;
-    wire slot1_a_capable = (decoded1.op_class != UOP_CLASS_BJP) &&
-        !decoded1_memory;
-    wire slot1_b_capable = (decoded1.op_class != UOP_CLASS_MUL) &&
-        !decoded1.full_bitmanip && !decoded1_serial;
+    // P0 owns ALU/LSU/BITX. P1 owns ALU/BRU/MDU/SERIAL. Keeping the two
+    // capability bits class-local prevents payload-dependent lane assignment
+    // from re-entering the Issue select cone.
+    wire slot0_a_capable = (decoded0.op_class == UOP_CLASS_ALU) ||
+        decoded0_memory || (decoded0.op_class == UOP_CLASS_BITMANIP);
+    wire slot0_b_capable = (decoded0.op_class == UOP_CLASS_ALU) ||
+        (decoded0.op_class == UOP_CLASS_BJP) ||
+        (decoded0.op_class == UOP_CLASS_MUL) || decoded0_serial;
+    wire slot1_a_capable = (decoded1.op_class == UOP_CLASS_ALU) ||
+        decoded1_memory || (decoded1.op_class == UOP_CLASS_BITMANIP);
+    wire slot1_b_capable = (decoded1.op_class == UOP_CLASS_ALU) ||
+        (decoded1.op_class == UOP_CLASS_BJP) ||
+        (decoded1.op_class == UOP_CLASS_MUL) || decoded1_serial;
     assign if_id_ready_o = issue_ready_i;
     assign if_id_consume_two_o = issue_ready_i && decode_valid1;
 

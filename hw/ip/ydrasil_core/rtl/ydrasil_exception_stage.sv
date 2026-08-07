@@ -28,12 +28,15 @@ import ydrasil_pkg::*;
         exception_req = '0;
         exception_req.valid =
             (ex_accept_valid_i && operator_type_i[OPERATOR_TYPE_SYS]) ||
-            (lane_a_valid_i && illegal_instr_i);
+            illegal_instr_i;
         exception_req.ecall = sys_info_i[OP_SYS_ECALL];
         exception_req.ebreak = sys_info_i[OP_SYS_EBREAK];
         exception_req.mret = sys_info_i[OP_SYS_MRET];
-        exception_req.illegal = lane_a_valid_i && illegal_instr_i;
-        exception_req.pc = lane_a_pc_i;
+        exception_req.illegal = illegal_instr_i;
+        // SERIAL uops, including illegal encodings, execute on P1. Use the
+        // PC carried by that registered token even though illegal retains the
+        // SYS base class for serialization and ROB draining.
+        exception_req.pc = lane_b_pc_i;
     end
 
     assign async_pc = lane_b_valid_i ? (lane_b_pc_i + 32'd4) :

@@ -31,19 +31,6 @@ import ydrasil_pkg::*;
     reg [PAYLOAD_WIDTH-1:0] payload0_q;
     reg [PAYLOAD_WIDTH-1:0] payload1_q;
 
-    function automatic [BACK_INDEX_WIDTH-1:0] advance_back_ptr(
-        input [BACK_INDEX_WIDTH-1:0] ptr,
-        input [1:0] amount
-    );
-        logic [BACK_INDEX_WIDTH:0] sum;
-        begin
-            sum = {1'b0, ptr} + (BACK_INDEX_WIDTH + 1)'(amount);
-            advance_back_ptr = (sum >= (BACK_INDEX_WIDTH + 1)'(BACK_DEPTH)) ?
-                BACK_INDEX_WIDTH'(sum - (BACK_INDEX_WIDTH + 1)'(BACK_DEPTH)) :
-                BACK_INDEX_WIDTH'(sum);
-        end
-    endfunction
-
     wire [COUNT_WIDTH-1:0] old_remaining =
         count_q - COUNT_WIDTH'(pop_count_i);
     reg [1:0] back_head_advance;
@@ -78,10 +65,35 @@ import ydrasil_pkg::*;
         endcase
     end
 
+    wire [BACK_INDEX_WIDTH:0] back_head1_sum =
+        {1'b0, back_head_q} + (BACK_INDEX_WIDTH + 1)'(1);
+    wire [BACK_INDEX_WIDTH:0] back_tail1_sum =
+        {1'b0, back_tail_q} + (BACK_INDEX_WIDTH + 1)'(1);
     wire [BACK_INDEX_WIDTH-1:0] back_head1 =
-        advance_back_ptr(back_head_q, 2'd1);
+        (back_head1_sum >= (BACK_INDEX_WIDTH + 1)'(BACK_DEPTH)) ?
+        BACK_INDEX_WIDTH'(back_head1_sum -
+            (BACK_INDEX_WIDTH + 1)'(BACK_DEPTH)) :
+        BACK_INDEX_WIDTH'(back_head1_sum);
     wire [BACK_INDEX_WIDTH-1:0] back_tail1 =
-        advance_back_ptr(back_tail_q, 2'd1);
+        (back_tail1_sum >= (BACK_INDEX_WIDTH + 1)'(BACK_DEPTH)) ?
+        BACK_INDEX_WIDTH'(back_tail1_sum -
+            (BACK_INDEX_WIDTH + 1)'(BACK_DEPTH)) :
+        BACK_INDEX_WIDTH'(back_tail1_sum);
+    wire [BACK_INDEX_WIDTH:0] back_head_advance_sum =
+        {1'b0, back_head_q} +
+        (BACK_INDEX_WIDTH + 1)'(back_head_advance);
+    wire [BACK_INDEX_WIDTH:0] back_tail_advance_sum =
+        {1'b0, back_tail_q} + (BACK_INDEX_WIDTH + 1)'(push_count_i);
+    wire [BACK_INDEX_WIDTH-1:0] back_head_advanced =
+        (back_head_advance_sum >= (BACK_INDEX_WIDTH + 1)'(BACK_DEPTH)) ?
+        BACK_INDEX_WIDTH'(back_head_advance_sum -
+            (BACK_INDEX_WIDTH + 1)'(BACK_DEPTH)) :
+        BACK_INDEX_WIDTH'(back_head_advance_sum);
+    wire [BACK_INDEX_WIDTH-1:0] back_tail_advanced =
+        (back_tail_advance_sum >= (BACK_INDEX_WIDTH + 1)'(BACK_DEPTH)) ?
+        BACK_INDEX_WIDTH'(back_tail_advance_sum -
+            (BACK_INDEX_WIDTH + 1)'(BACK_DEPTH)) :
+        BACK_INDEX_WIDTH'(back_tail_advance_sum);
     wire [BANK_ADDR_WIDTH-1:0] back_head_addr =
         back_head_q[BACK_INDEX_WIDTH-1:1];
     wire [BANK_ADDR_WIDTH-1:0] back_head1_addr =
@@ -203,9 +215,9 @@ import ydrasil_pkg::*;
             count_q <= count_q - COUNT_WIDTH'(pop_count_i) +
                 COUNT_WIDTH'(push_count_i);
             if (back_head_advance != 2'd0)
-                back_head_q <= advance_back_ptr(back_head_q, back_head_advance);
+                back_head_q <= back_head_advanced;
             if (push_count_i != 2'd0)
-                back_tail_q <= advance_back_ptr(back_tail_q, push_count_i);
+                back_tail_q <= back_tail_advanced;
         end
     end
 

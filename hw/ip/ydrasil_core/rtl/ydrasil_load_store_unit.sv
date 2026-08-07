@@ -4,6 +4,12 @@ import ydrasil_pkg::*;
     input  wire                            clk,
 	    input  wire                            rst_n,
 	    input  ydrasil_lsu_req_pkt_t           req_i,
+	    input  ydrasil_commit_pkt_t            commit_pkt_i,
+	    input  ydrasil_commit_pkt_t            commit_pkt1_i,
+	    input  wire                            branch_recovery_i,
+	    input  wire                            trap_flush_i,
+	    input  wire [PRODUCER_NUM-1:0]         recovery_keep_mask_i,
+	    input  producer_id_t                   rob_head_id_i,
 		    input  ydrasil_completion_meta_t       completion_meta_i [COMPLETION_LANES],
 		    input  wire [REGS_DATA_WIDTH-1:0]      completion_data_i [COMPLETION_LANES],
     input  wire [BUS_DATA_WIDTH-1:0]       dtcm_rdata_i,
@@ -38,6 +44,8 @@ import ydrasil_pkg::*;
     // pointer-indexed array reads.
 	    typedef struct packed {
 	        logic                         valid;
+	        logic                         retired;
+	        producer_id_t                 producer_id;
 	        logic [BUS_ADDR_WIDTH-1:0]    addr;
 	        logic [BUS_DATA_WIDTH-1:0]    store_data;
 	        logic [3:0]                   store_mask;
@@ -60,75 +68,129 @@ import ydrasil_pkg::*;
 	    logic [BUS_DATA_WIDTH-1:0] completion_shadow_data_q
 	        [0:STORE_COMPLETION_SHADOWS-1];
 
-	    function automatic [BUS_DATA_WIDTH-1:0] align_store_data(
-	        input [BUS_DATA_WIDTH-1:0] data,
-	        input [3:0] mask
-	    );
-	        unique case (mask)
-	            4'b0001: align_store_data = {24'b0, data[7:0]};
-	            4'b0010: align_store_data = {16'b0, data[7:0], 8'b0};
-	            4'b0100: align_store_data = {8'b0, data[7:0], 16'b0};
-	            4'b1000: align_store_data = {data[7:0], 24'b0};
-	            4'b0011: align_store_data = {16'b0, data[15:0]};
-	            4'b1100: align_store_data = {data[15:0], 16'b0};
-	            default: align_store_data = data;
-	        endcase
-	    endfunction
+	    ydrasil_lsu_req_pkt_t patched_queue0;
+	    ydrasil_lsu_req_pkt_t patched_queue1;
+	    store_buf_entry_t patched_store_buf0;
+	    store_buf_entry_t patched_store_buf1;
+	    integer completion_patch_idx;
+	    always_comb begin
+	        patched_queue0 = queue_q[0];
+	        patched_queue1 = queue_q[1];
+	        patched_store_buf0 = store_buf0_q;
+	        patched_store_buf1 = store_buf1_q;
 
-	    function automatic ydrasil_lsu_req_pkt_t patch_queue_store(
-	        input ydrasil_lsu_req_pkt_t entry
-	    );
-	        integer completion_idx;
-	        begin
-	            patch_queue_store = entry;
-	            if (entry.valid && entry.is_store &&
-	                !entry.store_data_valid &&
-	                entry.store_producer_tracked) begin
-	                for (completion_idx = 0;
-	                     completion_idx < STORE_COMPLETION_SHADOWS;
-	                     completion_idx = completion_idx + 1) begin
-		                    if (completion_shadow_valid_q[completion_idx] &&
-		                        (completion_shadow_id_q[completion_idx] ==
-		                         entry.store_producer_id)) begin
-		                        patch_queue_store.store_data =
-		                            completion_shadow_data_q[completion_idx];
-	                        patch_queue_store.store_data_valid = 1'b1;
-	                        patch_queue_store.store_producer_tracked = 1'b0;
-	                    end
-	                end
+	        if (queue_q[0].valid && queue_q[0].is_store &&
+	            ((commit_pkt_i.valid &&
+	              (commit_pkt_i.producer_id == queue_q[0].producer_id)) ||
+	             (commit_pkt1_i.valid &&
+	              (commit_pkt1_i.producer_id == queue_q[0].producer_id))))
+	            patched_queue0.retired = 1'b1;
+	        if (queue_q[1].valid && queue_q[1].is_store &&
+	            ((commit_pkt_i.valid &&
+	              (commit_pkt_i.producer_id == queue_q[1].producer_id)) ||
+	             (commit_pkt1_i.valid &&
+	              (commit_pkt1_i.producer_id == queue_q[1].producer_id))))
+	            patched_queue1.retired = 1'b1;
+	        if (store_buf0_q.valid &&
+	            ((commit_pkt_i.valid &&
+	              (commit_pkt_i.producer_id == store_buf0_q.producer_id)) ||
+	             (commit_pkt1_i.valid &&
+	              (commit_pkt1_i.producer_id == store_buf0_q.producer_id))))
+	            patched_store_buf0.retired = 1'b1;
+	        if (store_buf1_q.valid &&
+	            ((commit_pkt_i.valid &&
+	              (commit_pkt_i.producer_id == store_buf1_q.producer_id)) ||
+	             (commit_pkt1_i.valid &&
+	              (commit_pkt1_i.producer_id == store_buf1_q.producer_id))))
+	            patched_store_buf1.retired = 1'b1;
+
+	        for (completion_patch_idx = 0;
+	             completion_patch_idx < STORE_COMPLETION_SHADOWS;
+	             completion_patch_idx = completion_patch_idx + 1) begin
+	            if (queue_q[0].valid && queue_q[0].is_store &&
+	                !queue_q[0].store_data_valid &&
+	                queue_q[0].store_producer_tracked &&
+	                completion_shadow_valid_q[completion_patch_idx] &&
+	                (completion_shadow_id_q[completion_patch_idx] ==
+	                 queue_q[0].store_producer_id)) begin
+	                patched_queue0.store_data =
+	                    completion_shadow_data_q[completion_patch_idx];
+	                patched_queue0.store_data_valid = 1'b1;
+	                patched_queue0.store_producer_tracked = 1'b0;
+	            end
+	            if (queue_q[1].valid && queue_q[1].is_store &&
+	                !queue_q[1].store_data_valid &&
+	                queue_q[1].store_producer_tracked &&
+	                completion_shadow_valid_q[completion_patch_idx] &&
+	                (completion_shadow_id_q[completion_patch_idx] ==
+	                 queue_q[1].store_producer_id)) begin
+	                patched_queue1.store_data =
+	                    completion_shadow_data_q[completion_patch_idx];
+	                patched_queue1.store_data_valid = 1'b1;
+	                patched_queue1.store_producer_tracked = 1'b0;
+	            end
+	            if (store_buf0_q.valid && !store_buf0_q.store_data_valid &&
+	                store_buf0_q.store_producer_tracked &&
+	                completion_shadow_valid_q[completion_patch_idx] &&
+	                (completion_shadow_id_q[completion_patch_idx] ==
+	                 store_buf0_q.store_producer_id)) begin
+	                unique case (store_buf0_q.store_mask)
+	                    4'b0001: patched_store_buf0.store_data =
+	                        {24'b0, completion_shadow_data_q[
+	                            completion_patch_idx][7:0]};
+	                    4'b0010: patched_store_buf0.store_data =
+	                        {16'b0, completion_shadow_data_q[
+	                            completion_patch_idx][7:0], 8'b0};
+	                    4'b0100: patched_store_buf0.store_data =
+	                        {8'b0, completion_shadow_data_q[
+	                            completion_patch_idx][7:0], 16'b0};
+	                    4'b1000: patched_store_buf0.store_data =
+	                        {completion_shadow_data_q[
+	                            completion_patch_idx][7:0], 24'b0};
+	                    4'b0011: patched_store_buf0.store_data =
+	                        {16'b0, completion_shadow_data_q[
+	                            completion_patch_idx][15:0]};
+	                    4'b1100: patched_store_buf0.store_data =
+	                        {completion_shadow_data_q[
+	                            completion_patch_idx][15:0], 16'b0};
+	                    default: patched_store_buf0.store_data =
+	                        completion_shadow_data_q[completion_patch_idx];
+	                endcase
+	                patched_store_buf0.store_data_valid = 1'b1;
+	                patched_store_buf0.store_producer_tracked = 1'b0;
+	            end
+	            if (store_buf1_q.valid && !store_buf1_q.store_data_valid &&
+	                store_buf1_q.store_producer_tracked &&
+	                completion_shadow_valid_q[completion_patch_idx] &&
+	                (completion_shadow_id_q[completion_patch_idx] ==
+	                 store_buf1_q.store_producer_id)) begin
+	                unique case (store_buf1_q.store_mask)
+	                    4'b0001: patched_store_buf1.store_data =
+	                        {24'b0, completion_shadow_data_q[
+	                            completion_patch_idx][7:0]};
+	                    4'b0010: patched_store_buf1.store_data =
+	                        {16'b0, completion_shadow_data_q[
+	                            completion_patch_idx][7:0], 8'b0};
+	                    4'b0100: patched_store_buf1.store_data =
+	                        {8'b0, completion_shadow_data_q[
+	                            completion_patch_idx][7:0], 16'b0};
+	                    4'b1000: patched_store_buf1.store_data =
+	                        {completion_shadow_data_q[
+	                            completion_patch_idx][7:0], 24'b0};
+	                    4'b0011: patched_store_buf1.store_data =
+	                        {16'b0, completion_shadow_data_q[
+	                            completion_patch_idx][15:0]};
+	                    4'b1100: patched_store_buf1.store_data =
+	                        {completion_shadow_data_q[
+	                            completion_patch_idx][15:0], 16'b0};
+	                    default: patched_store_buf1.store_data =
+	                        completion_shadow_data_q[completion_patch_idx];
+	                endcase
+	                patched_store_buf1.store_data_valid = 1'b1;
+	                patched_store_buf1.store_producer_tracked = 1'b0;
 	            end
 	        end
-	    endfunction
-
-	    function automatic store_buf_entry_t patch_buffer_store(
-	        input store_buf_entry_t entry
-	    );
-	        integer completion_idx;
-	        begin
-	            patch_buffer_store = entry;
-	            if (entry.valid && !entry.store_data_valid &&
-	                entry.store_producer_tracked) begin
-	                for (completion_idx = 0;
-	                     completion_idx < STORE_COMPLETION_SHADOWS;
-	                     completion_idx = completion_idx + 1) begin
-		                    if (completion_shadow_valid_q[completion_idx] &&
-		                        (completion_shadow_id_q[completion_idx] ==
-		                         entry.store_producer_id)) begin
-		                        patch_buffer_store.store_data = align_store_data(
-		                            completion_shadow_data_q[completion_idx],
-	                            entry.store_mask);
-	                        patch_buffer_store.store_data_valid = 1'b1;
-	                        patch_buffer_store.store_producer_tracked = 1'b0;
-	                    end
-	                end
-	            end
-	        end
-	    endfunction
-
-	    wire store_buf_entry_t patched_store_buf0 =
-	        patch_buffer_store(store_buf0_q);
-	    wire store_buf_entry_t patched_store_buf1 =
-	        patch_buffer_store(store_buf1_q);
+	    end
 
     wire queue_empty = queue_count_q == '0;
     wire queue_full = queue_count_q == QUEUE_COUNT_WIDTH'(QUEUE_DEPTH);
@@ -136,13 +198,13 @@ import ydrasil_pkg::*;
     wire store_buf_full =
         store_buf_count_q == STORE_COUNT_WIDTH'(STORE_BUFFER_DEPTH);
 
-    wire store_head_data_valid = !store_buf_empty &&
-        store_buf0_q.store_data_valid;
+	    wire store_head_data_valid = !store_buf_empty &&
+	        store_buf0_q.store_data_valid && store_buf0_q.retired;
     wire [31:0] store_head_wdata = store_buf0_q.store_data;
     wire store_buf_dequeue = store_head_data_valid;
 
 	    ydrasil_lsu_req_pkt_t active_pkt;
-	    assign active_pkt = patch_queue_store(queue_q[queue_head_q]);
+	    assign active_pkt = queue_head_q[0] ? patched_queue1 : patched_queue0;
 
     wire active_valid = !queue_empty && active_pkt.valid;
     wire active_is_load = active_pkt.is_load;
@@ -158,7 +220,11 @@ import ydrasil_pkg::*;
     wire active_store_data_valid = active_pkt.store_data_valid;
     wire active_dtcm_load = active_valid && active_addr_is_dtcm && active_is_load;
     wire active_dtcm_store = active_valid && active_addr_is_dtcm && active_is_store;
-    wire active_mmio = active_valid && !active_addr_is_dtcm;
+	    wire active_mmio = active_valid && !active_addr_is_dtcm;
+	    wire active_at_rob_head =
+	        active_pkt.producer_id == rob_head_id_i;
+	    wire active_mmio_order_safe = active_at_rob_head ||
+	        (active_is_store && active_pkt.retired);
 
     reg mmio_req_valid_q;
     reg mmio_is_load_q;
@@ -185,6 +251,12 @@ import ydrasil_pkg::*;
     reg [1:0] load_s1_addr_index_q;
     reg [3:0] load_s1_forward_mask_q;
     reg [31:0] load_s1_forward_data_q;
+    // Recovery clears the producer table at the clock edge where a response
+    // is still visible combinationally. Keep a local kill bit for that one
+    // boundary cycle so a flushed response cannot reach the broadcast bus
+    // after its producer token has been recycled.
+    reg load_s1_killed_q;
+    reg mmio_wb_killed_q;
     // This is the only wide DTCM response boundary.  Issue receives the
     // matching tag through dtcm_reservation_o and selects this registered
     // data only after its own FU input cells.
@@ -250,7 +322,8 @@ import ydrasil_pkg::*;
     wire dtcm_store_fire = active_dtcm_store && store_buf_has_room;
     // MMIO observes all older buffered stores before it starts. Once launched,
     // younger DTCM requests can proceed independently while APB is busy.
-    wire mmio_fire = active_mmio && !mmio_busy && store_buf_empty &&
+	    wire mmio_fire = active_mmio && active_mmio_order_safe &&
+	        !mmio_busy && store_buf_empty &&
         (!active_is_store || active_store_data_valid);
     wire queue_dequeue = queued_dtcm_load_fire || dtcm_store_fire || mmio_fire;
     wire queue_has_room_after_dequeue = !queue_full || queue_dequeue;
@@ -343,8 +416,16 @@ import ydrasil_pkg::*;
     // The BRAM output and S1 metadata are the LSU response. Future File is the
     // second response register; a separate load_s2 register would add a third
     // cycle before the value becomes usable.
-    wire dtcm_wb_valid = load_s1_valid_q;
-    wire mmio_wb_out_valid = mmio_wb_valid_q && !dtcm_wb_valid;
+    wire dtcm_recovery_kill = branch_recovery_i && load_s1_valid_q &&
+        !recovery_keep_mask_i[load_s1_producer_id_q[
+            PRODUCER_SLOT_WIDTH-1:0]];
+    wire mmio_recovery_kill = branch_recovery_i && mmio_wb_valid_q &&
+        !recovery_keep_mask_i[mmio_wb_producer_id_q[
+            PRODUCER_SLOT_WIDTH-1:0]];
+    wire dtcm_wb_valid = load_s1_valid_q && !load_s1_killed_q &&
+        !dtcm_recovery_kill;
+    wire mmio_wb_out_valid = mmio_wb_valid_q && !mmio_wb_killed_q &&
+        !mmio_recovery_kill && !dtcm_wb_valid;
     assign completion_valid_o = dtcm_wb_valid ?
         load_s1_producer_tracked_q :
         (mmio_wb_out_valid && mmio_wb_producer_tracked_q);
@@ -369,7 +450,13 @@ import ydrasil_pkg::*;
 	ydrasil_lsu_req_pkt_t enqueue_pkt;
 	integer shadow_match_idx;
 	always_comb begin
-		enqueue_pkt = patch_queue_store(req_i);
+		enqueue_pkt = req_i;
+		if (req_i.valid && req_i.is_store &&
+		    ((commit_pkt_i.valid &&
+		      (commit_pkt_i.producer_id == req_i.producer_id)) ||
+		     (commit_pkt1_i.valid &&
+		      (commit_pkt1_i.producer_id == req_i.producer_id))))
+			enqueue_pkt.retired = 1'b1;
 		if (enqueue_pkt.valid && enqueue_pkt.is_store &&
 		    !enqueue_pkt.store_data_valid &&
 		    enqueue_pkt.store_producer_tracked) begin
@@ -412,7 +499,13 @@ import ydrasil_pkg::*;
 
 	always_comb begin
         store_enqueue_pkt = '0;
-        store_enqueue_pkt.valid = 1'b1;
+	        store_enqueue_pkt.valid = 1'b1;
+	        store_enqueue_pkt.retired = active_pkt.retired ||
+	            (commit_pkt_i.valid &&
+	             (commit_pkt_i.producer_id == active_pkt.producer_id)) ||
+	            (commit_pkt1_i.valid &&
+	             (commit_pkt1_i.producer_id == active_pkt.producer_id));
+	        store_enqueue_pkt.producer_id = active_pkt.producer_id;
         store_enqueue_pkt.addr = active_addr;
         store_enqueue_pkt.store_data = active_aligned_store_data;
         store_enqueue_pkt.store_mask = active_store_mask;
@@ -423,8 +516,79 @@ import ydrasil_pkg::*;
 	            active_pkt.store_producer_tracked && !active_store_data_valid;
 	    end
 
-	    wire store_buf_entry_t patched_store_enqueue =
-	        patch_buffer_store(store_enqueue_pkt);
+	    store_buf_entry_t patched_store_enqueue;
+	    integer enqueue_completion_idx;
+	    always_comb begin
+	        patched_store_enqueue = store_enqueue_pkt;
+	        for (enqueue_completion_idx = 0;
+	             enqueue_completion_idx < STORE_COMPLETION_SHADOWS;
+	             enqueue_completion_idx = enqueue_completion_idx + 1) begin
+	            if (store_enqueue_pkt.valid &&
+	                !store_enqueue_pkt.store_data_valid &&
+	                store_enqueue_pkt.store_producer_tracked &&
+	                completion_shadow_valid_q[enqueue_completion_idx] &&
+	                (completion_shadow_id_q[enqueue_completion_idx] ==
+	                 store_enqueue_pkt.store_producer_id)) begin
+	                unique case (store_enqueue_pkt.store_mask)
+	                    4'b0001: patched_store_enqueue.store_data =
+	                        {24'b0, completion_shadow_data_q[
+	                            enqueue_completion_idx][7:0]};
+	                    4'b0010: patched_store_enqueue.store_data =
+	                        {16'b0, completion_shadow_data_q[
+	                            enqueue_completion_idx][7:0], 8'b0};
+	                    4'b0100: patched_store_enqueue.store_data =
+	                        {8'b0, completion_shadow_data_q[
+	                            enqueue_completion_idx][7:0], 16'b0};
+	                    4'b1000: patched_store_enqueue.store_data =
+	                        {completion_shadow_data_q[
+	                            enqueue_completion_idx][7:0], 24'b0};
+	                    4'b0011: patched_store_enqueue.store_data =
+	                        {16'b0, completion_shadow_data_q[
+	                            enqueue_completion_idx][15:0]};
+	                    4'b1100: patched_store_enqueue.store_data =
+	                        {completion_shadow_data_q[
+	                            enqueue_completion_idx][15:0], 16'b0};
+	                    default: patched_store_enqueue.store_data =
+	                        completion_shadow_data_q[enqueue_completion_idx];
+	                endcase
+	                patched_store_enqueue.store_data_valid = 1'b1;
+	                patched_store_enqueue.store_producer_tracked = 1'b0;
+	            end
+	        end
+	    end
+
+	    wire [$clog2(QUEUE_DEPTH)-1:0] recovery_queue_second =
+	        queue_head_q + 1'b1;
+	    wire ydrasil_lsu_req_pkt_t recovery_queue_pkt0 =
+	        queue_head_q[0] ? patched_queue1 : patched_queue0;
+	    wire ydrasil_lsu_req_pkt_t recovery_queue_pkt1 =
+	        recovery_queue_second[0] ? patched_queue1 : patched_queue0;
+	    wire recovery_queue_keep0 = (queue_count_q > 0) &&
+	        recovery_queue_pkt0.valid &&
+	        (recovery_keep_mask_i[
+	             recovery_queue_pkt0.producer_id[PRODUCER_SLOT_WIDTH-1:0]] ||
+	         (recovery_queue_pkt0.is_store && recovery_queue_pkt0.retired));
+	    wire recovery_queue_keep1 = (queue_count_q > 1) &&
+	        recovery_queue_pkt1.valid &&
+	        (recovery_keep_mask_i[
+	             recovery_queue_pkt1.producer_id[PRODUCER_SLOT_WIDTH-1:0]] ||
+	         (recovery_queue_pkt1.is_store && recovery_queue_pkt1.retired));
+	    wire [QUEUE_COUNT_WIDTH-1:0] recovery_queue_count =
+	        QUEUE_COUNT_WIDTH'(recovery_queue_keep0) +
+	        QUEUE_COUNT_WIDTH'(recovery_queue_keep1);
+	    wire recovery_store_keep0 = (store_buf_count_q > 0) &&
+	        patched_store_buf0.valid &&
+	        (recovery_keep_mask_i[
+	             patched_store_buf0.producer_id[PRODUCER_SLOT_WIDTH-1:0]] ||
+	         patched_store_buf0.retired);
+	    wire recovery_store_keep1 = (store_buf_count_q > 1) &&
+	        patched_store_buf1.valid &&
+	        (recovery_keep_mask_i[
+	             patched_store_buf1.producer_id[PRODUCER_SLOT_WIDTH-1:0]] ||
+	         patched_store_buf1.retired);
+	    wire [STORE_COUNT_WIDTH-1:0] recovery_store_count =
+	        STORE_COUNT_WIDTH'(recovery_store_keep0) +
+	        STORE_COUNT_WIDTH'(recovery_store_keep1);
 
 	integer queue_idx;
 	always_ff @(posedge clk or negedge rst_n) begin
@@ -461,6 +625,7 @@ import ydrasil_pkg::*;
             load_s1_addr_index_q <= '0;
             load_s1_forward_mask_q <= '0;
             load_s1_forward_data_q <= '0;
+            load_s1_killed_q <= 1'b0;
             mmio_req_valid_q <= 1'b0;
             mmio_is_load_q <= 1'b0;
             mmio_addr_q <= '0;
@@ -476,14 +641,68 @@ import ydrasil_pkg::*;
             mmio_wb_rd_addr_q <= '0;
             mmio_wb_producer_id_q <= '0;
             mmio_wb_producer_tracked_q <= 1'b0;
+            mmio_wb_killed_q <= 1'b0;
 `ifndef SYNTHESIS
             perf_stb_lookup_q <= '0;
             perf_stb_hit_q <= '0;
             perf_stb_block_q <= '0;
             perf_stb_drain_q <= '0;
 `endif
-	        end else begin
-	            completion_shadow_valid_q[0] <=
+	        end else if (trap_flush_i) begin
+	            queue_count_q <= '0;
+	            issue_credit_q <= QUEUE_COUNT_WIDTH'(QUEUE_DEPTH);
+	            queue_head_q <= '0;
+	            queue_tail_q <= '0;
+	            store_buf_count_q <= '0;
+	            queue_q[0] <= '0;
+	            queue_q[1] <= '0;
+	            store_buf0_q <= '0;
+	            store_buf1_q <= '0;
+            load_s1_valid_q <= 1'b0;
+            mmio_req_valid_q <= 1'b0;
+            mmio_wb_valid_q <= 1'b0;
+            load_s1_killed_q <= 1'b0;
+            mmio_wb_killed_q <= 1'b0;
+	            completion_shadow_valid_q[0] <= 1'b0;
+	            completion_shadow_valid_q[1] <= 1'b0;
+	            completion_shadow_valid_q[2] <= 1'b0;
+	            completion_shadow_valid_q[3] <= 1'b0;
+	            completion_shadow_valid_q[4] <= 1'b0;
+	        end else if (branch_recovery_i) begin
+	            queue_head_q <= '0;
+	            queue_tail_q <= recovery_queue_count[
+	                $clog2(QUEUE_DEPTH)-1:0];
+	            queue_count_q <= recovery_queue_count;
+	            issue_credit_q <= QUEUE_COUNT_WIDTH'(QUEUE_DEPTH) -
+	                recovery_queue_count;
+	            queue_q[0] <= recovery_queue_keep0 ? recovery_queue_pkt0 :
+	                recovery_queue_keep1 ? recovery_queue_pkt1 : '0;
+	            queue_q[1] <= (recovery_queue_keep0 && recovery_queue_keep1) ?
+	                recovery_queue_pkt1 : '0;
+	            store_buf_count_q <= recovery_store_count;
+	            store_buf0_q <= recovery_store_keep0 ? patched_store_buf0 :
+	                recovery_store_keep1 ? patched_store_buf1 : '0;
+	            store_buf1_q <= (recovery_store_keep0 && recovery_store_keep1) ?
+	                patched_store_buf1 : '0;
+	            load_s1_valid_q <= load_s1_valid_q &&
+	                recovery_keep_mask_i[load_s1_producer_id_q[
+	                    PRODUCER_SLOT_WIDTH-1:0]];
+	            mmio_req_valid_q <= mmio_req_valid_q &&
+	                recovery_keep_mask_i[mmio_producer_id_q[
+	                    PRODUCER_SLOT_WIDTH-1:0]];
+            mmio_wb_valid_q <= mmio_wb_valid_q &&
+                recovery_keep_mask_i[mmio_wb_producer_id_q[
+                    PRODUCER_SLOT_WIDTH-1:0]];
+            load_s1_killed_q <= load_s1_valid_q &&
+                !recovery_keep_mask_i[load_s1_producer_id_q[
+                    PRODUCER_SLOT_WIDTH-1:0]];
+            mmio_wb_killed_q <= mmio_wb_valid_q &&
+                !recovery_keep_mask_i[mmio_wb_producer_id_q[
+                    PRODUCER_SLOT_WIDTH-1:0]];
+        end else begin
+            load_s1_killed_q <= 1'b0;
+            mmio_wb_killed_q <= 1'b0;
+            completion_shadow_valid_q[0] <=
 		                completion_meta_i[COMPLETION_ALU].valid &&
 		                completion_meta_i[COMPLETION_ALU].producer_tracked;
 		            completion_shadow_id_q[0] <=
@@ -514,8 +733,8 @@ import ydrasil_pkg::*;
 	                completion_meta_i[COMPLETION_LSU].producer_id;
 	            completion_shadow_data_q[4] <=
 	                completion_data_i[COMPLETION_LSU];
-	            for (queue_idx = 0; queue_idx < QUEUE_DEPTH; queue_idx++)
-	                queue_q[queue_idx] <= patch_queue_store(queue_q[queue_idx]);
+	            queue_q[0] <= patched_queue0;
+	            queue_q[1] <= patched_queue1;
 	            if (queue_dequeue) begin
                 queue_q[queue_head_q] <= '0;
                 queue_head_q <= queue_head_q + 1'b1;

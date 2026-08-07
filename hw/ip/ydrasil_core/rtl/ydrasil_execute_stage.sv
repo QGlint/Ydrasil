@@ -78,6 +78,10 @@ import ydrasil_pkg::*;
     output wire [REGS_ADDR_WIDTH-1:0] mul_rf_waddr_o,
     output producer_id_t mul_producer_id_o,
     output wire mul_result_valid_o,
+    output ydrasil_reservation_pkt_t mdu_due_o,
+    output ydrasil_reservation_pkt_t mdu_result_reservation_o,
+    output wire [REGS_DATA_WIDTH-1:0] mdu_bypass_data_o,
+    output wire div_available_o,
     output wire mul_stall_o,
 
     output wire dual_completion_valid_o,
@@ -115,7 +119,8 @@ import ydrasil_pkg::*;
         dual_meta_i.pc : dual_alu_operand_a_i;
     wire [REGS_DATA_WIDTH-1:0] dual_operand_b = dual_bru_valid_i ?
         32'd4 : dual_alu_operand_b_i;
-    wire dual_valid = dual_alu_valid_i || dual_bru_valid_i || agu_valid_i;
+    wire dual_valid = dual_alu_valid_i || dual_bru_valid_i || mul_valid_i ||
+        csr_valid_i;
     wire [BUS_ADDR_WIDTH-1:0] lsu_mem_addr;
     wire [REGS_DATA_WIDTH-1:0] lsu_store_result;
     wire unused_instret;
@@ -126,9 +131,11 @@ import ydrasil_pkg::*;
         if (dual_bru_valid_i) begin
             dual_operator[dual_bru_payload_i.subop] = 1'b1;
             dual_operator_type[OPERATOR_TYPE_BJP] = 1'b1;
-        end else if (agu_valid_i) begin
-            dual_operator_type[OPERATOR_TYPE_LOAD] = agu_req_i.is_load;
-            dual_operator_type[OPERATOR_TYPE_STORE] = agu_req_i.is_store;
+        end else if (mul_valid_i) begin
+            dual_operator = mul_operator_i;
+            dual_operator_type = mul_operator_type_i;
+        end else if (csr_valid_i) begin
+            dual_operator_type = csr_operator_type_i;
         end else if (dual_alu_valid_i) begin
             dual_operator[dual_alu_payload_i.subop] = 1'b1;
             dual_operator_type[OPERATOR_TYPE_ALU] =
@@ -197,6 +204,9 @@ import ydrasil_pkg::*;
         .mul_operand_a_i        (mul_operand_a_i),
         .mul_operand_b_i        (mul_operand_b_i),
         .csr_operand_a_i        (csr_operand_a_i),
+        .csr_rf_waddr_i         (dual_meta_i.rd_addr),
+        .csr_rf_wen_i           (dual_meta_i.rd_wen),
+        .csr_producer_id_i      (dual_meta_i.producer_id),
         .operator_i             (alu_operator_i),
         .operator_type_i        (alu_operator_type_i),
         .alu_valid_i            (alu_valid_i),
@@ -208,6 +218,9 @@ import ydrasil_pkg::*;
         .mul_operator_i         (mul_operator_i),
         .mul_operator_type_i    (mul_operator_type_i),
         .csr_operator_type_i    (csr_operator_type_i),
+        .mul_rf_waddr_i         (dual_meta_i.rd_addr),
+        .mul_rf_wen_i           (dual_meta_i.rd_wen),
+        .mul_producer_id_i      (dual_meta_i.producer_id),
         .id_rf_waddr_rd_i       (alu_rd_addr_i),
         .id_alu_rf_wen_rd_i     (alu_rd_wen_i),
         .id_ex_producer_id_i    (alu_producer_id_i),
@@ -240,7 +253,11 @@ import ydrasil_pkg::*;
         .mul_rf_waddr_rd_o      (mul_rf_waddr_o),
         .mul_producer_id_o      (mul_producer_id_o),
         .mul_result_valid_o     (mul_result_valid_o),
+        .mdu_due_o              (mdu_due_o),
+        .mdu_result_reservation_o(mdu_result_reservation_o),
+        .mdu_bypass_data_o      (mdu_bypass_data_o),
         .ex_instret_inc_o       (unused_instret),
+        .div_available_o        (div_available_o),
         .ex_mul_stall_o         (mul_stall_o)
     );
 
@@ -249,7 +266,8 @@ import ydrasil_pkg::*;
         .rst_n                  (rst_n),
         .flush_i                (flush_i),
         .interrupt_i            (trap_redirect_i),
-        .valid_i                (ex_accept_valid1_i && !agu_valid_i),
+        .valid_i                (ex_accept_valid1_i &&
+                                 (dual_alu_valid_i || dual_bru_valid_i)),
         .operand_a_i            (dual_operand_a),
         .operand_b_i            (dual_operand_b),
         .branch_operand_a_i     (dual_bru_operand_a_i),

@@ -323,6 +323,7 @@ package ydrasil_pkg;
 		logic                         used;
 		logic [REGS_ADDR_WIDTH-1:0]   arch_addr;
 		logic                         tag_valid;
+		logic                         ready;
 		producer_id_t                 producer_tag;
 		ydrasil_result_class_t        producer_class;
 	} ydrasil_source_desc_t;
@@ -446,6 +447,7 @@ package ydrasil_pkg;
 
 	typedef struct packed {
 		logic                                valid;
+		producer_id_t                        producer_id;
 		logic                                writes_gpr;
 		logic [REGS_ADDR_WIDTH-1:0]          rd_addr;
 		logic [REGS_DATA_WIDTH-1:0]          value;
@@ -479,6 +481,7 @@ package ydrasil_pkg;
 		logic                                store_data_valid;
 		producer_id_t                        store_producer_id;
 		logic                                store_producer_tracked;
+		logic                                retired;
 	} ydrasil_lsu_req_pkt_t;
 
 	typedef struct packed {

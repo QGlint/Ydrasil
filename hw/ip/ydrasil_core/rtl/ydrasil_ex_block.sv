@@ -16,6 +16,9 @@ import ydrasil_pkg::*;
     input  wire [DATA_WIDTH-1:0]           mul_operand_a_i,
     input  wire [DATA_WIDTH-1:0]           mul_operand_b_i,
     input  wire [DATA_WIDTH-1:0]           csr_operand_a_i,
+    input  wire [REGS_ADDR_WIDTH-1:0]      csr_rf_waddr_i,
+    input  wire                            csr_rf_wen_i,
+    input  producer_id_t                   csr_producer_id_i,
     input  wire [OPERATOR_WIDTH-1:0]       operator_i,
     input  wire [OPERATOR_TYPE_WIDTH-1:0]  operator_type_i,
     input  wire                            alu_valid_i,
@@ -27,6 +30,9 @@ import ydrasil_pkg::*;
     input  wire [OPERATOR_WIDTH-1:0]       mul_operator_i,
     input  wire [OPERATOR_TYPE_WIDTH-1:0]  mul_operator_type_i,
     input  wire [OPERATOR_TYPE_WIDTH-1:0]  csr_operator_type_i,
+    input  wire [REGS_ADDR_WIDTH-1:0]      mul_rf_waddr_i,
+    input  wire                            mul_rf_wen_i,
+    input  producer_id_t                   mul_producer_id_i,
     input  wire [REGS_ADDR_WIDTH-1:0]      id_rf_waddr_rd_i,
     input  wire                            id_alu_rf_wen_rd_i,
     input  producer_id_t                   id_ex_producer_id_i,
@@ -65,8 +71,12 @@ import ydrasil_pkg::*;
     output wire [REGS_ADDR_WIDTH-1:0]      mul_rf_waddr_rd_o,
     output producer_id_t                   mul_producer_id_o,
     output wire                            mul_result_valid_o,
+    output ydrasil_reservation_pkt_t       mdu_due_o,
+    output ydrasil_reservation_pkt_t       mdu_result_reservation_o,
+    output wire [REGS_DATA_WIDTH-1:0]      mdu_bypass_data_o,
 
 	output wire                            ex_instret_inc_o,
+	output wire                            div_available_o,
 	output wire                            ex_mul_stall_o
 );
 
@@ -94,6 +104,9 @@ import ydrasil_pkg::*;
     wire                       mul_pipe_wen;
     wire [REGS_ADDR_WIDTH-1:0] mul_pipe_waddr;
     producer_id_t              mul_pipe_producer_id;
+    wire                       mul_due_valid;
+    wire [REGS_ADDR_WIDTH-1:0] mul_due_waddr;
+    producer_id_t              mul_due_producer_id;
 
     wire [REGS_DATA_WIDTH-1:0] bitmanip_result;
     wire                       bitmanip_rf_wen_rd;
@@ -111,7 +124,7 @@ import ydrasil_pkg::*;
     reg [REGS_DATA_WIDTH-1:0]  div_result_q;
 
     wire div_kill = trap_redirect_i ||
-        (flush_ex_i && redirect_valid_i &&
+        (flush_ex_i &&
          !redirect_keep_mask_i[
              div_producer_id_q[PRODUCER_SLOT_WIDTH-1:0]]);
 
@@ -151,7 +164,12 @@ import ydrasil_pkg::*;
     assign ex_lsu_mem_addr_o = lsu_fast_add_result;
     assign ex_lsu_result_o = lsu_store_data;
 
-    assign op_m_unit = mul_operator_type_i[OPERATOR_TYPE_MUL];
+    // MDU control belongs exclusively to the lane-B MDU input cell.  The
+    // operator bits remain registered after a bubble, so validity must gate
+    // the class decode; otherwise a same-cycle lane-A ALU result is silently
+    // suppressed whenever the stale MDU class is still present.
+    assign op_m_unit = mul_valid_i &&
+        mul_operator_type_i[OPERATOR_TYPE_MUL];
     assign op_bitmanip = operator_type_i[OPERATOR_TYPE_BITMANIP];
     assign op_load = lsu_valid_i & lsu_is_load_i;
     assign op_store = lsu_valid_i & lsu_is_store_i;
@@ -169,9 +187,9 @@ import ydrasil_pkg::*;
          mul_operator_i[OP_MUL_REMU]);
 
     assign mul_issue_valid = mul_valid_i & op_mul & mul_issue_ready & !trap_redirect_i & !flush_ex_i;
-    assign mul_issue_wen = id_alu_rf_wen_rd_i & (id_rf_waddr_rd_i != '0);
+    assign mul_issue_wen = mul_rf_wen_i & (mul_rf_waddr_i != '0);
     assign mul_issue_o = mul_issue_valid & mul_issue_wen;
-    assign mul_issue_waddr_o = id_rf_waddr_rd_i;
+    assign mul_issue_waddr_o = mul_rf_waddr_i;
 
     assign div_start = mul_valid_i & op_div & !div_active_q &
         !div_pending_q & !div_busy & !div_done & !trap_redirect_i &
@@ -183,6 +201,19 @@ import ydrasil_pkg::*;
     assign div_rf_wen_rd = div_complete & div_wen_q;
     assign ex_mul_stall_o = mul_valid_i & op_div &
         (div_active_q | div_pending_q | div_busy | div_done) & !flush_ex_i;
+    assign div_available_o = !div_active_q && !div_pending_q &&
+        !div_busy && !div_done;
+    wire mul_pipe_survives_redirect = !flush_ex_i ||
+        redirect_keep_mask_i[mul_pipe_producer_id[
+            PRODUCER_SLOT_WIDTH-1:0]];
+
+`ifndef SYNTHESIS
+    always_ff @(posedge clk) begin
+        if (rst_n && !flush_ex_i)
+            assert (!ex_mul_stall_o)
+                else $fatal(1, "P1 issued DIV without a local reservation");
+    end
+`endif
 
     wire [4:0] fast_b_shamt = bitmanip_operand_b[4:0];
     wire [31:0] fast_b_mask = 32'h1 << fast_b_shamt;
@@ -245,17 +276,18 @@ import ydrasil_pkg::*;
         !trap_redirect_i & !flush_ex_i;
     assign normal_alu_rf_wen_rd = alu_valid_i & alu_rf_wen_rd &
         (operator_type_i[OPERATOR_TYPE_ALU] | operator_type_i[OPERATOR_TYPE_BJP]) &
-        !op_m_unit & !op_bitmanip & !flush_ex_i;
+        !op_bitmanip & !flush_ex_i;
     assign ex_rf_wen_rd =
         bitmanip_rf_wen_rd | fast_bitmanip_rf_wen_rd |
         normal_alu_rf_wen_rd | op_csr;
-    assign mul_result_valid_o = mul_result_valid | div_complete;
+    assign mul_result_valid_o = (mul_result_valid &&
+        mul_pipe_survives_redirect) | div_complete;
     assign ex_instret_inc_o =
-			(alu_valid_i & !trap_redirect_i & !flush_ex_i & !op_mul & !op_div) |
+			(alu_valid_i & !trap_redirect_i & !flush_ex_i) |
         div_complete;
 
     wire fast_alu_op =
-        operator_type_i[OPERATOR_TYPE_ALU] & !op_m_unit & !op_bitmanip &
+        operator_type_i[OPERATOR_TYPE_ALU] & !op_bitmanip &
         (operator_i[OP_ALU_ADD]  |
          operator_i[OP_ALU_SUB]  |
          operator_i[OP_ALU_SLT]  |
@@ -266,7 +298,7 @@ import ydrasil_pkg::*;
          operator_i[OP_ALU_LUI]  |
          operator_i[OP_ALU_AUIPC]);
     wire fast_result_wen = alu_valid_i && !trap_redirect_i && !flush_ex_i &&
-        !op_m_unit && !op_bitmanip && fast_alu_op;
+        !op_bitmanip && fast_alu_op;
     assign fast_add_result = operand_a + operand_b;
     wire [32:0] fast_sub_result_ext = {1'b0, operand_a} + {1'b0, ~operand_b} + 33'd1;
     wire        fast_signs_differ = operand_a[31] ^ operand_b[31];
@@ -335,7 +367,7 @@ import ydrasil_pkg::*;
         .clk             (clk),
         .rst_n           (rst_n),
         .flush_i         (trap_redirect_i),
-        .redirect_i      (flush_ex_i && redirect_valid_i),
+        .redirect_i      (flush_ex_i),
         .redirect_keep_mask_i(redirect_keep_mask_i),
         .issue_valid_i   (mul_issue_valid),
         .issue_ready_o   (mul_issue_ready),
@@ -343,20 +375,51 @@ import ydrasil_pkg::*;
         .operand_b_i     (mul_operand_b),
         .operator_i      (mul_operator_i),
         .issue_wen_i     (mul_issue_wen),
-        .issue_waddr_i   (id_rf_waddr_rd_i),
-        .issue_producer_id_i(id_ex_producer_id_i),
+        .issue_waddr_i   (mul_rf_waddr_i),
+        .issue_producer_id_i(mul_producer_id_i),
         .result_valid_o  (mul_result_valid),
         .result_wen_o    (mul_pipe_wen),
         .result_waddr_o  (mul_pipe_waddr),
         .result_producer_id_o(mul_pipe_producer_id),
-        .result_wdata_o  (mul_pipe_wdata)
+        .result_wdata_o  (mul_pipe_wdata),
+        .due_valid_o     (mul_due_valid),
+        .due_waddr_o     (mul_due_waddr),
+        .due_producer_id_o(mul_due_producer_id)
     );
 
-    assign mul_rf_wen_rd_o = mul_pipe_wen | div_rf_wen_rd;
+    // The raw s3 value remains available for same-cycle MDU reservation and
+    // bypass. Redirect filtering applies only to architectural completion/WB.
+    assign mul_rf_wen_rd_o = (mul_pipe_wen && mul_pipe_survives_redirect) |
+        div_rf_wen_rd;
     assign mul_rf_waddr_rd_o = div_rf_wen_rd ? div_waddr_q : mul_pipe_waddr;
     assign mul_producer_id_o = div_rf_wen_rd ?
         div_producer_id_q : mul_pipe_producer_id;
     assign mul_wdata_rd_o = div_rf_wen_rd ? div_result_q : mul_pipe_wdata;
+
+    always_comb begin
+        mdu_due_o = '0;
+        // Wake consumers only once the MDU result is on the architectural
+        // completion boundary. The earlier s2 "due" token is an internal
+        // pipeline reservation and is not a usable operand value.
+        mdu_due_o.valid = mul_pipe_wen || (div_done && div_active_q);
+        mdu_due_o.producer_tracked = mdu_due_o.valid;
+        mdu_due_o.producer_id = (div_done && div_active_q) ?
+            div_producer_id_q : mul_pipe_producer_id;
+        mdu_due_o.arch_addr = (div_done && div_active_q) ?
+            div_waddr_q : mul_pipe_waddr;
+        mdu_due_o.result_class = RESULT_MDU;
+
+        mdu_result_reservation_o = '0;
+        mdu_result_reservation_o.valid = mul_pipe_wen || div_rf_wen_rd;
+        mdu_result_reservation_o.producer_tracked =
+            mdu_result_reservation_o.valid;
+        mdu_result_reservation_o.producer_id = div_rf_wen_rd ?
+            div_producer_id_q : mul_pipe_producer_id;
+        mdu_result_reservation_o.arch_addr = div_rf_wen_rd ?
+            div_waddr_q : mul_pipe_waddr;
+        mdu_result_reservation_o.result_class = RESULT_MDU;
+    end
+    assign mdu_bypass_data_o = mul_wdata_rd_o;
 
     logic [OPERATOR_WIDTH-1:0] slow_bitmanip_operator;
 
@@ -447,8 +510,9 @@ import ydrasil_pkg::*;
             bitmanip_result_valid_ff <=
                 bitmanip_rf_wen_rd | fast_bitmanip_rf_wen_rd;
             alu_rf_wen_rd_ff   <= ex_rf_wen_rd;
-            alu_rf_waddr_rd_ff <= alu_rf_waddr_rd;
-            alu_producer_id_ff <= id_ex_producer_id_i;
+            alu_rf_waddr_rd_ff <= op_csr ? csr_rf_waddr_i : alu_rf_waddr_rd;
+            alu_producer_id_ff <= op_csr ? csr_producer_id_i :
+                id_ex_producer_id_i;
             ex_csr_wdata_o_ff  <= csr_wdata;
             ex_csr_wen_o_ff    <= csr_wen;
             ex_csr_waddr_o_ff  <= id_ex_csr_waddr_i;
@@ -479,9 +543,9 @@ import ydrasil_pkg::*;
         end else begin
             if (div_start) begin
                 div_active_q <= 1'b1;
-                div_wen_q    <= id_alu_rf_wen_rd_i & (id_rf_waddr_rd_i != '0);
-                div_waddr_q  <= id_rf_waddr_rd_i;
-                div_producer_id_q <= id_ex_producer_id_i;
+                div_wen_q    <= mul_rf_wen_i & (mul_rf_waddr_i != '0);
+                div_waddr_q  <= mul_rf_waddr_i;
+                div_producer_id_q <= mul_producer_id_i;
                 div_operator_q <= mul_operator_i;
             end
             if (div_done && div_active_q) begin
@@ -502,11 +566,14 @@ import ydrasil_pkg::*;
     assign slow_result_wen = op_csr;
     assign slow_result = ({32{op_csr}} & csr_reg_wdata);
 
-    assign completion_valid_o = ex_rf_wen_rd && (id_rf_waddr_rd_i != '0);
-    assign completion_producer_id_o = id_ex_producer_id_i;
+    wire [REGS_ADDR_WIDTH-1:0] completion_waddr = op_csr ?
+        csr_rf_waddr_i : id_rf_waddr_rd_i;
+    assign completion_valid_o = ex_rf_wen_rd && (completion_waddr != '0);
+    assign completion_producer_id_o = op_csr ? csr_producer_id_i :
+        id_ex_producer_id_i;
     assign completion_producer_tracked_o = ex_rf_wen_rd &&
-        (id_rf_waddr_rd_i != '0);
-    assign completion_addr_o = id_rf_waddr_rd_i;
+        (completion_waddr != '0);
+    assign completion_addr_o = completion_waddr;
     assign completion_data_o = fast_bitmanip_rf_wen_rd ?
         fast_bitmanip_result : bitmanip_rf_wen_rd ?
         bitmanip_result : slow_result_wen ? slow_result :

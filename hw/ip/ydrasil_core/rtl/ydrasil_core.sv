@@ -128,7 +128,8 @@ import ydrasil_axi_pkg::*;
 	wire                        alu_rf_wen_rd;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] alu_rf_waddr_rd;
 	producer_id_t               alu_producer_id;
-	wire                        ex_mul_stall;
+		wire                        ex_mul_stall;
+		wire                        mdu_div_available;
 	wire                        ex_mul_issue;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] ex_mul_issue_waddr;
 	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] mul_wb_result;
@@ -227,6 +228,9 @@ import ydrasil_axi_pkg::*;
 	ydrasil_ex_hzd_pkt_t            ex_hzd_pkt1;
 	ydrasil_gpr_fwd_pkt_t           lsu_fwd_pkt;
 	ydrasil_reservation_pkt_t       dtcm_reservation;
+	ydrasil_reservation_pkt_t       mdu_due;
+	ydrasil_reservation_pkt_t       mdu_result_reservation;
+	wire [REGS_DATA_WIDTH-1:0]      mdu_bypass_data;
 	wire [REGS_DATA_WIDTH-1:0]      dtcm_resp_data;
 	ydrasil_gpr_fwd_pkt_t           lsu_wb_fwd_pkt;
 	ydrasil_gpr_fwd_pkt_t           alu_fwd_pkt;
@@ -251,15 +255,16 @@ import ydrasil_axi_pkg::*;
 	wire                            dual_completion_producer_tracked;
 	wire [REGS_ADDR_WIDTH-1:0]      dual_completion_addr;
 	wire [REGS_DATA_WIDTH-1:0]      dual_completion_data;
-	ydrasil_rob_source_state_t      issue_src0_state;
-	ydrasil_rob_source_state_t      issue_src1_state;
-	ydrasil_rob_source_state_t      issue_src2_state;
-	ydrasil_rob_source_state_t      issue_src3_state;
 	producer_slot_t                 retire_value_slot0;
 	producer_slot_t                 retire_value_slot1;
 	wire [REGS_DATA_WIDTH-1:0]      retire_value0;
 	wire [REGS_DATA_WIDTH-1:0]      retire_value1;
 	wire                            issue_at_rob_head;
+	producer_id_t                   rob_head_id;
+	ydrasil_rob_source_state_t      issue_src0_state;
+	ydrasil_rob_source_state_t      issue_src1_state;
+	ydrasil_rob_source_state_t      issue_src2_state;
+	ydrasil_rob_source_state_t      issue_src3_state;
 	wire [ydrasil_pkg::PRODUCER_NUM-1:0]
 	                                branch_recovery_keep_mask;
 	ydrasil_issue_pkt_t             id_issue_pkt;
@@ -298,6 +303,8 @@ import ydrasil_axi_pkg::*;
 	wire                            lsu_struct_stall;
 	wire                            ex_accept_valid;
 	wire                            ex_accept_valid1;
+	wire                            exception_sys_accept =
+		csr_in_valid && ex_accept_valid1;
 	wire                            id_ex_rd_issue;
 	wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_clear_mask;
 	wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_issue_mask;
@@ -347,6 +354,8 @@ import ydrasil_axi_pkg::*;
 
 
 	ydrasil_completion_ctrl u_completion_ctrl (
+		.clk               (clk),
+		.rst_n             (rst_n),
 		.alu_valid_i       (alu_completion_valid),
 		.alu_producer_id_i (alu_completion_producer_id),
 		.alu_producer_tracked_i(alu_completion_producer_tracked),
@@ -373,7 +382,13 @@ import ydrasil_axi_pkg::*;
 	ydrasil_load_store_unit u_ydrasil_load_store_unit (
 		.clk               (clk),
 		.rst_n             (rst_n),
-		.req_i             (lsu_req_pkt),
+			.req_i             (lsu_req_pkt),
+			.commit_pkt_i      (commit_pkt),
+			.commit_pkt1_i     (commit_pkt1),
+			.branch_recovery_i (ex_pc_redirect),
+			.trap_flush_i      (trap_ctrl_pkt.redirect),
+			.recovery_keep_mask_i(branch_recovery_keep_mask),
+			.rob_head_id_i      (rob_head_id),
 		.completion_meta_i (completion_meta),
 		.completion_data_i (completion_data),
 		.dtcm_rdata_i      (dtcm_rdata),
@@ -509,17 +524,16 @@ import ydrasil_axi_pkg::*;
 		.clk                 (clk),
 		.rst_n               (rst_n),
 		.stall_id_i          (stall_id),
-		.bubble_id_i         (bubble_id),
-		.flush_id_i          (pipeline_flush),
+			.bubble_id_i         (bubble_id),
+			.flush_id_i          (pipeline_flush),
+			.branch_recovery_i   (ex_pc_redirect),
+			.trap_flush_i        (trap_ctrl_pkt.redirect),
+			.recovery_keep_mask_i(branch_recovery_keep_mask),
 		.decode_pkt_i        (id_issue_pkt),
 		.decode_pkt1_i       (id_issue_pkt1),
 		.dispatch_pkt_i      (dispatch_issue_pkt),
 		.dispatch_pkt1_i     (dispatch_issue_pkt1),
 		.dispatch_ready_i    (dispatch_ready),
-		.issue_src0_state_i  (issue_src0_state),
-			.issue_src1_state_i  (issue_src1_state),
-			.issue_src2_state_i  (issue_src2_state),
-			.issue_src3_state_i  (issue_src3_state),
 			.completion_meta_i   (completion_meta),
 			.completion_data_i   (completion_data),
 			.commit_pkt_i        (commit_pkt),
@@ -530,9 +544,15 @@ import ydrasil_axi_pkg::*;
 			.early_dual_bypass_data_i(dual_early_bypass_data),
 			.lsu_idle_i          (lsu_status_pkt.idle),
 		.lsu_credit_i        (lsu_issue_credit),
-		.dtcm_reservation_i (dtcm_reservation),
+			.dtcm_reservation_i (dtcm_reservation),
+				.mdu_due_i          (mdu_due),
+				.mdu_div_available_i(mdu_div_available),
+				.mdu_result_reservation_i(mdu_result_reservation),
+			.mdu_bypass_data_i  (mdu_bypass_data),
 		.dtcm_resp_data_i   (dtcm_resp_data),
 		.issue_at_rob_head_i (issue_at_rob_head),
+		.rob_head_id_i       (rob_head_id),
+		.issue_src1_state_i  (issue_src1_state),
 		.decode_ready_o      (issue_pipe_has_room),
 		.decode_consume_two_o(),
 		.dispatch_accept_o   (issue_pipe_push),
@@ -664,8 +684,12 @@ import ydrasil_axi_pkg::*;
 		.mul_rf_wen_o       (mul_rf_wen_rd),
 		.mul_rf_waddr_o     (mul_rf_waddr_rd),
 		.mul_producer_id_o  (mul_producer_id),
-		.mul_result_valid_o (mul_result_valid),
-		.mul_stall_o        (ex_mul_stall),
+			.mul_result_valid_o (mul_result_valid),
+			.mdu_due_o          (mdu_due),
+			.mdu_result_reservation_o(mdu_result_reservation),
+				.mdu_bypass_data_o  (mdu_bypass_data),
+				.div_available_o    (mdu_div_available),
+			.mul_stall_o        (ex_mul_stall),
 		.dual_completion_valid_o(dual_completion_valid),
 		.dual_completion_producer_id_o(dual_completion_producer_id),
 		.dual_completion_producer_tracked_o(dual_completion_producer_tracked),
@@ -742,6 +766,7 @@ import ydrasil_axi_pkg::*;
 			.issue_src2_state_o(issue_src2_state),
 			.issue_src3_state_o(issue_src3_state),
 			.issue_at_rob_head_o(issue_at_rob_head),
+			.rob_head_id_o     (rob_head_id),
 			.gpr_pending_o     (gpr_pending_q),
 			.ex_accept_valid_o (ex_accept_valid),
 			.ex_accept_valid1_o(ex_accept_valid1),
@@ -781,8 +806,8 @@ import ydrasil_axi_pkg::*;
 		.rst_n             (rst_n),
 		.irq_i             (irq_i),
 		.csr_state_i       (trap_csr_state_pkt),
-		.ex_accept_valid_i (ex_accept_valid),
-		.operator_type_i   (alu_in_operator_type),
+		.ex_accept_valid_i (exception_sys_accept),
+		.operator_type_i   (csr_in_operator_type),
 		.sys_info_i        (csr_in_sys_info),
 		.illegal_instr_i   (illegal_instr_ex),
 		.lane_a_valid_i    (id_ex_valid),
