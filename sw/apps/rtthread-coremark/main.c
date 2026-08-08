@@ -7,6 +7,8 @@
 extern int coremark_entry(void);
 extern volatile rt_int32_t seed4_volatile;
 
+#define COREMARK_DEFAULT_ITERATIONS 10000U
+
 static int parse_unsigned(const char *text, rt_uint32_t limit,
                           rt_uint32_t *parsed)
 {
@@ -38,23 +40,19 @@ static int parse_unsigned(const char *text, rt_uint32_t limit,
 
 static int coremark_command(int argc, char **argv)
 {
-    rt_uint32_t iterations = ITERATIONS;
-    rt_uint32_t cpu_frequency_hz = YDRASIL_CPU_FREQ_HZ;
+    rt_uint32_t iterations = COREMARK_DEFAULT_ITERATIONS;
     rt_uint32_t cycle_high;
     rt_uint32_t cycle_low;
     int result;
 
-    if (argc > 3 ||
+    if (argc > 2 ||
         (argc >= 2 &&
-         parse_unsigned(argv[1], 0x7fffffffU, &iterations) != RT_EOK) ||
-        (argc == 3 &&
-         (parse_unsigned(argv[2], 0xffffffffU, &cpu_frequency_hz) != RT_EOK ||
-          cpu_frequency_hz == 0U)))
+         (parse_unsigned(argv[1], 0x7fffffffU, &iterations) != RT_EOK ||
+          iterations == 0U)))
     {
-        rt_kprintf("usage: coremark [iterations] [cpu_hz]\n");
-        rt_kprintf("defaults: iterations=%u cpu_hz=%u; 0 iterations=automatic\n",
-                   (rt_uint32_t)ITERATIONS,
-                   (rt_uint32_t)YDRASIL_CPU_FREQ_HZ);
+        rt_kprintf("usage: coremark [iterations]\n");
+        rt_kprintf("default: %u iterations; iterations must be positive\n",
+                   COREMARK_DEFAULT_ITERATIONS);
         return -RT_EINVAL;
     }
     if ((YDRASIL_SYSCTRL_CM_STATUS & 1U) != 0U)
@@ -64,8 +62,9 @@ static int coremark_command(int argc, char **argv)
     }
 
     seed4_volatile = (rt_int32_t)iterations;
-    coremark_set_cpu_frequency(cpu_frequency_hz);
-    rt_kprintf("CoreMark CPU frequency: %u Hz\n", cpu_frequency_hz);
+    rt_kprintf("CoreMark iterations: %u\n", iterations);
+    rt_kprintf("CoreMark CPU frequency: %u Hz\n",
+               (rt_uint32_t)YDRASIL_CPU_FREQ_HZ);
     result = coremark_entry();
     cycle_high = YDRASIL_SYSCTRL_CM_CYC_HI;
     cycle_low = YDRASIL_SYSCTRL_CM_CYC_LO;
@@ -78,6 +77,6 @@ MSH_CMD_EXPORT_ALIAS(coremark_command, coremark, Run CoreMark with hardware LED 
 int main(void)
 {
     rt_kprintf("Ydrasil RT-Thread monitor ready\n");
-    rt_kprintf("commands: help, coremark [iterations] [cpu_hz], sensor [all|temp|imu]\n");
+    rt_kprintf("commands: help, coremark [iterations], sensor [all|temp|imu]\n");
     return 0;
 }

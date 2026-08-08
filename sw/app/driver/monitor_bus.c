@@ -218,8 +218,7 @@ static int spi_wait_idle(void)
         YDRASIL_DRIVER_ETIMEOUT : YDRASIL_DRIVER_OK;
 }
 
-static int spi_write_chunk(uint32_t chip_select,
-                           const uint8_t *data,
+static int spi_write_chunk(const uint8_t *data,
                            size_t size)
 {
     size_t offset;
@@ -252,17 +251,16 @@ static int spi_write_chunk(uint32_t chip_select,
         SPI_TXFIFO = word;
     }
 
-    SPI_STATUS = SPI_STATUS_START_WRITE | (1U << (8U + chip_select));
+    SPI_STATUS = SPI_STATUS_START_WRITE;
     return spi_wait_idle();
 }
 
-int ydrasil_bus_spi0_write(uint32_t chip_select,
-                           const uint8_t *data,
+int ydrasil_bus_spi0_write(const uint8_t *data,
                            size_t size)
 {
     int result = YDRASIL_DRIVER_OK;
 
-    if (chip_select > 3U || (data == NULL && size != 0U))
+    if (data == NULL && size != 0U)
     {
         return YDRASIL_DRIVER_EINVAL;
     }
@@ -271,7 +269,7 @@ int ydrasil_bus_spi0_write(uint32_t chip_select,
     {
         size_t chunk = size > SPI_FIFO_BYTES ? SPI_FIFO_BYTES : size;
 
-        result = spi_write_chunk(chip_select, data, chunk);
+        result = spi_write_chunk(data, chunk);
         data += chunk;
         size -= chunk;
     }

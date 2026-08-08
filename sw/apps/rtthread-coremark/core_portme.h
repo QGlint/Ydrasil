@@ -59,7 +59,6 @@ typedef unsigned int   ee_size_t;
 typedef ee_u64 CORE_TICKS;
 
 extern ee_u32 default_num_contexts;
-void coremark_set_cpu_frequency(ee_u32 frequency_hz);
 
 typedef struct
 {

@@ -8,9 +8,10 @@ import ydrasil_apb_pkg::*;
     input  wire                  rst_n,
     input  ydrasil_apb_req_pkt_t apb_req_i,
     output ydrasil_apb_rsp_pkt_t apb_rsp_o,
-    input  wire                  miso_i,
+    input  wire                  sdio_i,
     output wire                  sclk_o,
-    output wire                  mosi_o,
+    output wire                  sdio_o,
+    output wire                  sdio_oe_o,
     output wire [NUM_CS-1:0]     cs_n_o,
     output wire                  irq_o
 );
@@ -328,7 +329,7 @@ import ydrasil_apb_pkg::*;
                             serial_clock_q <= 1'b1;
                             if ((state_q == SPI_DATA) && transaction_read_q)
                                 receive_shift_q <=
-                                    {receive_shift_q[30:0], miso_i};
+                                    {receive_shift_q[30:0], sdio_i};
                         end
                     end else begin
                         serial_clock_q <= 1'b0;
@@ -527,7 +528,11 @@ import ydrasil_apb_pkg::*;
     end
 
     assign sclk_o = serial_clock_q;
-    assign mosi_o = serial_data_q;
+    assign sdio_o = serial_data_q;
+    assign sdio_oe_o = (state_q == SPI_COMMAND) ||
+        (state_q == SPI_ADDRESS) ||
+        (((state_q == SPI_DUMMY) || (state_q == SPI_DATA)) &&
+         !transaction_read_q);
     assign cs_n_o = ~chip_select_q;
     assign irq_o = interrupt_enable_q && (tx_irq || rx_irq || end_event_q);
     assign apb_rsp_o.prdata = read_data;

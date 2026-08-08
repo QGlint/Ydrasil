@@ -20,8 +20,7 @@ int ydrasil_bus_i2c_read_register(uint8_t address,
 void ydrasil_bus_uart1_reset(uint32_t baudrate);
 int ydrasil_bus_uart1_getc(uint8_t *value);
 void ydrasil_bus_gpio_write(uint32_t pin, int high);
-int ydrasil_bus_spi0_write(uint32_t chip_select,
-                           const uint8_t *data,
+int ydrasil_bus_spi0_write(const uint8_t *data,
                            size_t size);
 uint32_t ydrasil_bus_millis(void);
 void ydrasil_bus_delay_ms(uint32_t milliseconds);
