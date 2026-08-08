@@ -23,9 +23,8 @@ flag set. The FPU remains disabled. Outputs are written below
 ## Shell commands
 
 - `help`: list built-in and board commands.
-- `coremark [iterations] [cpu_hz]`: run CoreMark. The default is 10000
-  iterations; explicit zero retains CoreMark's automatic calibration mode.
-  `cpu_hz` overrides the build-time frequency for this run.
+- `coremark [iterations]`: run CoreMark. With no argument it runs 10000
+  iterations; a positive decimal argument selects the exact iteration count.
 - `sensor [all|temp|imu]`: read the selected sensors, print their values and
   refresh the OLED. With no argument, `all` is used.
 
@@ -35,11 +34,15 @@ manifest under `sw/apps/`.
 ## Monitor wiring
 
 - UART0 is the 115200 baud MSH console.
-- LM75B uses I2C0 address `0x48`: SCL `E16`, SDA `F16`.
-- ATK-MS601M uses UART1 at 115200 baud: FPGA RX `A13` connects to sensor TX;
-  FPGA TX `C14` remains available for configuration commands.
-- SSD1306 uses SPI0 CS0: SCLK `G13`, MOSI `A15`, CS `B15`. GPIO2 `H16` is
-  RESET and GPIO1 `H15` is DC. GPIO0 is kept low because it also feeds LED0.
+- On the digital-twin board, LM75B I2C0 uses SCL `K20` and SDA `K19`;
+  ATK-MS601M UART1 uses FPGA RX `G17` and TX `G18`; SSD1306 uses SCLK `B19`,
+  bidirectional SDIO `B18`, GPIO1/DC `A18` and GPIO2/RESET_n `A20`.
+- On the AG10/AH10 board, LM75B I2C0 uses SCL `E16` and SDA `F16`;
+  ATK-MS601M UART1 uses FPGA RX `A13` and TX `C14`; SSD1306 uses SCLK `G13`,
+  bidirectional SDIO `A15`, GPIO1/DC `B15` and GPIO2/RESET_n `C15`.
+- FPGA UART1 RX connects to the sensor TX. UART1 TX remains available for
+  configuration commands. The display CS input is tied directly to ground and
+  does not consume an FPGA pin. SPI0 releases SDIO during read data phases.
 
 The RISC-V port is integer-only. LM75B values preserve the sensor's 0.125 C
 resolution. MS601M attitude frames use the reference driver's `55 55` upload
@@ -64,14 +67,12 @@ monitor; `stop_time()` stops the monitor, captures its stable cycle count and
 restores the previous interrupt state. The measured interval therefore
 excludes the 1 kHz tick, shell RX handling and background scheduling.
 
-The default monitor frequency is injected with `RTTHREAD_CPU_FREQ_HZ` (150 MHz
-unless overridden). Synthesis memory staging derives it from
-`SYN_PLL_FREQ_MHZ`; for example, the 225 MHz target embeds 225000000. During
-field overclock sweeps, pass the applied frequency directly, for example
-`coremark 10000 237000000`, so one image can measure several clocks accurately.
-The CPU-domain monitor count, not the configured frequency, determines the
-measured cycle count; the frequency is used only to convert cycles to seconds
-and the reported CoreMark score.
+The monitor frequency is injected with `RTTHREAD_CPU_FREQ_HZ` (150 MHz unless
+overridden). Synthesis memory staging derives it from `SYN_PLL_FREQ_MHZ`; for
+example, the 225 MHz target embeds 225000000. The CPU-domain monitor count, not
+the configured frequency, determines the measured cycle count. For field
+overclock sweeps, rebuild with the applied frequency or convert the printed raw
+cycle count externally when reusing one image at several frequencies.
 
 The monitor `active` signal drives LED0 in hardware. It becomes active at the
 start of the timed region and inactive before interrupts are restored.

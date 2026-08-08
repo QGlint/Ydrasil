@@ -18,10 +18,11 @@ the CPU-domain monitor count to seconds. For example:
 make -C sw rtthread RTTHREAD_CPU_FREQ_HZ=200000000
 ```
 
-For board overclock sweeps, `coremark 10000 225000000` overrides that default
-for one run without rebuilding the image. The raw 64-bit cycle count is always
-printed, so results can be recalculated if the applied clock is later found to
-differ from the requested clock.
+The MSH command is `coremark [iterations]`. With no argument it runs 10000
+iterations; a positive decimal argument selects the exact iteration count.
+The raw 64-bit cycle count is always printed. For board overclock sweeps, build
+with the applied `RTTHREAD_CPU_FREQ_HZ`, or recalculate elapsed time from the
+raw cycle count when reusing one image at several frequencies.
 
 The tuned set includes `-O3 -funroll-loops`, aggressive inlining and the
 project's tested loop/control/tree shaping options. The final 8-byte alignment

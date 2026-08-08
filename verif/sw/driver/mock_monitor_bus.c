@@ -6,7 +6,6 @@
 
 #define MOCK_LM75B_ADDRESS 0x48U
 #define MOCK_OLED_DC_GPIO  1U
-#define MOCK_OLED_CS       0U
 #define MOCK_OLED_WIDTH    128U
 #define MOCK_OLED_PAGES    8U
 
@@ -128,13 +127,12 @@ static void process_oled_command(uint8_t command)
     }
 }
 
-int ydrasil_bus_spi0_write(uint32_t chip_select,
-                           const uint8_t *data,
+int ydrasil_bus_spi0_write(const uint8_t *data,
                            size_t size)
 {
     size_t index;
 
-    if (chip_select != MOCK_OLED_CS || (data == NULL && size != 0U))
+    if (data == NULL && size != 0U)
     {
         return YDRASIL_DRIVER_EINVAL;
     }

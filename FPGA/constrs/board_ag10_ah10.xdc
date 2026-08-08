@@ -14,32 +14,27 @@ set_property PACKAGE_PIN A13 [get_ports uart1_rx]
 set_property PACKAGE_PIN C14 [get_ports uart1_tx]
 set_property IOSTANDARD LVCMOS33 [get_ports {uart1_rx uart1_tx}]
 
-# GPIO3-9: SPI0.
-set_property PACKAGE_PIN B14 [get_ports spi_miso]
+# GPIO3-9: SSD1306 half-duplex SPI. CS is tied low on the display board.
 set_property PACKAGE_PIN G13 [get_ports spi_sclk]
-set_property PACKAGE_PIN A15 [get_ports spi_mosi]
-set_property PACKAGE_PIN B15 [get_ports {spi_cs_n[0]}]
-set_property PACKAGE_PIN C15 [get_ports {spi_cs_n[1]}]
-set_property PACKAGE_PIN E15 [get_ports {spi_cs_n[2]}]
-set_property PACKAGE_PIN F15 [get_ports {spi_cs_n[3]}]
-set_property IOSTANDARD LVCMOS33 [get_ports {spi_miso spi_sclk spi_mosi spi_cs_n[0] spi_cs_n[1] spi_cs_n[2] spi_cs_n[3]}]
+set_property PACKAGE_PIN A15 [get_ports spi_sdio]
+set_property PACKAGE_PIN B15 [get_ports {gpio[1]}]
+set_property PACKAGE_PIN C15 [get_ports {gpio[2]}]
+set_property IOSTANDARD LVCMOS33 [get_ports {spi_sclk spi_sdio gpio[1] gpio[2]}]
 
 # GPIO10-11: I2C0.
 set_property PACKAGE_PIN E16 [get_ports i2c_scl]
 set_property PACKAGE_PIN F16 [get_ports i2c_sda]
 set_property IOSTANDARD LVCMOS33 [get_ports {i2c_scl i2c_sda}]
 
-# GPIO12-20: nine software-controlled GPIO signals.
+# GPIO12 and GPIO15-20: remaining software-controlled GPIO signals.
 set_property PACKAGE_PIN G15 [get_ports {gpio[0]}]
-set_property PACKAGE_PIN H15 [get_ports {gpio[1]}]
-set_property PACKAGE_PIN H16 [get_ports {gpio[2]}]
 set_property PACKAGE_PIN J16 [get_ports {gpio[3]}]
 set_property PACKAGE_PIN J14 [get_ports {gpio[4]}]
 set_property PACKAGE_PIN K16 [get_ports {gpio[5]}]
 set_property PACKAGE_PIN K15 [get_ports {gpio[6]}]
 set_property PACKAGE_PIN L16 [get_ports {gpio[7]}]
 set_property PACKAGE_PIN L15 [get_ports {gpio[8]}]
-set_property IOSTANDARD LVCMOS33 [get_ports {gpio[0] gpio[1] gpio[2] gpio[3] gpio[4] gpio[5] gpio[6] gpio[7] gpio[8]}]
+set_property IOSTANDARD LVCMOS33 [get_ports {gpio[0] gpio[3] gpio[4] gpio[5] gpio[6] gpio[7] gpio[8]}]
 
 # Dedicated LEDs.
 set_property PACKAGE_PIN B12 [get_ports {led[0]}]

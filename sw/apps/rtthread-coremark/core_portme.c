@@ -25,7 +25,6 @@ static CORETIMETYPE stop_ticks;
 static rt_base_t benchmark_irq_level;
 static rt_bool_t benchmark_irq_locked;
 static rt_bool_t monitor_started;
-static ee_u32 cpu_frequency_hz = YDRASIL_CPU_FREQ_HZ;
 
 static int set_monitor_state(ee_u32 control, ee_u32 expected)
 {
@@ -91,12 +90,7 @@ CORE_TICKS get_time(void)
 
 secs_ret time_in_secs(CORE_TICKS ticks)
 {
-    return (secs_ret)ticks / (secs_ret)cpu_frequency_hz;
-}
-
-void coremark_set_cpu_frequency(ee_u32 frequency_hz)
-{
-    cpu_frequency_hz = frequency_hz;
+    return (secs_ret)ticks / (secs_ret)YDRASIL_CPU_FREQ_HZ;
 }
 
 void portable_init(core_portable *port, int *argc, char *argv[])

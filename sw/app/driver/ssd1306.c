@@ -6,7 +6,6 @@
 #include "ssd1306.h"
 
 #define SSD1306_WIDTH      128U
-#define SSD1306_SPI_CS     0U
 #define SSD1306_RESET_GPIO 2U
 #define SSD1306_DC_GPIO    1U
 
@@ -15,7 +14,7 @@ static int initialized;
 static int oled_write(int data_mode, const uint8_t *bytes, size_t size)
 {
     ydrasil_bus_gpio_write(SSD1306_DC_GPIO, data_mode);
-    return ydrasil_bus_spi0_write(SSD1306_SPI_CS, bytes, size);
+    return ydrasil_bus_spi0_write(bytes, size);
 }
 
 static int oled_command(const uint8_t *commands, size_t size)

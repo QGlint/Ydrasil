@@ -9,13 +9,14 @@ module ydrasil_soc_tb #(
     logic apb_rst_n = 1'b0;
     logic uart0_rx = 1'b1;
     logic uart1_rx = 1'b1;
-    logic spi_miso;
+    logic spi_sdio_in;
     logic [31:0] gpio_external = '0;
 
     wire uart0_tx;
     wire uart1_tx;
     wire spi_sclk;
-    wire spi_mosi;
+    wire spi_sdio_out;
+    wire spi_sdio_oe;
     wire [3:0] spi_cs_n;
     wire i2c_scl_drive_low;
     wire i2c_sda_drive_low;
@@ -44,7 +45,7 @@ module ydrasil_soc_tb #(
     always #3.333 cpu_clk = ~cpu_clk;
     always #10 apb_clk = ~apb_clk;
 
-    assign spi_miso = spi_mosi;
+    assign spi_sdio_in = spi_sdio_oe ? spi_sdio_out : 1'b1;
 
     ydrasil_soc_core #(
         .UART0_BIT_PERIOD_OVERRIDE(UART_DIV)
@@ -60,9 +61,10 @@ module ydrasil_soc_tb #(
         .uart0_tx_o(uart0_tx),
         .uart1_rx_i(uart1_rx),
         .uart1_tx_o(uart1_tx),
-        .spi_miso_i(spi_miso),
+        .spi_sdio_i(spi_sdio_in),
         .spi_sclk_o(spi_sclk),
-        .spi_mosi_o(spi_mosi),
+        .spi_sdio_o(spi_sdio_out),
+        .spi_sdio_oe_o(spi_sdio_oe),
         .spi_cs_n_o(spi_cs_n),
         .i2c_scl_i(i2c_scl),
         .i2c_sda_i(i2c_sda),
