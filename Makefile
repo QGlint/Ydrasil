@@ -1431,7 +1431,7 @@ SORT_APP_SW_MAKE_ARGS = \
 BOUNDARY_APP_SW_MAKE_ARGS = $(COREMARK_SW_MAKE_ARGS)
 BOUNDARY_APP_SW_MAKE_ARGS += BOUNDARY_EXTRA_CFLAGS="$(BOUNDARY_EXTRA_CFLAGS)"
 COREMARK_RESULT_LOG ?= $(HW_TRACE_OUT_DIR)/coremark/hw.log
-COREMARK_SIM_COMPARE ?= none
+COREMARK_SIM_COMPARE ?= csv
 COREMARK_DIFF_STOP_SYMBOL ?= stop_time
 
 coremark_swopt_show:
@@ -1947,7 +1947,7 @@ coremark_result:
 		tmp=$$(mktemp); \
 		awk '{ \
 			line=$$0; \
-			if (line ~ /^(PERF_METRIC:|PERF_STALL:|PERF_SCOREBOARD_DETAIL:|PERF_LOAD_DETAIL:|PERF_ALU_DETAIL:|PERF_PENDING_DETAIL:|PERF_LSU_STB:|PERF_DUAL_ISSUE:|PERF_L0_BTB:|PERF_FRONTEND:|PERF_BRANCH:|PERF_BP_ACC:|PERF_BP_DETAIL:)/) { \
+			if (line ~ /^(PERF_METRIC:|PERF_SLOT_ACCOUNT:|PERF_SLOT_REASON:|PERF_SLOT_LOSS:|PERF_NOIF_SLOT_DETAIL:|PERF_ISSUE_SLOT_DETAIL:|PERF_BANK_BLOCK_DETAIL:|PERF_P0_FULL_DETAIL:|PERF_CONTROL_DECOUPLE:|PERF_ROB_OCCUPANCY:|PERF_RS_OCCUPANCY:|PERF_PIPE_FLOW:|PERF_ROB_HEAD_STATE:|PERF_BACKEND_LOSS:|PERF_OTHER_SLOT_DETAIL:|PERF_SELECT_CANDIDATES:|PERF_LSU_STB:|PERF_FRONTEND:|PERF_BRANCH:|PERF_BP_ACC:|PERF_BP_DETAIL:)/) { \
 				print line; \
 			} else if (match(line, /(core[[:space:]]+0:|3[[:space:]]+0x)/)) { \
 				prefix=substr(line, 1, RSTART - 1); \
@@ -1958,8 +1958,8 @@ coremark_result:
 				printf "\n"; \
 			} \
 		} END { printf "\n"; }' "$(COREMARK_RESULT_LOG)" > $$tmp; \
-		if grep -Eq '^(CoreMark Size|Total ticks|Total time \(secs\)|Iterations/Sec|Iterations       |Compiler version|Compiler flags|Memory location|seedcrc|Correct operation validated|CoreMark 1\.0 :|Errors detected|ERROR!|COREMARK DONE|PERF_METRIC:|PERF_STALL:|PERF_SCOREBOARD_DETAIL:|PERF_LOAD_DETAIL:|PERF_ALU_DETAIL:|PERF_PENDING_DETAIL:|PERF_LSU_STB:|PERF_DUAL_ISSUE:|PERF_L0_BTB:|PERF_FRONTEND:|PERF_BRANCH:|PERF_BP_ACC:|PERF_BP_DETAIL:|\[[0-9]+\]crc)' "$$tmp"; then \
-			grep -E '^(CoreMark Size|Total ticks|Total time \(secs\)|Iterations/Sec|Iterations       |Compiler version|Compiler flags|Memory location|seedcrc|Correct operation validated|CoreMark 1\.0 :|Errors detected|ERROR!|COREMARK DONE|PERF_METRIC:|PERF_STALL:|PERF_SCOREBOARD_DETAIL:|PERF_LOAD_DETAIL:|PERF_ALU_DETAIL:|PERF_PENDING_DETAIL:|PERF_LSU_STB:|PERF_DUAL_ISSUE:|PERF_L0_BTB:|PERF_FRONTEND:|PERF_BRANCH:|PERF_BP_ACC:|PERF_BP_DETAIL:|\[[0-9]+\]crc)' "$$tmp" | tee -a "$(PPA_COREMARK_LOG)"; \
+			if grep -Eq '^(CoreMark Size|Total ticks|Total time \(secs\)|Iterations/Sec|Iterations       |Compiler version|Compiler flags|Memory location|seedcrc|Correct operation validated|CoreMark 1\.0 :|Errors detected|ERROR!|COREMARK DONE|PERF_METRIC:|PERF_SLOT_ACCOUNT:|PERF_SLOT_REASON:|PERF_SLOT_LOSS:|PERF_NOIF_SLOT_DETAIL:|PERF_ISSUE_SLOT_DETAIL:|PERF_BANK_BLOCK_DETAIL:|PERF_P0_FULL_DETAIL:|PERF_CONTROL_DECOUPLE:|PERF_ROB_OCCUPANCY:|PERF_RS_OCCUPANCY:|PERF_PIPE_FLOW:|PERF_ROB_HEAD_STATE:|PERF_BACKEND_LOSS:|PERF_OTHER_SLOT_DETAIL:|PERF_SELECT_CANDIDATES:|PERF_LSU_STB:|PERF_FRONTEND:|PERF_BRANCH:|PERF_BP_ACC:|PERF_BP_DETAIL:|\[[0-9]+\]crc)' "$$tmp"; then \
+				grep -E '^(CoreMark Size|Total ticks|Total time \(secs\)|Iterations/Sec|Iterations       |Compiler version|Compiler flags|Memory location|seedcrc|Correct operation validated|CoreMark 1\.0 :|Errors detected|ERROR!|COREMARK DONE|PERF_METRIC:|PERF_SLOT_ACCOUNT:|PERF_SLOT_REASON:|PERF_SLOT_LOSS:|PERF_NOIF_SLOT_DETAIL:|PERF_ISSUE_SLOT_DETAIL:|PERF_BANK_BLOCK_DETAIL:|PERF_P0_FULL_DETAIL:|PERF_CONTROL_DECOUPLE:|PERF_ROB_OCCUPANCY:|PERF_RS_OCCUPANCY:|PERF_PIPE_FLOW:|PERF_ROB_HEAD_STATE:|PERF_BACKEND_LOSS:|PERF_OTHER_SLOT_DETAIL:|PERF_SELECT_CANDIDATES:|PERF_LSU_STB:|PERF_FRONTEND:|PERF_BRANCH:|PERF_BP_ACC:|PERF_BP_DETAIL:|\[[0-9]+\]crc)' "$$tmp" | tee -a "$(PPA_COREMARK_LOG)"; \
 		else \
 			echo "[COREMARK] No CoreMark result lines found in $(COREMARK_RESULT_LOG)" | tee -a "$(PPA_COREMARK_LOG)"; \
 		fi; \

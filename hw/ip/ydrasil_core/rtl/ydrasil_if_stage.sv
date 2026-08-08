@@ -385,6 +385,11 @@ import ydrasil_pkg::*;
         logic pred_taken;
         fetch_addr_token_t pred_target;
         logic [1:0] pred_counter;
+        ydrasil_dispatch_domain_t domain;
+        logic serial;
+        logic src0_used;
+        logic src1_used;
+        logic dst_writes;
     } fetch_payload_t;
     localparam int FETCH_PAYLOAD_WIDTH = $bits(fetch_payload_t);
 
@@ -515,6 +520,32 @@ import ydrasil_pkg::*;
     fetch_payload_t fetchq_push_payload0;
     fetch_payload_t fetchq_push_payload1;
     wire [31:0] mem_req_pc_plus4 = mem_req_pc_q + 32'd4;
+    ydrasil_dispatch_domain_t push_domain0;
+    ydrasil_dispatch_domain_t push_domain1;
+    wire push_serial0;
+    wire push_serial1;
+    wire push_src0_used0;
+    wire push_src0_used1;
+    wire push_src1_used0;
+    wire push_src1_used1;
+    wire push_dst_writes0;
+    wire push_dst_writes1;
+    ydrasil_dispatch_predecode u_push_predecode0 (
+        .instr_i(if_mem_rdata_i),
+        .domain_o(push_domain0),
+        .serial_o(push_serial0),
+        .src0_used_o(push_src0_used0),
+        .src1_used_o(push_src1_used0),
+        .dst_writes_o(push_dst_writes0)
+    );
+    ydrasil_dispatch_predecode u_push_predecode1 (
+        .instr_i(if_mem_rdata1_i),
+        .domain_o(push_domain1),
+        .serial_o(push_serial1),
+        .src0_used_o(push_src0_used1),
+        .src1_used_o(push_src1_used1),
+        .dst_writes_o(push_dst_writes1)
+    );
     always_comb begin
         fetchq_push_payload0 = '0;
         fetchq_push_payload0.pc = {
@@ -528,6 +559,11 @@ import ydrasil_pkg::*;
                 DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2],
             bp_predict_target_i[ITCM_ADDR_WIDTH+1:2]};
         fetchq_push_payload0.pred_counter = bp_predict_counter_i;
+        fetchq_push_payload0.domain = push_domain0;
+        fetchq_push_payload0.serial = push_serial0;
+        fetchq_push_payload0.src0_used = push_src0_used0;
+        fetchq_push_payload0.src1_used = push_src1_used0;
+        fetchq_push_payload0.dst_writes = push_dst_writes0;
 
         fetchq_push_payload1 = '0;
         fetchq_push_payload1.pc = {
@@ -541,6 +577,11 @@ import ydrasil_pkg::*;
                 DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2],
             bp_predict1_target_i[ITCM_ADDR_WIDTH+1:2]};
         fetchq_push_payload1.pred_counter = bp_predict1_counter_i;
+        fetchq_push_payload1.domain = push_domain1;
+        fetchq_push_payload1.serial = push_serial1;
+        fetchq_push_payload1.src0_used = push_src0_used1;
+        fetchq_push_payload1.src1_used = push_src1_used1;
+        fetchq_push_payload1.dst_writes = push_dst_writes1;
     end
     ydrasil_fetch_queue #(
         .DEPTH      (FETCHQ_DEPTH),
@@ -645,14 +686,11 @@ import ydrasil_pkg::*;
     // head is invalid; stale payload is architecturally invisible.
     assign if_id_pc_o = fetchq_pc0;
     assign if_id_instr_o = fetchq_payload0.instr;
-    ydrasil_dispatch_predecode u_predecode0 (
-        .instr_i(fetchq_payload0.instr),
-        .domain_o(if_id_domain_o),
-        .serial_o(if_id_serial_o),
-        .src0_used_o(if_id_src0_used_o),
-        .src1_used_o(if_id_src1_used_o),
-        .dst_writes_o(if_id_dst_writes_o)
-    );
+    assign if_id_domain_o = fetchq_payload0.domain;
+    assign if_id_serial_o = fetchq_payload0.serial;
+    assign if_id_src0_used_o = fetchq_payload0.src0_used;
+    assign if_id_src1_used_o = fetchq_payload0.src1_used;
+    assign if_id_dst_writes_o = fetchq_payload0.dst_writes;
     assign if_id_pred_hit_o = fetchq_payload0.pred_taken;
     assign if_id_pred_taken_o = fetchq_payload0.pred_taken;
     assign if_id_pred_target_o = fetchq_pred_target0;
@@ -664,14 +702,11 @@ import ydrasil_pkg::*;
     assign if_id1_valid_o = fetchq_valid1;
     assign if_id1_pc_o = fetchq_pc1;
     assign if_id1_instr_o = fetchq_payload1.instr;
-    ydrasil_dispatch_predecode u_predecode1 (
-        .instr_i(fetchq_payload1.instr),
-        .domain_o(if_id1_domain_o),
-        .serial_o(if_id1_serial_o),
-        .src0_used_o(if_id1_src0_used_o),
-        .src1_used_o(if_id1_src1_used_o),
-        .dst_writes_o(if_id1_dst_writes_o)
-    );
+    assign if_id1_domain_o = fetchq_payload1.domain;
+    assign if_id1_serial_o = fetchq_payload1.serial;
+    assign if_id1_src0_used_o = fetchq_payload1.src0_used;
+    assign if_id1_src1_used_o = fetchq_payload1.src1_used;
+    assign if_id1_dst_writes_o = fetchq_payload1.dst_writes;
     assign if_id1_pred_hit_o = fetchq_payload1.pred_taken;
     assign if_id1_pred_taken_o = fetchq_payload1.pred_taken;
     assign if_id1_pred_target_o = fetchq_pred_target1;

@@ -9,6 +9,10 @@ import ydrasil_pkg::*;
 	    input  producer_id_t                alloc1_id_i,
 	    input  ydrasil_completion_meta_t    completion_meta_i [COMPLETION_LANES],
 	    input  wire [REGS_DATA_WIDTH-1:0]   completion_data_i [COMPLETION_LANES],
+    input  producer_id_t                lookup_tag0_i,
+    input  producer_id_t                lookup_tag1_i,
+    input  producer_id_t                lookup_tag2_i,
+    input  producer_id_t                lookup_tag3_i,
     input  producer_slot_t              read_slot0_i,
     input  producer_slot_t              read_slot1_i,
     input  producer_slot_t              read_slot2_i,
@@ -27,6 +31,10 @@ import ydrasil_pkg::*;
 	    output wire                         read_valid1_o,
 	    output wire                         read_valid2_o,
 	    output wire                         read_valid3_o,
+    output wire                         lookup_resident0_o,
+    output wire                         lookup_resident1_o,
+    output wire                         lookup_resident2_o,
+    output wire                         lookup_resident3_o,
     output wire [REGS_DATA_WIDTH-1:0]   retire_data0_o,
     output wire [REGS_DATA_WIDTH-1:0]   retire_data1_o
 );
@@ -224,6 +232,30 @@ import ydrasil_pkg::*;
                 value_epoch_odd_q[value_slot] <=
                     completion_meta_i[COMPLETION_DUAL_ALU].producer_id[
                         PRODUCER_ID_WIDTH-1];
+
+            // Allocation owns the final priority, matching value_valid_q.
+            // Recording generation before completion lets Operand distinguish
+            // an unavailable live value from a retired, reused producer slot.
+            if (alloc0_valid_i && !alloc0_id_i[0] &&
+                (alloc0_id_i[PRODUCER_SLOT_WIDTH-1:1] ==
+                 BANK_INDEX_WIDTH'(value_slot)))
+                value_epoch_even_q[value_slot] <=
+                    alloc0_id_i[PRODUCER_ID_WIDTH-1];
+            if (alloc1_valid_i && !alloc1_id_i[0] &&
+                (alloc1_id_i[PRODUCER_SLOT_WIDTH-1:1] ==
+                 BANK_INDEX_WIDTH'(value_slot)))
+                value_epoch_even_q[value_slot] <=
+                    alloc1_id_i[PRODUCER_ID_WIDTH-1];
+            if (alloc0_valid_i && alloc0_id_i[0] &&
+                (alloc0_id_i[PRODUCER_SLOT_WIDTH-1:1] ==
+                 BANK_INDEX_WIDTH'(value_slot)))
+                value_epoch_odd_q[value_slot] <=
+                    alloc0_id_i[PRODUCER_ID_WIDTH-1];
+            if (alloc1_valid_i && alloc1_id_i[0] &&
+                (alloc1_id_i[PRODUCER_SLOT_WIDTH-1:1] ==
+                 BANK_INDEX_WIDTH'(value_slot)))
+                value_epoch_odd_q[value_slot] <=
+                    alloc1_id_i[PRODUCER_ID_WIDTH-1];
         end
     end
 
@@ -235,6 +267,22 @@ import ydrasil_pkg::*;
         read_slot2_i[PRODUCER_SLOT_WIDTH-1:1];
     wire [BANK_INDEX_WIDTH-1:0] read_index3 =
         read_slot3_i[PRODUCER_SLOT_WIDTH-1:1];
+    wire producer_slot_t lookup_slot0 =
+        lookup_tag0_i[PRODUCER_SLOT_WIDTH-1:0];
+    wire producer_slot_t lookup_slot1 =
+        lookup_tag1_i[PRODUCER_SLOT_WIDTH-1:0];
+    wire producer_slot_t lookup_slot2 =
+        lookup_tag2_i[PRODUCER_SLOT_WIDTH-1:0];
+    wire producer_slot_t lookup_slot3 =
+        lookup_tag3_i[PRODUCER_SLOT_WIDTH-1:0];
+    wire [BANK_INDEX_WIDTH-1:0] lookup_index0 =
+        lookup_slot0[PRODUCER_SLOT_WIDTH-1:1];
+    wire [BANK_INDEX_WIDTH-1:0] lookup_index1 =
+        lookup_slot1[PRODUCER_SLOT_WIDTH-1:1];
+    wire [BANK_INDEX_WIDTH-1:0] lookup_index2 =
+        lookup_slot2[PRODUCER_SLOT_WIDTH-1:1];
+    wire [BANK_INDEX_WIDTH-1:0] lookup_index3 =
+        lookup_slot3[PRODUCER_SLOT_WIDTH-1:1];
     wire producer_slot_t retire_slot0 =
         retire_id0_i[PRODUCER_SLOT_WIDTH-1:0];
     wire producer_slot_t retire_slot1 =
@@ -288,6 +336,38 @@ import ydrasil_pkg::*;
 	        value_valid_odd_q[read_index2] : value_valid_even_q[read_index2];
 	    assign read_valid3_o = read_slot3_i[0] ?
 	        value_valid_odd_q[read_index3] : value_valid_even_q[read_index3];
+    // The registered allocation lookup asks whether a generation-qualified
+    // value is resident. Its one-bit result writes only the newly allocated
+    // RS entry's ready FF; it does not cross the current Select priority tree
+    // or participate in Decode/frontend ready.
+    assign lookup_resident0_o = lookup_slot0[0] ?
+        (value_valid_odd_q[lookup_index0] &&
+         (value_epoch_odd_q[lookup_index0] ==
+          lookup_tag0_i[PRODUCER_ID_WIDTH-1])) :
+        (value_valid_even_q[lookup_index0] &&
+         (value_epoch_even_q[lookup_index0] ==
+          lookup_tag0_i[PRODUCER_ID_WIDTH-1]));
+    assign lookup_resident1_o = lookup_slot1[0] ?
+        (value_valid_odd_q[lookup_index1] &&
+         (value_epoch_odd_q[lookup_index1] ==
+          lookup_tag1_i[PRODUCER_ID_WIDTH-1])) :
+        (value_valid_even_q[lookup_index1] &&
+         (value_epoch_even_q[lookup_index1] ==
+          lookup_tag1_i[PRODUCER_ID_WIDTH-1]));
+    assign lookup_resident2_o = lookup_slot2[0] ?
+        (value_valid_odd_q[lookup_index2] &&
+         (value_epoch_odd_q[lookup_index2] ==
+          lookup_tag2_i[PRODUCER_ID_WIDTH-1])) :
+        (value_valid_even_q[lookup_index2] &&
+         (value_epoch_even_q[lookup_index2] ==
+          lookup_tag2_i[PRODUCER_ID_WIDTH-1]));
+    assign lookup_resident3_o = lookup_slot3[0] ?
+        (value_valid_odd_q[lookup_index3] &&
+         (value_epoch_odd_q[lookup_index3] ==
+          lookup_tag3_i[PRODUCER_ID_WIDTH-1])) :
+        (value_valid_even_q[lookup_index3] &&
+         (value_epoch_even_q[lookup_index3] ==
+          lookup_tag3_i[PRODUCER_ID_WIDTH-1]));
     // Ready is captured from raw narrow metadata on the same edge that the
     // registered completion lane captures data. Retire therefore bypasses the
     // just-registered lane by full producer identity instead of reading the

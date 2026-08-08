@@ -53,8 +53,8 @@ import ydrasil_pkg::*;
     wire [3:0] mmio_wmask =
         $root.ydrasil_core_tb.u_dut.mmio_req_pkt.wmask;
 
-    wire scoreboard_stall =
-        $root.ydrasil_core_tb.u_dut.issue_scoreboard_stall;
+    wire dependency_wait =
+        $root.ydrasil_core_tb.u_dut.issue_dependency_wait;
     wire lsu_struct_stall =
         $root.ydrasil_core_tb.u_dut.issue_lsu_struct_stall;
     wire rs1_pending_stall =
@@ -97,30 +97,18 @@ import ydrasil_pkg::*;
     wire id_ctrl_lsu_req =
         ($root.ydrasil_core_tb.u_dut.issue_head_compact_uop.op_class == UOP_CLASS_LOAD) ||
         ($root.ydrasil_core_tb.u_dut.issue_head_compact_uop.op_class == UOP_CLASS_STORE);
-    wire [REGS_NUM-1:0] gpr_pending_for_hazard =
-        $root.ydrasil_core_tb.u_dut.gpr_pending_q;
-    wire [REGS_NUM-1:0] gpr_pending_clear_mask = '0;
-    wire [REGS_NUM-1:0] gpr_pending_issue_mask =
-        $root.ydrasil_core_tb.u_dut.gpr_pending_q;
     wire id_ex_rd_issue =
         $root.ydrasil_core_tb.u_dut.ex_accept_valid &&
         $root.ydrasil_core_tb.u_dut.ex_hzd_pkt.producer_tracked;
     wire [1:0] select_buf_count =
         {1'b0, $root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.
-            select_head_valid_q} +
-        {1'b0, $root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.
-            select_skid_valid_q};
+            select_head_valid_q};
     wire select_bundle0_pair =
         $root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.select_head_pair_q;
-    wire select_bundle1_pair =
-        $root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.select_skid_pair_q;
     wire [2:0] select_buf_uop_count =
         ($root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.
             select_head_valid_q ?
-         (3'd1 + {2'b0, select_bundle0_pair}) : 3'd0) +
-        ($root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.
-            select_skid_valid_q ?
-         (3'd1 + {2'b0, select_bundle1_pair}) : 3'd0);
+         (3'd1 + {2'b0, select_bundle0_pair}) : 3'd0);
     wire [3:0] issue_pending_uop_count = {1'b0, select_buf_uop_count};
     wire [2:0] issue_pipe_count_q = (issue_pending_uop_count >= 4) ?
         3'd4 : issue_pending_uop_count[2:0];

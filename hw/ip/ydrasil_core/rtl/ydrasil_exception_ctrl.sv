@@ -28,6 +28,7 @@ import ydrasil_pkg::*;
     logic [31:0] epc_q;
     logic [31:0] tval_q;
     logic is_interrupt_q;
+    logic drain_armed_q;
 
     wire irq_mei = csr_state_i.mstatus[3] && csr_state_i.mie[11] &&
         csr_state_i.mip[11];
@@ -109,9 +110,11 @@ import ydrasil_pkg::*;
             epc_q <= '0;
             tval_q <= '0;
             is_interrupt_q <= 1'b0;
+            drain_armed_q <= 1'b0;
         end else begin
             unique case (state_q)
                 S_IDLE: begin
+                    drain_armed_q <= 1'b0;
                     if (exception_req_i.valid && exception_req_i.mret) begin
                         state_q <= S_MRET_STATUS;
                     end else if (exception_req_i.valid) begin
@@ -130,7 +133,8 @@ import ydrasil_pkg::*;
                     end
                 end
                 S_DRAIN: begin
-                    if (backend_idle_i) begin
+                    drain_armed_q <= 1'b1;
+                    if (drain_armed_q && backend_idle_i) begin
                         if (is_interrupt_q)
                             epc_q <= async_pc_i;
                         state_q <= S_WRITE_MEPC;

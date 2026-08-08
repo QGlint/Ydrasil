@@ -312,6 +312,20 @@ package ydrasil_pkg;
 	localparam int PRODUCER_ID_WIDTH = PRODUCER_SLOT_WIDTH + 1;
 	typedef logic [PRODUCER_SLOT_WIDTH-1:0] producer_slot_t;
 	typedef logic [PRODUCER_ID_WIDTH-1:0] producer_id_t;
+	function automatic logic producer_slot_in_window(
+		input producer_slot_t producer_slot,
+		input producer_slot_t head_slot,
+		input producer_slot_t recovery_slot
+	);
+		if (head_slot <= recovery_slot)
+			producer_slot_in_window =
+				(producer_slot >= head_slot) &&
+				(producer_slot <= recovery_slot);
+		else
+			producer_slot_in_window =
+				(producer_slot >= head_slot) ||
+				(producer_slot <= recovery_slot);
+	endfunction
 	typedef enum logic [1:0] {
 		RESULT_ALU  = 2'b00,
 		RESULT_LSU  = 2'b01,
@@ -573,6 +587,8 @@ package ydrasil_pkg;
 		logic [1:0]                            lane_mask;
 		ydrasil_source_desc_t                  src0;
 		ydrasil_source_desc_t                  src1;
+		ydrasil_bypass_sel_t                   src0_bypass;
+		ydrasil_bypass_sel_t                   src1_bypass;
 		ydrasil_dest_desc_t                    dst;
 		logic [UOP_CLASS_WIDTH-1:0]            op_class;
 		logic [UOP_SUBOP_WIDTH-1:0]            subop;

@@ -7,6 +7,7 @@ import ydrasil_pkg::*;
     input  wire                            clk,
     input  wire                            rst_n,
     input  wire                            flush_ex_i,
+    input  wire                            lane_b_flush_i,
 
 	input  wire [DATA_WIDTH-1:0]           alu_operand_a_i,
 	input  wire [DATA_WIDTH-1:0]           alu_operand_b_i,
@@ -174,33 +175,35 @@ import ydrasil_pkg::*;
          mul_operator_i[OP_MUL_REM]  |
          mul_operator_i[OP_MUL_REMU]);
 
-    assign mul_issue_valid = mul_valid_i & op_mul & mul_issue_ready & !trap_redirect_i & !flush_ex_i;
+    assign mul_issue_valid = mul_valid_i & op_mul & mul_issue_ready &
+        !trap_redirect_i & !lane_b_flush_i;
     assign mul_issue_wen = mul_rf_wen_i & (mul_rf_waddr_i != '0);
     assign mul_issue_o = mul_issue_valid & mul_issue_wen;
     assign mul_issue_waddr_o = mul_rf_waddr_i;
 
     assign div_start = mul_valid_i & op_div & !div_active_q &
         !div_pending_q & !div_busy & !div_done & !trap_redirect_i &
-        !flush_ex_i;
+        !lane_b_flush_i;
     // A multiply result cannot be backpressured. Hold DIV completion state
     // until the single typed MDU result port is available.
     assign div_complete = div_pending_q & !mul_pipe_wen &
-        !trap_redirect_i & !flush_ex_i;
+        !trap_redirect_i;
     assign div_rf_wen_rd = div_complete & div_wen_q;
     assign ex_mul_stall_o = mul_valid_i & op_div &
-        (div_active_q | div_pending_q | div_busy | div_done) & !flush_ex_i;
+        (div_active_q | div_pending_q | div_busy | div_done) &
+        !lane_b_flush_i;
     assign div_available_o = !div_active_q && !div_pending_q &&
         !div_busy && !div_done;
 `ifndef SYNTHESIS
     always_ff @(posedge clk) begin
-        if (rst_n && !flush_ex_i)
+        if (rst_n && !lane_b_flush_i)
             assert (!ex_mul_stall_o)
                 else $fatal(1, "P1 issued DIV without a local reservation");
     end
 `endif
 
     wire op_csr = csr_valid_i & csr_operator_type_i[OPERATOR_TYPE_CSR] &
-        !trap_redirect_i & !flush_ex_i;
+        !trap_redirect_i & !lane_b_flush_i;
 
     assign normal_alu_rf_wen_rd = alu_valid_i & alu_rf_wen_rd &
         (operator_type_i[OPERATOR_TYPE_ALU] | operator_type_i[OPERATOR_TYPE_BJP]) &
@@ -336,7 +339,7 @@ import ydrasil_pkg::*;
             ex_csr_wdata_o_ff   <= '0;
             ex_csr_wen_o_ff     <= 1'b0;
             ex_csr_waddr_o_ff   <= '0;
-        end else if (flush_ex_i) begin
+        end else if (trap_redirect_i) begin
             alu_result_ff       <= '0;
             alu_rf_wen_rd_ff    <= 1'b0;
             alu_rf_waddr_rd_ff  <= '0;

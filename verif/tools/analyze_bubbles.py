@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a detailed, architecture-oriented bubble report from simulation logs."""
+"""Build an architecture-oriented report for the decoupled OoO backend."""
 
 from __future__ import annotations
 
@@ -17,11 +17,12 @@ def parse_log(path: Path) -> dict[str, dict[str, float]]:
     records: dict[str, dict[str, float]] = {}
     for line in path.read_text(errors="replace").splitlines():
         match = PERF_RE.match(line)
-        if not match:
-            continue
-        fields = {key: float(value) for key, value in FIELD_RE.findall(match.group(2))}
-        if fields:
-            records[match.group(1)] = fields
+        if match:
+            fields = {
+                key: float(raw) for key, raw in FIELD_RE.findall(match.group(2))
+            }
+            if fields:
+                records[match.group(1)] = fields
     return records
 
 
@@ -33,14 +34,428 @@ def pct(part: float, total: float) -> str:
     return f"{100.0 * part / total:.2f}%" if total else "0.00%"
 
 
-def signed_counter(value_: float, bits: int = 32) -> int:
-    raw = int(value_)
-    return raw - (1 << bits) if raw >= (1 << (bits - 1)) else raw
-
-
 def selected_logs(root: Path) -> list[Path]:
     suites = ("coremark", "sort", "boundary", "rv32ui", "rv32um", "rv32uz", "rv32mi")
-    return sorted(path for path in root.rglob("hw.log") if any(part.startswith(suites) for part in path.parts))
+    return sorted(
+        path
+        for path in root.rglob("hw.log")
+        if any(part.startswith(suites) for part in path.parts)
+    )
+
+
+CONTROL_FIELDS = (
+    "DEP_TOKEN_ENTRY_CYCLES",
+    "ORDER_TOKEN_ENTRY_CYCLES",
+    "RESOURCE_ENTRY_CYCLES",
+    "SELECTABLE_ENTRY_CYCLES",
+    "RS_BANK_FULL",
+    "RS_PAIR_BANK_LIMIT",
+    "ROB_FULL",
+    "LSU_CREDIT",
+    "DIV_CREDIT",
+    "SERIAL_GATE",
+    "SELECT_WIDTH",
+    "OPERAND_DEP_MISS",
+    "RECOVERY",
+    "RECOVERY_RESYNC",
+)
+LOCAL_CONTROL_FIELDS = (
+    "ALU_ENTRY_CYCLES",
+    "P0_ENTRY_CYCLES",
+    "P1_ENTRY_CYCLES",
+    "ALU_FULL",
+    "P0_FULL",
+    "P1_FULL",
+    "ALU_DUE_SELECT",
+    "DTCM_DUE_SELECT",
+    "MDU_DUE_SELECT",
+    "DTCM_LOCAL_WAKE",
+    "MDU_LOCAL_WAKE",
+    "RESIDENT_WAKE_ENTRIES",
+    "RESIDENT_DUE_SELECT",
+)
+FLOW_FAMILIES = (
+    ("rs_alloc", ("RS_ALLOC0", "RS_ALLOC1", "RS_ALLOC2")),
+    ("select", ("SELECT0", "SELECT1", "SELECT2")),
+    ("operand", ("OPERAND0", "OPERAND1", "OPERAND2")),
+    ("complete", ("COMPLETE0", "COMPLETE1", "COMPLETE2", "COMPLETE3", "COMPLETE4")),
+    ("retire", ("RETIRE0", "RETIRE1", "RETIRE2")),
+)
+HEAD_FIELDS = (
+    ("empty", "EMPTY"),
+    ("retire one", "RETIRE1"),
+    ("retire two", "RETIRE2"),
+    ("completion visible", "COMPLETE_VISIBLE"),
+    ("not issued", "NOT_ISSUED"),
+    ("wait ALU", "WAIT_ALU"),
+    ("wait load", "WAIT_LOAD"),
+    ("wait MDU", "WAIT_MDU"),
+    ("wait store", "WAIT_STORE"),
+    ("wait branch", "WAIT_BRANCH"),
+    ("wait other", "WAIT_OTHER"),
+)
+LOSS_FIELDS = (
+    ("recovery flush", "FLUSH"),
+    ("Operand contract miss", "OPERAND_BLOCK"),
+    ("single Operand bundle", "SINGLE_BUNDLE"),
+    ("Select refill", "SELECT_REFILL"),
+    ("RS dependency token", "RS_DEPENDENCY"),
+    ("RS order token", "RS_ORDER"),
+    ("RS resource credit", "RS_RESOURCE"),
+    ("RS other", "RS_OTHER"),
+    ("ROB full", "ROB_FULL"),
+    ("RS refill", "RS_REFILL"),
+    ("Decode refill", "DECODE_REFILL"),
+    ("front end", "FRONTEND"),
+    ("other", "OTHER"),
+)
+SLOT_REASON_FIELDS = (
+    ("executed", "EXECUTED"),
+    ("flush", "FLUSH"),
+    ("multicycle hold", "MUL_HOLD"),
+    ("multi-cause control", "MULTI_CAUSE"),
+    ("dependency", "DEPENDENCY"),
+    ("LSU structural", "LSU_STRUCT"),
+    ("producer full", "PRODUCER_FULL"),
+    ("writeback backpressure", "WB"),
+    ("CLINT/trap", "CLINT"),
+    ("LSU serialize", "LSU_SERIALIZE"),
+    ("front end has no IF/ID", "NO_IF_VALID"),
+    ("issue packet", "ISSUE"),
+    ("other", "OTHER"),
+)
+NOIF_SLOT_FIELDS = (
+    ("control redirect", "CONTROL_REDIRECT"),
+    ("predict redirect", "PREDICT_REDIRECT"),
+    ("fence refill", "FENCE_REFILL"),
+    ("memory response", "MEM_RESPONSE"),
+    ("fetch launch", "FETCH_LAUNCH"),
+    ("pending redirect", "PENDING_REDIRECT"),
+    ("other", "OTHER"),
+)
+BANK_BLOCK_FIELDS = (
+    ("ALU local full", "ALU_LOCAL_FULL"),
+    ("ALU credit stale", "ALU_CREDIT_STALE"),
+    ("P0 local full", "P0_LOCAL_FULL"),
+    ("P0 credit stale", "P0_CREDIT_STALE"),
+    ("P1 local full", "P1_LOCAL_FULL"),
+    ("P1 credit stale", "P1_CREDIT_STALE"),
+    ("unclassified", "UNCLASSIFIED"),
+)
+P0_FULL_FIELDS = (
+    ("dependency", "DEPENDENCY"),
+    ("order", "ORDER"),
+    ("resource", "RESOURCE"),
+    ("ready/release", "READY_RELEASE"),
+    ("no candidate", "NO_CANDIDATE"),
+)
+ISSUE_SLOT_FIELDS = (
+    ("dependency", "DEPENDENCY"),
+    ("LSU structural", "LSU_STRUCT"),
+    ("LSU serialize", "LSU_SERIALIZE"),
+    ("single lane admission", "SINGLE_LANE"),
+    ("no execute", "NO_EXECUTE"),
+)
+
+
+def detailed_columns() -> list[tuple[str, str, str]]:
+    columns = [
+        ("cycles", "PERF_METRIC", "CYCLES"),
+        ("insts", "PERF_METRIC", "INSTS"),
+        ("ipc", "PERF_METRIC", "IPC"),
+        ("capacity_slots", "PERF_SLOT_ACCOUNT", "CAPACITY_SLOTS"),
+        ("productive_slots", "PERF_SLOT_ACCOUNT", "PRODUCTIVE_SLOTS"),
+        ("lost_slots", "PERF_SLOT_ACCOUNT", "LOST_SLOTS"),
+        ("slot_ipc", "PERF_SLOT_ACCOUNT", "SLOT_IPC"),
+    ]
+    columns.extend(
+        (f"control_{field.lower()}", "PERF_CONTROL_DECOUPLE", field)
+        for field in CONTROL_FIELDS
+    )
+    columns.extend(
+        (f"local_{field.lower()}", "PERF_LOCAL_CONTROL", field)
+        for field in LOCAL_CONTROL_FIELDS
+    )
+    columns.extend(
+        (f"rob_occ_o{index}", "PERF_ROB_OCCUPANCY", f"O{index}")
+        for index in range(13)
+    )
+    columns.extend(
+        (f"rs_occ_o{index}", "PERF_RS_OCCUPANCY", f"O{index}")
+        for index in range(11)
+    )
+    for prefix, fields in FLOW_FAMILIES:
+        columns.extend((f"flow_{prefix}_{field[-1]}", "PERF_PIPE_FLOW", field) for field in fields)
+    columns.extend(
+        (f"head_{field.lower()}", "PERF_ROB_HEAD_STATE", field)
+        for _, field in HEAD_FIELDS
+    )
+    columns.extend(
+        (f"loss_{field.lower()}", "PERF_BACKEND_LOSS", field)
+        for _, field in LOSS_FIELDS
+    )
+    columns.extend(
+        (f"slot_reason_{field.lower()}", "PERF_SLOT_REASON", field)
+        for _, field in SLOT_REASON_FIELDS
+    )
+    columns.extend(
+        (f"noif_slot_{field.lower()}", "PERF_NOIF_SLOT_DETAIL", field)
+        for _, field in (*NOIF_SLOT_FIELDS, ("accounted", "ACCOUNTED"), ("expected", "EXPECTED"))
+    )
+    columns.extend(
+        (f"issue_slot_{field.lower()}", "PERF_ISSUE_SLOT_DETAIL", field)
+        for _, field in (*ISSUE_SLOT_FIELDS, ("accounted", "ACCOUNTED"), ("expected", "EXPECTED"))
+    )
+    columns.extend(
+        (f"bank_block_{field.lower()}", "PERF_BANK_BLOCK_DETAIL", field)
+        for _, field in (*BANK_BLOCK_FIELDS, ("accounted", "ACCOUNTED"), ("expected", "EXPECTED"))
+    )
+    columns.extend(
+        (f"p0_full_{field.lower()}", "PERF_P0_FULL_DETAIL", field)
+        for _, field in (*P0_FULL_FIELDS, ("accounted", "ACCOUNTED"), ("expected", "EXPECTED"))
+    )
+    columns.extend(
+        (name, record, field)
+        for name, record, field in (
+            ("branches", "PERF_BRANCH", "BRANCHES"),
+            ("mispredicts", "PERF_BRANCH", "MISPRED"),
+            ("branch_accuracy", "PERF_BRANCH", "ACC"),
+            ("wrong_direction_flush", "PERF_FRONTEND", "WRONG_DIR_FLUSH"),
+            ("btb_miss_taken", "PERF_FRONTEND", "BTB_MISS_TAKEN"),
+        )
+    )
+    return columns
+
+
+def write_csv(
+    path: Path,
+    programs: list[tuple[str, dict[str, dict[str, float]]]],
+) -> None:
+    columns = detailed_columns()
+    with path.open("w", newline="") as stream:
+        writer = csv.writer(stream)
+        writer.writerow(["program", *[name for name, _, _ in columns]])
+        for program, records in programs:
+            writer.writerow(
+                [program, *[value(records, record, field) for _, record, field in columns]]
+            )
+
+
+def write_report(
+    path: Path,
+    programs: list[tuple[str, dict[str, dict[str, float]]]],
+) -> None:
+    focus = [(name, records) for name, records in programs if name == "coremark"]
+    with path.open("w") as stream:
+        stream.write("# Decoupled backend performance analysis\n\n")
+        stream.write(
+            "The measured backend is `ID -> Issue (RS/Select) -> Operand -> EX -> WB`. "
+            "`RS_ALLOC` is an event at the Issue input, not an extra pipeline stage. "
+            "Dependency readiness is held in each RS entry and is not a centralized architectural-register table.\n\n"
+        )
+        if not focus:
+            stream.write("No CoreMark log containing `PERF_CONTROL_DECOUPLE` was found.\n")
+            return
+
+        for program, records in focus:
+            cycles = value(records, "PERF_METRIC", "CYCLES")
+            insts = value(records, "PERF_METRIC", "INSTS")
+            ipc = value(records, "PERF_METRIC", "IPC")
+            sample = value(records, "PERF_PIPE_FLOW", "SAMPLE") or cycles
+            lost = value(records, "PERF_SLOT_ACCOUNT", "LOST_SLOTS")
+            stream.write(
+                f"## {program}\n\n{int(cycles)} cycles, {int(insts)} retired instructions, "
+                f"IPC {ipc:.4f}, lost execution slots {int(lost)}.\n\n"
+            )
+
+            stream.write("### Pipeline flow\n\n")
+            stream.write("| Boundary | Histogram | Average uops/cycle | Closure |\n")
+            stream.write("|---|---|---:|---|\n")
+            for label, fields in FLOW_FAMILIES:
+                counts = [value(records, "PERF_PIPE_FLOW", field) for field in fields]
+                total = sum(counts)
+                average = (
+                    sum(index * count for index, count in enumerate(counts)) / sample
+                    if sample
+                    else 0.0
+                )
+                histogram = ", ".join(
+                    f"{index}:{int(count)}" for index, count in enumerate(counts)
+                )
+                stream.write(
+                    f"| {label} | {histogram} | {average:.4f} | "
+                    f"{'PASS' if total == sample else 'FAIL'} |\n"
+                )
+
+            rs_total = sum(
+                value(records, "PERF_RS_OCCUPANCY", f"O{index}") for index in range(11)
+            )
+            rob_total = sum(
+                value(records, "PERF_ROB_OCCUPANCY", f"O{index}") for index in range(13)
+            )
+            rs_average = (
+                sum(
+                    index * value(records, "PERF_RS_OCCUPANCY", f"O{index}")
+                    for index in range(11)
+                )
+                / sample
+                if sample
+                else 0.0
+            )
+            rob_average = (
+                sum(
+                    index * value(records, "PERF_ROB_OCCUPANCY", f"O{index}")
+                    for index in range(13)
+                )
+                / sample
+                if sample
+                else 0.0
+            )
+            stream.write(
+                f"\nRS occupancy closure: **{'PASS' if rs_total == sample else 'FAIL'}**, "
+                f"average {rs_average:.2f}/10. ROB occupancy closure: "
+                f"**{'PASS' if rob_total == sample else 'FAIL'}**, average {rob_average:.2f}/12.\n\n"
+            )
+
+            stream.write("### Decoupled control\n\n")
+            stream.write("| Observation | Count | Denominator | Rate |\n")
+            stream.write("|---|---:|---:|---:|\n")
+            for field in CONTROL_FIELDS:
+                count = value(records, "PERF_CONTROL_DECOUPLE", field)
+                entry_metric = field.endswith("ENTRY_CYCLES")
+                denominator = sample * 10 if entry_metric else sample
+                stream.write(
+                    f"| {field.lower().replace('_', ' ')} | {int(count)} | "
+                    f"{int(denominator)} | {pct(count, denominator)} |\n"
+                )
+            operand_miss = value(
+                records, "PERF_CONTROL_DECOUPLE", "OPERAND_DEP_MISS"
+            )
+            stream.write(
+                "\n`OPERAND_DEP_MISS` should be zero: a nonzero value means Select admitted a uop "
+                "whose value/epoch contract was not satisfied at Operand.\n\n"
+            )
+            stream.write("### Local wakeup paths\n\n")
+            stream.write("| Observation | Count | Sample |\n")
+            stream.write("|---|---:|---:|\n")
+            for field in LOCAL_CONTROL_FIELDS:
+                count = value(records, "PERF_LOCAL_CONTROL", field)
+                stream.write(
+                    f"| {field.lower().replace('_', ' ')} | {int(count)} | "
+                    f"{pct(count, sample)} |\n"
+                )
+            stream.write(
+                "\n`DTCM_DUE_SELECT` and `RESIDENT_DUE_SELECT` count consumers "
+                "that entered Select on a local narrow-token path.\n\n"
+            )
+
+            expected_loss = value(records, "PERF_BACKEND_LOSS", "EXPECTED")
+            accounted_loss = sum(
+                value(records, "PERF_BACKEND_LOSS", field) for _, field in LOSS_FIELDS
+            )
+            stream.write("### Lost slots\n\n")
+            stream.write(
+                f"Closure: **{'PASS' if accounted_loss == expected_loss else 'FAIL'}**, "
+                f"accounted {int(accounted_loss)}, expected {int(expected_loss)}.\n\n"
+            )
+            stream.write("| Cause | Slots | Lost slots |\n|---|---:|---:|\n")
+            for label, field in sorted(
+                LOSS_FIELDS,
+                key=lambda item: value(records, "PERF_BACKEND_LOSS", item[1]),
+                reverse=True,
+            ):
+                count = value(records, "PERF_BACKEND_LOSS", field)
+                stream.write(f"| {label} | {int(count)} | {pct(count, expected_loss)} |\n")
+
+            slot_expected = value(records, "PERF_SLOT_REASON", "EXPECTED")
+            slot_accounted = value(records, "PERF_SLOT_REASON", "ACCOUNTED")
+            stream.write("\n### Complete execution-slot reason partition\n\n")
+            stream.write(
+                f"Closure: **{'PASS' if slot_accounted == slot_expected else 'FAIL'}**, "
+                f"accounted {int(slot_accounted)}, expected {int(slot_expected)} "
+                "(two capacity slots per sampled cycle).\n\n"
+            )
+            stream.write("| Cause | Slots | Capacity share |\n|---|---:|---:|\n")
+            for label, field in sorted(
+                SLOT_REASON_FIELDS,
+                key=lambda item: value(records, "PERF_SLOT_REASON", item[1]),
+                reverse=True,
+            ):
+                count = value(records, "PERF_SLOT_REASON", field)
+                stream.write(
+                    f"| {label} | {int(count)} | {pct(count, slot_expected)} |\n"
+                )
+            noif_expected = value(records, "PERF_NOIF_SLOT_DETAIL", "EXPECTED")
+            noif_accounted = value(records, "PERF_NOIF_SLOT_DETAIL", "ACCOUNTED")
+            stream.write(
+                f"\nNO_IF_VALID detail closure: **{'PASS' if noif_accounted == noif_expected else 'FAIL'}**, "
+                f"accounted {int(noif_accounted)}, expected {int(noif_expected)}.\n"
+            )
+            issue_expected = value(records, "PERF_ISSUE_SLOT_DETAIL", "EXPECTED")
+            issue_accounted = value(records, "PERF_ISSUE_SLOT_DETAIL", "ACCOUNTED")
+            stream.write(
+                f"ISSUE detail closure: **{'PASS' if issue_accounted == issue_expected else 'FAIL'}**, "
+                f"accounted {int(issue_accounted)}, expected {int(issue_expected)}.\n"
+            )
+            bank_expected = value(records, "PERF_BANK_BLOCK_DETAIL", "EXPECTED")
+            bank_accounted = value(records, "PERF_BANK_BLOCK_DETAIL", "ACCOUNTED")
+            stream.write(
+                f"RS bank detail closure: **{'PASS' if bank_accounted == bank_expected else 'FAIL'}**, "
+                f"accounted {int(bank_accounted)}, expected {int(bank_expected)}.\n"
+            )
+            stream.write("| RS bank cause | Slots | Bank-block share |\n|---|---:|---:|\n")
+            for label, field in sorted(
+                BANK_BLOCK_FIELDS,
+                key=lambda item: value(records, "PERF_BANK_BLOCK_DETAIL", item[1]),
+                reverse=True,
+            ):
+                count = value(records, "PERF_BANK_BLOCK_DETAIL", field)
+                stream.write(
+                    f"| {label} | {int(count)} | {pct(count, bank_expected)} |\n"
+                )
+            p0_expected = value(records, "PERF_P0_FULL_DETAIL", "EXPECTED")
+            p0_accounted = value(records, "PERF_P0_FULL_DETAIL", "ACCOUNTED")
+            stream.write(
+                f"\nP0-full detail closure: **{'PASS' if p0_accounted == p0_expected else 'FAIL'}**, "
+                f"accounted {int(p0_accounted)}, expected {int(p0_expected)}.\n"
+            )
+            stream.write("| P0-full cause | Slots | P0-full share |\n|---|---:|---:|\n")
+            for label, field in sorted(
+                P0_FULL_FIELDS,
+                key=lambda item: value(records, "PERF_P0_FULL_DETAIL", item[1]),
+                reverse=True,
+            ):
+                count = value(records, "PERF_P0_FULL_DETAIL", field)
+                stream.write(
+                    f"| {label} | {int(count)} | {pct(count, p0_expected)} |\n"
+                )
+
+            head_total = sum(
+                value(records, "PERF_ROB_HEAD_STATE", field) for _, field in HEAD_FIELDS
+            )
+            stream.write(
+                f"\n### ROB head\n\nClosure: **{'PASS' if head_total == sample else 'FAIL'}**.\n\n"
+            )
+            stream.write("| State | Cycles | Sample |\n|---|---:|---:|\n")
+            for label, field in sorted(
+                HEAD_FIELDS,
+                key=lambda item: value(records, "PERF_ROB_HEAD_STATE", item[1]),
+                reverse=True,
+            ):
+                count = value(records, "PERF_ROB_HEAD_STATE", field)
+                stream.write(f"| {label} | {int(count)} | {pct(count, sample)} |\n")
+
+            branches = value(records, "PERF_BRANCH", "BRANCHES")
+            mispredicts = value(records, "PERF_BRANCH", "MISPRED")
+            stream.write(
+                f"\nBranch prediction: {int(branches)} resolutions, {int(mispredicts)} "
+                f"mispredicts, accuracy {pct(branches - mispredicts, branches)}.\n"
+            )
+            if operand_miss:
+                stream.write(
+                    "\nPriority finding: fix the Select-to-Operand readiness contract before "
+                    "tuning RS depth or front-end prediction.\n"
+                )
 
 
 def main() -> None:
@@ -53,394 +468,11 @@ def main() -> None:
     programs: list[tuple[str, dict[str, dict[str, float]]]] = []
     for log in selected_logs(args.root):
         records = parse_log(log)
-        if "PERF_CYCLE_ACCOUNT" in records:
+        if "PERF_CONTROL_DECOUPLE" in records:
             programs.append((str(log.relative_to(args.root).parent), records))
 
-    detailed_csv = args.out_dir / "perf_bubble_detail.csv"
-    columns = [
-        ("cycles", "PERF_METRIC", "CYCLES"), ("insts", "PERF_METRIC", "INSTS"),
-        ("ipc", "PERF_METRIC", "IPC"), ("issue", "PERF_CYCLE_ACCOUNT", "ISSUE"),
-        ("capacity_slots", "PERF_SLOT_ACCOUNT", "CAPACITY_SLOTS"),
-        ("productive_slots", "PERF_SLOT_ACCOUNT", "PRODUCTIVE_SLOTS"),
-        ("lost_slots", "PERF_SLOT_ACCOUNT", "LOST_SLOTS"),
-        ("slot_ipc", "PERF_SLOT_ACCOUNT", "SLOT_IPC"),
-        ("flush", "PERF_CYCLE_ACCOUNT", "FLUSH"), ("mul_hold", "PERF_CYCLE_ACCOUNT", "MUL_HOLD"),
-        ("scoreboard", "PERF_CYCLE_ACCOUNT", "SCOREBOARD"), ("lsu_struct", "PERF_CYCLE_ACCOUNT", "LSU_STRUCT"),
-        ("lsu_serialize", "PERF_CYCLE_ACCOUNT", "LSU_SERIALIZE"),
-        ("producer_full", "PERF_CYCLE_ACCOUNT", "PRODUCER_FULL"), ("wb", "PERF_CYCLE_ACCOUNT", "WB"),
-        ("clint", "PERF_CYCLE_ACCOUNT", "CLINT"), ("multi", "PERF_CYCLE_ACCOUNT", "MULTI"),
-        ("no_if_valid", "PERF_CYCLE_ACCOUNT", "NO_IF_VALID"), ("other", "PERF_CYCLE_ACCOUNT", "OTHER"),
-        ("noif_control_redirect", "PERF_NOIF_DETAIL", "CONTROL_REDIRECT"),
-        ("noif_predict_redirect", "PERF_NOIF_DETAIL", "PREDICT_REDIRECT"),
-        ("noif_fence_refill", "PERF_NOIF_DETAIL", "FENCE_REFILL"),
-        ("noif_mem_response", "PERF_NOIF_DETAIL", "MEM_RESPONSE"),
-        ("noif_fetch_launch", "PERF_NOIF_DETAIL", "FETCH_LAUNCH"),
-        ("noif_pending_redirect", "PERF_NOIF_DETAIL", "PENDING_REDIRECT"),
-        ("noif_other", "PERF_NOIF_DETAIL", "OTHER"),
-        ("other_issue_refill", "PERF_OTHER_DETAIL", "ISSUE_REFILL"),
-        ("other_decode_refill", "PERF_OTHER_DETAIL", "DECODE_REFILL"),
-        ("other_issue_blocked", "PERF_OTHER_DETAIL", "ISSUE_BLOCKED"),
-        ("other_unclassified", "PERF_OTHER_DETAIL", "OTHER"),
-        ("decode_refill_after_control", "PERF_DECODE_REFILL_DETAIL", "AFTER_CONTROL"),
-        ("decode_refill_after_predict", "PERF_DECODE_REFILL_DETAIL", "AFTER_PREDICT"),
-        ("decode_refill_after_fence", "PERF_DECODE_REFILL_DETAIL", "AFTER_FENCE"),
-        ("decode_refill_after_supply", "PERF_DECODE_REFILL_DETAIL", "AFTER_SUPPLY"),
-        ("load_use", "PERF_SCOREBOARD_DETAIL", "LOAD_USE"), ("alu_use", "PERF_SCOREBOARD_DETAIL", "ALU_USE"),
-        ("mul_div_use", "PERF_SCOREBOARD_DETAIL", "MUL_DIV_USE"),
-        ("branch_wait", "PERF_SCOREBOARD_DETAIL", "BRANCH_SRC_WAIT"),
-        ("store_addr_wait", "PERF_SCOREBOARD_DETAIL", "STORE_ADDR_WAIT"),
-        ("store_data_wait", "PERF_SCOREBOARD_DETAIL", "STORE_DATA_WAIT"),
-        ("pending_alu", "PERF_PENDING_DETAIL", "ALU"), ("pending_load", "PERF_PENDING_DETAIL", "LOAD"),
-        ("pending_mul", "PERF_PENDING_DETAIL", "MUL"), ("ready_but_stall", "PERF_PENDING_DETAIL", "READY_BUT_STALL"),
-        ("load_to_alu", "PERF_LOAD_DETAIL", "TO_ALU"), ("load_to_branch", "PERF_LOAD_DETAIL", "TO_BRANCH"),
-        ("load_to_load", "PERF_LOAD_DETAIL", "TO_LOAD"), ("load_to_store", "PERF_LOAD_DETAIL", "TO_STORE"),
-        ("load_to_mul", "PERF_LOAD_DETAIL", "TO_MUL"),
-        ("alu_to_alu", "PERF_ALU_DETAIL", "TO_ALU"), ("alu_to_branch", "PERF_ALU_DETAIL", "TO_BRANCH"),
-        ("alu_to_load", "PERF_ALU_DETAIL", "TO_LOAD"), ("alu_to_store", "PERF_ALU_DETAIL", "TO_STORE"),
-        ("alu_to_mul", "PERF_ALU_DETAIL", "TO_MUL"),
-        ("pred_redirect", "PERF_FRONTEND", "PRED_TAKEN_REDIRECT"),
-        ("wrong_dir_flush", "PERF_FRONTEND", "WRONG_DIR_FLUSH"),
-        ("btb_miss_taken", "PERF_FRONTEND", "BTB_MISS_TAKEN"),
-        ("branches", "PERF_BRANCH", "BRANCHES"), ("mispred", "PERF_BRANCH", "MISPRED"),
-        ("stb_lookup", "PERF_LSU_STB", "LOOKUP"), ("stb_hit", "PERF_LSU_STB", "HIT"),
-        ("occ2", "PERF_PRODUCER_STATE", "OCC2"), ("both_wait", "PERF_PRODUCER_STATE", "BOTH_WAIT"),
-    ]
-    columns.extend((f"rob_occ_o{index}", "PERF_ROB_OCCUPANCY", f"O{index}")
-                   for index in range(13))
-    columns.extend([
-        ("rob_occ_accounted", "PERF_ROB_OCCUPANCY", "ACCOUNTED"),
-        ("rob_occ_sample", "PERF_ROB_OCCUPANCY", "SAMPLE"),
-    ])
-    columns.extend((f"rs_occ_o{index}", "PERF_RS_OCCUPANCY", f"O{index}")
-                   for index in range(11))
-    columns.extend([
-        ("rs_occ_accounted", "PERF_RS_OCCUPANCY", "ACCOUNTED"),
-        ("rs_occ_sample", "PERF_RS_OCCUPANCY", "SAMPLE"),
-    ])
-    for prefix, record, fields in (
-        ("flow", "PERF_PIPE_FLOW",
-         ("DISPATCH0", "DISPATCH1", "DISPATCH2", "SELECT0", "SELECT1",
-          "SELECT2", "SELECT3", "ISSUE0", "ISSUE1", "ISSUE2", "COMPLETE0",
-          "COMPLETE1", "COMPLETE2", "COMPLETE3", "COMPLETE4", "RETIRE0",
-          "RETIRE1", "RETIRE2", "SAMPLE")),
-        ("head", "PERF_ROB_HEAD_STATE",
-         ("EMPTY", "RETIRE1", "RETIRE2", "COMPLETE_VISIBLE", "NOT_ISSUED",
-          "WAIT_ALU", "WAIT_LOAD", "WAIT_MDU", "WAIT_STORE", "WAIT_BRANCH",
-          "WAIT_OTHER", "ACCOUNTED", "SAMPLE")),
-        ("backend_loss", "PERF_BACKEND_LOSS",
-         ("FLUSH", "OPERAND_BLOCK", "SINGLE_BUNDLE", "SELECT_REFILL",
-          "RS_DEPENDENCY", "RS_ORDER", "RS_RESOURCE", "RS_OTHER", "ROB_FULL",
-          "RS_REFILL", "DECODE_REFILL", "FRONTEND", "OTHER", "ACCOUNTED",
-          "EXPECTED")),
-    ):
-        columns.extend((f"{prefix}_{field.lower()}", record, field)
-                       for field in fields)
-    columns.extend((f"candidate_m{index}", "PERF_SELECT_CANDIDATES", f"M{index}")
-                   for index in range(16))
-    with detailed_csv.open("w", newline="") as stream:
-        writer = csv.writer(stream)
-        writer.writerow(["program", *[item[0] for item in columns]])
-        for program, records in programs:
-            writer.writerow([program, *[value(records, record, field) for _, record, field in columns]])
-
-    focus = [(name, records) for name, records in programs if name == "coremark"]
-    report = args.out_dir / "perf_bubble_analysis.md"
-    with report.open("w") as stream:
-        stream.write("# Pipeline bubble analysis\n\n")
-        stream.write("Generated from the final `PERF_*` record in each simulation log. ")
-        stream.write("The top-level cycle partition is mutually exclusive and checked for closure. ")
-        stream.write("Diagnostic event families overlap and must not be summed.\n\n")
-        stream.write("## Counting model\n\n")
-        stream.write("The primary-cause priority is `flush > multicycle hold > multi-cause decode stall > scoreboard > LSU structural > producer full > WB > CLINT > LSU serialize > no IF valid > issue > other`. ")
-        stream.write("This makes the partition exclusive, but a higher-priority cause masks lower-priority causes in that table. ")
-        stream.write("`ISSUE` is productive admission, not a bubble; `OTHER` and `NO_IF_VALID` are complete buckets but not complete root-cause classifications.\n\n")
-        stream.write("Subset/overlap rules used below:\n\n")
-        stream.write("- `branch/store wait` are consumer-role subsets of scoreboard cycles and may overlap producer-kind counters.\n")
-        stream.write("- producer-to-consumer cells are subsets of their producer-use row; two source operands can make producer-kind rows overlap in one cycle.\n")
-        stream.write("- pending producer kinds are selected by an `if/else` chain and are mutually exclusive with each other. Pending-tail explicitly excludes same-cycle issue hazards.\n")
-        stream.write("- `ready but stalled`, complete-visible, and registered-visible are cross-cutting state observations, not additional lost cycles.\n")
-        stream.write("- branch mispredicts are a subset of resolved branches; store-buffer hits are a subset of store-buffer lookups.\n")
-        stream.write("- the legacy cause histogram has exact SB/LSU/PF intersections only when WB and CLINT are both low. `WB_ANY` and `CLINT_ANY` are overlapping marginals.\n\n")
-        for program, records in focus:
-            cycles = value(records, "PERF_METRIC", "CYCLES")
-            insts = value(records, "PERF_METRIC", "INSTS")
-            ipc = value(records, "PERF_METRIC", "IPC")
-            capacity = value(records, "PERF_SLOT_ACCOUNT", "CAPACITY_SLOTS")
-            productive = value(records, "PERF_SLOT_ACCOUNT", "PRODUCTIVE_SLOTS")
-            lost = value(records, "PERF_SLOT_ACCOUNT", "LOST_SLOTS")
-            slot_ipc = value(records, "PERF_SLOT_ACCOUNT", "SLOT_IPC")
-            stream.write(f"## {program}\n\n{int(cycles)} cycles, {int(insts)} retired instructions, IPC {ipc:.4f}. ")
-            if capacity:
-                stream.write(f"Dual-slot capacity={int(capacity)}, productive slots={int(productive)}, lost slots={int(lost)}, slot utilization={slot_ipc:.4f}.\n\n")
-            else:
-                stream.write("Dual-slot accounting is unavailable in this log.\n\n")
-
-            backend_record_names = (
-                "PERF_ROB_OCCUPANCY", "PERF_RS_OCCUPANCY", "PERF_PIPE_FLOW",
-                "PERF_ROB_HEAD_STATE", "PERF_BACKEND_LOSS", "PERF_SELECT_CANDIDATES",
-            )
-            stream.write("### Six-stage backend accounting\n\n")
-            if not all(record in records for record in backend_record_names):
-                stream.write("The log predates the six-stage backend counters; rerun the simulation to generate this section.\n\n")
-            else:
-                sample = value(records, "PERF_PIPE_FLOW", "SAMPLE")
-                rob_fields = tuple(f"O{index}" for index in range(13))
-                rs_fields = tuple(f"O{index}" for index in range(11))
-                rob_total = sum(value(records, "PERF_ROB_OCCUPANCY", field)
-                                for field in rob_fields)
-                rs_total = sum(value(records, "PERF_RS_OCCUPANCY", field)
-                               for field in rs_fields)
-                rob_accounted = value(records, "PERF_ROB_OCCUPANCY", "ACCOUNTED")
-                rs_accounted = value(records, "PERF_RS_OCCUPANCY", "ACCOUNTED")
-                rob_closed = (rob_total == rob_accounted ==
-                              value(records, "PERF_ROB_OCCUPANCY", "SAMPLE") == sample)
-                rs_closed = (rs_total == rs_accounted ==
-                             value(records, "PERF_RS_OCCUPANCY", "SAMPLE") == sample)
-                rob_average = (sum(index * value(records, "PERF_ROB_OCCUPANCY", f"O{index}")
-                                   for index in range(13)) / sample if sample else 0.0)
-                rs_average = (sum(index * value(records, "PERF_RS_OCCUPANCY", f"O{index}")
-                                  for index in range(11)) / sample if sample else 0.0)
-                stream.write(
-                    f"ROB occupancy closure: **{'PASS' if rob_closed else 'FAIL'}**, "
-                    f"average={rob_average:.2f}, full(O12)={int(value(records, 'PERF_ROB_OCCUPANCY', 'O12'))} "
-                    f"({pct(value(records, 'PERF_ROB_OCCUPANCY', 'O12'), sample)}).  \n"
-                )
-                stream.write(
-                    f"RS occupancy closure: **{'PASS' if rs_closed else 'FAIL'}**, "
-                    f"average={rs_average:.2f}, empty(O0)={int(value(records, 'PERF_RS_OCCUPANCY', 'O0'))} "
-                    f"({pct(value(records, 'PERF_RS_OCCUPANCY', 'O0'), sample)}).\n\n"
-                )
-                stream.write("| Occupancy | ROB cycles | RS cycles |\n|---:|---:|---:|\n")
-                for index in range(13):
-                    rs_cell = (str(int(value(records, "PERF_RS_OCCUPANCY", f"O{index}")))
-                               if index <= 10 else "-")
-                    stream.write(
-                        f"| {index} | {int(value(records, 'PERF_ROB_OCCUPANCY', f'O{index}'))} "
-                        f"| {rs_cell} |\n"
-                    )
-
-                flow_families = (
-                    ("dispatch", tuple(f"DISPATCH{index}" for index in range(3))),
-                    ("select", tuple(f"SELECT{index}" for index in range(4))),
-                    ("issue", tuple(f"ISSUE{index}" for index in range(3))),
-                    ("complete", tuple(f"COMPLETE{index}" for index in range(5))),
-                    ("retire", tuple(f"RETIRE{index}" for index in range(3))),
-                )
-                stream.write("\n| Flow family | Histogram | Accounted | Closure |\n|---|---|---:|---|\n")
-                for label, fields in flow_families:
-                    counts = [value(records, "PERF_PIPE_FLOW", field) for field in fields]
-                    total = sum(counts)
-                    histogram = ", ".join(f"{index}:{int(count)}"
-                                          for index, count in enumerate(counts))
-                    stream.write(
-                        f"| {label} | {histogram} | {int(total)} | "
-                        f"{'PASS' if total == sample else 'FAIL'} |\n"
-                    )
-
-                head_fields = (
-                    ("empty", "EMPTY"), ("retire one", "RETIRE1"),
-                    ("retire two", "RETIRE2"),
-                    ("completion visible, ready pending", "COMPLETE_VISIBLE"),
-                    ("not issued", "NOT_ISSUED"), ("wait ALU", "WAIT_ALU"),
-                    ("wait load", "WAIT_LOAD"), ("wait MDU", "WAIT_MDU"),
-                    ("wait store", "WAIT_STORE"), ("wait branch", "WAIT_BRANCH"),
-                    ("wait other", "WAIT_OTHER"),
-                )
-                head_total = sum(value(records, "PERF_ROB_HEAD_STATE", field)
-                                 for _, field in head_fields)
-                head_accounted = value(records, "PERF_ROB_HEAD_STATE", "ACCOUNTED")
-                head_closed = (head_total == head_accounted ==
-                               value(records, "PERF_ROB_HEAD_STATE", "SAMPLE") == sample)
-                stream.write(
-                    f"\nROB-head closure: **{'PASS' if head_closed else 'FAIL'}**, "
-                    f"accounted={int(head_accounted)}, sample={int(sample)}.\n\n"
-                )
-                stream.write("| ROB-head state | Cycles | Sample |\n|---|---:|---:|\n")
-                for label, field in sorted(
-                    head_fields,
-                    key=lambda item: value(records, "PERF_ROB_HEAD_STATE", item[1]),
-                    reverse=True,
-                ):
-                    count = value(records, "PERF_ROB_HEAD_STATE", field)
-                    stream.write(f"| {label} | {int(count)} | {pct(count, sample)} |\n")
-
-                loss_fields = (
-                    ("flush", "FLUSH"), ("operand block", "OPERAND_BLOCK"),
-                    ("single input bundle", "SINGLE_BUNDLE"),
-                    ("select-buffer refill", "SELECT_REFILL"),
-                    ("RS dependency", "RS_DEPENDENCY"), ("RS order", "RS_ORDER"),
-                    ("RS resource", "RS_RESOURCE"), ("RS other", "RS_OTHER"),
-                    ("ROB full", "ROB_FULL"), ("RS refill", "RS_REFILL"),
-                    ("decode refill", "DECODE_REFILL"), ("front end", "FRONTEND"),
-                    ("other", "OTHER"),
-                )
-                loss_total = sum(value(records, "PERF_BACKEND_LOSS", field)
-                                 for _, field in loss_fields)
-                loss_accounted = value(records, "PERF_BACKEND_LOSS", "ACCOUNTED")
-                loss_expected = value(records, "PERF_BACKEND_LOSS", "EXPECTED")
-                loss_closed = loss_total == loss_accounted == loss_expected
-                stream.write(
-                    f"\nBackend lost-slot closure: **{'PASS' if loss_closed else 'FAIL'}**, "
-                    f"accounted={int(loss_accounted)}, expected={int(loss_expected)}.\n\n"
-                )
-                stream.write("| Lost-slot cause | Slots | Lost slots |\n|---|---:|---:|\n")
-                for label, field in sorted(
-                    loss_fields,
-                    key=lambda item: value(records, "PERF_BACKEND_LOSS", item[1]),
-                    reverse=True,
-                ):
-                    count = value(records, "PERF_BACKEND_LOSS", field)
-                    stream.write(f"| {label} | {int(count)} | {pct(count, loss_expected)} |\n")
-
-                candidate_total = sum(value(records, "PERF_SELECT_CANDIDATES", f"M{mask}")
-                                      for mask in range(16))
-                stream.write(
-                    f"\nSelect-candidate closure: **{'PASS' if candidate_total == sample else 'FAIL'}**, "
-                    f"accounted={int(candidate_total)}, sample={int(sample)}. "
-                    "Mask bits are `{serial,p1,p0,alu}`.\n\n"
-                )
-                stream.write("| Mask | Active domains | Cycles | Sample |\n|---:|---|---:|---:|\n")
-                domains = ("alu", "p0", "p1", "serial")
-                for mask in range(16):
-                    count = value(records, "PERF_SELECT_CANDIDATES", f"M{mask}")
-                    if not count:
-                        continue
-                    active = "+".join(domain for bit, domain in enumerate(domains)
-                                      if mask & (1 << bit)) or "none"
-                    stream.write(f"| 0x{mask:x} | {active} | {int(count)} | {pct(count, sample)} |\n")
-                stream.write("\n")
-            partition = [(label, value(records, "PERF_CYCLE_ACCOUNT", key)) for label, key in (
-                ("scoreboard dependency", "SCOREBOARD"), ("front-end invalid", "NO_IF_VALID"),
-                ("unclassified/issue gap", "OTHER"), ("control flush", "FLUSH"),
-                ("multicycle EX hold", "MUL_HOLD"), ("LSU structural", "LSU_STRUCT"),
-                ("LSU serialization", "LSU_SERIALIZE"),
-                ("producer slots full", "PRODUCER_FULL"), ("overlapping causes", "MULTI"),
-                ("WB backpressure", "WB"), ("CLINT serialization", "CLINT"),
-                ("productive issue", "ISSUE"))]
-            accounted = value(records, "PERF_CYCLE_ACCOUNT", "ACCOUNTED")
-            sample_cycles = value(records, "PERF_CYCLE_ACCOUNT", "SAMPLE_CYCLES") or cycles
-            arch_delta_field = ("ARCH_CYCLE_DELTA" if "ARCH_CYCLE_DELTA" in records.get("PERF_CYCLE_ACCOUNT", {})
-                                else "CYCLE_DELTA")
-            arch_delta = signed_counter(value(records, "PERF_CYCLE_ACCOUNT", arch_delta_field))
-            closed = accounted == sample_cycles and sum(count for _, count in partition) == sample_cycles
-            stream.write("### Complete exclusive cycle partition\n\n")
-            stream.write(f"Closure: **{'PASS' if closed else 'FAIL'}**, accounted={int(accounted)}, sample_cycles={int(sample_cycles)}. ")
-            stream.write(f"Architectural mcycle={int(cycles)}, mcycle-sample delta={int(arch_delta)}.\n\n")
-            stream.write("| Primary bucket | Cycles | Total cycles |\n|---|---:|---:|\n")
-            for label, count in sorted(partition, key=lambda item: item[1], reverse=True):
-                stream.write(f"| {label} | {int(count)} | {pct(count, cycles)} |\n")
-            stream.write("\nThis table is exhaustive for sampled cycles, but it is priority-attributed rather than causally independent. ")
-            stream.write("A mechanism's removable-cycle upper bound is its exclusive bucket plus only overlapping buckets proven to contain that mechanism.\n")
-            has_supply_detail = "PERF_NOIF_DETAIL" in records and "PERF_OTHER_DETAIL" in records
-            supply_unclassified = (value(records, "PERF_NOIF_DETAIL", "OTHER") +
-                                   value(records, "PERF_OTHER_DETAIL", "OTHER"))
-            root_status = "COMPLETE" if closed and has_supply_detail and supply_unclassified == 0 else "PARTIAL"
-            stream.write(f"\nDefined-taxonomy completeness: **{root_status}**. `NO_IF_VALID`={int(value(records, 'PERF_CYCLE_ACCOUNT', 'NO_IF_VALID'))}, ")
-            stream.write(f"`OTHER`={int(value(records, 'PERF_CYCLE_ACCOUNT', 'OTHER'))}, unclassified children={int(supply_unclassified)}.\n")
-
-            stream.write("\n### Front-end and pipeline-supply gaps\n\n")
-            noif_parent = value(records, "PERF_CYCLE_ACCOUNT", "NO_IF_VALID")
-            other_parent = value(records, "PERF_CYCLE_ACCOUNT", "OTHER")
-            if not has_supply_detail:
-                stream.write("The current log predates the sub-cause counters. Rerun simulation to split these parent buckets.\n")
-            else:
-                noif_parts = [("resolved control redirect refill", "CONTROL_REDIRECT"),
-                              ("predicted-taken redirect refill", "PREDICT_REDIRECT"),
-                              ("FENCE.I refill", "FENCE_REFILL"),
-                              ("memory response arrives while queue empty", "MEM_RESPONSE"),
-                              ("first fetch launch while queue empty", "FETCH_LAUNCH"),
-                              ("pending predicted target", "PENDING_REDIRECT"),
-                              ("unclassified front-end empty", "OTHER")]
-                noif_sum = sum(value(records, "PERF_NOIF_DETAIL", key) for _, key in noif_parts)
-                stream.write(f"`NO_IF_VALID` child closure: **{'PASS' if noif_sum == noif_parent else 'FAIL'}**, children={int(noif_sum)}, parent={int(noif_parent)}.\n\n")
-                stream.write("| NO_IF_VALID child (exclusive priority) | Cycles | Parent |\n|---|---:|---:|\n")
-                for label, key in noif_parts:
-                    count = value(records, "PERF_NOIF_DETAIL", key)
-                    stream.write(f"| {label} | {int(count)} | {pct(count, noif_parent)} |\n")
-                other_parts = [("issue register refill from decode FIFO", "ISSUE_REFILL"),
-                               ("decode FIFO refill from IF queue", "DECODE_REFILL"),
-                               ("valid issue unable to advance", "ISSUE_BLOCKED"),
-                               ("unclassified supply gap", "OTHER")]
-                other_sum = sum(value(records, "PERF_OTHER_DETAIL", key) for _, key in other_parts)
-                stream.write(f"\n`OTHER` child closure: **{'PASS' if other_sum == other_parent else 'FAIL'}**, children={int(other_sum)}, parent={int(other_parent)}.\n\n")
-                stream.write("| OTHER child (exclusive) | Cycles | Parent |\n|---|---:|---:|\n")
-                for label, key in other_parts:
-                    count = value(records, "PERF_OTHER_DETAIL", key)
-                    stream.write(f"| {label} | {int(count)} | {pct(count, other_parent)} |\n")
-                if "PERF_DECODE_REFILL_DETAIL" in records:
-                    decode_parent = value(records, "PERF_OTHER_DETAIL", "DECODE_REFILL")
-                    decode_parts = [("after resolved control redirect", "AFTER_CONTROL"),
-                                    ("after predicted redirect", "AFTER_PREDICT"),
-                                    ("after FENCE.I", "AFTER_FENCE"),
-                                    ("after ordinary front-end supply gap", "AFTER_SUPPLY")]
-                    decode_sum = sum(value(records, "PERF_DECODE_REFILL_DETAIL", key) for _, key in decode_parts)
-                    stream.write(f"\nDecode-refill cross-sequence closure: **{'PASS' if decode_sum == decode_parent else 'FAIL'}**, children={int(decode_sum)}, parent={int(decode_parent)}.\n\n")
-                    stream.write("| Decode refill sequence subset | Cycles | Decode refill |\n|---|---:|---:|\n")
-                    for label, key in decode_parts:
-                        count = value(records, "PERF_DECODE_REFILL_DETAIL", key)
-                        stream.write(f"| {label} | {int(count)} | {pct(count, decode_parent)} |\n")
-                stream.write("\nRedirect refill has priority over request-state labels, so those rows are exclusive attributions. ")
-                stream.write("A redirect-refill cycle can physically also contain a fetch launch or memory response.\n")
-
-            hist = records.get("PERF_CAUSE_HIST", {})
-            stream.write("\n### Decode-stall intersections\n\n")
-            stream.write("The 32-bin bitmap covers SB/LSU structural/PF/WB/CLINT. LSU serialization is independently primary-attributed and is not a bitmap dimension.\n\n")
-            stream.write("| Exact combination (WB=0, CLINT=0) | Cycles | Relation |\n|---|---:|---|\n")
-            for label, key, relation in (
-                ("SB only", "SB", "exclusive bin"), ("LSU only", "LSU", "exclusive bin"),
-                ("LSU & SB", "LSU_SB", "intersection"), ("PF only", "PF", "exclusive bin"),
-                ("PF & SB", "PF_SB", "intersection"), ("PF & LSU", "PF_LSU", "intersection"),
-                ("PF & LSU & SB", "PF_LSU_SB", "three-way intersection")):
-                stream.write(f"| {label} | {int(hist.get(key, 0.0))} | {relation} |\n")
-            stream.write(f"\nAggregated overlapping marginals: WB_ANY={int(hist.get('WB_ANY', 0.0))}, ")
-            stream.write(f"CLINT_ANY={int(hist.get('CLINT_ANY', 0.0))}. ")
-            if "PERF_CAUSE_HIST_FULL" in records:
-                stream.write("The log contains all 32 raw bitmask bins. Pairwise intersections (including higher-order intersections) are:\n\n")
-                full_hist = records["PERF_CAUSE_HIST_FULL"]
-                signals = (("SB", 0), ("LSU", 1), ("PF", 2), ("WB", 3), ("CLINT", 4))
-                stream.write("| A | B | A & B cycles |\n|---|---|---:|\n")
-                for left_index, (left_name, left_bit) in enumerate(signals):
-                    for right_name, right_bit in signals[left_index + 1:]:
-                        intersection = sum(
-                            full_hist.get(f"H{mask:02d}", 0.0)
-                            for mask in range(32)
-                            if mask & (1 << left_bit) and mask & (1 << right_bit)
-                        )
-                        stream.write(f"| {left_name} | {right_name} | {int(intersection)} |\n")
-            else:
-                stream.write("This legacy log does not contain all 32 raw bins, so WB/CLINT intersections cannot be reconstructed exactly; rerun simulation with the updated testbench.\n")
-            stream.write("\n### Scoreboard diagnosis\n\n| Signal | Cycles/events | Scoreboard cycles |\n|---|---:|---:|\n")
-            scoreboard = value(records, "PERF_STALL", "SCOREBOARD")
-            details = [("load producer use", "PERF_SCOREBOARD_DETAIL", "LOAD_USE"),
-                       ("ALU producer use", "PERF_SCOREBOARD_DETAIL", "ALU_USE"),
-                       ("MUL/DIV producer use", "PERF_SCOREBOARD_DETAIL", "MUL_DIV_USE"),
-                       ("pending load tail", "PERF_PENDING_DETAIL", "LOAD"),
-                       ("pending MUL tail", "PERF_PENDING_DETAIL", "MUL"),
-                       ("branch source wait", "PERF_SCOREBOARD_DETAIL", "BRANCH_SRC_WAIT"),
-                       ("store address wait", "PERF_SCOREBOARD_DETAIL", "STORE_ADDR_WAIT"),
-                       ("store data wait", "PERF_SCOREBOARD_DETAIL", "STORE_DATA_WAIT"),
-                       ("ready producer but still stalled", "PERF_PENDING_DETAIL", "READY_BUT_STALL")]
-            for label, record, field in details:
-                count = value(records, record, field)
-                stream.write(f"| {label} | {int(count)} | {pct(count, scoreboard)} |\n")
-            pending_sum = sum(value(records, "PERF_PENDING_DETAIL", field) for field in ("ALU", "LOAD", "MUL", "OTHER"))
-            pending_tail = value(records, "PERF_LOAD_DETAIL", "PENDING_TAIL")
-            stream.write(f"\nPending-kind partition check: {int(pending_sum)} classified events vs {int(pending_tail)} pending-tail events")
-            stream.write(" (PASS).\n" if pending_sum == pending_tail else " (FAIL: counter definitions or sampling differ).\n")
-            stream.write("\nProducer-to-consumer events (overlapping):\n\n| Producer | ALU | Branch | Load | Store | MUL |\n|---|---:|---:|---:|---:|---:|\n")
-            for producer, record in (("load", "PERF_LOAD_DETAIL"), ("ALU", "PERF_ALU_DETAIL")):
-                vals = [int(value(records, record, key)) for key in ("TO_ALU", "TO_BRANCH", "TO_LOAD", "TO_STORE", "TO_MUL")]
-                stream.write(f"| {producer} | {' | '.join(map(str, vals))} |\n")
-            branches = value(records, "PERF_BRANCH", "BRANCHES")
-            mispred = value(records, "PERF_BRANCH", "MISPRED")
-            lookup = value(records, "PERF_LSU_STB", "LOOKUP")
-            hit = value(records, "PERF_LSU_STB", "HIT")
-            stream.write(f"\nFront end: {int(mispred)}/{int(branches)} branch mispredicts ({pct(mispred, branches)}), ")
-            stream.write(f"{int(value(records, 'PERF_FRONTEND', 'BTB_MISS_TAKEN'))} taken BTB misses. ")
-            stream.write(f"LSU store-buffer forwarding hit rate: {int(hit)}/{int(lookup)} ({pct(hit, lookup)}).\n\n")
-
-    print(f"[PPA] Detailed bubble CSV: {detailed_csv}")
-    print(f"[PPA] Bubble analysis: {report}")
+    write_csv(args.out_dir / "perf_bubble_detail.csv", programs)
+    write_report(args.out_dir / "perf_bubble_analysis.md", programs)
 
 
 if __name__ == "__main__":

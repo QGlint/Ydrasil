@@ -247,6 +247,8 @@ import ydrasil_axi_pkg::*;
 	ydrasil_ex_hzd_pkt_t            ex_hzd_pkt1;
 	ydrasil_gpr_fwd_pkt_t           lsu_fwd_pkt;
 	ydrasil_reservation_pkt_t       dtcm_reservation;
+	wire                            dtcm_launch_wakeup_valid;
+	producer_id_t                   dtcm_launch_wakeup_id;
 	ydrasil_reservation_pkt_t       mdu_due;
 	ydrasil_reservation_pkt_t       mdu_result_reservation;
 	wire [REGS_DATA_WIDTH-1:0]      mdu_bypass_data;
@@ -284,12 +286,7 @@ import ydrasil_axi_pkg::*;
 	wire [REGS_DATA_WIDTH-1:0]      retire_value1;
 	wire                            issue_at_rob_head;
 	producer_id_t                   rob_head_id;
-	ydrasil_rob_source_state_t      issue_src0_state;
-	ydrasil_rob_source_state_t      issue_src1_state;
-	ydrasil_rob_source_state_t      issue_src2_state;
-	ydrasil_rob_source_state_t      issue_src3_state;
-	wire [ydrasil_pkg::PRODUCER_NUM-1:0]
-	                                branch_recovery_keep_mask;
+	wire                            backend_empty;
 	ydrasil_issue_pkt_t             id_issue_pkt;
 	ydrasil_issue_pkt_t             id_issue_pkt1;
 	ydrasil_source_desc_t           id_decode_src0;
@@ -304,20 +301,16 @@ import ydrasil_axi_pkg::*;
 	ydrasil_source_desc_t           dispatch_src1;
 	ydrasil_source_desc_t           dispatch_src2;
 	ydrasil_source_desc_t           dispatch_src3;
-	producer_id_t                   dispatch_src0_tag;
-	producer_id_t                   dispatch_src1_tag;
-	producer_id_t                   dispatch_src2_tag;
-	producer_id_t                   dispatch_src3_tag;
-	wire                            dispatch_src0_ready;
-	wire                            dispatch_src1_ready;
-	wire                            dispatch_src2_ready;
-	wire                            dispatch_src3_ready;
+	wire                            dispatch_src0_static_ready;
+	wire                            dispatch_src1_static_ready;
+	wire                            dispatch_src2_static_ready;
+	wire                            dispatch_src3_static_ready;
 	ydrasil_compact_uop_t           issue_head_compact_uop;
 	ydrasil_compact_uop_t           issue_head_compact_uop1;
 	wire                            issue_consume_two;
 	wire                            issue_slot1_replay;
-	wire                            issue_scoreboard_stall;
-	wire                            issue_scoreboard_stall1;
+	wire                            issue_dependency_wait;
+	wire                            issue_dependency_wait1;
 	wire                            issue_lsu_struct_stall;
 	wire                            issue_lsu_struct_stall1;
 	wire                            issue_serialize_stall;
@@ -326,44 +319,17 @@ import ydrasil_axi_pkg::*;
 	wire                            issue_src2_wait;
 	wire                            issue_src3_wait;
 	wire                            dispatch_ready;
+	wire                            dispatch_two_ready;
 	wire                            issue_pipe_has_room;
 	wire                            issue_pipe_push;
 	wire                            issue_pipe_push_two;
 	wire                            decode_if_ready;
 	wire                            decode_consume_two;
 	wire                            id_ex_execute_valid;
-	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    id_ctrl_rs1_addr;
-	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    id_ctrl_rs2_addr;
-	wire                            id_ctrl_rs1_ren;
-	wire                            id_ctrl_rs2_ren;
-	wire                            id_ctrl_rd_wen;
-	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0]    id_ctrl_rd_addr;
-	wire                            id_ctrl_lsu_req;
-	wire                            id_ctrl_store_req;
-	wire                            scoreboard_stall;
-	wire                            lsu_struct_stall;
 	wire                            ex_accept_valid;
 	wire                            ex_accept_valid1;
 	wire                            exception_sys_accept =
 		csr_in_valid && ex_accept_valid1;
-	wire                            id_ex_rd_issue;
-	wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_clear_mask;
-	wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_issue_mask;
-	wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_for_hazard;
-	wire [ydrasil_pkg::REGS_NUM-1:0] gpr_pending_q;
-	wire                            rs1_pending_stall;
-	wire                            rs2_pending_stall;
-	wire                            rd_waw_stall;
-	wire                            rs1_issue_hzd;
-	wire                            rs2_issue_hzd;
-	wire                            rd_issue_hzd;
-	wire                            issue_load_producer;
-	wire                            issue_alu_producer;
-	wire                            issue_mul_div_producer;
-	wire                            issue_src_hzd;
-	wire                            store_data_wait;
-
-
 	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]      csr_ex_rdata;
 	wire 					    ex_csr_wen;
 	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0]      ex_csr_wdata;
@@ -421,13 +387,17 @@ import ydrasil_axi_pkg::*;
 		main_alu_due_valid || main_csr_due_valid;
 	assign completion_ready_rd[COMPLETION_ALU] = main_csr_due_valid ?
 		dual_meta.rd_addr : alu_in_rd_addr;
-	// LSU result and readiness cross the same EX/WB boundary.  Feeding the
-	// pre-register response into Ctrl reconnects LSU recovery/MMIO control to
-	// the ROB ready array even though the data already stops in completion_ctrl.
-	assign completion_ready_meta[COMPLETION_LSU] =
-		completion_meta[COMPLETION_LSU];
-	assign completion_ready_rd[COMPLETION_LSU] =
-		completion_rd[COMPLETION_LSU];
+	// LSU completion identity is already registered in load_s1/mmio_wb.  Let the
+	// ROB capture this narrow due token on the same edge that completion_ctrl
+	// captures the data; retirement observes producer_done_q one cycle later and
+	// can then use the registered completion lane for its value bypass.
+	assign completion_ready_meta[COMPLETION_LSU].valid =
+		lsu_completion_valid;
+	assign completion_ready_meta[COMPLETION_LSU].producer_id =
+		lsu_completion_producer_id;
+	assign completion_ready_meta[COMPLETION_LSU].producer_tracked =
+		lsu_completion_producer_tracked;
+	assign completion_ready_rd[COMPLETION_LSU] = lsu_completion_addr;
 	assign completion_ready_meta[COMPLETION_MUL].valid =
 		mdu_result_reservation.valid;
 	assign completion_ready_meta[COMPLETION_MUL].producer_id =
@@ -476,12 +446,14 @@ import ydrasil_axi_pkg::*;
 		.rst_n             (rst_n),
 			.req_i             (lsu_req_pkt),
 				.commit0_valid_i   (retire_valid),
-				.commit0_id_i      (retire_value_id0),
+					.commit0_id_i      (commit_pkt.producer_id),
 				.commit1_valid_i   (retire_valid1),
-				.commit1_id_i      (retire_value_id1),
+					.commit1_id_i      (commit_pkt1.producer_id),
 			.branch_recovery_i (ex_pc_redirect),
 			.trap_flush_i      (trap_ctrl_pkt.redirect),
-			.recovery_keep_mask_i(branch_recovery_keep_mask),
+			.recovery_head_slot_i(rob_head_id[PRODUCER_SLOT_WIDTH-1:0]),
+			.recovery_branch_slot_i(ex_bp_train_pkt.producer_id[
+				PRODUCER_SLOT_WIDTH-1:0]),
 			.rob_head_id_i      (rob_head_id),
 		.completion_meta_i (completion_meta),
 		.completion_data_i (completion_data),
@@ -497,6 +469,8 @@ import ydrasil_axi_pkg::*;
 		.status_o          (lsu_status_pkt),
 		.issue_credit_o     (lsu_issue_credit),
 		.dtcm_reservation_o(dtcm_reservation),
+		.dtcm_launch_wakeup_valid_o(dtcm_launch_wakeup_valid),
+		.dtcm_launch_wakeup_id_o(dtcm_launch_wakeup_id),
 		.dtcm_resp_data_o   (dtcm_resp_data),
 		.completion_valid_o (lsu_completion_valid),
 		.completion_data_o  (lsu_completion_data),
@@ -634,7 +608,7 @@ import ydrasil_axi_pkg::*;
 			.if_id1_src1_used_i  (if_id1_src1_used),
 			.if_id1_dst_writes_i (if_id1_dst_writes),
 		.if_id_ready_o       (decode_if_ready),
-		.if_id_consume_two_o (decode_consume_two),
+			.if_id_consume_two_o (),
 		.issue_pkt_o         (id_issue_pkt),
 		.issue_pkt1_o        (id_issue_pkt1),
 		.decode_src0_o       (id_decode_src0),
@@ -653,7 +627,9 @@ import ydrasil_axi_pkg::*;
 			.flush_id_i          (pipeline_flush),
 			.branch_recovery_i   (ex_pc_redirect),
 			.trap_flush_i        (trap_ctrl_pkt.redirect),
-			.recovery_keep_mask_i(branch_recovery_keep_mask),
+			.recovery_head_slot_i(rob_head_id[PRODUCER_SLOT_WIDTH-1:0]),
+			.recovery_branch_slot_i(ex_bp_train_pkt.producer_id[
+				PRODUCER_SLOT_WIDTH-1:0]),
 			.decode_pkt_i        (id_issue_pkt),
 			.decode_pkt1_i       (id_issue_pkt1),
 			.decode_valid_i      (if_id_valid),
@@ -669,18 +645,17 @@ import ydrasil_axi_pkg::*;
 		.dispatch_pkt_i      (dispatch_issue_pkt),
 		.dispatch_pkt1_i     (dispatch_issue_pkt1),
 		.renamed_src0_i      (dispatch_src0),
-		.renamed_src1_i      (dispatch_src1),
-		.renamed_src2_i      (dispatch_src2),
-		.renamed_src3_i      (dispatch_src3),
-		.renamed_src0_tag_i  (dispatch_src0_tag),
-		.renamed_src1_tag_i  (dispatch_src1_tag),
-		.renamed_src2_tag_i  (dispatch_src2_tag),
-		.renamed_src3_tag_i  (dispatch_src3_tag),
-		.renamed_src0_ready_i(dispatch_src0_ready),
-		.renamed_src1_ready_i(dispatch_src1_ready),
-		.renamed_src2_ready_i(dispatch_src2_ready),
-		.renamed_src3_ready_i(dispatch_src3_ready),
-		.dispatch_ready_i    (dispatch_ready),
+			.renamed_src1_i      (dispatch_src1),
+			.renamed_src2_i      (dispatch_src2),
+			.renamed_src3_i      (dispatch_src3),
+			.renamed_src0_static_ready_i(dispatch_src0_static_ready),
+			.renamed_src1_static_ready_i(dispatch_src1_static_ready),
+			.renamed_src2_static_ready_i(dispatch_src2_static_ready),
+			.renamed_src3_static_ready_i(dispatch_src3_static_ready),
+			.dispatch_ready_i    (dispatch_ready),
+			.dispatch_two_ready_i(dispatch_two_ready),
+			.dtcm_launch_wakeup_valid_i(dtcm_launch_wakeup_valid),
+			.dtcm_launch_wakeup_id_i(dtcm_launch_wakeup_id),
 			.completion_meta_i   (completion_meta),
 			.completion_data_i   (completion_data),
 			.commit_pkt_i        (commit_pkt),
@@ -692,16 +667,15 @@ import ydrasil_axi_pkg::*;
 			.lsu_idle_i          (lsu_status_pkt.idle),
 		.lsu_credit_i        (lsu_issue_credit),
 			.dtcm_reservation_i (dtcm_reservation),
-				.mdu_due_i          (mdu_due),
+			.mdu_due_i          (mdu_due),
 				.mdu_div_available_i(mdu_div_available),
 				.mdu_result_reservation_i(mdu_result_reservation),
 			.mdu_bypass_data_i  (mdu_bypass_data),
 		.dtcm_resp_data_i   (dtcm_resp_data),
 		.issue_at_rob_head_i (issue_at_rob_head),
 		.rob_head_id_i       (rob_head_id),
-		.issue_src1_state_i  (issue_src1_state),
 		.decode_ready_o      (issue_pipe_has_room),
-		.decode_consume_two_o(),
+			.decode_consume_two_o(decode_consume_two),
 		.dispatch_accept_o   (issue_pipe_push),
 		.dispatch_accept1_o  (issue_pipe_push_two),
 			.issue_pkt_o         (issue_head_compact_uop),
@@ -714,8 +688,8 @@ import ydrasil_axi_pkg::*;
 		.issue_fence_o       (id_fence_i),
 		.issue_fence_tag_o   (issue_fence_tag),
 		.issue_fence_next_pc_o(issue_fence_next_pc),
-		.scoreboard_stall_o  (issue_scoreboard_stall),
-		.scoreboard_stall1_o (issue_scoreboard_stall1),
+		.dependency_wait_o   (issue_dependency_wait),
+		.dependency_wait1_o  (issue_dependency_wait1),
 		.lsu_struct_stall_o  (issue_lsu_struct_stall),
 		.lsu_struct_stall1_o (issue_lsu_struct_stall1),
 		.serialize_stall_o   (issue_serialize_stall),
@@ -771,6 +745,9 @@ import ydrasil_axi_pkg::*;
 		.flush_i            (flush_ex),
 		.trap_redirect_i   (trap_ctrl_pkt.redirect),
 		.trap_redirect_addr_i(trap_ctrl_pkt.redirect_addr),
+		.recovery_head_slot_i(rob_head_id[PRODUCER_SLOT_WIDTH-1:0]),
+		.recovery_branch_slot_i(ex_bp_train_pkt.producer_id[
+			PRODUCER_SLOT_WIDTH-1:0]),
 		.alu_valid_i        (alu_in_valid),
 		.alu_operand_a_i    (alu_in_operand_a),
 		.alu_operand_b_i    (alu_in_operand_b),
@@ -906,6 +883,8 @@ import ydrasil_axi_pkg::*;
 			.ex_no_result_due0_id_i(alu_in_producer_id),
 			.ex_no_result_due1_valid_i(ex_no_result_due1_valid),
 			.ex_no_result_due1_id_i(dual_meta.producer_id),
+			.ex_branch_due_valid_i(dual_bru_valid && !dual_meta.rd_wen),
+			.ex_branch_due_id_i(dual_meta.producer_id),
 			.serial_complete_i (serial_complete),
 			.dispatch_pkt_i    (id_issue_pkt),
 			.dispatch_pkt1_i   (id_issue_pkt1),
@@ -932,25 +911,18 @@ import ydrasil_axi_pkg::*;
 			.dispatch_pkt_o    (dispatch_issue_pkt),
 			.dispatch_pkt1_o   (dispatch_issue_pkt1),
 			.renamed_src0_o    (dispatch_src0),
-			.renamed_src1_o    (dispatch_src1),
-			.renamed_src2_o    (dispatch_src2),
-			.renamed_src3_o    (dispatch_src3),
-			.renamed_src0_tag_o(dispatch_src0_tag),
-			.renamed_src1_tag_o(dispatch_src1_tag),
-			.renamed_src2_tag_o(dispatch_src2_tag),
-			.renamed_src3_tag_o(dispatch_src3_tag),
-			.renamed_src0_ready_o(dispatch_src0_ready),
-			.renamed_src1_ready_o(dispatch_src1_ready),
-			.renamed_src2_ready_o(dispatch_src2_ready),
-			.renamed_src3_ready_o(dispatch_src3_ready),
-			.dispatch_ready_o  (dispatch_ready),
-			.issue_src0_state_o(issue_src0_state),
-			.issue_src1_state_o(issue_src1_state),
-			.issue_src2_state_o(issue_src2_state),
-			.issue_src3_state_o(issue_src3_state),
+				.renamed_src1_o    (dispatch_src1),
+				.renamed_src2_o    (dispatch_src2),
+				.renamed_src3_o    (dispatch_src3),
+				.renamed_src0_static_ready_o(dispatch_src0_static_ready),
+				.renamed_src1_static_ready_o(dispatch_src1_static_ready),
+				.renamed_src2_static_ready_o(dispatch_src2_static_ready),
+				.renamed_src3_static_ready_o(dispatch_src3_static_ready),
+					.dispatch_ready_o  (dispatch_ready),
+				.dispatch_two_ready_o(dispatch_two_ready),
 			.issue_at_rob_head_o(issue_at_rob_head),
 			.rob_head_id_o     (rob_head_id),
-			.gpr_pending_o     (gpr_pending_q),
+			.backend_empty_o   (backend_empty),
 			.ex_accept_valid_o (ex_accept_valid),
 			.ex_accept_valid1_o(ex_accept_valid1),
 			.retire_commit_o  (commit_pkt),
@@ -967,8 +939,7 @@ import ydrasil_axi_pkg::*;
 			.flush_ex_o        (flush_ex),
 			.pipeline_flush_o  (pipeline_flush),
 		.branch_jump_o     (branch_jump),
-		.branch_target_o   (branch_target),
-		.branch_recovery_keep_mask_o(branch_recovery_keep_mask)
+			.branch_target_o   (branch_target)
 	);
 
 	ydrasil_csr_stage u_ydrasil_csr_stage (
@@ -1001,7 +972,7 @@ import ydrasil_axi_pkg::*;
 		.lane_b_pc_i       (dual_id_ex_pc),
 		.frontend_pc_i     (if_id_pc),
 		.lsu_idle_i        (lsu_status_pkt.idle),
-		.gpr_pending_i     (gpr_pending_q),
+		.backend_empty_i   (backend_empty),
 		.mul_stall_i       (ex_mul_stall),
 		.csr_write_o       (trap_csr_write_pkt),
 		.trap_ctrl_o       (trap_ctrl_pkt)

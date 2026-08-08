@@ -6,6 +6,8 @@ import ydrasil_pkg::*;
     input  wire flush_i,
     input  wire trap_redirect_i,
     input  wire [INST_ADDR_WIDTH-1:0] trap_redirect_addr_i,
+    input  producer_slot_t recovery_head_slot_i,
+    input  producer_slot_t recovery_branch_slot_i,
 
     input  wire alu_valid_i,
     input  wire [REGS_DATA_WIDTH-1:0] alu_operand_a_i,
@@ -122,6 +124,20 @@ import ydrasil_pkg::*;
     wire [BUS_ADDR_WIDTH-1:0] lsu_mem_addr;
     wire [REGS_DATA_WIDTH-1:0] lsu_store_result;
     wire unused_instret;
+    wire branch_recovery = ex_pc_redirect_o;
+    wire main_recovery_keep = producer_slot_in_window(
+        alu_producer_id_i[PRODUCER_SLOT_WIDTH-1:0],
+        recovery_head_slot_i, recovery_branch_slot_i);
+    wire agu_recovery_keep = producer_slot_in_window(
+        agu_req_i.producer_id[PRODUCER_SLOT_WIDTH-1:0],
+        recovery_head_slot_i, recovery_branch_slot_i);
+    wire dual_recovery_keep = producer_slot_in_window(
+        dual_meta_i.producer_id[PRODUCER_SLOT_WIDTH-1:0],
+        recovery_head_slot_i, recovery_branch_slot_i);
+    wire main_flush = flush_i &&
+        (!branch_recovery || !main_recovery_keep);
+    wire dual_flush = flush_i &&
+        (!branch_recovery || !dual_recovery_keep);
 
     always_comb begin
         dual_hzd_operator = '0;
@@ -167,7 +183,8 @@ import ydrasil_pkg::*;
 
     always_comb begin
         lsu_req_o = agu_req_i;
-        lsu_req_o.valid = agu_req_i.valid && !ex_pc_redirect_o;
+        lsu_req_o.valid = agu_req_i.valid &&
+            (!branch_recovery || agu_recovery_keep);
         lsu_req_o.addr = lsu_mem_addr;
         lsu_req_o.store_data = agu_store_data_i;
         lsu_req_o.addr_is_dtcm =
@@ -193,7 +210,8 @@ import ydrasil_pkg::*;
     ydrasil_ex_block u_main_ex (
         .clk                    (clk),
         .rst_n                  (rst_n),
-        .flush_ex_i             (flush_i),
+        .flush_ex_i             (main_flush),
+        .lane_b_flush_i         (dual_flush),
         .alu_operand_a_i        (alu_operand_a_i),
         .alu_operand_b_i        (alu_operand_b_i),
         .lsu_operand_a_i        (agu_operand_a_i),
@@ -260,7 +278,7 @@ import ydrasil_pkg::*;
     ydrasil_dual_alu u_dual_ex (
         .clk                    (clk),
         .rst_n                  (rst_n),
-        .flush_i                (flush_i),
+        .flush_i                (dual_flush),
         .interrupt_i            (trap_redirect_i),
         .alu_valid_i            (dual_alu_valid_i),
         .alu_operand_a_i        (dual_alu_operand_a_i),
