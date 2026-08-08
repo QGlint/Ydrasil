@@ -217,7 +217,18 @@ override OBJDUMP := $(RISCV_TOOLCHAIN_PREFIX)-objdump
 # -----------------------------------------------------------------------------
 # All quick-check artifacts stay below BUILD_DIR.  Tool paths and policy knobs
 # live here so the top-level Makefile only contains target recipes.
-RTL_QC_DIR ?= $(BUILD_DIR)/rtl-quickcheck
+fre ?= 200
+RTL_QC_SUPPORTED_FREQS ?= 200 250
+RTL_QC_FREQ_MHZ ?= $(fre)
+ifeq ($(filter $(RTL_QC_FREQ_MHZ),$(RTL_QC_SUPPORTED_FREQS)),)
+$(error Unsupported rtl-structure fre=$(RTL_QC_FREQ_MHZ); supported values: $(RTL_QC_SUPPORTED_FREQS))
+endif
+RTL_QC_FREQ_TAG := pll$(subst .,p,$(RTL_QC_FREQ_MHZ))m
+RTL_QC_FREQ_FILE_TAG := $(subst .,p,$(RTL_QC_FREQ_MHZ))
+RTL_QC_BASE_DIR ?= $(BUILD_DIR)/rtl-quickcheck
+# Preserve the established default output paths.  Non-default frequencies get
+# isolated trees/reports so alternating quick checks cannot reuse stale JSON.
+RTL_QC_DIR ?= $(if $(filter 200,$(RTL_QC_FREQ_MHZ)),$(RTL_QC_BASE_DIR),$(RTL_QC_BASE_DIR)/$(RTL_QC_FREQ_TAG))
 RTL_QC_TOP ?= ydrasil_core
 RTL_QC_BENDER_DIR ?= $(PROJECT_ROOT)/hw/ip/ydrasil_core
 RTL_QC_BENDER_TARGETS ?= verilator
@@ -229,20 +240,21 @@ RTL_QC_METADATA ?= $(RTL_QC_DIR)/$(RTL_QC_TOP).sources.json
 RTL_QC_TREE_DIR ?= $(RTL_QC_DIR)/verilator-tree
 RTL_QC_TREE_JSON ?= $(RTL_QC_TREE_DIR)/final.tree.json
 RTL_QC_STRUCTURE_JSON ?= $(RTL_QC_DIR)/$(RTL_QC_TOP).structure.json
-RTL_QC_VIVADO_REPORT_DIR ?= $(BUILD_DIR)/syn/pll200m/reports
+RTL_QC_VIVADO_REPORT_DIR ?= $(BUILD_DIR)/syn/$(RTL_QC_FREQ_TAG)/reports
 RTL_QC_VIVADO_UTILIZATION ?= $(RTL_QC_VIVADO_REPORT_DIR)/synth_utilization_hier.rpt
 RTL_QC_VIVADO_TIMING ?= $(RTL_QC_VIVADO_REPORT_DIR)/synth_timing_summary.rpt
 RTL_QC_VIVADO_POST_ROUTE_TIMING ?= $(RTL_QC_VIVADO_REPORT_DIR)/post_route_timing_summary.rpt
-RTL_QC_VIVADO_TIMING_PATHS_CSV ?= $(RTL_QC_VIVADO_REPORT_DIR)/cpu200_timing_paths.csv
+RTL_QC_VIVADO_TIMING_PATHS_CSV ?= $(RTL_QC_VIVADO_REPORT_DIR)/cpu$(RTL_QC_FREQ_FILE_TAG)_timing_paths.csv
 RTL_QC_VIVADO_COMPARE_JSON ?= $(RTL_QC_DIR)/$(RTL_QC_TOP).vivado-compare.json
 RTL_QC_RELIABILITY_SUMMARY ?= $(RTL_QC_DIR)/reliability-summary.txt
 RTL_QC_CROSS_VALIDATE_JSON ?= $(RTL_QC_DIR)/archive-cross-validation.json
 RTL_QC_CROSS_VALIDATE_SUMMARY ?= $(RTL_QC_DIR)/archive-cross-validation.txt
-RTL_QC_CALIBRATION_ROOT ?= $(BUILD_DIR)/rtl-calibration
+RTL_QC_CALIBRATION_BASE ?= $(BUILD_DIR)/rtl-calibration
+RTL_QC_CALIBRATION_ROOT ?= $(if $(filter 200,$(RTL_QC_FREQ_MHZ)),$(RTL_QC_CALIBRATION_BASE),$(RTL_QC_CALIBRATION_BASE)/$(RTL_QC_FREQ_TAG))
 RTL_QC_CALIBRATION_HISTORY ?= $(RTL_QC_CALIBRATION_ROOT)
 RTL_QC_GIT_SHORT := $(shell git -C $(PROJECT_ROOT) rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 RTL_QC_CALIBRATION_TIMESTAMP := $(shell date -u +%Y%m%d-%H%M%S)
-RTL_QC_CALIBRATION_TAG ?= $(RTL_QC_GIT_SHORT)-pll200m-$(RTL_QC_CALIBRATION_TIMESTAMP)
+RTL_QC_CALIBRATION_TAG ?= $(RTL_QC_GIT_SHORT)-$(RTL_QC_FREQ_TAG)-$(RTL_QC_CALIBRATION_TIMESTAMP)
 RTL_QC_CALIBRATION_DIR ?= $(RTL_QC_CALIBRATION_ROOT)/$(RTL_QC_CALIBRATION_TAG)
 RTL_QC_ARCHIVE_SCRIPT ?= $(SYN_DIR)/archive_rtl_calibration.py
 RTL_QC_CROSS_VALIDATE_SCRIPT ?= $(SYN_DIR)/cross_validate_rtl_timing.py
@@ -250,18 +262,29 @@ RTL_QC_CV_MIN_AGGREGATE_PATH_RECALL ?= 0.95
 RTL_QC_CV_MIN_AGGREGATE_FAMILY_RECALL ?= 0.80
 RTL_QC_CV_MIN_HOLDOUT_PATH_RECALL ?= 0.90
 RTL_QC_CV_MIN_HOLDOUT_SCORED_PATHS ?= 100
+RTL_QC_CV_MIN_ERROR_PRECISION ?= 0.90
+RTL_QC_CV_MIN_ERROR_TRUE_FAMILIES ?= 5
 RTL_QC_ERROR_LIMIT ?= 50
-# Structural timing warning policy, calibrated against the current xc7
-# synth/post-route reports.  The BRAM reference includes both cascaded RAMB
-# propagation arcs, which Vivado reports as one logic level.
-# Reserve ten percent of the 200 MHz cycle for placement, routing and clock
-# uncertainty.  Vivado still implements against 5.0 ns; the structural gate is
-# intentionally tighter so a route-strategy-only pass is not accepted as RTL
-# closure.
-RTL_QC_TARGET_PERIOD_NS ?= 4.5
-RTL_QC_TIMING_POSSIBLE_DEPTH ?= 9
-RTL_QC_TIMING_DEFINITE_DEPTH ?= 32
-RTL_QC_LUTRAM_POSSIBLE_DEPTH ?= 6
+# Frequency-specific policy calibrated against the xc7 post-route reports.
+# At 200 MHz, depth 33 closes timing and depth 34 remains the zero-false-positive
+# severe boundary across the archive.  At 250 MHz, the current depth-33 fetch
+# path fails at -0.846 ns, so it is an ERROR while 3.6 ns remains the warning
+# margin.  BRAM clock-to-out is device-specific and remains unchanged.
+RTL_QC_TARGET_PERIOD_NS_200 ?= 5.0
+RTL_QC_WARNING_PERIOD_NS_200 ?= 4.5
+RTL_QC_TIMING_POSSIBLE_DEPTH_200 ?= 9
+RTL_QC_TIMING_DEFINITE_DEPTH_200 ?= 34
+RTL_QC_LUTRAM_POSSIBLE_DEPTH_200 ?= 6
+RTL_QC_TARGET_PERIOD_NS_250 ?= 4.0
+RTL_QC_WARNING_PERIOD_NS_250 ?= 3.6
+RTL_QC_TIMING_POSSIBLE_DEPTH_250 ?= 7
+RTL_QC_TIMING_DEFINITE_DEPTH_250 ?= 33
+RTL_QC_LUTRAM_POSSIBLE_DEPTH_250 ?= 5
+RTL_QC_TARGET_PERIOD_NS ?= $(RTL_QC_TARGET_PERIOD_NS_$(RTL_QC_FREQ_MHZ))
+RTL_QC_WARNING_PERIOD_NS ?= $(RTL_QC_WARNING_PERIOD_NS_$(RTL_QC_FREQ_MHZ))
+RTL_QC_TIMING_POSSIBLE_DEPTH ?= $(RTL_QC_TIMING_POSSIBLE_DEPTH_$(RTL_QC_FREQ_MHZ))
+RTL_QC_TIMING_DEFINITE_DEPTH ?= $(RTL_QC_TIMING_DEFINITE_DEPTH_$(RTL_QC_FREQ_MHZ))
+RTL_QC_LUTRAM_POSSIBLE_DEPTH ?= $(RTL_QC_LUTRAM_POSSIBLE_DEPTH_$(RTL_QC_FREQ_MHZ))
 RTL_QC_FANOUT_TIMING_MIN_DEPTH ?= 3
 RTL_QC_BRAM_LAUNCH_PENALTY_DEPTH ?= 6
 RTL_QC_BRAM_CLOCK_TO_OUT_NS ?= 2.45

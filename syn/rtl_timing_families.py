@@ -162,6 +162,37 @@ def read_timing_csv(path: Path) -> list[dict[str, Any]]:
     return records
 
 
+def archive_timing_csv(
+    archive: Path,
+    manifest: dict[str, Any] | None = None,
+) -> Path:
+    """Resolve a frequency-tagged timing CSV with legacy 200 MHz fallback."""
+    if manifest is None:
+        try:
+            manifest = json.loads((archive / "manifest.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            manifest = {}
+    frequency = manifest.get("frequency_mhz", 200)
+    try:
+        numeric_frequency = float(frequency)
+        frequency_tag = (
+            str(int(numeric_frequency))
+            if numeric_frequency.is_integer()
+            else str(numeric_frequency).replace(".", "p")
+        )
+    except (TypeError, ValueError):
+        frequency_tag = "200"
+    reports = archive / "reports"
+    preferred = reports / f"cpu{frequency_tag}_timing_paths.csv"
+    if preferred.is_file():
+        return preferred
+    legacy = reports / "cpu200_timing_paths.csv"
+    if legacy.is_file():
+        return legacy
+    candidates = sorted(reports.glob("cpu*_timing_paths.csv"))
+    return candidates[0] if candidates else preferred
+
+
 def summarize_families(
     datasets: Iterable[tuple[str, Iterable[dict[str, Any]]]],
     target_period_ns: float = 5.0,
@@ -239,7 +270,7 @@ def load_archive_training(
         if fingerprint in seen_fingerprints:
             skipped.append({"archive": archive.name, "reason": "duplicate_source_fingerprint"})
             continue
-        csv_path = archive / "reports" / "cpu200_timing_paths.csv"
+        csv_path = archive_timing_csv(archive, manifest)
         records = read_timing_csv(csv_path)
         if not records:
             skipped.append({"archive": archive.name, "reason": "missing_or_empty_timing_csv"})

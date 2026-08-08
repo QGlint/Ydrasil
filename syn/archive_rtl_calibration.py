@@ -38,6 +38,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo-root", type=Path, required=True)
     parser.add_argument("--build-root", type=Path, required=True)
+    parser.add_argument("--frequency-mhz", type=float, required=True)
     parser.add_argument("--archive-dir", type=Path, required=True)
     parser.add_argument("--reports", type=Path, required=True)
     parser.add_argument("--structure", type=Path, required=True)
@@ -105,9 +106,21 @@ def main() -> int:
         "source_fingerprint": provenance.get("source_fingerprint"),
         "source_count": provenance.get("source_count"),
         "top": structure.get("top"),
+        "frequency_mhz": (
+            int(args.frequency_mhz)
+            if args.frequency_mhz.is_integer() else args.frequency_mhz
+        ),
         "target_period_ns": structure.get("summary", {}).get("target_period_ns"),
+        "warning_period_ns": structure.get("summary", {}).get("warning_period_ns"),
         "memory_geometry_profile": structure.get("memory_geometry_profile"),
-        "timing_path_fail_count": structure.get("summary", {}).get("timing_path_fail_count", 0),
+        "timing_path_error_count": structure.get("summary", {}).get(
+            "timing_path_error_count",
+            structure.get("summary", {}).get("timing_path_fail_count", 0),
+        ),
+        "timing_path_warning_count": structure.get("summary", {}).get(
+            "timing_path_warning_count",
+            structure.get("summary", {}).get("timing_path_high_count", 0),
+        ),
         "path_family_training": {
             key: comparison.get("path_family_training", {}).get(key)
             for key in ("schema_version", "dataset_count", "path_count", "family_count")

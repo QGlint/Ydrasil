@@ -1220,11 +1220,13 @@ rtl-xml: $(RTL_QC_FLIST)
 		echo "[RTL] tree JSON: $(RTL_QC_TREE_JSON)"; exit 0
 
 rtl-structure-report: rtl-xml
+	@echo "[RTL] structure timing policy: fre=$(RTL_QC_FREQ_MHZ)MHz warning=$(RTL_QC_WARNING_PERIOD_NS)ns target=$(RTL_QC_TARGET_PERIOD_NS)ns"
 	$(PYTHON) "$(SYN_DIR)/analyze_rtl_structure.py" \
 		--input "$(RTL_QC_TREE_JSON)" --output "$(RTL_QC_STRUCTURE_JSON)" --top "$(RTL_QC_TOP)" \
 		--source-metadata "$(RTL_QC_METADATA)" \
 		--calibration-history "$(RTL_QC_CALIBRATION_HISTORY)" \
 		--target-period-ns "$(RTL_QC_TARGET_PERIOD_NS)" \
+		--warning-period-ns "$(RTL_QC_WARNING_PERIOD_NS)" \
 		--timing-possible-depth "$(RTL_QC_TIMING_POSSIBLE_DEPTH)" \
 		--timing-definite-depth "$(RTL_QC_TIMING_DEFINITE_DEPTH)" \
 		--lutram-possible-depth "$(RTL_QC_LUTRAM_POSSIBLE_DEPTH)" \
@@ -1254,10 +1256,14 @@ rtl-vivado-cross-validate:
 	$(PYTHON) "$(RTL_QC_CROSS_VALIDATE_SCRIPT)" \
 		--archive-root "$(RTL_QC_CALIBRATION_HISTORY)" \
 		--target-period-ns "$(RTL_QC_TARGET_PERIOD_NS)" \
+		--warning-period-ns "$(RTL_QC_WARNING_PERIOD_NS)" \
+		--definite-depth "$(RTL_QC_TIMING_DEFINITE_DEPTH)" \
 		--min-aggregate-path-recall "$(RTL_QC_CV_MIN_AGGREGATE_PATH_RECALL)" \
 		--min-aggregate-family-recall "$(RTL_QC_CV_MIN_AGGREGATE_FAMILY_RECALL)" \
 		--min-holdout-path-recall "$(RTL_QC_CV_MIN_HOLDOUT_PATH_RECALL)" \
 		--min-holdout-scored-paths "$(RTL_QC_CV_MIN_HOLDOUT_SCORED_PATHS)" \
+		--min-error-precision "$(RTL_QC_CV_MIN_ERROR_PRECISION)" \
+		--min-error-true-families "$(RTL_QC_CV_MIN_ERROR_TRUE_FAMILIES)" \
 		--output "$(RTL_QC_CROSS_VALIDATE_JSON)" \
 		--summary-output "$(RTL_QC_CROSS_VALIDATE_SUMMARY)"
 
@@ -1265,6 +1271,7 @@ rtl-vivado-archive: rtl-vivado-compare
 	$(PYTHON) "$(RTL_QC_ARCHIVE_SCRIPT)" \
 		--repo-root "$(PROJECT_ROOT)" \
 		--build-root "$(BUILD_DIR)" \
+		--frequency-mhz "$(RTL_QC_FREQ_MHZ)" \
 		--archive-dir "$(RTL_QC_CALIBRATION_DIR)" \
 		--reports "$(RTL_QC_VIVADO_REPORT_DIR)" \
 		--structure "$(RTL_QC_STRUCTURE_JSON)" \

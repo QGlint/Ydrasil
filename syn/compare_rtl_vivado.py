@@ -1204,7 +1204,13 @@ def timing_path_family_validation(
         family_counts[key] += 1
         prediction = predicted.get(key)
         if prediction:
-            covered_by_severity[str(prediction.get("severity", "WARN"))] += 1
+            severity = str(prediction.get("severity", "ADVISORY"))
+            severity = {
+                "FAIL": "ERROR",
+                "HIGH": "WARNING",
+                "WARN": "ADVISORY",
+            }.get(severity, severity)
+            covered_by_severity[severity] += 1
         else:
             missed[key] += 1
             missed_examples.setdefault(key, {
@@ -1215,16 +1221,19 @@ def timing_path_family_validation(
             })
         violations.append(path)
     covered = len(violations) - sum(missed.values())
-    fail_covered = int(covered_by_severity.get("FAIL", 0))
+    error_covered = int(covered_by_severity.get("ERROR", 0))
     return {
         "target_period_ns": period_ns,
         "violating_path_count": len(violations),
         "predicted_family_count": len(predicted),
         "observed_family_count": len(family_counts),
         "covered_path_count": covered,
-        "fail_covered_path_count": fail_covered,
+        "error_covered_path_count": error_covered,
         "path_recall": covered / len(violations) if violations else None,
-        "fail_path_recall": fail_covered / len(violations) if violations else None,
+        "error_path_recall": error_covered / len(violations) if violations else None,
+        # Compatibility aliases for consumers of pre-severity-split reports.
+        "fail_covered_path_count": error_covered,
+        "fail_path_recall": error_covered / len(violations) if violations else None,
         "covered_by_severity": dict(sorted(covered_by_severity.items())),
         "missed_path_count": sum(missed.values()),
         "out_of_scope_path_count": sum(out_of_scope.values()),
@@ -1277,6 +1286,7 @@ def render_summary(result: dict[str, Any]) -> str:
         possible = risk.get("possible_flag_validation", {})
         definite = risk.get("definite_flag_validation", {})
         path_family = comparison.get("timing_path_family_validation", {})
+        period_label = f"{float(risk.get('target_period_ns', 5.0)):g}ns"
         lines.extend([
             f"REPORT {comparison.get('report')}",
             f"format={comparison.get('format')} wns_ns={comparison.get('wns_ns')} "
@@ -1299,12 +1309,12 @@ def render_summary(result: dict[str, Any]) -> str:
             f"memory_levels_vs_logic_delay={route.get('memory_logic_levels_vs_logic_delay_spearman')} "
             f"non_memory_paths={route.get('non_memory_path_count')} "
             f"non_memory_levels_vs_logic_delay={route.get('non_memory_logic_levels_vs_logic_delay_spearman')}",
-            f"possible_5ns_observed_recall={possible.get('observed_module_recall')} "
+            f"possible_{period_label}_observed_recall={possible.get('observed_module_recall')} "
             f"missed={possible.get('observed_not_flagged_modules', [])}",
-            f"definite_5ns_observed_recall={definite.get('observed_module_recall')} "
+            f"definite_{period_label}_observed_recall={definite.get('observed_module_recall')} "
             f"matched={definite.get('flagged_and_observed_modules', [])}",
             f"path_family_recall={path_family.get('path_recall')} "
-            f"fail_path_family_recall={path_family.get('fail_path_recall')} "
+            f"error_path_family_recall={path_family.get('error_path_recall')} "
             f"covered={path_family.get('covered_path_count')}/{path_family.get('violating_path_count')} "
             f"missed_families={len(path_family.get('missed_families', []))} "
             f"out_of_scope_paths={path_family.get('out_of_scope_path_count', 0)}",

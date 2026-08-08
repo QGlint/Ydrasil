@@ -9,10 +9,27 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from rtl_timing_families import normalize_owner, read_timing_csv, summarize_families
+from rtl_timing_families import (
+    archive_timing_csv,
+    normalize_owner,
+    read_timing_csv,
+    summarize_families,
+)
 
 
 class TimingFamilyTest(unittest.TestCase):
+    def test_archive_timing_csv_uses_manifest_frequency(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            archive = Path(directory)
+            reports = archive / "reports"
+            reports.mkdir()
+            expected = reports / "cpu250_timing_paths.csv"
+            expected.write_text("rank,data_delay_ns\n", encoding="utf-8")
+
+            resolved = archive_timing_csv(archive, {"frequency_mhz": 250})
+
+        self.assertEqual(resolved, expected)
+
     def test_main_execute_instance_is_ex_block(self) -> None:
         resource = (
             "u_soc_core/u_core/u_ydrasil_execute_stage/u_main_ex/"

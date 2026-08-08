@@ -16,7 +16,12 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from rtl_timing_families import family_key, path_family, read_timing_csv
+from rtl_timing_families import (
+    archive_timing_csv,
+    family_key,
+    path_family,
+    read_timing_csv,
+)
 
 
 REGISTER_ENDPOINTS = ("register_d", "register_ce", "register_control")
@@ -39,7 +44,7 @@ def load_archives(root: Path) -> list[dict[str, Any]]:
         fingerprint = str(manifest.get("source_fingerprint") or directory.name)
         if fingerprint in seen_fingerprints:
             continue
-        records = read_timing_csv(directory / "reports" / "cpu200_timing_paths.csv")
+        records = read_timing_csv(archive_timing_csv(directory, manifest))
         if not records:
             continue
         try:
@@ -89,8 +94,8 @@ def is_over_target(record: dict[str, Any], target_period_ns: float) -> bool:
     )
 
 
-def independent_structure_predictions(structure: dict[str, Any]) -> set[str]:
-    predicted = set()
+def independent_structure_risks(structure: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    predicted: dict[str, dict[str, Any]] = {}
     for risk in structure.get("hierarchical", {}).get("timing_path_risks", []):
         reasons = [str(reason) for reason in risk.get("reasons", [])]
         if not any(
@@ -99,15 +104,26 @@ def independent_structure_predictions(structure: dict[str, Any]) -> set[str]:
         ):
             continue
         key = str(risk.get("key", ""))
-        if key:
-            predicted.add(key)
+        previous = predicted.get(key)
+        if key and (
+            previous is None
+            or int(risk.get("structural_depth", 0))
+            > int(previous.get("structural_depth", 0))
+        ):
+            predicted[key] = risk
     return predicted
+
+
+def independent_structure_predictions(structure: dict[str, Any]) -> set[str]:
+    return set(independent_structure_risks(structure))
 
 
 def validate_holdout(
     held: dict[str, Any],
     training: list[dict[str, Any]],
     target_period_ns: float,
+    definite_depth: int = 34,
+    warning_period_ns: float = 4.5,
 ) -> dict[str, Any]:
     held_geometry = held.get("memory_geometry_profile")
     exact_geometry_training = [
@@ -130,7 +146,8 @@ def validate_holdout(
             training_path_count += 1
             add_prediction_variants(historical_predicted, family)
 
-    structural_predicted = independent_structure_predictions(held["structure"])
+    structural_risks = independent_structure_risks(held["structure"])
+    structural_predicted = set(structural_risks)
     structural_prediction_available = "timing_path_risks" in held[
         "structure"
     ].get("hierarchical", {})
@@ -142,13 +159,16 @@ def validate_holdout(
     out_of_scope: Counter[str] = Counter()
     bram_unscored: Counter[str] = Counter()
     covered_by_source: Counter[str] = Counter()
+    observed_records: dict[str, list[dict[str, Any]]] = {}
     for record in held["records"]:
-        if not is_over_target(record, target_period_ns):
-            continue
         family = path_family(record)
         key = family["key"]
         if not in_scope(family):
-            out_of_scope[key] += 1
+            if is_over_target(record, warning_period_ns):
+                out_of_scope[key] += 1
+            continue
+        observed_records.setdefault(key, []).append(record)
+        if not is_over_target(record, warning_period_ns):
             continue
         if (
             family["launch_kind"] == "bram_output"
@@ -175,9 +195,22 @@ def validate_holdout(
     covered_paths = sum(covered.values())
     observed_families = set(scored)
     covered_families = observed_families & predicted
+    error_predicted = {
+        key for key, risk in structural_risks.items()
+        if int(risk.get("structural_depth", 0)) >= definite_depth
+    }
+    error_scored = error_predicted & set(observed_records)
+    actually_over_target = {
+        key for key, records in observed_records.items()
+        if any(is_over_target(record, target_period_ns) for record in records)
+    }
+    error_true_positive = error_scored & actually_over_target
+    error_false_positive = error_scored - actually_over_target
     return {
         "archive": held["name"],
         "fingerprint": held["fingerprint"],
+        "warning_period_ns": warning_period_ns,
+        "target_period_ns": target_period_ns,
         "training_archive_count": len(training),
         "training_path_count": training_path_count,
         "historical_predicted_family_count": len(historical_predicted),
@@ -194,6 +227,15 @@ def validate_holdout(
         "observed_family_count": len(observed_families),
         "covered_family_count": len(covered_families),
         "family_recall": len(covered_families) / len(observed_families) if observed_families else None,
+        "definite_depth_threshold": definite_depth,
+        "error_predicted_family_count": len(error_predicted),
+        "error_scored_family_count": len(error_scored),
+        "error_true_positive_family_count": len(error_true_positive),
+        "error_false_positive_family_count": len(error_false_positive),
+        "error_precision": (
+            len(error_true_positive) / len(error_scored) if error_scored else None
+        ),
+        "error_false_positive_families": sorted(error_false_positive),
         "bram_unscored_path_count": sum(bram_unscored.values()),
         "out_of_scope_path_count": sum(out_of_scope.values()),
         "missed_families": [
@@ -212,6 +254,7 @@ def render_summary(result: dict[str, Any]) -> str:
         "RTL timing archive leave-one-out cross-validation",
         f"archive_root={result['archive_root']}",
         "Each held-out archive is excluded from its own training set.",
+        "Warning recall is scored at the margin period; ERROR precision is scored at the target period.",
         "BRAM paths are scored only when another archive has an exact memory geometry profile.",
         "",
     ]
@@ -223,6 +266,13 @@ def render_summary(result: dict[str, Any]) -> str:
             f"families={holdout['covered_family_count']}/{holdout['observed_family_count']} "
             f"bram_unscored={holdout['bram_unscored_path_count']} "
             f"out_of_scope={holdout['out_of_scope_path_count']}"
+        )
+        lines.append(
+            f"  severe_error_precision={holdout['error_precision']} "
+            f"true={holdout['error_true_positive_family_count']} "
+            f"false={holdout['error_false_positive_family_count']} "
+            f"scored={holdout['error_scored_family_count']} "
+            f"depth_threshold={holdout['definite_depth_threshold']}"
         )
         lines.append(
             f"  prediction_sources historical={holdout['historical_predicted_family_count']} "
@@ -240,6 +290,10 @@ def render_summary(result: dict[str, Any]) -> str:
         f"aggregate_family_recall={aggregate['family_recall']} "
         f"families={aggregate['covered_family_count']}/{aggregate['observed_family_count']}",
         f"aggregate_bram_unscored={aggregate['bram_unscored_path_count']}",
+        f"aggregate_error_precision={aggregate['error_precision']} "
+        f"true={aggregate['error_true_positive_family_count']} "
+        f"false={aggregate['error_false_positive_family_count']} "
+        f"scored={aggregate['error_scored_family_count']}",
         f"acceptance={result['acceptance']['passed']} "
         f"failures={result['acceptance']['failures']}",
     ])
@@ -250,13 +304,19 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--archive-root", type=Path, required=True)
     parser.add_argument("--target-period-ns", type=float, default=5.0)
+    parser.add_argument("--warning-period-ns", type=float, default=4.5)
+    parser.add_argument("--definite-depth", type=int, default=34)
     parser.add_argument("--min-aggregate-path-recall", type=float, default=0.95)
     parser.add_argument("--min-aggregate-family-recall", type=float, default=0.80)
     parser.add_argument("--min-holdout-path-recall", type=float, default=0.90)
     parser.add_argument("--min-holdout-scored-paths", type=int, default=100)
+    parser.add_argument("--min-error-precision", type=float, default=0.90)
+    parser.add_argument("--min-error-true-families", type=int, default=5)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--summary-output", type=Path, required=True)
     args = parser.parse_args()
+    if args.warning_period_ns > args.target_period_ns:
+        parser.error("--warning-period-ns must not exceed --target-period-ns")
     if not args.archive_root.is_dir():
         parser.error(f"archive root does not exist: {args.archive_root}")
     archives = load_archives(args.archive_root)
@@ -267,6 +327,8 @@ def main() -> int:
             held,
             [item for item in archives if item is not held],
             args.target_period_ns,
+            args.definite_depth,
+            args.warning_period_ns,
         )
         for held in archives
     ]
@@ -277,6 +339,19 @@ def main() -> int:
     aggregate_path_recall = covered_paths / scored_paths if scored_paths else None
     aggregate_family_recall = (
         covered_families / observed_families if observed_families else None
+    )
+    error_scored_families = sum(
+        item["error_scored_family_count"] for item in holdouts
+    )
+    error_true_positive_families = sum(
+        item["error_true_positive_family_count"] for item in holdouts
+    )
+    error_false_positive_families = sum(
+        item["error_false_positive_family_count"] for item in holdouts
+    )
+    error_precision = (
+        error_true_positive_families / error_scored_families
+        if error_scored_families else None
     )
     acceptance_failures = []
     if aggregate_path_recall is None or aggregate_path_recall < args.min_aggregate_path_recall:
@@ -290,6 +365,17 @@ def main() -> int:
         acceptance_failures.append(
             f"aggregate_family_recall<{args.min_aggregate_family_recall}"
         )
+    if (
+        error_precision is not None
+        and error_precision < args.min_error_precision
+    ):
+        acceptance_failures.append(
+            f"aggregate_error_precision<{args.min_error_precision}"
+        )
+    if error_true_positive_families < args.min_error_true_families:
+        acceptance_failures.append(
+            f"aggregate_error_true_families<{args.min_error_true_families}"
+        )
     for holdout in holdouts:
         recall = holdout["path_recall"]
         if (
@@ -301,9 +387,10 @@ def main() -> int:
                 f"{holdout['archive']}:path_recall<{args.min_holdout_path_recall}"
             )
     result = {
-        "schema_version": 1,
+        "schema_version": 2,
         "archive_root": str(args.archive_root.resolve()),
         "target_period_ns": args.target_period_ns,
+        "warning_period_ns": args.warning_period_ns,
         "archive_count": len(archives),
         "method": (
             "leave_one_archive_out_historical_family_plus_holdout_independent_"
@@ -323,6 +410,10 @@ def main() -> int:
             "family_recall": aggregate_family_recall,
             "bram_unscored_path_count": sum(item["bram_unscored_path_count"] for item in holdouts),
             "out_of_scope_path_count": sum(item["out_of_scope_path_count"] for item in holdouts),
+            "error_scored_family_count": error_scored_families,
+            "error_true_positive_family_count": error_true_positive_families,
+            "error_false_positive_family_count": error_false_positive_families,
+            "error_precision": error_precision,
         },
         "acceptance": {
             "passed": not acceptance_failures,
@@ -331,6 +422,8 @@ def main() -> int:
             "min_aggregate_family_recall": args.min_aggregate_family_recall,
             "min_holdout_path_recall": args.min_holdout_path_recall,
             "min_holdout_scored_paths": args.min_holdout_scored_paths,
+            "min_error_precision": args.min_error_precision,
+            "min_error_true_families": args.min_error_true_families,
         },
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)

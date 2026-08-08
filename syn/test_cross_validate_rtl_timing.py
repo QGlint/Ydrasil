@@ -13,9 +13,28 @@ from cross_validate_rtl_timing import (
     independent_structure_predictions,
     is_over_target,
 )
+from analyze_rtl_structure import classify_timing_path_severity
 
 
 class CrossValidationTest(unittest.TestCase):
+    def test_severity_keeps_margin_risk_as_warning(self) -> None:
+        self.assertEqual(
+            classify_timing_path_severity(33, 8.0, 4.5, 34),
+            "WARNING",
+        )
+
+    def test_definite_depth_is_an_error(self) -> None:
+        self.assertEqual(
+            classify_timing_path_severity(34, 5.1, 4.5, 34),
+            "ERROR",
+        )
+
+    def test_low_estimate_is_advisory(self) -> None:
+        self.assertEqual(
+            classify_timing_path_severity(8, 4.4, 4.5, 34),
+            "ADVISORY",
+        )
+
     def test_margin_target_marks_met_5ns_path_for_scoring(self) -> None:
         record = {
             "data_delay_ns": 4.72,
