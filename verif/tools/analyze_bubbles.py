@@ -106,8 +106,18 @@ SELECT_QUEUE_FIELDS = (
 )
 SELECT_REFILL_BOUNDARY_FIELDS = (
     "HEAD_EMPTY_PUSH_CYCLES", "HEAD_EMPTY_PUSH_SLOTS",
-    "HEAD_EMPTY_PAIR_SLOTS", "HEAD_EMPTY_SINGLE_SLOTS",
+    "HEAD_EMPTY_PAIR_SLOTS", "HEAD_EMPTY_SINGLE_SLOTS", "PUSHED_UOPS",
 )
+SELECT_REFILL_LIFECYCLES = (
+    ("eligible in prior cycle", "ELIGIBLE"),
+    ("dependency released", "DEPENDENCY"),
+    ("order released", "ORDER"),
+    ("resource released", "RESOURCE"),
+    ("new/replaced RS entry", "NEW"),
+    ("other", "OTHER"),
+)
+SELECT_REFILL_PRIOR_BITS = ("DEP", "ORDER", "RESOURCE")
+SELECT_REFILL_PENDING_BITS = ("ALU", "LOAD", "MDU", "OTHER")
 EX_VALID_HOLD_FIELDS = ("LANE0", "LANE1", "TOTAL")
 SELECT_OPPORTUNITY_FIELDS = (
     "RAW_W0", "RAW_W1", "RAW_W2", "ACTUAL_W0", "ACTUAL_W1", "ACTUAL_W2",
@@ -244,6 +254,12 @@ P0_FULL_FIELDS = (
     ("resource", "RESOURCE"),
     ("ready/release", "READY_RELEASE"),
     ("no candidate", "NO_CANDIDATE"),
+)
+P0_PIPELINE_FIELDS = (
+    ("selectable/releasing", "SELECTABLE"),
+    ("LSU credit/reservation blocked", "CREDIT_BLOCKED"),
+    ("memory order blocked", "ORDER_BLOCKED"),
+    ("all entries dependency blocked", "DEPENDENCY_BLOCKED"),
 )
 SINGLE_BUNDLE_FIELDS = (
     ("P0-only bundle", "P0_ONLY"),
@@ -391,6 +407,36 @@ def detailed_columns() -> list[tuple[str, str, str]]:
         for field in SELECT_REFILL_BOUNDARY_FIELDS
     )
     columns.extend(
+        (f"select_refill_lifecycle_{lifecycle.lower()}_{data.lower()}",
+         "PERF_SELECT_REFILL_LIFECYCLE_DATA", f"{lifecycle}_{data}")
+        for _, lifecycle in SELECT_REFILL_LIFECYCLES
+        for data in ("PENDING", "STORED")
+    )
+    columns.extend(
+        (f"select_refill_lifecycle_{field.lower()}",
+         "PERF_SELECT_REFILL_LIFECYCLE_DATA", field)
+        for field in ("ACCOUNTED", "EXPECTED")
+    )
+    columns.extend(
+        (f"select_refill_prior_m{mask}", "PERF_SELECT_REFILL_PRIOR_MASK", f"M{mask}")
+        for mask in range(8)
+    )
+    columns.extend(
+        (f"select_refill_prior_{field.lower()}",
+         "PERF_SELECT_REFILL_PRIOR_MASK", field)
+        for field in ("NEW", "OTHER", "ACCOUNTED", "EXPECTED")
+    )
+    columns.extend(
+        (f"select_refill_pending_m{mask}",
+         "PERF_SELECT_REFILL_PENDING_MASK", f"M{mask}")
+        for mask in range(16)
+    )
+    columns.extend(
+        (f"select_refill_pending_{field.lower()}",
+         "PERF_SELECT_REFILL_PENDING_MASK", field)
+        for field in ("ACCOUNTED", "EXPECTED")
+    )
+    columns.extend(
         (f"ex_valid_hold_{field.lower()}", "PERF_EX_VALID_HOLD", field)
         for field in EX_VALID_HOLD_FIELDS
     )
@@ -464,6 +510,18 @@ def detailed_columns() -> list[tuple[str, str, str]]:
     columns.extend(
         (f"p0_full_{field.lower()}", "PERF_P0_FULL_DETAIL", field)
         for _, field in (*P0_FULL_FIELDS, ("accounted", "ACCOUNTED"), ("expected", "EXPECTED"))
+    )
+    columns.extend(
+        (f"p0_pipeline_{field.lower()}", "PERF_P0_FULL_PIPELINE", field)
+        for _, field in (*P0_PIPELINE_FIELDS, ("accounted", "ACCOUNTED"), ("expected", "EXPECTED"))
+    )
+    columns.extend(
+        (f"p0_credit_resv_c{credit}_r{reservation}",
+         "PERF_P0_CREDIT_RESV_MATRIX", f"C{credit}_R{reservation}")
+        for credit in range(3) for reservation in range(3)
+    )
+    columns.append(
+        ("lsu_age_repair_cycles", "PERF_LSU_AGE_REPAIR", "CYCLES")
     )
     columns.extend(
         (f"single_bundle_{field.lower()}", "PERF_SINGLE_BUNDLE_DETAIL", field)
@@ -819,11 +877,23 @@ def write_report(
             )
             refill_boundary = records.get("PERF_SELECT_REFILL_BOUNDARY", {})
             refill_slots = refill_boundary.get("HEAD_EMPTY_PUSH_SLOTS", 0)
+            refill_uops = refill_boundary.get("PUSHED_UOPS", 0)
+            refill_lifecycle = records.get(
+                "PERF_SELECT_REFILL_LIFECYCLE_DATA", {}
+            )
+            refill_stored = sum(
+                refill_lifecycle.get(f"{field}_STORED", 0)
+                for _, field in SELECT_REFILL_LIFECYCLES
+            )
+            refill_pending = sum(
+                refill_lifecycle.get(f"{field}_PENDING", 0)
+                for _, field in SELECT_REFILL_LIFECYCLES
+            )
             stream.write(
                 "Select refill boundary: **%d cycles / %d lost slots**, split as "
-                "**%d pair** and **%d singleton** pushes. This is the direct evidence "
-                "for a fire-through/bypass or prefetch redesign at the Select->Operand "
-                "register boundary; it is not evidence that the RS has no candidates.\n\n"
+                "**%d pair** and **%d singleton** push-slots. These are boundary events, "
+                "not an equal number of recoverable cycles; load/completion data can "
+                "arrive during the registered transit.\n\n"
                 % (
                     int(refill_boundary.get("HEAD_EMPTY_PUSH_CYCLES", 0)),
                     int(refill_slots),
@@ -831,6 +901,71 @@ def write_report(
                     int(refill_boundary.get("HEAD_EMPTY_SINGLE_SLOTS", 0)),
                 )
             )
+            lifecycle_accounted = refill_lifecycle.get("ACCOUNTED", 0)
+            lifecycle_expected = refill_lifecycle.get("EXPECTED", 0)
+            stream.write(
+                "Refill lifecycle/data closure: "
+                f"**{'PASS' if lifecycle_accounted == lifecycle_expected == refill_uops else 'FAIL'}**, "
+                f"accounted {int(lifecycle_accounted)}, expected {int(lifecycle_expected)}, "
+                f"boundary uops {int(refill_uops)}. Registered-data uops are "
+                f"**{int(refill_stored)} ({pct(refill_stored, refill_uops)})**; "
+                f"completion-aligned/pending uops are **{int(refill_pending)} "
+                f"({pct(refill_pending, refill_uops)})**. Only the registered-data "
+                "subset directly supports a bank-local operand-ready/preselected slot; "
+                "the pending subset requires producer-lifetime or alignment work.\n\n"
+            )
+            stream.write("| Prior-cycle lifecycle | Pending data | Registered data | Total |\n")
+            stream.write("|---|---:|---:|---:|\n")
+            for label, field in SELECT_REFILL_LIFECYCLES:
+                pending = refill_lifecycle.get(f"{field}_PENDING", 0)
+                stored = refill_lifecycle.get(f"{field}_STORED", 0)
+                stream.write(
+                    f"| {label} | {int(pending)} | {int(stored)} | "
+                    f"{int(pending + stored)} |\n"
+                )
+
+            prior = records.get("PERF_SELECT_REFILL_PRIOR_MASK", {})
+            prior_accounted = prior.get("ACCOUNTED", 0)
+            prior_expected = prior.get("EXPECTED", 0)
+            stream.write(
+                "\nExact prior blocker-mask closure: "
+                f"**{'PASS' if prior_accounted == prior_expected == refill_uops else 'FAIL'}**, "
+                f"accounted {int(prior_accounted)}, expected {int(prior_expected)}. "
+                "Unlike the lifecycle projection, this table preserves simultaneous "
+                "dependency, order, and resource blockers.\n\n"
+            )
+            stream.write("| Prior blocker mask | Refill uops | Share |\n|---|---:|---:|\n")
+            prior_rows = [(mask, prior.get(f"M{mask}", 0)) for mask in range(8)]
+            prior_rows.extend(((8, prior.get("NEW", 0)), (9, prior.get("OTHER", 0))))
+            for mask, count in sorted(prior_rows, key=lambda item: item[1], reverse=True):
+                if mask < 8:
+                    label = "+".join(
+                        name for bit, name in enumerate(SELECT_REFILL_PRIOR_BITS)
+                        if mask & (1 << bit)
+                    ) or "eligible"
+                else:
+                    label = "new/replaced" if mask == 8 else "other"
+                stream.write(f"| {label} | {int(count)} | {pct(count, refill_uops)} |\n")
+
+            pending_masks = records.get("PERF_SELECT_REFILL_PENDING_MASK", {})
+            pending_accounted = pending_masks.get("ACCOUNTED", 0)
+            pending_expected = pending_masks.get("EXPECTED", 0)
+            stream.write(
+                "\nPending-producer mask closure: "
+                f"**{'PASS' if pending_accounted == pending_expected == refill_uops else 'FAIL'}**, "
+                f"accounted {int(pending_accounted)}, expected {int(pending_expected)}.\n\n"
+            )
+            stream.write("| Data still absent from registered storage | Refill uops | Share |\n")
+            stream.write("|---|---:|---:|\n")
+            for mask, count in sorted(
+                ((mask, pending_masks.get(f"M{mask}", 0)) for mask in range(16)),
+                key=lambda item: item[1], reverse=True,
+            ):
+                label = "+".join(
+                    name for bit, name in enumerate(SELECT_REFILL_PENDING_BITS)
+                    if mask & (1 << bit)
+                ) or "none (all operands registered)"
+                stream.write(f"| {label} | {int(count)} | {pct(count, refill_uops)} |\n")
 
             stream.write("### Loss-weighted coupling and Select opportunity\n\n")
             stream.write(
@@ -980,8 +1115,8 @@ def write_report(
             )
             stream.write("| Current loss evidence | RTL direction | 200 MHz/PPA constraint |\n|---|---|---|\n")
             stream.write(
-                f"| Select->Operand head-empty refill {int(value(records, 'PERF_BACKEND_LOSS', 'SELECT_REFILL'))} slots | "
-                "Replace the bubble-producing bundle FIFO interface with bank-local candidate/operand prefetch and an elastic lane assembler. | "
+                f"| Head-empty boundary: {int(refill_stored)}/{int(refill_uops)} pushed uops already have registered data | "
+                "Use the registered-data fraction to size bank-local operand prefetch; address the pending fraction at its producer lifetime instead of treating every refill event as recoverable. | "
                 "Do not make raw Select drive RF/value resolution or EX in one cycle; preserve a register cut at the bank output. |\n"
             )
             stream.write(
@@ -1229,6 +1364,56 @@ def write_report(
                 stream.write(
                     f"| {label} | {int(count)} | {pct(count, p0_expected)} |\n"
                 )
+            p0_pipe_expected = value(records, "PERF_P0_FULL_PIPELINE", "EXPECTED")
+            p0_pipe_accounted = value(records, "PERF_P0_FULL_PIPELINE", "ACCOUNTED")
+            stream.write(
+                "\nThe legacy table above assigns a whole full-bank sample by "
+                "priority and can let one dependent entry hide another ready entry. "
+                "The progressive table below asks whether any resident entry passes "
+                "each successive RTL candidate gate.\n\n"
+            )
+            stream.write(
+                f"Progressive P0 pipeline closure: **{'PASS' if p0_pipe_accounted == p0_pipe_expected else 'FAIL'}**, "
+                f"accounted {int(p0_pipe_accounted)}, expected {int(p0_pipe_expected)}.\n\n"
+            )
+            stream.write("| Furthest P0 candidate gate reached | Slots | P0-full share |\n")
+            stream.write("|---|---:|---:|\n")
+            for label, field in sorted(
+                P0_PIPELINE_FIELDS,
+                key=lambda item: value(records, "PERF_P0_FULL_PIPELINE", item[1]),
+                reverse=True,
+            ):
+                count = value(records, "PERF_P0_FULL_PIPELINE", field)
+                stream.write(
+                    f"| {label} | {int(count)} | {pct(count, p0_pipe_expected)} |\n"
+                )
+            credit_resv = records.get("PERF_P0_CREDIT_RESV_MATRIX", {})
+            matrix_accounted = credit_resv.get("ACCOUNTED", 0)
+            matrix_expected = credit_resv.get("EXPECTED", 0)
+            stream.write(
+                f"\nP0 LSU credit/reservation matrix closure: "
+                f"**{'PASS' if matrix_accounted == matrix_expected else 'FAIL'}**, "
+                f"accounted {int(matrix_accounted)}, expected {int(matrix_expected)}. "
+                "Rows are registered LSU queue credits; columns are P0 selections "
+                "reserved between Select and AGU enqueue.\n\n"
+            )
+            stream.write("| LSU credit | reservation 0 | reservation 1 | reservation 2 |\n")
+            stream.write("|---:|---:|---:|---:|\n")
+            for credit in range(3):
+                counts = [
+                    int(credit_resv.get(f"C{credit}_R{reservation}", 0))
+                    for reservation in range(3)
+                ]
+                stream.write(
+                    f"| {credit} | {counts[0]} | {counts[1]} | {counts[2]} |\n"
+                )
+            stream.write(
+                "\nRegistered LSU queue age repairs: "
+                f"**{int(value(records, 'PERF_LSU_AGE_REPAIR', 'CYCLES'))} cycles**. "
+                "This counts a younger unsafe MMIO head being exchanged with "
+                "an older registered request; it is a correctness/progress event, "
+                "not an additive performance-loss bucket.\n"
+            )
             p0_mix = records.get("PERF_P0_FULL_RESIDENT_MIX", {})
             p0_mix_expected = p0_mix.get("EXPECTED", 0)
             stream.write("\nP0-full resident composition:\n\n")

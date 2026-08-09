@@ -45,6 +45,24 @@ import ydrasil_pkg::*;
     localparam int STORE_BUFFER_DEPTH = 2;
     localparam int QUEUE_COUNT_WIDTH = $clog2(QUEUE_DEPTH + 1);
     localparam int STORE_COUNT_WIDTH = $clog2(STORE_BUFFER_DEPTH + 1);
+    localparam int PRODUCER_AGE_WIDTH = PRODUCER_SLOT_WIDTH + 1;
+
+    function automatic logic [PRODUCER_AGE_WIDTH-1:0]
+        producer_age_from_head(input producer_id_t producer_id);
+        logic [PRODUCER_AGE_WIDTH-1:0] producer_slot_ext;
+        logic [PRODUCER_AGE_WIDTH-1:0] rob_head_slot_ext;
+        begin
+            producer_slot_ext = {1'b0,
+                producer_id[PRODUCER_SLOT_WIDTH-1:0]};
+            rob_head_slot_ext = {1'b0,
+                rob_head_id_i[PRODUCER_SLOT_WIDTH-1:0]};
+            producer_age_from_head =
+                (producer_slot_ext >= rob_head_slot_ext) ?
+                (producer_slot_ext - rob_head_slot_ext) :
+                (PRODUCER_AGE_WIDTH'(PRODUCER_NUM) -
+                 rob_head_slot_ext + producer_slot_ext);
+        end
+    endfunction
 
     ydrasil_lsu_req_pkt_t queue_q [0:QUEUE_DEPTH-1];
     reg [QUEUE_COUNT_WIDTH-1:0] queue_count_q;
@@ -224,11 +242,21 @@ import ydrasil_pkg::*;
     wire store_buf_dequeue = store_head_data_valid;
 
 	    ydrasil_lsu_req_pkt_t active_pkt;
+	    ydrasil_lsu_req_pkt_t second_pkt;
+	    ydrasil_lsu_req_pkt_t patched_active_pkt;
+	    ydrasil_lsu_req_pkt_t patched_second_pkt;
+	    wire [$clog2(QUEUE_DEPTH)-1:0] queue_second_index =
+	        queue_head_q + 1'b1;
 	    // Queue patching commits into queue_q at the clock edge. Execution and
 	    // DTCM launch consume only the previously registered queue image so ROB
 	    // retirement/completion data cannot cross the LSU and memory boundary in
 	    // one cycle.
 	    assign active_pkt = queue_head_q[0] ? queue_q[1] : queue_q[0];
+	    assign second_pkt = queue_head_q[0] ? queue_q[0] : queue_q[1];
+	    assign patched_active_pkt = queue_head_q[0] ?
+	        patched_queue1 : patched_queue0;
+	    assign patched_second_pkt = queue_head_q[0] ?
+	        patched_queue0 : patched_queue1;
 
     wire active_valid = !queue_empty && active_pkt.valid;
     wire active_is_load = active_pkt.is_load;
@@ -249,6 +277,19 @@ import ydrasil_pkg::*;
 	        active_pkt.producer_id == rob_head_id_i;
 	    wire active_mmio_order_safe = active_at_rob_head ||
 	        (active_is_store && active_pkt.retired);
+	    wire second_is_older =
+	        producer_age_from_head(second_pkt.producer_id) <
+	        producer_age_from_head(active_pkt.producer_id);
+	    // Load-load OoO can enqueue a younger speculative MMIO request before an
+	    // older request whose address was dependency-blocked.  MMIO must wait at
+	    // ROB head, so leaving that younger request at the FIFO head deadlocks the
+	    // older request and the ROB.  Repair only the two registered queue cells;
+	    // the normal DTCM launch payload remains on its existing registered path.
+	    wire queue_age_repair =
+	        (queue_count_q == QUEUE_COUNT_WIDTH'(QUEUE_DEPTH)) &&
+	        active_mmio && !active_mmio_order_safe &&
+	        active_pkt.producer_tracked && second_pkt.valid &&
+	        second_pkt.producer_tracked && second_is_older;
 
     reg mmio_req_valid_q;
     reg mmio_is_load_q;
@@ -780,6 +821,10 @@ import ydrasil_pkg::*;
         end else begin
 		            queue_q[0] <= patched_queue0;
 	            queue_q[1] <= patched_queue1;
+	            if (queue_age_repair) begin
+	                queue_q[queue_head_q] <= patched_second_pkt;
+	                queue_q[queue_second_index] <= patched_active_pkt;
+	            end
 	            if (queue_dequeue) begin
                 queue_q[queue_head_q] <= '0;
                 queue_head_q <= queue_head_q + 1'b1;

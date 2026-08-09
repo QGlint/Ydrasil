@@ -382,7 +382,9 @@ import ydrasil_pkg::*;
         retire_hit11 ? completion_data_i[COMPLETION_LSU] : retire_stored_data1;
 
 `ifndef SYNTHESIS
-    initial assert ((PRODUCER_NUM == 12) && ((PRODUCER_NUM % 2) == 0))
-        else $fatal(1, "value file requires the 12-slot two-bank producer layout");
+    initial assert ((PRODUCER_NUM >= 2) && ((PRODUCER_NUM % 2) == 0) &&
+                    (BANK_DEPTH <= (1 << BANK_INDEX_WIDTH)))
+        else $fatal(1,
+            "value file requires an even producer count representable by two banks");
 `endif
 endmodule
