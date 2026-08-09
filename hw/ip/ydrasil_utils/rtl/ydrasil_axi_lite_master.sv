@@ -11,6 +11,7 @@ import ydrasil_axi_pkg::*;
     output logic                        rsp_valid_o,
     output logic [AXI_DATA_WIDTH-1:0]   rsp_rdata_o,
     output logic                        rsp_error_o,
+    output logic                        req_ready_o,
     output ydrasil_axi_lite_m2s_pkt_t   axi_m2s_o,
     input  ydrasil_axi_lite_s2m_pkt_t   axi_s2m_i
 );
@@ -36,6 +37,7 @@ import ydrasil_axi_pkg::*;
     wire r_fire = axi_s2m_i.rvalid && axi_m2s_o.rready;
 
     always_comb begin
+        req_ready_o = (state_q == S_IDLE);
         axi_m2s_o = '0;
         axi_m2s_o.awaddr = addr_q;
         axi_m2s_o.wdata = wdata_q;

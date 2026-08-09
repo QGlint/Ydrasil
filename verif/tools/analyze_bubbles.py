@@ -74,6 +74,58 @@ LOCAL_CONTROL_FIELDS = (
     "RESIDENT_WAKE_ENTRIES",
     "RESIDENT_DUE_SELECT",
 )
+WAKEUP_FIELDS = (
+    "COMPLETION_ENTRIES",
+    "ALLOC_ENTRIES",
+    "SELECT_ENTRIES",
+    "DTCM_LAUNCH",
+    "DTCM_RESULT",
+    "MDU_RESULT",
+    "REPLAY",
+    "P0_COMPLETION_CYCLES",
+)
+BANK_STATE_FIELDS = (
+    "ALU_DEP", "P0_DEP", "P1_DEP", "ALU_ORDER", "P0_ORDER", "P1_ORDER",
+    "ALU_RESOURCE", "P0_RESOURCE", "P1_RESOURCE", "ALU_READY", "P0_READY",
+    "P1_READY", "ALU_CANDIDATE", "P0_CANDIDATE", "P1_CANDIDATE",
+    "ALU_SELECTED", "P0_SELECTED", "P1_SELECTED",
+)
+COUPLING_PAIR_FIELDS = (
+    "BANK_DEP", "BANK_ROB", "BANK_RESOURCE", "BANK_SELECT", "BANK_OPERAND",
+    "ROB_DEP", "ROB_RESOURCE", "ROB_SELECT", "ROB_OPERAND", "DEP_RESOURCE",
+    "DEP_SELECT", "DEP_OPERAND", "RESOURCE_SELECT", "SELECT_OPERAND",
+    "BANK_DEP_SELECT", "BANK_ROB_SELECT", "DEP_SELECT_OPERAND",
+)
+LATENCY_FIELDS = ("B0_3", "B4_7", "B8_15", "B16_31", "B32_63", "B64P")
+SELECT_QUEUE_FIELDS = (
+    "HOL_SINGLE_HEAD_PAIR_SKID_CYCLES", "HOL_LOST_SLOTS", "PAIR_PUSH_CYCLES",
+    "PAIR_HEAD_ISSUE_CYCLES", "PAIR_PUSH_BEHIND_SINGLE_HEAD_CYCLES",
+    "PAIR_PUSH_BEHIND_SINGLE_HEAD_SLOTS", "STATE_EMPTY", "STATE_HEAD_SINGLE",
+    "STATE_HEAD_PAIR", "STATE_SINGLE_SINGLE", "STATE_SINGLE_PAIR",
+    "STATE_PAIR_SINGLE", "STATE_PAIR_PAIR",
+)
+SELECT_REFILL_BOUNDARY_FIELDS = (
+    "HEAD_EMPTY_PUSH_CYCLES", "HEAD_EMPTY_PUSH_SLOTS",
+    "HEAD_EMPTY_PAIR_SLOTS", "HEAD_EMPTY_SINGLE_SLOTS",
+)
+EX_VALID_HOLD_FIELDS = ("LANE0", "LANE1", "TOTAL")
+SELECT_OPPORTUNITY_FIELDS = (
+    "RAW_W0", "RAW_W1", "RAW_W2", "ACTUAL_W0", "ACTUAL_W1", "ACTUAL_W2",
+    "RAW_ALU_ENTRIES", "RAW_P0_CYCLES", "RAW_P1_CYCLES",
+    "DROP_ALU_ENTRIES", "DROP_P0_ENTRIES", "DROP_P1_ENTRIES",
+    "WIDTH_GAP_SLOTS", "PAIR_CAPABLE_SINGLE_CYCLES",
+    "PAIR_CAPABLE_SINGLE_LOST_SLOTS", "GAP_RECOVERY_CYCLES",
+    "GAP_NO_PUSH_CYCLES", "GAP_POLICY_CYCLES",
+)
+SELECT_WIDTH_MATRIX_FIELDS = ("M00", "M01", "M02", "M10", "M11", "M12", "M20", "M21", "M22")
+LOSS_COUPLING_FIELDS = ("CYCLES", "SLOTS", "MASK_BITS")
+LOSS_COUPLING_BITS = (
+    "BANK", "ROB_CAP", "DEP", "ORDER", "RESOURCE", "SELECT",
+    "OPERAND", "RECOVERY", "FRONTEND", "ROB_HEAD", "LSU", "FU",
+)
+DEP_BLOCKER_BITS = ("ALU", "LOAD", "MDU", "OTHER", "UNTRACKED")
+RS_DEPTH = 12
+ROB_DEPTH = 12
 FLOW_FAMILIES = (
     ("rs_alloc", ("RS_ALLOC0", "RS_ALLOC1", "RS_ALLOC2")),
     ("select", ("SELECT0", "SELECT1", "SELECT2")),
@@ -124,6 +176,50 @@ SLOT_REASON_FIELDS = (
     ("issue packet", "ISSUE"),
     ("other", "OTHER"),
 )
+# A non-overlapping expansion of PERF_SLOT_REASON.  The RS-bank parent is
+# replaced by its bank leaves, and the front-end/issue parents by their
+# existing slot-weighted details.  This is the report that must close to
+# exactly two capacity slots per sampled cycle.
+SLOT_LEAF_FIELDS = (
+    ("executed lane 0", "EXECUTED_SLOT0"),
+    ("executed lane 1", "EXECUTED_SLOT1"),
+    ("flush", "FLUSH"),
+    ("multicycle hold", "MUL_HOLD"),
+    ("multi-cause control", "MULTI_CAUSE"),
+    ("dependency", "DEPENDENCY"),
+    ("LSU structural", "LSU_STRUCT"),
+    ("producer full", "PRODUCER_FULL"),
+    ("writeback backpressure", "WB"),
+    ("CLINT/trap", "CLINT"),
+    ("LSU serialize", "LSU_SERIALIZE"),
+    ("control redirect", "NOIF_CONTROL_REDIRECT"),
+    ("prediction redirect", "NOIF_PREDICT_REDIRECT"),
+    ("FENCE refill", "NOIF_FENCE_REFILL"),
+    ("memory response", "NOIF_MEM_RESPONSE"),
+    ("fetch launch", "NOIF_FETCH_LAUNCH"),
+    ("pending redirect", "NOIF_PENDING_REDIRECT"),
+    ("IF/ID empty other", "NOIF_OTHER"),
+    ("issue single lane", "ISSUE_SINGLE_LANE"),
+    ("issue no execute", "ISSUE_NO_EXECUTE"),
+    ("ROB block", "ROB_BLOCK"),
+    ("recovery resync", "RECOVERY_RESYNC"),
+    ("ALU local full", "ALU_LOCAL_FULL"),
+    ("ALU credit stale", "ALU_CREDIT_STALE"),
+    ("P0 local full", "P0_LOCAL_FULL"),
+    ("P0 credit stale", "P0_CREDIT_STALE"),
+    ("P1 local full", "P1_LOCAL_FULL"),
+    ("P1 credit stale", "P1_CREDIT_STALE"),
+    ("RS bank unclassified", "RS_BANK_UNCLASSIFIED"),
+    ("RS pair limit", "RS_PAIR_LIMIT"),
+    ("Select refill", "SELECT_REFILL"),
+    ("RS dependency", "RS_DEPENDENCY"),
+    ("RS order", "RS_ORDER"),
+    ("RS resource", "RS_RESOURCE"),
+    ("RS no candidate", "RS_NO_CANDIDATE"),
+    ("RS empty", "RS_EMPTY"),
+    ("decode block", "DECODE_BLOCK"),
+    ("other unclassified", "OTHER_UNCLASSIFIED"),
+)
 NOIF_SLOT_FIELDS = (
     ("control redirect", "CONTROL_REDIRECT"),
     ("predict redirect", "PREDICT_REDIRECT"),
@@ -149,12 +245,102 @@ P0_FULL_FIELDS = (
     ("ready/release", "READY_RELEASE"),
     ("no candidate", "NO_CANDIDATE"),
 )
+SINGLE_BUNDLE_FIELDS = (
+    ("P0-only bundle", "P0_ONLY"),
+    ("P1-only bundle", "P1_ONLY"),
+    ("ALU-only bundle", "ALU_ONLY"),
+    ("serial bundle", "SERIAL"),
+    ("other singleton", "OTHER"),
+)
+SELECT_REFILL_FIELDS = (
+    ("pair refill", "PAIR"),
+    ("P0 singleton refill", "P0_SINGLE"),
+    ("P1 singleton refill", "P1_SINGLE"),
+    ("ALU singleton refill", "ALU_SINGLE"),
+    ("serial refill", "SERIAL"),
+    ("other refill", "OTHER"),
+)
+RS_DEPENDENCY_DETAIL_FIELDS = (
+    ("source 0", "SRC0"),
+    ("source 1", "SRC1"),
+    ("both sources", "BOTH_SRC"),
+    ("completion wakeup", "COMPLETION_WAKE"),
+    ("allocation wakeup", "ALLOC_WAKE"),
+    ("load entry", "LOAD"),
+    ("multiply/divide entry", "MUL"),
+    ("branch entry", "BRANCH"),
+    ("other dependency", "OTHER"),
+)
+SINGLE_BUNDLE_OP_FIELDS = (
+    ("ALU", "ALU"),
+    ("load", "LOAD"),
+    ("store", "STORE"),
+    ("multiply/divide", "MUL"),
+    ("CSR/system", "CSR_SYS"),
+    ("other", "OTHER"),
+)
+SELECT_REFILL_SHAPE_FIELDS = (
+    ("P0 + P1 pair", "P0_P1"),
+    ("P0 + ALU pair", "P0_ALU"),
+    ("P1 + ALU pair", "P1_ALU"),
+    ("ALU + ALU pair", "ALU_ALU"),
+    ("P0 singleton", "SINGLE_P0"),
+    ("P1 singleton", "SINGLE_P1"),
+    ("ALU singleton", "SINGLE_ALU"),
+    ("serial singleton", "SERIAL"),
+    ("other shape", "OTHER"),
+)
+RS_DEPENDENCY_WAKE_FIELDS = (
+    ("both sources wake", "BOTH"),
+    ("completion/allocation mixed", "MIXED"),
+    ("source 0 completion", "SRC0_COMPLETION"),
+    ("source 1 completion", "SRC1_COMPLETION"),
+    ("source 0 allocation", "SRC0_ALLOC"),
+    ("source 1 allocation", "SRC1_ALLOC"),
+    ("no visible wakeup", "NONE"),
+)
+RS_DEPENDENCY_OP_FIELDS = (
+    ("ALU", "ALU"),
+    ("load", "LOAD"),
+    ("store", "STORE"),
+    ("multiply/divide", "MUL"),
+    ("branch", "BRANCH"),
+    ("other", "OTHER"),
+)
 ISSUE_SLOT_FIELDS = (
     ("dependency", "DEPENDENCY"),
     ("LSU structural", "LSU_STRUCT"),
     ("LSU serialize", "LSU_SERIALIZE"),
     ("single lane admission", "SINGLE_LANE"),
     ("no execute", "NO_EXECUTE"),
+)
+EX_SLOT_FIELDS = (
+    ("accepted lane 0", "ACCEPT0"),
+    ("accepted lane 1", "ACCEPT1"),
+    ("branch drop lane 0", "BRANCH_DROP0"),
+    ("branch drop lane 1", "BRANCH_DROP1"),
+    ("multicycle drop lane 0", "MUL_DROP0"),
+    ("multicycle drop lane 1", "MUL_DROP1"),
+    ("pipeline empty lane 0", "PIPE_EMPTY0"),
+    ("pipeline empty lane 1", "PIPE_EMPTY1"),
+)
+EX_EMPTY_FIELDS = (
+    ("reset/pipeline fill", "RESET_PIPE"),
+    ("recovery", "RECOVERY"),
+    ("FENCE", "FENCE"),
+    ("lane-B-only packet", "B_ONLY"),
+    ("single-head packet", "SINGLE_HEAD"),
+    ("Select refill", "SELECT_REFILL"),
+    ("RS dependency", "RS_DEPENDENCY"),
+    ("RS order", "RS_ORDER"),
+    ("RS resource", "RS_RESOURCE"),
+    ("RS no candidate", "RS_NO_CANDIDATE"),
+    ("RS empty", "RS_EMPTY"),
+    ("front-end empty", "FRONTEND_EMPTY"),
+    ("launch snapshot mismatch", "LAUNCH_MISMATCH"),
+    ("other", "OTHER"),
+    ("unmapped source kind", "UNMAPPED"),
+    ("unaccounted snapshot residual", "UNACCOUNTED_SNAPSHOT"),
 )
 
 
@@ -177,12 +363,65 @@ def detailed_columns() -> list[tuple[str, str, str]]:
         for field in LOCAL_CONTROL_FIELDS
     )
     columns.extend(
+        (f"wakeup_{field.lower()}", "PERF_WAKEUP", field)
+        for field in WAKEUP_FIELDS
+    )
+    columns.extend(
+        (f"bank_state_{field.lower()}", "PERF_RS_BANK_STATE", field)
+        for field in BANK_STATE_FIELDS
+    )
+    columns.extend(
+        (f"coupling_pair_{field.lower()}", "PERF_COUPLING_PAIR", field)
+        for field in COUPLING_PAIR_FIELDS
+    )
+    for prefix, record in (
+        ("latency_alloc_select", "PERF_LATENCY_ALLOC_SELECT"),
+        ("latency_select_operand", "PERF_LATENCY_SELECT_OPERAND"),
+        ("latency_operand_ex", "PERF_LATENCY_OPERAND_EX"),
+        ("latency_alloc_complete", "PERF_LATENCY_ALLOC_COMPLETE"),
+        ("latency_alloc_retire", "PERF_LATENCY_ALLOC_RETIRE"),
+    ):
+        columns.extend((f"{prefix}_{field.lower()}", record, field) for field in LATENCY_FIELDS)
+    columns.extend(
+        (f"select_queue_{field.lower()}", "PERF_SELECT_QUEUE", field)
+        for field in SELECT_QUEUE_FIELDS
+    )
+    columns.extend(
+        (f"select_refill_boundary_{field.lower()}", "PERF_SELECT_REFILL_BOUNDARY", field)
+        for field in SELECT_REFILL_BOUNDARY_FIELDS
+    )
+    columns.extend(
+        (f"ex_valid_hold_{field.lower()}", "PERF_EX_VALID_HOLD", field)
+        for field in EX_VALID_HOLD_FIELDS
+    )
+    columns.extend(
+        (f"select_opportunity_{field.lower()}", "PERF_SELECT_OPPORTUNITY", field)
+        for field in SELECT_OPPORTUNITY_FIELDS
+    )
+    columns.extend(
+        (f"loss_coupling_{field.lower()}", "PERF_LOSS_COUPLING", field)
+        for field in LOSS_COUPLING_FIELDS
+    )
+    columns.extend(
+        (f"select_width_matrix_cycles_{field.lower()}",
+         "PERF_SELECT_WIDTH_MATRIX_CYCLES", field)
+        for field in SELECT_WIDTH_MATRIX_FIELDS
+    )
+    columns.extend(
+        (f"select_width_matrix_slots_{field.lower()}",
+         "PERF_SELECT_WIDTH_MATRIX_SLOTS", field)
+        for field in SELECT_WIDTH_MATRIX_FIELDS
+    )
+    columns.extend(
         (f"rob_occ_o{index}", "PERF_ROB_OCCUPANCY", f"O{index}")
         for index in range(13)
     )
+    # RS has twelve physical entries (0..11).  O12 is retained as an
+    # explicit overflow/unclassified bucket because the testbench emits it
+    # for closure; silently dropping it made the old report claim /10.
     columns.extend(
         (f"rs_occ_o{index}", "PERF_RS_OCCUPANCY", f"O{index}")
-        for index in range(11)
+        for index in range(RS_DEPTH + 1)
     )
     for prefix, fields in FLOW_FAMILIES:
         columns.extend((f"flow_{prefix}_{field[-1]}", "PERF_PIPE_FLOW", field) for field in fields)
@@ -197,6 +436,18 @@ def detailed_columns() -> list[tuple[str, str, str]]:
     columns.extend(
         (f"slot_reason_{field.lower()}", "PERF_SLOT_REASON", field)
         for _, field in SLOT_REASON_FIELDS
+    )
+    columns.extend(
+        (f"slot_leaf_{field.lower()}", "PERF_SLOT_LEAF", field)
+        for _, field in (*SLOT_LEAF_FIELDS, ("accounted", "ACCOUNTED"), ("expected", "EXPECTED"))
+    )
+    columns.extend(
+        (f"ex_slot_{field.lower()}", "PERF_EX_SLOT_STATE", field)
+        for _, field in (*EX_SLOT_FIELDS, ("accounted", "ACCOUNTED"), ("expected", "EXPECTED"))
+    )
+    columns.extend(
+        (f"ex_empty_{field.lower()}", "PERF_EX_EMPTY_CAUSE", field)
+        for _, field in (*EX_EMPTY_FIELDS, ("accounted", "ACCOUNTED"), ("expected", "EXPECTED"))
     )
     columns.extend(
         (f"noif_slot_{field.lower()}", "PERF_NOIF_SLOT_DETAIL", field)
@@ -215,6 +466,34 @@ def detailed_columns() -> list[tuple[str, str, str]]:
         for _, field in (*P0_FULL_FIELDS, ("accounted", "ACCOUNTED"), ("expected", "EXPECTED"))
     )
     columns.extend(
+        (f"single_bundle_{field.lower()}", "PERF_SINGLE_BUNDLE_DETAIL", field)
+        for _, field in (*SINGLE_BUNDLE_FIELDS, ("accounted", "ACCOUNTED"), ("expected", "EXPECTED"))
+    )
+    columns.extend(
+        (f"select_refill_{field.lower()}", "PERF_SELECT_REFILL_DETAIL", field)
+        for _, field in (*SELECT_REFILL_FIELDS, ("accounted", "ACCOUNTED"), ("expected", "EXPECTED"))
+    )
+    columns.extend(
+        (f"rs_dependency_detail_{field.lower()}", "PERF_RS_DEPENDENCY_DETAIL2", field)
+        for _, field in (*RS_DEPENDENCY_DETAIL_FIELDS, ("accounted", "ACCOUNTED"), ("expected", "EXPECTED"))
+    )
+    columns.extend(
+        (f"single_bundle_op_{field.lower()}", "PERF_SINGLE_BUNDLE_OP", field)
+        for _, field in (*SINGLE_BUNDLE_OP_FIELDS, ("accounted", "ACCOUNTED"), ("expected", "EXPECTED"))
+    )
+    columns.extend(
+        (f"select_refill_shape_{field.lower()}", "PERF_SELECT_REFILL_SHAPE", field)
+        for _, field in (*SELECT_REFILL_SHAPE_FIELDS, ("accounted", "ACCOUNTED"), ("expected", "EXPECTED"))
+    )
+    columns.extend(
+        (f"rs_dependency_wake_{field.lower()}", "PERF_RS_DEPENDENCY_WAKE", field)
+        for _, field in (*RS_DEPENDENCY_WAKE_FIELDS, ("accounted", "ACCOUNTED"), ("expected", "EXPECTED"))
+    )
+    columns.extend(
+        (f"rs_dependency_op_{field.lower()}", "PERF_RS_DEPENDENCY_OP", field)
+        for _, field in (*RS_DEPENDENCY_OP_FIELDS, ("accounted", "ACCOUNTED"), ("expected", "EXPECTED"))
+    )
+    columns.extend(
         (name, record, field)
         for name, record, field in (
             ("branches", "PERF_BRANCH", "BRANCHES"),
@@ -227,11 +506,37 @@ def detailed_columns() -> list[tuple[str, str, str]]:
     return columns
 
 
+def all_columns(
+    programs: list[tuple[str, dict[str, dict[str, float]]]],
+) -> list[tuple[str, str, str]]:
+    """Return the detailed schema plus every field emitted by the RTL TB.
+
+    The hand-curated schema is used for stable, readable columns.  A raw
+    fallback is appended for fields from coverage/debug records and sparse
+    masks so adding a new PERF line can never silently disappear from CSV.
+    """
+    columns = detailed_columns()
+    known = {(record, field) for _, record, field in columns}
+    records = {
+        (record, field)
+        for _, values in programs
+        for record, fields in values.items()
+        for field in fields
+    }
+    for record, field in sorted(records):
+        if (record, field) in known:
+            continue
+        columns.append(
+            (f"raw_{record.lower()}_{field.lower()}", record, field)
+        )
+    return columns
+
+
 def write_csv(
     path: Path,
     programs: list[tuple[str, dict[str, dict[str, float]]]],
 ) -> None:
-    columns = detailed_columns()
+    columns = all_columns(programs)
     with path.open("w", newline="") as stream:
         writer = csv.writer(stream)
         writer.writerow(["program", *[name for name, _, _ in columns]])
@@ -241,11 +546,51 @@ def write_csv(
             )
 
 
+def sparse_mask(records: dict[str, dict[str, float]], record: str) -> dict[int, float]:
+    """Decode the M<number>=value form used for sparse coupling masks."""
+    return {
+        int(key[1:]): raw
+        for key, raw in records.get(record, {}).items()
+        if key.startswith("M") and key[1:].isdigit()
+    }
+
+
+def loss_coupling_pairs(
+    records: dict[str, dict[str, float]],
+) -> list[tuple[str, str, float]]:
+    """Return pair intersections weighted by lost execution slots.
+
+    The mask rows overlap by design.  Summing pair rows is therefore not a
+    loss partition; it answers which architectural controls are asserted on
+    the same lost-slot cycles.
+    """
+    masks = sparse_mask(records, "PERF_LOSS_COUPLING_MASK_SLOTS")
+    pairs: list[tuple[str, str, float]] = []
+    for left, left_name in enumerate(LOSS_COUPLING_BITS):
+        for right in range(left + 1, len(LOSS_COUPLING_BITS)):
+            total = sum(
+                slots
+                for mask, slots in masks.items()
+                if (mask & (1 << left)) and (mask & (1 << right))
+            )
+            if total:
+                pairs.append((left_name, LOSS_COUPLING_BITS[right], total))
+    return sorted(pairs, key=lambda item: item[2], reverse=True)
+
+
 def write_report(
     path: Path,
     programs: list[tuple[str, dict[str, dict[str, float]]]],
 ) -> None:
-    focus = [(name, records) for name, records in programs if name == "coremark"]
+    # Keep the reference CoreMark run and every optimized profile in the
+    # report.  The active performance image is
+    # `coremark-opt/O3_app_unroll`, so restricting focus to the legacy
+    # `coremark` directory silently turns all detailed causes into zeros.
+    focus = [
+        (name, records)
+        for name, records in programs
+        if name == "coremark" or name.startswith("coremark-opt/")
+    ]
     with path.open("w") as stream:
         stream.write("# Decoupled backend performance analysis\n\n")
         stream.write(
@@ -288,7 +633,8 @@ def write_report(
                 )
 
             rs_total = sum(
-                value(records, "PERF_RS_OCCUPANCY", f"O{index}") for index in range(11)
+                value(records, "PERF_RS_OCCUPANCY", f"O{index}")
+                for index in range(RS_DEPTH + 1)
             )
             rob_total = sum(
                 value(records, "PERF_ROB_OCCUPANCY", f"O{index}") for index in range(13)
@@ -296,7 +642,7 @@ def write_report(
             rs_average = (
                 sum(
                     index * value(records, "PERF_RS_OCCUPANCY", f"O{index}")
-                    for index in range(11)
+                    for index in range(RS_DEPTH + 1)
                 )
                 / sample
                 if sample
@@ -313,8 +659,48 @@ def write_report(
             )
             stream.write(
                 f"\nRS occupancy closure: **{'PASS' if rs_total == sample else 'FAIL'}**, "
-                f"average {rs_average:.2f}/10. ROB occupancy closure: "
-                f"**{'PASS' if rob_total == sample else 'FAIL'}**, average {rob_average:.2f}/12.\n\n"
+                f"average {rs_average:.2f}/{RS_DEPTH}. ROB occupancy closure: "
+                f"**{'PASS' if rob_total == sample else 'FAIL'}**, "
+                f"average {rob_average:.2f}/{ROB_DEPTH}.\n\n"
+            )
+
+            target_ipc = 1.2
+            target_cycles = insts / target_ipc if target_ipc else 0.0
+            cycles_to_remove = cycles - target_cycles
+            mean_rob_residence = rob_average / ipc if ipc else 0.0
+            target_rob_occupancy = target_ipc * mean_rob_residence
+            practical_rob_depth = int(target_rob_occupancy / 0.8 + 0.999999)
+            score = value(records, "PERF_BENCHMARK", "COREMARK_SCORE")
+            score456_cycles = cycles * score / 456.0 if score else 0.0
+            score456_ipc = insts / score456_cycles if score456_cycles else 0.0
+            projected_score = score * cycles / target_cycles if target_cycles else 0.0
+            stream.write("### Throughput target budget\n\n")
+            stream.write("| Target/evidence | Value | Architectural implication |\n")
+            stream.write("|---|---:|---|\n")
+            if score:
+                stream.write(
+                    f"| Current CoreMark score | {score:.6f} | Current measured baseline. |\n"
+                )
+                stream.write(
+                    f"| Score 456 equivalent | {score456_cycles:.0f} cycles / IPC {score456_ipc:.4f} | "
+                    f"Requires removing about {cycles - score456_cycles:.0f} cycles. |\n"
+                )
+            stream.write(
+                f"| IPC 1.2 equivalent | {target_cycles:.0f} cycles"
+                + (f" / projected score {projected_score:.2f}" if score else "")
+                + f" | Requires removing about {cycles_to_remove:.0f} cycles ({pct(cycles_to_remove, cycles)}). |\n"
+            )
+            stream.write(
+                f"| Measured mean ROB residence (Little's law) | {mean_rob_residence:.2f} cycles | "
+                "Derived from average occupancy / retirement IPC. |\n"
+            )
+            stream.write(
+                f"| Occupancy needed at IPC 1.2 with current residence | {target_rob_occupancy:.2f} entries | "
+                f"Exceeds the {ROB_DEPTH}-entry ROB before any headroom. |\n"
+            )
+            stream.write(
+                f"| ROB depth for <=80% average occupancy | {practical_rob_depth} entries | "
+                "Either use this capacity class or reduce mean residence to <=8 cycles. |\n\n"
             )
 
             stream.write("### Decoupled control\n\n")
@@ -323,7 +709,7 @@ def write_report(
             for field in CONTROL_FIELDS:
                 count = value(records, "PERF_CONTROL_DECOUPLE", field)
                 entry_metric = field.endswith("ENTRY_CYCLES")
-                denominator = sample * 10 if entry_metric else sample
+                denominator = sample * RS_DEPTH if entry_metric else sample
                 stream.write(
                     f"| {field.lower().replace('_', ' ')} | {int(count)} | "
                     f"{int(denominator)} | {pct(count, denominator)} |\n"
@@ -348,6 +734,276 @@ def write_report(
                 "\n`DTCM_DUE_SELECT` and `RESIDENT_DUE_SELECT` count consumers "
                 "that entered Select on a local narrow-token path.\n\n"
             )
+            stream.write("### Wakeup source accounting\n\n")
+            stream.write(
+                "These counts are sampled from the RS entry completion-tag comparators and "
+                "registered local token inputs. `COMPLETION_ENTRIES` is entry-weighted, so "
+                "it can exceed the number of cycles.\n\n"
+            )
+            stream.write("| Source | Count | Sample rate |\n|---|---:|---:|\n")
+            for field in WAKEUP_FIELDS:
+                count = value(records, "PERF_WAKEUP", field)
+                stream.write(
+                    f"| {field.lower().replace('_', ' ')} | {int(count)} | "
+                    f"{pct(count, sample)} |\n"
+                )
+
+            stream.write("\n### Coupled backend state (orthogonal)\n\n")
+            stream.write(
+                "The following values are not a partition. A cycle/entry is allowed to "
+                "contribute to multiple columns, which is the required view for deciding "
+                "whether a bank, ROB, dependency, or Select policy change removes the same stall.\n\n"
+            )
+            stream.write("| RS bank state | Entry-cycles |\n|---|---:|\n")
+            for field in BANK_STATE_FIELDS:
+                count = value(records, "PERF_RS_BANK_STATE", field)
+                stream.write(f"| {field.lower().replace('_', ' ')} | {int(count)} |\n")
+            stream.write("\n| Coupled predicates | Cycles |\n|---|---:|\n")
+            for field in COUPLING_PAIR_FIELDS:
+                count = value(records, "PERF_COUPLING_PAIR", field)
+                stream.write(f"| {field.lower().replace('_', ' + ')} | {int(count)} |\n")
+            stream.write(
+                "\nA high `BANK_DEP_SELECT` count means increasing total RS entries alone will not "
+                "help: the bank mapping and Select width must be changed together. A high "
+                "`SELECT_OPERAND` count points at the extra Select/Operand boundary and its "
+                "pair metadata contract.\n\n"
+            )
+            stream.write("### Producer lifetime latency\n\n")
+            stream.write("| Lifetime | 0-3 | 4-7 | 8-15 | 16-31 | 32-63 | 64+ |\n|---|---:|---:|---:|---:|---:|---:|\n")
+            for label, record in (
+                ("allocate -> select", "PERF_LATENCY_ALLOC_SELECT"),
+                ("select -> Operand", "PERF_LATENCY_SELECT_OPERAND"),
+                ("Operand -> EX", "PERF_LATENCY_OPERAND_EX"),
+                ("allocate -> completion", "PERF_LATENCY_ALLOC_COMPLETE"),
+                ("allocate -> retire", "PERF_LATENCY_ALLOC_RETIRE"),
+            ):
+                values = [int(value(records, record, field)) for field in LATENCY_FIELDS]
+                stream.write(f"| {label} | " + " | ".join(str(item) for item in values) + " |\n")
+            stream.write(
+                "\nThe lifetime table separates window/select delay from the one-cycle Operand "
+                "boundary and from FU/ROB retirement latency; it must be used before choosing "
+                "between flexible banking, wakeup changes, and retirement decoupling.\n\n"
+            )
+            stream.write("### Select/Operand bundle state\n\n")
+            stream.write(
+                "`HOL_SINGLE_HEAD_PAIR_SKID_CYCLES` is the exact case where the current "
+                "two-cell bundle queue has a single uop at the head and a pair waiting in "
+                "the skid cell. It is a direct measure of lost pairing opportunity, not a "
+                "generic Select bubble.\n\n"
+            )
+            stream.write("| Queue state | Cycles |\n|---|---:|\n")
+            for label, field in (
+                ("empty", "STATE_EMPTY"),
+                ("head single", "STATE_HEAD_SINGLE"),
+                ("head pair", "STATE_HEAD_PAIR"),
+                ("pair pushed behind singleton head", "PAIR_PUSH_BEHIND_SINGLE_HEAD_CYCLES"),
+                ("single head + single skid", "STATE_SINGLE_SINGLE"),
+                ("single head + pair skid", "STATE_SINGLE_PAIR"),
+                ("pair head + single skid", "STATE_PAIR_SINGLE"),
+                ("pair head + pair skid", "STATE_PAIR_PAIR"),
+            ):
+                stream.write(
+                    f"| {label} | {int(value(records, 'PERF_SELECT_QUEUE', field))} |\n"
+                )
+            hol = value(records, "PERF_SELECT_QUEUE", "HOL_SINGLE_HEAD_PAIR_SKID_CYCLES")
+            hol_lost = value(records, "PERF_SELECT_QUEUE", "HOL_LOST_SLOTS")
+            pair_behind = value(
+                records, "PERF_SELECT_QUEUE", "PAIR_PUSH_BEHIND_SINGLE_HEAD_SLOTS"
+            )
+            stream.write(
+                f"\nBundle HOL: **{int(hol)} cycles**, **{int(hol_lost)} lost slots**; "
+                f"pair-push-behind-single-head edges account for **{int(pair_behind)} "
+                "lost slots**. A persistent skid state and an edge-level pair loss are "
+                "different phenomena; only the latter is visible when the head is consumed "
+                "on the same edge.\n\n"
+            )
+            refill_boundary = records.get("PERF_SELECT_REFILL_BOUNDARY", {})
+            refill_slots = refill_boundary.get("HEAD_EMPTY_PUSH_SLOTS", 0)
+            stream.write(
+                "Select refill boundary: **%d cycles / %d lost slots**, split as "
+                "**%d pair** and **%d singleton** pushes. This is the direct evidence "
+                "for a fire-through/bypass or prefetch redesign at the Select->Operand "
+                "register boundary; it is not evidence that the RS has no candidates.\n\n"
+                % (
+                    int(refill_boundary.get("HEAD_EMPTY_PUSH_CYCLES", 0)),
+                    int(refill_slots),
+                    int(refill_boundary.get("HEAD_EMPTY_PAIR_SLOTS", 0)),
+                    int(refill_boundary.get("HEAD_EMPTY_SINGLE_SLOTS", 0)),
+                )
+            )
+
+            stream.write("### Loss-weighted coupling and Select opportunity\n\n")
+            stream.write(
+                "`PERF_COUPLING_MASK` above is a state histogram and is deliberately not "
+                "a loss partition. The following mask is sampled only when an EX capacity "
+                "slot is empty and is weighted by the number of lost slots. A row may match "
+                "several architectural controls; pair totals below are intersections, not "
+                "additive causes. Bits are BANK, ROB_CAP, DEP, ORDER, RESOURCE, SELECT, "
+                "OPERAND, RECOVERY, FRONTEND, ROB_HEAD, LSU, FU.\n\n"
+            )
+            loss_cycles = value(records, "PERF_LOSS_COUPLING", "CYCLES")
+            loss_slots = value(records, "PERF_LOSS_COUPLING", "SLOTS")
+            mask_slots = sparse_mask(records, "PERF_LOSS_COUPLING_MASK_SLOTS")
+            mask_cycles = sparse_mask(records, "PERF_LOSS_COUPLING_MASK_CYCLES")
+            mask_sum = sum(mask_slots.values())
+            stream.write(
+                f"Loss-mask closure: **{'PASS' if mask_sum == loss_slots else 'FAIL'}**, "
+                f"{int(loss_cycles)} loss cycles, {int(loss_slots)} loss slots, "
+                f"weighted rows sum {int(mask_sum)}.\n\n"
+            )
+            stream.write("| Loss mask | Active controls | Cycles | Lost slots |\n|---:|---|---:|---:|\n")
+            for mask, slots in sorted(mask_slots.items(), key=lambda item: item[1], reverse=True)[:16]:
+                active = "+".join(
+                    name for bit, name in enumerate(LOSS_COUPLING_BITS) if mask & (1 << bit)
+                ) or "none"
+                stream.write(
+                    f"| 0x{mask:03x} | {active} | {int(mask_cycles.get(mask, 0))} | {int(slots)} |\n"
+                )
+            stream.write("\n| Coupled controls on lost slots | Lost slots | Share of loss mask |\n|---|---:|---:|\n")
+            for left, right, slots in loss_coupling_pairs(records)[:16]:
+                stream.write(f"| {left} + {right} | {int(slots)} | {pct(slots, loss_slots)} |\n")
+
+            stream.write("\n| Control involvement | Lost slots with bit | Exclusive slots | Coupled slots |\n")
+            stream.write("|---|---:|---:|---:|\n")
+            for bit, name in enumerate(LOSS_COUPLING_BITS):
+                involved = sum(
+                    slots for mask, slots in mask_slots.items() if mask & (1 << bit)
+                )
+                exclusive = mask_slots.get(1 << bit, 0)
+                stream.write(
+                    f"| {name} | {int(involved)} | {int(exclusive)} | "
+                    f"{int(involved - exclusive)} |\n"
+                )
+
+            opportunity = records.get("PERF_SELECT_OPPORTUNITY", {})
+            stream.write("\n#### Select opportunity\n\n")
+            stream.write(
+                "`RAW_W*` is the width available from the three bank candidate vectors "
+                "after resource/dependency predicates, while `ACTUAL_W*` is the width that "
+                "crossed the registered Select/Operand boundary. This is a policy/bank "
+                "opportunity metric, not a claim that every candidate is independent.\n\n"
+            )
+            stream.write("| Observation | Value |\n|---|---:|\n")
+            for label, field in (
+                ("raw width 0/1/2 cycles", "RAW_W0"),
+                ("raw width 1 cycles", "RAW_W1"),
+                ("raw width 2 cycles", "RAW_W2"),
+                ("actual width 0 cycles", "ACTUAL_W0"),
+                ("actual width 1 cycles", "ACTUAL_W1"),
+                ("actual width 2 cycles", "ACTUAL_W2"),
+                ("raw ALU candidate entries", "RAW_ALU_ENTRIES"),
+                ("raw P0 candidate cycles", "RAW_P0_CYCLES"),
+                ("raw P1 candidate cycles", "RAW_P1_CYCLES"),
+                ("ALU candidates not selected", "DROP_ALU_ENTRIES"),
+                ("P0 candidates not selected", "DROP_P0_ENTRIES"),
+                ("P1 candidates not selected", "DROP_P1_ENTRIES"),
+                ("Select width gap slots", "WIDTH_GAP_SLOTS"),
+                ("pair-capable but singleton cycles", "PAIR_CAPABLE_SINGLE_CYCLES"),
+                ("pair-capable singleton lost slots", "PAIR_CAPABLE_SINGLE_LOST_SLOTS"),
+                ("gap during recovery", "GAP_RECOVERY_CYCLES"),
+                ("gap with no Select push", "GAP_NO_PUSH_CYCLES"),
+                ("gap with policy/bank push", "GAP_POLICY_CYCLES"),
+            ):
+                stream.write(f"| {label} | {int(opportunity.get(field, 0))} |\n")
+            stream.write("\nSelect width matrix (raw width -> actual width):\n\n")
+            stream.write("| Raw\\Actual | 0 | 1 | 2 |\n|---:|---:|---:|---:|\n")
+            matrix_cycles = records.get("PERF_SELECT_WIDTH_MATRIX_CYCLES", {})
+            matrix_slots = records.get("PERF_SELECT_WIDTH_MATRIX_SLOTS", {})
+            for raw_width in range(3):
+                cells = []
+                for actual_width in range(3):
+                    field = f"M{raw_width}{actual_width}"
+                    cells.append(
+                        f"{int(matrix_cycles.get(field, 0))} cyc / "
+                        f"{int(matrix_slots.get(field, 0))} lost"
+                    )
+                stream.write(f"| {raw_width} | " + " | ".join(cells) + " |\n")
+
+            rob_full = value(records, "PERF_CONTROL_DECOUPLE", "ROB_FULL")
+            rob_head_wait = value(records, "PERF_ROB_HEAD_STATE", "WAIT_LOAD") + value(
+                records, "PERF_ROB_HEAD_STATE", "WAIT_BRANCH"
+            ) + value(records, "PERF_ROB_HEAD_STATE", "WAIT_MDU")
+            p0_candidate = value(records, "PERF_RS_BANK_STATE", "P0_CANDIDATE")
+            p0_selected = value(records, "PERF_RS_BANK_STATE", "P0_SELECTED")
+            alloc_select_tail = sum(
+                value(records, "PERF_LATENCY_ALLOC_SELECT", field)
+                for field in ("B4_7", "B8_15", "B16_31", "B32_63", "B64P")
+            )
+            stream.write("\n#### Architecture decision gates\n\n")
+            stream.write("| Evidence in current HEAD | What it rules in/out |\n|---|---|\n")
+            stream.write(
+                f"| ROB full {int(rob_full)} cycles ({pct(rob_full, sample)}) | "
+                f"Capacity is not the first refill fix, but {ROB_DEPTH} entries cannot sustain IPC 1.2 "
+                "at the measured residence time; a timing-partitioned 16-entry design is a later required gate. |\n"
+            )
+            stream.write(
+                f"| ROB head waits in load/MDU/branch classes {int(rob_head_wait)} cycles | "
+                "Retirement serialization must be analyzed separately from RS admission. |\n"
+            )
+            stream.write(
+                f"| P0 candidate/selected entry-cycles {int(p0_candidate)}/{int(p0_selected)} | "
+                "If the ratio is near one, P0 is not Select-starved; its bank dependency/order/credit pressure is the coupled target. |\n"
+            )
+            stream.write(
+                f"| allocate->Select latency tail (4+ cycles) {int(alloc_select_tail)} | "
+                "Window admission, wakeup visibility, bank mapping, and Select policy must be optimized as one path. |\n"
+            )
+            stream.write(
+                f"| pair-capable singleton lost slots {int(opportunity.get('PAIR_CAPABLE_SINGLE_LOST_SLOTS', 0))} | "
+                "A nonzero value supports flexible lane assignment/pair formation; it is not evidence for Operand skid merge by itself. |\n"
+            )
+            stream.write(
+                f"| Select width gap: recovery {int(opportunity.get('GAP_RECOVERY_CYCLES', 0))}, "
+                f"policy/bank {int(opportunity.get('GAP_POLICY_CYCLES', 0))} cycles | "
+                "A zero policy/bank gap rules out Select priority as the explanation for the raw-width mismatch; keep recovery separate. |\n"
+            )
+            stream.write(
+                f"| pair pushed behind singleton head {int(pair_behind)} lost slots | "
+                "This is an edge-level cross-bundle pairing opportunity even though persistent skid state is zero. |\n"
+            )
+            stream.write(
+                "\nThe RTL ownership behind these gates is the current `ydrasil_issue_stage.sv` "
+                "12-entry RS split into ALU[0:3], P0/LSU[4:7], and P1[8:11], followed by "
+                "the registered two-cell Select/Operand bundle. `ydrasil_ctrl.sv` owns the "
+                "expanded in-order ROB head and retirement, while `ydrasil_load_store_unit.sv` "
+                "owns LSU credit, store-buffer, and memory-response timing. The report keeps "
+                "these ownership boundaries explicit so one counter cannot be mistaken for a "
+                "single RTL root cause.\n\n"
+            )
+            stream.write("### 200 MHz and PPA guardrails\n\n")
+            stream.write(
+                "This report intentionally does not import an older post-route result. A "
+                "200 MHz claim is valid only when timing/utilization/power are generated "
+                "from the same current RTL hash and constraints (5.0 ns period). The "
+                "following are architecture changes to evaluate while preserving that "
+                "boundary:\n\n"
+            )
+            stream.write("| Current loss evidence | RTL direction | 200 MHz/PPA constraint |\n|---|---|---|\n")
+            stream.write(
+                f"| Select->Operand head-empty refill {int(value(records, 'PERF_BACKEND_LOSS', 'SELECT_REFILL'))} slots | "
+                "Replace the bubble-producing bundle FIFO interface with bank-local candidate/operand prefetch and an elastic lane assembler. | "
+                "Do not make raw Select drive RF/value resolution or EX in one cycle; preserve a register cut at the bank output. |\n"
+            )
+            stream.write(
+                f"| DEP+ORDER overlap {int(loss_coupling_pairs(records)[0][2]) if loss_coupling_pairs(records) else 0} slots at top pair | "
+                "Treat this primarily as dependency-driven residency of ordered entries; direct RS_ORDER loss is small, so do not relax ordering first. | "
+                "Shorten load readiness lifetime and encode order with bank-local registered age/frontier tokens. |\n"
+            )
+            stream.write(
+                f"| P0 full {int(value(records, 'PERF_LOCAL_CONTROL', 'P0_FULL'))} cycles; P0 candidate selected ratio near one | "
+                "Add a P0 ingress elastic slot for same-cycle full+release and a small load-capable overflow path for dependency residency. | "
+                "Keep ingress/overflow registered and P0-local; never feed current Select release combinationally to Fetch/Decode. |\n"
+            )
+            stream.write(
+                f"| ROB head class waits {int(rob_head_wait)} cycles, ROB full {int(rob_full)} cycles | "
+                "After refill and P0 fixes, use a 16-entry ROB or reduce mean residence below 8 cycles; load-head delay dominates. | "
+                "Register head/head+1 metadata and isolate completion decode from rename-map clear before increasing depth. |\n"
+            )
+            stream.write(
+                f"| branch mispredicts {int(value(records, 'PERF_BRANCH', 'MISPRED'))}, recovery loss slots {int(value(records, 'PERF_BACKEND_LOSS', 'FLUSH'))} | "
+                "Keep recovery/resync as a separate term from steady-state OoO issue. | "
+                "Do not count recovery bubbles as Select policy loss when sizing the issue network. |\n\n"
+            )
 
             expected_loss = value(records, "PERF_BACKEND_LOSS", "EXPECTED")
             accounted_loss = sum(
@@ -367,6 +1023,74 @@ def write_report(
                 count = value(records, "PERF_BACKEND_LOSS", field)
                 stream.write(f"| {label} | {int(count)} | {pct(count, expected_loss)} |\n")
 
+            for title, record, fields in (
+                ("SINGLE_BUNDLE detail", "PERF_SINGLE_BUNDLE_DETAIL", SINGLE_BUNDLE_FIELDS),
+                ("SELECT_REFILL detail", "PERF_SELECT_REFILL_DETAIL", SELECT_REFILL_FIELDS),
+                ("RS_DEPENDENCY detail", "PERF_RS_DEPENDENCY_DETAIL2", RS_DEPENDENCY_DETAIL_FIELDS),
+                ("SINGLE_BUNDLE operation class", "PERF_SINGLE_BUNDLE_OP", SINGLE_BUNDLE_OP_FIELDS),
+                ("SELECT_REFILL shape", "PERF_SELECT_REFILL_SHAPE", SELECT_REFILL_SHAPE_FIELDS),
+                ("RS_DEPENDENCY wakeup source", "PERF_RS_DEPENDENCY_WAKE", RS_DEPENDENCY_WAKE_FIELDS),
+                ("RS_DEPENDENCY operation class", "PERF_RS_DEPENDENCY_OP", RS_DEPENDENCY_OP_FIELDS),
+            ):
+                detail_expected = value(records, record, "EXPECTED")
+                detail_accounted = value(records, record, "ACCOUNTED")
+                stream.write(
+                    f"\n#### {title}\n\nClosure: **{'PASS' if detail_accounted == detail_expected else 'FAIL'}**, "
+                    f"accounted {int(detail_accounted)}, expected {int(detail_expected)}.\n\n"
+                )
+                stream.write("| Leaf | Slots | Parent share |\n|---|---:|---:|\n")
+                for label, field in sorted(
+                    fields,
+                    key=lambda item: value(records, record, item[1]),
+                    reverse=True,
+                ):
+                    count = value(records, record, field)
+                    stream.write(f"| {label} | {int(count)} | {pct(count, detail_expected)} |\n")
+
+            dep_blocker_slots = sparse_mask(
+                records, "PERF_RS_DEP_BLOCKER_MASK_SLOTS"
+            )
+            dep_blocker_total = sum(dep_blocker_slots.values())
+            stream.write("\n#### RS dependency producer classes\n\n")
+            stream.write(
+                "This is an orthogonal producer-side view of `RS_DEPENDENCY_OP`: "
+                "the latter names the blocked consumer, while this mask names all "
+                "producer classes simultaneously blocking resident operands. "
+                "`UNTRACKED` means the tag no longer maps to a live ROB generation; "
+                "it is a readiness-lifetime observation, not an Operand correctness "
+                "failure (`OPERAND_DEP_MISS` remains the contract check).\n\n"
+            )
+            stream.write(
+                f"Mask closure: **{'PASS' if dep_blocker_total == value(records, 'PERF_BACKEND_LOSS', 'RS_DEPENDENCY') else 'FAIL'}**, "
+                f"rows={int(dep_blocker_total)}, expected="
+                f"{int(value(records, 'PERF_BACKEND_LOSS', 'RS_DEPENDENCY'))}.\n\n"
+            )
+            stream.write("| Blocker combination | Lost slots | Dependency share |\n")
+            stream.write("|---|---:|---:|\n")
+            for mask, slots in sorted(
+                dep_blocker_slots.items(), key=lambda item: item[1], reverse=True
+            ):
+                if not slots:
+                    continue
+                active = "+".join(
+                    name for bit, name in enumerate(DEP_BLOCKER_BITS)
+                    if mask & (1 << bit)
+                ) or "none"
+                stream.write(
+                    f"| {active} | {int(slots)} | {pct(slots, dep_blocker_total)} |\n"
+                )
+            stream.write("\n| Blocked producer operand class | Operand-entry cycles | Share |\n")
+            stream.write("|---|---:|---:|\n")
+            blocker_operands = records.get("PERF_RS_DEP_BLOCKER_OPERANDS", {})
+            blocker_operand_total = blocker_operands.get("TOTAL", 0)
+            for field in DEP_BLOCKER_BITS:
+                source_field = "STALE" if field == "UNTRACKED" else field
+                count = blocker_operands.get(source_field, 0)
+                stream.write(
+                    f"| {field.lower()} | {int(count)} | "
+                    f"{pct(count, blocker_operand_total)} |\n"
+                )
+
             slot_expected = value(records, "PERF_SLOT_REASON", "EXPECTED")
             slot_accounted = value(records, "PERF_SLOT_REASON", "ACCOUNTED")
             stream.write("\n### Complete execution-slot reason partition\n\n")
@@ -385,6 +1109,82 @@ def write_report(
                 stream.write(
                     f"| {label} | {int(count)} | {pct(count, slot_expected)} |\n"
                 )
+            leaf_expected = value(records, "PERF_SLOT_LEAF", "EXPECTED")
+            leaf_accounted = sum(
+                value(records, "PERF_SLOT_LEAF", field)
+                for _, field in SLOT_LEAF_FIELDS
+            )
+            # Prefer the explicit TB total when present; the sum is retained
+            # as an independent check against omitted/overlapping leaves.
+            leaf_recorded = value(records, "PERF_SLOT_LEAF", "ACCOUNTED")
+            stream.write("\n### Complete execution-slot leaf partition\n\n")
+            stream.write(
+                f"Closure: **{'PASS' if leaf_accounted == leaf_expected == leaf_recorded else 'FAIL'}**, "
+                f"leaves={int(leaf_accounted)}, recorded={int(leaf_recorded)}, "
+                f"expected={int(leaf_expected)} (two slots/cycle).\n\n"
+            )
+            stream.write("| Leaf cause | Slots | Capacity share |\n|---|---:|---:|\n")
+            for label, field in sorted(
+                SLOT_LEAF_FIELDS,
+                key=lambda item: value(records, "PERF_SLOT_LEAF", item[1]),
+                reverse=True,
+            ):
+                count = value(records, "PERF_SLOT_LEAF", field)
+                stream.write(f"| {label} | {int(count)} | {pct(count, leaf_expected)} |\n")
+            ex_expected = value(records, "PERF_EX_SLOT_STATE", "EXPECTED")
+            ex_accounted = sum(
+                value(records, "PERF_EX_SLOT_STATE", field)
+                for _, field in EX_SLOT_FIELDS
+            )
+            ex_recorded = value(records, "PERF_EX_SLOT_STATE", "ACCOUNTED")
+            stream.write("\n### Physical EX slot state (stage-aligned)\n\n")
+            stream.write(
+                f"Closure: **{'PASS' if ex_accounted == ex_expected == ex_recorded else 'FAIL'}**, "
+                f"leaves={int(ex_accounted)}, recorded={int(ex_recorded)}, "
+                f"expected={int(ex_expected)}. These states are sampled at EX, "
+                "not inferred from current Issue/RS controls.\n\n"
+            )
+            stream.write("| EX state | Slots | Capacity share |\n|---|---:|---:|\n")
+            for label, field in sorted(
+                EX_SLOT_FIELDS,
+                key=lambda item: value(records, "PERF_EX_SLOT_STATE", item[1]),
+                reverse=True,
+            ):
+                count = value(records, "PERF_EX_SLOT_STATE", field)
+                stream.write(f"| {label} | {int(count)} | {pct(count, ex_expected)} |\n")
+            empty_expected = value(records, "PERF_EX_EMPTY_CAUSE", "EXPECTED")
+            empty_accounted = sum(
+                value(records, "PERF_EX_EMPTY_CAUSE", field)
+                for _, field in EX_EMPTY_FIELDS
+            )
+            empty_recorded = value(records, "PERF_EX_EMPTY_CAUSE", "ACCOUNTED")
+            alignment_residual = value(records, "PERF_EX_EMPTY_CAUSE", "UNACCOUNTED_SNAPSHOT")
+            valid_hold = value(records, "PERF_EX_VALID_HOLD", "TOTAL")
+            stream.write("\n### Stage-aligned EX pipeline-empty causes\n\n")
+            stream.write(
+                f"Closure: **{'PASS' if empty_accounted == empty_expected == empty_recorded and alignment_residual == valid_hold else 'FAIL'}**, "
+                f"leaves={int(empty_accounted)}, recorded={int(empty_recorded)}, "
+                f"expected={int(empty_expected)}. Each cause is from the "
+                "registered source snapshot; valid packet holds are explicitly checked below.\n\n"
+            )
+            stream.write("| Empty-lane cause | Slots | Empty-slot share |\n|---|---:|---:|\n")
+            for label, field in sorted(
+                EX_EMPTY_FIELDS,
+                key=lambda item: value(records, "PERF_EX_EMPTY_CAUSE", item[1]),
+                reverse=True,
+            ):
+                count = value(records, "PERF_EX_EMPTY_CAUSE", field)
+                stream.write(f"| {label} | {int(count)} | {pct(count, empty_expected)} |\n")
+            stream.write(
+                f"\nStage alignment residual: {int(alignment_residual)} slots; valid Operand/EX "
+                f"holds observed in the registered EX packet: {int(valid_hold)} "
+                "(lane0/lane1 = "
+                f"{int(value(records, 'PERF_EX_VALID_HOLD', 'LANE0'))}/"
+                f"{int(value(records, 'PERF_EX_VALID_HOLD', 'LANE1'))}). "
+                "A nonzero residual is a real EX packet-hold state, not a missing "
+                "frontend/RS cause; it must be optimized or explicitly excluded from "
+                "the empty-slot partition.\n"
+            )
             noif_expected = value(records, "PERF_NOIF_SLOT_DETAIL", "EXPECTED")
             noif_accounted = value(records, "PERF_NOIF_SLOT_DETAIL", "ACCOUNTED")
             stream.write(
@@ -428,6 +1228,25 @@ def write_report(
                 count = value(records, "PERF_P0_FULL_DETAIL", field)
                 stream.write(
                     f"| {label} | {int(count)} | {pct(count, p0_expected)} |\n"
+                )
+            p0_mix = records.get("PERF_P0_FULL_RESIDENT_MIX", {})
+            p0_mix_expected = p0_mix.get("EXPECTED", 0)
+            stream.write("\nP0-full resident composition:\n\n")
+            stream.write("| Stores resident (remaining entries are loads) | Lost slots | Share |\n")
+            stream.write("|---:|---:|---:|\n")
+            for store_count in range(5):
+                count = p0_mix.get(f"STORE{store_count}", 0)
+                stream.write(
+                    f"| {store_count} | {int(count)} | {pct(count, p0_mix_expected)} |\n"
+                )
+            blocked_ops = records.get("PERF_P0_FULL_BLOCKED_OP", {})
+            blocked_expected = blocked_ops.get("EXPECTED", 0)
+            stream.write("\n| P0 operation blocked at dispatch | Lost slots | Share |\n")
+            stream.write("|---|---:|---:|\n")
+            for field in ("LOAD", "STORE", "OTHER"):
+                count = blocked_ops.get(field, 0)
+                stream.write(
+                    f"| {field.lower()} | {int(count)} | {pct(count, blocked_expected)} |\n"
                 )
 
             head_total = sum(

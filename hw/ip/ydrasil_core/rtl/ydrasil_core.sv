@@ -209,6 +209,7 @@ import ydrasil_axi_pkg::*;
 	wire [3:0]                 dtcm_store_mask;
 	ydrasil_mem_req_pkt_t       mmio_req_pkt;
 	ydrasil_mem_rsp_pkt_t       mmio_rsp_pkt;
+	wire                        mmio_req_ready;
 	ydrasil_lsu_status_pkt_t    lsu_status_pkt;
 	wire [1:0]                  lsu_issue_credit;
 	wire [ydrasil_pkg::BUS_DATA_WIDTH-1:0]  dtcm_rdata;
@@ -465,6 +466,7 @@ import ydrasil_axi_pkg::*;
 		.dtcm_store_data_o (dtcm_store_data),
 		.dtcm_store_mask_o (dtcm_store_mask),
 		.mmio_rsp_i        (mmio_rsp_pkt),
+		.mmio_ready_i      (mmio_req_ready),
 		.mmio_req_o        (mmio_req_pkt),
 		.status_o          (lsu_status_pkt),
 		.issue_credit_o     (lsu_issue_credit),
@@ -490,6 +492,7 @@ import ydrasil_axi_pkg::*;
 		.rsp_valid_o (mmio_rsp_pkt.valid),
 		.rsp_rdata_o (mmio_rsp_pkt.rdata),
 		.rsp_error_o (mmio_rsp_pkt.error),
+		.req_ready_o (mmio_req_ready),
 		.axi_m2s_o   (axi_m2s_o),
 		.axi_s2m_i   (axi_s2m_i)
 	);

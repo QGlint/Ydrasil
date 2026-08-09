@@ -13,12 +13,14 @@ import ydrasil_pkg::*;
     input  ydrasil_completion_meta_t     completion_meta_i [COMPLETION_LANES],
     input  wire [DATA_WIDTH-1:0]         completion_data_i [COMPLETION_LANES],
     input  ydrasil_reservation_pkt_t     dtcm_reservation_i,
+    input  ydrasil_reservation_pkt_t     dtcm_history_reservation_i,
     input  ydrasil_reservation_pkt_t     mdu_reservation_i,
     input  wire [DATA_WIDTH-1:0]         mdu_bypass_data_i,
     output wire                          ready_o,
     output wire [DATA_WIDTH-1:0]         data_o,
     output wire                          data_valid_o,
     output wire                          dtcm_hit_o,
+    output wire                          dtcm_history_hit_o,
     output wire                          mdu_hit_o
 );
     wire source_nonzero = source_i.arch_addr != '0;
@@ -26,6 +28,8 @@ import ydrasil_pkg::*;
     // and architectural destination are metadata checks, not mux selectors.
     wire source_dtcm_key_match =
         source_i.producer_tag == dtcm_reservation_i.producer_id;
+    wire source_dtcm_history_key_match =
+        source_i.producer_tag == dtcm_history_reservation_i.producer_id;
     wire source_mdu_key_match =
         source_i.producer_tag == mdu_reservation_i.producer_id;
     wire source_value_epoch_match = value_epoch_i ==
@@ -68,6 +72,10 @@ import ydrasil_pkg::*;
     assign dtcm_hit_o = &{source_i.used, source_nonzero, source_i.tag_valid,
         dtcm_reservation_i.valid, dtcm_reservation_i.producer_tracked,
         source_dtcm_key_match};
+    assign dtcm_history_hit_o = &{source_i.used, source_nonzero,
+        source_i.tag_valid, dtcm_history_reservation_i.valid,
+        dtcm_history_reservation_i.producer_tracked,
+        source_dtcm_history_key_match};
     assign mdu_hit_o = &{source_i.used, source_nonzero, source_i.tag_valid,
         mdu_reservation_i.valid, mdu_reservation_i.producer_tracked,
         source_mdu_key_match};
@@ -88,7 +96,8 @@ import ydrasil_pkg::*;
     // When a different generation of the same architectural register retires,
     // ARF is not a legal fallback for a still-tagged source in this cycle.
     assign data_valid_o = !source_i.used || !source_nonzero ||
-        !source_i.tag_valid || mdu_hit_o || (|completion_hit) ||
+        !source_i.tag_valid || mdu_hit_o || dtcm_history_hit_o ||
+        (|completion_hit) ||
         source_value_hit || source_slot_reallocated ||
         commit0_hit || commit1_hit;
 
@@ -99,6 +108,14 @@ import ydrasil_pkg::*;
                 else $fatal(1, "DTCM wakeup producer class mismatch");
             assert (source_i.arch_addr == dtcm_reservation_i.arch_addr)
                 else $fatal(1, "DTCM wakeup destination mismatch");
+        end
+        if (dtcm_history_hit_o) begin
+            assert (source_i.producer_class ==
+                    dtcm_history_reservation_i.result_class)
+                else $fatal(1, "DTCM history producer class mismatch");
+            assert (source_i.arch_addr ==
+                    dtcm_history_reservation_i.arch_addr)
+                else $fatal(1, "DTCM history destination mismatch");
         end
         if (mdu_hit_o) begin
             assert (source_i.producer_class == RESULT_MDU)

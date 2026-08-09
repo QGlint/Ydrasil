@@ -23,6 +23,11 @@ import ydrasil_pkg::*;
 	    output wire [BUS_DATA_WIDTH-1:0]       dtcm_store_data_o,
 	    output wire [3:0]                      dtcm_store_mask_o,
     input  ydrasil_mem_rsp_pkt_t           mmio_rsp_i,
+    // Explicit request boundary for the single outstanding AXI transaction.
+    // A response may still be retiring while the master is not able to
+    // accept a new request; keeping this boundary local prevents an old
+    // response from clearing a newly launched LSU request.
+    input  wire                            mmio_ready_i,
     output ydrasil_mem_req_pkt_t           mmio_req_o,
     output ydrasil_lsu_status_pkt_t        status_o,
 	    output wire [1:0]                     issue_credit_o,
@@ -333,7 +338,7 @@ import ydrasil_pkg::*;
     // MMIO observes all older buffered stores before it starts. Once launched,
     // younger DTCM requests can proceed independently while APB is busy.
 	    wire mmio_fire = active_mmio && active_mmio_order_safe &&
-	        !mmio_busy && store_buf_empty &&
+	        !mmio_busy && mmio_ready_i && store_buf_empty &&
         (!active_is_store || active_store_data_valid);
     wire queue_dequeue = queued_dtcm_load_fire || dtcm_store_fire || mmio_fire;
     wire queue_has_room_after_dequeue = !queue_full || queue_dequeue;

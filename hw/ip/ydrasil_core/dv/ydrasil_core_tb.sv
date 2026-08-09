@@ -123,22 +123,28 @@ end
     reg         perf_local_debug_en;
     reg         perf_event_scan_en;
     reg         perf_bank_scan_en;
+    reg         perf_issue_scan_en;
     integer     raw_debug_cycle;
     integer     lsu_local_debug_cycle;
     integer     perf_local_debug_cycle;
     integer     perf_local_start;
     integer     perf_local_end;
+    integer     perf_issue_scan_count;
+    integer     perf_empty_scan_count;
     initial begin
         raw_debug_en = $test$plusargs("raw_debug");
         lsu_local_debug_en = $test$plusargs("lsu_local_debug");
         perf_local_debug_en = $test$plusargs("perf_local_debug");
         perf_event_scan_en = $test$plusargs("perf_event_scan");
         perf_bank_scan_en = $test$plusargs("perf_bank_scan");
+        perf_issue_scan_en = $test$plusargs("perf_issue_scan");
         raw_debug_cycle = 0;
         lsu_local_debug_cycle = 0;
         perf_local_debug_cycle = 0;
         perf_local_start = 0;
         perf_local_end = 32'h7fffffff;
+        perf_issue_scan_count = 0;
+        perf_empty_scan_count = 0;
         if (!$value$plusargs("perf_local_start=%d", perf_local_start))
             perf_local_start = 0;
         if (!$value$plusargs("perf_local_end=%d", perf_local_end))
@@ -262,6 +268,35 @@ end
     reg [31:0] acct_other_count;
     reg [31:0] perf_sample_cycle_count;
     reg [31:0] perf_productive_slot_count;
+    // Exact lane split for the productive part of the capacity partition.
+    // These are slot counts, unlike the cycle-level primary cause counters.
+    reg [31:0] perf_executed_slot0_count;
+    reg [31:0] perf_executed_slot1_count;
+    reg [31:0] perf_ex_branch_drop0_count;
+    reg [31:0] perf_ex_branch_drop1_count;
+    reg [31:0] perf_ex_mul_drop0_count;
+    reg [31:0] perf_ex_mul_drop1_count;
+    reg [31:0] perf_ex_empty0_count;
+    reg [31:0] perf_ex_empty1_count;
+    reg [31:0] perf_ex_empty_reset_count;
+    reg [31:0] perf_ex_empty_recovery_count;
+    reg [31:0] perf_ex_empty_fence_count;
+    reg [31:0] perf_ex_empty_b_only_count;
+    reg [31:0] perf_ex_empty_single_head_count;
+    reg [31:0] perf_ex_empty_select_refill_count;
+    reg [31:0] perf_ex_empty_rs_dependency_count;
+    reg [31:0] perf_ex_empty_rs_order_count;
+    reg [31:0] perf_ex_empty_rs_resource_count;
+    reg [31:0] perf_ex_empty_rs_no_candidate_count;
+    reg [31:0] perf_ex_empty_rs_empty_count;
+    reg [31:0] perf_ex_empty_frontend_count;
+    reg [31:0] perf_ex_empty_other_count;
+    reg [31:0] perf_ex_empty_launch_mismatch_count;
+    reg [31:0] perf_ex_empty_unmapped_count;
+    reg [31:0] perf_ex_valid_hold0_count;
+    reg [31:0] perf_ex_valid_hold1_count;
+    reg [4:0] perf_src_kind0_q;
+    reg [4:0] perf_src_kind1_q;
     reg [31:0] perf_lost_flush_slot_count;
     reg [31:0] perf_lost_mul_hold_slot_count;
     reg [31:0] perf_lost_dependency_slot_count;
@@ -372,6 +407,63 @@ end
     reg [31:0] perf_loss_decode_refill_slots;
     reg [31:0] perf_loss_frontend_slots;
     reg [31:0] perf_loss_other_slots;
+    // Mutually-exclusive leaves for the three largest backend-loss parents.
+    // They are slot-weighted and must sum to their corresponding parent.
+    reg [31:0] perf_single_p0_only_slots;
+    reg [31:0] perf_single_p1_only_slots;
+    reg [31:0] perf_single_alu_only_slots;
+    reg [31:0] perf_single_serial_slots;
+    reg [31:0] perf_single_other_slots;
+    reg [31:0] perf_select_refill_pair_slots;
+    reg [31:0] perf_select_refill_p0_slots;
+    reg [31:0] perf_select_refill_p1_slots;
+    reg [31:0] perf_select_refill_alu_slots;
+    reg [31:0] perf_select_refill_serial_slots;
+    reg [31:0] perf_select_refill_other_slots;
+    reg [31:0] perf_dep_src0_slots;
+    reg [31:0] perf_dep_src1_slots;
+    reg [31:0] perf_dep_both_src_slots;
+    reg [31:0] perf_dep_completion_wakeup_slots;
+    reg [31:0] perf_dep_alloc_wakeup_slots;
+    reg [31:0] perf_dep_load_slots;
+    reg [31:0] perf_dep_mul_slots;
+    reg [31:0] perf_dep_branch_slots;
+    reg [31:0] perf_dep_other_slots;
+    // Independent operation-class and wakeup-source projections of the same
+    // three parent loss buckets. Each projection has its own closure check.
+    reg [31:0] perf_single_op_alu_slots;
+    reg [31:0] perf_single_op_load_slots;
+    reg [31:0] perf_single_op_store_slots;
+    reg [31:0] perf_single_op_mul_slots;
+    reg [31:0] perf_single_op_csr_sys_slots;
+    reg [31:0] perf_single_op_other_slots;
+    reg [31:0] perf_refill_shape_p0_p1_slots;
+    reg [31:0] perf_refill_shape_p0_alu_slots;
+    reg [31:0] perf_refill_shape_p1_alu_slots;
+    reg [31:0] perf_refill_shape_alu_alu_slots;
+    reg [31:0] perf_refill_shape_single_p0_slots;
+    reg [31:0] perf_refill_shape_single_p1_slots;
+    reg [31:0] perf_refill_shape_single_alu_slots;
+    reg [31:0] perf_refill_shape_serial_slots;
+    reg [31:0] perf_refill_shape_other_slots;
+    reg [31:0] perf_dep_wake_both_slots;
+    reg [31:0] perf_dep_wake_mixed_slots;
+    reg [31:0] perf_dep_wake_src0_completion_slots;
+    reg [31:0] perf_dep_wake_src1_completion_slots;
+    reg [31:0] perf_dep_wake_src0_alloc_slots;
+    reg [31:0] perf_dep_wake_src1_alloc_slots;
+    reg [31:0] perf_dep_wake_none_slots;
+    reg [31:0] perf_dep_op_alu_slots;
+    reg [31:0] perf_dep_op_load_slots;
+    reg [31:0] perf_dep_op_store_slots;
+    reg [31:0] perf_dep_op_mul_slots;
+    reg [31:0] perf_dep_op_branch_slots;
+    reg [31:0] perf_dep_op_other_slots;
+    // Orthogonal dependency projection. The mask keeps simultaneous blocker
+    // classes coupled instead of forcing them into an arbitrary priority bin.
+    // Bits are ALU, LOAD, MDU, OTHER, and stale/missing producer identity.
+    reg [31:0] perf_dep_blocker_mask_slots [0:31];
+    reg [31:0] perf_dep_blocker_operand_cycles [0:4];
     // Decompose the execution-slot OTHER bucket. These counters are mutually
     // exclusive and are charged only in the final cycle-accounting OTHER arm.
     reg [31:0] perf_other_rob_block_slots;
@@ -392,6 +484,21 @@ end
     reg [31:0] perf_p0_full_resource_slots;
     reg [31:0] perf_p0_full_ready_release_slots;
     reg [31:0] perf_p0_full_no_candidate_slots;
+    reg [31:0] perf_p0_full_store_mix_slots [0:4];
+    reg [31:0] perf_p0_full_blocked_load_slots;
+    reg [31:0] perf_p0_full_blocked_store_slots;
+    reg [31:0] perf_p0_full_blocked_other_slots;
+    reg [31:0] perf_p0_completion_wakeup_cycles;
+    reg [31:0] perf_operand_merge_pair_cycles;
+    // Entry-weighted wakeup observations. These are intentionally separate
+    // from slot-loss counters: a single cycle can wake several RS entries.
+    reg [31:0] perf_rs_completion_wakeup_entries;
+    reg [31:0] perf_rs_alloc_wakeup_entries;
+    reg [31:0] perf_rs_select_wakeup_entries;
+    reg [31:0] perf_dtcm_launch_wakeup_events;
+    reg [31:0] perf_dtcm_result_wakeup_events;
+    reg [31:0] perf_mdu_wakeup_events;
+    reg [31:0] perf_replay_wakeup_events;
     reg [31:0] perf_other_rs_pair_limit_slots;
     reg [31:0] perf_other_select_refill_slots;
     reg [31:0] perf_other_rs_dependency_slots;
@@ -428,6 +535,93 @@ end
     reg [31:0] perf_mdu_local_wake_cycles;
     reg [31:0] perf_resident_wakeup_entry_cycles;
     reg [31:0] perf_resident_due_select_cycles;
+    // Orthogonal backend observations.  The legacy loss counters below are
+    // intentionally exclusive; these counters preserve simultaneous causes
+    // so an optimization can be evaluated against the actual coupled state.
+    reg [31:0] perf_coupling_mask_count [0:255];
+    reg [31:0] perf_cpl_bank_dep_count;
+    reg [31:0] perf_cpl_bank_rob_count;
+    reg [31:0] perf_cpl_bank_resource_count;
+    reg [31:0] perf_cpl_bank_select_count;
+    reg [31:0] perf_cpl_bank_operand_count;
+    reg [31:0] perf_cpl_rob_dep_count;
+    reg [31:0] perf_cpl_rob_resource_count;
+    reg [31:0] perf_cpl_rob_select_count;
+    reg [31:0] perf_cpl_rob_operand_count;
+    reg [31:0] perf_cpl_dep_resource_count;
+    reg [31:0] perf_cpl_dep_select_count;
+    reg [31:0] perf_cpl_dep_operand_count;
+    reg [31:0] perf_cpl_resource_select_count;
+    reg [31:0] perf_cpl_select_operand_count;
+    reg [31:0] perf_cpl_bank_dep_select_count;
+    reg [31:0] perf_cpl_bank_rob_select_count;
+    reg [31:0] perf_cpl_dep_select_operand_count;
+    // Loss-weighted coupling.  The legacy coupling mask is a state
+    // observation over all cycles; this mask is charged only when an EX
+    // capacity slot was actually lost, and stores both cycle and slot weight.
+    localparam integer PERF_LOSS_COUPLING_BITS = 12;
+    localparam integer PERF_LOSS_COUPLING_DEPTH =
+        (1 << PERF_LOSS_COUPLING_BITS);
+    reg [31:0] perf_loss_coupling_cycle_count [0:PERF_LOSS_COUPLING_DEPTH-1];
+    reg [31:0] perf_loss_coupling_slot_count [0:PERF_LOSS_COUPLING_DEPTH-1];
+    reg [31:0] perf_loss_coupling_cycles;
+    reg [31:0] perf_loss_coupling_slots;
+    // Select opportunity is kept separate from the exclusive loss tree.  It
+    // describes raw bank candidates, the best width allowed by those banks,
+    // and the width that crossed the Select/Operand boundary.
+    reg [31:0] perf_select_raw_width_count [0:2];
+    reg [31:0] perf_select_actual_width_count [0:2];
+    reg [31:0] perf_select_raw_shape_count [0:15];
+    reg [31:0] perf_select_raw_alu_entries;
+    reg [31:0] perf_select_raw_p0_entries;
+    reg [31:0] perf_select_raw_p1_entries;
+    reg [31:0] perf_select_drop_alu_entries;
+    reg [31:0] perf_select_drop_p0_entries;
+    reg [31:0] perf_select_drop_p1_entries;
+    reg [31:0] perf_select_width_gap_slots;
+    reg [31:0] perf_select_pair_capable_single_cycles;
+    reg [31:0] perf_select_pair_capable_single_slots;
+    reg [31:0] perf_select_width_matrix_cycles [0:2][0:2];
+    reg [31:0] perf_select_width_matrix_slots [0:2][0:2];
+    reg [31:0] perf_select_gap_recovery_cycles;
+    reg [31:0] perf_select_gap_no_push_cycles;
+    reg [31:0] perf_select_gap_policy_cycles;
+    reg [31:0] perf_select_queue_state_count [0:15];
+    reg [31:0] perf_select_hol_pair_cycles;
+    reg [31:0] perf_select_hol_pair_lost_slots;
+    reg [31:0] perf_select_pair_push_cycles;
+    reg [31:0] perf_select_pair_issue_cycles;
+    reg [31:0] perf_select_pair_push_single_head_cycles;
+    reg [31:0] perf_select_pair_push_single_head_slots;
+    reg [31:0] perf_select_refill_head_empty_cycles;
+    reg [31:0] perf_select_refill_head_empty_slots;
+    reg [31:0] perf_select_refill_head_empty_pair_slots;
+    reg [31:0] perf_select_refill_head_empty_single_slots;
+    // Per-bank state is needed to distinguish a genuinely full bank from a
+    // bank that is merely selected by the exclusive legacy reason priority.
+    reg [31:0] perf_bank_dep_entry_cycles [0:2];
+    reg [31:0] perf_bank_order_entry_cycles [0:2];
+    reg [31:0] perf_bank_resource_entry_cycles [0:2];
+    reg [31:0] perf_bank_ready_entry_cycles [0:2];
+    reg [31:0] perf_bank_candidate_entry_cycles [0:2];
+    reg [31:0] perf_bank_selected_entry_cycles [0:2];
+    // Transaction timing is keyed by the generation-qualified producer ID.
+    // It exposes whether the extra pipeline is spent in RS, Operand, FU, or
+    // retirement rather than charging the whole delay to one parent bucket.
+    localparam integer PERF_LATENCY_BINS = 6;
+    reg [31:0] perf_latency_alloc_select [0:PERF_LATENCY_BINS-1];
+    reg [31:0] perf_latency_select_operand [0:PERF_LATENCY_BINS-1];
+    reg [31:0] perf_latency_operand_ex [0:PERF_LATENCY_BINS-1];
+    reg [31:0] perf_latency_alloc_complete [0:PERF_LATENCY_BINS-1];
+    reg [31:0] perf_latency_alloc_retire [0:PERF_LATENCY_BINS-1];
+    reg [31:0] perf_alloc_cycle_by_id [0:(1 << PRODUCER_ID_WIDTH)-1];
+    reg [31:0] perf_select_cycle_by_id [0:(1 << PRODUCER_ID_WIDTH)-1];
+    reg [31:0] perf_operand_cycle_by_id [0:(1 << PRODUCER_ID_WIDTH)-1];
+    reg perf_alloc_live_by_id [0:(1 << PRODUCER_ID_WIDTH)-1];
+    integer perf_lifecycle_id;
+    integer perf_lifecycle_bin;
+    integer perf_lifecycle_latency;
+    integer perf_lifecycle_idx;
     reg [PRODUCER_NUM-1:0] perf_producer_issued_q;
     reg perf_producer_full_q;
     reg perf_p0_bank_block_q;
@@ -463,6 +657,8 @@ end
     reg [31:0] early_bubble_clear_count;
     reg [31:0] non_early_alu_count;
     integer perf_stat_idx;
+    integer perf_width_idx;
+    integer perf_width_idx2;
     reg [31:0] fe_pred_taken_redirect_count;
     reg [31:0] fe_correct_taken_redirect_count;
     reg [31:0] fe_pred_taken_bubble_count;
@@ -486,10 +682,59 @@ end
     wire [1:0] perf_operand_admit_slots =
         {1'b0, u_dut.u_ydrasil_issue_stage.lane_a_accept} +
         {1'b0, u_dut.u_ydrasil_issue_stage.lane_b_accept};
+    wire perf_p0_completion_wakeup_now =
+        (|u_dut.u_ydrasil_issue_stage.issue_src0_completion_wakeup[7:4]) ||
+        (|u_dut.u_ydrasil_issue_stage.issue_src1_completion_wakeup[7:4]);
+    wire perf_rs_completion_wakeup_now =
+        (|u_dut.u_ydrasil_issue_stage.issue_src0_completion_wakeup) ||
+        (|u_dut.u_ydrasil_issue_stage.issue_src1_completion_wakeup);
+    wire perf_rs_alloc_wakeup_now =
+        (|u_dut.u_ydrasil_issue_stage.issue_src0_alloc_wakeup) ||
+        (|u_dut.u_ydrasil_issue_stage.issue_src1_alloc_wakeup);
+    wire [3:0] perf_rs_completion_wakeup_entries_now =
+        4'($countones(u_dut.u_ydrasil_issue_stage.
+            issue_src0_completion_wakeup | u_dut.u_ydrasil_issue_stage.
+            issue_src1_completion_wakeup));
+    wire [3:0] perf_rs_alloc_wakeup_entries_now =
+        4'($countones(u_dut.u_ydrasil_issue_stage.
+            issue_src0_alloc_wakeup | u_dut.u_ydrasil_issue_stage.
+            issue_src1_alloc_wakeup));
+    wire [3:0] perf_rs_select_wakeup_entries_now =
+        4'($countones(u_dut.u_ydrasil_issue_stage.
+            issue_src0_fast_main | u_dut.u_ydrasil_issue_stage.
+            issue_src0_fast_dual | u_dut.u_ydrasil_issue_stage.
+            issue_src1_fast_main | u_dut.u_ydrasil_issue_stage.
+            issue_src1_fast_dual));
+    wire perf_operand_merge_pair_now =
+        u_dut.u_ydrasil_issue_stage.select_skid_merge_pair;
     wire [2:0] perf_operand_lost_slots =
         3'd2 - {1'b0, perf_operand_admit_slots};
     wire [31:0] perf_operand_lost_slots_ext =
         {{29{1'b0}}, perf_operand_lost_slots};
+    localparam [4:0] PERF_SRC_RESET = 5'd0;
+    localparam [4:0] PERF_SRC_RECOVERY = 5'd1;
+    localparam [4:0] PERF_SRC_FENCE = 5'd2;
+    localparam [4:0] PERF_SRC_B_ONLY = 5'd3;
+    localparam [4:0] PERF_SRC_SINGLE_HEAD = 5'd4;
+    localparam [4:0] PERF_SRC_SELECT_REFILL = 5'd5;
+    localparam [4:0] PERF_SRC_RS_DEPENDENCY = 5'd6;
+    localparam [4:0] PERF_SRC_RS_ORDER = 5'd7;
+    localparam [4:0] PERF_SRC_RS_RESOURCE = 5'd8;
+    localparam [4:0] PERF_SRC_RS_NO_CANDIDATE = 5'd9;
+    localparam [4:0] PERF_SRC_RS_EMPTY = 5'd10;
+    localparam [4:0] PERF_SRC_FRONTEND = 5'd11;
+    localparam [4:0] PERF_SRC_OTHER = 5'd12;
+    localparam [4:0] PERF_SRC_LAUNCH = 5'd13;
+    localparam [3:0] PERF_SEL_REASON_OTHER = 4'd0;
+    localparam [3:0] PERF_SEL_REASON_SERIAL = 4'd1;
+    localparam [3:0] PERF_SEL_REASON_P0 = 4'd2;
+    localparam [3:0] PERF_SEL_REASON_P1 = 4'd3;
+    localparam [3:0] PERF_SEL_REASON_ALU = 4'd4;
+    localparam [3:0] PERF_SEL_REASON_PAIR = 4'd5;
+    reg [3:0] perf_select_reason_d;
+    reg [3:0] perf_select_reason_q;
+    reg [4:0] perf_src_kind0_d;
+    reg [4:0] perf_src_kind1_d;
     wire perf_select_head_serial =
         u_dut.u_ydrasil_issue_stage.select_head_valid_q &&
         ((u_dut.u_ydrasil_issue_stage.select_head_uop0_q.op_class ==
@@ -611,7 +856,60 @@ end
     reg [3:0] perf_rs_order_entries_now;
     reg [3:0] perf_rs_resource_entries_now;
     reg [3:0] perf_rs_ready_entries_now;
+    reg perf_rs_dep_src0_wait_now;
+    reg perf_rs_dep_src1_wait_now;
+    reg perf_rs_dep_both_src_now;
+    reg perf_rs_dep_load_now;
+    reg perf_rs_dep_store_now;
+    reg perf_rs_dep_mul_now;
+    reg perf_rs_dep_branch_now;
+    reg perf_rs_dep_both_wakeup_now;
+    reg perf_rs_dep_mixed_wakeup_now;
+    reg perf_rs_dep_src0_completion_now;
+    reg perf_rs_dep_src1_completion_now;
+    reg perf_rs_dep_src0_alloc_now;
+    reg perf_rs_dep_src1_alloc_now;
+    localparam logic [4:0] PERF_DEP_BLOCKER_ALU = 5'b00001;
+    localparam logic [4:0] PERF_DEP_BLOCKER_LOAD = 5'b00010;
+    localparam logic [4:0] PERF_DEP_BLOCKER_MDU = 5'b00100;
+    localparam logic [4:0] PERF_DEP_BLOCKER_OTHER = 5'b01000;
+    localparam logic [4:0] PERF_DEP_BLOCKER_STALE = 5'b10000;
+    localparam logic [2:0] PERF_DBG_PRODUCER_ALU = 3'd1;
+    localparam logic [2:0] PERF_DBG_PRODUCER_LOAD = 3'd2;
+    localparam logic [2:0] PERF_DBG_PRODUCER_MDU = 3'd3;
+    reg [4:0] perf_rs_dep_blocker_mask_now;
+    reg [4:0] perf_dep_blocker_operand_count_now [0:4];
+    reg [4:0] perf_dep_blocker_kind_now;
+    integer perf_dep_blocker_idx;
     integer perf_rs_reason_idx;
+
+    function automatic logic [4:0] perf_dep_blocker_kind(
+        input logic tag_valid,
+        input producer_id_t producer_tag
+    );
+        producer_slot_t producer_slot;
+        begin
+            producer_slot = producer_tag[PRODUCER_SLOT_WIDTH-1:0];
+            if (!tag_valid ||
+                !u_dut.u_ctrl.producer_valid_q[producer_slot] ||
+                (u_dut.u_ctrl.producer_epoch_q[producer_slot] !=
+                 producer_tag[PRODUCER_ID_WIDTH-1])) begin
+                perf_dep_blocker_kind = PERF_DEP_BLOCKER_STALE;
+            end else begin
+                case (u_dut.u_ctrl.dbg_producer_kind_q[producer_slot])
+                    PERF_DBG_PRODUCER_ALU:
+                        perf_dep_blocker_kind = PERF_DEP_BLOCKER_ALU;
+                    PERF_DBG_PRODUCER_LOAD:
+                        perf_dep_blocker_kind = PERF_DEP_BLOCKER_LOAD;
+                    PERF_DBG_PRODUCER_MDU:
+                        perf_dep_blocker_kind = PERF_DEP_BLOCKER_MDU;
+                    default:
+                        perf_dep_blocker_kind = PERF_DEP_BLOCKER_OTHER;
+                endcase
+            end
+        end
+    endfunction
+
     always_comb begin
         perf_rs_dependency_wait = 1'b0;
         perf_rs_order_wait = 1'b0;
@@ -623,6 +921,24 @@ end
         perf_rs_order_entries_now = '0;
         perf_rs_resource_entries_now = '0;
         perf_rs_ready_entries_now = '0;
+        perf_rs_dep_src0_wait_now = 1'b0;
+        perf_rs_dep_src1_wait_now = 1'b0;
+        perf_rs_dep_both_src_now = 1'b0;
+        perf_rs_dep_load_now = 1'b0;
+        perf_rs_dep_store_now = 1'b0;
+        perf_rs_dep_mul_now = 1'b0;
+        perf_rs_dep_branch_now = 1'b0;
+        perf_rs_dep_both_wakeup_now = 1'b0;
+        perf_rs_dep_mixed_wakeup_now = 1'b0;
+        perf_rs_dep_src0_completion_now = 1'b0;
+        perf_rs_dep_src1_completion_now = 1'b0;
+        perf_rs_dep_src0_alloc_now = 1'b0;
+        perf_rs_dep_src1_alloc_now = 1'b0;
+        perf_rs_dep_blocker_mask_now = '0;
+        perf_dep_blocker_kind_now = '0;
+        for (perf_dep_blocker_idx = 0; perf_dep_blocker_idx < 5;
+             perf_dep_blocker_idx = perf_dep_blocker_idx + 1)
+            perf_dep_blocker_operand_count_now[perf_dep_blocker_idx] = '0;
         for (perf_rs_reason_idx = 0; perf_rs_reason_idx < 12;
              perf_rs_reason_idx = perf_rs_reason_idx + 1) begin
             if (u_dut.u_ydrasil_issue_stage.issue_window_valid_q[
@@ -636,6 +952,122 @@ end
                     perf_rs_dependency_wait = 1'b1;
                     perf_rs_dependency_entries_now =
                         perf_rs_dependency_entries_now + 1'b1;
+                    if (!u_dut.u_ydrasil_issue_stage.issue_src0_ready_for_select[
+                            perf_rs_reason_idx]) begin
+                        perf_rs_dep_src0_wait_now = 1'b1;
+                        perf_dep_blocker_kind_now = perf_dep_blocker_kind(
+                            u_dut.u_ydrasil_issue_stage.issue_window_q[
+                                perf_rs_reason_idx].src0.tag_valid,
+                            u_dut.u_ydrasil_issue_stage.issue_window_q[
+                                perf_rs_reason_idx].src0.producer_tag);
+                        perf_rs_dep_blocker_mask_now =
+                            perf_rs_dep_blocker_mask_now |
+                            perf_dep_blocker_kind_now;
+                        for (perf_dep_blocker_idx = 0;
+                             perf_dep_blocker_idx < 5;
+                             perf_dep_blocker_idx = perf_dep_blocker_idx + 1)
+                            if (perf_dep_blocker_kind_now[perf_dep_blocker_idx])
+                                perf_dep_blocker_operand_count_now[
+                                    perf_dep_blocker_idx] =
+                                    perf_dep_blocker_operand_count_now[
+                                        perf_dep_blocker_idx] + 1'b1;
+                    end
+                    if (!u_dut.u_ydrasil_issue_stage.issue_src1_ready_for_select[
+                            perf_rs_reason_idx] &&
+                        !u_dut.u_ydrasil_issue_stage.issue_store_q[
+                            perf_rs_reason_idx]) begin
+                        perf_rs_dep_src1_wait_now = 1'b1;
+                        perf_dep_blocker_kind_now = perf_dep_blocker_kind(
+                            u_dut.u_ydrasil_issue_stage.issue_window_q[
+                                perf_rs_reason_idx].src1.tag_valid,
+                            u_dut.u_ydrasil_issue_stage.issue_window_q[
+                                perf_rs_reason_idx].src1.producer_tag);
+                        perf_rs_dep_blocker_mask_now =
+                            perf_rs_dep_blocker_mask_now |
+                            perf_dep_blocker_kind_now;
+                        for (perf_dep_blocker_idx = 0;
+                             perf_dep_blocker_idx < 5;
+                             perf_dep_blocker_idx = perf_dep_blocker_idx + 1)
+                            if (perf_dep_blocker_kind_now[perf_dep_blocker_idx])
+                                perf_dep_blocker_operand_count_now[
+                                    perf_dep_blocker_idx] =
+                                    perf_dep_blocker_operand_count_now[
+                                        perf_dep_blocker_idx] + 1'b1;
+                    end
+                    if (u_dut.u_ydrasil_issue_stage.issue_memory_q[
+                            perf_rs_reason_idx])
+                        if (u_dut.u_ydrasil_issue_stage.issue_store_q[
+                                perf_rs_reason_idx])
+                            perf_rs_dep_store_now = 1'b1;
+                        else
+                            perf_rs_dep_load_now = 1'b1;
+                    else if (u_dut.u_ydrasil_issue_stage.issue_mul_q[
+                                 perf_rs_reason_idx])
+                        perf_rs_dep_mul_now = 1'b1;
+                    else if (u_dut.u_ydrasil_issue_stage.issue_branch_q[
+                                 perf_rs_reason_idx])
+                        perf_rs_dep_branch_now = 1'b1;
+
+                    // Use the stored ready bits for this projection.  The
+                    // *_ready_for_select wires already include the current
+                    // wakeup, so looking only at them would hide the exact
+                    // wakeup that missed the Select window.
+                    if (!u_dut.u_ydrasil_issue_stage.
+                            issue_window_src0_ready_q[perf_rs_reason_idx] &&
+                        u_dut.u_ydrasil_issue_stage.
+                            issue_src0_completion_wakeup[perf_rs_reason_idx])
+                        perf_rs_dep_src0_completion_now = 1'b1;
+                    if (!u_dut.u_ydrasil_issue_stage.
+                            issue_window_src1_ready_q[perf_rs_reason_idx] &&
+                        !u_dut.u_ydrasil_issue_stage.issue_store_q[
+                            perf_rs_reason_idx] &&
+                        u_dut.u_ydrasil_issue_stage.
+                            issue_src1_completion_wakeup[perf_rs_reason_idx])
+                        perf_rs_dep_src1_completion_now = 1'b1;
+                    if (!u_dut.u_ydrasil_issue_stage.
+                            issue_window_src0_ready_q[perf_rs_reason_idx] &&
+                        u_dut.u_ydrasil_issue_stage.
+                            issue_src0_alloc_wakeup[perf_rs_reason_idx])
+                        perf_rs_dep_src0_alloc_now = 1'b1;
+                    if (!u_dut.u_ydrasil_issue_stage.
+                            issue_window_src1_ready_q[perf_rs_reason_idx] &&
+                        !u_dut.u_ydrasil_issue_stage.issue_store_q[
+                            perf_rs_reason_idx] &&
+                        u_dut.u_ydrasil_issue_stage.
+                            issue_src1_alloc_wakeup[perf_rs_reason_idx])
+                        perf_rs_dep_src1_alloc_now = 1'b1;
+                    if ((!u_dut.u_ydrasil_issue_stage.
+                             issue_window_src0_ready_q[perf_rs_reason_idx] &&
+                         u_dut.u_ydrasil_issue_stage.
+                             issue_src0_completion_wakeup[perf_rs_reason_idx]) &&
+                        (!u_dut.u_ydrasil_issue_stage.
+                             issue_window_src1_ready_q[perf_rs_reason_idx] &&
+                         !u_dut.u_ydrasil_issue_stage.issue_store_q[
+                             perf_rs_reason_idx] &&
+                         u_dut.u_ydrasil_issue_stage.
+                             issue_src1_completion_wakeup[perf_rs_reason_idx]))
+                        perf_rs_dep_both_wakeup_now = 1'b1;
+                    if (((!u_dut.u_ydrasil_issue_stage.
+                              issue_window_src0_ready_q[perf_rs_reason_idx] &&
+                          u_dut.u_ydrasil_issue_stage.
+                              issue_src0_completion_wakeup[perf_rs_reason_idx]) &&
+                         (!u_dut.u_ydrasil_issue_stage.
+                              issue_window_src1_ready_q[perf_rs_reason_idx] &&
+                          !u_dut.u_ydrasil_issue_stage.issue_store_q[
+                              perf_rs_reason_idx] &&
+                          u_dut.u_ydrasil_issue_stage.
+                              issue_src1_alloc_wakeup[perf_rs_reason_idx])) ||
+                        ((!u_dut.u_ydrasil_issue_stage.
+                              issue_window_src0_ready_q[perf_rs_reason_idx] &&
+                          u_dut.u_ydrasil_issue_stage.
+                              issue_src0_alloc_wakeup[perf_rs_reason_idx]) &&
+                         (!u_dut.u_ydrasil_issue_stage.
+                              issue_window_src1_ready_q[perf_rs_reason_idx] &&
+                          !u_dut.u_ydrasil_issue_stage.issue_store_q[
+                              perf_rs_reason_idx] &&
+                          u_dut.u_ydrasil_issue_stage.
+                              issue_src1_completion_wakeup[perf_rs_reason_idx])))
+                        perf_rs_dep_mixed_wakeup_now = 1'b1;
                 end else if (u_dut.u_ydrasil_issue_stage.issue_order_blocked[
                                  perf_rs_reason_idx]) begin
                     perf_rs_order_wait = 1'b1;
@@ -681,6 +1113,8 @@ end
                 end
             end
         end
+        perf_rs_dep_both_src_now = perf_rs_dep_src0_wait_now &&
+            perf_rs_dep_src1_wait_now;
     end
     reg perf_p0_dependency_wait;
     reg perf_p0_order_wait;
@@ -731,10 +1165,84 @@ end
     wire perf_rob_full_now =
         u_dut.u_ydrasil_issue_stage.decode_valid_i &&
         !u_dut.u_ydrasil_issue_stage.dispatch_ready_i;
+    // Raw Select opportunity.  The old SELECT_WIDTH predicate compared the
+    // number of ready entries with the number already admitted in the same
+    // cycle, which made every idle Select cycle look width-limited.  These
+    // signals use the actual bank candidate vectors and the actual bundle
+    // crossing the Select/Operand boundary.
+    wire [2:0] perf_raw_alu_candidate_entries_now =
+        3'($countones(u_dut.u_ydrasil_issue_stage.alu_candidate_local));
+    wire perf_raw_p0_candidate_now =
+        |u_dut.u_ydrasil_issue_stage.p0_candidate_local;
+    wire perf_raw_p1_candidate_now =
+        |u_dut.u_ydrasil_issue_stage.p1_candidate_local;
+    wire perf_raw_serial_candidate_now =
+        |u_dut.u_ydrasil_issue_stage.p1_serial_candidate_local;
+    wire [2:0] perf_raw_bank_supply_now =
+        (perf_raw_alu_candidate_entries_now > 3'd2 ? 3'd2 :
+         perf_raw_alu_candidate_entries_now) +
+        {2'b0, perf_raw_p0_candidate_now} +
+        {2'b0, perf_raw_p1_candidate_now};
+    wire [1:0] perf_select_ideal_width_now =
+        perf_raw_serial_candidate_now ? 2'd1 :
+        (perf_raw_bank_supply_now >= 3'd2 ? 2'd2 :
+         perf_raw_bank_supply_now[1:0]);
+    wire [1:0] perf_select_actual_width_now =
+        u_dut.u_ydrasil_issue_stage.select_buf_push ?
+        ({1'b0, u_dut.u_ydrasil_issue_stage.selected_valid0} +
+         {1'b0, u_dut.u_ydrasil_issue_stage.selected_valid1}) : 2'd0;
+    wire [31:0] perf_select_width_gap_now =
+        (perf_select_ideal_width_now > perf_select_actual_width_now) ?
+        ({{30{1'b0}}, perf_select_ideal_width_now} -
+         {{30{1'b0}}, perf_select_actual_width_now}) : 32'd0;
+    wire perf_select_gap_recovery_now =
+        (perf_select_width_gap_now != 0) &&
+        (u_dut.u_ydrasil_issue_stage.branch_recovery_i ||
+         u_dut.u_ydrasil_issue_stage.recovery_pending_q);
+    wire perf_select_gap_no_push_now =
+        (perf_select_width_gap_now != 0) && !perf_select_gap_recovery_now &&
+        !u_dut.u_ydrasil_issue_stage.select_buf_push;
+    wire [3:0] perf_select_raw_shape_now = {
+        perf_raw_serial_candidate_now, perf_raw_p1_candidate_now,
+        perf_raw_p0_candidate_now, (perf_raw_alu_candidate_entries_now != 0)};
+    wire [2:0] perf_select_drop_alu_entries_now =
+        3'($countones(u_dut.u_ydrasil_issue_stage.alu_candidate_local &
+                      ~u_dut.u_ydrasil_issue_stage.issue_select_mask[3:0]));
+    wire [2:0] perf_select_drop_p0_entries_now =
+        3'($countones(u_dut.u_ydrasil_issue_stage.p0_candidate_local &
+                      ~u_dut.u_ydrasil_issue_stage.issue_select_mask[7:4]));
+    wire [2:0] perf_select_drop_p1_entries_now =
+        3'($countones(u_dut.u_ydrasil_issue_stage.p1_candidate_local &
+                      ~u_dut.u_ydrasil_issue_stage.issue_select_mask[11:8]));
     wire perf_select_width_limit_now =
-        (perf_rs_ready_entries_now > {1'b0, perf_select_admit_slots});
+        !u_dut.u_ydrasil_issue_stage.branch_recovery_i &&
+        !u_dut.u_ydrasil_issue_stage.recovery_pending_q &&
+        (perf_select_ideal_width_now > perf_select_actual_width_now);
     wire perf_operand_dependency_miss_now =
         u_dut.issue_dependency_wait || u_dut.issue_dependency_wait1;
+    wire perf_rob_head_wait_now =
+        (u_dut.u_ctrl.queue_count_q != '0) &&
+        !u_dut.commit_pkt.valid && !u_dut.commit_pkt1.valid &&
+        !u_dut.u_ctrl.producer_complete_mask[u_dut.u_ctrl.queue_head_q];
+    wire perf_frontend_empty_now = !u_dut.if_id_valid;
+    wire perf_lsu_wait_now = perf_rs_lsu_credit_wait ||
+        perf_rs_serial_gate_wait ||
+        (u_dut.u_ydrasil_load_store_unit.queue_count_q == 2'd2);
+    wire perf_fu_wait_now = u_dut.ex_mul_stall;
+    // Loss mask bits (LSB first): BANK, ROB_CAP, DEP, ORDER, RESOURCE,
+    // SELECT, OPERAND, RECOVERY, FRONTEND, ROB_HEAD, LSU, FU.
+    wire [PERF_LOSS_COUPLING_BITS-1:0] perf_loss_coupling_mask_now = {
+        perf_fu_wait_now, perf_lsu_wait_now, perf_rob_head_wait_now,
+        perf_frontend_empty_now,
+        (u_dut.ex_pc_redirect ||
+         u_dut.u_ydrasil_issue_stage.recovery_pending_q),
+        perf_operand_dependency_miss_now,
+        perf_select_width_limit_now,
+        (perf_rs_resource_wait || perf_rs_pair_bank_limit_now),
+        perf_rs_order_wait, perf_rs_dependency_wait,
+        perf_rob_full_now,
+        (perf_bank_full_any_now || perf_rs_bank_full_now)
+    };
     // Primary cycle-cause partition used by the slot accounting below.  The
     // ordering is intentional: a cycle with several asserted controls is
     // charged once to MULTI_CAUSE, while the remaining arms are exclusive.
@@ -808,6 +1316,134 @@ end
         perf_cycle_producer_full, perf_cycle_lsu_struct,
         perf_cycle_dependency, perf_cycle_multi_cause, perf_cycle_mul_hold,
         perf_cycle_flush};
+    // Source-side reason snapshot.  It is registered below and consumed one
+    // cycle later when the corresponding EX slot is observed.  This keeps
+    // front-end/RS attribution on the same transaction as the empty EX slot.
+    always_comb begin
+        perf_src_kind0_d = PERF_SRC_OTHER;
+        perf_src_kind1_d = PERF_SRC_OTHER;
+        if (u_dut.u_ydrasil_issue_stage.flush_id_i ||
+            u_dut.u_ydrasil_issue_stage.trap_flush_i ||
+            u_dut.u_ydrasil_issue_stage.branch_recovery_i ||
+            u_dut.u_ydrasil_issue_stage.recovery_pending_q) begin
+            perf_src_kind0_d = PERF_SRC_RECOVERY;
+            perf_src_kind1_d = PERF_SRC_RECOVERY;
+        end else if (!u_dut.u_ydrasil_issue_stage.issue_pkt_i.valid) begin
+            if (u_dut.u_ydrasil_issue_stage.select_buf_push) begin
+                perf_src_kind0_d = PERF_SRC_SELECT_REFILL;
+                perf_src_kind1_d = PERF_SRC_SELECT_REFILL;
+            end else if (|u_dut.u_ydrasil_issue_stage.issue_window_valid_q) begin
+                if (perf_rs_dependency_wait) begin
+                    perf_src_kind0_d = PERF_SRC_RS_DEPENDENCY;
+                    perf_src_kind1_d = PERF_SRC_RS_DEPENDENCY;
+                end else if (perf_rs_order_wait) begin
+                    perf_src_kind0_d = PERF_SRC_RS_ORDER;
+                    perf_src_kind1_d = PERF_SRC_RS_ORDER;
+                end else if (perf_rs_resource_wait) begin
+                    perf_src_kind0_d = PERF_SRC_RS_RESOURCE;
+                    perf_src_kind1_d = PERF_SRC_RS_RESOURCE;
+                end else begin
+                    perf_src_kind0_d = PERF_SRC_RS_NO_CANDIDATE;
+                    perf_src_kind1_d = PERF_SRC_RS_NO_CANDIDATE;
+                end
+            end else if (!u_dut.if_id_valid) begin
+                perf_src_kind0_d = PERF_SRC_FRONTEND;
+                perf_src_kind1_d = PERF_SRC_FRONTEND;
+            end else begin
+                perf_src_kind0_d = PERF_SRC_RS_EMPTY;
+                perf_src_kind1_d = PERF_SRC_RS_EMPTY;
+            end
+        end else begin
+            if (u_dut.u_ydrasil_issue_stage.lane_a_fu_valid)
+                perf_src_kind0_d = PERF_SRC_LAUNCH;
+            else if (u_dut.u_ydrasil_issue_stage.lane_a_accept &&
+                     u_dut.u_ydrasil_issue_stage.issue_pkt_i.fence_i)
+                perf_src_kind0_d = PERF_SRC_FENCE;
+            else if (u_dut.u_ydrasil_issue_stage.lane_b_accept)
+                perf_src_kind0_d = PERF_SRC_B_ONLY;
+            else if (u_dut.u_ydrasil_issue_stage.lane_a_accept)
+                perf_src_kind0_d = PERF_SRC_SINGLE_HEAD;
+            if (u_dut.u_ydrasil_issue_stage.lane_b_accept)
+                perf_src_kind1_d = PERF_SRC_LAUNCH;
+            else if (u_dut.u_ydrasil_issue_stage.lane_a_accept)
+                perf_src_kind1_d = PERF_SRC_SINGLE_HEAD;
+        end
+    end
+
+    // Snapshot the producer of each selected Operand bundle.  The snapshot is
+    // consumed after the Select/Operand register boundary, so the loss leaves
+    // below describe the bundle that actually became a singleton or refill,
+    // rather than a live candidate signal from a different cycle.
+    always_comb begin
+        perf_select_reason_d = PERF_SEL_REASON_OTHER;
+        if (|u_dut.u_ydrasil_issue_stage.p1_serial_select_local)
+            perf_select_reason_d = PERF_SEL_REASON_SERIAL;
+        else if (u_dut.u_ydrasil_issue_stage.selected_valid1)
+            perf_select_reason_d = PERF_SEL_REASON_PAIR;
+        else if (|u_dut.u_ydrasil_issue_stage.selected0_mask[7:4])
+            perf_select_reason_d = PERF_SEL_REASON_P0;
+        else if (|u_dut.u_ydrasil_issue_stage.selected0_mask[11:8])
+            perf_select_reason_d = PERF_SEL_REASON_P1;
+        else if (|u_dut.u_ydrasil_issue_stage.selected0_mask[3:0])
+            perf_select_reason_d = PERF_SEL_REASON_ALU;
+    end
+    function automatic [1:0] perf_empty_kind_slots(input [4:0] kind);
+        perf_empty_kind_slots =
+            {1'b0, !u_dut.ex_hzd_pkt.valid && (perf_src_kind0_q == kind)} +
+            {1'b0, !u_dut.ex_hzd_pkt1.valid && (perf_src_kind1_q == kind)};
+    endfunction
+    function automatic [1:0] perf_empty_unmapped_slots;
+        perf_empty_unmapped_slots =
+            {1'b0, !u_dut.ex_hzd_pkt.valid &&
+                !((perf_src_kind0_q == PERF_SRC_RESET) ||
+                  (perf_src_kind0_q == PERF_SRC_RECOVERY) ||
+                  (perf_src_kind0_q == PERF_SRC_FENCE) ||
+                  (perf_src_kind0_q == PERF_SRC_B_ONLY) ||
+                  (perf_src_kind0_q == PERF_SRC_SINGLE_HEAD) ||
+                  (perf_src_kind0_q == PERF_SRC_SELECT_REFILL) ||
+                  (perf_src_kind0_q == PERF_SRC_RS_DEPENDENCY) ||
+                  (perf_src_kind0_q == PERF_SRC_RS_ORDER) ||
+                  (perf_src_kind0_q == PERF_SRC_RS_RESOURCE) ||
+                  (perf_src_kind0_q == PERF_SRC_RS_NO_CANDIDATE) ||
+                  (perf_src_kind0_q == PERF_SRC_RS_EMPTY) ||
+                  (perf_src_kind0_q == PERF_SRC_FRONTEND) ||
+                  (perf_src_kind0_q == PERF_SRC_OTHER) ||
+                  (perf_src_kind0_q == PERF_SRC_LAUNCH))} +
+            {1'b0, !u_dut.ex_hzd_pkt1.valid &&
+                !((perf_src_kind1_q == PERF_SRC_RESET) ||
+                  (perf_src_kind1_q == PERF_SRC_RECOVERY) ||
+                  (perf_src_kind1_q == PERF_SRC_FENCE) ||
+                  (perf_src_kind1_q == PERF_SRC_B_ONLY) ||
+                  (perf_src_kind1_q == PERF_SRC_SINGLE_HEAD) ||
+                  (perf_src_kind1_q == PERF_SRC_SELECT_REFILL) ||
+                  (perf_src_kind1_q == PERF_SRC_RS_DEPENDENCY) ||
+                  (perf_src_kind1_q == PERF_SRC_RS_ORDER) ||
+                  (perf_src_kind1_q == PERF_SRC_RS_RESOURCE) ||
+                  (perf_src_kind1_q == PERF_SRC_RS_NO_CANDIDATE) ||
+                  (perf_src_kind1_q == PERF_SRC_RS_EMPTY) ||
+                  (perf_src_kind1_q == PERF_SRC_FRONTEND) ||
+                  (perf_src_kind1_q == PERF_SRC_OTHER) ||
+                  (perf_src_kind1_q == PERF_SRC_LAUNCH))};
+    endfunction
+    wire [1:0] perf_empty_slots_now =
+        {1'b0, !u_dut.ex_hzd_pkt.valid} +
+        {1'b0, !u_dut.ex_hzd_pkt1.valid};
+    wire [1:0] perf_empty_classified_slots_now =
+        perf_empty_kind_slots(PERF_SRC_RESET) +
+        perf_empty_kind_slots(PERF_SRC_RECOVERY) +
+        perf_empty_kind_slots(PERF_SRC_FENCE) +
+        perf_empty_kind_slots(PERF_SRC_B_ONLY) +
+        perf_empty_kind_slots(PERF_SRC_SINGLE_HEAD) +
+        perf_empty_kind_slots(PERF_SRC_SELECT_REFILL) +
+        perf_empty_kind_slots(PERF_SRC_RS_DEPENDENCY) +
+        perf_empty_kind_slots(PERF_SRC_RS_ORDER) +
+        perf_empty_kind_slots(PERF_SRC_RS_RESOURCE) +
+        perf_empty_kind_slots(PERF_SRC_RS_NO_CANDIDATE) +
+        perf_empty_kind_slots(PERF_SRC_RS_EMPTY) +
+        perf_empty_kind_slots(PERF_SRC_FRONTEND) +
+        perf_empty_kind_slots(PERF_SRC_OTHER) +
+        perf_empty_kind_slots(PERF_SRC_LAUNCH) +
+        perf_empty_unmapped_slots();
     wire [2:0] perf_alu_bank_occ_now =
         3'($countones(u_dut.u_ydrasil_issue_stage.issue_window_valid_q[3:0]));
     wire [2:0] perf_p0_bank_occ_now =
@@ -834,6 +1470,173 @@ end
         |(u_dut.u_ydrasil_issue_stage.issue_select_mask &
           (u_dut.u_ydrasil_issue_stage.issue_src0_alloc_wakeup |
            u_dut.u_ydrasil_issue_stage.issue_src1_alloc_wakeup));
+
+    // Raw RS masks.  These are deliberately independent predicates; unlike
+    // perf_rs_*_wait, an entry can appear in more than one mask and therefore
+    // exposes the real coupling between dependency, ordering, and resources.
+    reg [11:0] perf_rs_dep_mask_now;
+    reg [11:0] perf_rs_order_mask_now;
+    reg [11:0] perf_rs_resource_mask_now;
+    reg [11:0] perf_rs_ready_mask_now;
+    integer perf_rs_mask_idx;
+    always_comb begin
+        perf_rs_dep_mask_now = '0;
+        perf_rs_order_mask_now = '0;
+        perf_rs_resource_mask_now = '0;
+        perf_rs_ready_mask_now = '0;
+        for (perf_rs_mask_idx = 0; perf_rs_mask_idx < 12;
+             perf_rs_mask_idx = perf_rs_mask_idx + 1) begin
+            if (u_dut.u_ydrasil_issue_stage.issue_window_valid_q[
+                    perf_rs_mask_idx]) begin
+                if (!u_dut.u_ydrasil_issue_stage.
+                        issue_src0_ready_for_select[perf_rs_mask_idx] ||
+                    (!u_dut.u_ydrasil_issue_stage.
+                         issue_src1_ready_for_select[perf_rs_mask_idx] &&
+                     !u_dut.u_ydrasil_issue_stage.issue_store_q[
+                         perf_rs_mask_idx]))
+                    perf_rs_dep_mask_now[perf_rs_mask_idx] = 1'b1;
+                if (u_dut.u_ydrasil_issue_stage.issue_order_blocked[
+                        perf_rs_mask_idx])
+                    perf_rs_order_mask_now[perf_rs_mask_idx] = 1'b1;
+                if (((perf_rs_mask_idx >= 4) && (perf_rs_mask_idx <= 7) &&
+                     u_dut.u_ydrasil_issue_stage.issue_memory_q[
+                         perf_rs_mask_idx] &&
+                     ({1'b0, u_dut.lsu_issue_credit} <=
+                      {1'b0, u_dut.u_ydrasil_issue_stage.
+                          lsu_select_reserved_q})) ||
+                    ((perf_rs_mask_idx >= 8) &&
+                     u_dut.u_ydrasil_issue_stage.issue_divrem_q[
+                         perf_rs_mask_idx] &&
+                     (!u_dut.u_ydrasil_issue_stage.mdu_div_available_q ||
+                      u_dut.u_ydrasil_issue_stage.div_select_reserved_q)) ||
+                    ((perf_rs_mask_idx >= 8) &&
+                     u_dut.u_ydrasil_issue_stage.issue_serial_q[
+                         perf_rs_mask_idx] &&
+                     ((u_dut.u_ydrasil_issue_stage.issue_window_q[
+                           perf_rs_mask_idx].dst.rob_tag !=
+                       u_dut.u_ydrasil_issue_stage.rob_head_select_q) ||
+                      !u_dut.u_ydrasil_issue_stage.lsu_idle_select_q)))
+                    perf_rs_resource_mask_now[perf_rs_mask_idx] = 1'b1;
+                if (!perf_rs_dep_mask_now[perf_rs_mask_idx] &&
+                    !perf_rs_order_mask_now[perf_rs_mask_idx] &&
+                    !perf_rs_resource_mask_now[perf_rs_mask_idx])
+                    perf_rs_ready_mask_now[perf_rs_mask_idx] = 1'b1;
+            end
+        end
+    end
+
+    wire [15:0] perf_rs_candidate_mask_now = {
+        u_dut.u_ydrasil_issue_stage.p1_serial_candidate_local,
+        u_dut.u_ydrasil_issue_stage.p1_candidate_local,
+        u_dut.u_ydrasil_issue_stage.p0_candidate_local,
+        u_dut.u_ydrasil_issue_stage.alu_candidate_local};
+    wire [11:0] perf_rs_selected_mask_now =
+        u_dut.u_ydrasil_issue_stage.issue_select_mask;
+    wire perf_bank_full_any_now =
+        (perf_alu_bank_occ_now == 3'd4) ||
+        (perf_p0_bank_occ_now == 3'd4) ||
+        (perf_p1_bank_occ_now == 3'd4);
+    wire perf_select_single_now =
+        u_dut.u_ydrasil_issue_stage.select_buf_push &&
+        u_dut.u_ydrasil_issue_stage.selected_valid0 &&
+        !u_dut.u_ydrasil_issue_stage.selected_valid1;
+    wire [3:0] perf_select_queue_state_now = {
+        u_dut.u_ydrasil_issue_stage.select_skid_valid_q,
+        u_dut.u_ydrasil_issue_stage.select_skid_pair_q,
+        u_dut.u_ydrasil_issue_stage.select_head_valid_q,
+        u_dut.u_ydrasil_issue_stage.select_head_pair_q
+    };
+    // A single head plus a pair waiting in skid is the exact bundle HOL case:
+    // one selected uop is available but cannot share the already-issued head.
+    wire perf_select_hol_pair_now =
+        u_dut.u_ydrasil_issue_stage.select_head_valid_q &&
+        !u_dut.u_ydrasil_issue_stage.select_head_pair_q &&
+        u_dut.u_ydrasil_issue_stage.select_skid_valid_q &&
+        u_dut.u_ydrasil_issue_stage.select_skid_pair_q;
+    // The queue state after the edge can hide this event: a singleton head
+    // may be consumed while a pair is pushed into the freed cell.  The cycle
+    // still lost one execution slot before that pair reaches the head.  Count
+    // this edge explicitly instead of relying on a persistent skid state.
+    wire perf_select_pair_push_single_head_now =
+        u_dut.u_ydrasil_issue_stage.select_buf_push &&
+        u_dut.u_ydrasil_issue_stage.selected_valid1 &&
+        u_dut.u_ydrasil_issue_stage.select_head_valid_q &&
+        !u_dut.u_ydrasil_issue_stage.select_head_pair_q;
+    wire perf_select_refill_head_empty_now =
+        !u_dut.u_ydrasil_issue_stage.select_head_valid_q &&
+        u_dut.u_ydrasil_issue_stage.select_buf_push;
+    // Coupling mask bits: BANK, ROB, DEP, ORDER, RESOURCE, SELECT, OPERAND,
+    // RECOVERY.  The mask is a state vector, not a one-hot attribution.
+    wire [7:0] perf_coupling_mask_now = {
+        (u_dut.ex_pc_redirect ||
+         u_dut.u_ydrasil_issue_stage.recovery_pending_q),
+        perf_operand_dependency_miss_now,
+        (perf_select_width_limit_now || perf_select_single_now ||
+         perf_select_hol_pair_now),
+        (perf_rs_resource_wait || perf_rs_pair_bank_limit_now),
+        perf_rs_order_wait,
+        perf_rs_dependency_wait,
+        perf_rob_full_now,
+        (perf_bank_full_any_now || perf_rs_bank_full_now)
+    };
+
+    wire [2:0] perf_bank_dep_entries_now [0:2];
+    wire [2:0] perf_bank_order_entries_now [0:2];
+    wire [2:0] perf_bank_resource_entries_now [0:2];
+    wire [2:0] perf_bank_ready_entries_now [0:2];
+    wire [2:0] perf_bank_candidate_entries_now [0:2];
+    wire [2:0] perf_bank_selected_entries_now [0:2];
+    assign perf_bank_dep_entries_now[0] =
+        3'($countones(perf_rs_dep_mask_now[3:0]));
+    assign perf_bank_dep_entries_now[1] =
+        3'($countones(perf_rs_dep_mask_now[7:4]));
+    assign perf_bank_dep_entries_now[2] =
+        3'($countones(perf_rs_dep_mask_now[11:8]));
+    assign perf_bank_order_entries_now[0] =
+        3'($countones(perf_rs_order_mask_now[3:0]));
+    assign perf_bank_order_entries_now[1] =
+        3'($countones(perf_rs_order_mask_now[7:4]));
+    assign perf_bank_order_entries_now[2] =
+        3'($countones(perf_rs_order_mask_now[11:8]));
+    assign perf_bank_resource_entries_now[0] =
+        3'($countones(perf_rs_resource_mask_now[3:0]));
+    assign perf_bank_resource_entries_now[1] =
+        3'($countones(perf_rs_resource_mask_now[7:4]));
+    assign perf_bank_resource_entries_now[2] =
+        3'($countones(perf_rs_resource_mask_now[11:8]));
+    assign perf_bank_ready_entries_now[0] =
+        3'($countones(perf_rs_ready_mask_now[3:0]));
+    assign perf_bank_ready_entries_now[1] =
+        3'($countones(perf_rs_ready_mask_now[7:4]));
+    assign perf_bank_ready_entries_now[2] =
+        3'($countones(perf_rs_ready_mask_now[11:8]));
+    assign perf_bank_candidate_entries_now[0] =
+        3'($countones(perf_rs_candidate_mask_now[3:0]));
+    assign perf_bank_candidate_entries_now[1] =
+        3'($countones(perf_rs_candidate_mask_now[7:4]));
+    assign perf_bank_candidate_entries_now[2] =
+        3'($countones(perf_rs_candidate_mask_now[11:8]));
+    assign perf_bank_selected_entries_now[0] =
+        3'($countones(perf_rs_selected_mask_now[3:0]));
+    assign perf_bank_selected_entries_now[1] =
+        3'($countones(perf_rs_selected_mask_now[7:4]));
+    assign perf_bank_selected_entries_now[2] =
+        3'($countones(perf_rs_selected_mask_now[11:8]));
+
+    function automatic integer perf_latency_bucket(input integer latency);
+        if (latency < 4)
+            perf_latency_bucket = 0;
+        else if (latency < 8)
+            perf_latency_bucket = 1;
+        else if (latency < 16)
+            perf_latency_bucket = 2;
+        else if (latency < 32)
+            perf_latency_bucket = 3;
+        else if (latency < 64)
+            perf_latency_bucket = 4;
+        else
+            perf_latency_bucket = 5;
+    endfunction
     wire        retire0_valid;
     wire [31:0] retire0_pc;
     wire        retire1_valid;
@@ -1417,6 +2220,7 @@ end
             perf_producer_full_q <= 1'b0;
             perf_p0_bank_block_q <= 1'b0;
             perf_producer_full_start_q <= 0;
+            perf_issue_scan_count <= 0;
         end else begin
             perf_local_debug_cycle <= perf_local_debug_cycle + 1;
             perf_producer_full_q <= u_dut.u_ctrl.producer_full_stall;
@@ -1424,6 +2228,43 @@ end
                 !u_dut.decode_if_ready && u_dut.dispatch_ready &&
                 !u_dut.u_ydrasil_issue_stage.dispatch_slots_available &&
                 u_dut.u_ydrasil_issue_stage.dispatch0_p0;
+            // Bounded local evidence for the large ISSUE_NO_EXECUTE bucket.
+            // This is intentionally observational and cannot affect RTL.
+            if (perf_issue_scan_en && perf_cycle_issue &&
+                (perf_executed_slots == 2'd0) &&
+                (perf_issue_scan_count < 32)) begin
+                $display("PERFISSUE cyc=%0d pkt=%0b pair=%0b lane=%0b/%0b accept=%0b/%0b ex=%0b/%0b raw=%0b/%0b br=%0b mul=%0b advance=%0b flush_id=%0b recover=%0b pending=%0b serialize=%0b dep=%0b/%0b src=%0b/%0b/%0b/%0b fence=%0b pc=0x%08h/0x%08h",
+                         perf_local_debug_cycle,
+                         u_dut.u_ydrasil_issue_stage.issue_pkt_i.valid,
+                         u_dut.u_ydrasil_issue_stage.issue_pair_execute,
+                         u_dut.u_ydrasil_issue_stage.lane_a_valid,
+                         u_dut.u_ydrasil_issue_stage.lane_b_valid,
+                         u_dut.u_ydrasil_issue_stage.lane_a_accept,
+                         u_dut.u_ydrasil_issue_stage.lane_b_accept,
+                         u_dut.ex_hzd_pkt.valid,
+                         u_dut.ex_hzd_pkt1.valid,
+                         u_dut.alu_in_valid,
+                         u_dut.dual_alu_valid || u_dut.dual_bit_valid ||
+                             u_dut.dual_bru_valid || u_dut.mul_in_valid ||
+                             u_dut.csr_in_valid,
+                         u_dut.ex_branch_jump,
+                         u_dut.ex_mul_stall,
+                         u_dut.u_ydrasil_issue_stage.id_advance,
+                         u_dut.flush_id,
+                         u_dut.u_ydrasil_issue_stage.branch_recovery_i,
+                         u_dut.u_ydrasil_issue_stage.recovery_pending_q,
+                         u_dut.issue_serialize_stall,
+                         u_dut.issue_dependency_wait,
+                         u_dut.issue_dependency_wait1,
+                         u_dut.u_ydrasil_issue_stage.src0_ready,
+                         u_dut.u_ydrasil_issue_stage.src1_ready,
+                         u_dut.u_ydrasil_issue_stage.src2_ready,
+                         u_dut.u_ydrasil_issue_stage.src3_ready,
+                         u_dut.u_ydrasil_issue_stage.issue_pkt_i.fence_i,
+                         u_dut.u_ydrasil_issue_stage.issue_pkt_i.pc,
+                         u_dut.u_ydrasil_issue_stage.issue_pkt1_i.pc);
+                perf_issue_scan_count <= perf_issue_scan_count + 1;
+            end
             if (perf_event_scan_en &&
                 (perf_local_debug_cycle >= perf_local_start) &&
                 (perf_local_debug_cycle <= perf_local_end) &&
@@ -2156,6 +2997,34 @@ end
             acct_other_count <= 32'b0;
             perf_sample_cycle_count <= 32'b0;
             perf_productive_slot_count <= 32'b0;
+            perf_executed_slot0_count <= 32'b0;
+            perf_executed_slot1_count <= 32'b0;
+            perf_ex_branch_drop0_count <= 32'b0;
+            perf_ex_branch_drop1_count <= 32'b0;
+            perf_ex_mul_drop0_count <= 32'b0;
+            perf_ex_mul_drop1_count <= 32'b0;
+            perf_ex_empty0_count <= 32'b0;
+            perf_ex_empty1_count <= 32'b0;
+            perf_ex_empty_reset_count <= 32'b0;
+            perf_ex_empty_recovery_count <= 32'b0;
+            perf_ex_empty_fence_count <= 32'b0;
+            perf_ex_empty_b_only_count <= 32'b0;
+            perf_ex_empty_single_head_count <= 32'b0;
+            perf_ex_empty_select_refill_count <= 32'b0;
+            perf_ex_empty_rs_dependency_count <= 32'b0;
+            perf_ex_empty_rs_order_count <= 32'b0;
+            perf_ex_empty_rs_resource_count <= 32'b0;
+            perf_ex_empty_rs_no_candidate_count <= 32'b0;
+            perf_ex_empty_rs_empty_count <= 32'b0;
+            perf_ex_empty_frontend_count <= 32'b0;
+            perf_ex_empty_other_count <= 32'b0;
+            perf_ex_empty_launch_mismatch_count <= 32'b0;
+            perf_ex_empty_unmapped_count <= 32'b0;
+            perf_ex_valid_hold0_count <= 32'b0;
+            perf_ex_valid_hold1_count <= 32'b0;
+            perf_src_kind0_q <= PERF_SRC_RESET;
+            perf_src_kind1_q <= PERF_SRC_RESET;
+            perf_select_reason_q <= PERF_SEL_REASON_OTHER;
             perf_lost_flush_slot_count <= 32'b0;
             perf_lost_mul_hold_slot_count <= 32'b0;
             perf_lost_dependency_slot_count <= 32'b0;
@@ -2275,6 +3144,60 @@ end
             perf_loss_decode_refill_slots <= 32'b0;
             perf_loss_frontend_slots <= 32'b0;
             perf_loss_other_slots <= 32'b0;
+            perf_single_p0_only_slots <= 32'b0;
+            perf_single_p1_only_slots <= 32'b0;
+            perf_single_alu_only_slots <= 32'b0;
+            perf_single_serial_slots <= 32'b0;
+            perf_single_other_slots <= 32'b0;
+            perf_select_refill_pair_slots <= 32'b0;
+            perf_select_refill_p0_slots <= 32'b0;
+            perf_select_refill_p1_slots <= 32'b0;
+            perf_select_refill_alu_slots <= 32'b0;
+            perf_select_refill_serial_slots <= 32'b0;
+            perf_select_refill_other_slots <= 32'b0;
+            perf_dep_src0_slots <= 32'b0;
+            perf_dep_src1_slots <= 32'b0;
+            perf_dep_both_src_slots <= 32'b0;
+            perf_dep_completion_wakeup_slots <= 32'b0;
+            perf_dep_alloc_wakeup_slots <= 32'b0;
+            perf_dep_load_slots <= 32'b0;
+            perf_dep_mul_slots <= 32'b0;
+            perf_dep_branch_slots <= 32'b0;
+            perf_dep_other_slots <= 32'b0;
+            perf_single_op_alu_slots <= 32'b0;
+            perf_single_op_load_slots <= 32'b0;
+            perf_single_op_store_slots <= 32'b0;
+            perf_single_op_mul_slots <= 32'b0;
+            perf_single_op_csr_sys_slots <= 32'b0;
+            perf_single_op_other_slots <= 32'b0;
+            perf_refill_shape_p0_p1_slots <= 32'b0;
+            perf_refill_shape_p0_alu_slots <= 32'b0;
+            perf_refill_shape_p1_alu_slots <= 32'b0;
+            perf_refill_shape_alu_alu_slots <= 32'b0;
+            perf_refill_shape_single_p0_slots <= 32'b0;
+            perf_refill_shape_single_p1_slots <= 32'b0;
+            perf_refill_shape_single_alu_slots <= 32'b0;
+            perf_refill_shape_serial_slots <= 32'b0;
+            perf_refill_shape_other_slots <= 32'b0;
+            perf_dep_wake_both_slots <= 32'b0;
+            perf_dep_wake_mixed_slots <= 32'b0;
+            perf_dep_wake_src0_completion_slots <= 32'b0;
+            perf_dep_wake_src1_completion_slots <= 32'b0;
+            perf_dep_wake_src0_alloc_slots <= 32'b0;
+            perf_dep_wake_src1_alloc_slots <= 32'b0;
+            perf_dep_wake_none_slots <= 32'b0;
+            perf_dep_op_alu_slots <= 32'b0;
+            perf_dep_op_load_slots <= 32'b0;
+            perf_dep_op_store_slots <= 32'b0;
+            perf_dep_op_mul_slots <= 32'b0;
+            perf_dep_op_branch_slots <= 32'b0;
+            perf_dep_op_other_slots <= 32'b0;
+            for (perf_stat_idx = 0; perf_stat_idx < 32;
+                 perf_stat_idx = perf_stat_idx + 1)
+                perf_dep_blocker_mask_slots[perf_stat_idx] <= 32'b0;
+            for (perf_stat_idx = 0; perf_stat_idx < 5;
+                 perf_stat_idx = perf_stat_idx + 1)
+                perf_dep_blocker_operand_cycles[perf_stat_idx] <= 32'b0;
             perf_other_rob_block_slots <= 32'b0;
             perf_other_rs_bank_block_slots <= 32'b0;
             perf_other_recovery_resync_slots <= 32'b0;
@@ -2293,6 +3216,21 @@ end
             perf_p0_full_resource_slots <= 32'b0;
             perf_p0_full_ready_release_slots <= 32'b0;
             perf_p0_full_no_candidate_slots <= 32'b0;
+            for (perf_stat_idx = 0; perf_stat_idx < 5;
+                 perf_stat_idx = perf_stat_idx + 1)
+                perf_p0_full_store_mix_slots[perf_stat_idx] <= 32'b0;
+            perf_p0_full_blocked_load_slots <= 32'b0;
+            perf_p0_full_blocked_store_slots <= 32'b0;
+            perf_p0_full_blocked_other_slots <= 32'b0;
+            perf_p0_completion_wakeup_cycles <= 32'b0;
+            perf_operand_merge_pair_cycles <= 32'b0;
+            perf_rs_completion_wakeup_entries <= 32'b0;
+            perf_rs_alloc_wakeup_entries <= 32'b0;
+            perf_rs_select_wakeup_entries <= 32'b0;
+            perf_dtcm_launch_wakeup_events <= 32'b0;
+            perf_dtcm_result_wakeup_events <= 32'b0;
+            perf_mdu_wakeup_events <= 32'b0;
+            perf_replay_wakeup_events <= 32'b0;
             perf_other_rs_pair_limit_slots <= 32'b0;
             perf_other_select_refill_slots <= 32'b0;
             perf_other_rs_dependency_slots <= 32'b0;
@@ -2329,6 +3267,100 @@ end
             perf_mdu_local_wake_cycles <= 32'b0;
             perf_resident_wakeup_entry_cycles <= 32'b0;
             perf_resident_due_select_cycles <= 32'b0;
+            perf_cpl_bank_dep_count <= 32'b0;
+            perf_cpl_bank_rob_count <= 32'b0;
+            perf_cpl_bank_resource_count <= 32'b0;
+            perf_cpl_bank_select_count <= 32'b0;
+            perf_cpl_bank_operand_count <= 32'b0;
+            perf_cpl_rob_dep_count <= 32'b0;
+            perf_cpl_rob_resource_count <= 32'b0;
+            perf_cpl_rob_select_count <= 32'b0;
+            perf_cpl_rob_operand_count <= 32'b0;
+            perf_cpl_dep_resource_count <= 32'b0;
+            perf_cpl_dep_select_count <= 32'b0;
+            perf_cpl_dep_operand_count <= 32'b0;
+            perf_cpl_resource_select_count <= 32'b0;
+            perf_cpl_select_operand_count <= 32'b0;
+            perf_cpl_bank_dep_select_count <= 32'b0;
+            perf_cpl_bank_rob_select_count <= 32'b0;
+            perf_cpl_dep_select_operand_count <= 32'b0;
+            perf_loss_coupling_cycles <= 32'b0;
+            perf_loss_coupling_slots <= 32'b0;
+            perf_select_raw_alu_entries <= 32'b0;
+            perf_select_raw_p0_entries <= 32'b0;
+            perf_select_raw_p1_entries <= 32'b0;
+            perf_select_drop_alu_entries <= 32'b0;
+            perf_select_drop_p0_entries <= 32'b0;
+            perf_select_drop_p1_entries <= 32'b0;
+            perf_select_width_gap_slots <= 32'b0;
+            perf_select_pair_capable_single_cycles <= 32'b0;
+            perf_select_pair_capable_single_slots <= 32'b0;
+            perf_select_gap_recovery_cycles <= 32'b0;
+            perf_select_gap_no_push_cycles <= 32'b0;
+            perf_select_gap_policy_cycles <= 32'b0;
+            perf_select_hol_pair_cycles <= 32'b0;
+            perf_select_hol_pair_lost_slots <= 32'b0;
+            perf_select_pair_push_cycles <= 32'b0;
+            perf_select_pair_issue_cycles <= 32'b0;
+            perf_select_pair_push_single_head_cycles <= 32'b0;
+            perf_select_pair_push_single_head_slots <= 32'b0;
+            perf_select_refill_head_empty_cycles <= 32'b0;
+            perf_select_refill_head_empty_slots <= 32'b0;
+            perf_select_refill_head_empty_pair_slots <= 32'b0;
+            perf_select_refill_head_empty_single_slots <= 32'b0;
+            for (perf_stat_idx = 0; perf_stat_idx < PERF_LOSS_COUPLING_DEPTH;
+                 perf_stat_idx = perf_stat_idx + 1) begin
+                perf_loss_coupling_cycle_count[perf_stat_idx] <= 32'b0;
+                perf_loss_coupling_slot_count[perf_stat_idx] <= 32'b0;
+            end
+            for (perf_stat_idx = 0; perf_stat_idx < 256;
+                 perf_stat_idx = perf_stat_idx + 1)
+                perf_coupling_mask_count[perf_stat_idx] <= 32'b0;
+            for (perf_stat_idx = 0; perf_stat_idx < 16;
+                 perf_stat_idx = perf_stat_idx + 1)
+                begin
+                    perf_select_queue_state_count[perf_stat_idx] <= 32'b0;
+                    perf_select_raw_shape_count[perf_stat_idx] <= 32'b0;
+                end
+            for (perf_stat_idx = 0; perf_stat_idx < 3;
+                 perf_stat_idx = perf_stat_idx + 1) begin
+                perf_select_raw_width_count[perf_stat_idx] <= 32'b0;
+                perf_select_actual_width_count[perf_stat_idx] <= 32'b0;
+            end
+            for (perf_width_idx = 0; perf_width_idx < 3;
+                 perf_width_idx = perf_width_idx + 1)
+                for (perf_width_idx2 = 0; perf_width_idx2 < 3;
+                     perf_width_idx2 = perf_width_idx2 + 1) begin
+                    perf_select_width_matrix_cycles[perf_width_idx][perf_width_idx2] <=
+                        32'b0;
+                    perf_select_width_matrix_slots[perf_width_idx][perf_width_idx2] <=
+                        32'b0;
+                end
+            for (perf_stat_idx = 0; perf_stat_idx < 3;
+                 perf_stat_idx = perf_stat_idx + 1) begin
+                perf_bank_dep_entry_cycles[perf_stat_idx] <= 32'b0;
+                perf_bank_order_entry_cycles[perf_stat_idx] <= 32'b0;
+                perf_bank_resource_entry_cycles[perf_stat_idx] <= 32'b0;
+                perf_bank_ready_entry_cycles[perf_stat_idx] <= 32'b0;
+                perf_bank_candidate_entry_cycles[perf_stat_idx] <= 32'b0;
+                perf_bank_selected_entry_cycles[perf_stat_idx] <= 32'b0;
+            end
+            for (perf_stat_idx = 0; perf_stat_idx < PERF_LATENCY_BINS;
+                 perf_stat_idx = perf_stat_idx + 1) begin
+                perf_latency_alloc_select[perf_stat_idx] <= 32'b0;
+                perf_latency_select_operand[perf_stat_idx] <= 32'b0;
+                perf_latency_operand_ex[perf_stat_idx] <= 32'b0;
+                perf_latency_alloc_complete[perf_stat_idx] <= 32'b0;
+                perf_latency_alloc_retire[perf_stat_idx] <= 32'b0;
+            end
+            for (perf_stat_idx = 0;
+                 perf_stat_idx < (1 << PRODUCER_ID_WIDTH);
+                 perf_stat_idx = perf_stat_idx + 1) begin
+                perf_alloc_cycle_by_id[perf_stat_idx] <= 32'b0;
+                perf_select_cycle_by_id[perf_stat_idx] <= 32'b0;
+                perf_operand_cycle_by_id[perf_stat_idx] <= 32'b0;
+                perf_alloc_live_by_id[perf_stat_idx] <= 1'b0;
+            end
             perf_producer_issued_q <= '0;
             producer_normal_drain_count <= 32'b0;
             producer_flush_drain_count <= 32'b0;
@@ -2374,11 +3406,406 @@ end
                 operandq_occ_count[perf_stat_idx] <= 32'b0;
         end else begin
             perf_sample_cycle_count <= perf_sample_cycle_count + 1'b1;
+            perf_select_queue_state_count[perf_select_queue_state_now] <=
+                perf_select_queue_state_count[perf_select_queue_state_now] + 1'b1;
+            perf_select_raw_width_count[perf_select_ideal_width_now] <=
+                perf_select_raw_width_count[perf_select_ideal_width_now] + 1'b1;
+            perf_select_actual_width_count[perf_select_actual_width_now] <=
+                perf_select_actual_width_count[perf_select_actual_width_now] + 1'b1;
+            perf_select_width_matrix_cycles[perf_select_ideal_width_now]
+                [perf_select_actual_width_now] <=
+                perf_select_width_matrix_cycles[perf_select_ideal_width_now]
+                    [perf_select_actual_width_now] + 1'b1;
+            perf_select_width_matrix_slots[perf_select_ideal_width_now]
+                [perf_select_actual_width_now] <=
+                perf_select_width_matrix_slots[perf_select_ideal_width_now]
+                    [perf_select_actual_width_now] + perf_lost_slots_ext;
+            perf_select_raw_shape_count[perf_select_raw_shape_now] <=
+                perf_select_raw_shape_count[perf_select_raw_shape_now] + 1'b1;
+            perf_select_raw_alu_entries <= perf_select_raw_alu_entries +
+                {{29{1'b0}}, perf_raw_alu_candidate_entries_now};
+            perf_select_raw_p0_entries <= perf_select_raw_p0_entries +
+                {31'b0, perf_raw_p0_candidate_now};
+            perf_select_raw_p1_entries <= perf_select_raw_p1_entries +
+                {31'b0, perf_raw_p1_candidate_now};
+            perf_select_drop_alu_entries <= perf_select_drop_alu_entries +
+                {{29{1'b0}}, perf_select_drop_alu_entries_now};
+            perf_select_drop_p0_entries <= perf_select_drop_p0_entries +
+                {{29{1'b0}}, perf_select_drop_p0_entries_now};
+            perf_select_drop_p1_entries <= perf_select_drop_p1_entries +
+                {{29{1'b0}}, perf_select_drop_p1_entries_now};
+            if (perf_select_ideal_width_now > perf_select_actual_width_now)
+                perf_select_width_gap_slots <= perf_select_width_gap_slots +
+                    perf_select_width_gap_now;
+            if (perf_select_gap_recovery_now)
+                perf_select_gap_recovery_cycles <=
+                    perf_select_gap_recovery_cycles + 1'b1;
+            else if (perf_select_gap_no_push_now)
+                perf_select_gap_no_push_cycles <=
+                    perf_select_gap_no_push_cycles + 1'b1;
+            else if (perf_select_width_gap_now != 0)
+                perf_select_gap_policy_cycles <=
+                    perf_select_gap_policy_cycles + 1'b1;
+            if ((perf_select_ideal_width_now == 2'd2) &&
+                (perf_select_actual_width_now == 2'd1)) begin
+                perf_select_pair_capable_single_cycles <=
+                    perf_select_pair_capable_single_cycles + 1'b1;
+                if (perf_lost_slots != '0)
+                    perf_select_pair_capable_single_slots <=
+                        perf_select_pair_capable_single_slots +
+                        perf_lost_slots_ext;
+            end
+            if (perf_lost_slots != '0) begin
+                perf_loss_coupling_cycles <= perf_loss_coupling_cycles + 1'b1;
+                perf_loss_coupling_slots <= perf_loss_coupling_slots +
+                    perf_lost_slots_ext;
+                perf_loss_coupling_cycle_count[perf_loss_coupling_mask_now] <=
+                    perf_loss_coupling_cycle_count[perf_loss_coupling_mask_now] + 1'b1;
+                perf_loss_coupling_slot_count[perf_loss_coupling_mask_now] <=
+                    perf_loss_coupling_slot_count[perf_loss_coupling_mask_now] +
+                    perf_lost_slots_ext;
+            end
+            if (perf_select_hol_pair_now)
+                perf_select_hol_pair_cycles <= perf_select_hol_pair_cycles + 1'b1;
+            if (perf_select_hol_pair_now && (perf_operand_lost_slots != '0))
+                perf_select_hol_pair_lost_slots <=
+                    perf_select_hol_pair_lost_slots + perf_operand_lost_slots_ext;
+            if (u_dut.u_ydrasil_issue_stage.select_buf_push &&
+                u_dut.u_ydrasil_issue_stage.selected_valid1)
+                perf_select_pair_push_cycles <= perf_select_pair_push_cycles + 1'b1;
+            if (perf_select_pair_push_single_head_now) begin
+                perf_select_pair_push_single_head_cycles <=
+                    perf_select_pair_push_single_head_cycles + 1'b1;
+                perf_select_pair_push_single_head_slots <=
+                    perf_select_pair_push_single_head_slots +
+                    perf_operand_lost_slots_ext;
+            end
+            if (perf_select_refill_head_empty_now &&
+                (perf_operand_lost_slots != '0)) begin
+                perf_select_refill_head_empty_cycles <=
+                    perf_select_refill_head_empty_cycles + 1'b1;
+                perf_select_refill_head_empty_slots <=
+                    perf_select_refill_head_empty_slots +
+                    perf_operand_lost_slots_ext;
+                if (u_dut.u_ydrasil_issue_stage.selected_valid1)
+                    perf_select_refill_head_empty_pair_slots <=
+                        perf_select_refill_head_empty_pair_slots +
+                        perf_operand_lost_slots_ext;
+                else
+                    perf_select_refill_head_empty_single_slots <=
+                        perf_select_refill_head_empty_single_slots +
+                        perf_operand_lost_slots_ext;
+            end
+            if (u_dut.u_ydrasil_issue_stage.select_head_valid_q &&
+                u_dut.u_ydrasil_issue_stage.select_head_pair_q)
+                perf_select_pair_issue_cycles <= perf_select_pair_issue_cycles + 1'b1;
+            // Preserve the simultaneous backend state before the legacy
+            // exclusive slot attribution is evaluated.
+            perf_coupling_mask_count[perf_coupling_mask_now] <=
+                perf_coupling_mask_count[perf_coupling_mask_now] + 1'b1;
+            if (perf_coupling_mask_now[0] && perf_coupling_mask_now[2])
+                perf_cpl_bank_select_count <= perf_cpl_bank_select_count + 1'b1;
+            if (perf_coupling_mask_now[0] && perf_coupling_mask_now[1])
+                perf_cpl_bank_rob_count <= perf_cpl_bank_rob_count + 1'b1;
+            if (perf_coupling_mask_now[0] && perf_coupling_mask_now[3])
+                perf_cpl_bank_resource_count <= perf_cpl_bank_resource_count + 1'b1;
+            if (perf_coupling_mask_now[0] && perf_coupling_mask_now[5])
+                perf_cpl_bank_dep_count <= perf_cpl_bank_dep_count + 1'b1;
+            if (perf_coupling_mask_now[0] && perf_coupling_mask_now[6])
+                perf_cpl_bank_operand_count <= perf_cpl_bank_operand_count + 1'b1;
+            if (perf_coupling_mask_now[1] && perf_coupling_mask_now[5])
+                perf_cpl_rob_dep_count <= perf_cpl_rob_dep_count + 1'b1;
+            if (perf_coupling_mask_now[1] && perf_coupling_mask_now[3])
+                perf_cpl_rob_resource_count <= perf_cpl_rob_resource_count + 1'b1;
+            if (perf_coupling_mask_now[1] && perf_coupling_mask_now[2])
+                perf_cpl_rob_select_count <= perf_cpl_rob_select_count + 1'b1;
+            if (perf_coupling_mask_now[1] && perf_coupling_mask_now[6])
+                perf_cpl_rob_operand_count <= perf_cpl_rob_operand_count + 1'b1;
+            if (perf_coupling_mask_now[5] && perf_coupling_mask_now[3])
+                perf_cpl_dep_resource_count <= perf_cpl_dep_resource_count + 1'b1;
+            if (perf_coupling_mask_now[5] && perf_coupling_mask_now[2])
+                perf_cpl_dep_select_count <= perf_cpl_dep_select_count + 1'b1;
+            if (perf_coupling_mask_now[5] && perf_coupling_mask_now[6])
+                perf_cpl_dep_operand_count <= perf_cpl_dep_operand_count + 1'b1;
+            if (perf_coupling_mask_now[3] && perf_coupling_mask_now[2])
+                perf_cpl_resource_select_count <= perf_cpl_resource_select_count + 1'b1;
+            if (perf_coupling_mask_now[2] && perf_coupling_mask_now[6])
+                perf_cpl_select_operand_count <= perf_cpl_select_operand_count + 1'b1;
+            if (&{perf_coupling_mask_now[0], perf_coupling_mask_now[5],
+                  perf_coupling_mask_now[2]})
+                perf_cpl_bank_dep_select_count <= perf_cpl_bank_dep_select_count + 1'b1;
+            if (&{perf_coupling_mask_now[0], perf_coupling_mask_now[1],
+                  perf_coupling_mask_now[2]})
+                perf_cpl_bank_rob_select_count <= perf_cpl_bank_rob_select_count + 1'b1;
+            if (&{perf_coupling_mask_now[5], perf_coupling_mask_now[2],
+                  perf_coupling_mask_now[6]})
+                perf_cpl_dep_select_operand_count <= perf_cpl_dep_select_operand_count + 1'b1;
+            for (perf_lifecycle_idx = 0; perf_lifecycle_idx < 3;
+                 perf_lifecycle_idx = perf_lifecycle_idx + 1) begin
+                perf_bank_dep_entry_cycles[perf_lifecycle_idx] <=
+                    perf_bank_dep_entry_cycles[perf_lifecycle_idx] +
+                    {{29{1'b0}}, perf_bank_dep_entries_now[perf_lifecycle_idx]};
+                perf_bank_order_entry_cycles[perf_lifecycle_idx] <=
+                    perf_bank_order_entry_cycles[perf_lifecycle_idx] +
+                    {{29{1'b0}}, perf_bank_order_entries_now[perf_lifecycle_idx]};
+                perf_bank_resource_entry_cycles[perf_lifecycle_idx] <=
+                    perf_bank_resource_entry_cycles[perf_lifecycle_idx] +
+                    {{29{1'b0}}, perf_bank_resource_entries_now[perf_lifecycle_idx]};
+                perf_bank_ready_entry_cycles[perf_lifecycle_idx] <=
+                    perf_bank_ready_entry_cycles[perf_lifecycle_idx] +
+                    {{29{1'b0}}, perf_bank_ready_entries_now[perf_lifecycle_idx]};
+                perf_bank_candidate_entry_cycles[perf_lifecycle_idx] <=
+                    perf_bank_candidate_entry_cycles[perf_lifecycle_idx] +
+                    {{29{1'b0}}, perf_bank_candidate_entries_now[perf_lifecycle_idx]};
+                perf_bank_selected_entry_cycles[perf_lifecycle_idx] <=
+                    perf_bank_selected_entry_cycles[perf_lifecycle_idx] +
+                    {{29{1'b0}}, perf_bank_selected_entries_now[perf_lifecycle_idx]};
+            end
+
+            // Allocate -> Select -> Operand -> EX -> completion/retire timing.
+            // Blocking updates are used only for these DV histograms so two
+            // events in one cycle cannot overwrite the same histogram bin.
+            if (u_dut.u_ctrl.queue_alloc0) begin
+                perf_alloc_cycle_by_id[u_dut.u_ctrl.producer_alloc_id] =
+                    perf_sample_cycle_count;
+                perf_alloc_live_by_id[u_dut.u_ctrl.producer_alloc_id] = 1'b1;
+            end
+            if (u_dut.u_ctrl.queue_alloc1) begin
+                perf_alloc_cycle_by_id[u_dut.u_ctrl.producer_alloc_id1] =
+                    perf_sample_cycle_count;
+                perf_alloc_live_by_id[u_dut.u_ctrl.producer_alloc_id1] = 1'b1;
+            end
+            if (u_dut.u_ydrasil_issue_stage.select_buf_push) begin
+                if (u_dut.u_ydrasil_issue_stage.selected_valid0) begin
+                    perf_lifecycle_id = int'(u_dut.u_ydrasil_issue_stage.
+                        selected_uop0.dst.rob_tag);
+                    perf_select_cycle_by_id[perf_lifecycle_id] =
+                        perf_sample_cycle_count;
+                    if (perf_alloc_live_by_id[perf_lifecycle_id]) begin
+                        perf_lifecycle_latency = perf_sample_cycle_count -
+                            perf_alloc_cycle_by_id[perf_lifecycle_id];
+                        perf_lifecycle_bin = perf_latency_bucket(
+                            perf_lifecycle_latency);
+                        perf_latency_alloc_select[perf_lifecycle_bin] =
+                            perf_latency_alloc_select[perf_lifecycle_bin] + 1'b1;
+                    end
+                end
+                if (u_dut.u_ydrasil_issue_stage.selected_valid1) begin
+                    perf_lifecycle_id = int'(u_dut.u_ydrasil_issue_stage.
+                        selected_uop1.dst.rob_tag);
+                    perf_select_cycle_by_id[perf_lifecycle_id] =
+                        perf_sample_cycle_count;
+                    if (perf_alloc_live_by_id[perf_lifecycle_id]) begin
+                        perf_lifecycle_latency = perf_sample_cycle_count -
+                            perf_alloc_cycle_by_id[perf_lifecycle_id];
+                        perf_lifecycle_bin = perf_latency_bucket(
+                            perf_lifecycle_latency);
+                        perf_latency_alloc_select[perf_lifecycle_bin] =
+                            perf_latency_alloc_select[perf_lifecycle_bin] + 1'b1;
+                    end
+                end
+            end
+            if (u_dut.u_ydrasil_issue_stage.lane_a_accept) begin
+                perf_lifecycle_id = int'(u_dut.u_ydrasil_issue_stage.
+                    lane_a_uop.dst.rob_tag);
+                perf_operand_cycle_by_id[perf_lifecycle_id] =
+                    perf_sample_cycle_count;
+                if (perf_select_cycle_by_id[perf_lifecycle_id] != 0) begin
+                    perf_lifecycle_latency = perf_sample_cycle_count -
+                        perf_select_cycle_by_id[perf_lifecycle_id];
+                    perf_lifecycle_bin = perf_latency_bucket(
+                        perf_lifecycle_latency);
+                    perf_latency_select_operand[perf_lifecycle_bin] =
+                        perf_latency_select_operand[perf_lifecycle_bin] + 1'b1;
+                end
+            end
+            if (u_dut.u_ydrasil_issue_stage.lane_b_accept) begin
+                perf_lifecycle_id = int'(u_dut.u_ydrasil_issue_stage.
+                    lane_b_uop.dst.rob_tag);
+                perf_operand_cycle_by_id[perf_lifecycle_id] =
+                    perf_sample_cycle_count;
+                if (perf_select_cycle_by_id[perf_lifecycle_id] != 0) begin
+                    perf_lifecycle_latency = perf_sample_cycle_count -
+                        perf_select_cycle_by_id[perf_lifecycle_id];
+                    perf_lifecycle_bin = perf_latency_bucket(
+                        perf_lifecycle_latency);
+                    perf_latency_select_operand[perf_lifecycle_bin] =
+                        perf_latency_select_operand[perf_lifecycle_bin] + 1'b1;
+                end
+            end
+            if (u_dut.ex_accept_valid) begin
+                perf_lifecycle_id = int'(u_dut.ex_hzd_pkt.producer_id);
+                if (perf_operand_cycle_by_id[perf_lifecycle_id] != 0) begin
+                    perf_lifecycle_latency = perf_sample_cycle_count -
+                        perf_operand_cycle_by_id[perf_lifecycle_id];
+                    perf_lifecycle_bin = perf_latency_bucket(
+                        perf_lifecycle_latency);
+                    perf_latency_operand_ex[perf_lifecycle_bin] =
+                        perf_latency_operand_ex[perf_lifecycle_bin] + 1'b1;
+                end
+            end
+            if (u_dut.ex_accept_valid1) begin
+                perf_lifecycle_id = int'(u_dut.ex_hzd_pkt1.producer_id);
+                if (perf_operand_cycle_by_id[perf_lifecycle_id] != 0) begin
+                    perf_lifecycle_latency = perf_sample_cycle_count -
+                        perf_operand_cycle_by_id[perf_lifecycle_id];
+                    perf_lifecycle_bin = perf_latency_bucket(
+                        perf_lifecycle_latency);
+                    perf_latency_operand_ex[perf_lifecycle_bin] =
+                        perf_latency_operand_ex[perf_lifecycle_bin] + 1'b1;
+                end
+            end
+            for (perf_lifecycle_idx = 0;
+                 perf_lifecycle_idx < COMPLETION_LANES;
+                 perf_lifecycle_idx = perf_lifecycle_idx + 1) begin
+                if (u_dut.completion_meta[perf_lifecycle_idx].valid &&
+                    u_dut.completion_meta[perf_lifecycle_idx].producer_tracked) begin
+                    perf_lifecycle_id = int'(u_dut.completion_meta[
+                        perf_lifecycle_idx].producer_id);
+                    if (perf_alloc_live_by_id[perf_lifecycle_id]) begin
+                        perf_lifecycle_latency = perf_sample_cycle_count -
+                            perf_alloc_cycle_by_id[perf_lifecycle_id];
+                        perf_lifecycle_bin = perf_latency_bucket(
+                            perf_lifecycle_latency);
+                        perf_latency_alloc_complete[perf_lifecycle_bin] =
+                            perf_latency_alloc_complete[perf_lifecycle_bin] + 1'b1;
+                    end
+                end
+            end
+            if (u_dut.commit_pkt.valid) begin
+                perf_lifecycle_id = int'(u_dut.commit_pkt.producer_id);
+                if (perf_alloc_live_by_id[perf_lifecycle_id]) begin
+                    perf_lifecycle_latency = perf_sample_cycle_count -
+                        perf_alloc_cycle_by_id[perf_lifecycle_id];
+                    perf_lifecycle_bin = perf_latency_bucket(
+                        perf_lifecycle_latency);
+                    perf_latency_alloc_retire[perf_lifecycle_bin] =
+                        perf_latency_alloc_retire[perf_lifecycle_bin] + 1'b1;
+                    perf_alloc_live_by_id[perf_lifecycle_id] = 1'b0;
+                end
+            end
+            if (u_dut.commit_pkt1.valid) begin
+                perf_lifecycle_id = int'(u_dut.commit_pkt1.producer_id);
+                if (perf_alloc_live_by_id[perf_lifecycle_id]) begin
+                    perf_lifecycle_latency = perf_sample_cycle_count -
+                        perf_alloc_cycle_by_id[perf_lifecycle_id];
+                    perf_lifecycle_bin = perf_latency_bucket(
+                        perf_lifecycle_latency);
+                    perf_latency_alloc_retire[perf_lifecycle_bin] =
+                        perf_latency_alloc_retire[perf_lifecycle_bin] + 1'b1;
+                    perf_alloc_live_by_id[perf_lifecycle_id] = 1'b0;
+                end
+            end
+            perf_p0_completion_wakeup_cycles <=
+                perf_p0_completion_wakeup_cycles +
+                {31'b0, perf_p0_completion_wakeup_now};
+            perf_operand_merge_pair_cycles <=
+                perf_operand_merge_pair_cycles +
+                {31'b0, perf_operand_merge_pair_now};
+            perf_rs_completion_wakeup_entries <=
+                perf_rs_completion_wakeup_entries +
+                {{28{1'b0}}, perf_rs_completion_wakeup_entries_now};
+            perf_rs_alloc_wakeup_entries <=
+                perf_rs_alloc_wakeup_entries +
+                {{28{1'b0}}, perf_rs_alloc_wakeup_entries_now};
+            perf_rs_select_wakeup_entries <=
+                perf_rs_select_wakeup_entries +
+                {{28{1'b0}}, perf_rs_select_wakeup_entries_now};
+            perf_dtcm_launch_wakeup_events <=
+                perf_dtcm_launch_wakeup_events +
+                {31'b0, u_dut.u_ydrasil_issue_stage.dtcm_launch_wakeup_valid_i};
+            perf_dtcm_result_wakeup_events <=
+                perf_dtcm_result_wakeup_events +
+                {31'b0, (u_dut.u_ydrasil_issue_stage.dtcm_reservation_i.valid &&
+                         u_dut.u_ydrasil_issue_stage.dtcm_reservation_i.
+                             producer_tracked)};
+            perf_mdu_wakeup_events <= perf_mdu_wakeup_events +
+                {31'b0, (u_dut.u_ydrasil_issue_stage.mdu_due_i.valid &&
+                         u_dut.u_ydrasil_issue_stage.mdu_due_i.
+                             producer_tracked)};
+            perf_replay_wakeup_events <= perf_replay_wakeup_events +
+                {31'b0, (u_dut.u_ydrasil_issue_stage.dtcm_result_replay_valid_q ||
+                         u_dut.u_ydrasil_issue_stage.mdu_replay_valid_q)};
+            if (perf_issue_scan_en &&
+                (perf_empty_slots_now != perf_empty_classified_slots_now) &&
+                (perf_empty_scan_count < 16)) begin
+                $display("PERFEMPTYGAP cyc=%0d empty=%0d classified=%0d hzd=%0b/%0b q=%0d/%0d issue=%0b/%0b lane=%0b/%0b/%0b/%0b",
+                         perf_sample_cycle_count,
+                         perf_empty_slots_now,
+                         perf_empty_classified_slots_now,
+                         u_dut.ex_hzd_pkt.valid,
+                         u_dut.ex_hzd_pkt1.valid,
+                         perf_src_kind0_q,
+                         perf_src_kind1_q,
+                         u_dut.u_ydrasil_issue_stage.issue_pkt_i.valid,
+                         u_dut.u_ydrasil_issue_stage.issue_pair_execute,
+                         u_dut.u_ydrasil_issue_stage.lane_a_accept,
+                         u_dut.u_ydrasil_issue_stage.lane_b_accept,
+                         u_dut.u_ydrasil_issue_stage.lane_a_fu_valid,
+                         u_dut.u_ydrasil_issue_stage.lane_b_valid);
+                perf_empty_scan_count <= perf_empty_scan_count + 1;
+            end
             assert ($onehot(perf_cycle_cause_onehot))
                 else $fatal(1, "PERF_CAUSE_NOT_ONEHOT causes=0x%03h",
                             perf_cycle_cause_onehot);
             perf_productive_slot_count <= perf_productive_slot_count +
                 {30'b0, perf_executed_slots};
+            if (u_dut.ex_accept_valid)
+                perf_executed_slot0_count <= perf_executed_slot0_count + 1'b1;
+            else if (u_dut.ex_hzd_pkt.valid && u_dut.ex_branch_jump)
+                perf_ex_branch_drop0_count <= perf_ex_branch_drop0_count + 1'b1;
+            else if (u_dut.ex_hzd_pkt.valid && u_dut.ex_mul_stall)
+                perf_ex_mul_drop0_count <= perf_ex_mul_drop0_count + 1'b1;
+            else begin
+                if (u_dut.ex_hzd_pkt.valid)
+                    perf_ex_valid_hold0_count <= perf_ex_valid_hold0_count + 1'b1;
+                perf_ex_empty0_count <= perf_ex_empty0_count + 1'b1;
+            end
+            if (u_dut.ex_accept_valid1)
+                perf_executed_slot1_count <= perf_executed_slot1_count + 1'b1;
+            else if (u_dut.ex_hzd_pkt1.valid && u_dut.ex_branch_jump)
+                perf_ex_branch_drop1_count <= perf_ex_branch_drop1_count + 1'b1;
+            else if (u_dut.ex_hzd_pkt1.valid && u_dut.ex_mul_stall)
+                perf_ex_mul_drop1_count <= perf_ex_mul_drop1_count + 1'b1;
+            else begin
+                if (u_dut.ex_hzd_pkt1.valid)
+                    perf_ex_valid_hold1_count <= perf_ex_valid_hold1_count + 1'b1;
+                perf_ex_empty1_count <= perf_ex_empty1_count + 1'b1;
+            end
+            perf_ex_empty_reset_count <= perf_ex_empty_reset_count +
+                {{30{1'b0}}, perf_empty_kind_slots(PERF_SRC_RESET)};
+            perf_ex_empty_recovery_count <= perf_ex_empty_recovery_count +
+                {{30{1'b0}}, perf_empty_kind_slots(PERF_SRC_RECOVERY)};
+            perf_ex_empty_fence_count <= perf_ex_empty_fence_count +
+                {{30{1'b0}}, perf_empty_kind_slots(PERF_SRC_FENCE)};
+            perf_ex_empty_b_only_count <= perf_ex_empty_b_only_count +
+                {{30{1'b0}}, perf_empty_kind_slots(PERF_SRC_B_ONLY)};
+            perf_ex_empty_single_head_count <= perf_ex_empty_single_head_count +
+                {{30{1'b0}}, perf_empty_kind_slots(PERF_SRC_SINGLE_HEAD)};
+            perf_ex_empty_select_refill_count <= perf_ex_empty_select_refill_count +
+                {{30{1'b0}}, perf_empty_kind_slots(PERF_SRC_SELECT_REFILL)};
+            perf_ex_empty_rs_dependency_count <= perf_ex_empty_rs_dependency_count +
+                {{30{1'b0}}, perf_empty_kind_slots(PERF_SRC_RS_DEPENDENCY)};
+            perf_ex_empty_rs_order_count <= perf_ex_empty_rs_order_count +
+                {{30{1'b0}}, perf_empty_kind_slots(PERF_SRC_RS_ORDER)};
+            perf_ex_empty_rs_resource_count <= perf_ex_empty_rs_resource_count +
+                {{30{1'b0}}, perf_empty_kind_slots(PERF_SRC_RS_RESOURCE)};
+            perf_ex_empty_rs_no_candidate_count <= perf_ex_empty_rs_no_candidate_count +
+                {{30{1'b0}}, perf_empty_kind_slots(PERF_SRC_RS_NO_CANDIDATE)};
+            perf_ex_empty_rs_empty_count <= perf_ex_empty_rs_empty_count +
+                {{30{1'b0}}, perf_empty_kind_slots(PERF_SRC_RS_EMPTY)};
+            perf_ex_empty_frontend_count <= perf_ex_empty_frontend_count +
+                {{30{1'b0}}, perf_empty_kind_slots(PERF_SRC_FRONTEND)};
+            perf_ex_empty_other_count <= perf_ex_empty_other_count +
+                {{30{1'b0}}, perf_empty_kind_slots(PERF_SRC_OTHER)};
+            perf_ex_empty_launch_mismatch_count <=
+                perf_ex_empty_launch_mismatch_count +
+                {{30{1'b0}}, perf_empty_kind_slots(PERF_SRC_LAUNCH)};
+            perf_ex_empty_unmapped_count <= perf_ex_empty_unmapped_count +
+                {{30{1'b0}}, perf_empty_unmapped_slots()};
+            perf_src_kind0_q <= perf_src_kind0_d;
+            perf_src_kind1_q <= perf_src_kind1_d;
+            perf_select_reason_q <= perf_select_reason_d;
             perf_rob_occ_count[u_dut.u_ctrl.queue_count_q] <=
                 perf_rob_occ_count[u_dut.u_ctrl.queue_count_q] + 1'b1;
             perf_rs_occ_count[$countones(
@@ -2400,6 +3827,12 @@ end
             perf_rs_dependency_entry_cycles <=
                 perf_rs_dependency_entry_cycles +
                 {28'b0, perf_rs_dependency_entries_now};
+            for (perf_stat_idx = 0; perf_stat_idx < 5;
+                 perf_stat_idx = perf_stat_idx + 1)
+                perf_dep_blocker_operand_cycles[perf_stat_idx] <=
+                    perf_dep_blocker_operand_cycles[perf_stat_idx] +
+                    {{27{1'b0}},
+                     perf_dep_blocker_operand_count_now[perf_stat_idx]};
             perf_rs_order_entry_cycles <= perf_rs_order_entry_cycles +
                 {28'b0, perf_rs_order_entries_now};
             perf_rs_resource_entry_cycles <=
@@ -2532,10 +3965,103 @@ end
                     perf_loss_single_bundle_slots <=
                         perf_loss_single_bundle_slots +
                         perf_operand_lost_slots_ext;
+                    case (perf_select_reason_q)
+                        PERF_SEL_REASON_P0:
+                            perf_single_p0_only_slots <=
+                                perf_single_p0_only_slots + perf_operand_lost_slots_ext;
+                        PERF_SEL_REASON_P1:
+                            perf_single_p1_only_slots <=
+                                perf_single_p1_only_slots + perf_operand_lost_slots_ext;
+                        PERF_SEL_REASON_ALU:
+                            perf_single_alu_only_slots <=
+                                perf_single_alu_only_slots + perf_operand_lost_slots_ext;
+                        PERF_SEL_REASON_SERIAL:
+                            perf_single_serial_slots <=
+                                perf_single_serial_slots + perf_operand_lost_slots_ext;
+                        default:
+                            perf_single_other_slots <=
+                                perf_single_other_slots + perf_operand_lost_slots_ext;
+                    endcase
+                    case (u_dut.u_ydrasil_issue_stage.issue_pkt_i.op_class)
+                        UOP_CLASS_ALU:
+                            perf_single_op_alu_slots <=
+                                perf_single_op_alu_slots + perf_operand_lost_slots_ext;
+                        UOP_CLASS_LOAD:
+                            perf_single_op_load_slots <=
+                                perf_single_op_load_slots + perf_operand_lost_slots_ext;
+                        UOP_CLASS_STORE:
+                            perf_single_op_store_slots <=
+                                perf_single_op_store_slots + perf_operand_lost_slots_ext;
+                        UOP_CLASS_MUL:
+                            perf_single_op_mul_slots <=
+                                perf_single_op_mul_slots + perf_operand_lost_slots_ext;
+                        UOP_CLASS_CSR, UOP_CLASS_SYS:
+                            perf_single_op_csr_sys_slots <=
+                                perf_single_op_csr_sys_slots + perf_operand_lost_slots_ext;
+                        default:
+                            perf_single_op_other_slots <=
+                                perf_single_op_other_slots + perf_operand_lost_slots_ext;
+                    endcase
                 end else if (u_dut.u_ydrasil_issue_stage.select_buf_push) begin
                     perf_loss_select_refill_slots <=
                         perf_loss_select_refill_slots +
                         perf_operand_lost_slots_ext;
+                    case (perf_select_reason_d)
+                        PERF_SEL_REASON_PAIR:
+                            perf_select_refill_pair_slots <=
+                                perf_select_refill_pair_slots + perf_operand_lost_slots_ext;
+                        PERF_SEL_REASON_P0:
+                            perf_select_refill_p0_slots <=
+                                perf_select_refill_p0_slots + perf_operand_lost_slots_ext;
+                        PERF_SEL_REASON_P1:
+                            perf_select_refill_p1_slots <=
+                                perf_select_refill_p1_slots + perf_operand_lost_slots_ext;
+                        PERF_SEL_REASON_ALU:
+                            perf_select_refill_alu_slots <=
+                                perf_select_refill_alu_slots + perf_operand_lost_slots_ext;
+                        PERF_SEL_REASON_SERIAL:
+                            perf_select_refill_serial_slots <=
+                                perf_select_refill_serial_slots + perf_operand_lost_slots_ext;
+                        default:
+                            perf_select_refill_other_slots <=
+                                perf_select_refill_other_slots + perf_operand_lost_slots_ext;
+                    endcase
+                    if (u_dut.u_ydrasil_issue_stage.selected_valid1) begin
+                        if ((|(u_dut.u_ydrasil_issue_stage.selected0_mask[7:4])) &&
+                            (|(u_dut.u_ydrasil_issue_stage.selected1_mask[11:8])))
+                            perf_refill_shape_p0_p1_slots <=
+                                perf_refill_shape_p0_p1_slots + perf_operand_lost_slots_ext;
+                        else if ((|(u_dut.u_ydrasil_issue_stage.selected0_mask[7:4])) &&
+                                 (|(u_dut.u_ydrasil_issue_stage.selected1_mask[3:0])))
+                            perf_refill_shape_p0_alu_slots <=
+                                perf_refill_shape_p0_alu_slots + perf_operand_lost_slots_ext;
+                        else if ((|(u_dut.u_ydrasil_issue_stage.selected0_mask[3:0])) &&
+                                 (|(u_dut.u_ydrasil_issue_stage.selected1_mask[11:8])))
+                            perf_refill_shape_p1_alu_slots <=
+                                perf_refill_shape_p1_alu_slots + perf_operand_lost_slots_ext;
+                        else if ((|(u_dut.u_ydrasil_issue_stage.selected0_mask[3:0])) &&
+                                 (|(u_dut.u_ydrasil_issue_stage.selected1_mask[3:0])))
+                            perf_refill_shape_alu_alu_slots <=
+                                perf_refill_shape_alu_alu_slots + perf_operand_lost_slots_ext;
+                        else
+                            perf_refill_shape_other_slots <=
+                                perf_refill_shape_other_slots + perf_operand_lost_slots_ext;
+                    end else if (|u_dut.u_ydrasil_issue_stage.p1_serial_select_local) begin
+                        perf_refill_shape_serial_slots <=
+                            perf_refill_shape_serial_slots + perf_operand_lost_slots_ext;
+                    end else if (|(u_dut.u_ydrasil_issue_stage.selected0_mask[7:4])) begin
+                        perf_refill_shape_single_p0_slots <=
+                            perf_refill_shape_single_p0_slots + perf_operand_lost_slots_ext;
+                    end else if (|(u_dut.u_ydrasil_issue_stage.selected0_mask[11:8])) begin
+                        perf_refill_shape_single_p1_slots <=
+                            perf_refill_shape_single_p1_slots + perf_operand_lost_slots_ext;
+                    end else if (|(u_dut.u_ydrasil_issue_stage.selected0_mask[3:0])) begin
+                        perf_refill_shape_single_alu_slots <=
+                            perf_refill_shape_single_alu_slots + perf_operand_lost_slots_ext;
+                    end else begin
+                        perf_refill_shape_other_slots <=
+                            perf_refill_shape_other_slots + perf_operand_lost_slots_ext;
+                    end
                 end else if (|u_dut.u_ydrasil_issue_stage.
                                   issue_window_valid_q) begin
                     if (perf_rs_dependency_wait)
@@ -2554,6 +4080,82 @@ end
                         perf_loss_rs_other_slots <=
                             perf_loss_rs_other_slots +
                             perf_operand_lost_slots_ext;
+                    if (perf_rs_dependency_wait) begin
+                        if (perf_rs_completion_wakeup_now)
+                            perf_dep_completion_wakeup_slots <=
+                                perf_dep_completion_wakeup_slots + perf_operand_lost_slots_ext;
+                        else if (perf_rs_alloc_wakeup_now)
+                            perf_dep_alloc_wakeup_slots <=
+                                perf_dep_alloc_wakeup_slots + perf_operand_lost_slots_ext;
+                        else if (perf_rs_dep_both_src_now)
+                            perf_dep_both_src_slots <=
+                                perf_dep_both_src_slots + perf_operand_lost_slots_ext;
+                        else if (perf_rs_dep_src0_wait_now)
+                            perf_dep_src0_slots <=
+                                perf_dep_src0_slots + perf_operand_lost_slots_ext;
+                        else if (perf_rs_dep_src1_wait_now)
+                            perf_dep_src1_slots <=
+                                perf_dep_src1_slots + perf_operand_lost_slots_ext;
+                        else if (perf_rs_dep_load_now)
+                            perf_dep_load_slots <=
+                                perf_dep_load_slots + perf_operand_lost_slots_ext;
+                        else if (perf_rs_dep_mul_now)
+                            perf_dep_mul_slots <=
+                                perf_dep_mul_slots + perf_operand_lost_slots_ext;
+                        else if (perf_rs_dep_branch_now)
+                            perf_dep_branch_slots <=
+                                perf_dep_branch_slots + perf_operand_lost_slots_ext;
+                        else
+                            perf_dep_other_slots <=
+                                perf_dep_other_slots + perf_operand_lost_slots_ext;
+
+                        if (perf_rs_dep_both_wakeup_now)
+                            perf_dep_wake_both_slots <=
+                                perf_dep_wake_both_slots + perf_operand_lost_slots_ext;
+                        else if (perf_rs_dep_mixed_wakeup_now)
+                            perf_dep_wake_mixed_slots <=
+                                perf_dep_wake_mixed_slots + perf_operand_lost_slots_ext;
+                        else if (perf_rs_dep_src0_completion_now)
+                            perf_dep_wake_src0_completion_slots <=
+                                perf_dep_wake_src0_completion_slots + perf_operand_lost_slots_ext;
+                        else if (perf_rs_dep_src1_completion_now)
+                            perf_dep_wake_src1_completion_slots <=
+                                perf_dep_wake_src1_completion_slots + perf_operand_lost_slots_ext;
+                        else if (perf_rs_dep_src0_alloc_now)
+                            perf_dep_wake_src0_alloc_slots <=
+                                perf_dep_wake_src0_alloc_slots + perf_operand_lost_slots_ext;
+                        else if (perf_rs_dep_src1_alloc_now)
+                            perf_dep_wake_src1_alloc_slots <=
+                                perf_dep_wake_src1_alloc_slots + perf_operand_lost_slots_ext;
+                        else
+                            perf_dep_wake_none_slots <=
+                                perf_dep_wake_none_slots + perf_operand_lost_slots_ext;
+
+                        perf_dep_blocker_mask_slots[
+                            perf_rs_dep_blocker_mask_now] <=
+                            perf_dep_blocker_mask_slots[
+                                perf_rs_dep_blocker_mask_now] +
+                            perf_operand_lost_slots_ext;
+
+                        if (perf_rs_dep_load_now)
+                            perf_dep_op_load_slots <=
+                                perf_dep_op_load_slots + perf_operand_lost_slots_ext;
+                        else if (perf_rs_dep_store_now)
+                            perf_dep_op_store_slots <=
+                                perf_dep_op_store_slots + perf_operand_lost_slots_ext;
+                        else if (perf_rs_dep_mul_now)
+                            perf_dep_op_mul_slots <=
+                                perf_dep_op_mul_slots + perf_operand_lost_slots_ext;
+                        else if (perf_rs_dep_branch_now)
+                            perf_dep_op_branch_slots <=
+                                perf_dep_op_branch_slots + perf_operand_lost_slots_ext;
+                        else if (perf_rs_dependency_entries_now != '0)
+                            perf_dep_op_alu_slots <=
+                                perf_dep_op_alu_slots + perf_operand_lost_slots_ext;
+                        else
+                            perf_dep_op_other_slots <=
+                                perf_dep_op_other_slots + perf_operand_lost_slots_ext;
+                    end
                 end else if (u_dut.u_ctrl.producer_full_stall) begin
                     perf_loss_rob_full_slots <= perf_loss_rob_full_slots +
                         perf_operand_lost_slots_ext;
@@ -3019,6 +4621,28 @@ end
                             if (u_dut.u_ydrasil_issue_stage.p0_free_count == 3'd0) begin
                                 perf_bank_p0_local_full_slots <=
                                     perf_bank_p0_local_full_slots + perf_lost_slots_ext;
+                                perf_p0_full_store_mix_slots[$countones(
+                                    u_dut.u_ydrasil_issue_stage.issue_store_q[7:4] &
+                                    u_dut.u_ydrasil_issue_stage.issue_window_valid_q[7:4])] <=
+                                    perf_p0_full_store_mix_slots[$countones(
+                                        u_dut.u_ydrasil_issue_stage.issue_store_q[7:4] &
+                                        u_dut.u_ydrasil_issue_stage.issue_window_valid_q[7:4])] +
+                                    perf_lost_slots_ext;
+                                if (u_dut.u_ydrasil_issue_stage.dispatch_compact_uop.op_class ==
+                                    UOP_CLASS_LOAD)
+                                    perf_p0_full_blocked_load_slots <=
+                                        perf_p0_full_blocked_load_slots +
+                                        perf_lost_slots_ext;
+                                else if (u_dut.u_ydrasil_issue_stage.
+                                             dispatch_compact_uop.op_class ==
+                                         UOP_CLASS_STORE)
+                                    perf_p0_full_blocked_store_slots <=
+                                        perf_p0_full_blocked_store_slots +
+                                        perf_lost_slots_ext;
+                                else
+                                    perf_p0_full_blocked_other_slots <=
+                                        perf_p0_full_blocked_other_slots +
+                                        perf_lost_slots_ext;
                                 if (u_dut.u_ydrasil_issue_stage.p0_select_valid)
                                     perf_p0_full_ready_release_slots <=
                                         perf_p0_full_ready_release_slots + perf_lost_slots_ext;
@@ -3335,6 +4959,22 @@ end
 	bit perip_debug_en;
 	logic [31:0] finish_pc;
 	logic perip_req_q;
+	localparam integer SIM_STDOUT_BUFFER_BYTES = 4096;
+	byte sim_stdout_buffer [0:SIM_STDOUT_BUFFER_BYTES-1];
+	integer sim_stdout_length;
+	integer sim_stdout_flush_idx;
+	integer sim_stdout_capture_count;
+	logic sim_stdout_apb_setup_q;
+	logic sim_stdout_apb_done_q;
+	logic sim_stdout_apb_write_q;
+	logic [31:0] sim_stdout_apb_addr_q;
+	logic [31:0] sim_stdout_apb_wdata_q;
+	bit sim_stdout_debug_en;
+	bit sim_mmio_debug_en;
+	bit sim_apb_wave_debug_en;
+	logic sim_axi_req_seen_q;
+	integer sim_mmio_stdout_count;
+	integer sim_axi_stdout_count;
 
 	wire [31:0] virtual_led_output;
 	wire [39:0] virtual_seg_output;
@@ -3354,6 +4994,12 @@ end
 		finish_on_terminal_led = $test$plusargs("finish_on_terminal_led");
 		finish_on_tohost = !$test$plusargs("no_finish_on_tohost");
 		perip_debug_en = $test$plusargs("perip_debug");
+		sim_stdout_debug_en = $test$plusargs("stdout_debug");
+		sim_mmio_debug_en = $test$plusargs("mmio_stdout_debug");
+		sim_apb_wave_debug_en = $test$plusargs("apb_wave_debug");
+		sim_mmio_stdout_count = 0;
+		sim_axi_stdout_count = 0;
+		sim_stdout_capture_count = 0;
 		finish_pc = `PC_WRITE_TOHOST;
 		void'($value$plusargs("finish_pc=%h", finish_pc));
 	end
@@ -3400,11 +5046,6 @@ end
 			print_perf_metrics();
 		end
 
-		if (!rst && perip_transfer && perip_wen &&
-		    (perip_addr == SIM_STDOUT_ADDR)) begin
-			$write("%c", perip_wdata[7:0]);
-		end
-
 		if (!rst && perip_debug_en && perip_transfer) begin
 			if (perip_wen) begin
 				case (perip_addr)
@@ -3416,6 +5057,121 @@ end
 				endcase
 			end else if (perip_addr == CNT_ADDR) begin
 				$display("[PERIP] time=%0t CNT read rdata=0x%08h", $time, perip_rdata);
+			end
+		end
+	end
+
+	// Capture stdout from a local APB waveform: latch the payload in SETUP,
+	// then retire exactly once in ACCESS when PREADY is observed.  Keeping the
+	// setup payload in the APB domain avoids CPU/APB phase races and makes the
+	// monitor independent of the bridge's AXI request toggle.
+	always_ff @(posedge apb_clk) begin
+		if (rst) begin
+			sim_stdout_length <= 0;
+			sim_stdout_apb_setup_q <= 1'b0;
+			sim_stdout_apb_done_q <= 1'b0;
+			sim_stdout_apb_write_q <= 1'b0;
+			sim_stdout_apb_addr_q <= '0;
+			sim_stdout_apb_wdata_q <= '0;
+			sim_stdout_capture_count <= 0;
+		end else if (u_mmio_subsystem.apb_req.psel &&
+		             !u_mmio_subsystem.apb_req.penable) begin
+			sim_stdout_apb_setup_q <= 1'b1;
+			sim_stdout_apb_done_q <= 1'b0;
+			sim_stdout_apb_write_q <= u_mmio_subsystem.apb_req.pwrite;
+			sim_stdout_apb_addr_q <= u_mmio_subsystem.apb_req.paddr;
+			sim_stdout_apb_wdata_q <= u_mmio_subsystem.apb_req.pwdata;
+		end else if (u_mmio_subsystem.apb_req.psel &&
+		             u_mmio_subsystem.apb_req.penable &&
+		             u_mmio_subsystem.apb_rsp.pready &&
+		             sim_stdout_apb_setup_q && !sim_stdout_apb_done_q) begin
+			sim_stdout_apb_done_q <= 1'b1;
+			if (sim_stdout_apb_write_q &&
+			    (sim_stdout_apb_addr_q == SIM_STDOUT_ADDR)) begin
+				sim_stdout_capture_count <= sim_stdout_capture_count + 1;
+				if (sim_stdout_debug_en)
+					$display("[APB-STDOUT] n=%0d addr=0x%08h data=0x%02h",
+						sim_stdout_capture_count,
+						sim_stdout_apb_addr_q,
+						sim_stdout_apb_wdata_q[7:0]);
+				if (sim_stdout_apb_wdata_q[7:0] == 8'h0a) begin
+				for (sim_stdout_flush_idx = 0;
+				     sim_stdout_flush_idx < sim_stdout_length;
+				     sim_stdout_flush_idx = sim_stdout_flush_idx + 1)
+					$write("%c", sim_stdout_buffer[sim_stdout_flush_idx]);
+				$write("\n");
+				$fflush();
+				sim_stdout_length <= 0;
+			end else if (sim_stdout_length < SIM_STDOUT_BUFFER_BYTES) begin
+				sim_stdout_buffer[sim_stdout_length] <=
+					sim_stdout_apb_wdata_q[7:0];
+				sim_stdout_length <= sim_stdout_length + 1;
+			end
+		end
+		end else if (!u_mmio_subsystem.apb_req.psel) begin
+			sim_stdout_apb_setup_q <= 1'b0;
+			sim_stdout_apb_done_q <= 1'b0;
+		end
+		if (!rst && sim_apb_wave_debug_en &&
+		    u_mmio_subsystem.apb_req.psel)
+			$display("[APB-WAVE] setup=%0b access=%0b ready=%0b write=%0b addr=0x%08h data=0x%02h setup_q=%0b done_q=%0b",
+				u_mmio_subsystem.apb_req.psel &&
+					!u_mmio_subsystem.apb_req.penable,
+				u_mmio_subsystem.apb_req.penable,
+				u_mmio_subsystem.apb_rsp.pready,
+				u_mmio_subsystem.apb_req.pwrite,
+				u_mmio_subsystem.apb_req.paddr,
+				u_mmio_subsystem.apb_req.pwdata[7:0],
+				sim_stdout_apb_setup_q,
+				sim_stdout_apb_done_q);
+	end
+
+	// Optional source-side probe.  This is intentionally separate from the
+	// APB waveform monitor so a missing AXI/LSU store is distinguishable from a
+	// testbench sampling error.
+	always_ff @(posedge clk) begin
+		if (rst) begin
+			sim_mmio_stdout_count <= 0;
+		end else if (u_dut.u_ydrasil_load_store_unit.mmio_fire &&
+		             (u_dut.u_ydrasil_load_store_unit.active_addr ==
+		              SIM_STDOUT_ADDR)) begin
+			sim_mmio_stdout_count <= sim_mmio_stdout_count + 1;
+		end
+		if (!rst && sim_mmio_debug_en &&
+			u_dut.u_ydrasil_load_store_unit.mmio_fire &&
+			(u_dut.u_ydrasil_load_store_unit.active_addr == SIM_STDOUT_ADDR))
+			$display("[MMIO-STDOUT] time=%0t addr=0x%08h data=0x%02h producer=%0d",
+				$time,
+				u_dut.u_ydrasil_load_store_unit.active_addr,
+				u_dut.u_ydrasil_load_store_unit.active_aligned_store_data[7:0],
+				u_dut.u_ydrasil_load_store_unit.active_producer_id);
+		if (!rst && sim_mmio_debug_en &&
+			u_dut.u_ydrasil_load_store_unit.mmio_fire)
+			$display("[MMIO-STATE] time=%0t req_q=%0b rsp=%0b busy=%0b axi_state=%0d addr=0x%08h data=0x%02h",
+				$time,
+				u_dut.u_ydrasil_load_store_unit.mmio_req_valid_q,
+				u_dut.mmio_rsp_pkt.valid,
+				u_dut.u_ydrasil_load_store_unit.mmio_busy,
+				u_dut.u_ydrasil_axi_lite_master.state_q,
+				u_dut.u_ydrasil_load_store_unit.active_addr,
+				u_dut.u_ydrasil_load_store_unit.active_aligned_store_data[7:0]);
+	end
+
+	always_ff @(posedge clk) begin
+		if (rst) begin
+			sim_axi_req_seen_q <= 1'b0;
+			sim_axi_stdout_count <= 0;
+		end else if (u_mmio_subsystem.u_axi_to_apb.req_toggle_axi_q !=
+		             sim_axi_req_seen_q) begin
+			sim_axi_req_seen_q <= u_mmio_subsystem.u_axi_to_apb.req_toggle_axi_q;
+			if (u_mmio_subsystem.u_axi_to_apb.req_axi_q.write &&
+			    (u_mmio_subsystem.u_axi_to_apb.req_axi_q.addr == SIM_STDOUT_ADDR)) begin
+				sim_axi_stdout_count <= sim_axi_stdout_count + 1;
+				if (sim_stdout_debug_en)
+					$display("[AXI-STDOUT] time=%0t n=%0d data=0x%02h",
+						$time,
+						sim_axi_stdout_count,
+						u_mmio_subsystem.u_axi_to_apb.req_axi_q.wdata[7:0]);
 			end
 		end
 	end
@@ -3491,6 +5247,13 @@ end
 
             $display("PERF_METRIC: CYCLES=%-d INSTS=%-d IPC=%.4f",
                 cycle_count, instruction_count, perf_ipc);
+            $display("PERF_APB_STDOUT_ACCOUNT: MMIO_FIRE=%-d AXI_TOGGLE=%-d APB_ACCESS_READY=%-d MMIO_TO_AXI_LOSS=%-d AXI_TO_APB_LOSS=%-d END_TO_END_LOSS=%-d",
+                sim_mmio_stdout_count,
+                sim_axi_stdout_count,
+                sim_stdout_capture_count,
+                sim_mmio_stdout_count - sim_axi_stdout_count,
+                sim_axi_stdout_count - sim_stdout_capture_count,
+                sim_mmio_stdout_count - sim_stdout_capture_count);
             $display("PERF_STALL: DEPENDENCY=%-d LSU_STRUCT=%-d WB_BACKPRESSURE=%-d CLINT=%-d MUL_DIV=%-d",
                 stall_dependency_count,
                 stall_lsu_struct_count,
@@ -3566,6 +5329,74 @@ end
                 perf_sample_cycle_count,
                 (perf_sample_cycle_count > 0) ?
                     (perf_productive_slot_count * 1.0) / (perf_sample_cycle_count << 1) : 0.0);
+            // Exact state of the two physical EX acceptance slots.  This is
+            // intentionally independent of front-end/RS signals, which are
+            // one or more registered stages away from EX.
+            $display("PERF_EX_SLOT_STATE: ACCEPT0=%-d ACCEPT1=%-d BRANCH_DROP0=%-d BRANCH_DROP1=%-d MUL_DROP0=%-d MUL_DROP1=%-d PIPE_EMPTY0=%-d PIPE_EMPTY1=%-d ACCOUNTED=%-d EXPECTED=%-d",
+                perf_executed_slot0_count,
+                perf_executed_slot1_count,
+                perf_ex_branch_drop0_count,
+                perf_ex_branch_drop1_count,
+                perf_ex_mul_drop0_count,
+                perf_ex_mul_drop1_count,
+                perf_ex_empty0_count,
+                perf_ex_empty1_count,
+                perf_executed_slot0_count + perf_executed_slot1_count +
+                    perf_ex_branch_drop0_count + perf_ex_branch_drop1_count +
+                    perf_ex_mul_drop0_count + perf_ex_mul_drop1_count +
+                    perf_ex_empty0_count + perf_ex_empty1_count,
+                (perf_sample_cycle_count << 1));
+            $display("PERF_EX_EMPTY_CAUSE: RESET_PIPE=%-d RECOVERY=%-d FENCE=%-d B_ONLY=%-d SINGLE_HEAD=%-d SELECT_REFILL=%-d RS_DEPENDENCY=%-d RS_ORDER=%-d RS_RESOURCE=%-d RS_NO_CANDIDATE=%-d RS_EMPTY=%-d FRONTEND_EMPTY=%-d LAUNCH_MISMATCH=%-d OTHER=%-d UNMAPPED=%-d UNACCOUNTED_SNAPSHOT=%-d ACCOUNTED=%-d EXPECTED=%-d",
+                perf_ex_empty_reset_count,
+                perf_ex_empty_recovery_count,
+                perf_ex_empty_fence_count,
+                perf_ex_empty_b_only_count,
+                perf_ex_empty_single_head_count,
+                perf_ex_empty_select_refill_count,
+                perf_ex_empty_rs_dependency_count,
+                perf_ex_empty_rs_order_count,
+                perf_ex_empty_rs_resource_count,
+                perf_ex_empty_rs_no_candidate_count,
+                perf_ex_empty_rs_empty_count,
+                perf_ex_empty_frontend_count,
+                perf_ex_empty_launch_mismatch_count,
+                perf_ex_empty_other_count,
+                perf_ex_empty_unmapped_count,
+                (perf_ex_empty0_count + perf_ex_empty1_count) -
+                    (perf_ex_empty_reset_count + perf_ex_empty_recovery_count +
+                     perf_ex_empty_fence_count + perf_ex_empty_b_only_count +
+                     perf_ex_empty_single_head_count +
+                     perf_ex_empty_select_refill_count +
+                     perf_ex_empty_rs_dependency_count + perf_ex_empty_rs_order_count +
+                     perf_ex_empty_rs_resource_count +
+                     perf_ex_empty_rs_no_candidate_count + perf_ex_empty_rs_empty_count +
+                     perf_ex_empty_frontend_count + perf_ex_empty_launch_mismatch_count +
+                     perf_ex_empty_other_count + perf_ex_empty_unmapped_count),
+                perf_ex_empty_reset_count + perf_ex_empty_recovery_count +
+                    perf_ex_empty_fence_count + perf_ex_empty_b_only_count +
+                    perf_ex_empty_single_head_count +
+                    perf_ex_empty_select_refill_count +
+                    perf_ex_empty_rs_dependency_count + perf_ex_empty_rs_order_count +
+                    perf_ex_empty_rs_resource_count +
+                    perf_ex_empty_rs_no_candidate_count +
+                    perf_ex_empty_rs_empty_count + perf_ex_empty_frontend_count +
+                    perf_ex_empty_launch_mismatch_count + perf_ex_empty_other_count +
+                    perf_ex_empty_unmapped_count +
+                    ((perf_ex_empty0_count + perf_ex_empty1_count) -
+                     (perf_ex_empty_reset_count + perf_ex_empty_recovery_count +
+                      perf_ex_empty_fence_count + perf_ex_empty_b_only_count +
+                      perf_ex_empty_single_head_count +
+                      perf_ex_empty_select_refill_count +
+                      perf_ex_empty_rs_dependency_count + perf_ex_empty_rs_order_count +
+                      perf_ex_empty_rs_resource_count +
+                      perf_ex_empty_rs_no_candidate_count + perf_ex_empty_rs_empty_count +
+                      perf_ex_empty_frontend_count + perf_ex_empty_launch_mismatch_count +
+                perf_ex_empty_other_count + perf_ex_empty_unmapped_count)),
+                perf_ex_empty0_count + perf_ex_empty1_count);
+            $display("PERF_EX_VALID_HOLD: LANE0=%-d LANE1=%-d TOTAL=%-d",
+                perf_ex_valid_hold0_count,
+                perf_ex_valid_hold1_count,
+                perf_ex_valid_hold0_count + perf_ex_valid_hold1_count);
             // Complete mutually-exclusive partition of both execution slots
             // in every sampled cycle.  Unlike PERF_BACKEND_LOSS, this line
             // includes front-end, issue, and no-execute slots as well.
@@ -3594,6 +5425,70 @@ end
                     perf_lost_lsu_serialize_slot_count +
                     perf_lost_no_if_valid_slot_count +
                     perf_lost_issue_slot_count + perf_lost_other_slot_count,
+                (perf_sample_cycle_count << 1));
+            // Leaf partition of the complete two-slot capacity.  Parent
+            // buckets above are useful for a high-level view, but this line
+            // deliberately expands every diagnostic family and never counts
+            // an RS-bank parent together with its bank children.
+            $display("PERF_SLOT_LEAF: EXECUTED_SLOT0=%-d EXECUTED_SLOT1=%-d FLUSH=%-d MUL_HOLD=%-d MULTI_CAUSE=%-d DEPENDENCY=%-d LSU_STRUCT=%-d PRODUCER_FULL=%-d WB=%-d CLINT=%-d LSU_SERIALIZE=%-d NOIF_CONTROL_REDIRECT=%-d NOIF_PREDICT_REDIRECT=%-d NOIF_FENCE_REFILL=%-d NOIF_MEM_RESPONSE=%-d NOIF_FETCH_LAUNCH=%-d NOIF_PENDING_REDIRECT=%-d NOIF_OTHER=%-d ISSUE_SINGLE_LANE=%-d ISSUE_NO_EXECUTE=%-d ROB_BLOCK=%-d RECOVERY_RESYNC=%-d ALU_LOCAL_FULL=%-d ALU_CREDIT_STALE=%-d P0_LOCAL_FULL=%-d P0_CREDIT_STALE=%-d P1_LOCAL_FULL=%-d P1_CREDIT_STALE=%-d RS_BANK_UNCLASSIFIED=%-d RS_PAIR_LIMIT=%-d SELECT_REFILL=%-d RS_DEPENDENCY=%-d RS_ORDER=%-d RS_RESOURCE=%-d RS_NO_CANDIDATE=%-d RS_EMPTY=%-d DECODE_BLOCK=%-d OTHER_UNCLASSIFIED=%-d ACCOUNTED=%-d EXPECTED=%-d",
+                perf_executed_slot0_count,
+                perf_executed_slot1_count,
+                perf_lost_flush_slot_count,
+                perf_lost_mul_hold_slot_count,
+                perf_lost_multi_slot_count,
+                perf_lost_dependency_slot_count,
+                perf_lost_lsu_struct_slot_count,
+                perf_lost_producer_full_slot_count,
+                perf_lost_wb_slot_count,
+                perf_lost_clint_slot_count,
+                perf_lost_lsu_serialize_slot_count,
+                perf_noif_control_redirect_slots,
+                perf_noif_predict_redirect_slots,
+                perf_noif_fence_refill_slots,
+                perf_noif_mem_response_slots,
+                perf_noif_fetch_launch_slots,
+                perf_noif_pending_redirect_slots,
+                perf_noif_other_slots,
+                perf_issue_single_lane_slots,
+                perf_issue_no_execute_slots,
+                perf_other_rob_block_slots,
+                perf_other_recovery_resync_slots,
+                perf_bank_alu_local_full_slots,
+                perf_bank_alu_credit_stale_slots,
+                perf_bank_p0_local_full_slots,
+                perf_bank_p0_credit_stale_slots,
+                perf_bank_p1_local_full_slots,
+                perf_bank_p1_credit_stale_slots,
+                perf_bank_unclassified_slots,
+                perf_other_rs_pair_limit_slots,
+                perf_other_select_refill_slots,
+                perf_other_rs_dependency_slots,
+                perf_other_rs_order_slots,
+                perf_other_rs_resource_slots,
+                perf_other_rs_no_candidate_slots,
+                perf_other_rs_empty_slots,
+                perf_other_decode_block_slots,
+                perf_other_unclassified_slots,
+                perf_executed_slot0_count + perf_executed_slot1_count +
+                    perf_lost_flush_slot_count + perf_lost_mul_hold_slot_count +
+                    perf_lost_multi_slot_count + perf_lost_dependency_slot_count +
+                    perf_lost_lsu_struct_slot_count +
+                    perf_lost_producer_full_slot_count + perf_lost_wb_slot_count +
+                    perf_lost_clint_slot_count + perf_lost_lsu_serialize_slot_count +
+                    perf_noif_control_redirect_slots + perf_noif_predict_redirect_slots +
+                    perf_noif_fence_refill_slots + perf_noif_mem_response_slots +
+                    perf_noif_fetch_launch_slots + perf_noif_pending_redirect_slots +
+                    perf_noif_other_slots + perf_issue_single_lane_slots +
+                    perf_issue_no_execute_slots + perf_other_rob_block_slots +
+                    perf_other_recovery_resync_slots +
+                    perf_bank_alu_local_full_slots + perf_bank_alu_credit_stale_slots +
+                    perf_bank_p0_local_full_slots + perf_bank_p0_credit_stale_slots +
+                    perf_bank_p1_local_full_slots + perf_bank_p1_credit_stale_slots +
+                    perf_bank_unclassified_slots + perf_other_rs_pair_limit_slots +
+                    perf_other_select_refill_slots + perf_other_rs_dependency_slots +
+                    perf_other_rs_order_slots + perf_other_rs_resource_slots +
+                    perf_other_rs_no_candidate_slots + perf_other_rs_empty_slots +
+                    perf_other_decode_block_slots + perf_other_unclassified_slots,
                 (perf_sample_cycle_count << 1));
             $display("PERF_SLOT_LOSS: FLUSH=%-d MUL_HOLD=%-d DEPENDENCY=%-d LSU_STRUCT=%-d LSU_SERIALIZE=%-d PRODUCER_FULL=%-d WB=%-d CLINT=%-d MULTI=%-d NO_IF_VALID=%-d ISSUE=%-d OTHER=%-d",
                 perf_lost_flush_slot_count,
@@ -3687,7 +5582,27 @@ end
                 perf_p0_full_dependency_slots + perf_p0_full_order_slots +
                     perf_p0_full_resource_slots +
                     perf_p0_full_ready_release_slots +
-                    perf_p0_full_no_candidate_slots,
+                perf_p0_full_no_candidate_slots,
+                perf_bank_p0_local_full_slots);
+            $display("PERF_P0_FULL_RESIDENT_MIX: STORE0=%-d STORE1=%-d STORE2=%-d STORE3=%-d STORE4=%-d ACCOUNTED=%-d EXPECTED=%-d",
+                perf_p0_full_store_mix_slots[0],
+                perf_p0_full_store_mix_slots[1],
+                perf_p0_full_store_mix_slots[2],
+                perf_p0_full_store_mix_slots[3],
+                perf_p0_full_store_mix_slots[4],
+                perf_p0_full_store_mix_slots[0] +
+                    perf_p0_full_store_mix_slots[1] +
+                    perf_p0_full_store_mix_slots[2] +
+                    perf_p0_full_store_mix_slots[3] +
+                    perf_p0_full_store_mix_slots[4],
+                perf_bank_p0_local_full_slots);
+            $display("PERF_P0_FULL_BLOCKED_OP: LOAD=%-d STORE=%-d OTHER=%-d ACCOUNTED=%-d EXPECTED=%-d",
+                perf_p0_full_blocked_load_slots,
+                perf_p0_full_blocked_store_slots,
+                perf_p0_full_blocked_other_slots,
+                perf_p0_full_blocked_load_slots +
+                    perf_p0_full_blocked_store_slots +
+                    perf_p0_full_blocked_other_slots,
                 perf_bank_p0_local_full_slots);
             $display("PERF_NOIF_DETAIL: CONTROL_REDIRECT=%-d PREDICT_REDIRECT=%-d FENCE_REFILL=%-d MEM_RESPONSE=%-d FETCH_LAUNCH=%-d PENDING_REDIRECT=%-d OTHER=%-d",
                 noif_control_redirect_count,
@@ -3828,7 +5743,7 @@ end
                 perf_operand_dependency_miss_cycles,
                 perf_recovery_cycles,
                 perf_recovery_resync_cycles);
-            $display("PERF_LOCAL_CONTROL: ALU_ENTRY_CYCLES=%-d P0_ENTRY_CYCLES=%-d P1_ENTRY_CYCLES=%-d ALU_FULL=%-d P0_FULL=%-d P1_FULL=%-d ALU_DUE_SELECT=%-d DTCM_DUE_SELECT=%-d MDU_DUE_SELECT=%-d DTCM_LOCAL_WAKE=%-d MDU_LOCAL_WAKE=%-d RESIDENT_WAKE_ENTRIES=%-d RESIDENT_DUE_SELECT=%-d",
+            $display("PERF_LOCAL_CONTROL: ALU_ENTRY_CYCLES=%-d P0_ENTRY_CYCLES=%-d P1_ENTRY_CYCLES=%-d ALU_FULL=%-d P0_FULL=%-d P1_FULL=%-d ALU_DUE_SELECT=%-d DTCM_DUE_SELECT=%-d MDU_DUE_SELECT=%-d DTCM_LOCAL_WAKE=%-d MDU_LOCAL_WAKE=%-d RESIDENT_WAKE_ENTRIES=%-d RESIDENT_DUE_SELECT=%-d P0_COMPLETION_WAKEUP=%-d OPERAND_MERGE_PAIR=%-d",
                 perf_alu_bank_entry_cycles,
                 perf_p0_bank_entry_cycles,
                 perf_p1_bank_entry_cycles,
@@ -3841,7 +5756,154 @@ end
                 perf_dtcm_local_wake_cycles,
                 perf_mdu_local_wake_cycles,
                 perf_resident_wakeup_entry_cycles,
-                perf_resident_due_select_cycles);
+                perf_resident_due_select_cycles,
+                perf_p0_completion_wakeup_cycles,
+                perf_operand_merge_pair_cycles);
+            $display("PERF_RS_BANK_STATE: ALU_DEP=%-d P0_DEP=%-d P1_DEP=%-d ALU_ORDER=%-d P0_ORDER=%-d P1_ORDER=%-d ALU_RESOURCE=%-d P0_RESOURCE=%-d P1_RESOURCE=%-d ALU_READY=%-d P0_READY=%-d P1_READY=%-d ALU_CANDIDATE=%-d P0_CANDIDATE=%-d P1_CANDIDATE=%-d ALU_SELECTED=%-d P0_SELECTED=%-d P1_SELECTED=%-d",
+                perf_bank_dep_entry_cycles[0], perf_bank_dep_entry_cycles[1],
+                perf_bank_dep_entry_cycles[2],
+                perf_bank_order_entry_cycles[0], perf_bank_order_entry_cycles[1],
+                perf_bank_order_entry_cycles[2],
+                perf_bank_resource_entry_cycles[0],
+                perf_bank_resource_entry_cycles[1],
+                perf_bank_resource_entry_cycles[2],
+                perf_bank_ready_entry_cycles[0], perf_bank_ready_entry_cycles[1],
+                perf_bank_ready_entry_cycles[2],
+                perf_bank_candidate_entry_cycles[0],
+                perf_bank_candidate_entry_cycles[1],
+                perf_bank_candidate_entry_cycles[2],
+                perf_bank_selected_entry_cycles[0],
+                perf_bank_selected_entry_cycles[1],
+                perf_bank_selected_entry_cycles[2]);
+            $display("PERF_COUPLING_PAIR: BANK_DEP=%-d BANK_ROB=%-d BANK_RESOURCE=%-d BANK_SELECT=%-d BANK_OPERAND=%-d ROB_DEP=%-d ROB_RESOURCE=%-d ROB_SELECT=%-d ROB_OPERAND=%-d DEP_RESOURCE=%-d DEP_SELECT=%-d DEP_OPERAND=%-d RESOURCE_SELECT=%-d SELECT_OPERAND=%-d BANK_DEP_SELECT=%-d BANK_ROB_SELECT=%-d DEP_SELECT_OPERAND=%-d",
+                perf_cpl_bank_dep_count, perf_cpl_bank_rob_count,
+                perf_cpl_bank_resource_count, perf_cpl_bank_select_count,
+                perf_cpl_bank_operand_count, perf_cpl_rob_dep_count,
+                perf_cpl_rob_resource_count, perf_cpl_rob_select_count,
+                perf_cpl_rob_operand_count, perf_cpl_dep_resource_count,
+                perf_cpl_dep_select_count, perf_cpl_dep_operand_count,
+                perf_cpl_resource_select_count, perf_cpl_select_operand_count,
+                perf_cpl_bank_dep_select_count,
+                perf_cpl_bank_rob_select_count,
+                perf_cpl_dep_select_operand_count);
+            $display("PERF_SELECT_QUEUE: HOL_SINGLE_HEAD_PAIR_SKID_CYCLES=%-d HOL_LOST_SLOTS=%-d PAIR_PUSH_CYCLES=%-d PAIR_HEAD_ISSUE_CYCLES=%-d PAIR_PUSH_BEHIND_SINGLE_HEAD_CYCLES=%-d PAIR_PUSH_BEHIND_SINGLE_HEAD_SLOTS=%-d STATE_EMPTY=%-d STATE_HEAD_SINGLE=%-d STATE_HEAD_PAIR=%-d STATE_SINGLE_SINGLE=%-d STATE_SINGLE_PAIR=%-d STATE_PAIR_SINGLE=%-d STATE_PAIR_PAIR=%-d",
+                perf_select_hol_pair_cycles,
+                perf_select_hol_pair_lost_slots,
+                perf_select_pair_push_cycles,
+                perf_select_pair_issue_cycles,
+                perf_select_pair_push_single_head_cycles,
+                perf_select_pair_push_single_head_slots,
+                perf_select_queue_state_count[0],
+                perf_select_queue_state_count[2],
+                perf_select_queue_state_count[3],
+                perf_select_queue_state_count[10],
+                perf_select_queue_state_count[14],
+                perf_select_queue_state_count[11],
+                perf_select_queue_state_count[15]);
+            $display("PERF_SELECT_REFILL_BOUNDARY: HEAD_EMPTY_PUSH_CYCLES=%-d HEAD_EMPTY_PUSH_SLOTS=%-d HEAD_EMPTY_PAIR_SLOTS=%-d HEAD_EMPTY_SINGLE_SLOTS=%-d",
+                perf_select_refill_head_empty_cycles,
+                perf_select_refill_head_empty_slots,
+                perf_select_refill_head_empty_pair_slots,
+                perf_select_refill_head_empty_single_slots);
+            $write("PERF_COUPLING_MASK:");
+            for (perf_stat_idx = 0; perf_stat_idx < 256;
+                 perf_stat_idx = perf_stat_idx + 1)
+                if (perf_coupling_mask_count[perf_stat_idx] != 0)
+                    $write(" M%0d=%0d", perf_stat_idx,
+                           perf_coupling_mask_count[perf_stat_idx]);
+            $display("");
+            $display("PERF_SELECT_OPPORTUNITY: RAW_W0=%-d RAW_W1=%-d RAW_W2=%-d ACTUAL_W0=%-d ACTUAL_W1=%-d ACTUAL_W2=%-d RAW_ALU_ENTRIES=%-d RAW_P0_CYCLES=%-d RAW_P1_CYCLES=%-d DROP_ALU_ENTRIES=%-d DROP_P0_ENTRIES=%-d DROP_P1_ENTRIES=%-d WIDTH_GAP_SLOTS=%-d PAIR_CAPABLE_SINGLE_CYCLES=%-d PAIR_CAPABLE_SINGLE_LOST_SLOTS=%-d GAP_RECOVERY_CYCLES=%-d GAP_NO_PUSH_CYCLES=%-d GAP_POLICY_CYCLES=%-d",
+                perf_select_raw_width_count[0],
+                perf_select_raw_width_count[1],
+                perf_select_raw_width_count[2],
+                perf_select_actual_width_count[0],
+                perf_select_actual_width_count[1],
+                perf_select_actual_width_count[2],
+                perf_select_raw_alu_entries,
+                perf_select_raw_p0_entries,
+                perf_select_raw_p1_entries,
+                perf_select_drop_alu_entries,
+                perf_select_drop_p0_entries,
+                perf_select_drop_p1_entries,
+                perf_select_width_gap_slots,
+                perf_select_pair_capable_single_cycles,
+                perf_select_pair_capable_single_slots,
+                perf_select_gap_recovery_cycles,
+                perf_select_gap_no_push_cycles,
+                perf_select_gap_policy_cycles);
+            $write("PERF_SELECT_WIDTH_MATRIX_CYCLES:");
+            for (perf_width_idx = 0; perf_width_idx < 3;
+                 perf_width_idx = perf_width_idx + 1)
+                for (perf_width_idx2 = 0; perf_width_idx2 < 3;
+                     perf_width_idx2 = perf_width_idx2 + 1)
+                    if (perf_select_width_matrix_cycles[perf_width_idx][perf_width_idx2] != 0)
+                        $write(" M%0d%0d=%0d", perf_width_idx, perf_width_idx2,
+                               perf_select_width_matrix_cycles[perf_width_idx][perf_width_idx2]);
+            $display("");
+            $write("PERF_SELECT_WIDTH_MATRIX_SLOTS:");
+            for (perf_width_idx = 0; perf_width_idx < 3;
+                 perf_width_idx = perf_width_idx + 1)
+                for (perf_width_idx2 = 0; perf_width_idx2 < 3;
+                     perf_width_idx2 = perf_width_idx2 + 1)
+                    if (perf_select_width_matrix_slots[perf_width_idx][perf_width_idx2] != 0)
+                        $write(" M%0d%0d=%0d", perf_width_idx, perf_width_idx2,
+                               perf_select_width_matrix_slots[perf_width_idx][perf_width_idx2]);
+            $display("");
+            $write("PERF_SELECT_RAW_SHAPE:");
+            for (perf_stat_idx = 0; perf_stat_idx < 16;
+                 perf_stat_idx = perf_stat_idx + 1)
+                if (perf_select_raw_shape_count[perf_stat_idx] != 0)
+                    $write(" M%0d=%0d", perf_stat_idx,
+                           perf_select_raw_shape_count[perf_stat_idx]);
+            $display("");
+            $display("PERF_LOSS_COUPLING: CYCLES=%-d SLOTS=%-d MASK_BITS=%-d",
+                perf_loss_coupling_cycles, perf_loss_coupling_slots,
+                PERF_LOSS_COUPLING_BITS);
+            $write("PERF_LOSS_COUPLING_MASK_CYCLES:");
+            for (perf_stat_idx = 0;
+                 perf_stat_idx < PERF_LOSS_COUPLING_DEPTH;
+                 perf_stat_idx = perf_stat_idx + 1)
+                if (perf_loss_coupling_cycle_count[perf_stat_idx] != 0)
+                    $write(" M%0d=%0d", perf_stat_idx,
+                           perf_loss_coupling_cycle_count[perf_stat_idx]);
+            $display("");
+            $write("PERF_LOSS_COUPLING_MASK_SLOTS:");
+            for (perf_stat_idx = 0;
+                 perf_stat_idx < PERF_LOSS_COUPLING_DEPTH;
+                 perf_stat_idx = perf_stat_idx + 1)
+                if (perf_loss_coupling_slot_count[perf_stat_idx] != 0)
+                    $write(" M%0d=%0d", perf_stat_idx,
+                           perf_loss_coupling_slot_count[perf_stat_idx]);
+            $display("");
+            $display("PERF_LATENCY_ALLOC_SELECT: B0_3=%-d B4_7=%-d B8_15=%-d B16_31=%-d B32_63=%-d B64P=%-d",
+                perf_latency_alloc_select[0], perf_latency_alloc_select[1],
+                perf_latency_alloc_select[2], perf_latency_alloc_select[3],
+                perf_latency_alloc_select[4], perf_latency_alloc_select[5]);
+            $display("PERF_LATENCY_SELECT_OPERAND: B0_3=%-d B4_7=%-d B8_15=%-d B16_31=%-d B32_63=%-d B64P=%-d",
+                perf_latency_select_operand[0], perf_latency_select_operand[1],
+                perf_latency_select_operand[2], perf_latency_select_operand[3],
+                perf_latency_select_operand[4], perf_latency_select_operand[5]);
+            $display("PERF_LATENCY_OPERAND_EX: B0_3=%-d B4_7=%-d B8_15=%-d B16_31=%-d B32_63=%-d B64P=%-d",
+                perf_latency_operand_ex[0], perf_latency_operand_ex[1],
+                perf_latency_operand_ex[2], perf_latency_operand_ex[3],
+                perf_latency_operand_ex[4], perf_latency_operand_ex[5]);
+            $display("PERF_LATENCY_ALLOC_COMPLETE: B0_3=%-d B4_7=%-d B8_15=%-d B16_31=%-d B32_63=%-d B64P=%-d",
+                perf_latency_alloc_complete[0], perf_latency_alloc_complete[1],
+                perf_latency_alloc_complete[2], perf_latency_alloc_complete[3],
+                perf_latency_alloc_complete[4], perf_latency_alloc_complete[5]);
+            $display("PERF_LATENCY_ALLOC_RETIRE: B0_3=%-d B4_7=%-d B8_15=%-d B16_31=%-d B32_63=%-d B64P=%-d",
+                perf_latency_alloc_retire[0], perf_latency_alloc_retire[1],
+                perf_latency_alloc_retire[2], perf_latency_alloc_retire[3],
+                perf_latency_alloc_retire[4], perf_latency_alloc_retire[5]);
+            $display("PERF_WAKEUP: COMPLETION_ENTRIES=%-d ALLOC_ENTRIES=%-d SELECT_ENTRIES=%-d DTCM_LAUNCH=%-d DTCM_RESULT=%-d MDU_RESULT=%-d REPLAY=%-d P0_COMPLETION_CYCLES=%-d",
+                perf_rs_completion_wakeup_entries,
+                perf_rs_alloc_wakeup_entries,
+                perf_rs_select_wakeup_entries,
+                perf_dtcm_launch_wakeup_events,
+                perf_dtcm_result_wakeup_events,
+                perf_mdu_wakeup_events,
+                perf_replay_wakeup_events,
+                perf_p0_completion_wakeup_cycles);
             $display("PERF_ROB_HEAD_STATE: EMPTY=%-d RETIRE1=%-d RETIRE2=%-d COMPLETE_VISIBLE=%-d NOT_ISSUED=%-d WAIT_ALU=%-d WAIT_LOAD=%-d WAIT_MDU=%-d WAIT_STORE=%-d WAIT_BRANCH=%-d WAIT_OTHER=%-d ACCOUNTED=%-d SAMPLE=%-d",
                 perf_head_empty_count, perf_head_retire1_count,
                 perf_head_retire2_count, perf_head_complete_visible_count,
@@ -3892,6 +5954,138 @@ end
                     perf_loss_frontend_slots + perf_loss_other_slots,
                 (perf_sample_cycle_count << 1) - perf_operand_count[1] -
                     (perf_operand_count[2] << 1));
+            $display("PERF_SINGLE_BUNDLE_DETAIL: P0_ONLY=%-d P1_ONLY=%-d ALU_ONLY=%-d SERIAL=%-d OTHER=%-d ACCOUNTED=%-d EXPECTED=%-d",
+                perf_single_p0_only_slots,
+                perf_single_p1_only_slots,
+                perf_single_alu_only_slots,
+                perf_single_serial_slots,
+                perf_single_other_slots,
+                perf_single_p0_only_slots + perf_single_p1_only_slots +
+                    perf_single_alu_only_slots + perf_single_serial_slots +
+                    perf_single_other_slots,
+                perf_loss_single_bundle_slots);
+            $display("PERF_SELECT_REFILL_DETAIL: PAIR=%-d P0_SINGLE=%-d P1_SINGLE=%-d ALU_SINGLE=%-d SERIAL=%-d OTHER=%-d ACCOUNTED=%-d EXPECTED=%-d",
+                perf_select_refill_pair_slots,
+                perf_select_refill_p0_slots,
+                perf_select_refill_p1_slots,
+                perf_select_refill_alu_slots,
+                perf_select_refill_serial_slots,
+                perf_select_refill_other_slots,
+                perf_select_refill_pair_slots + perf_select_refill_p0_slots +
+                    perf_select_refill_p1_slots + perf_select_refill_alu_slots +
+                    perf_select_refill_serial_slots + perf_select_refill_other_slots,
+                perf_loss_select_refill_slots);
+            $display("PERF_RS_DEPENDENCY_DETAIL2: SRC0=%-d SRC1=%-d BOTH_SRC=%-d COMPLETION_WAKE=%-d ALLOC_WAKE=%-d LOAD=%-d MUL=%-d BRANCH=%-d OTHER=%-d ACCOUNTED=%-d EXPECTED=%-d",
+                perf_dep_src0_slots,
+                perf_dep_src1_slots,
+                perf_dep_both_src_slots,
+                perf_dep_completion_wakeup_slots,
+                perf_dep_alloc_wakeup_slots,
+                perf_dep_load_slots,
+                perf_dep_mul_slots,
+                perf_dep_branch_slots,
+                perf_dep_other_slots,
+                perf_dep_src0_slots + perf_dep_src1_slots + perf_dep_both_src_slots +
+                    perf_dep_completion_wakeup_slots + perf_dep_alloc_wakeup_slots +
+                    perf_dep_load_slots + perf_dep_mul_slots + perf_dep_branch_slots +
+                    perf_dep_other_slots,
+                perf_loss_rs_dependency_slots);
+            $display("PERF_SINGLE_BUNDLE_OP: ALU=%-d LOAD=%-d STORE=%-d MUL=%-d CSR_SYS=%-d OTHER=%-d ACCOUNTED=%-d EXPECTED=%-d",
+                perf_single_op_alu_slots,
+                perf_single_op_load_slots,
+                perf_single_op_store_slots,
+                perf_single_op_mul_slots,
+                perf_single_op_csr_sys_slots,
+                perf_single_op_other_slots,
+                perf_single_op_alu_slots + perf_single_op_load_slots +
+                    perf_single_op_store_slots + perf_single_op_mul_slots +
+                    perf_single_op_csr_sys_slots + perf_single_op_other_slots,
+                perf_loss_single_bundle_slots);
+            $display("PERF_SELECT_REFILL_SHAPE: P0_P1=%-d P0_ALU=%-d P1_ALU=%-d ALU_ALU=%-d SINGLE_P0=%-d SINGLE_P1=%-d SINGLE_ALU=%-d SERIAL=%-d OTHER=%-d ACCOUNTED=%-d EXPECTED=%-d",
+                perf_refill_shape_p0_p1_slots,
+                perf_refill_shape_p0_alu_slots,
+                perf_refill_shape_p1_alu_slots,
+                perf_refill_shape_alu_alu_slots,
+                perf_refill_shape_single_p0_slots,
+                perf_refill_shape_single_p1_slots,
+                perf_refill_shape_single_alu_slots,
+                perf_refill_shape_serial_slots,
+                perf_refill_shape_other_slots,
+                perf_refill_shape_p0_p1_slots + perf_refill_shape_p0_alu_slots +
+                    perf_refill_shape_p1_alu_slots + perf_refill_shape_alu_alu_slots +
+                    perf_refill_shape_single_p0_slots + perf_refill_shape_single_p1_slots +
+                    perf_refill_shape_single_alu_slots + perf_refill_shape_serial_slots +
+                    perf_refill_shape_other_slots,
+                perf_loss_select_refill_slots);
+            $display("PERF_RS_DEPENDENCY_WAKE: BOTH=%-d MIXED=%-d SRC0_COMPLETION=%-d SRC1_COMPLETION=%-d SRC0_ALLOC=%-d SRC1_ALLOC=%-d NONE=%-d ACCOUNTED=%-d EXPECTED=%-d",
+                perf_dep_wake_both_slots,
+                perf_dep_wake_mixed_slots,
+                perf_dep_wake_src0_completion_slots,
+                perf_dep_wake_src1_completion_slots,
+                perf_dep_wake_src0_alloc_slots,
+                perf_dep_wake_src1_alloc_slots,
+                perf_dep_wake_none_slots,
+                perf_dep_wake_both_slots + perf_dep_wake_mixed_slots +
+                    perf_dep_wake_src0_completion_slots +
+                    perf_dep_wake_src1_completion_slots +
+                    perf_dep_wake_src0_alloc_slots + perf_dep_wake_src1_alloc_slots +
+                    perf_dep_wake_none_slots,
+                perf_loss_rs_dependency_slots);
+            $display("PERF_RS_DEPENDENCY_OP: ALU=%-d LOAD=%-d STORE=%-d MUL=%-d BRANCH=%-d OTHER=%-d ACCOUNTED=%-d EXPECTED=%-d",
+                perf_dep_op_alu_slots,
+                perf_dep_op_load_slots,
+                perf_dep_op_store_slots,
+                perf_dep_op_mul_slots,
+                perf_dep_op_branch_slots,
+                perf_dep_op_other_slots,
+                perf_dep_op_alu_slots + perf_dep_op_load_slots +
+                    perf_dep_op_store_slots + perf_dep_op_mul_slots +
+                    perf_dep_op_branch_slots + perf_dep_op_other_slots,
+                perf_loss_rs_dependency_slots);
+            $display("PERF_RS_DEP_BLOCKER_OPERANDS: ALU=%-d LOAD=%-d MDU=%-d OTHER=%-d STALE=%-d TOTAL=%-d",
+                perf_dep_blocker_operand_cycles[0],
+                perf_dep_blocker_operand_cycles[1],
+                perf_dep_blocker_operand_cycles[2],
+                perf_dep_blocker_operand_cycles[3],
+                perf_dep_blocker_operand_cycles[4],
+                perf_dep_blocker_operand_cycles[0] +
+                    perf_dep_blocker_operand_cycles[1] +
+                    perf_dep_blocker_operand_cycles[2] +
+                    perf_dep_blocker_operand_cycles[3] +
+                    perf_dep_blocker_operand_cycles[4]);
+            $display("PERF_RS_DEP_BLOCKER_MASK_SLOTS: M0=%-d M1=%-d M2=%-d M3=%-d M4=%-d M5=%-d M6=%-d M7=%-d M8=%-d M9=%-d M10=%-d M11=%-d M12=%-d M13=%-d M14=%-d M15=%-d M16=%-d M17=%-d M18=%-d M19=%-d M20=%-d M21=%-d M22=%-d M23=%-d M24=%-d M25=%-d M26=%-d M27=%-d M28=%-d M29=%-d M30=%-d M31=%-d",
+                perf_dep_blocker_mask_slots[0],
+                perf_dep_blocker_mask_slots[1],
+                perf_dep_blocker_mask_slots[2],
+                perf_dep_blocker_mask_slots[3],
+                perf_dep_blocker_mask_slots[4],
+                perf_dep_blocker_mask_slots[5],
+                perf_dep_blocker_mask_slots[6],
+                perf_dep_blocker_mask_slots[7],
+                perf_dep_blocker_mask_slots[8],
+                perf_dep_blocker_mask_slots[9],
+                perf_dep_blocker_mask_slots[10],
+                perf_dep_blocker_mask_slots[11],
+                perf_dep_blocker_mask_slots[12],
+                perf_dep_blocker_mask_slots[13],
+                perf_dep_blocker_mask_slots[14],
+                perf_dep_blocker_mask_slots[15],
+                perf_dep_blocker_mask_slots[16],
+                perf_dep_blocker_mask_slots[17],
+                perf_dep_blocker_mask_slots[18],
+                perf_dep_blocker_mask_slots[19],
+                perf_dep_blocker_mask_slots[20],
+                perf_dep_blocker_mask_slots[21],
+                perf_dep_blocker_mask_slots[22],
+                perf_dep_blocker_mask_slots[23],
+                perf_dep_blocker_mask_slots[24],
+                perf_dep_blocker_mask_slots[25],
+                perf_dep_blocker_mask_slots[26],
+                perf_dep_blocker_mask_slots[27],
+                perf_dep_blocker_mask_slots[28],
+                perf_dep_blocker_mask_slots[29],
+                perf_dep_blocker_mask_slots[30],
+                perf_dep_blocker_mask_slots[31]);
             $display("PERF_SELECT_CANDIDATES: M0=%-d M1=%-d M2=%-d M3=%-d M4=%-d M5=%-d M6=%-d M7=%-d M8=%-d M9=%-d M10=%-d M11=%-d M12=%-d M13=%-d M14=%-d M15=%-d",
                 perf_candidate_mask_count[0],
                 perf_candidate_mask_count[1],

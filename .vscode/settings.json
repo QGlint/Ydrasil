@@ -1,5 +1,19 @@
 {
     "files.watcherExclude": {
         "**/target": true
+    },
+    "http.proxy": "http://127.0.0.1:15732",
+    "http.proxyStrictSSL": true,
+    "http.proxySupport": "override",
+    "http.useLocalProxyConfiguration": false,
+    "terminal.integrated.env.linux": {
+        "HTTP_PROXY": "http://127.0.0.1:15732",
+        "HTTPS_PROXY": "http://127.0.0.1:15732",
+        "ALL_PROXY": "http://127.0.0.1:15732",
+        "http_proxy": "http://127.0.0.1:15732",
+        "https_proxy": "http://127.0.0.1:15732",
+        "all_proxy": "http://127.0.0.1:15732",
+        "NO_PROXY": "localhost,127.0.0.1,127.0.0.53",
+        "no_proxy": "localhost,127.0.0.1,127.0.0.53"
     }
 }
