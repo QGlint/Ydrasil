@@ -324,6 +324,7 @@ package ydrasil_pkg;
 		logic [REGS_ADDR_WIDTH-1:0]   arch_addr;
 		logic                         tag_valid;
 		producer_id_t                 producer_tag;
+		logic                         ready;
 	} ydrasil_source_desc_t;
 	typedef struct packed {
 		logic                         used;
@@ -361,10 +362,6 @@ package ydrasil_pkg;
 		logic [2:0]                   op_class;
 		logic [2:0]                   exception_code;
 	} ydrasil_rob_entry_t;
-	typedef struct packed {
-		logic                         live;
-		logic                         done;
-	} ydrasil_rob_source_state_t;
 	typedef enum logic [1:0] {
 		BYPASS_NONE  = 2'b00,
 		BYPASS_LANE0 = 2'b01,
