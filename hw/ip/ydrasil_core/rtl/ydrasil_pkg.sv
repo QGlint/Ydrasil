@@ -404,6 +404,30 @@ package ydrasil_pkg;
 		logic                                illegal_instr;
 	} ydrasil_decode_pkt_t;
 
+	// ID consumes register addresses, access enables and lane capability
+	// locally. Only execution-facing fields cross the elastic boundary.
+	typedef struct packed {
+		logic [INST_ADDR_WIDTH-1:0]          pc;
+		logic [INST_DATA_WIDTH-1:0]          instr;
+		logic                                pred_hit;
+		logic                                pred_taken;
+		logic [INST_ADDR_WIDTH-1:0]          pred_target;
+		logic [1:0]                          pred_counter;
+		bp_bht_index_t                       pred_bht_index;
+		logic [REGS_DATA_WIDTH-1:0]          imm;
+		logic                                operand_b_rs_sel;
+		logic                                operand_a_pc_sel;
+		logic                                operand_a_imm_sel;
+		logic                                bt_a_rs_sel;
+		logic                                operand_b_jump_sel;
+		logic [CSR_ADDR_WIDTH-1:0]           csr_raddr;
+		logic [CSR_ADDR_WIDTH-1:0]           csr_waddr;
+		logic [OP_CSR_INFO_WIDTH-1:0]        csr_op_info;
+		logic [OP_SYS_INFO_WIDTH-1:0]        sys_op_info;
+		logic                                fence_i;
+		logic                                illegal_instr;
+	} ydrasil_issue_decode_pkt_t;
+
 	typedef struct packed {
 		logic                                valid;
 		producer_id_t                        producer_id;
@@ -543,7 +567,7 @@ package ydrasil_pkg;
 		ydrasil_source_desc_t                  src1;
 		ydrasil_dest_desc_t                    dst;
 		ydrasil_id_ctrl_pkt_t                  ctrl;
-		ydrasil_decode_pkt_t                   decode;
+		ydrasil_issue_decode_pkt_t             decode;
 	} ydrasil_issue_pkt_t;
 
 	// The decoded elastic boundary stores only execution class and class-local

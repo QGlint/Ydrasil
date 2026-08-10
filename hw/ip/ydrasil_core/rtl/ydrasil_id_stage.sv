@@ -218,10 +218,37 @@ import ydrasil_pkg::*;
     assign if_id_ready_o = id_ready_q;
     assign if_id_consume_two_o = id_two_room_q;
 
+    function automatic ydrasil_issue_decode_pkt_t issue_decode_payload(
+        input ydrasil_decode_pkt_t decoded
+    );
+        begin
+            issue_decode_payload = '0;
+            issue_decode_payload.pc = decoded.pc;
+            issue_decode_payload.instr = decoded.instr;
+            issue_decode_payload.pred_hit = decoded.pred_hit;
+            issue_decode_payload.pred_taken = decoded.pred_taken;
+            issue_decode_payload.pred_target = decoded.pred_target;
+            issue_decode_payload.pred_counter = decoded.pred_counter;
+            issue_decode_payload.pred_bht_index = decoded.pred_bht_index;
+            issue_decode_payload.imm = decoded.imm;
+            issue_decode_payload.operand_b_rs_sel = decoded.operand_b_rs_sel;
+            issue_decode_payload.operand_a_pc_sel = decoded.operand_a_pc_sel;
+            issue_decode_payload.operand_a_imm_sel = decoded.operand_a_imm_sel;
+            issue_decode_payload.bt_a_rs_sel = decoded.bt_a_rs_sel;
+            issue_decode_payload.operand_b_jump_sel = decoded.operand_b_jump_sel;
+            issue_decode_payload.csr_raddr = decoded.csr_raddr;
+            issue_decode_payload.csr_waddr = decoded.csr_waddr;
+            issue_decode_payload.csr_op_info = decoded.csr_op_info;
+            issue_decode_payload.sys_op_info = decoded.sys_op_info;
+            issue_decode_payload.fence_i = decoded.fence_i;
+            issue_decode_payload.illegal_instr = decoded.illegal_instr;
+        end
+    endfunction
+
     always_comb begin
         incoming_pkt0 = '0;
         incoming_pkt0.valid = decode_valid;
-        incoming_pkt0.decode = decoded0;
+        incoming_pkt0.decode = issue_decode_payload(decoded0);
         incoming_pkt0.uop_class = decoded0.op_class;
         incoming_pkt0.uop_subop = decoded0.subop;
         incoming_pkt0.uop_lsu_subop = decoded0.lsu_subop;
@@ -240,7 +267,7 @@ import ydrasil_pkg::*;
 
         incoming_pkt1 = '0;
         incoming_pkt1.valid = decode_valid1;
-        incoming_pkt1.decode = decoded1;
+        incoming_pkt1.decode = issue_decode_payload(decoded1);
         incoming_pkt1.uop_class = decoded1.op_class;
         incoming_pkt1.uop_subop = decoded1.subop;
         incoming_pkt1.uop_lsu_subop = decoded1.lsu_subop;
