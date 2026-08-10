@@ -44,6 +44,9 @@ CRITICAL_CONE_SPECS = (
             r"/u_ydrasil_issue_stage/u_value_file\."
             r"value_(?:even|odd)_q/D$"
         ),
+        "rtl_waypoint_pattern": (
+            r"/u_ydrasil_execute_stage/u_main_ex\.completion_data_o$"
+        ),
         "vivado_source_pattern": (
             r"/u_ydrasil_issue_stage/"
             r"(?:alu_in_operand_[ab]_dtcm_q|dtcm_stall_data_valid_q)_reg(?:_replica)?/"
@@ -59,6 +62,49 @@ CRITICAL_CONE_SPECS = (
         "rtl_target_pattern": (
             r"/u_ydrasil_issue_stage/u_value_file\."
             r"value_(?:even|odd)_q/D$"
+        ),
+        "rtl_waypoint_pattern": (
+            r"/u_ydrasil_execute_stage/u_main_ex\.completion_data_o$"
+        ),
+        "vivado_source_pattern": (
+            r"/u_ydrasil_issue_stage/dtcm_stall_data_q_reg(?:\[[^]]+\])?/"
+        ),
+        "vivado_destination_pattern": (
+            r"/u_ydrasil_issue_stage/u_value_file/"
+            r"value_(?:even|odd)_q_reg(?:\[[^]]+\])+/D$"
+        ),
+    },
+    {
+        "name": "issue_dtcm_bypass_select_to_value_file_dual",
+        "rtl_source_pattern": (
+            r"/u_ydrasil_issue_stage\."
+            r"(?:dual_in_operand_[ab]_dtcm_q|dtcm_stall_data_valid_q)$"
+        ),
+        "rtl_target_pattern": (
+            r"/u_ydrasil_issue_stage/u_value_file\."
+            r"value_(?:even|odd)_q/D$"
+        ),
+        "rtl_waypoint_pattern": (
+            r"/u_ydrasil_execute_stage/u_dual_ex\.completion_data_o$"
+        ),
+        "vivado_source_pattern": (
+            r"/u_ydrasil_issue_stage/"
+            r"(?:alu_in_operand_[ab]_dtcm_q|dtcm_stall_data_valid_q)_reg(?:_replica)?/"
+        ),
+        "vivado_destination_pattern": (
+            r"/u_ydrasil_issue_stage/u_value_file/"
+            r"value_(?:even|odd)_q_reg(?:\[[^]]+\])+/D$"
+        ),
+    },
+    {
+        "name": "issue_dtcm_buffer_to_value_file_dual",
+        "rtl_source_pattern": r"/u_ydrasil_issue_stage\.dtcm_stall_data_q$",
+        "rtl_target_pattern": (
+            r"/u_ydrasil_issue_stage/u_value_file\."
+            r"value_(?:even|odd)_q/D$"
+        ),
+        "rtl_waypoint_pattern": (
+            r"/u_ydrasil_execute_stage/u_dual_ex\.completion_data_o$"
         ),
         "vivado_source_pattern": (
             r"/u_ydrasil_issue_stage/dtcm_stall_data_q_reg(?:\[[^]]+\])?/"
@@ -77,16 +123,18 @@ CRITICAL_CONE_SPECS = (
         "rtl_target_pattern": (
             r"/u_ydrasil_issue_stage\."
             r"(?:agu_in_operand_[ab]_q|mul_in_operand_[ab]_q|"
-            r"dual_(?:alu|bru)_payload_q)/D$"
+            r"dual_(?:alu|bru)_payload_q)/(?:D|CE)$"
         ),
         "vivado_source_pattern": (
             r"/u_ydrasil_issue_stage/"
-            r"(?:issue_pipe_q0_q|issue_pipe_head_q)_reg(?:\[[^]]+\])?(?:_rep[^/]*)?/"
+            r"(?:issue_pipe_q0(?:_q)?|issue_pipe_head_q)_reg"
+            r"(?:\[[^]]+\])*(?:_rep[^/]*)?/"
         ),
         "vivado_destination_pattern": (
             r"/u_ydrasil_issue_stage/"
             r"(?:agu_in_operand_[ab]_q|mul_in_operand_[ab]_q|"
-            r"dual_(?:alu|bru)_payload_q)_reg(?:\[[^]]+\])+/D$"
+            r"dual_(?:alu|bru)_payload_q)_reg(?:\[[^]]+\])+/"
+            r"(?:D|CE)$"
         ),
     },
 )
@@ -156,6 +204,12 @@ def rtl_register_signal(resource: str | None) -> str | None:
     leaf = re.sub(r"\[[^]]+\]", "", parts[-2])
     leaf = re.sub(r"_reg(?:_rep[^/]*)?$", "", leaf)
     return leaf or None
+
+
+def rtl_register_endpoint_pin(resource: str | None) -> str | None:
+    """Recover the endpoint pin used by a routed register timing path."""
+    leaf = str(resource or "").rsplit("/", 1)[-1]
+    return leaf if re.fullmatch(r"(?:D|CE|R|S|CLR|SET|PRE)", leaf) else None
 
 
 def family_key(
@@ -244,6 +298,9 @@ def summarize_critical_cones(
                 worst_record.get("source")
             ),
             "worst_destination_rtl_signal": rtl_register_signal(
+                worst_record.get("destination")
+            ),
+            "worst_destination_rtl_pin": rtl_register_endpoint_pin(
                 worst_record.get("destination")
             ),
             "worst_dataset": worst_dataset,

@@ -50,10 +50,6 @@ import ydrasil_pkg::*;
 
     output wire [DATA_WIDTH-1:0]           ex_lsu_result_o,
 
-    output wire [REGS_DATA_WIDTH-1:0]      alu_result_o,
-    output wire                            alu_rf_wen_rd_o,
-    output wire [REGS_ADDR_WIDTH-1:0]      alu_rf_waddr_rd_o,
-    output producer_id_t                   alu_producer_id_o,
     output wire                            completion_valid_o,
     output producer_id_t                   completion_producer_id_o,
     output wire                            completion_producer_tracked_o,
@@ -121,9 +117,9 @@ import ydrasil_pkg::*;
     reg [REGS_DATA_WIDTH-1:0] alu_result_ff;
     reg [REGS_DATA_WIDTH-1:0] bitmanip_result_ff;
     reg                       bitmanip_result_valid_ff;
-    reg                       alu_rf_wen_rd_ff;
-    producer_id_t             alu_producer_id_ff;
-    (* max_fanout = 8 *) reg [REGS_ADDR_WIDTH-1:0] alu_rf_waddr_rd_ff;
+    reg                       completion_valid_ff;
+    producer_id_t             completion_producer_id_ff;
+    reg [REGS_ADDR_WIDTH-1:0] completion_addr_ff;
 
     wire [31:0] operand_a;
     wire [31:0] operand_b;
@@ -417,19 +413,14 @@ import ydrasil_pkg::*;
     // CSRRS/CSRRC with rs1 (or zimm) equal to zero are reads only.
     assign csr_wen = op_csr & id_op_csr_info_i[OP_CSR_WRITE];
 
-    assign alu_result_o = bitmanip_result_valid_ff ? bitmanip_result_ff : alu_result_ff;
-    assign alu_rf_wen_rd_o = alu_rf_wen_rd_ff;
-    assign alu_rf_waddr_rd_o = alu_rf_waddr_rd_ff;
-    assign alu_producer_id_o = alu_producer_id_ff;
-
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             alu_result_ff       <= '0;
             bitmanip_result_ff  <= '0;
             bitmanip_result_valid_ff <= 1'b0;
-            alu_rf_wen_rd_ff    <= 1'b0;
-            alu_rf_waddr_rd_ff  <= '0;
-            alu_producer_id_ff  <= '0;
+            completion_valid_ff <= 1'b0;
+            completion_addr_ff  <= '0;
+            completion_producer_id_ff <= '0;
             ex_csr_wdata_o_ff   <= '0;
             ex_csr_wen_o_ff     <= 1'b0;
             ex_csr_waddr_o_ff   <= '0;
@@ -437,22 +428,29 @@ import ydrasil_pkg::*;
             alu_result_ff       <= '0;
             bitmanip_result_ff  <= '0;
             bitmanip_result_valid_ff <= 1'b0;
-            alu_rf_wen_rd_ff    <= 1'b0;
-            alu_rf_waddr_rd_ff  <= '0;
-            alu_producer_id_ff  <= '0;
+            completion_valid_ff <= 1'b0;
+            completion_addr_ff  <= '0;
+            completion_producer_id_ff <= '0;
             ex_csr_wdata_o_ff   <= '0;
             ex_csr_wen_o_ff     <= 1'b0;
             ex_csr_waddr_o_ff   <= '0;
         end else begin
-            alu_result_ff      <= fast_result_wen ? fast_result :
-                                  slow_result_wen ? slow_result : alu_result;
-            bitmanip_result_ff <= fast_bitmanip_rf_wen_rd ?
-                                  fast_bitmanip_result : bitmanip_result;
-            bitmanip_result_valid_ff <=
-                bitmanip_rf_wen_rd | fast_bitmanip_rf_wen_rd;
-            alu_rf_wen_rd_ff   <= ex_rf_wen_rd;
-            alu_rf_waddr_rd_ff <= alu_rf_waddr_rd;
-            alu_producer_id_ff <= id_ex_producer_id_i;
+            // The FU input cell is held while DIV/REM stalls Issue. Capture
+            // its result only when execution can advance (including the
+            // release cycle), otherwise one producer would emit a completion
+            // every stalled cycle and leave a late duplicate after retirement.
+            completion_valid_ff <= !ex_mul_stall_o && ex_rf_wen_rd &&
+                (id_rf_waddr_rd_i != '0);
+            if (!ex_mul_stall_o) begin
+                alu_result_ff <= fast_result_wen ? fast_result :
+                                 slow_result_wen ? slow_result : alu_result;
+                bitmanip_result_ff <= fast_bitmanip_rf_wen_rd ?
+                                      fast_bitmanip_result : bitmanip_result;
+                bitmanip_result_valid_ff <=
+                    bitmanip_rf_wen_rd | fast_bitmanip_rf_wen_rd;
+                completion_addr_ff <= id_rf_waddr_rd_i;
+                completion_producer_id_ff <= id_ex_producer_id_i;
+            end
             ex_csr_wdata_o_ff  <= csr_wdata;
             ex_csr_wen_o_ff    <= csr_wen;
             ex_csr_waddr_o_ff  <= id_ex_csr_waddr_i;
@@ -506,14 +504,11 @@ import ydrasil_pkg::*;
     assign slow_result_wen = op_csr;
     assign slow_result = ({32{op_csr}} & csr_reg_wdata);
 
-    assign completion_valid_o = ex_rf_wen_rd && (id_rf_waddr_rd_i != '0);
-    assign completion_producer_id_o = id_ex_producer_id_i;
-    assign completion_producer_tracked_o = ex_rf_wen_rd &&
-        (id_rf_waddr_rd_i != '0);
-    assign completion_addr_o = id_rf_waddr_rd_i;
-    assign completion_data_o = fast_bitmanip_rf_wen_rd ?
-        fast_bitmanip_result : bitmanip_rf_wen_rd ?
-        bitmanip_result : slow_result_wen ? slow_result :
-        fast_result_wen ? fast_result : alu_result;
+    assign completion_valid_o = completion_valid_ff;
+    assign completion_producer_id_o = completion_producer_id_ff;
+    assign completion_producer_tracked_o = completion_valid_ff;
+    assign completion_addr_o = completion_addr_ff;
+    assign completion_data_o = bitmanip_result_valid_ff ?
+        bitmanip_result_ff : alu_result_ff;
 
 endmodule

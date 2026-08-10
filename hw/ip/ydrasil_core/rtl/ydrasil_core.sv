@@ -123,12 +123,8 @@ import ydrasil_axi_pkg::*;
 	// EX outputs
 	wire                        ex_branch_jump;
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] ex_branch_target;
-	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] alu_result;
 	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] main_early_bypass_data;
 	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] dual_early_bypass_data;
-	wire                        alu_rf_wen_rd;
-	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] alu_rf_waddr_rd;
-	producer_id_t               alu_producer_id;
 	wire                        ex_mul_stall;
 	wire                        ex_mul_issue;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] ex_mul_issue_waddr;
@@ -655,10 +651,6 @@ import ydrasil_axi_pkg::*;
 		.ex_csr_wen_o       (ex_csr_wen),
 		.ex_csr_wdata_o     (ex_csr_wdata),
 		.ex_csr_waddr_o     (ex_csr_waddr),
-		.alu_result_o       (alu_result),
-		.alu_rf_wen_o       (alu_rf_wen_rd),
-		.alu_rf_waddr_o     (alu_rf_waddr_rd),
-			.alu_producer_id_o  (alu_producer_id),
 			.alu_completion_valid_o(alu_completion_valid),
 			.alu_completion_producer_id_o(alu_completion_producer_id),
 			.alu_completion_producer_tracked_o(alu_completion_producer_tracked),

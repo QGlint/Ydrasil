@@ -415,6 +415,10 @@ import ydrasil_pkg::*;
         .source_i(issue_pkt_i.src0), .state_i(issue_src0_state_i),
         .value_i(issue_src0_value_i), .arf_i(rf_rdata_rs1_i),
         .dtcm_reservation_i(dtcm_reservation_i),
+        .completion_main_meta_i(completion_meta_i[COMPLETION_ALU]),
+        .completion_main_data_i(completion_data_i[COMPLETION_ALU]),
+        .completion_dual_meta_i(completion_meta_i[COMPLETION_DUAL_ALU]),
+        .completion_dual_data_i(completion_data_i[COMPLETION_DUAL_ALU]),
         .early_main_valid_i(early_wakeup_valid_q[0]),
         .early_main_id_i(early_wakeup_id_q[0]),
         .early_main_rd_i(early_wakeup_rd_q[0]),
@@ -429,6 +433,10 @@ import ydrasil_pkg::*;
         .source_i(issue_pkt_i.src1), .state_i(issue_src1_state_i),
         .value_i(issue_src1_value_i), .arf_i(rf_rdata_rs2_i),
         .dtcm_reservation_i(dtcm_reservation_i),
+        .completion_main_meta_i(completion_meta_i[COMPLETION_ALU]),
+        .completion_main_data_i(completion_data_i[COMPLETION_ALU]),
+        .completion_dual_meta_i(completion_meta_i[COMPLETION_DUAL_ALU]),
+        .completion_dual_data_i(completion_data_i[COMPLETION_DUAL_ALU]),
         .early_main_valid_i(early_wakeup_valid_q[0]),
         .early_main_id_i(early_wakeup_id_q[0]),
         .early_main_rd_i(early_wakeup_rd_q[0]),
@@ -443,6 +451,10 @@ import ydrasil_pkg::*;
         .source_i(issue_pkt1_i.src0), .state_i(issue_src2_state_i),
         .value_i(issue_src2_value_i), .arf_i(rf_rdata_rs3_i),
         .dtcm_reservation_i(dtcm_reservation_i),
+        .completion_main_meta_i(completion_meta_i[COMPLETION_ALU]),
+        .completion_main_data_i(completion_data_i[COMPLETION_ALU]),
+        .completion_dual_meta_i(completion_meta_i[COMPLETION_DUAL_ALU]),
+        .completion_dual_data_i(completion_data_i[COMPLETION_DUAL_ALU]),
         .early_main_valid_i(early_wakeup_valid_q[0]),
         .early_main_id_i(early_wakeup_id_q[0]),
         .early_main_rd_i(early_wakeup_rd_q[0]),
@@ -457,6 +469,10 @@ import ydrasil_pkg::*;
         .source_i(issue_pkt1_i.src1), .state_i(issue_src3_state_i),
         .value_i(issue_src3_value_i), .arf_i(rf_rdata_rs4_i),
         .dtcm_reservation_i(dtcm_reservation_i),
+        .completion_main_meta_i(completion_meta_i[COMPLETION_ALU]),
+        .completion_main_data_i(completion_data_i[COMPLETION_ALU]),
+        .completion_dual_meta_i(completion_meta_i[COMPLETION_DUAL_ALU]),
+        .completion_dual_data_i(completion_data_i[COMPLETION_DUAL_ALU]),
         .early_main_valid_i(early_wakeup_valid_q[0]),
         .early_main_id_i(early_wakeup_id_q[0]),
         .early_main_rd_i(early_wakeup_rd_q[0]),
@@ -1036,6 +1052,11 @@ import ydrasil_pkg::*;
     reg valid_q;
     reg [INST_ADDR_WIDTH-1:0] pc_q;
     reg [INST_DATA_WIDTH-1:0] instr_q;
+    reg completion_valid_q;
+    producer_id_t completion_producer_id_q;
+    reg completion_producer_tracked_q;
+    reg [REGS_ADDR_WIDTH-1:0] completion_addr_q;
+    reg [REGS_DATA_WIDTH-1:0] completion_data_q;
     wire [REGS_DATA_WIDTH-1:0] exec_operand_a = operand_a_i;
     wire [REGS_DATA_WIDTH-1:0] exec_operand_b = operand_b_i;
     wire [REGS_DATA_WIDTH-1:0] alu_result;
@@ -1107,6 +1128,9 @@ import ydrasil_pkg::*;
          operator_i[OP_B_ZEXT_H]);
     wire [REGS_DATA_WIDTH-1:0] early_lite_bitmanip_result =
         fast_b_shadd_result | early_b_pack_result | fast_b_extend_result;
+    wire [REGS_DATA_WIDTH-1:0] completion_data_d =
+        operator_type_i[OPERATOR_TYPE_BITMANIP] ?
+        fast_bitmanip_result : alu_result;
     assign early_bypass_data_o = early_lite_bitmanip_op ?
         early_lite_bitmanip_result :
         (operator_type_i[OPERATOR_TYPE_ALU] &&
@@ -1116,22 +1140,29 @@ import ydrasil_pkg::*;
             valid_q <= 1'b0;
             pc_q <= '0;
             instr_q <= RV32I_INS_NOP;
+            completion_valid_q <= 1'b0;
+            completion_producer_id_q <= '0;
+            completion_producer_tracked_q <= 1'b0;
+            completion_addr_q <= '0;
+            completion_data_q <= '0;
         end else begin
             valid_q <= valid_i && !interrupt_i;
             pc_q <= pc_i;
             instr_q <= instr_i;
+            completion_valid_q <= valid_i && rd_wen_i && !interrupt_i &&
+                (rd_addr_i != '0);
+            completion_producer_id_q <= producer_id_i;
+            completion_producer_tracked_q <= producer_tracked_i;
+            completion_addr_q <= rd_addr_i;
+            completion_data_q <= completion_data_d;
         end
     end
 
-    // Lane B completion is captured by the typed ALU result array at WB. The
-    // remaining q state is commit trace metadata, not an execution bypass.
-    assign completion_valid_o = valid_i && rd_wen_i && !interrupt_i &&
-        (rd_addr_i != '0);
-    assign completion_producer_id_o = producer_id_i;
-    assign completion_producer_tracked_o = producer_tracked_i;
-    assign completion_addr_o = rd_addr_i;
-    assign completion_data_o = operator_type_i[OPERATOR_TYPE_BITMANIP] ?
-        fast_bitmanip_result : alu_result;
+    assign completion_valid_o = completion_valid_q;
+    assign completion_producer_id_o = completion_producer_id_q;
+    assign completion_producer_tracked_o = completion_producer_tracked_q;
+    assign completion_addr_o = completion_addr_q;
+    assign completion_data_o = completion_data_q;
     assign instret_valid_o = valid_q;
     assign commit_pc_o = pc_q;
     assign commit_instr_o = instr_q;

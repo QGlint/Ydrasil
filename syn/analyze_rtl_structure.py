@@ -103,6 +103,27 @@ def classify_timing_path_severity(
     return "ADVISORY"
 
 
+def join_cone_segments(
+    first: dict[str, Any] | None,
+    second: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Join two structural paths which meet at a required cone waypoint."""
+    if first is None or second is None:
+        return None
+    return {
+        "source": first.get("source"),
+        "target": second.get("target"),
+        "source_signal": first.get("source_signal"),
+        "destination_signal": second.get("destination_signal"),
+        "depth": int(first.get("depth", 0)) + int(second.get("depth", 0)),
+        "signals": first.get("signals", []) + second.get("signals", [])[1:],
+        "owner_crossings": (
+            int(first.get("owner_crossings", 0))
+            + int(second.get("owner_crossings", 0))
+        ),
+    }
+
+
 def operator_depth_cost(node: dict[str, Any], index: dict[str, dict[str, Any]]) -> int:
     """Return a conservative FPGA-structure cost for one AST operator.
 
@@ -2495,6 +2516,18 @@ def hierarchical_report(
         if (path := named_path(source_pattern, target_pattern)) is not None
     }
 
+    def named_cone_path(
+        spec: dict[str, Any],
+        source_pattern: str,
+        target_pattern: str,
+    ) -> dict[str, Any] | None:
+        waypoint_pattern = spec.get("rtl_waypoint_pattern")
+        if not waypoint_pattern:
+            return named_path(source_pattern, target_pattern)
+        first = named_path(source_pattern, str(waypoint_pattern))
+        second = named_path(str(waypoint_pattern), target_pattern)
+        return join_cone_segments(first, second)
+
     def best_endpoint_path(
         source_owner: str,
         launch_kind: str,
@@ -2674,15 +2707,28 @@ def hierarchical_report(
         preferred_destination = str(
             trained.get("worst_destination_rtl_signal", "") if trained else ""
         )
+        preferred_destination_pin = str(
+            trained.get("worst_destination_rtl_pin", "D") if trained else "D"
+        )
+        if preferred_destination_pin not in {
+            "D", "CE", "R", "S", "CLR", "SET", "PRE"
+        }:
+            preferred_destination_pin = "D"
         path = None
         if preferred_source and preferred_destination:
-            path = named_path(
-                rf"/u_ydrasil_issue_stage\.{re.escape(preferred_source)}$",
+            preferred_source_pattern = re.escape(preferred_source)
+            if not preferred_source.endswith("_q"):
+                preferred_source_pattern += r"(?:_q)?"
+            path = named_cone_path(
+                spec,
+                rf"/u_ydrasil_issue_stage\.{preferred_source_pattern}$",
                 rf"/u_ydrasil_issue_stage(?:/u_value_file)?\."
-                rf"{re.escape(preferred_destination)}/D$",
+                rf"{re.escape(preferred_destination)}/"
+                rf"{re.escape(preferred_destination_pin)}$",
             )
         if path is None:
-            path = named_path(
+            path = named_cone_path(
+                spec,
                 str(spec["rtl_source_pattern"]),
                 str(spec["rtl_target_pattern"]),
             )

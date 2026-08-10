@@ -98,17 +98,56 @@ class TimingFamilyTest(unittest.TestCase):
 
         cones = summarize_critical_cones([("design-a", [matching, unrelated])])
 
-        self.assertEqual(len(cones), 1)
-        self.assertEqual(
-            cones[0]["name"], "issue_dtcm_bypass_select_to_value_file"
+        self.assertEqual(len(cones), 2)
+        main_cone = next(
+            item for item in cones
+            if item["name"] == "issue_dtcm_bypass_select_to_value_file"
         )
-        self.assertEqual(cones[0]["sample_count"], 1)
-        self.assertEqual(cones[0]["delay_ns_max"], 5.906)
-        self.assertEqual(cones[0]["worst_slack_ns"], -0.898)
-        self.assertEqual(
-            cones[0]["worst_source_rtl_signal"], "alu_in_operand_b_dtcm_q"
+        dual_cone = next(
+            item for item in cones
+            if item["name"] == "issue_dtcm_bypass_select_to_value_file_dual"
         )
-        self.assertEqual(cones[0]["worst_destination_rtl_signal"], "value_odd_q")
+        self.assertEqual(
+            main_cone["name"], "issue_dtcm_bypass_select_to_value_file"
+        )
+        self.assertEqual(main_cone["sample_count"], 1)
+        self.assertEqual(main_cone["delay_ns_max"], 5.906)
+        self.assertEqual(main_cone["worst_slack_ns"], -0.898)
+        self.assertEqual(
+            main_cone["worst_source_rtl_signal"], "alu_in_operand_b_dtcm_q"
+        )
+        self.assertEqual(
+            main_cone["worst_destination_rtl_signal"], "value_odd_q"
+        )
+        self.assertEqual(dual_cone["sample_count"], 1)
+
+    def test_issue_queue_cone_includes_multidimensional_ce_paths(self) -> None:
+        path = {
+            "source": (
+                "u_soc/u_core/u_ydrasil_issue_stage/"
+                "issue_pipe_q0_reg[src1][producer_tag][3]/C"
+            ),
+            "destination": (
+                "u_soc/u_core/u_ydrasil_issue_stage/"
+                "dual_alu_payload_q_reg[operand_a][23]/CE"
+            ),
+            "data_delay_ns": 5.445,
+            "slack_ns": -0.809,
+            "logic_levels": 9,
+            "route_fraction": 0.88797,
+        }
+
+        cones = summarize_critical_cones([("design-a", [path])])
+        issue_cone = next(
+            item for item in cones if item["name"] == "issue_queue_to_fu_payload"
+        )
+
+        self.assertEqual(issue_cone["sample_count"], 1)
+        self.assertEqual(issue_cone["worst_source_rtl_signal"], "issue_pipe_q0")
+        self.assertEqual(
+            issue_cone["worst_destination_rtl_signal"], "dual_alu_payload_q"
+        )
+        self.assertEqual(issue_cone["worst_destination_rtl_pin"], "CE")
 
 
 if __name__ == "__main__":
