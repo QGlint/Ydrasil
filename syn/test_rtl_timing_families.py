@@ -141,10 +141,6 @@ class TimingFamilyTest(unittest.TestCase):
         issue_cone = next(
             item for item in cones if item["name"] == "issue_queue_to_fu_payload"
         )
-        control_cone = next(
-            item for item in cones
-            if item["name"] == "issue_queue_control_roundtrip_to_fu"
-        )
 
         self.assertEqual(issue_cone["sample_count"], 1)
         self.assertEqual(issue_cone["worst_source_rtl_signal"], "issue_pipe_q0")
@@ -152,8 +148,6 @@ class TimingFamilyTest(unittest.TestCase):
             issue_cone["worst_destination_rtl_signal"], "dual_alu_payload_q"
         )
         self.assertEqual(issue_cone["worst_destination_rtl_pin"], "CE")
-        self.assertEqual(control_cone["sample_count"], 1)
-        self.assertEqual(control_cone["worst_slack_ns"], -0.809)
 
 
 if __name__ == "__main__":

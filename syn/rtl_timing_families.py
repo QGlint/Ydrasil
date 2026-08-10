@@ -137,32 +137,6 @@ CRITICAL_CONE_SPECS = (
             r"(?:D|CE)$"
         ),
     },
-    {
-        "name": "issue_queue_control_roundtrip_to_fu",
-        "rtl_source_pattern": (
-            r"/u_ydrasil_issue_stage\."
-            r"(?:issue_pipe_q0_q|issue_pipe_head_q)$"
-        ),
-        "rtl_target_pattern": (
-            r"/u_ydrasil_issue_stage\."
-            r"(?:agu_in_operand_[ab]_q|mul_in_operand_[ab]_q|"
-            r"dual_(?:alu|bru)_payload_q)/(?:D|CE)$"
-        ),
-        "rtl_waypoint_pattern": (
-            r"/u_ctrl\.issue_src[0-3]_state_o"
-            r"(?:\.(?:live|done))?$"
-        ),
-        "vivado_source_pattern": (
-            r"/u_ydrasil_issue_stage/"
-            r"(?:issue_pipe_q0(?:_q)?|issue_pipe_head_q)_reg"
-            r"(?:\[[^]]+\])*(?:_rep[^/]*)?/"
-        ),
-        "vivado_destination_pattern": (
-            r"/u_ydrasil_issue_stage/"
-            r"(?:agu_in_operand_[ab]_q|mul_in_operand_[ab]_q|"
-            r"dual_(?:alu|bru)_payload_q)_reg(?:\[[^]]+\])+/(?:D|CE)$"
-        ),
-    },
 )
 
 

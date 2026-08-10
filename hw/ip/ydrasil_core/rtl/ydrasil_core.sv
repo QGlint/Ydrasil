@@ -123,6 +123,8 @@ import ydrasil_axi_pkg::*;
 	// EX outputs
 	wire                        ex_branch_jump;
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] ex_branch_target;
+	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] main_early_bypass_data;
+	wire [ydrasil_pkg::REGS_DATA_WIDTH-1:0] dual_early_bypass_data;
 	wire                        ex_mul_stall;
 	wire                        ex_mul_issue;
 	wire [ydrasil_pkg::REGS_ADDR_WIDTH-1:0] ex_mul_issue_waddr;
@@ -241,14 +243,15 @@ import ydrasil_axi_pkg::*;
 	wire                            dual_completion_producer_tracked;
 	wire [REGS_ADDR_WIDTH-1:0]      dual_completion_addr;
 	wire [REGS_DATA_WIDTH-1:0]      dual_completion_data;
+	ydrasil_rob_source_state_t      issue_src0_state;
+	ydrasil_rob_source_state_t      issue_src1_state;
+	ydrasil_rob_source_state_t      issue_src2_state;
+	ydrasil_rob_source_state_t      issue_src3_state;
 	producer_slot_t                 retire_value_slot0;
 	producer_slot_t                 retire_value_slot1;
 	wire [REGS_DATA_WIDTH-1:0]      retire_value0;
 	wire [REGS_DATA_WIDTH-1:0]      retire_value1;
-	producer_id_t                   rob_head_id;
-	wire [ydrasil_pkg::PRODUCER_NUM-1:0] producer_valid;
-	wire [ydrasil_pkg::PRODUCER_NUM-1:0] producer_ready;
-	wire [ydrasil_pkg::PRODUCER_NUM-1:0] producer_epoch;
+	wire                            issue_at_rob_head;
 	wire [ydrasil_pkg::PRODUCER_NUM-1:0]
 	                                branch_recovery_keep_mask;
 	wire [ydrasil_pkg::PRODUCER_NUM-1:0] lsu_flush_keep_mask =
@@ -262,6 +265,7 @@ import ydrasil_axi_pkg::*;
 	ydrasil_issue_pkt_t             dispatch_issue_pkt;
 	ydrasil_issue_pkt_t             dispatch_issue_pkt1;
 	ydrasil_compact_uop_t           issue_head_compact_uop;
+	ydrasil_compact_uop_t           issue_head_compact_uop1;
 	wire                            issue_consume_two;
 	wire                            issue_slot1_replay;
 	wire                            issue_scoreboard_stall;
@@ -515,33 +519,29 @@ import ydrasil_axi_pkg::*;
 		.dispatch_pkt_i      (dispatch_issue_pkt),
 		.dispatch_pkt1_i     (dispatch_issue_pkt1),
 		.dispatch_ready_i    (dispatch_ready),
-		.rob_head_id_i       (rob_head_id),
-		.producer_valid_i    (producer_valid),
-		.producer_ready_i    (producer_ready),
-		.producer_epoch_i    (producer_epoch),
+		.issue_src0_state_i  (issue_src0_state),
+			.issue_src1_state_i  (issue_src1_state),
+			.issue_src2_state_i  (issue_src2_state),
+			.issue_src3_state_i  (issue_src3_state),
 			.completion_meta_i   (completion_meta),
 			.completion_data_i   (completion_data),
-			.main_completion_valid_i(alu_completion_valid),
-			.main_completion_producer_id_i(alu_completion_producer_id),
-			.main_completion_producer_tracked_i(alu_completion_producer_tracked),
-			.main_completion_data_i(alu_completion_data),
-			.dual_completion_valid_i(dual_completion_valid),
-			.dual_completion_producer_id_i(dual_completion_producer_id),
-			.dual_completion_producer_tracked_i(dual_completion_producer_tracked),
-			.dual_completion_data_i(dual_completion_data),
 			.commit_pkt_i        (commit_pkt),
 			.commit_pkt1_i       (commit_pkt1),
 			.retire_slot0_i      (retire_value_slot0),
 			.retire_slot1_i      (retire_value_slot1),
+			.early_main_bypass_data_i(main_early_bypass_data),
+			.early_dual_bypass_data_i(dual_early_bypass_data),
 			.lsu_idle_i          (lsu_status_pkt.idle),
 		.lsu_credit_i        (lsu_issue_credit),
 		.dtcm_reservation_i (dtcm_reservation),
 		.dtcm_resp_data_i   (dtcm_resp_data),
+		.issue_at_rob_head_i (issue_at_rob_head),
 		.decode_ready_o      (issue_pipe_has_room),
 		.decode_consume_two_o(),
 		.dispatch_accept_o   (issue_pipe_push),
 		.dispatch_accept1_o  (issue_pipe_push_two),
 			.issue_pkt_o         (issue_head_compact_uop),
+			.issue_pkt1_o        (issue_head_compact_uop1),
 			.retire_value0_o     (retire_value0),
 			.retire_value1_o     (retire_value1),
 		.issue_ready_o       (),
@@ -656,7 +656,8 @@ import ydrasil_axi_pkg::*;
 			.alu_completion_producer_tracked_o(alu_completion_producer_tracked),
 			.alu_completion_addr_o(alu_completion_addr),
 			.alu_completion_data_o(alu_completion_data),
-			.mul_issue_o        (ex_mul_issue),
+			.main_early_bypass_data_o(main_early_bypass_data),
+		.mul_issue_o        (ex_mul_issue),
 		.mul_issue_waddr_o  (ex_mul_issue_waddr),
 		.mul_result_o       (mul_wb_result),
 		.mul_rf_wen_o       (mul_rf_wen_rd),
@@ -669,7 +670,8 @@ import ydrasil_axi_pkg::*;
 		.dual_completion_producer_tracked_o(dual_completion_producer_tracked),
 		.dual_completion_addr_o(dual_completion_addr),
 		.dual_completion_data_o(dual_completion_data),
-			.ex_branch_jump_o  (ex_branch_jump),
+		.dual_early_bypass_data_o(dual_early_bypass_data),
+		.ex_branch_jump_o  (ex_branch_jump),
 		.ex_branch_target_o(ex_branch_target),
 		.ex_pc_redirect_o  (ex_pc_redirect),
 		.ex_pc_redirect_target_o(ex_pc_redirect_target),
@@ -722,6 +724,7 @@ import ydrasil_axi_pkg::*;
 			.dispatch_accept_i (issue_pipe_push),
 			.dispatch_accept1_i(issue_pipe_push_two),
 			.issue_pkt_i       (issue_head_compact_uop),
+			.issue_pkt1_i      (issue_head_compact_uop1),
 				.issue_fence_i     (id_fence_i),
 			.issue_fence_tag_i (issue_fence_tag),
 			.completion_meta_i (completion_meta),
@@ -733,10 +736,11 @@ import ydrasil_axi_pkg::*;
 			.dispatch_pkt_o    (dispatch_issue_pkt),
 			.dispatch_pkt1_o   (dispatch_issue_pkt1),
 			.dispatch_ready_o  (dispatch_ready),
-			.rob_head_id_o     (rob_head_id),
-			.producer_valid_o  (producer_valid),
-			.producer_ready_o  (producer_ready),
-			.producer_epoch_o  (producer_epoch),
+			.issue_src0_state_o(issue_src0_state),
+			.issue_src1_state_o(issue_src1_state),
+			.issue_src2_state_o(issue_src2_state),
+			.issue_src3_state_o(issue_src3_state),
+			.issue_at_rob_head_o(issue_at_rob_head),
 			.gpr_pending_o     (gpr_pending_q),
 			.retire_pending_o  (retire_pending),
 			.ex_accept_valid_o (ex_accept_valid),
