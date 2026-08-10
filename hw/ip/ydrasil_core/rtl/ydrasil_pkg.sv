@@ -300,7 +300,11 @@ package ydrasil_pkg;
 	localparam int BP_BTB_ENTRIES = 1024;
 	localparam int BP_BHT_ENTRIES = 4096;
 	localparam int BP_BHT_INDEX_WIDTH = $clog2(BP_BHT_ENTRIES);
+	// Keep the speculative global history narrow enough to travel with an
+	// in-flight branch. Predictor instances with smaller BHTs truncate it.
+	localparam int BP_GHR_WIDTH = 8;
 	typedef logic [BP_BHT_INDEX_WIDTH-1:0] bp_bht_index_t;
+	typedef logic [BP_GHR_WIDTH-1:0] bp_ghr_t;
 	// Future File: each producer carries its value independently of the two
 	// architectural writeback ports.
 `ifdef YDRASIL_PRODUCER_NUM
@@ -393,7 +397,10 @@ package ydrasil_pkg;
 		logic                                pred_taken;
 		logic [INST_ADDR_WIDTH-1:0]          pred_target;
 		logic [1:0]                          pred_counter;
+		logic [1:0]                          pred_global_counter;
+		logic [1:0]                          pred_local_counter;
 		bp_bht_index_t                      pred_bht_index;
+		bp_ghr_t                            pred_ghr_checkpoint;
 		logic [REGS_ADDR_WIDTH-1:0]          rs1_addr;
 		logic [REGS_ADDR_WIDTH-1:0]          rs2_addr;
 		logic [REGS_ADDR_WIDTH-1:0]          rd_addr;
@@ -427,7 +434,13 @@ package ydrasil_pkg;
 		logic                                taken;
 		logic [INST_ADDR_WIDTH-1:0]          target;
 		logic [1:0]                          counter;
+		logic [1:0]                          global_counter;
+		logic [1:0]                          local_counter;
 		bp_bht_index_t                      bht_index;
+		// GHR immediately before this branch's predicted direction was applied.
+		// A redirect restores this checkpoint before inserting the actual result.
+		bp_ghr_t                            ghr_checkpoint;
+		logic                                recover;
 	} ydrasil_bp_train_pkt_t;
 
 	typedef struct packed {
@@ -605,7 +618,10 @@ package ydrasil_pkg;
 		logic                                  pred_taken;
 		logic [INST_ADDR_WIDTH-1:0]            pred_target;
 		logic [1:0]                            pred_counter;
+		logic [1:0]                            pred_global_counter;
+		logic [1:0]                            pred_local_counter;
 		bp_bht_index_t                         pred_bht_index;
+		bp_ghr_t                               pred_ghr_checkpoint;
 		logic [CSR_ADDR_WIDTH-1:0]             csr_raddr;
 		logic [CSR_ADDR_WIDTH-1:0]             csr_waddr;
 		logic [OP_CSR_INFO_WIDTH-1:0]          csr_op_info;
@@ -647,7 +663,10 @@ package ydrasil_pkg;
 		logic                                pred_taken;
 		logic [INST_ADDR_WIDTH-1:0]          pred_target;
 		logic [1:0]                          pred_counter;
+		logic [1:0]                          pred_global_counter;
+		logic [1:0]                          pred_local_counter;
 		bp_bht_index_t                       pred_bht_index;
+		bp_ghr_t                             pred_ghr_checkpoint;
 	} ydrasil_lane_b_bru_payload_t;
 
 endpackage

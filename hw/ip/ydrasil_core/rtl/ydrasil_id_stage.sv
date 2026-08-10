@@ -7,7 +7,10 @@ import ydrasil_pkg::*;
     input  wire        pred_taken_i,
     input  wire [31:0] pred_target_i,
     input  wire [1:0]  pred_counter_i,
+    input  wire [1:0]  pred_global_counter_i,
+    input  wire [1:0]  pred_local_counter_i,
     input  bp_bht_index_t pred_bht_index_i,
+    input  bp_ghr_t       pred_ghr_checkpoint_i,
     output ydrasil_decode_pkt_t decode_pkt_o,
     output wire [REGS_ADDR_WIDTH-1:0] src0_arch_addr_o,
     output wire                         src0_used_o,
@@ -91,7 +94,10 @@ import ydrasil_pkg::*;
         decode_pkt_o.pred_taken = pred_taken_i;
         decode_pkt_o.pred_target = pred_target_i;
         decode_pkt_o.pred_counter = pred_counter_i;
+        decode_pkt_o.pred_global_counter = pred_global_counter_i;
+        decode_pkt_o.pred_local_counter = pred_local_counter_i;
         decode_pkt_o.pred_bht_index = pred_bht_index_i;
+        decode_pkt_o.pred_ghr_checkpoint = pred_ghr_checkpoint_i;
         decode_pkt_o.rs1_addr = rs1_addr;
         decode_pkt_o.rs2_addr = rs2_addr;
         decode_pkt_o.rd_addr = rd_addr;
@@ -147,7 +153,10 @@ import ydrasil_pkg::*;
     input  wire                  if_id_pred_taken_i,
     input  wire [31:0]           if_id_pred_target_i,
     input  wire [1:0]            if_id_pred_counter_i,
+    input  wire [1:0]            if_id_pred_global_counter_i,
+    input  wire [1:0]            if_id_pred_local_counter_i,
     input  bp_bht_index_t        if_id_pred_bht_index_i,
+    input  bp_ghr_t              if_id_pred_ghr_checkpoint_i,
     input  wire                  if_id_valid_i,
     input  wire                  if_id_serial_i,
     input  ydrasil_dispatch_domain_t if_id_domain_i,
@@ -160,7 +169,10 @@ import ydrasil_pkg::*;
     input  wire                  if_id1_pred_taken_i,
     input  wire [31:0]           if_id1_pred_target_i,
     input  wire [1:0]            if_id1_pred_counter_i,
+    input  wire [1:0]            if_id1_pred_global_counter_i,
+    input  wire [1:0]            if_id1_pred_local_counter_i,
     input  bp_bht_index_t        if_id1_pred_bht_index_i,
+    input  bp_ghr_t              if_id1_pred_ghr_checkpoint_i,
     input  wire                  if_id1_valid_i,
     input  wire                  if_id1_serial_i,
     input  ydrasil_dispatch_domain_t if_id1_domain_i,
@@ -197,7 +209,11 @@ import ydrasil_pkg::*;
         .pc_i(if_id_pc_i), .instr_i(if_id_instr_i),
         .pred_hit_i(if_id_pred_hit_i), .pred_taken_i(if_id_pred_taken_i),
         .pred_target_i(if_id_pred_target_i), .pred_counter_i(if_id_pred_counter_i),
-        .pred_bht_index_i(if_id_pred_bht_index_i), .decode_pkt_o(decoded0),
+        .pred_global_counter_i(if_id_pred_global_counter_i),
+        .pred_local_counter_i(if_id_pred_local_counter_i),
+        .pred_bht_index_i(if_id_pred_bht_index_i),
+        .pred_ghr_checkpoint_i(if_id_pred_ghr_checkpoint_i),
+        .decode_pkt_o(decoded0),
         .src0_arch_addr_o(decoded0_src0_addr),
         .src0_used_o(decoded0_src0_used),
         .src1_arch_addr_o(decoded0_src1_addr),
@@ -209,7 +225,11 @@ import ydrasil_pkg::*;
         .pc_i(if_id1_pc_i), .instr_i(if_id1_instr_i),
         .pred_hit_i(if_id1_pred_hit_i), .pred_taken_i(if_id1_pred_taken_i),
         .pred_target_i(if_id1_pred_target_i), .pred_counter_i(if_id1_pred_counter_i),
-        .pred_bht_index_i(if_id1_pred_bht_index_i), .decode_pkt_o(decoded1),
+        .pred_global_counter_i(if_id1_pred_global_counter_i),
+        .pred_local_counter_i(if_id1_pred_local_counter_i),
+        .pred_bht_index_i(if_id1_pred_bht_index_i),
+        .pred_ghr_checkpoint_i(if_id1_pred_ghr_checkpoint_i),
+        .decode_pkt_o(decoded1),
         .src0_arch_addr_o(decoded1_src0_addr),
         .src0_used_o(decoded1_src0_used),
         .src1_arch_addr_o(decoded1_src1_addr),

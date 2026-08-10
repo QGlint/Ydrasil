@@ -21,7 +21,10 @@ import ydrasil_pkg::*;
     input  wire                            id_ex_pred_taken_i,
     input  wire [DATA_WIDTH-1:0]           id_ex_pred_target_i,
     input  wire [1:0]                      id_ex_pred_counter_i,
+    input  wire [1:0]                      id_ex_pred_global_counter_i,
+    input  wire [1:0]                      id_ex_pred_local_counter_i,
     input  bp_bht_index_t                  id_ex_pred_bht_index_i,
+    input  bp_ghr_t                        id_ex_pred_ghr_checkpoint_i,
     input  producer_id_t                   id_ex_producer_id_i,
     input  wire                            trap_redirect_i,
     input  wire [INST_ADDR_WIDTH-1:0]      trap_redirect_addr_i,
@@ -118,7 +121,11 @@ import ydrasil_pkg::*;
         ex_bp_train.taken = ex_is_jump | ex_branch_taken;
         ex_bp_train.target = ex_is_jump ? ex_jump_target : ex_branch_target;
         ex_bp_train.counter = id_ex_pred_counter_i;
+        ex_bp_train.global_counter = id_ex_pred_global_counter_i;
+        ex_bp_train.local_counter = id_ex_pred_local_counter_i;
         ex_bp_train.bht_index = id_ex_pred_bht_index_i;
+        ex_bp_train.ghr_checkpoint = id_ex_pred_ghr_checkpoint_i;
+        ex_bp_train.recover = ex_pc_redirect;
     end
 
     reg                       ex2_branch_jump_q;

@@ -53,7 +53,10 @@ import ydrasil_axi_pkg::*;
 	wire        if_id_pred_taken;
 	wire [31:0] if_id_pred_target;
 	wire [1:0]  if_id_pred_counter;
+	wire [1:0]  if_id_pred_global_counter;
+	wire [1:0]  if_id_pred_local_counter;
 	bp_bht_index_t if_id_pred_bht_index;
+	bp_ghr_t       if_id_pred_ghr_checkpoint;
 	wire        if_id_valid;
 	ydrasil_dispatch_domain_t if_id_domain;
 		wire        if_id_serial;
@@ -66,7 +69,10 @@ import ydrasil_axi_pkg::*;
 	wire        if_id1_pred_taken;
 	wire [31:0] if_id1_pred_target;
 	wire [1:0]  if_id1_pred_counter;
+	wire [1:0]  if_id1_pred_global_counter;
+	wire [1:0]  if_id1_pred_local_counter;
 	bp_bht_index_t if_id1_pred_bht_index;
+	bp_ghr_t       if_id1_pred_ghr_checkpoint;
 	wire        if_id1_valid;
 	ydrasil_dispatch_domain_t if_id1_domain;
 		wire        if_id1_serial;
@@ -188,9 +194,24 @@ import ydrasil_axi_pkg::*;
 	wire                        bp_bram_predict_hit1;
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] bp_bram_predict_target;
 	wire [1:0]                  bp_bram_predict_counter;
+	wire [1:0]                  bp_bram_predict_global_counter;
+	wire [1:0]                  bp_bram_predict_local_counter;
+	bp_bht_index_t              bp_bram_predict_bht_index;
+	bp_ghr_t                    bp_bram_predict_ghr_checkpoint;
+	wire                        bp_bram_predict_hit1;
 	wire                        bp_bram_predict1_taken;
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] bp_bram_predict1_target;
 	wire [1:0]                  bp_bram_predict1_counter;
+	wire [1:0]                  bp_bram_predict1_global_counter;
+	wire [1:0]                  bp_bram_predict1_local_counter;
+	bp_bht_index_t              bp_bram_predict1_bht_index;
+	bp_ghr_t                    bp_bram_predict1_ghr_checkpoint;
+	wire                        bp_speculate0_valid;
+	wire                        bp_speculate0_conditional;
+	wire                        bp_speculate0_taken;
+	wire                        bp_speculate1_valid;
+	wire                        bp_speculate1_conditional;
+	wire                        bp_speculate1_taken;
 		// Compatibility observability now reflects the FF target table.
 		wire l0_hit;
 		wire l0_hit1;
@@ -502,10 +523,7 @@ import ydrasil_axi_pkg::*;
 			.BP_ENTRIES(BP_ENTRIES),
 			.BTB_ENTRIES(BTB_ENTRIES),
 			.BHT_ENTRIES(BHT_ENTRIES),
-			// The predictor's carried training packet has no speculative GHR
-			// checkpoint.  Keep the indexed BHT mode until that recovery contract
-			// exists; enabling GShare here corrupts the history after redirects.
-			.USE_GSHARE(1'b0)
+			.USE_GSHARE(1'b1)
 		) u_ydrasil_branch_predictor (
 			.clk              (clk),
 			.rst_n            (rst_n),
@@ -514,16 +532,25 @@ import ydrasil_axi_pkg::*;
 			.predict_taken_o  (bp_bram_predict_taken),
 			.predict_target_o (bp_bram_predict_target),
 			.predict_counter_o(bp_bram_predict_counter),
-			.predict_bht_index_o(),
-			.predict0_spec_valid_i(1'b0),
-			.predict0_spec_conditional_i(1'b0),
-			.predict0_spec_taken_i(1'b0),
+			.predict_global_counter_o(bp_bram_predict_global_counter),
+			.predict_local_counter_o(bp_bram_predict_local_counter),
+			.predict_bht_index_o(bp_bram_predict_bht_index),
+			.predict_ghr_checkpoint_o(bp_bram_predict_ghr_checkpoint),
+			.predict0_spec_valid_i(bp_speculate0_valid),
+			.predict0_spec_conditional_i(bp_speculate0_conditional),
+			.predict0_spec_taken_i(bp_speculate0_taken),
 			.predict_pc1_i    (if_mem_addr1),
 			.predict1_hit_o   (bp_bram_predict_hit1),
 			.predict1_taken_o (bp_bram_predict1_taken),
 			.predict1_target_o(bp_bram_predict1_target),
 			.predict1_counter_o(bp_bram_predict1_counter),
-			.predict1_bht_index_o(),
+			.predict1_global_counter_o(bp_bram_predict1_global_counter),
+			.predict1_local_counter_o(bp_bram_predict1_local_counter),
+			.predict1_bht_index_o(bp_bram_predict1_bht_index),
+			.predict1_ghr_checkpoint_o(bp_bram_predict1_ghr_checkpoint),
+			.predict1_spec_valid_i(bp_speculate1_valid),
+			.predict1_spec_conditional_i(bp_speculate1_conditional),
+			.predict1_spec_taken_i(bp_speculate1_taken),
 			.train_i          (ex_bp_train_pkt),
 			.invalidate_i     (id_fence_i)
 		);
@@ -543,16 +570,30 @@ import ydrasil_axi_pkg::*;
 				.bp_predict_hit_i(bp_bram_predict_hit),
 				.bp_predict_target_i(bp_bram_predict_target),
 				.bp_predict_counter_i(bp_bram_predict_counter),
+				.bp_predict_global_counter_i(bp_bram_predict_global_counter),
+				.bp_predict_local_counter_i(bp_bram_predict_local_counter),
+				.bp_predict_bht_index_i(bp_bram_predict_bht_index),
+				.bp_predict_ghr_checkpoint_i(bp_bram_predict_ghr_checkpoint),
 				.bp_predict1_taken_i(bp_bram_predict1_taken),
 				.bp_predict1_hit_i(bp_bram_predict_hit1),
 				.bp_predict1_target_i(bp_bram_predict1_target),
 				.bp_predict1_counter_i(bp_bram_predict1_counter),
+				.bp_predict1_global_counter_i(bp_bram_predict1_global_counter),
+				.bp_predict1_local_counter_i(bp_bram_predict1_local_counter),
+				.bp_predict1_bht_index_i(bp_bram_predict1_bht_index),
+				.bp_predict1_ghr_checkpoint_i(bp_bram_predict1_ghr_checkpoint),
 			.bp_invalidate_i(id_fence_i),
 				.bp_invalidate_target_i(issue_fence_next_pc),
 			.target_ff_train_i(ex_bp_train_pkt),
 			.if_mem_addr_o   (if_mem_addr),
 			.if_mem_addr1_o  (if_mem_addr1),
 			.bp_lookup_pc_o   (bp_lookup_pc),
+			.bp_speculate0_valid_o(bp_speculate0_valid),
+			.bp_speculate0_conditional_o(bp_speculate0_conditional),
+			.bp_speculate0_taken_o(bp_speculate0_taken),
+			.bp_speculate1_valid_o(bp_speculate1_valid),
+			.bp_speculate1_conditional_o(bp_speculate1_conditional),
+			.bp_speculate1_taken_o(bp_speculate1_taken),
 			.if_mem_rdata_i  (if_mem_rdata),
 			.if_mem_rdata1_i (if_mem_rdata1),
 			.if_id_pc_o      (if_id_pc),
@@ -560,7 +601,10 @@ import ydrasil_axi_pkg::*;
 			.if_id_pred_taken_o(if_id_pred_taken),
 			.if_id_pred_target_o(if_id_pred_target),
 			.if_id_pred_counter_o(if_id_pred_counter),
+			.if_id_pred_global_counter_o(if_id_pred_global_counter),
+			.if_id_pred_local_counter_o(if_id_pred_local_counter),
 			.if_id_pred_bht_index_o(if_id_pred_bht_index),
+			.if_id_pred_ghr_checkpoint_o(if_id_pred_ghr_checkpoint),
 			.if_id_valid_o   (if_id_valid),
 				.if_id_instr_o   (if_id_instr)
 				,.if_id_domain_o (if_id_domain)
@@ -573,7 +617,10 @@ import ydrasil_axi_pkg::*;
 			,.if_id1_pred_taken_o(if_id1_pred_taken)
 			,.if_id1_pred_target_o(if_id1_pred_target)
 			,.if_id1_pred_counter_o(if_id1_pred_counter)
+			,.if_id1_pred_global_counter_o(if_id1_pred_global_counter)
+			,.if_id1_pred_local_counter_o(if_id1_pred_local_counter)
 			,.if_id1_pred_bht_index_o(if_id1_pred_bht_index)
+			,.if_id1_pred_ghr_checkpoint_o(if_id1_pred_ghr_checkpoint)
 			,.if_id1_valid_o   (if_id1_valid)
 					,.if_id1_instr_o   (if_id1_instr)
 					,.if_id1_domain_o (if_id1_domain)
@@ -597,7 +644,10 @@ import ydrasil_axi_pkg::*;
 		.if_id_pred_taken_i  (if_id_pred_taken),
 		.if_id_pred_target_i (if_id_pred_target),
 		.if_id_pred_counter_i(if_id_pred_counter),
+		.if_id_pred_global_counter_i(if_id_pred_global_counter),
+		.if_id_pred_local_counter_i(if_id_pred_local_counter),
 		.if_id_pred_bht_index_i(if_id_pred_bht_index),
+		.if_id_pred_ghr_checkpoint_i(if_id_pred_ghr_checkpoint),
 		.if_id_valid_i       (if_id_valid),
 			.if_id_serial_i      (if_id_serial),
 			.if_id_domain_i      (if_id_domain),
@@ -610,7 +660,10 @@ import ydrasil_axi_pkg::*;
 		.if_id1_pred_taken_i (if_id1_pred_taken),
 		.if_id1_pred_target_i(if_id1_pred_target),
 		.if_id1_pred_counter_i(if_id1_pred_counter),
+		.if_id1_pred_global_counter_i(if_id1_pred_global_counter),
+		.if_id1_pred_local_counter_i(if_id1_pred_local_counter),
 		.if_id1_pred_bht_index_i(if_id1_pred_bht_index),
+		.if_id1_pred_ghr_checkpoint_i(if_id1_pred_ghr_checkpoint),
 		.if_id1_valid_i      (if_id1_valid),
 			.if_id1_serial_i     (if_id1_serial),
 			.if_id1_domain_i     (if_id1_domain),

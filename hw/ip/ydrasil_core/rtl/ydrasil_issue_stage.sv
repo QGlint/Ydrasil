@@ -641,13 +641,51 @@ import ydrasil_pkg::*;
         (!issue_memory_q[7] ||
          ({1'b0, lsu_credit_i} > {1'b0, lsu_select_reserved_q})) &&
         !issue_order_blocked[7];
-    assign p0_select_local[0] = p0_candidate_local[0];
-    assign p0_select_local[1] = p0_candidate_local[1] &&
-        !p0_candidate_local[0];
-    assign p0_select_local[2] = p0_candidate_local[2] &&
-        !(|p0_candidate_local[1:0]);
-    assign p0_select_local[3] = p0_candidate_local[3] &&
-        !(|p0_candidate_local[2:0]);
+    // P0 loads may pass older loads, but a fixed RS-slot priority can keep an
+    // older ready load from ever launching while younger independent loads
+    // consume both LSU credits.  Select the oldest ready P0 entry using the
+    // registered ROB-head token; this keeps the age compare local to the four
+    // P0 candidates and avoids a current ROB-to-Select control path.
+    function automatic [PRODUCER_SLOT_WIDTH:0] p0_age_from_head(
+        input producer_id_t producer_id
+    );
+        logic [PRODUCER_SLOT_WIDTH:0] producer_slot_ext;
+        logic [PRODUCER_SLOT_WIDTH:0] head_slot_ext;
+        begin
+            producer_slot_ext = {1'b0,
+                producer_id[PRODUCER_SLOT_WIDTH-1:0]};
+            head_slot_ext = {1'b0,
+                rob_head_select_q[PRODUCER_SLOT_WIDTH-1:0]};
+            p0_age_from_head = (producer_slot_ext >= head_slot_ext) ?
+                (producer_slot_ext - head_slot_ext) :
+                ((PRODUCER_SLOT_WIDTH + 1)'(PRODUCER_NUM) -
+                 head_slot_ext + producer_slot_ext);
+        end
+    endfunction
+    wire [PRODUCER_SLOT_WIDTH:0] p0_age0 =
+        p0_age_from_head(issue_window_q[4].dst.rob_tag);
+    wire [PRODUCER_SLOT_WIDTH:0] p0_age1 =
+        p0_age_from_head(issue_window_q[5].dst.rob_tag);
+    wire [PRODUCER_SLOT_WIDTH:0] p0_age2 =
+        p0_age_from_head(issue_window_q[6].dst.rob_tag);
+    wire [PRODUCER_SLOT_WIDTH:0] p0_age3 =
+        p0_age_from_head(issue_window_q[7].dst.rob_tag);
+    wire [3:0] p0_oldest_local;
+    assign p0_oldest_local[0] = p0_candidate_local[0] &&
+        (!p0_candidate_local[1] || (p0_age0 <= p0_age1)) &&
+        (!p0_candidate_local[2] || (p0_age0 <= p0_age2)) &&
+        (!p0_candidate_local[3] || (p0_age0 <= p0_age3));
+    assign p0_oldest_local[1] = p0_candidate_local[1] &&
+        !p0_oldest_local[0] &&
+        (!p0_candidate_local[2] || (p0_age1 <= p0_age2)) &&
+        (!p0_candidate_local[3] || (p0_age1 <= p0_age3));
+    assign p0_oldest_local[2] = p0_candidate_local[2] &&
+        !p0_oldest_local[0] && !p0_oldest_local[1] &&
+        (!p0_candidate_local[3] || (p0_age2 <= p0_age3));
+    assign p0_oldest_local[3] = p0_candidate_local[3] &&
+        !p0_oldest_local[0] && !p0_oldest_local[1] &&
+        !p0_oldest_local[2];
+    assign p0_select_local = p0_oldest_local;
 
     assign p1_candidate_local[0] = issue_window_valid_q[8] &&
         issue_src0_ready_for_select[8] && issue_src1_ready_for_select[8] &&
@@ -2041,7 +2079,12 @@ import ydrasil_pkg::*;
         dual_bru_payload_d.pred_taken = lane_b_uop.pred_taken;
         dual_bru_payload_d.pred_target = lane_b_uop.pred_target;
         dual_bru_payload_d.pred_counter = lane_b_uop.pred_counter;
+        dual_bru_payload_d.pred_global_counter =
+            lane_b_uop.pred_global_counter;
+        dual_bru_payload_d.pred_local_counter = lane_b_uop.pred_local_counter;
         dual_bru_payload_d.pred_bht_index = lane_b_uop.pred_bht_index;
+        dual_bru_payload_d.pred_ghr_checkpoint =
+            lane_b_uop.pred_ghr_checkpoint;
     end
 
     // Return-channel identity and data cross into Operand together. No live
@@ -2498,7 +2541,10 @@ import ydrasil_pkg::*;
     input  wire                           pred_taken_i,
     input  wire [INST_ADDR_WIDTH-1:0]     pred_target_i,
     input  wire [1:0]                     pred_counter_i,
+    input  wire [1:0]                     pred_global_counter_i,
+    input  wire [1:0]                     pred_local_counter_i,
     input  bp_bht_index_t                 pred_bht_index_i,
+    input  bp_ghr_t                       pred_ghr_checkpoint_i,
     input  wire [INST_ADDR_WIDTH-1:0]     trap_redirect_addr_i,
     output wire                           completion_valid_o,
     output producer_id_t                  completion_producer_id_o,
@@ -2637,7 +2683,10 @@ import ydrasil_pkg::*;
         .id_ex_pred_taken_i(pred_taken_i),
         .id_ex_pred_target_i(pred_target_i),
         .id_ex_pred_counter_i(pred_counter_i),
+        .id_ex_pred_global_counter_i(pred_global_counter_i),
+        .id_ex_pred_local_counter_i(pred_local_counter_i),
         .id_ex_pred_bht_index_i(pred_bht_index_i),
+        .id_ex_pred_ghr_checkpoint_i(pred_ghr_checkpoint_i),
         .id_ex_producer_id_i(producer_id_i),
         .trap_redirect_i(interrupt_i),
         .trap_redirect_addr_i(trap_redirect_addr_i),
