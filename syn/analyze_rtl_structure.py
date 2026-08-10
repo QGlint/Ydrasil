@@ -18,7 +18,12 @@ from collections import Counter, defaultdict, deque
 from pathlib import Path
 from typing import Any, Iterable
 
-from rtl_timing_families import family_key, load_archive_training, normalize_owner
+from rtl_timing_families import (
+    CRITICAL_CONE_SPECS,
+    family_key,
+    load_archive_training,
+    normalize_owner,
+)
 
 
 ASSIGN_TYPES = {"ASSIGN", "ASSIGNW", "ASSIGNDLY"}
@@ -518,7 +523,7 @@ def tarjan(graph: dict[str, set[str]]) -> list[list[str]]:
         index_counter += 1
         stack.append(node)
         on_stack.add(node)
-        for target in graph.get(node, ()):
+        for target in sorted(graph.get(node, ())):
             if target not in indices:
                 visit(target)
                 lowlink[node] = min(lowlink[node], lowlink[target])
@@ -532,9 +537,9 @@ def tarjan(graph: dict[str, set[str]]) -> list[list[str]]:
                 component.append(target)
                 if target == node:
                     break
-            components.append(component)
+            components.append(sorted(component))
 
-    for node in graph:
+    for node in sorted(graph):
         if node not in indices:
             visit(node)
     return components
@@ -970,14 +975,16 @@ def module_report(module: dict[str, Any], index: dict[str, dict[str, Any]], modu
         ]
         return max(weights, default=1)
 
-    queue = deque(number for number in range(len(components)) if indegree[number] == 0)
+    queue = deque(sorted(
+        number for number in range(len(components)) if indegree[number] == 0
+    ))
     depth = {number: 0 for number in range(len(components))}
     depth_parent: dict[int, int] = {}
     topo_order = []
     while queue:
         current = queue.popleft()
         topo_order.append(current)
-        for target in dag.get(current, ()):
+        for target in sorted(dag.get(current, ())):
             edge_cost = component_edge_cost(current, target)
             candidate = depth[current] + edge_cost
             if candidate > depth[target]:
@@ -1046,7 +1053,7 @@ def module_report(module: dict[str, Any], index: dict[str, dict[str, Any]], modu
             candidates.append((0, "register_control", None, control_targets))
         if not dag.get(current):
             candidates.append((0, "combinational_sink", None, None))
-        for target in dag.get(current, ()):
+        for target in sorted(dag.get(current, ())):
             candidates.append((
                 component_edge_cost(current, target) + forward_depth[target],
                 forward_endpoint.get(target, "combinational_sink"),
@@ -1093,7 +1100,7 @@ def module_report(module: dict[str, Any], index: dict[str, dict[str, Any]], modu
         for endpoint in endpoint_kinds:
             best = 0 if endpoint in terminal_kinds else -1
             best_target = None
-            for target in dag.get(current, ()):
+            for target in sorted(dag.get(current, ())):
                 target_depth = endpoint_forward_depth[endpoint][target]
                 if target_depth < 0:
                     continue
@@ -1334,11 +1341,14 @@ def module_report(module: dict[str, Any], index: dict[str, dict[str, Any]], modu
     for source, targets in dag.items():
         for target in targets:
             cross_indegree[target] += 1
-    cross_queue = deque(number for number in range(len(components)) if cross_indegree[number] == 0)
+    cross_queue = deque(sorted(
+        number for number in range(len(components))
+        if cross_indegree[number] == 0
+    ))
     cross_parent: dict[int, int] = {}
     while cross_queue:
         current = cross_queue.popleft()
-        for target in dag.get(current, ()):
+        for target in sorted(dag.get(current, ())):
             edge_cost = component_edge_cost(current, target)
             candidate = cross_component_depth[current] + edge_cost
             if candidate > cross_component_depth[target]:
@@ -2237,14 +2247,16 @@ def hierarchical_report(
         ]
         return max(weights, default=1)
 
-    queue = deque(number for number in range(len(components)) if indegree[number] == 0)
+    queue = deque(sorted(
+        number for number in range(len(components)) if indegree[number] == 0
+    ))
     topo_order: list[int] = []
     depth = {number: 0 for number in range(len(components))}
     depth_parent: dict[int, int] = {}
     while queue:
         current = queue.popleft()
         topo_order.append(current)
-        for target in dag.get(current, ()):
+        for target in sorted(dag.get(current, ())):
             candidate = depth[current] + component_cost(current, target)
             if candidate > depth[target]:
                 depth[target] = candidate
@@ -2253,7 +2265,9 @@ def hierarchical_report(
             if indegree[target] == 0:
                 queue.append(target)
 
-    terminal_components = {component_of[node] for node in terminal_nodes if node in component_of}
+    terminal_components = {
+        component_of[node] for node in terminal_nodes if node in component_of
+    }
     forward_depth = {number: 0 for number in range(len(components))}
     forward_endpoint: dict[int, str] = {}
     for current in reversed(topo_order):
@@ -2262,7 +2276,7 @@ def hierarchical_report(
             candidates.append((0, "register_or_output"))
         if not dag.get(current):
             candidates.append((0, "combinational_sink"))
-        for target in dag.get(current, ()):
+        for target in sorted(dag.get(current, ())):
             candidates.append((component_cost(current, target) + forward_depth[target], forward_endpoint.get(target, "combinational_sink")))
         if candidates:
             selected = max(candidates, key=lambda item: (item[0], item[1]))
@@ -2393,7 +2407,7 @@ def hierarchical_report(
     # a timing-endpoint depth separately for correlation with Vivado paths.
     endpoint_depths = {
         component: depth.get(component, 0)
-        for component in terminal_components
+        for component in sorted(terminal_components)
     }
     max_component = max(depth, key=depth.get, default=0)
     max_endpoint_component = max(endpoint_depths, key=endpoint_depths.get, default=max_component)
@@ -2404,8 +2418,15 @@ def hierarchical_report(
     critical_path = [display(sorted(components[item])[0]) for item in critical_components]
 
     def named_path(source_pattern: str, target_pattern: str) -> dict[str, Any] | None:
-        source_nodes = [node for node in nodes if re.search(source_pattern, display(node), re.I)]
-        target_nodes = [node for node in nodes if re.search(target_pattern, display(node), re.I)]
+        ordered_nodes = sorted(nodes, key=display)
+        source_nodes = [
+            node for node in ordered_nodes
+            if re.search(source_pattern, display(node), re.I)
+        ]
+        target_nodes = [
+            node for node in ordered_nodes
+            if re.search(target_pattern, display(node), re.I)
+        ]
         if not source_nodes or not target_nodes:
             return None
         target_components = {component_of[node] for node in target_nodes}
@@ -2420,25 +2441,47 @@ def hierarchical_report(
         for current in topo_order:
             if current not in best_depth:
                 continue
-            for target in dag.get(current, ()):
+            for target in sorted(dag.get(current, ())):
                 candidate = best_depth[current] + component_cost(current, target)
                 if candidate > best_depth.get(target, -1):
                     best_depth[target] = candidate
                     parents[target] = current
                     source_for[target] = source_for[current]
-        reachable = [component for component in target_components if component in best_depth]
+        reachable = sorted(
+            component for component in target_components if component in best_depth
+        )
         if not reachable:
             return None
-        end = max(reachable, key=lambda item: best_depth[item])
+        end = max(reachable, key=lambda item: (
+            best_depth[item],
+            display(sorted(components[item])[0]),
+        ))
         path_components = [end]
         while path_components[-1] in parents:
             path_components.append(parents[path_components[-1]])
         path_components.reverse()
+        source = source_for[end]
+        target = min(
+            (node for node in target_nodes if component_of[node] == end),
+            key=display,
+        )
+        path_owners = [
+            owner_for(
+                node_info.get(sorted(components[item])[0], ("", "", ""))[0],
+                node_info.get(sorted(components[item])[0], ("", "", ""))[1],
+            )
+            for item in path_components
+        ]
         return {
-            "source": display(source_for[path_components[0]]),
-            "target": display(next(node for node in target_nodes if component_of[node] == end)),
+            "source": display(source),
+            "target": display(target),
+            "source_signal": launch_nodes.get(source, {}).get("signal"),
+            "destination_signal": endpoint_nodes.get(target, {}).get("signal"),
             "depth": best_depth[end],
             "signals": [display(sorted(components[item])[0]) for item in path_components],
+            "owner_crossings": sum(
+                left != right for left, right in zip(path_owners, path_owners[1:])
+            ),
         }
 
     named_paths = {
@@ -2491,16 +2534,21 @@ def hierarchical_report(
         for current in topo_order:
             if current not in best_depth:
                 continue
-            for target in dag.get(current, ()):
+            for target in sorted(dag.get(current, ())):
                 candidate = best_depth[current] + component_cost(current, target)
                 if candidate > best_depth.get(target, -1):
                     best_depth[target] = candidate
                     parents[target] = current
                     source_for[target] = source_for[current]
-        reachable = [component for component in target_components if component in best_depth]
+        reachable = sorted(
+            component for component in target_components if component in best_depth
+        )
         if not reachable:
             return None
-        end = max(reachable, key=lambda component: best_depth[component])
+        end = max(reachable, key=lambda component: (
+            best_depth[component],
+            display(sorted(components[component])[0]),
+        ))
         path_components = [end]
         while path_components[-1] in parents:
             path_components.append(parents[path_components[-1]])
@@ -2611,6 +2659,102 @@ def hierarchical_report(
             previous["reasons"] = sorted(
                 set(previous["reasons"]) | set(severity_reasons)
             )
+
+    trained_critical_cones = {
+        str(item.get("name")): item
+        for item in (training or {}).get("critical_cones", [])
+    }
+    critical_cones = []
+    for spec in CRITICAL_CONE_SPECS:
+        cone_name = str(spec["name"])
+        trained = trained_critical_cones.get(cone_name)
+        preferred_source = str(
+            trained.get("worst_source_rtl_signal", "") if trained else ""
+        )
+        preferred_destination = str(
+            trained.get("worst_destination_rtl_signal", "") if trained else ""
+        )
+        path = None
+        if preferred_source and preferred_destination:
+            path = named_path(
+                rf"/u_ydrasil_issue_stage\.{re.escape(preferred_source)}$",
+                rf"/u_ydrasil_issue_stage(?:/u_value_file)?\."
+                rf"{re.escape(preferred_destination)}/D$",
+            )
+        if path is None:
+            path = named_path(
+                str(spec["rtl_source_pattern"]),
+                str(spec["rtl_target_pattern"]),
+            )
+        if path is None:
+            critical_cones.append({
+                "name": cone_name,
+                "reachable": False,
+                "severity": "CLEAR",
+                "reasons": ["combinational_cone_cut_or_absent"],
+                "training_sample_count": int(trained.get("sample_count", 0)) if trained else 0,
+            })
+            continue
+        structural_upper_ns = structural_upper_delay(path, "register_q", "register_d")
+        trained_p95_ns = float(trained.get("delay_ns_p95", 0.0)) if trained else 0.0
+        trained_max_ns = float(trained.get("delay_ns_max", 0.0)) if trained else 0.0
+        trained_worst_slack_ns = (
+            float(trained.get("worst_slack_ns"))
+            if trained and trained.get("worst_slack_ns") is not None
+            else None
+        )
+        estimated_upper_ns = max(structural_upper_ns, trained_p95_ns)
+        observed_failure = (
+            trained_worst_slack_ns is not None and trained_worst_slack_ns < 0.0
+        )
+        severity = classify_timing_path_severity(
+            int(path.get("depth", 0)),
+            estimated_upper_ns,
+            warning_period_ns,
+            definite_depth,
+            force_error=observed_failure,
+        )
+        reasons = ["signal_level_critical_cone_reachable"]
+        if observed_failure:
+            reasons.append("same_signal_cone_failed_in_archived_vivado")
+        if int(path.get("depth", 0)) >= definite_depth:
+            reasons.append("definite_structural_depth_threshold")
+        critical_cones.append({
+            "name": cone_name,
+            "reachable": True,
+            "severity": severity,
+            "source": path.get("source"),
+            "destination": path.get("target"),
+            "source_signal": path.get("source_signal"),
+            "destination_signal": path.get("destination_signal"),
+            "structural_depth": int(path.get("depth", 0)),
+            "owner_crossings": int(path.get("owner_crossings", 0)),
+            "structural_upper_delay_ns": round(structural_upper_ns, 3),
+            "trained_p95_delay_ns": round(trained_p95_ns, 3) if trained else None,
+            "trained_max_delay_ns": round(trained_max_ns, 3) if trained else None,
+            "trained_worst_slack_ns": (
+                round(trained_worst_slack_ns, 3)
+                if trained_worst_slack_ns is not None else None
+            ),
+            "trained_worst_source": trained.get("worst_source") if trained else None,
+            "trained_worst_destination": (
+                trained.get("worst_destination") if trained else None
+            ),
+            "estimated_upper_delay_ns": round(estimated_upper_ns, 3),
+            "estimated_slack_ns": round(target_period_ns - estimated_upper_ns, 3),
+            "training_sample_count": int(trained.get("sample_count", 0)) if trained else 0,
+            "reasons": reasons,
+            "signals": path.get("signals", []),
+        })
+    critical_cones.sort(key=lambda item: (
+        {"ERROR": 0, "WARNING": 1, "ADVISORY": 2, "CLEAR": 3}[item["severity"]],
+        float(
+            item.get("trained_worst_slack_ns")
+            if item.get("trained_worst_slack_ns") is not None
+            else item.get("estimated_slack_ns", 0.0)
+        ),
+        item["name"],
+    ))
 
     trained_families = (training or {}).get("families", [])
     for trained in trained_families:
@@ -2859,6 +3003,13 @@ def hierarchical_report(
         "timing_endpoint_max_depth": max(endpoint_depths.values(), default=0),
         "critical_timing_path": critical_timing_path,
         "named_paths": named_paths,
+        "critical_cones": critical_cones,
+        "critical_cone_error_count": sum(
+            item["severity"] == "ERROR" for item in critical_cones
+        ),
+        "critical_cone_warning_count": sum(
+            item["severity"] == "WARNING" for item in critical_cones
+        ),
         "timing_launch_count": len(launch_nodes),
         "timing_launch_count_by_owner_kind": dict(Counter(
             f"{item.get('owner')}|{item.get('kind')}"
@@ -3236,6 +3387,7 @@ def main() -> int:
         hierarchy = checked.get("hierarchical", {})
         summary = checked.get("summary", {})
         path_risks = hierarchy.get("timing_path_risks", [])
+        critical_cones = hierarchy.get("critical_cones", [])
         try:
             report_target_period_ns = float(
                 hierarchy.get(
@@ -3257,7 +3409,22 @@ def main() -> int:
             item for item in path_risks
             if item.get("severity") in {"WARNING", "HIGH"}
         ]
+        critical_failures = [
+            item for item in critical_cones if item.get("severity") == "ERROR"
+        ]
+        critical_warnings = [
+            item for item in critical_cones if item.get("severity") == "WARNING"
+        ]
         cycles = checked.get("hierarchical", {}).get("meaningful_cycles", [])
+        for item in critical_failures + critical_warnings:
+            print(
+                f"{item.get('severity')} critical_cone {item.get('name')}: "
+                f"observed-max={item.get('trained_max_delay_ns')}ns "
+                f"observed-slack={item.get('trained_worst_slack_ns')}ns "
+                f"depth={item.get('structural_depth')} "
+                f"{item.get('source')} -> {item.get('destination')} "
+                f"reasons={','.join(item.get('reasons', []))}"
+            )
         for item in failures:
             print(
                 f"ERROR {item.get('key')}: estimated={item.get('estimated_upper_delay_ns')}ns "
@@ -3279,11 +3446,13 @@ def main() -> int:
                 f"path families are estimated at or above {report_target_period_ns:g}ns; "
                 f"limit={args.max_over_target_paths}"
             )
-        if failures or cycles:
+        if critical_failures or failures or cycles:
             print(
-                f"error: {len(failures)} structural timing path families and "
+                f"error: {len(critical_failures)} critical cones, "
+                f"{len(failures)} structural timing path families and "
                 f"{len(cycles)} combinational loops fail the gate; "
-                f"{len(warnings)} high timing warnings remain; "
+                f"{len(critical_warnings)} critical-cone and "
+                f"{len(warnings)} family warnings remain; "
                 f"{over_target_count} paths at or above {report_target_period_ns:g}ns",
                 file=sys.stderr,
             )
@@ -3419,6 +3588,12 @@ def main() -> int:
         "timing_definite_depth_threshold": args.timing_definite_depth,
         "timing_path_error_count": hierarchy.get("timing_path_error_count", 0),
         "timing_path_warning_count": hierarchy.get("timing_path_warning_count", 0),
+        "critical_cone_error_count": hierarchy.get("critical_cone_error_count", 0),
+        "critical_cone_warning_count": hierarchy.get("critical_cone_warning_count", 0),
+        "critical_cone_errors": [
+            item.get("name") for item in hierarchy.get("critical_cones", [])
+            if item.get("severity") == "ERROR"
+        ],
         "timing_path_error_families": [
             item.get("key") for item in hierarchy.get("timing_path_risks", [])
             if item.get("severity") == "ERROR"
@@ -3452,6 +3627,17 @@ def main() -> int:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(f"wrote {args.output} ({len(reports)} modules)")
+    for item in hierarchy.get("critical_cones", []):
+        if item.get("severity") not in {"ERROR", "WARNING"}:
+            continue
+        print(
+            f"{item.get('severity')} critical_cone {item.get('name')}: "
+            f"observed-max={item.get('trained_max_delay_ns')}ns "
+            f"observed-slack={item.get('trained_worst_slack_ns')}ns "
+            f"depth={item.get('structural_depth')} "
+            f"{item.get('source')} -> {item.get('destination')} "
+            f"reasons={','.join(item.get('reasons', []))}"
+        )
     for item in hierarchy.get("timing_path_risks", []):
         print(
             f"{item.get('severity')} {item.get('key')}: "

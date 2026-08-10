@@ -13,6 +13,7 @@ from rtl_timing_families import (
     archive_timing_csv,
     normalize_owner,
     read_timing_csv,
+    summarize_critical_cones,
     summarize_families,
 )
 
@@ -73,6 +74,41 @@ class TimingFamilyTest(unittest.TestCase):
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0]["status"], "MET")
         self.assertEqual(records[0]["slack_ns"], 0.047)
+
+    def test_signal_level_dtcm_value_file_cone_is_trained_separately(self) -> None:
+        matching = {
+            "source": (
+                "u_soc/u_core/u_ydrasil_issue_stage/"
+                "alu_in_operand_b_dtcm_q_reg/C"
+            ),
+            "destination": (
+                "u_soc/u_core/u_ydrasil_issue_stage/u_value_file/"
+                "value_odd_q_reg[4][7]/D"
+            ),
+            "data_delay_ns": 5.906,
+            "slack_ns": -0.898,
+            "logic_levels": 11,
+            "route_fraction": 0.86487,
+        }
+        unrelated = {
+            **matching,
+            "source": "u_soc/u_core/u_ctrl/queue_head_q_reg[0]/C",
+            "data_delay_ns": 6.5,
+        }
+
+        cones = summarize_critical_cones([("design-a", [matching, unrelated])])
+
+        self.assertEqual(len(cones), 1)
+        self.assertEqual(
+            cones[0]["name"], "issue_dtcm_bypass_select_to_value_file"
+        )
+        self.assertEqual(cones[0]["sample_count"], 1)
+        self.assertEqual(cones[0]["delay_ns_max"], 5.906)
+        self.assertEqual(cones[0]["worst_slack_ns"], -0.898)
+        self.assertEqual(
+            cones[0]["worst_source_rtl_signal"], "alu_in_operand_b_dtcm_q"
+        )
+        self.assertEqual(cones[0]["worst_destination_rtl_signal"], "value_odd_q")
 
 
 if __name__ == "__main__":

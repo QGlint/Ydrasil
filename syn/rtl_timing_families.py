@@ -30,6 +30,68 @@ OWNER_PATTERNS = (
 )
 
 
+# Signal-level cones which repeatedly dominate the routed 200 MHz reports.
+# Keep both RTL-graph and Vivado spellings here so the structural checker can
+# prove that the same combinational cone still exists after an RTL change.
+CRITICAL_CONE_SPECS = (
+    {
+        "name": "issue_dtcm_bypass_select_to_value_file",
+        "rtl_source_pattern": (
+            r"/u_ydrasil_issue_stage\."
+            r"(?:alu_in_operand_[ab]_dtcm_q|dtcm_stall_data_valid_q)$"
+        ),
+        "rtl_target_pattern": (
+            r"/u_ydrasil_issue_stage/u_value_file\."
+            r"value_(?:even|odd)_q/D$"
+        ),
+        "vivado_source_pattern": (
+            r"/u_ydrasil_issue_stage/"
+            r"(?:alu_in_operand_[ab]_dtcm_q|dtcm_stall_data_valid_q)_reg(?:_replica)?/"
+        ),
+        "vivado_destination_pattern": (
+            r"/u_ydrasil_issue_stage/u_value_file/"
+            r"value_(?:even|odd)_q_reg(?:\[[^]]+\])+/D$"
+        ),
+    },
+    {
+        "name": "issue_dtcm_buffer_to_value_file",
+        "rtl_source_pattern": r"/u_ydrasil_issue_stage\.dtcm_stall_data_q$",
+        "rtl_target_pattern": (
+            r"/u_ydrasil_issue_stage/u_value_file\."
+            r"value_(?:even|odd)_q/D$"
+        ),
+        "vivado_source_pattern": (
+            r"/u_ydrasil_issue_stage/dtcm_stall_data_q_reg(?:\[[^]]+\])?/"
+        ),
+        "vivado_destination_pattern": (
+            r"/u_ydrasil_issue_stage/u_value_file/"
+            r"value_(?:even|odd)_q_reg(?:\[[^]]+\])+/D$"
+        ),
+    },
+    {
+        "name": "issue_queue_to_fu_payload",
+        "rtl_source_pattern": (
+            r"/u_ydrasil_issue_stage\."
+            r"(?:issue_pipe_q0_q|issue_pipe_head_q)$"
+        ),
+        "rtl_target_pattern": (
+            r"/u_ydrasil_issue_stage\."
+            r"(?:agu_in_operand_[ab]_q|mul_in_operand_[ab]_q|"
+            r"dual_(?:alu|bru)_payload_q)/D$"
+        ),
+        "vivado_source_pattern": (
+            r"/u_ydrasil_issue_stage/"
+            r"(?:issue_pipe_q0_q|issue_pipe_head_q)_reg(?:\[[^]]+\])?(?:_rep[^/]*)?/"
+        ),
+        "vivado_destination_pattern": (
+            r"/u_ydrasil_issue_stage/"
+            r"(?:agu_in_operand_[ab]_q|mul_in_operand_[ab]_q|"
+            r"dual_(?:alu|bru)_payload_q)_reg(?:\[[^]]+\])+/D$"
+        ),
+    },
+)
+
+
 def normalize_owner(resource: str | None) -> str:
     text = str(resource or "")
     for owner, pattern in OWNER_PATTERNS:
@@ -86,6 +148,16 @@ def normalize_signal(resource: str | None) -> str:
     return leaf
 
 
+def rtl_register_signal(resource: str | None) -> str | None:
+    """Recover an RTL register name from a Vivado endpoint spelling."""
+    parts = str(resource or "").split("/")
+    if len(parts) < 2:
+        return None
+    leaf = re.sub(r"\[[^]]+\]", "", parts[-2])
+    leaf = re.sub(r"_reg(?:_rep[^/]*)?$", "", leaf)
+    return leaf or None
+
+
 def family_key(
     source_owner: str,
     destination_owner: str,
@@ -128,6 +200,55 @@ def percentile(values: list[float], fraction: float) -> float | None:
         return ordered[lower]
     weight = position - lower
     return ordered[lower] * (1.0 - weight) + ordered[upper] * weight
+
+
+def summarize_critical_cones(
+    datasets: Iterable[tuple[str, Iterable[dict[str, Any]]]],
+) -> list[dict[str, Any]]:
+    """Summarize routed evidence for signal-level architectural cones."""
+    materialized = [(name, list(records)) for name, records in datasets]
+    summaries = []
+    for spec in CRITICAL_CONE_SPECS:
+        samples = [
+            (dataset, record)
+            for dataset, records in materialized
+            for record in records
+            if re.search(spec["vivado_source_pattern"], str(record.get("source", "")))
+            and re.search(
+                spec["vivado_destination_pattern"],
+                str(record.get("destination", "")),
+            )
+        ]
+        if not samples:
+            continue
+        delays = [float(record.get("data_delay_ns", 0.0)) for _, record in samples]
+        slacks = [float(record.get("slack_ns", 0.0)) for _, record in samples]
+        levels = [float(record.get("logic_levels", 0.0)) for _, record in samples]
+        routes = [float(record.get("route_fraction", 0.0)) for _, record in samples]
+        worst_dataset, worst_record = max(
+            samples,
+            key=lambda item: float(item[1].get("data_delay_ns", 0.0)),
+        )
+        summaries.append({
+            "name": spec["name"],
+            "sample_count": len(samples),
+            "design_count": len({dataset for dataset, _ in samples}),
+            "delay_ns_p95": percentile(delays, 0.95),
+            "delay_ns_max": max(delays),
+            "worst_slack_ns": min(slacks),
+            "logic_levels_p95": percentile(levels, 0.95),
+            "route_fraction_p95": percentile(routes, 0.95),
+            "worst_source": worst_record.get("source"),
+            "worst_destination": worst_record.get("destination"),
+            "worst_source_rtl_signal": rtl_register_signal(
+                worst_record.get("source")
+            ),
+            "worst_destination_rtl_signal": rtl_register_signal(
+                worst_record.get("destination")
+            ),
+            "worst_dataset": worst_dataset,
+        })
+    return summaries
 
 
 def read_timing_csv(path: Path) -> list[dict[str, Any]]:
@@ -254,7 +375,9 @@ def load_archive_training(
     memory_geometry_profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not root or not root.is_dir():
-        return summarize_families([], target_period_ns)
+        result = summarize_families([], target_period_ns)
+        result["critical_cones"] = []
+        return result
     datasets = []
     seen_fingerprints: set[str] = set()
     skipped = []
@@ -310,6 +433,7 @@ def load_archive_training(
         seen_fingerprints.add(fingerprint)
         datasets.append((fingerprint, records))
     result = summarize_families(datasets, target_period_ns)
+    result["critical_cones"] = summarize_critical_cones(datasets)
     result["archive_root"] = str(root)
     result["memory_geometry_profile"] = memory_geometry_profile
     result["skipped"] = skipped
