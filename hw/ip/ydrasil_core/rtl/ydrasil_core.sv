@@ -185,6 +185,7 @@ import ydrasil_axi_pkg::*;
 		// Feed fetch directly from the BRAM branch predictor.
 	wire                        bp_bram_predict_hit;
 	wire                        bp_bram_predict_taken;
+	wire                        bp_bram_predict_hit1;
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] bp_bram_predict_target;
 	wire [1:0]                  bp_bram_predict_counter;
 	wire                        bp_bram_predict1_taken;
@@ -518,7 +519,7 @@ import ydrasil_axi_pkg::*;
 			.predict0_spec_conditional_i(1'b0),
 			.predict0_spec_taken_i(1'b0),
 			.predict_pc1_i    (if_mem_addr1),
-			.predict1_hit_o   (),
+			.predict1_hit_o   (bp_bram_predict_hit1),
 			.predict1_taken_o (bp_bram_predict1_taken),
 			.predict1_target_o(bp_bram_predict1_target),
 			.predict1_counter_o(bp_bram_predict1_counter),
@@ -539,9 +540,11 @@ import ydrasil_axi_pkg::*;
 			.branch_jump_i   (branch_jump),
 			.branch_target_i (branch_target),
 				.bp_predict_taken_i(bp_bram_predict_taken),
+				.bp_predict_hit_i(bp_bram_predict_hit),
 				.bp_predict_target_i(bp_bram_predict_target),
 				.bp_predict_counter_i(bp_bram_predict_counter),
 				.bp_predict1_taken_i(bp_bram_predict1_taken),
+				.bp_predict1_hit_i(bp_bram_predict_hit1),
 				.bp_predict1_target_i(bp_bram_predict1_target),
 				.bp_predict1_counter_i(bp_bram_predict1_counter),
 			.bp_invalidate_i(id_fence_i),

@@ -141,6 +141,11 @@ end
     reg         execution_wave_en;
     string      execution_wave_file;
     integer     execution_wave_fd;
+    // Optional causal RS trace. Kept separate from execution_wave.csv so the
+    // existing v2 schema and its consumers remain byte-compatible.
+    reg         execution_causal_en;
+    string      execution_causal_file;
+    integer     execution_causal_fd;
     integer     execution_wave_start;
     integer     execution_wave_end;
     reg [31:0]  execution_wave_measure_start_pc;
@@ -148,6 +153,7 @@ end
     reg         execution_wave_measure_filter_en;
     reg         execution_wave_measure_active;
     reg         execution_wave_measure_done;
+    integer     execution_causal_idx;
     initial begin
         raw_debug_en = $test$plusargs("raw_debug");
         lsu_local_debug_en = $test$plusargs("lsu_local_debug");
@@ -168,6 +174,8 @@ end
         perf_stall_snapshot_threshold = 64;
         execution_wave_en = 1'b0;
         execution_wave_fd = 0;
+        execution_causal_en = 1'b0;
+        execution_causal_fd = 0;
         execution_wave_start = 0;
         execution_wave_end = 32'h7fffffff;
         execution_wave_measure_start_pc = '0;
@@ -190,6 +198,30 @@ end
             execution_wave_en = 1'b1;
             $fdisplay(execution_wave_fd,
                 "reset,sample_valid,halted,cycle,instret,fetch_pc,issue_pc0,issue_pc1,issue_tag0,issue_tag1,selected_pc0,selected_pc1,selected_tag0,selected_tag1,ex_pc0,ex_pc1,ex_tag0,ex_tag1,if_valid0,if_valid1,decode_valid0,decode_valid1,dispatch_accept0,dispatch_accept1,rs_valid_mask,rs_dep_mask,rs_order_mask,rs_resource_mask,rs_ready_mask,rs_candidate_mask,rs_selected_mask,select_valid0,select_valid1,select_push,select_head_valid,select_head_pair,select_skid_valid,head0_b_only,operand_accept0,operand_accept1,ex_valid0,ex_valid1,ex_accept0,ex_accept1,retire0,retire1,rob_count,producer_full,lsu_credit,lsu_reserved,lsu_queue_count,lsu_idle,lsu_struct_stall,serialize_stall,mdu_available,flush,redirect,recovery_pending,pipeline_flush,fence_issue,trap_redirect,frontend_queue_count,fetch_req_valid,fetch_resp_valid,pending_redirect,completion_wakeup_mask,alloc_wakeup_mask,select_wakeup_mask,dtcm_wakeup,mdu_wakeup,dep_blocker_mask,alu_credit,p0_credit,p1_credit,physical_exec0,physical_exec1,branch_mispredict,direct_fire,direct_pair,retire_pc0,retire_pc1");
+        end
+        if ($value$plusargs("execution_causal=%s", execution_causal_file)) begin
+            execution_causal_fd = $fopen(execution_causal_file, "w");
+            if (execution_causal_fd == 0)
+                $fatal(1, "unable to open causal execution CSV: %s",
+                       execution_causal_file);
+            execution_causal_en = 1'b1;
+            $fwrite(execution_causal_fd,
+                "reset,sample_valid,halted,cycle,instret,physical_exec0,physical_exec1,ex_accept0,ex_accept1,producer_full,rob_count,rob_head_tag,redirect,branch_mispredict,frontend_queue_count,fetch_req_valid,fetch_resp_valid,pending_redirect,if_valid0,if_valid1,decode_valid0,decode_valid1,dispatch_accept0,dispatch_accept1,select_push,select_head_valid,select_head_pair,select_skid_valid,operand_accept0,operand_accept1,rs_valid_mask,rs_ready_mask,rs_candidate_mask,rs_selected_mask,rs_dep_mask,rs_order_mask,rs_resource_mask,completion_wakeup_mask,alloc_wakeup_mask,select_wakeup_mask,select_head_pc0,select_head_tag0,select_head_pc1,select_head_tag1,operand_pc0,operand_tag0,operand_pc1,operand_tag1,ex_pc0,ex_tag0,ex_pc1,ex_tag1,completion0_valid,completion0_tag,completion1_valid,completion1_tag,completion2_valid,completion2_tag,completion3_valid,completion3_tag,retire0_valid,retire0_tag,retire1_valid,retire1_tag");
+            for (execution_causal_idx = 0; execution_causal_idx < 12;
+                 execution_causal_idx = execution_causal_idx + 1) begin
+                $fwrite(execution_causal_fd,
+                ",rs%0d_valid,rs%0d_pc,rs%0d_tag,rs%0d_src0_ready,rs%0d_src1_ready,rs%0d_candidate,rs%0d_selected,rs%0d_src0_tag_valid,rs%0d_src0_prod,rs%0d_src1_tag_valid,rs%0d_src1_prod,rs%0d_memory,rs%0d_store,rs%0d_mul,rs%0d_divrem,rs%0d_serial,rs%0d_order_blocked,rs%0d_bank",
+                    execution_causal_idx, execution_causal_idx,
+                    execution_causal_idx, execution_causal_idx,
+                    execution_causal_idx, execution_causal_idx,
+                    execution_causal_idx, execution_causal_idx,
+                    execution_causal_idx, execution_causal_idx,
+                    execution_causal_idx, execution_causal_idx,
+                    execution_causal_idx, execution_causal_idx,
+                    execution_causal_idx, execution_causal_idx,
+                    execution_causal_idx, execution_causal_idx);
+            end
+            $fwrite(execution_causal_fd, "\n");
         end
         if (!$value$plusargs("execution_wave_start=%d", execution_wave_start))
             execution_wave_start = 0;
@@ -6976,9 +7008,141 @@ end
         end
     end
 
+    // Optional per-entry trace for causal (rather than aggregate-mask)
+    // attribution. This is a TB-only observer and is completely dormant
+    // unless +execution_causal=<path> is supplied.
+    always @(posedge clk) begin
+        if (execution_causal_en && rst_n &&
+            (cycle_count >= execution_wave_start) &&
+            (cycle_count <= execution_wave_end)) begin
+            $fwrite(execution_causal_fd,
+                "%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,0x%03h,0x%03h,0x%0h,0x%03h,0x%03h,0x%03h,0x%03h,0x%03h,0x%03h,0x%03h",
+                !rst_n,
+                rst_n && execution_wave_measure_active,
+                execution_wave_measure_filter_en ?
+                    execution_wave_measure_done : pc_write_to_host_flag,
+                cycle_count, instruction_count,
+                u_dut.alu_in_valid || u_dut.agu_in_valid,
+                u_dut.dual_alu_valid || u_dut.dual_bit_valid ||
+                    u_dut.dual_bru_valid || u_dut.mul_in_valid ||
+                    u_dut.csr_in_valid,
+                u_dut.ex_accept_valid, u_dut.ex_accept_valid1,
+                u_dut.u_ctrl.producer_full_stall,
+                u_dut.u_ctrl.queue_count_q,
+                u_dut.u_ctrl.queue_head_id,
+                u_dut.ex_pc_redirect, u_dut.ex_branch_mispredict,
+                u_dut.u_ydrasil_if_stage.fetchq_count_q,
+                u_dut.u_ydrasil_if_stage.mem_req_valid_q,
+                u_dut.u_ydrasil_if_stage.mem_resp_valid,
+                u_dut.u_ydrasil_if_stage.pending_redirect_valid_q,
+                u_dut.if_id_valid, u_dut.if_id1_valid,
+                u_dut.id_issue_pkt.valid, u_dut.id_issue_pkt1.valid,
+                u_dut.u_ydrasil_issue_stage.dispatch_accept_o,
+                u_dut.u_ydrasil_issue_stage.dispatch_accept1_o,
+                u_dut.u_ydrasil_issue_stage.select_buf_push,
+                u_dut.u_ydrasil_issue_stage.select_head_valid_q,
+                u_dut.u_ydrasil_issue_stage.select_head_pair_q,
+                u_dut.u_ydrasil_issue_stage.select_skid_valid_q,
+                u_dut.u_ydrasil_issue_stage.lane_a_accept,
+                u_dut.u_ydrasil_issue_stage.lane_b_accept,
+                u_dut.u_ydrasil_issue_stage.issue_window_valid_q,
+                perf_rs_ready_mask_now,
+                perf_rs_candidate_mask_now,
+                perf_rs_selected_mask_now,
+                perf_rs_dep_mask_now,
+                perf_rs_order_mask_now,
+                perf_rs_resource_mask_now,
+                u_dut.u_ydrasil_issue_stage.issue_src0_completion_wakeup |
+                    u_dut.u_ydrasil_issue_stage.issue_src1_completion_wakeup,
+                u_dut.u_ydrasil_issue_stage.issue_src0_alloc_wakeup |
+                    u_dut.u_ydrasil_issue_stage.issue_src1_alloc_wakeup,
+                u_dut.u_ydrasil_issue_stage.issue_src0_fast_main |
+                u_dut.u_ydrasil_issue_stage.issue_src0_fast_dual |
+                    u_dut.u_ydrasil_issue_stage.issue_src1_fast_main |
+                    u_dut.u_ydrasil_issue_stage.issue_src1_fast_dual);
+            $fwrite(execution_causal_fd,
+                ",0x%08h,%0d,0x%08h,%0d,0x%08h,%0d,0x%08h,%0d,0x%08h,%0d,0x%08h,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d",
+                u_dut.u_ydrasil_issue_stage.select_head_uop0_q.pc,
+                u_dut.u_ydrasil_issue_stage.select_head_uop0_q.dst.rob_tag,
+                u_dut.u_ydrasil_issue_stage.select_head_uop1_q.pc,
+                u_dut.u_ydrasil_issue_stage.select_head_uop1_q.dst.rob_tag,
+                u_dut.u_ydrasil_issue_stage.issue_pkt_i.pc,
+                u_dut.u_ydrasil_issue_stage.issue_pkt_i.dst.rob_tag,
+                u_dut.u_ydrasil_issue_stage.issue_pkt1_i.pc,
+                u_dut.u_ydrasil_issue_stage.issue_pkt1_i.dst.rob_tag,
+                u_dut.id_instr_addr,
+                u_dut.alu_in_valid ? u_dut.alu_in_producer_id :
+                    u_dut.agu_in_req.producer_id,
+                u_dut.dual_id_ex_pc, u_dut.dual_meta.producer_id,
+                u_dut.completion_meta[0].valid,
+                u_dut.completion_meta[0].producer_id,
+                u_dut.completion_meta[1].valid,
+                u_dut.completion_meta[1].producer_id,
+                u_dut.completion_meta[2].valid,
+                u_dut.completion_meta[2].producer_id,
+                u_dut.completion_meta[3].valid,
+                u_dut.completion_meta[3].producer_id,
+                u_dut.commit_pkt.valid, u_dut.commit_pkt.producer_id,
+                u_dut.commit_pkt1.valid, u_dut.commit_pkt1.producer_id);
+            for (execution_causal_idx = 0; execution_causal_idx < 12;
+                 execution_causal_idx = execution_causal_idx + 1) begin
+                $fwrite(execution_causal_fd,
+                    ",%0d,0x%08h,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d",
+                    u_dut.u_ydrasil_issue_stage.issue_window_valid_q[
+                        execution_causal_idx],
+                    u_dut.u_ydrasil_issue_stage.issue_window_q[
+                        execution_causal_idx].pc,
+                    u_dut.u_ydrasil_issue_stage.issue_window_q[
+                        execution_causal_idx].dst.rob_tag,
+                    u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[
+                        execution_causal_idx],
+                    u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[
+                        execution_causal_idx],
+                    (execution_causal_idx < 4) ?
+                        u_dut.u_ydrasil_issue_stage.alu_candidate_local[
+                            execution_causal_idx] :
+                    (execution_causal_idx < 8) ?
+                        u_dut.u_ydrasil_issue_stage.p0_candidate_local[
+                            execution_causal_idx-4] :
+                        (u_dut.u_ydrasil_issue_stage.p1_candidate_local[
+                            execution_causal_idx-8] ||
+                         u_dut.u_ydrasil_issue_stage.p1_serial_candidate_local[
+                            execution_causal_idx-8]),
+                    u_dut.u_ydrasil_issue_stage.issue_select_mask[
+                        execution_causal_idx],
+                    u_dut.u_ydrasil_issue_stage.issue_window_q[
+                        execution_causal_idx].src0.tag_valid,
+                    u_dut.u_ydrasil_issue_stage.issue_window_q[
+                        execution_causal_idx].src0.producer_tag,
+                    u_dut.u_ydrasil_issue_stage.issue_window_q[
+                        execution_causal_idx].src1.tag_valid,
+                    u_dut.u_ydrasil_issue_stage.issue_window_q[
+                        execution_causal_idx].src1.producer_tag,
+                    u_dut.u_ydrasil_issue_stage.issue_memory_q[
+                        execution_causal_idx],
+                    u_dut.u_ydrasil_issue_stage.issue_store_q[
+                        execution_causal_idx],
+                    u_dut.u_ydrasil_issue_stage.issue_mul_q[
+                        execution_causal_idx],
+                    u_dut.u_ydrasil_issue_stage.issue_divrem_q[
+                        execution_causal_idx],
+                    u_dut.u_ydrasil_issue_stage.issue_serial_q[
+                        execution_causal_idx],
+                    |(u_dut.u_ydrasil_issue_stage.issue_order_mask_q[
+                        execution_causal_idx] &
+                      ~u_dut.u_ydrasil_issue_stage.issued_slot_mask_q),
+                    (execution_causal_idx < 4) ? 0 :
+                    (execution_causal_idx < 8) ? 1 : 2);
+            end
+            $fwrite(execution_causal_fd, "\n");
+        end
+    end
+
     final begin
         if (execution_wave_fd != 0)
             $fclose(execution_wave_fd);
+        if (execution_causal_fd != 0)
+            $fclose(execution_causal_fd);
     end
 `endif
 

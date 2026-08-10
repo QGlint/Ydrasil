@@ -325,9 +325,11 @@ import ydrasil_pkg::*;
     input  wire [31:0] branch_target_i,
 
     input  wire        bp_predict_taken_i,
+    input  wire        bp_predict_hit_i,
     input  wire [31:0] bp_predict_target_i,
     input  wire [1:0]  bp_predict_counter_i,
     input  wire        bp_predict1_taken_i,
+    input  wire        bp_predict1_hit_i,
     input  wire [31:0] bp_predict1_target_i,
     input  wire [1:0]  bp_predict1_counter_i,
     input  wire        bp_invalidate_i,
@@ -382,6 +384,7 @@ import ydrasil_pkg::*;
     typedef struct packed {
         fetch_addr_token_t pc;
         logic [31:0] instr;
+        logic pred_hit;
         logic pred_taken;
         fetch_addr_token_t pred_target;
         logic [1:0] pred_counter;
@@ -553,6 +556,7 @@ import ydrasil_pkg::*;
                 DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2],
             mem_req_pc_q[ITCM_ADDR_WIDTH+1:2]};
         fetchq_push_payload0.instr = if_mem_rdata_i;
+        fetchq_push_payload0.pred_hit = bp_predict_hit_i;
         fetchq_push_payload0.pred_taken = bp_predict_taken_i;
         fetchq_push_payload0.pred_target = {
             bp_predict_target_i[31:ITCM_ADDR_WIDTH+2] ==
@@ -571,6 +575,7 @@ import ydrasil_pkg::*;
                 DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2],
             mem_req_pc_plus4[ITCM_ADDR_WIDTH+1:2]};
         fetchq_push_payload1.instr = if_mem_rdata1_i;
+        fetchq_push_payload1.pred_hit = bp_predict1_hit_i;
         fetchq_push_payload1.pred_taken = bp_predict1_taken_i;
         fetchq_push_payload1.pred_target = {
             bp_predict1_target_i[31:ITCM_ADDR_WIDTH+2] ==
@@ -691,7 +696,7 @@ import ydrasil_pkg::*;
     assign if_id_src0_used_o = fetchq_payload0.src0_used;
     assign if_id_src1_used_o = fetchq_payload0.src1_used;
     assign if_id_dst_writes_o = fetchq_payload0.dst_writes;
-    assign if_id_pred_hit_o = fetchq_payload0.pred_taken;
+    assign if_id_pred_hit_o = fetchq_payload0.pred_hit;
     assign if_id_pred_taken_o = fetchq_payload0.pred_taken;
     assign if_id_pred_target_o = fetchq_pred_target0;
     assign if_id_pred_counter_o = fetchq_payload0.pred_counter;
@@ -707,7 +712,7 @@ import ydrasil_pkg::*;
     assign if_id1_src0_used_o = fetchq_payload1.src0_used;
     assign if_id1_src1_used_o = fetchq_payload1.src1_used;
     assign if_id1_dst_writes_o = fetchq_payload1.dst_writes;
-    assign if_id1_pred_hit_o = fetchq_payload1.pred_taken;
+    assign if_id1_pred_hit_o = fetchq_payload1.pred_hit;
     assign if_id1_pred_taken_o = fetchq_payload1.pred_taken;
     assign if_id1_pred_target_o = fetchq_pred_target1;
     assign if_id1_pred_counter_o = fetchq_payload1.pred_counter;
