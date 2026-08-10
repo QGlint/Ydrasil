@@ -17,7 +17,7 @@ RVTEST_CODE_BEGIN
   CHECK_EQ_IMM(4, t4, 9)
   CHECK_EQ_IMM(5, t5, 14)
 
-  # 相邻 WAW：禁止成对写同一个体系结构寄存器。
+  # 相邻 WAW：独立 producer 槽允许成对发射，年轻值必须最终可见。
   li a0, 11
   li a0, 22
   CHECK_EQ_IMM(6, a0, 22)

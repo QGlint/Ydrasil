@@ -478,14 +478,14 @@ import ydrasil_pkg::*;
           (issue_pkt1_i.src0.producer_tag == issue_pkt_i.dst.rob_tag)) ||
          (issue_pkt1_i.src1.tag_valid &&
           (issue_pkt1_i.src1.producer_tag == issue_pkt_i.dst.rob_tag)));
-    wire pair_waw = issue_pkt_i.dst.writes_gpr &&
-        issue_pkt1_i.dst.writes_gpr &&
-        (issue_pkt_i.dst.rd_addr == issue_pkt1_i.dst.rd_addr);
+    // Destinations are renamed to distinct producer slots. If both retire on
+    // one edge, the younger commit port intentionally wins the ARF write, so
+    // an architectural WAW does not prevent dual issue.
     wire pair_div_memory =
         (uop_divrem(issue_pkt_i) && uop_memory(issue_pkt1_i)) ||
         (uop_memory(issue_pkt_i) && uop_divrem(issue_pkt1_i));
     wire pair_eligible = issue_pkt_i.valid && issue_pkt1_i.valid &&
-        pair_lane_assignable && !pair_raw && !pair_waw &&
+        pair_lane_assignable && !pair_raw &&
         !uop_serial(issue_pkt_i) && !uop_serial(issue_pkt1_i) &&
         !pair_div_memory;
     wire slot1_active = pair_eligible;
