@@ -11,8 +11,8 @@ import ydrasil_pkg::*;
     input  wire [INST_ADDR_WIDTH-1:0]   ex_pc1_i,
     input  ydrasil_ex_hzd_pkt_t         ex_hzd_i,
     input  ydrasil_ex_hzd_pkt_t         ex_hzd1_i,
-    input  ydrasil_issue_pkt_t          dispatch_pkt_i,
-    input  ydrasil_issue_pkt_t          dispatch_pkt1_i,
+    input  ydrasil_id_issue_pkt_t       dispatch_pkt_i,
+    input  ydrasil_id_issue_pkt_t       dispatch_pkt1_i,
     input  wire                         dispatch_accept_i,
     input  wire                         dispatch_accept1_i,
     input  ydrasil_compact_uop_t        issue_pkt_i,
@@ -223,9 +223,30 @@ import ydrasil_pkg::*;
         dispatch_pkt_i.dst.writes_gpr && (dispatch_pkt_i.dst.rd_addr != '0) &&
         (dispatch_pkt1_i.src1.arch_addr == dispatch_pkt_i.dst.rd_addr);
 
+    function automatic ydrasil_issue_pkt_t allocate_packet_shape(
+        input ydrasil_id_issue_pkt_t id_pkt
+    );
+        begin
+            allocate_packet_shape = '0;
+            allocate_packet_shape.valid = id_pkt.valid;
+            allocate_packet_shape.lane_mask = id_pkt.lane_mask;
+            allocate_packet_shape.uop_class = id_pkt.uop_class;
+            allocate_packet_shape.uop_subop = id_pkt.uop_subop;
+            allocate_packet_shape.uop_lsu_subop = id_pkt.uop_lsu_subop;
+            allocate_packet_shape.src0.used = id_pkt.src0.used;
+            allocate_packet_shape.src0.arch_addr = id_pkt.src0.arch_addr;
+            allocate_packet_shape.src1.used = id_pkt.src1.used;
+            allocate_packet_shape.src1.arch_addr = id_pkt.src1.arch_addr;
+            allocate_packet_shape.dst.writes_gpr = id_pkt.dst.writes_gpr;
+            allocate_packet_shape.dst.rd_addr = id_pkt.dst.rd_addr;
+            allocate_packet_shape.ctrl = id_pkt.ctrl;
+            allocate_packet_shape.decode = id_pkt.decode;
+        end
+    endfunction
+
     always_comb begin
-        dispatch_pkt_o = dispatch_pkt_i;
-        dispatch_pkt1_o = dispatch_pkt1_i;
+        dispatch_pkt_o = allocate_packet_shape(dispatch_pkt_i);
+        dispatch_pkt1_o = allocate_packet_shape(dispatch_pkt1_i);
 
         dispatch_pkt_o.src0.tag_valid = dispatch_pkt_i.src0.used &&
             (dispatch_pkt_i.src0.arch_addr != '0) &&

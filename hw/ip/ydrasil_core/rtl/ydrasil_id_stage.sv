@@ -140,17 +140,17 @@ import ydrasil_pkg::*;
     input  wire                  if_id1_valid_i,
     output wire                  if_id_ready_o,
     output wire                  if_id_consume_two_o,
-    output ydrasil_issue_pkt_t   issue_pkt_o,
-    output ydrasil_issue_pkt_t   issue_pkt1_o
+    output ydrasil_id_issue_pkt_t issue_pkt_o,
+    output ydrasil_id_issue_pkt_t issue_pkt1_o
 );
     ydrasil_decode_pkt_t decoded0;
     ydrasil_decode_pkt_t decoded1;
-    ydrasil_issue_pkt_t incoming_pkt0;
-    ydrasil_issue_pkt_t incoming_pkt1;
-    ydrasil_issue_pkt_t id_queue_q0;
-    ydrasil_issue_pkt_t id_queue_q1;
-    ydrasil_issue_pkt_t id_queue_q2;
-    ydrasil_issue_pkt_t id_queue_q3;
+    ydrasil_id_issue_pkt_t incoming_pkt0;
+    ydrasil_id_issue_pkt_t incoming_pkt1;
+    ydrasil_id_issue_pkt_t id_queue_q0;
+    ydrasil_id_issue_pkt_t id_queue_q1;
+    ydrasil_id_issue_pkt_t id_queue_q2;
+    ydrasil_id_issue_pkt_t id_queue_q3;
     reg [2:0] id_queue_count_q;
     reg [1:0] id_queue_head_q;
     reg [1:0] id_queue_tail_q;

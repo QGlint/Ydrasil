@@ -264,8 +264,8 @@ import ydrasil_axi_pkg::*;
 		 (ydrasil_pkg::PRODUCER_NUM'(1) << retire_value_slot0) : '0) |
 		(commit_pkt1.valid ?
 		 (ydrasil_pkg::PRODUCER_NUM'(1) << retire_value_slot1) : '0);
-	ydrasil_issue_pkt_t             id_issue_pkt;
-	ydrasil_issue_pkt_t             id_issue_pkt1;
+	ydrasil_id_issue_pkt_t          id_issue_pkt;
+	ydrasil_id_issue_pkt_t          id_issue_pkt1;
 	ydrasil_issue_pkt_t             dispatch_issue_pkt;
 	ydrasil_issue_pkt_t             dispatch_issue_pkt1;
 	ydrasil_compact_uop_t           issue_head_compact_uop;

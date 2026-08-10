@@ -326,6 +326,10 @@ package ydrasil_pkg;
 		producer_id_t                 producer_tag;
 		ydrasil_result_class_t        producer_class;
 	} ydrasil_source_desc_t;
+	typedef struct packed {
+		logic                         used;
+		logic [REGS_ADDR_WIDTH-1:0]   arch_addr;
+	} ydrasil_id_source_desc_t;
 
 	// A local, generation-tagged wakeup contract. Identity and valid are
 	// registered at the producer boundary; data is consumed only after the
@@ -344,6 +348,10 @@ package ydrasil_pkg;
 		producer_id_t                 rob_tag;
 		ydrasil_result_class_t        result_class;
 	} ydrasil_dest_desc_t;
+	typedef struct packed {
+		logic                         writes_gpr;
+		logic [REGS_ADDR_WIDTH-1:0]   rd_addr;
+	} ydrasil_id_dest_desc_t;
 
 	typedef struct packed {
 		logic                         valid;
@@ -556,6 +564,19 @@ package ydrasil_pkg;
 		logic                                idle;
 		logic                                fast_load;
 	} ydrasil_lsu_status_pkt_t;
+
+	typedef struct packed {
+		logic                                  valid;
+		logic [1:0]                            lane_mask;
+		logic [UOP_CLASS_WIDTH-1:0]            uop_class;
+		logic [UOP_SUBOP_WIDTH-1:0]            uop_subop;
+		logic [UOP_LSU_SUBOP_WIDTH-1:0]        uop_lsu_subop;
+		ydrasil_id_source_desc_t               src0;
+		ydrasil_id_source_desc_t               src1;
+		ydrasil_id_dest_desc_t                 dst;
+		ydrasil_id_ctrl_pkt_t                  ctrl;
+		ydrasil_issue_decode_pkt_t             decode;
+	} ydrasil_id_issue_pkt_t;
 
 	typedef struct packed {
 		logic                                  valid;
