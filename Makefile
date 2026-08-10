@@ -1226,13 +1226,14 @@ rtl-xml: $(RTL_QC_FLIST)
 		echo "[RTL] tree JSON: $(RTL_QC_TREE_JSON)"; exit 0
 
 rtl-structure-report: rtl-xml
-	@echo "[RTL] structure timing policy: fre=$(RTL_QC_FREQ_MHZ)MHz warning=$(RTL_QC_WARNING_PERIOD_NS)ns target=$(RTL_QC_TARGET_PERIOD_NS)ns"
+	@echo "[RTL] structure timing policy: fre=$(RTL_QC_FREQ_MHZ)MHz warning=$(RTL_QC_WARNING_PERIOD_NS)ns target=$(RTL_QC_TARGET_PERIOD_NS)ns over-target-limit=$(RTL_QC_MAX_OVER_TARGET_PATHS)"
 	$(PYTHON) "$(SYN_DIR)/analyze_rtl_structure.py" \
 		--input "$(RTL_QC_TREE_JSON)" --output "$(RTL_QC_STRUCTURE_JSON)" --top "$(RTL_QC_TOP)" \
 		--source-metadata "$(RTL_QC_METADATA)" \
 		--calibration-history "$(RTL_QC_CALIBRATION_HISTORY)" \
 		--target-period-ns "$(RTL_QC_TARGET_PERIOD_NS)" \
 		--warning-period-ns "$(RTL_QC_WARNING_PERIOD_NS)" \
+		--max-over-target-paths "$(RTL_QC_MAX_OVER_TARGET_PATHS)" \
 		--timing-possible-depth "$(RTL_QC_TIMING_POSSIBLE_DEPTH)" \
 		--timing-definite-depth "$(RTL_QC_TIMING_DEFINITE_DEPTH)" \
 		--lutram-possible-depth "$(RTL_QC_LUTRAM_POSSIBLE_DEPTH)" \
@@ -1243,7 +1244,8 @@ rtl-structure-report: rtl-xml
 
 rtl-structure: rtl-structure-report
 	$(PYTHON) "$(SYN_DIR)/analyze_rtl_structure.py" \
-		--check-output "$(RTL_QC_STRUCTURE_JSON)"
+		--check-output "$(RTL_QC_STRUCTURE_JSON)" \
+		--max-over-target-paths "$(RTL_QC_MAX_OVER_TARGET_PATHS)"
 
 rtl-vivado-compare: rtl-structure-report
 	@test -f "$(RTL_QC_VIVADO_UTILIZATION)" || { echo "Vivado utilization report not found: $(RTL_QC_VIVADO_UTILIZATION)" >&2; exit 2; }

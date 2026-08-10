@@ -13,7 +13,10 @@ from cross_validate_rtl_timing import (
     independent_structure_predictions,
     is_over_target,
 )
-from analyze_rtl_structure import classify_timing_path_severity
+from analyze_rtl_structure import (
+    classify_timing_path_severity,
+    over_target_path_families,
+)
 
 
 class CrossValidationTest(unittest.TestCase):
@@ -50,6 +53,18 @@ class CrossValidationTest(unittest.TestCase):
 
         self.assertTrue(is_over_target(record, 4.5))
         self.assertFalse(is_over_target(record, 5.0))
+
+    def test_over_target_path_count_includes_zero_slack_boundary(self) -> None:
+        paths = [
+            {"key": "at", "estimated_upper_delay_ns": 5.0},
+            {"key": "over", "estimated_upper_delay_ns": 5.2},
+            {"key": "under", "estimated_upper_delay_ns": 4.99},
+        ]
+
+        self.assertEqual(
+            [item["key"] for item in over_target_path_families(paths, 5.0)],
+            ["at", "over"],
+        )
 
     def test_only_independent_structure_reason_is_eligible(self) -> None:
         structure = {

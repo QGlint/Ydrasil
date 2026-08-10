@@ -233,17 +233,9 @@ import ydrasil_pkg::*;
         incoming_pkt0.src1.arch_addr = decoded0.rs2_addr;
         incoming_pkt0.dst.writes_gpr = decode_valid && slot0_writes;
         incoming_pkt0.dst.rd_addr = decoded0.rd_addr;
-        incoming_pkt0.ctrl.rs1_addr = decoded0.rs1_addr;
-        incoming_pkt0.ctrl.valid = decode_valid;
-        incoming_pkt0.ctrl.rs2_addr = decoded0.rs2_addr;
-        incoming_pkt0.ctrl.rd_addr = decoded0.rd_addr;
-        incoming_pkt0.ctrl.rs1_ren = decode_valid && decoded0.rs1_ren;
-        incoming_pkt0.ctrl.rs2_ren = decode_valid &&
-			(decoded0.rs2_ren || (decoded0.op_class == UOP_CLASS_STORE));
-        incoming_pkt0.ctrl.rd_wen = decode_valid && slot0_writes;
-        incoming_pkt0.ctrl.lsu_req = decode_valid && decoded0_memory;
-        incoming_pkt0.ctrl.store_req = decode_valid &&
-            (decoded0.op_class == UOP_CLASS_STORE);
+        // Issue/CTRL only consumes this serialization bit from the ID
+        // control bundle.  Validity is carried by id_queue_valid_q and the
+        // other decoded control mirrors are reconstructed from src/dst/uop.
         incoming_pkt0.ctrl.serialize_before = decode_valid && decoded0_serial;
 
         incoming_pkt1 = '0;
@@ -260,17 +252,7 @@ import ydrasil_pkg::*;
         incoming_pkt1.src1.arch_addr = decoded1.rs2_addr;
         incoming_pkt1.dst.writes_gpr = decode_valid1 && slot1_writes;
         incoming_pkt1.dst.rd_addr = decoded1.rd_addr;
-        incoming_pkt1.ctrl.rs1_addr = decoded1.rs1_addr;
-        incoming_pkt1.ctrl.valid = decode_valid1;
-        incoming_pkt1.ctrl.rs2_addr = decoded1.rs2_addr;
-        incoming_pkt1.ctrl.rd_addr = decoded1.rd_addr;
-        incoming_pkt1.ctrl.rs1_ren = decode_valid1 && decoded1.rs1_ren;
-        incoming_pkt1.ctrl.rs2_ren = decode_valid1 &&
-			(decoded1.rs2_ren || (decoded1.op_class == UOP_CLASS_STORE));
-        incoming_pkt1.ctrl.rd_wen = decode_valid1 && slot1_writes;
-        incoming_pkt1.ctrl.lsu_req = decode_valid1 && decoded1_memory;
-        incoming_pkt1.ctrl.store_req = decode_valid1 &&
-            (decoded1.op_class == UOP_CLASS_STORE);
+        // See lane A: only serialize_before crosses the elastic boundary.
         incoming_pkt1.ctrl.serialize_before = decode_valid1 && decoded1_serial;
     end
 
@@ -301,16 +283,12 @@ import ydrasil_pkg::*;
                 issue_pkt1_o.valid = id_queue_valid_q[0];
             end
         endcase
-        issue_pkt_o.ctrl.valid = issue_pkt_o.valid;
-        issue_pkt1_o.ctrl.valid = issue_pkt1_o.valid;
         if (!issue_pkt_o.valid) begin
             issue_pkt_o.valid = 1'b0;
-            issue_pkt_o.ctrl.valid = 1'b0;
             issue_pkt_o.lane_mask = '0;
         end
         if (!issue_pkt1_o.valid || issue_pkt_o.ctrl.serialize_before) begin
             issue_pkt1_o.valid = 1'b0;
-            issue_pkt1_o.ctrl.valid = 1'b0;
             issue_pkt1_o.lane_mask = '0;
         end
     end

@@ -53,6 +53,26 @@ OPERATOR_ALIASES = {
 TIMING_SEVERITY_RANK = {"ADVISORY": 0, "WARNING": 1, "ERROR": 2}
 
 
+def over_target_path_families(
+    path_risks: Iterable[dict[str, Any]], target_period_ns: float
+) -> list[dict[str, Any]]:
+    """Return path families whose conservative delay reaches the target.
+
+    A zero-slack path is already a timing failure, so the comparison is
+    inclusive.  Reports from older checker versions may omit or null the
+    estimate; those entries are ignored rather than making the gate fail.
+    """
+    over_target: list[dict[str, Any]] = []
+    for item in path_risks:
+        try:
+            estimated_ns = float(item.get("estimated_upper_delay_ns"))
+        except (TypeError, ValueError):
+            continue
+        if estimated_ns >= target_period_ns:
+            over_target.append(item)
+    return over_target
+
+
 def classify_timing_path_severity(
     structural_depth: int,
     conservative_delay_ns: float,
@@ -1934,6 +1954,7 @@ def hierarchical_report(
     warning_period_ns: float = 4.5,
     definite_depth: int = 21,
     bram_clock_to_out_ns: float = 2.45,
+    max_over_target_paths: int = 100,
 ) -> dict[str, Any]:
     """Flatten combinational CELL connections for top-level feedback analysis.
 
@@ -2822,6 +2843,8 @@ def hierarchical_report(
             item["key"],
         ),
     )
+    over_target_paths = over_target_path_families(ordered_path_risks, target_period_ns)
+    over_target_count = len(over_target_paths)
     meaningful_cycles = [item for item in cycles if item.get("size", 0) > 1]
     critical_timing_path = [display(sorted(components[item])[0]) for item in critical_components]
     return {
@@ -2849,6 +2872,16 @@ def hierarchical_report(
             for item in endpoint_nodes.values()
         )),
         "timing_path_risks": ordered_path_risks,
+        "target_period_ns": target_period_ns,
+        "warning_period_ns": warning_period_ns,
+        "timing_path_over_target_count": over_target_count,
+        "timing_path_over_target_limit": max_over_target_paths,
+        "timing_path_over_target_limit_exceeded": (
+            over_target_count > max_over_target_paths
+        ),
+        "timing_path_over_target_families": [
+            item["key"] for item in over_target_paths
+        ],
         "timing_path_error_count": sum(
             item["severity"] == "ERROR" for item in ordered_path_risks
         ),
@@ -3176,6 +3209,12 @@ def main() -> int:
     parser.add_argument("--fail-on-timing-path", action="store_true")
     parser.add_argument("--target-period-ns", type=float, default=5.0)
     parser.add_argument("--warning-period-ns", type=float, default=4.5)
+    parser.add_argument(
+        "--max-over-target-paths",
+        type=int,
+        default=100,
+        help="warn when this many path families reach the target period",
+    )
     parser.add_argument("--timing-possible-depth", type=int, default=9)
     parser.add_argument("--timing-definite-depth", type=int, default=21)
     parser.add_argument("--lutram-possible-depth", type=int, default=6)
@@ -3186,13 +3225,30 @@ def main() -> int:
     args = parser.parse_args()
     if args.warning_period_ns > args.target_period_ns:
         parser.error("--warning-period-ns must not exceed --target-period-ns")
+    if args.max_over_target_paths < 0:
+        parser.error("--max-over-target-paths must be non-negative")
     if args.check_output:
         try:
             checked = json.loads(args.check_output.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             print(f"error: cannot read structure report {args.check_output}: {exc}", file=sys.stderr)
             return 2
-        path_risks = checked.get("hierarchical", {}).get("timing_path_risks", [])
+        hierarchy = checked.get("hierarchical", {})
+        summary = checked.get("summary", {})
+        path_risks = hierarchy.get("timing_path_risks", [])
+        try:
+            report_target_period_ns = float(
+                hierarchy.get(
+                    "target_period_ns",
+                    summary.get("target_period_ns", args.target_period_ns),
+                )
+            )
+        except (TypeError, ValueError):
+            report_target_period_ns = args.target_period_ns
+        over_target_paths = over_target_path_families(
+            path_risks, report_target_period_ns
+        )
+        over_target_count = len(over_target_paths)
         failures = [
             item for item in path_risks
             if item.get("severity") in {"ERROR", "FAIL"}
@@ -3217,11 +3273,18 @@ def main() -> int:
                 f"bounded-depth={cycle.get('bounded_path_depth')} "
                 f"witness={witness[:2]}"
             )
+        if over_target_count > args.max_over_target_paths:
+            print(
+                f"WARNING timing_path_over_target_count: {over_target_count} "
+                f"path families are estimated at or above {report_target_period_ns:g}ns; "
+                f"limit={args.max_over_target_paths}"
+            )
         if failures or cycles:
             print(
                 f"error: {len(failures)} structural timing path families and "
                 f"{len(cycles)} combinational loops fail the gate; "
-                f"{len(warnings)} high timing warnings remain",
+                f"{len(warnings)} high timing warnings remain; "
+                f"{over_target_count} paths at or above {report_target_period_ns:g}ns",
                 file=sys.stderr,
             )
             return 1
@@ -3234,7 +3297,8 @@ def main() -> int:
                 f"reasons={','.join(item.get('reasons', []))}"
             )
         print(
-            f"no structural timing ERRORs; {len(warnings)} high timing warnings"
+            f"no structural timing ERRORs; {len(warnings)} high timing warnings; "
+            f"{over_target_count} paths at or above {report_target_period_ns:g}ns"
         )
         return 0
     if args.input is None or args.output is None:
@@ -3285,6 +3349,7 @@ def main() -> int:
         warning_period_ns=args.warning_period_ns,
         definite_depth=args.timing_definite_depth,
         bram_clock_to_out_ns=args.bram_clock_to_out_ns,
+        max_over_target_paths=args.max_over_target_paths,
     )
     for report in reports:
         report_hierarchy = hierarchy if report.get("name") == hierarchy_top else None
@@ -3343,6 +3408,13 @@ def main() -> int:
         "hierarchical_timing_endpoint_max_depth": hierarchy.get("timing_endpoint_max_depth", 0) if hierarchy.get("available") else 0,
         "target_period_ns": args.target_period_ns,
         "warning_period_ns": args.warning_period_ns,
+        "timing_path_over_target_count": hierarchy.get("timing_path_over_target_count", 0),
+        "timing_path_over_target_limit": hierarchy.get(
+            "timing_path_over_target_limit", args.max_over_target_paths
+        ),
+        "timing_path_over_target_limit_exceeded": hierarchy.get(
+            "timing_path_over_target_limit_exceeded", False
+        ),
         "timing_possible_depth_threshold": args.timing_possible_depth,
         "timing_definite_depth_threshold": args.timing_definite_depth,
         "timing_path_error_count": hierarchy.get("timing_path_error_count", 0),
