@@ -376,7 +376,6 @@ import ydrasil_pkg::*;
     ydrasil_lane_b_bru_payload_t dual_bru_payload_q;
     reg alu_in_operand_a_dtcm_q, alu_in_operand_b_dtcm_q;
     reg agu_in_operand_a_dtcm_q, agu_in_store_data_dtcm_q;
-    reg csr_in_operand_a_dtcm_q;
     reg mul_in_operand_a_dtcm_q, mul_in_operand_b_dtcm_q;
     reg dual_in_operand_a_dtcm_q, dual_in_operand_b_dtcm_q;
     reg dual_in_branch_operand_a_dtcm_q, dual_in_branch_operand_b_dtcm_q;
@@ -385,8 +384,8 @@ import ydrasil_pkg::*;
     wire dtcm_bypass_active_q =
         alu_in_operand_a_dtcm_q || alu_in_operand_b_dtcm_q ||
         agu_in_operand_a_dtcm_q || agu_in_store_data_dtcm_q ||
-        csr_in_operand_a_dtcm_q || mul_in_operand_a_dtcm_q ||
-        mul_in_operand_b_dtcm_q || dual_in_operand_a_dtcm_q ||
+        mul_in_operand_a_dtcm_q || mul_in_operand_b_dtcm_q ||
+        dual_in_operand_a_dtcm_q ||
         dual_in_operand_b_dtcm_q || dual_in_branch_operand_a_dtcm_q ||
         dual_in_branch_operand_b_dtcm_q;
     wire [DATA_WIDTH-1:0] dtcm_bypass_data = dtcm_stall_data_valid_q ?
@@ -588,6 +587,10 @@ import ydrasil_pkg::*;
     wire [DATA_WIDTH-1:0] slot1_src1_local = slot1_src1_early_main_hit ?
         early_main_bypass_data_i : slot1_src1_early_dual_hit ?
         early_dual_bypass_data_i : slot1_src1;
+    wire [DATA_WIDTH-1:0] slot0_operand_a_local =
+        issue_pkt_i.operand_a_pc_sel ? issue_pkt_i.pc :
+        issue_pkt_i.operand_a_imm_sel ? issue_pkt_i.imm :
+        slot0_src0_local;
     wire lane_b_uses_slot0 = head0_b_only || swap_pair;
     wire lane_b_src1_ready = lane_b_uses_slot0 ? src1_ready : src3_ready;
     wire [DATA_WIDTH-1:0] lane_a_src0_local = swap_pair ?
@@ -609,6 +612,9 @@ import ydrasil_pkg::*;
 
     wire lane_a_accept = id_advance && lane_a_valid;
     wire lane_b_accept = id_advance && lane_b_valid;
+    wire slot0_csr_accept = id_advance && issue_pkt_i.valid &&
+        ((issue_pkt_i.op_class == UOP_CLASS_CSR) ||
+         (issue_pkt_i.op_class == UOP_CLASS_SYS));
     wire lane_a_op_a_src = !lane_a_uop.operand_a_pc_sel &&
         !lane_a_uop.operand_a_imm_sel;
     wire lane_a_op_b_src = !lane_a_uop.operand_b_jump_sel &&
@@ -786,8 +792,8 @@ import ydrasil_pkg::*;
             dual_bru_payload_q <= '0;
             {alu_in_operand_a_dtcm_q, alu_in_operand_b_dtcm_q,
              agu_in_operand_a_dtcm_q, agu_in_store_data_dtcm_q,
-             csr_in_operand_a_dtcm_q, mul_in_operand_a_dtcm_q,
-             mul_in_operand_b_dtcm_q, dual_in_operand_a_dtcm_q,
+             mul_in_operand_a_dtcm_q, mul_in_operand_b_dtcm_q,
+             dual_in_operand_a_dtcm_q,
              dual_in_operand_b_dtcm_q,
              dual_in_branch_operand_a_dtcm_q,
              dual_in_branch_operand_b_dtcm_q} <= '0;
@@ -828,8 +834,8 @@ import ydrasil_pkg::*;
                     dual_bru_valid_q <= 1'b0;
                     {alu_in_operand_a_dtcm_q, alu_in_operand_b_dtcm_q,
                      agu_in_operand_a_dtcm_q, agu_in_store_data_dtcm_q,
-                     csr_in_operand_a_dtcm_q, mul_in_operand_a_dtcm_q,
-                     mul_in_operand_b_dtcm_q, dual_in_operand_a_dtcm_q,
+                     mul_in_operand_a_dtcm_q, mul_in_operand_b_dtcm_q,
+                     dual_in_operand_a_dtcm_q,
                      dual_in_operand_b_dtcm_q,
                      dual_in_branch_operand_a_dtcm_q,
                      dual_in_branch_operand_b_dtcm_q} <= '0;
@@ -848,10 +854,6 @@ import ydrasil_pkg::*;
                     agu_in_store_data_dtcm_q <= lane_b_agu_accept &&
                         (lane_b_uop.op_class == UOP_CLASS_STORE) &&
                         lane_b_src1_dtcm_hit;
-                    csr_in_operand_a_dtcm_q <= lane_a_accept &&
-                        ((lane_a_uop.op_class == UOP_CLASS_CSR) ||
-                         (lane_a_uop.op_class == UOP_CLASS_SYS)) &&
-                        lane_a_op_a_src && lane_a_src0_dtcm_hit;
                     mul_in_operand_a_dtcm_q <= lane_b_mul_accept &&
                         lane_b_op_a_src && lane_b_src0_dtcm_hit;
                     mul_in_operand_b_dtcm_q <= lane_b_mul_accept &&
@@ -907,15 +909,16 @@ import ydrasil_pkg::*;
                     // The execute block consumes CSR input only for CSR/SYS
                     // operations.  Do not carry the lane-A valid pulse for
                     // ordinary ALU/BRU instructions across this boundary.
-                    csr_in_valid_q <= lane_a_fu_valid &&
-                        ((lane_a_uop.op_class == UOP_CLASS_CSR) ||
-                         (lane_a_uop.op_class == UOP_CLASS_SYS));
-                    csr_in_operand_a_q <= lane_a_operand_a_local;
-                    csr_in_operator_type_q <= lane_a_operator_type;
-                    csr_in_raddr_q <= lane_a_uop.csr_raddr;
-                    csr_in_waddr_q <= lane_a_uop.csr_waddr;
-                    csr_in_op_info_q <= lane_a_uop.csr_op_info;
-                    csr_in_sys_info_q <= lane_a_uop.sys_op_info;
+                    csr_in_valid_q <= slot0_csr_accept;
+                    if (slot0_csr_accept) begin
+                        csr_in_operand_a_q <= slot0_operand_a_local;
+                        csr_in_operator_type_q <=
+                            uop_operator_type(issue_pkt_i);
+                        csr_in_raddr_q <= issue_pkt_i.csr_raddr;
+                        csr_in_waddr_q <= issue_pkt_i.csr_waddr;
+                        csr_in_op_info_q <= issue_pkt_i.csr_op_info;
+                        csr_in_sys_info_q <= issue_pkt_i.sys_op_info;
+                    end
                     mul_in_valid_q <= lane_b_mul_accept;
                     mul_in_operand_a_q <= lane_b_operand_a_local;
                     mul_in_operand_b_q <= lane_b_operand_b_local;
@@ -954,8 +957,7 @@ import ydrasil_pkg::*;
 	assign agu_in_store_data_o = agu_in_store_data_dtcm_q ?
         dtcm_bypass_data : agu_in_req_q.store_data;
     assign csr_in_valid_o = csr_in_valid_q;
-	assign csr_in_operand_a_o = csr_in_operand_a_dtcm_q ?
-        dtcm_bypass_data : csr_in_operand_a_q;
+	assign csr_in_operand_a_o = csr_in_operand_a_q;
     assign csr_in_operator_type_o = csr_in_operator_type_q;
     assign csr_in_raddr_o = csr_in_raddr_q;
     assign csr_in_waddr_o = csr_in_waddr_q;
