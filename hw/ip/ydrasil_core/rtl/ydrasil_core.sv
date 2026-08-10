@@ -198,7 +198,6 @@ import ydrasil_axi_pkg::*;
 	wire [1:0]                  bp_bram_predict_local_counter;
 	bp_bht_index_t              bp_bram_predict_bht_index;
 	bp_ghr_t                    bp_bram_predict_ghr_checkpoint;
-	wire                        bp_bram_predict_hit1;
 	wire                        bp_bram_predict1_taken;
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] bp_bram_predict1_target;
 	wire [1:0]                  bp_bram_predict1_counter;
