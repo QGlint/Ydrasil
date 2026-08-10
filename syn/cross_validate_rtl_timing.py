@@ -122,7 +122,7 @@ def validate_holdout(
     held: dict[str, Any],
     training: list[dict[str, Any]],
     target_period_ns: float,
-    definite_depth: int = 34,
+    definite_depth: int = 21,
     warning_period_ns: float = 4.5,
 ) -> dict[str, Any]:
     held_geometry = held.get("memory_geometry_profile")
@@ -305,7 +305,7 @@ def main() -> int:
     parser.add_argument("--archive-root", type=Path, required=True)
     parser.add_argument("--target-period-ns", type=float, default=5.0)
     parser.add_argument("--warning-period-ns", type=float, default=4.5)
-    parser.add_argument("--definite-depth", type=int, default=34)
+    parser.add_argument("--definite-depth", type=int, default=21)
     parser.add_argument("--min-aggregate-path-recall", type=float, default=0.95)
     parser.add_argument("--min-aggregate-family-recall", type=float, default=0.80)
     parser.add_argument("--min-holdout-path-recall", type=float, default=0.90)

@@ -461,7 +461,6 @@ package ydrasil_pkg;
 		logic [REGS_ADDR_WIDTH-1:0]          rd_addr;
 		logic                                alu_rf_wen;
 		logic [OPERATOR_TYPE_WIDTH-1:0]      operator_type;
-		logic [OPERATOR_WIDTH-1:0]           operator_info;
 	} ydrasil_ex_hzd_pkt_t;
 
 	typedef struct packed {
@@ -603,6 +602,7 @@ package ydrasil_pkg;
 	typedef struct packed {
 		logic                                bitmanip;
 		logic [UOP_SUBOP_WIDTH-1:0]          subop;
+		logic [OPERATOR_WIDTH-1:0]           operator_info;
 		logic [REGS_DATA_WIDTH-1:0]          operand_a;
 		logic [REGS_DATA_WIDTH-1:0]          operand_b;
 	} ydrasil_lane_b_alu_payload_t;

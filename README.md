@@ -223,6 +223,9 @@ make yosys-slang-gate YOSYS_BASELINE_STAT=build/yosys-slang/base/stat.json
 `rtl-quickcheck` 现在默认串起 `rtl-strict`、`rtl-structure` 和 `vivado-ooc`。
 `rtl-vivado-compare` 不重新启动 Vivado，只读取 `config.mk` 中的
 `RTL_QC_VIVADO_*` 报告路径，并在 `build/rtl-quickcheck/` 生成比较 JSON。
+200 MHz 默认把结构深度 `>=21`（即超过 20 级）提升为严格 ERROR；当前
+检查结果中的 ERROR 和 WARNING 数量都会写入结构 JSON，便于按真实违例
+路径族排序修复。
 寄存器位数是 RTL 状态上界；宽度加权的 AST fanout 和组合工作量是趋势估计，
 不能替代 Vivado 的复制、时钟使能提升和布线 fanout。结构报告同时给出
 `max_depth`（模块内）和 `cross_module_max_depth`（跨 CELL 展开），并标记

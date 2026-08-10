@@ -29,6 +29,12 @@ class CrossValidationTest(unittest.TestCase):
             "ERROR",
         )
 
+    def test_strict_200mhz_depth_boundary_is_an_error(self) -> None:
+        self.assertEqual(
+            classify_timing_path_severity(21, 8.0, 4.5, 21),
+            "ERROR",
+        )
+
     def test_low_estimate_is_advisory(self) -> None:
         self.assertEqual(
             classify_timing_path_severity(8, 4.4, 4.5, 34),

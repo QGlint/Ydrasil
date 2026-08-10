@@ -109,8 +109,8 @@ import ydrasil_pkg::*;
     ,output wire dbg_bp_mispredict_o
 `endif
 );
-    logic [OPERATOR_WIDTH-1:0] dual_operator;
     logic [OPERATOR_TYPE_WIDTH-1:0] dual_operator_type;
+    logic [OPERATOR_TYPE_WIDTH-1:0] dual_alu_operator_type;
     wire [REGS_DATA_WIDTH-1:0] dual_operand_a = dual_alu_operand_a_i;
     wire [REGS_DATA_WIDTH-1:0] dual_operand_b = dual_alu_operand_b_i;
     wire dual_valid = dual_alu_valid_i || agu_valid_i || mul_valid_i;
@@ -119,20 +119,20 @@ import ydrasil_pkg::*;
     wire unused_instret;
 
     always_comb begin
-        dual_operator = '0;
         dual_operator_type = '0;
+        // Lane B's ALU type is mutually exclusive with MUL/AGU. Keep its
+        // type separate from the hazard mux so unrelated valid controls do
+        // not enter the early-result feedback cone.
+        dual_alu_operator_type = '0;
+        dual_alu_operator_type[OPERATOR_TYPE_ALU] = !dual_alu_payload_i.bitmanip;
+        dual_alu_operator_type[OPERATOR_TYPE_BITMANIP] = dual_alu_payload_i.bitmanip;
         if (mul_valid_i) begin
-            dual_operator = mul_operator_i;
             dual_operator_type = mul_operator_type_i;
         end else if (agu_valid_i) begin
             dual_operator_type[OPERATOR_TYPE_LOAD] = agu_req_i.is_load;
             dual_operator_type[OPERATOR_TYPE_STORE] = agu_req_i.is_store;
         end else if (dual_alu_valid_i) begin
-            dual_operator[dual_alu_payload_i.subop] = 1'b1;
-            dual_operator_type[OPERATOR_TYPE_ALU] =
-                !dual_alu_payload_i.bitmanip;
-            dual_operator_type[OPERATOR_TYPE_BITMANIP] =
-                dual_alu_payload_i.bitmanip;
+            dual_operator_type = dual_alu_operator_type;
         end
     end
 
@@ -145,7 +145,6 @@ import ydrasil_pkg::*;
         ex_hzd_o.rd_addr = alu_rd_addr_i;
         ex_hzd_o.alu_rf_wen = alu_rd_wen_i;
         ex_hzd_o.operator_type = alu_operator_type_i;
-        ex_hzd_o.operator_info = alu_operator_i;
 
         ex_hzd1_o = '0;
         ex_hzd1_o.valid = dual_valid;
@@ -155,7 +154,6 @@ import ydrasil_pkg::*;
         ex_hzd1_o.rd_addr = dual_meta_i.rd_addr;
         ex_hzd1_o.alu_rf_wen = dual_meta_i.rd_wen;
         ex_hzd1_o.operator_type = dual_operator_type;
-        ex_hzd1_o.operator_info = dual_operator;
     end
 
     always_comb begin
@@ -297,8 +295,8 @@ import ydrasil_pkg::*;
         .valid_i                (ex_accept_valid1_i && dual_alu_valid_i),
         .operand_a_i            (dual_operand_a),
         .operand_b_i            (dual_operand_b),
-        .operator_i             (dual_operator),
-        .operator_type_i        (dual_operator_type),
+        .operator_i             (dual_alu_payload_i.operator_info),
+        .operator_type_i        (dual_alu_operator_type),
         .rd_addr_i              (dual_meta_i.rd_addr),
         .rd_wen_i               (dual_meta_i.rd_wen),
         .producer_id_i          (dual_meta_i.producer_id),

@@ -65,9 +65,11 @@ def classify_timing_path_severity(
     """Separate high-confidence gate failures from conservative warnings.
 
     Verilator AST depth is useful for ranking paths, but it overstates mapped
-    FPGA logic on mux-heavy paths.  Archived passing designs therefore set the
-    definite-depth boundary.  Delay estimates and historical failures remain
-    warnings unless an independent current-structure condition is definite.
+    FPGA logic on mux-heavy paths.  The definite-depth boundary is therefore
+    configurable; the current 200 MHz route-dominated design sets it above
+    structural depth 20 based on observed negative-slack path families. Delay
+    estimates and historical failures remain warnings unless an independent
+    current-structure condition is definite.
     """
     if force_error or structural_depth >= definite_depth:
         return "ERROR"
@@ -1930,7 +1932,7 @@ def hierarchical_report(
     training: dict[str, Any] | None = None,
     target_period_ns: float = 5.0,
     warning_period_ns: float = 4.5,
-    definite_depth: int = 34,
+    definite_depth: int = 21,
     bram_clock_to_out_ns: float = 2.45,
 ) -> dict[str, Any]:
     """Flatten combinational CELL connections for top-level feedback analysis.
@@ -3175,7 +3177,7 @@ def main() -> int:
     parser.add_argument("--target-period-ns", type=float, default=5.0)
     parser.add_argument("--warning-period-ns", type=float, default=4.5)
     parser.add_argument("--timing-possible-depth", type=int, default=9)
-    parser.add_argument("--timing-definite-depth", type=int, default=34)
+    parser.add_argument("--timing-definite-depth", type=int, default=21)
     parser.add_argument("--lutram-possible-depth", type=int, default=6)
     parser.add_argument("--fanout-timing-min-depth", type=int, default=3)
     parser.add_argument("--bram-launch-penalty-depth", type=int, default=6)
@@ -3218,7 +3220,8 @@ def main() -> int:
         if failures or cycles:
             print(
                 f"error: {len(failures)} structural timing path families and "
-                f"{len(cycles)} combinational loops fail the gate",
+                f"{len(cycles)} combinational loops fail the gate; "
+                f"{len(warnings)} high timing warnings remain",
                 file=sys.stderr,
             )
             return 1

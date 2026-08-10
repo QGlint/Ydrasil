@@ -272,14 +272,16 @@ RTL_QC_CV_MIN_ERROR_PRECISION ?= 0.90
 RTL_QC_CV_MIN_ERROR_TRUE_FAMILIES ?= 5
 RTL_QC_ERROR_LIMIT ?= 50
 # Frequency-specific policy calibrated against the xc7 post-route reports.
-# At 200 MHz, depth 33 closes timing and depth 34 remains the zero-false-positive
-# severe boundary across the archive.  At 250 MHz, the current depth-33 fetch
-# path fails at -0.846 ns, so it is an ERROR while 3.6 ns remains the warning
+# The 200 MHz report is route-dominated: paths with structural depth above 20
+# already appear among the real negative-slack families.  Keep that boundary
+# strict so the checker exposes repair candidates instead of collapsing them
+# into a large warning bucket.  At 250 MHz, the current depth-33 fetch path
+# fails at -0.846 ns, so it remains an ERROR while 3.6 ns is the warning
 # margin.  BRAM clock-to-out is device-specific and remains unchanged.
 RTL_QC_TARGET_PERIOD_NS_200 ?= 5.0
 RTL_QC_WARNING_PERIOD_NS_200 ?= 4.5
 RTL_QC_TIMING_POSSIBLE_DEPTH_200 ?= 9
-RTL_QC_TIMING_DEFINITE_DEPTH_200 ?= 34
+RTL_QC_TIMING_DEFINITE_DEPTH_200 ?= 21
 RTL_QC_LUTRAM_POSSIBLE_DEPTH_200 ?= 6
 RTL_QC_TARGET_PERIOD_NS_250 ?= 4.0
 RTL_QC_WARNING_PERIOD_NS_250 ?= 3.6

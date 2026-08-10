@@ -625,6 +625,8 @@ import ydrasil_pkg::*;
         uop_operator_info(lane_a_uop);
     wire [OPERATOR_TYPE_WIDTH-1:0] lane_a_operator_type =
         uop_operator_type(lane_a_uop);
+    wire [OPERATOR_WIDTH-1:0] lane_b_operator_info =
+        uop_operator_info(lane_b_uop);
     assign rf_addr_rs1 = issue_pkt_i.src0.arch_addr;
     assign rf_addr_rs2 = issue_pkt_i.src1.arch_addr;
     assign rf_addr_rs3 = issue_pkt1_i.src0.arch_addr;
@@ -724,6 +726,7 @@ import ydrasil_pkg::*;
         dual_alu_payload_d.bitmanip =
             lane_b_uop.op_class == UOP_CLASS_BITMANIP;
         dual_alu_payload_d.subop = lane_b_uop.subop;
+        dual_alu_payload_d.operator_info = lane_b_operator_info;
         dual_alu_payload_d.operand_a = lane_b_operand_a_local;
         dual_alu_payload_d.operand_b = lane_b_operand_b_local;
 
@@ -911,7 +914,7 @@ import ydrasil_pkg::*;
                     mul_in_valid_q <= lane_b_mul_accept;
                     mul_in_operand_a_q <= lane_b_operand_a_local;
                     mul_in_operand_b_q <= lane_b_operand_b_local;
-                    mul_in_operator_q <= uop_operator_info(lane_b_uop);
+                    mul_in_operator_q <= lane_b_operator_info;
                     mul_in_operator_type_q <= uop_operator_type(lane_b_uop);
                     dual_alu_valid_q <= lane_b_alu_accept;
                     dual_bru_valid_q <= lane_a_bru_accept;
