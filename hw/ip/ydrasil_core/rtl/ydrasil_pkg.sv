@@ -416,15 +416,6 @@ package ydrasil_pkg;
 	} ydrasil_bp_train_pkt_t;
 
 	typedef struct packed {
-		logic                                valid;
-		logic [REGS_ADDR_WIDTH-1:0]          rs1_addr;
-		logic [REGS_ADDR_WIDTH-1:0]          rs2_addr;
-		logic [REGS_ADDR_WIDTH-1:0]          rd_addr;
-		logic                                rs1_ren;
-		logic                                rs2_ren;
-		logic                                rd_wen;
-		logic                                lsu_req;
-		logic                                store_req;
 		logic                                serialize_before;
 	} ydrasil_id_ctrl_pkt_t;
 
