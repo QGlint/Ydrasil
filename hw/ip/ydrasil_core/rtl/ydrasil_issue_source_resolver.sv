@@ -21,8 +21,7 @@ import ydrasil_pkg::*;
     output wire                          early_dual_hit_o
 );
     wire source_nonzero = source_i.arch_addr != '0;
-    // The generation-qualified producer ID is the functional identity. Class
-    // and architectural destination are metadata checks, not mux selectors.
+    // The generation-qualified producer ID is the functional identity.
     wire source_dtcm_key_match =
         source_i.producer_tag == dtcm_reservation_i.producer_id;
     wire source_main_key_match =
@@ -45,20 +44,14 @@ import ydrasil_pkg::*;
 `ifndef SYNTHESIS
     always_comb begin
         if (dtcm_hit_o) begin
-            assert (source_i.producer_class == dtcm_reservation_i.result_class)
-                else $fatal(1, "DTCM wakeup producer class mismatch");
             assert (source_i.arch_addr == dtcm_reservation_i.arch_addr)
                 else $fatal(1, "DTCM wakeup destination mismatch");
         end
         if (early_main_hit_o) begin
-            assert (source_i.producer_class == RESULT_ALU)
-                else $fatal(1, "main ALU wakeup producer class mismatch");
             assert (source_i.arch_addr == early_main_rd_i)
                 else $fatal(1, "main ALU wakeup destination mismatch");
         end
         if (early_dual_hit_o) begin
-            assert (source_i.producer_class == RESULT_ALU)
-                else $fatal(1, "dual ALU wakeup producer class mismatch");
             assert (source_i.arch_addr == early_dual_rd_i)
                 else $fatal(1, "dual ALU wakeup destination mismatch");
         end

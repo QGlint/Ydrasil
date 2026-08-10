@@ -64,21 +64,28 @@ import ydrasil_pkg::*;
     wire rd_waw_stall = 1'b0;
     wire rd_issue_hzd = 1'b0;
     wire issue_src_hzd = rs1_pending_stall || rs2_pending_stall;
+    localparam logic [2:0] DBG_PRODUCER_ALU = 3'd1;
+    localparam logic [2:0] DBG_PRODUCER_LOAD = 3'd2;
+    localparam logic [2:0] DBG_PRODUCER_MUL = 3'd3;
+    wire [2:0] rs1_producer_kind =
+        $root.ydrasil_core_tb.u_dut.u_ctrl.dbg_rs1_producer_kind;
+    wire [2:0] rs2_producer_kind =
+        $root.ydrasil_core_tb.u_dut.u_ctrl.dbg_rs2_producer_kind;
     wire issue_load_producer =
         (rs1_pending_stall &&
-         ($root.ydrasil_core_tb.u_dut.issue_head_compact_uop.src0.producer_class == RESULT_LSU)) ||
+         (rs1_producer_kind == DBG_PRODUCER_LOAD)) ||
         (rs2_pending_stall &&
-         ($root.ydrasil_core_tb.u_dut.issue_head_compact_uop.src1.producer_class == RESULT_LSU));
+         (rs2_producer_kind == DBG_PRODUCER_LOAD));
     wire issue_alu_producer =
         (rs1_pending_stall &&
-         ($root.ydrasil_core_tb.u_dut.issue_head_compact_uop.src0.producer_class == RESULT_ALU)) ||
+         (rs1_producer_kind == DBG_PRODUCER_ALU)) ||
         (rs2_pending_stall &&
-         ($root.ydrasil_core_tb.u_dut.issue_head_compact_uop.src1.producer_class == RESULT_ALU));
+         (rs2_producer_kind == DBG_PRODUCER_ALU));
     wire issue_mul_div_producer =
         (rs1_pending_stall &&
-         ($root.ydrasil_core_tb.u_dut.issue_head_compact_uop.src0.producer_class == RESULT_MDU)) ||
+         (rs1_producer_kind == DBG_PRODUCER_MUL)) ||
         (rs2_pending_stall &&
-         ($root.ydrasil_core_tb.u_dut.issue_head_compact_uop.src1.producer_class == RESULT_MDU));
+         (rs2_producer_kind == DBG_PRODUCER_MUL));
 
     wire [REGS_ADDR_WIDTH-1:0] id_ctrl_rs1_addr =
         $root.ydrasil_core_tb.u_dut.issue_head_compact_uop.src0.arch_addr;

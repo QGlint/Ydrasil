@@ -395,7 +395,6 @@ import ydrasil_pkg::*;
         load_s1_producer_tracked_q;
     assign dtcm_reservation_o.producer_id = load_s1_producer_id_q;
     assign dtcm_reservation_o.arch_addr = load_s1_rd_addr_q;
-    assign dtcm_reservation_o.result_class = RESULT_LSU;
     assign dtcm_resp_data_o = dtcm_resp_data_q;
 
 	ydrasil_lsu_req_pkt_t enqueue_pkt;

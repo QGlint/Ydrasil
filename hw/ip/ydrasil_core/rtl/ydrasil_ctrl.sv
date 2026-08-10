@@ -65,15 +65,9 @@ import ydrasil_pkg::*;
     reg [PRODUCER_NUM-1:0] producer_epoch_q;
     reg [INST_ADDR_WIDTH-1:0] producer_pc_q [0:PRODUCER_NUM-1];
     reg [2:0] producer_op_class_q [0:PRODUCER_NUM-1];
-    ydrasil_result_class_t producer_result_class_q [0:PRODUCER_NUM-1];
 
     reg [REGS_NUM-1:0] latest_valid_q;
     producer_id_t latest_id_q [0:REGS_NUM-1];
-    // Keep the completion class beside the RAT tag.  Reading it back through
-    // the producer file turns every decode source into two cascaded dynamic
-    // selects (architectural register -> producer slot).  This small mirror
-    // removes that second select from the decode/issue boundary.
-    ydrasil_result_class_t latest_class_q [0:REGS_NUM-1];
 
     producer_slot_t queue_head_q;
     producer_slot_t queue_tail_q;
@@ -189,9 +183,8 @@ import ydrasil_pkg::*;
             ~producer_epoch_q[alloc_slot1], alloc_slot1};
     end
 
-    // Name each RAT read once.  Besides making the tag/class relationship
-    // explicit, this gives synthesis one consumer per source instead of
-    // duplicating an unpacked-array lookup in the packet assembly below.
+    // Name each RAT read once so synthesis sees one consumer per source
+    // instead of duplicating an unpacked-array lookup in packet assembly.
     wire producer_id_t dispatch_src0_latest_id =
         latest_id_q[dispatch_pkt_i.src0.arch_addr];
     wire producer_id_t dispatch_src1_latest_id =
@@ -200,22 +193,6 @@ import ydrasil_pkg::*;
         latest_id_q[dispatch_pkt1_i.src0.arch_addr];
     wire producer_id_t dispatch1_src1_latest_id =
         latest_id_q[dispatch_pkt1_i.src1.arch_addr];
-    wire ydrasil_result_class_t dispatch_src0_latest_class =
-        latest_class_q[dispatch_pkt_i.src0.arch_addr];
-    wire ydrasil_result_class_t dispatch_src1_latest_class =
-        latest_class_q[dispatch_pkt_i.src1.arch_addr];
-    wire ydrasil_result_class_t dispatch1_src0_latest_class =
-        latest_class_q[dispatch_pkt1_i.src0.arch_addr];
-    wire ydrasil_result_class_t dispatch1_src1_latest_class =
-        latest_class_q[dispatch_pkt1_i.src1.arch_addr];
-    wire ydrasil_result_class_t dispatch_result_class =
-        (dispatch_pkt_i.uop_class == UOP_CLASS_LOAD) ? RESULT_LSU :
-		(dispatch_pkt_i.uop_class == UOP_CLASS_MUL) ?
-        RESULT_MDU : RESULT_ALU;
-    wire ydrasil_result_class_t dispatch1_result_class =
-        (dispatch_pkt1_i.uop_class == UOP_CLASS_LOAD) ? RESULT_LSU :
-		(dispatch_pkt1_i.uop_class == UOP_CLASS_MUL) ?
-        RESULT_MDU : RESULT_ALU;
     wire dispatch1_src0_from_slot0 = dispatch_pkt1_i.src0.used &&
         dispatch_pkt_i.dst.writes_gpr && (dispatch_pkt_i.dst.rd_addr != '0) &&
         (dispatch_pkt1_i.src0.arch_addr == dispatch_pkt_i.dst.rd_addr);
@@ -252,14 +229,11 @@ import ydrasil_pkg::*;
             (dispatch_pkt_i.src0.arch_addr != '0) &&
             latest_valid_q[dispatch_pkt_i.src0.arch_addr];
         dispatch_pkt_o.src0.producer_tag = dispatch_src0_latest_id;
-        dispatch_pkt_o.src0.producer_class = dispatch_src0_latest_class;
         dispatch_pkt_o.src1.tag_valid = dispatch_pkt_i.src1.used &&
             (dispatch_pkt_i.src1.arch_addr != '0) &&
             latest_valid_q[dispatch_pkt_i.src1.arch_addr];
         dispatch_pkt_o.src1.producer_tag = dispatch_src1_latest_id;
-        dispatch_pkt_o.src1.producer_class = dispatch_src1_latest_class;
         dispatch_pkt_o.dst.rob_tag = producer_alloc_id;
-        dispatch_pkt_o.dst.result_class = dispatch_result_class;
 
         dispatch_pkt1_o.src0.tag_valid = dispatch1_src0_from_slot0 ||
             (dispatch_pkt1_i.src0.used &&
@@ -267,18 +241,13 @@ import ydrasil_pkg::*;
              latest_valid_q[dispatch_pkt1_i.src0.arch_addr]);
         dispatch_pkt1_o.src0.producer_tag = dispatch1_src0_from_slot0 ?
             producer_alloc_id : dispatch1_src0_latest_id;
-        dispatch_pkt1_o.src0.producer_class = dispatch1_src0_from_slot0 ?
-            dispatch_result_class : dispatch1_src0_latest_class;
         dispatch_pkt1_o.src1.tag_valid = dispatch1_src1_from_slot0 ||
             (dispatch_pkt1_i.src1.used &&
              (dispatch_pkt1_i.src1.arch_addr != '0) &&
              latest_valid_q[dispatch_pkt1_i.src1.arch_addr]);
         dispatch_pkt1_o.src1.producer_tag = dispatch1_src1_from_slot0 ?
             producer_alloc_id : dispatch1_src1_latest_id;
-        dispatch_pkt1_o.src1.producer_class = dispatch1_src1_from_slot0 ?
-            dispatch_result_class : dispatch1_src1_latest_class;
         dispatch_pkt1_o.dst.rob_tag = producer_alloc_id1;
-        dispatch_pkt1_o.dst.result_class = dispatch1_result_class;
     end
 
     wire producer_id_t queue_head_id =
@@ -344,7 +313,6 @@ import ydrasil_pkg::*;
     localparam logic [2:0] DBG_PRODUCER_ALU = 3'd1;
     localparam logic [2:0] DBG_PRODUCER_LOAD = 3'd2;
     localparam logic [2:0] DBG_PRODUCER_MUL = 3'd3;
-    localparam logic [2:0] DBG_PRODUCER_OTHER = 3'd4;
     logic [2:0] dbg_producer_kind_q [0:PRODUCER_NUM-1];
     wire [2:0] dbg_rs1_producer_kind = rs1_has_producer ?
         dbg_producer_kind_q[rs1_producer_slot] : 3'd0;
@@ -579,14 +547,12 @@ import ydrasil_pkg::*;
                 producer_rd_q[slot_idx] <= '0;
                 producer_pc_q[slot_idx] <= '0;
                 producer_op_class_q[slot_idx] <= '0;
-                producer_result_class_q[slot_idx] <= RESULT_NONE;
 `ifndef SYNTHESIS
                 dbg_producer_kind_q[slot_idx] <= '0;
 `endif
             end
             for (reg_idx = 0; reg_idx < REGS_NUM; reg_idx++) begin
                 latest_id_q[reg_idx] <= '0;
-                latest_class_q[reg_idx] <= RESULT_NONE;
             end
         end else begin
             if (ex_branch_jump_i || serial_accept)
@@ -663,23 +629,17 @@ import ydrasil_pkg::*;
                     dispatch_pkt_i.uop_class == UOP_CLASS_BJP,
                     dispatch_pkt_i.uop_class == UOP_CLASS_STORE,
                     dispatch_pkt_i.uop_class == UOP_CLASS_LOAD};
-                producer_result_class_q[alloc_slot0] <=
-                    dispatch_result_class;
                 if (dispatch_pkt_i.dst.writes_gpr) begin
                     latest_valid_q[dispatch_pkt_i.dst.rd_addr] <= 1'b1;
                     latest_id_q[dispatch_pkt_i.dst.rd_addr] <= producer_alloc_id;
-                    latest_class_q[dispatch_pkt_i.dst.rd_addr] <=
-                        dispatch_result_class;
                 end
 `ifndef SYNTHESIS
                 if (dispatch_pkt_i.uop_class == UOP_CLASS_LOAD)
                     dbg_producer_kind_q[alloc_slot0] <= DBG_PRODUCER_LOAD;
                 else if (dispatch_pkt_i.uop_class == UOP_CLASS_MUL)
                     dbg_producer_kind_q[alloc_slot0] <= DBG_PRODUCER_MUL;
-                else if (dispatch_pkt_i.uop_class == UOP_CLASS_ALU)
-                    dbg_producer_kind_q[alloc_slot0] <= DBG_PRODUCER_ALU;
                 else
-                    dbg_producer_kind_q[alloc_slot0] <= DBG_PRODUCER_OTHER;
+                    dbg_producer_kind_q[alloc_slot0] <= DBG_PRODUCER_ALU;
 `endif
             end
             if (queue_alloc1) begin
@@ -695,23 +655,17 @@ import ydrasil_pkg::*;
                     dispatch_pkt1_i.uop_class == UOP_CLASS_BJP,
                     dispatch_pkt1_i.uop_class == UOP_CLASS_STORE,
                     dispatch_pkt1_i.uop_class == UOP_CLASS_LOAD};
-                producer_result_class_q[alloc_slot1] <=
-                    dispatch1_result_class;
                 if (dispatch_pkt1_i.dst.writes_gpr) begin
                     latest_valid_q[dispatch_pkt1_i.dst.rd_addr] <= 1'b1;
                     latest_id_q[dispatch_pkt1_i.dst.rd_addr] <= producer_alloc_id1;
-                    latest_class_q[dispatch_pkt1_i.dst.rd_addr] <=
-                        dispatch1_result_class;
                 end
 `ifndef SYNTHESIS
                 if (dispatch_pkt1_i.uop_class == UOP_CLASS_LOAD)
                     dbg_producer_kind_q[alloc_slot1] <= DBG_PRODUCER_LOAD;
                 else if (dispatch_pkt1_i.uop_class == UOP_CLASS_MUL)
                     dbg_producer_kind_q[alloc_slot1] <= DBG_PRODUCER_MUL;
-                else if (dispatch_pkt1_i.uop_class == UOP_CLASS_ALU)
-                    dbg_producer_kind_q[alloc_slot1] <= DBG_PRODUCER_ALU;
                 else
-                    dbg_producer_kind_q[alloc_slot1] <= DBG_PRODUCER_OTHER;
+                    dbg_producer_kind_q[alloc_slot1] <= DBG_PRODUCER_ALU;
 `endif
             end
 
@@ -728,14 +682,10 @@ import ydrasil_pkg::*;
                 if (rebuild_do0 && rebuild_live0) begin
                     latest_valid_q[rebuild_rd0] <= 1'b1;
                     latest_id_q[rebuild_rd0] <= rebuild_id0;
-                    latest_class_q[rebuild_rd0] <=
-                        producer_result_class_q[rebuild_ptr0];
                 end
                 if (rebuild_do1 && rebuild_live1) begin
                     latest_valid_q[rebuild_rd1] <= 1'b1;
                     latest_id_q[rebuild_rd1] <= rebuild_id1;
-                    latest_class_q[rebuild_rd1] <=
-                        producer_result_class_q[rebuild_ptr1];
                 end
                 if (rebuild_remaining_q <= QUEUE_COUNT_WIDTH'(2)) begin
                     recovering_q <= 1'b0;

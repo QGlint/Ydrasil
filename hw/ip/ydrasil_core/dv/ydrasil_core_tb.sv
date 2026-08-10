@@ -993,14 +993,26 @@ end
                     u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL])) ? 32'd1 : 32'd0);
             if ((u_dut.u_ydrasil_commit_trace.rs1_pending_stall | u_dut.u_ydrasil_commit_trace.rs2_pending_stall) &&
                 !(u_dut.u_ydrasil_commit_trace.rs1_issue_hzd | u_dut.u_ydrasil_commit_trace.rs2_issue_hzd)) begin
-                if ((u_dut.u_ydrasil_commit_trace.rs1_pending_stall && u_dut.issue_head_compact_uop.src0.producer_class == ydrasil_pkg::RESULT_LSU) ||
-                    (u_dut.u_ydrasil_commit_trace.rs2_pending_stall && u_dut.issue_head_compact_uop.src1.producer_class == ydrasil_pkg::RESULT_LSU))
+                if ((u_dut.u_ydrasil_commit_trace.rs1_pending_stall &&
+                     u_dut.u_ydrasil_commit_trace.rs1_producer_kind ==
+                         u_dut.u_ydrasil_commit_trace.DBG_PRODUCER_LOAD) ||
+                    (u_dut.u_ydrasil_commit_trace.rs2_pending_stall &&
+                     u_dut.u_ydrasil_commit_trace.rs2_producer_kind ==
+                         u_dut.u_ydrasil_commit_trace.DBG_PRODUCER_LOAD))
                     sb_pending_load_count <= sb_pending_load_count + 1'b1;
-                else if ((u_dut.u_ydrasil_commit_trace.rs1_pending_stall && u_dut.issue_head_compact_uop.src0.producer_class == ydrasil_pkg::RESULT_MDU) ||
-                         (u_dut.u_ydrasil_commit_trace.rs2_pending_stall && u_dut.issue_head_compact_uop.src1.producer_class == ydrasil_pkg::RESULT_MDU))
+                else if ((u_dut.u_ydrasil_commit_trace.rs1_pending_stall &&
+                          u_dut.u_ydrasil_commit_trace.rs1_producer_kind ==
+                              u_dut.u_ydrasil_commit_trace.DBG_PRODUCER_MUL) ||
+                         (u_dut.u_ydrasil_commit_trace.rs2_pending_stall &&
+                          u_dut.u_ydrasil_commit_trace.rs2_producer_kind ==
+                              u_dut.u_ydrasil_commit_trace.DBG_PRODUCER_MUL))
                     sb_pending_mul_count <= sb_pending_mul_count + 1'b1;
-                else if ((u_dut.u_ydrasil_commit_trace.rs1_pending_stall && u_dut.issue_head_compact_uop.src0.producer_class == ydrasil_pkg::RESULT_ALU) ||
-                         (u_dut.u_ydrasil_commit_trace.rs2_pending_stall && u_dut.issue_head_compact_uop.src1.producer_class == ydrasil_pkg::RESULT_ALU))
+                else if ((u_dut.u_ydrasil_commit_trace.rs1_pending_stall &&
+                          u_dut.u_ydrasil_commit_trace.rs1_producer_kind ==
+                              u_dut.u_ydrasil_commit_trace.DBG_PRODUCER_ALU) ||
+                         (u_dut.u_ydrasil_commit_trace.rs2_pending_stall &&
+                          u_dut.u_ydrasil_commit_trace.rs2_producer_kind ==
+                              u_dut.u_ydrasil_commit_trace.DBG_PRODUCER_ALU))
                     sb_pending_alu_count <= sb_pending_alu_count + 1'b1;
                 else
                     sb_pending_other_count <= sb_pending_other_count + 1'b1;

@@ -324,7 +324,6 @@ package ydrasil_pkg;
 		logic [REGS_ADDR_WIDTH-1:0]   arch_addr;
 		logic                         tag_valid;
 		producer_id_t                 producer_tag;
-		ydrasil_result_class_t        producer_class;
 	} ydrasil_source_desc_t;
 	typedef struct packed {
 		logic                         used;
@@ -339,14 +338,12 @@ package ydrasil_pkg;
 		logic                         producer_tracked;
 		producer_id_t                 producer_id;
 		logic [REGS_ADDR_WIDTH-1:0]   arch_addr;
-		ydrasil_result_class_t        result_class;
 	} ydrasil_reservation_pkt_t;
 
 	typedef struct packed {
 		logic                         writes_gpr;
 		logic [REGS_ADDR_WIDTH-1:0]   rd_addr;
 		producer_id_t                 rob_tag;
-		ydrasil_result_class_t        result_class;
 	} ydrasil_dest_desc_t;
 	typedef struct packed {
 		logic                         writes_gpr;
