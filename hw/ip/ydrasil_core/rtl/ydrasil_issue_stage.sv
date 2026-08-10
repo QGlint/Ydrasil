@@ -904,7 +904,12 @@ import ydrasil_pkg::*;
                     end else begin
                         agu_in_req_q.valid <= 1'b0;
                     end
-                    csr_in_valid_q <= lane_a_fu_valid;
+                    // The execute block consumes CSR input only for CSR/SYS
+                    // operations.  Do not carry the lane-A valid pulse for
+                    // ordinary ALU/BRU instructions across this boundary.
+                    csr_in_valid_q <= lane_a_fu_valid &&
+                        ((lane_a_uop.op_class == UOP_CLASS_CSR) ||
+                         (lane_a_uop.op_class == UOP_CLASS_SYS));
                     csr_in_operand_a_q <= lane_a_operand_a_local;
                     csr_in_operator_type_q <= lane_a_operator_type;
                     csr_in_raddr_q <= lane_a_uop.csr_raddr;
