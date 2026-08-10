@@ -50,6 +50,31 @@ OPERATOR_ALIASES = {
     "DIVS": "DIV", "MODDIVS": "MOD",
 }
 
+TIMING_SEVERITY_RANK = {"ADVISORY": 0, "WARNING": 1, "ERROR": 2}
+
+
+def classify_timing_path_severity(
+    structural_depth: int,
+    conservative_delay_ns: float,
+    warning_period_ns: float,
+    definite_depth: int,
+    *,
+    force_error: bool = False,
+    force_warning: bool = False,
+) -> str:
+    """Separate high-confidence gate failures from conservative warnings.
+
+    Verilator AST depth is useful for ranking paths, but it overstates mapped
+    FPGA logic on mux-heavy paths.  Archived passing designs therefore set the
+    definite-depth boundary.  Delay estimates and historical failures remain
+    warnings unless an independent current-structure condition is definite.
+    """
+    if force_error or structural_depth >= definite_depth:
+        return "ERROR"
+    if force_warning or conservative_delay_ns >= warning_period_ns:
+        return "WARNING"
+    return "ADVISORY"
+
 
 def operator_depth_cost(node: dict[str, Any], index: dict[str, dict[str, Any]]) -> int:
     """Return a conservative FPGA-structure cost for one AST operator.
@@ -1904,6 +1929,8 @@ def hierarchical_report(
     reports: list[dict[str, Any]],
     training: dict[str, Any] | None = None,
     target_period_ns: float = 5.0,
+    warning_period_ns: float = 4.5,
+    definite_depth: int = 34,
     bram_clock_to_out_ns: float = 2.45,
 ) -> dict[str, Any]:
     """Flatten combinational CELL connections for top-level feedback analysis.
@@ -2504,17 +2531,26 @@ def hierarchical_report(
         launch_memory_role: str,
         reasons: list[str],
         trained: dict[str, Any] | None = None,
-        force_fail: bool = False,
+        force_error: bool = False,
+        force_warning: bool = False,
     ) -> None:
         structural_upper_ns = structural_upper_delay(path, launch_kind, endpoint_kind)
         trained_p95_ns = float(trained.get("delay_ns_p95", 0.0)) if trained else 0.0
         estimated_upper_ns = max(structural_upper_ns, trained_p95_ns)
-        if force_fail or estimated_upper_ns >= target_period_ns:
-            severity = "FAIL"
-        elif estimated_upper_ns >= max(0.0, target_period_ns - 0.7):
-            severity = "HIGH"
-        else:
-            severity = "WARN"
+        structural_depth = int(path.get("depth", 0))
+        severity = classify_timing_path_severity(
+            structural_depth,
+            estimated_upper_ns,
+            warning_period_ns,
+            definite_depth,
+            force_error=force_error,
+            force_warning=force_warning,
+        )
+        severity_reasons = list(reasons)
+        if structural_depth >= definite_depth:
+            severity_reasons.append("definite_structural_depth_threshold")
+        if force_warning:
+            severity_reasons.append("conservative_evidence_requires_warning")
         candidate = {
             "key": key,
             "severity": severity,
@@ -2527,27 +2563,31 @@ def hierarchical_report(
             "destination": path.get("destination"),
             "source_signal": path.get("source_signal"),
             "destination_signal": path.get("destination_signal"),
-            "structural_depth": path.get("depth", 0),
+            "structural_depth": structural_depth,
             "owner_crossings": path.get("owner_crossings", 0),
             "structural_upper_delay_ns": round(structural_upper_ns, 3),
             "trained_p95_delay_ns": round(trained_p95_ns, 3) if trained else None,
             "estimated_upper_delay_ns": round(estimated_upper_ns, 3),
             "estimated_slack_ns": round(target_period_ns - estimated_upper_ns, 3),
+            "warning_period_ns": warning_period_ns,
+            "warning_slack_ns": round(warning_period_ns - estimated_upper_ns, 3),
+            "definite_depth_threshold": definite_depth,
             "training_sample_count": int(trained.get("sample_count", 0)) if trained else 0,
             "training_design_count": int(trained.get("design_count", 0)) if trained else 0,
-            "reasons": sorted(set(reasons)),
+            "reasons": sorted(set(severity_reasons)),
             "signals": path.get("signals", []),
         }
         previous = timing_path_risks.get(key)
-        severity_rank = {"WARN": 0, "HIGH": 1, "FAIL": 2}
         if previous is None or (
-            severity_rank[candidate["severity"]], candidate["estimated_upper_delay_ns"]
+            TIMING_SEVERITY_RANK[candidate["severity"]], candidate["estimated_upper_delay_ns"]
         ) > (
-            severity_rank[previous["severity"]], previous["estimated_upper_delay_ns"]
+            TIMING_SEVERITY_RANK[previous["severity"]], previous["estimated_upper_delay_ns"]
         ):
             timing_path_risks[key] = candidate
         elif previous is not None:
-            previous["reasons"] = sorted(set(previous["reasons"]) | set(reasons))
+            previous["reasons"] = sorted(
+                set(previous["reasons"]) | set(severity_reasons)
+            )
 
     trained_families = (training or {}).get("families", [])
     for trained in trained_families:
@@ -2597,7 +2637,7 @@ def hierarchical_report(
             str(trained.get("launch_memory_role", "none")),
             reasons,
             trained=trained,
-            force_fail=float(trained.get("worst_slack_ns", 0.0)) < 0.0,
+            force_warning=float(trained.get("worst_slack_ns", 0.0)) < 0.0,
         )
         if requested_endpoint_kind in {
             "register_d", "register_ce", "register_control",
@@ -2637,7 +2677,7 @@ def hierarchical_report(
                     str(trained.get("launch_memory_role", "none")),
                     sibling_reasons,
                     trained=trained,
-                    force_fail=float(trained.get("worst_slack_ns", 0.0)) < 0.0,
+                    force_warning=float(trained.get("worst_slack_ns", 0.0)) < 0.0,
                 )
 
     launch_groups = sorted({
@@ -2743,7 +2783,7 @@ def hierarchical_report(
                 key, path, source_owner, destination_owner, launch_kind, endpoint_kind,
                 launch_memory_role,
                 ["bram_clock_to_out_to_unregistered_ram_pin"],
-                force_fail=True,
+                force_warning=True,
             )
 
     multiwrite_owners = sorted({
@@ -2769,13 +2809,13 @@ def hierarchical_report(
                 key, path, source_owner, destination_owner, launch_kind, "register_d",
                 launch_memory_role,
                 ["multiwrite_register_array_endpoint"],
-                force_fail=True,
+                force_warning=True,
             )
 
     ordered_path_risks = sorted(
         timing_path_risks.values(),
         key=lambda item: (
-            {"FAIL": 0, "HIGH": 1, "WARN": 2}[item["severity"]],
+            {"ERROR": 0, "WARNING": 1, "ADVISORY": 2}[item["severity"]],
             item["estimated_slack_ns"],
             item["key"],
         ),
@@ -2807,11 +2847,18 @@ def hierarchical_report(
             for item in endpoint_nodes.values()
         )),
         "timing_path_risks": ordered_path_risks,
+        "timing_path_error_count": sum(
+            item["severity"] == "ERROR" for item in ordered_path_risks
+        ),
+        "timing_path_warning_count": sum(
+            item["severity"] == "WARNING" for item in ordered_path_risks
+        ),
+        # Compatibility aliases for archived reports and existing consumers.
         "timing_path_fail_count": sum(
-            item["severity"] == "FAIL" for item in ordered_path_risks
+            item["severity"] == "ERROR" for item in ordered_path_risks
         ),
         "timing_path_high_count": sum(
-            item["severity"] == "HIGH" for item in ordered_path_risks
+            item["severity"] == "WARNING" for item in ordered_path_risks
         ),
         "timing_training": {
             "archive_root": (training or {}).get("archive_root"),
@@ -2970,6 +3017,7 @@ def apply_timing_risk_policy(
     report: dict[str, Any],
     hierarchy: dict[str, Any] | None,
     period_ns: float,
+    warning_period_ns: float,
     possible_depth: int,
     definite_depth: int,
     lutram_possible_depth: int,
@@ -3072,6 +3120,7 @@ def apply_timing_risk_policy(
     )
     risk = {
         "target_period_ns": period_ns,
+        "warning_period_ns": warning_period_ns,
         "classification": "definite_failure" if definite else ("possible_failure" if possible else "no_structural_flag"),
         "possible_target_period_failure": possible,
         "definite_target_period_failure": definite,
@@ -3124,26 +3173,36 @@ def main() -> int:
     parser.add_argument("--calibration-history", type=Path, default=None)
     parser.add_argument("--fail-on-timing-path", action="store_true")
     parser.add_argument("--target-period-ns", type=float, default=5.0)
+    parser.add_argument("--warning-period-ns", type=float, default=4.5)
     parser.add_argument("--timing-possible-depth", type=int, default=9)
-    parser.add_argument("--timing-definite-depth", type=int, default=32)
+    parser.add_argument("--timing-definite-depth", type=int, default=34)
     parser.add_argument("--lutram-possible-depth", type=int, default=6)
     parser.add_argument("--fanout-timing-min-depth", type=int, default=3)
     parser.add_argument("--bram-launch-penalty-depth", type=int, default=6)
     parser.add_argument("--bram-clock-to-out-ns", type=float, default=2.45)
     parser.add_argument("--lutram-arc-ns", type=float, default=0.06)
     args = parser.parse_args()
+    if args.warning_period_ns > args.target_period_ns:
+        parser.error("--warning-period-ns must not exceed --target-period-ns")
     if args.check_output:
         try:
             checked = json.loads(args.check_output.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             print(f"error: cannot read structure report {args.check_output}: {exc}", file=sys.stderr)
             return 2
-        failures = checked.get("hierarchical", {}).get("timing_path_risks", [])
-        failures = [item for item in failures if item.get("severity") == "FAIL"]
+        path_risks = checked.get("hierarchical", {}).get("timing_path_risks", [])
+        failures = [
+            item for item in path_risks
+            if item.get("severity") in {"ERROR", "FAIL"}
+        ]
+        warnings = [
+            item for item in path_risks
+            if item.get("severity") in {"WARNING", "HIGH"}
+        ]
         cycles = checked.get("hierarchical", {}).get("meaningful_cycles", [])
         for item in failures:
             print(
-                f"FAIL {item.get('key')}: estimated={item.get('estimated_upper_delay_ns')}ns "
+                f"ERROR {item.get('key')}: estimated={item.get('estimated_upper_delay_ns')}ns "
                 f"slack={item.get('estimated_slack_ns')}ns "
                 f"{item.get('source')} -> {item.get('destination')} "
                 f"reasons={','.join(item.get('reasons', []))}"
@@ -3151,7 +3210,7 @@ def main() -> int:
         for index, cycle in enumerate(cycles):
             witness = cycle.get("sensitivity_witness_path", [])
             print(
-                f"FAIL combinational_loop[{index}]: kind={cycle.get('kind')} "
+                f"ERROR combinational_loop[{index}]: kind={cycle.get('kind')} "
                 f"timing-depth={cycle.get('timing_path_depth')} "
                 f"bounded-depth={cycle.get('bounded_path_depth')} "
                 f"witness={witness[:2]}"
@@ -3163,7 +3222,17 @@ def main() -> int:
                 file=sys.stderr,
             )
             return 1
-        print("no structural timing path FAIL warnings")
+        for item in warnings:
+            print(
+                f"WARNING {item.get('key')}: estimated={item.get('estimated_upper_delay_ns')}ns "
+                f"warning-slack={item.get('warning_slack_ns')}ns "
+                f"depth={item.get('structural_depth')} "
+                f"{item.get('source')} -> {item.get('destination')} "
+                f"reasons={','.join(item.get('reasons', []))}"
+            )
+        print(
+            f"no structural timing ERRORs; {len(warnings)} high timing warnings"
+        )
         return 0
     if args.input is None or args.output is None:
         parser.error("--input and --output are required unless --check-output is used")
@@ -3210,6 +3279,8 @@ def main() -> int:
         reports,
         training=training,
         target_period_ns=args.target_period_ns,
+        warning_period_ns=args.warning_period_ns,
+        definite_depth=args.timing_definite_depth,
         bram_clock_to_out_ns=args.bram_clock_to_out_ns,
     )
     for report in reports:
@@ -3218,6 +3289,7 @@ def main() -> int:
             report,
             report_hierarchy,
             args.target_period_ns,
+            args.warning_period_ns,
             args.timing_possible_depth,
             args.timing_definite_depth,
             args.lutram_possible_depth,
@@ -3267,13 +3339,21 @@ def main() -> int:
         "hierarchical_max_depth": hierarchy.get("max_depth", 0) if hierarchy.get("available") else 0,
         "hierarchical_timing_endpoint_max_depth": hierarchy.get("timing_endpoint_max_depth", 0) if hierarchy.get("available") else 0,
         "target_period_ns": args.target_period_ns,
+        "warning_period_ns": args.warning_period_ns,
         "timing_possible_depth_threshold": args.timing_possible_depth,
         "timing_definite_depth_threshold": args.timing_definite_depth,
-        "timing_path_fail_count": hierarchy.get("timing_path_fail_count", 0),
-        "timing_path_high_count": hierarchy.get("timing_path_high_count", 0),
+        "timing_path_error_count": hierarchy.get("timing_path_error_count", 0),
+        "timing_path_warning_count": hierarchy.get("timing_path_warning_count", 0),
+        "timing_path_error_families": [
+            item.get("key") for item in hierarchy.get("timing_path_risks", [])
+            if item.get("severity") == "ERROR"
+        ],
+        # Compatibility aliases for archived report readers.
+        "timing_path_fail_count": hierarchy.get("timing_path_error_count", 0),
+        "timing_path_high_count": hierarchy.get("timing_path_warning_count", 0),
         "timing_path_fail_families": [
             item.get("key") for item in hierarchy.get("timing_path_risks", [])
-            if item.get("severity") == "FAIL"
+            if item.get("severity") == "ERROR"
         ],
     }
     for report in reports:
@@ -3332,7 +3412,7 @@ def main() -> int:
                   f"hierarchical-cycle-path={report['combination']['hierarchical'].get('cycle_max_timing_path_depth', 0)}")
         if report["combinational_outputs"]:
             print(f"{report['name']}: combinational outputs: {', '.join(report['combinational_outputs'])}")
-    if args.fail_on_timing_path and hierarchy.get("timing_path_fail_count", 0):
+    if args.fail_on_timing_path and hierarchy.get("timing_path_error_count", 0):
         return 1
     return 0
 

@@ -1362,8 +1362,11 @@ end
 	bit finish_on_terminal_led;
 	bit finish_on_tohost;
 	bit perip_debug_en;
+	bit stdout_debug_en;
 	logic [31:0] finish_pc;
 	logic perip_req_q;
+	logic stdout_axi_req_seen_q;
+	integer stdout_axi_count;
 
 	wire [31:0] virtual_led_output;
 	wire [39:0] virtual_seg_output;
@@ -1383,6 +1386,8 @@ end
 		finish_on_terminal_led = $test$plusargs("finish_on_terminal_led");
 		finish_on_tohost = !$test$plusargs("no_finish_on_tohost");
 		perip_debug_en = $test$plusargs("perip_debug");
+		stdout_debug_en = $test$plusargs("stdout_debug");
+		stdout_axi_count = 0;
 		finish_pc = `PC_WRITE_TOHOST;
 		void'($value$plusargs("finish_pc=%h", finish_pc));
 	end
@@ -1429,11 +1434,6 @@ end
 			print_perf_metrics();
 		end
 
-		if (!rst && perip_transfer && perip_wen &&
-		    (perip_addr == SIM_STDOUT_ADDR)) begin
-			$write("%c", perip_wdata[7:0]);
-		end
-
 		if (!rst && perip_debug_en && perip_transfer) begin
 			if (perip_wen) begin
 				case (perip_addr)
@@ -1445,6 +1445,35 @@ end
 				endcase
 			end else if (perip_addr == CNT_ADDR) begin
 				$display("[PERIP] time=%0t CNT read rdata=0x%08h", $time, perip_rdata);
+			end
+		end
+	end
+
+	// req_toggle_axi_q changes exactly once when the bridge accepts a complete
+	// AXI request. Sampling the stable request register on the following CPU
+	// edge avoids APB phase races and prevents held ACCESS cycles from printing
+	// the same character more than once.
+	always_ff @(posedge clk) begin
+		if (rst) begin
+			stdout_axi_req_seen_q <= 1'b0;
+			stdout_axi_count <= 0;
+		end else if (u_mmio_subsystem.u_axi_to_apb.req_toggle_axi_q !=
+		             stdout_axi_req_seen_q) begin
+			stdout_axi_req_seen_q <=
+				u_mmio_subsystem.u_axi_to_apb.req_toggle_axi_q;
+			if (u_mmio_subsystem.u_axi_to_apb.req_axi_q.write &&
+			    (u_mmio_subsystem.u_axi_to_apb.req_axi_q.addr ==
+			     SIM_STDOUT_ADDR)) begin
+				stdout_axi_count <= stdout_axi_count + 1;
+				$write("%c",
+					u_mmio_subsystem.u_axi_to_apb.req_axi_q.wdata[7:0]);
+				if (stdout_debug_en)
+					$display("[AXI-STDOUT] time=%0t n=%0d data=0x%02h addr=0x%08h toggle=%0d",
+						$time,
+						stdout_axi_count,
+						u_mmio_subsystem.u_axi_to_apb.req_axi_q.wdata[7:0],
+						u_mmio_subsystem.u_axi_to_apb.req_axi_q.addr,
+						u_mmio_subsystem.u_axi_to_apb.req_toggle_axi_q);
 			end
 		end
 	end

@@ -483,32 +483,71 @@ def main() -> int:
     parser.add_argument("--md", type=Path, default=None)
     parser.add_argument("--paths-csv", type=Path, default=None)
     parser.add_argument("--violations-csv", type=Path, default=None)
+    parser.add_argument("--path-group", default=None)
+    parser.add_argument("--training-slack-max-ns", type=float, default=0.5)
     parser.add_argument("--max-groups", type=int, default=80)
     parser.add_argument("--max-violating-paths", type=int, default=5000)
+    parser.add_argument("--max-training-paths", type=int, default=5000)
     args = parser.parse_args()
 
     report_dir = args.report_dir
     analyze_sweep(report_dir)
-    timing_report = args.timing_report or report_dir / "post_route_timing_paths.rpt"
+    timing_report = args.timing_report or report_dir / "post_route_timing_summary.rpt"
     violation_report = args.violation_report
     csv_out = args.csv or report_dir / "timing_groups.csv"
     md_out = args.md or report_dir / "timing_groups.md"
     paths_csv_out = args.paths_csv or report_dir / "timing_paths.csv"
     violations_csv_out = args.violations_csv or report_dir / "timing_violations.csv"
 
+    timing_paths = load_paths(timing_report)
     violation_paths = load_paths(violation_report) if violation_report is not None else []
-    source_paths = violation_paths if violation_paths else load_paths(timing_report)
-    paths = sorted((path for path in source_paths if path.slack < 0), key=lambda item: item.slack)
+    if args.path_group is not None:
+        timing_paths = [
+            path for path in timing_paths if path.path_group == args.path_group
+        ]
+        violation_paths = [
+            path for path in violation_paths if path.path_group == args.path_group
+        ]
+    violation_source = violation_paths if violation_paths else timing_paths
+    paths = sorted(
+        (path for path in violation_source if path.slack < 0),
+        key=lambda item: item.slack,
+    )
     if args.max_violating_paths > 0:
         paths = paths[: args.max_violating_paths]
+    training_paths = sorted(
+        (
+            path for path in timing_paths
+            if path.slack <= args.training_slack_max_ns
+        ),
+        key=lambda item: item.slack,
+    )
+    if not training_paths:
+        training_paths = paths
+    if args.max_training_paths > 0:
+        training_paths = training_paths[: args.max_training_paths]
     rows = write_csv(paths, csv_out)
-    representative_paths = dedupe_worst_paths(paths)
-    write_paths_csv(representative_paths, paths_csv_out)
-    write_paths_csv(representative_paths, violations_csv_out)
-    write_markdown(rows, representative_paths, md_out, args.max_groups, len(paths))
+    representative_training_paths = dedupe_worst_paths(training_paths)
+    representative_violation_paths = dedupe_worst_paths(paths)
+    write_paths_csv(representative_training_paths, paths_csv_out)
+    write_paths_csv(representative_violation_paths, violations_csv_out)
+    write_markdown(
+        rows,
+        representative_violation_paths,
+        md_out,
+        args.max_groups,
+        len(paths),
+    )
 
     print(f"parsed {len(paths)} violating timing paths")
-    print(f"deduped to {len(representative_paths)} representative paths")
+    print(
+        f"retained {len(training_paths)} paths at or below "
+        f"{args.training_slack_max_ns:.3f} ns slack for training"
+    )
+    print(
+        f"deduped to {len(representative_training_paths)} training and "
+        f"{len(representative_violation_paths)} violating representatives"
+    )
     print(f"wrote {csv_out}")
     print(f"wrote {paths_csv_out}")
     print(f"wrote {violations_csv_out}")
