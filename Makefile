@@ -75,10 +75,11 @@ COREMARK_SWOPT_CFLAGS_unroll_all = -funroll-all-loops
 COREMARK_SWOPT_CFLAGS_no_strict_alias = -fno-strict-aliasing
 COREMARK_SWOPT_CFLAGS_lto = -flto
 COREMARK_SWOPT_CFLAGS_mtune_s7 = -mtune=sifive-7-series
+COREMARK_SWOPT_CFLAGS_mtune_ydrasil = -mtune=ydrasil
 COREMARK_SWOPT_CFLAGS_branch_cost_2 = -mbranch-cost=2
 COREMARK_SWOPT_CFLAGS_branch_cost_3 = -mbranch-cost=3
 COREMARK_SWOPT_CFLAGS_branch_cost_5 = -mbranch-cost=5
-COREMARK_SWOPT_AVAILABLE_GROUPS := inline register loop_shape control_shape tree_shape unroll_all no_strict_alias lto mtune_s7 branch_cost_2 branch_cost_3 branch_cost_5
+COREMARK_SWOPT_AVAILABLE_GROUPS := inline register loop_shape control_shape tree_shape unroll_all no_strict_alias lto mtune_s7 mtune_ydrasil branch_cost_2 branch_cost_3 branch_cost_5
 COREMARK_SWOPT_DEFAULT_GROUPS ?= inline register loop_shape control_shape tree_shape
 COREMARK_SWOPT_GROUPS ?= $(COREMARK_SWOPT_DEFAULT_GROUPS)
 COREMARK_SWOPT_UNKNOWN_GROUPS := $(filter-out $(COREMARK_SWOPT_AVAILABLE_GROUPS),$(COREMARK_SWOPT_GROUPS))
