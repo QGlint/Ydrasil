@@ -111,11 +111,9 @@ import ydrasil_pkg::*;
 );
     logic [OPERATOR_WIDTH-1:0] dual_operator;
     logic [OPERATOR_TYPE_WIDTH-1:0] dual_operator_type;
-    wire [REGS_DATA_WIDTH-1:0] dual_operand_a = dual_bru_valid_i ?
-        dual_meta_i.pc : dual_alu_operand_a_i;
-    wire [REGS_DATA_WIDTH-1:0] dual_operand_b = dual_bru_valid_i ?
-        32'd4 : dual_alu_operand_b_i;
-    wire dual_valid = dual_alu_valid_i || dual_bru_valid_i || agu_valid_i;
+    wire [REGS_DATA_WIDTH-1:0] dual_operand_a = dual_alu_operand_a_i;
+    wire [REGS_DATA_WIDTH-1:0] dual_operand_b = dual_alu_operand_b_i;
+    wire dual_valid = dual_alu_valid_i || agu_valid_i || mul_valid_i;
     wire [BUS_ADDR_WIDTH-1:0] lsu_mem_addr;
     wire [REGS_DATA_WIDTH-1:0] lsu_store_result;
     wire unused_instret;
@@ -123,9 +121,9 @@ import ydrasil_pkg::*;
     always_comb begin
         dual_operator = '0;
         dual_operator_type = '0;
-        if (dual_bru_valid_i) begin
-            dual_operator[dual_bru_payload_i.subop] = 1'b1;
-            dual_operator_type[OPERATOR_TYPE_BJP] = 1'b1;
+        if (mul_valid_i) begin
+            dual_operator = mul_operator_i;
+            dual_operator_type = mul_operator_type_i;
         end else if (agu_valid_i) begin
             dual_operator_type[OPERATOR_TYPE_LOAD] = agu_req_i.is_load;
             dual_operator_type[OPERATOR_TYPE_STORE] = agu_req_i.is_store;
@@ -207,6 +205,9 @@ import ydrasil_pkg::*;
         .csr_valid_i            (csr_valid_i),
         .mul_operator_i         (mul_operator_i),
         .mul_operator_type_i    (mul_operator_type_i),
+        .mul_rf_waddr_i         (dual_meta_i.rd_addr),
+        .mul_rf_wen_i           (dual_meta_i.rd_wen),
+        .mul_producer_id_i      (dual_meta_i.producer_id),
         .csr_operator_type_i    (csr_operator_type_i),
         .id_rf_waddr_rd_i       (alu_rd_addr_i),
         .id_alu_rf_wen_rd_i     (alu_rd_wen_i),
@@ -244,49 +245,35 @@ import ydrasil_pkg::*;
         .ex_mul_stall_o         (mul_stall_o)
     );
 
-    ydrasil_dual_alu u_dual_ex (
-        .clk                    (clk),
-        .rst_n                  (rst_n),
-        .flush_i                (flush_i),
-        .interrupt_i            (trap_redirect_i),
-        .valid_i                (ex_accept_valid1_i && !agu_valid_i),
-        .operand_a_i            (dual_operand_a),
-        .operand_b_i            (dual_operand_b),
-        .branch_operand_a_i     (dual_bru_operand_a_i),
-        .branch_operand_b_i     (dual_bru_operand_b_i),
-        .branch_imm_i           (dual_bru_payload_i.imm),
-        .operator_i             (dual_operator),
-        .operator_type_i        (dual_operator_type),
-        .rd_addr_i              (dual_meta_i.rd_addr),
-        .rd_wen_i               (dual_meta_i.rd_wen),
-        .producer_id_i          (dual_meta_i.producer_id),
-        .producer_tracked_i     (dual_meta_i.producer_tracked),
-        .pc_i                   (dual_meta_i.pc),
-        .instr_i                (dual_meta_i.instr),
-        .jalr_i                 (dual_bru_payload_i.jalr),
-        .branch_target_i        (dual_meta_i.pc + dual_bru_payload_i.imm),
-        .branch_next_pc_i       (dual_meta_i.pc + 32'd4),
-        .pred_hit_i             (dual_bru_payload_i.pred_hit),
-        .pred_taken_i           (dual_bru_payload_i.pred_taken),
-        .pred_target_i          (dual_bru_payload_i.pred_target),
-        .pred_counter_i         (dual_bru_payload_i.pred_counter),
-        .pred_bht_index_i       (dual_bru_payload_i.pred_bht_index),
-        .trap_redirect_addr_i   (trap_redirect_addr_i),
-        .completion_valid_o     (dual_completion_valid_o),
-        .completion_producer_id_o(dual_completion_producer_id_o),
-        .completion_producer_tracked_o(dual_completion_producer_tracked_o),
-        .completion_addr_o      (dual_completion_addr_o),
-        .completion_data_o      (dual_completion_data_o),
-        .early_bypass_data_o    (dual_early_bypass_data_o),
-        .ex_branch_jump_o       (ex_branch_jump_o),
-        .ex_branch_target_o     (ex_branch_target_o),
-        .ex_pc_redirect_o       (ex_pc_redirect_o),
+    ydrasil_bru u_lane_a_bru (
+        .clk(clk),
+        .rst_n(rst_n),
+        .flush_i(flush_i),
+        .operand_a_i(dual_bru_operand_a_i),
+        .operand_b_i(dual_bru_operand_b_i),
+        .bt_a_operand_i(dual_bru_payload_i.jalr ?
+            dual_bru_operand_a_i : lane_a_pc_i),
+        .bt_b_operand_i(dual_bru_payload_i.imm),
+        .operator_i(alu_operator_i),
+        .operator_type_i(alu_operator_type_i),
+        .id_ex_valid_i(dual_bru_valid_i),
+        .id_ex_jalr_i(dual_bru_payload_i.jalr),
+        .id_ex_branch_target_i(lane_a_pc_i + dual_bru_payload_i.imm),
+        .id_ex_branch_next_pc_i(lane_a_pc_i + 32'd4),
+        .id_ex_pred_hit_i(dual_bru_payload_i.pred_hit),
+        .id_ex_pred_taken_i(dual_bru_payload_i.pred_taken),
+        .id_ex_pred_target_i(dual_bru_payload_i.pred_target),
+        .id_ex_pred_counter_i(dual_bru_payload_i.pred_counter),
+        .id_ex_pred_bht_index_i(dual_bru_payload_i.pred_bht_index),
+        .id_ex_producer_id_i(alu_producer_id_i),
+        .trap_redirect_i(trap_redirect_i),
+        .trap_redirect_addr_i(trap_redirect_addr_i),
+        .ex_branch_jump_o(ex_branch_jump_o),
+        .ex_branch_target_o(ex_branch_target_o),
+        .ex_pc_redirect_o(ex_pc_redirect_o),
         .ex_pc_redirect_target_o(ex_pc_redirect_target_o),
-        .ex_bp_train_o          (ex_bp_train_o),
-        .ex_branch_mispredict_o (ex_branch_mispredict_o),
-        .instret_valid_o        (dual_instret_valid_o),
-        .commit_pc_o            (dual_commit_pc_o),
-        .commit_instr_o         (dual_commit_instr_o)
+        .ex_bp_train_o(ex_bp_train_o),
+        .ex_branch_mispredict_o(ex_branch_mispredict_o)
 `ifndef SYNTHESIS
         ,.dbg_bp_resolve_valid_o(dbg_bp_resolve_valid_o)
         ,.dbg_bp_resolve_pc_o(dbg_bp_resolve_pc_o)
@@ -300,6 +287,33 @@ import ydrasil_pkg::*;
         ,.dbg_bp_pred_next_pc_o(dbg_bp_pred_next_pc_o)
         ,.dbg_bp_mispredict_o(dbg_bp_mispredict_o)
 `endif
+    );
+
+    ydrasil_dual_alu u_dual_ex (
+        .clk                    (clk),
+        .rst_n                  (rst_n),
+        .flush_i                (flush_i),
+        .interrupt_i            (trap_redirect_i),
+        .valid_i                (ex_accept_valid1_i && dual_alu_valid_i),
+        .operand_a_i            (dual_operand_a),
+        .operand_b_i            (dual_operand_b),
+        .operator_i             (dual_operator),
+        .operator_type_i        (dual_operator_type),
+        .rd_addr_i              (dual_meta_i.rd_addr),
+        .rd_wen_i               (dual_meta_i.rd_wen),
+        .producer_id_i          (dual_meta_i.producer_id),
+        .producer_tracked_i     (dual_meta_i.producer_tracked),
+        .pc_i                   (dual_meta_i.pc),
+        .instr_i                (dual_meta_i.instr),
+        .completion_valid_o     (dual_completion_valid_o),
+        .completion_producer_id_o(dual_completion_producer_id_o),
+        .completion_producer_tracked_o(dual_completion_producer_tracked_o),
+        .completion_addr_o      (dual_completion_addr_o),
+        .completion_data_o      (dual_completion_data_o),
+        .early_bypass_data_o    (dual_early_bypass_data_o),
+        .instret_valid_o        (dual_instret_valid_o),
+        .commit_pc_o            (dual_commit_pc_o),
+        .commit_instr_o         (dual_commit_instr_o)
     );
 
     wire unused = &{1'b0, lsu_store_result};

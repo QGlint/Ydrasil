@@ -619,7 +619,8 @@ import ydrasil_pkg::*;
         lane_b_uop.operand_b_rs_sel;
     wire lane_a_alu_exec =
         (lane_a_uop.op_class == UOP_CLASS_ALU) ||
-        (lane_a_uop.op_class == UOP_CLASS_BITMANIP);
+        (lane_a_uop.op_class == UOP_CLASS_BITMANIP) ||
+        (lane_a_uop.op_class == UOP_CLASS_BJP);
     wire [OPERATOR_WIDTH-1:0] lane_a_operator_info =
         uop_operator_info(lane_a_uop);
     wire [OPERATOR_TYPE_WIDTH-1:0] lane_a_operator_type =
@@ -682,8 +683,10 @@ import ydrasil_pkg::*;
     wire lane_b_alu_accept = lane_b_accept &&
         ((lane_b_uop.op_class == UOP_CLASS_ALU) ||
          (lane_b_uop.op_class == UOP_CLASS_BITMANIP));
-    wire lane_b_bru_accept = lane_b_accept &&
-        (lane_b_uop.op_class == UOP_CLASS_BJP);
+    wire lane_a_bru_accept = lane_a_accept &&
+        (lane_a_uop.op_class == UOP_CLASS_BJP);
+    wire lane_b_mul_accept = lane_b_accept &&
+        (lane_b_uop.op_class == UOP_CLASS_MUL);
     wire lane_b_agu_accept = lane_b_accept && uop_memory(lane_b_uop);
     ydrasil_lsu_req_pkt_t shared_agu_req_d;
     ydrasil_lane_b_meta_t dual_meta_d;
@@ -725,16 +728,16 @@ import ydrasil_pkg::*;
         dual_alu_payload_d.operand_b = lane_b_operand_b_local;
 
         dual_bru_payload_d = '0;
-        dual_bru_payload_d.subop = lane_b_uop.subop;
-        dual_bru_payload_d.operand_a = lane_b_src0_local;
-        dual_bru_payload_d.operand_b = lane_b_src1_local;
-        dual_bru_payload_d.imm = lane_b_uop.imm;
-        dual_bru_payload_d.jalr = lane_b_uop.bt_a_rs_sel;
-        dual_bru_payload_d.pred_hit = lane_b_uop.pred_hit;
-        dual_bru_payload_d.pred_taken = lane_b_uop.pred_taken;
-        dual_bru_payload_d.pred_target = lane_b_uop.pred_target;
-        dual_bru_payload_d.pred_counter = lane_b_uop.pred_counter;
-        dual_bru_payload_d.pred_bht_index = lane_b_uop.pred_bht_index;
+        dual_bru_payload_d.subop = lane_a_uop.subop;
+        dual_bru_payload_d.operand_a = lane_a_src0_local;
+        dual_bru_payload_d.operand_b = lane_a_src1_local;
+        dual_bru_payload_d.imm = lane_a_uop.imm;
+        dual_bru_payload_d.jalr = lane_a_uop.bt_a_rs_sel;
+        dual_bru_payload_d.pred_hit = lane_a_uop.pred_hit;
+        dual_bru_payload_d.pred_taken = lane_a_uop.pred_taken;
+        dual_bru_payload_d.pred_target = lane_a_uop.pred_target;
+        dual_bru_payload_d.pred_counter = lane_a_uop.pred_counter;
+        dual_bru_payload_d.pred_bht_index = lane_a_uop.pred_bht_index;
     end
 
     always_ff @(posedge clk) begin
@@ -846,22 +849,18 @@ import ydrasil_pkg::*;
                         ((lane_a_uop.op_class == UOP_CLASS_CSR) ||
                          (lane_a_uop.op_class == UOP_CLASS_SYS)) &&
                         lane_a_op_a_src && lane_a_src0_dtcm_hit;
-                    mul_in_operand_a_dtcm_q <= lane_a_accept &&
-                        (lane_a_uop.op_class == UOP_CLASS_MUL) &&
-                        lane_a_op_a_src && lane_a_src0_dtcm_hit;
-                    mul_in_operand_b_dtcm_q <= lane_a_accept &&
-                        (lane_a_uop.op_class == UOP_CLASS_MUL) &&
-                        lane_a_op_b_src && lane_a_src1_dtcm_hit;
+                    mul_in_operand_a_dtcm_q <= lane_b_mul_accept &&
+                        lane_b_op_a_src && lane_b_src0_dtcm_hit;
+                    mul_in_operand_b_dtcm_q <= lane_b_mul_accept &&
+                        lane_b_op_b_src && lane_b_src1_dtcm_hit;
                     dual_in_operand_a_dtcm_q <= lane_b_alu_accept &&
                         lane_b_op_a_src && lane_b_src0_dtcm_hit;
                     dual_in_operand_b_dtcm_q <= lane_b_alu_accept &&
                         lane_b_op_b_src && lane_b_src1_dtcm_hit;
-                    dual_in_branch_operand_a_dtcm_q <= lane_b_accept &&
-                        (lane_b_uop.op_class == UOP_CLASS_BJP) &&
-                        lane_b_src0_dtcm_hit;
-                    dual_in_branch_operand_b_dtcm_q <= lane_b_accept &&
-                        (lane_b_uop.op_class == UOP_CLASS_BJP) &&
-                        lane_b_src1_dtcm_hit;
+                    dual_in_branch_operand_a_dtcm_q <= lane_a_bru_accept &&
+                        lane_a_src0_dtcm_hit;
+                    dual_in_branch_operand_b_dtcm_q <= lane_a_bru_accept &&
+                        lane_a_src1_dtcm_hit;
                     // Wakeup qualification is a control token, not execution
                     // payload.  Derive it directly from the selected lane so
                     // LSU request/credit fields cannot re-enter this D cone.
@@ -909,18 +908,18 @@ import ydrasil_pkg::*;
                     csr_in_waddr_q <= lane_a_uop.csr_waddr;
                     csr_in_op_info_q <= lane_a_uop.csr_op_info;
                     csr_in_sys_info_q <= lane_a_uop.sys_op_info;
-                    mul_in_valid_q <= lane_a_fu_valid;
-                    mul_in_operand_a_q <= lane_a_operand_a_local;
-                    mul_in_operand_b_q <= lane_a_operand_b_local;
-                    mul_in_operator_q <= lane_a_operator_info;
-                    mul_in_operator_type_q <= lane_a_operator_type;
+                    mul_in_valid_q <= lane_b_mul_accept;
+                    mul_in_operand_a_q <= lane_b_operand_a_local;
+                    mul_in_operand_b_q <= lane_b_operand_b_local;
+                    mul_in_operator_q <= uop_operator_info(lane_b_uop);
+                    mul_in_operator_type_q <= uop_operator_type(lane_b_uop);
                     dual_alu_valid_q <= lane_b_alu_accept;
-                    dual_bru_valid_q <= lane_b_bru_accept;
+                    dual_bru_valid_q <= lane_a_bru_accept;
                     if (lane_b_accept)
                         dual_meta_q <= dual_meta_d;
                     if (lane_b_alu_accept)
                         dual_alu_payload_q <= dual_alu_payload_d;
-                    if (lane_b_bru_accept)
+                    if (lane_a_bru_accept)
                         dual_bru_payload_q <= dual_bru_payload_d;
                 end
             end
@@ -995,7 +994,7 @@ endmodule
 
 
 // 第二槽位仅执行无异常的单周期整数/位操作。输入与输出各打一拍，
-// 使其完成时序与主 ALU 完成总线保持一致。
+// 使其完成时序与主 ALU 完成总线保持一致。BRU 在主槽位独立解析。
 module ydrasil_dual_alu
 import ydrasil_pkg::*;
 (
@@ -1006,9 +1005,6 @@ import ydrasil_pkg::*;
     input  wire                           valid_i,
     input  wire [REGS_DATA_WIDTH-1:0]     operand_a_i,
     input  wire [REGS_DATA_WIDTH-1:0]     operand_b_i,
-    input  wire [REGS_DATA_WIDTH-1:0]     branch_operand_a_i,
-    input  wire [REGS_DATA_WIDTH-1:0]     branch_operand_b_i,
-    input  wire [REGS_DATA_WIDTH-1:0]     branch_imm_i,
     input  wire [OPERATOR_WIDTH-1:0]      operator_i,
     input  wire [OPERATOR_TYPE_WIDTH-1:0] operator_type_i,
     input  wire [REGS_ADDR_WIDTH-1:0]     rd_addr_i,
@@ -1017,43 +1013,15 @@ import ydrasil_pkg::*;
     input  wire                           producer_tracked_i,
     input  wire [INST_ADDR_WIDTH-1:0]     pc_i,
     input  wire [INST_DATA_WIDTH-1:0]     instr_i,
-    input  wire                           jalr_i,
-    input  wire [INST_ADDR_WIDTH-1:0]     branch_target_i,
-    input  wire [INST_ADDR_WIDTH-1:0]     branch_next_pc_i,
-    input  wire                           pred_hit_i,
-    input  wire                           pred_taken_i,
-    input  wire [INST_ADDR_WIDTH-1:0]     pred_target_i,
-    input  wire [1:0]                     pred_counter_i,
-    input  bp_bht_index_t                 pred_bht_index_i,
-    input  wire [INST_ADDR_WIDTH-1:0]     trap_redirect_addr_i,
     output wire                           completion_valid_o,
     output producer_id_t                  completion_producer_id_o,
     output wire                           completion_producer_tracked_o,
     output wire [REGS_ADDR_WIDTH-1:0]     completion_addr_o,
     output wire [REGS_DATA_WIDTH-1:0]     completion_data_o,
     output wire [REGS_DATA_WIDTH-1:0]     early_bypass_data_o,
-    output wire                           ex_branch_jump_o,
-    output wire [INST_ADDR_WIDTH-1:0]     ex_branch_target_o,
-    output wire                           ex_pc_redirect_o,
-    output wire [INST_ADDR_WIDTH-1:0]     ex_pc_redirect_target_o,
-    output ydrasil_bp_train_pkt_t         ex_bp_train_o,
-    output wire                           ex_branch_mispredict_o,
     output wire                           instret_valid_o,
     output wire [INST_ADDR_WIDTH-1:0]     commit_pc_o,
     output wire [INST_DATA_WIDTH-1:0]     commit_instr_o
-`ifndef SYNTHESIS
-    ,output wire                          dbg_bp_resolve_valid_o
-    ,output wire [INST_ADDR_WIDTH-1:0]    dbg_bp_resolve_pc_o
-    ,output wire                          dbg_bp_actual_taken_o
-    ,output wire [INST_ADDR_WIDTH-1:0]    dbg_bp_actual_target_o
-    ,output wire [INST_ADDR_WIDTH-1:0]    dbg_bp_actual_next_pc_o
-    ,output wire                          dbg_bp_pred_hit_o
-    ,output wire                          dbg_bp_pred_taken_o
-    ,output wire [INST_ADDR_WIDTH-1:0]    dbg_bp_pred_target_o
-    ,output wire [1:0]                    dbg_bp_pred_counter_o
-    ,output wire [INST_ADDR_WIDTH-1:0]    dbg_bp_pred_next_pc_o
-    ,output wire                          dbg_bp_mispredict_o
-`endif
 );
     reg valid_q;
     reg [INST_ADDR_WIDTH-1:0] pc_q;
@@ -1132,52 +1100,7 @@ import ydrasil_pkg::*;
     assign early_bypass_data_o = early_lite_bitmanip_op ?
         early_lite_bitmanip_result :
         (operator_type_i[OPERATOR_TYPE_ALU] &&
-         !operator_type_i[OPERATOR_TYPE_BITMANIP]) ? alu_result :
-        operator_type_i[OPERATOR_TYPE_BJP] ?
-        (exec_operand_a + exec_operand_b) : '0;
-
-    ydrasil_bru u_lane_b_bru (
-        .clk(clk),
-        .rst_n(rst_n),
-        .flush_i(flush_i),
-        .operand_a_i(branch_operand_a_i),
-        .operand_b_i(branch_operand_b_i),
-        .bt_a_operand_i(jalr_i ? branch_operand_a_i : pc_i),
-        .bt_b_operand_i(branch_imm_i),
-        .operator_i(operator_i),
-        .operator_type_i(operator_type_i),
-        .id_ex_valid_i(valid_i),
-        .id_ex_jalr_i(jalr_i),
-        .id_ex_branch_target_i(branch_target_i),
-        .id_ex_branch_next_pc_i(branch_next_pc_i),
-        .id_ex_pred_hit_i(pred_hit_i),
-        .id_ex_pred_taken_i(pred_taken_i),
-        .id_ex_pred_target_i(pred_target_i),
-        .id_ex_pred_counter_i(pred_counter_i),
-        .id_ex_pred_bht_index_i(pred_bht_index_i),
-        .id_ex_producer_id_i(producer_id_i),
-        .trap_redirect_i(interrupt_i),
-        .trap_redirect_addr_i(trap_redirect_addr_i),
-        .ex_branch_jump_o(ex_branch_jump_o),
-        .ex_branch_target_o(ex_branch_target_o),
-        .ex_pc_redirect_o(ex_pc_redirect_o),
-        .ex_pc_redirect_target_o(ex_pc_redirect_target_o),
-        .ex_bp_train_o(ex_bp_train_o),
-        .ex_branch_mispredict_o(ex_branch_mispredict_o)
-`ifndef SYNTHESIS
-        ,.dbg_bp_resolve_valid_o(dbg_bp_resolve_valid_o)
-        ,.dbg_bp_resolve_pc_o(dbg_bp_resolve_pc_o)
-        ,.dbg_bp_actual_taken_o(dbg_bp_actual_taken_o)
-        ,.dbg_bp_actual_target_o(dbg_bp_actual_target_o)
-        ,.dbg_bp_actual_next_pc_o(dbg_bp_actual_next_pc_o)
-        ,.dbg_bp_pred_hit_o(dbg_bp_pred_hit_o)
-        ,.dbg_bp_pred_taken_o(dbg_bp_pred_taken_o)
-        ,.dbg_bp_pred_target_o(dbg_bp_pred_target_o)
-        ,.dbg_bp_pred_counter_o(dbg_bp_pred_counter_o)
-        ,.dbg_bp_pred_next_pc_o(dbg_bp_pred_next_pc_o)
-        ,.dbg_bp_mispredict_o(dbg_bp_mispredict_o)
-`endif
-    );
+         !operator_type_i[OPERATOR_TYPE_BITMANIP]) ? alu_result : '0;
     always_ff @(posedge clk) begin
         if (!rst_n || flush_i) begin
             valid_q <= 1'b0;

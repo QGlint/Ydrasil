@@ -29,10 +29,12 @@ module ydrasil_branch_predictor_tb
     localparam logic [31:0] PC_A = 32'h8000_0000;
     localparam logic [31:0] PC_B = PC_A + (BTB_ENTRIES * 32'd4);
     localparam logic [31:0] PC_C = PC_A + 32'd4;
+    localparam logic [31:0] PC_D = PC_A + 32'h0000_0200;
     localparam logic [31:0] TARGET_A0 = 32'h8000_0040;
     localparam logic [31:0] TARGET_B0 = 32'h8000_0080;
     localparam logic [31:0] TARGET_B1 = 32'h8000_00c0;
     localparam logic [31:0] TARGET_C0 = 32'h8000_0100;
+    localparam logic [31:0] TARGET_D0 = 32'h8000_0240;
 
     logic        predict_hit;
     logic        predict_taken;
@@ -62,9 +64,6 @@ module ydrasil_branch_predictor_tb
         .predict_target_o (predict_target),
         .predict_counter_o(predict_counter),
         .predict_bht_index_o(predict_bht_index),
-        .predict0_spec_valid_i(1'b0),
-        .predict0_spec_conditional_i(1'b1),
-        .predict0_spec_taken_i(1'b0),
         .predict_pc1_i    (predict_pc + 32'd4),
         .predict1_hit_o   (predict1_hit),
         .predict1_taken_o (predict1_taken),
@@ -97,8 +96,7 @@ module ydrasil_branch_predictor_tb
             train_pkt.taken <= taken;
             train_pkt.target <= target;
             train_pkt.counter <= counter;
-            // USE_GSHARE=0 in this test, so the branch's carried BHT index is
-            // the word address index of the branch being trained.
+            // The carried index is the word address index used for lookup.
             train_pkt.bht_index <= ydrasil_pkg::BP_BHT_INDEX_WIDTH'(pc >> 2);
             invalidate    <= 1'b0;
         end
@@ -311,6 +309,82 @@ module ydrasil_branch_predictor_tb
                     // An unconditional BTB entry is taken even though its BHT
                     // counter remains at weak-not-taken.
                     check_predict(1'b1, 1'b1, TARGET_C0, 2'b11);
+                    predict_pc <= PC_D;
+                    train_pkt <= '0;
+                    invalidate <= 1'b1;
+                    step <= step + 1;
+                end
+                27: begin
+                    check_predict(1'b0, 1'b0, '0, 2'b01);
+                    drive_idle(PC_D);
+                    step <= step + 1;
+                end
+                28: begin
+                    check_predict(1'b0, 1'b0, '0, 2'b01);
+                    drive_train_current(PC_D, 1'b1, TARGET_D0);
+                    step <= step + 1;
+                end
+                29: begin
+                    check_predict(1'b0, 1'b0, '0, 2'b01);
+                    drive_idle(PC_D);
+                    step <= step + 1;
+                end
+                30: begin
+                    check_predict(1'b1, 1'b1, TARGET_D0, 2'b10);
+                    drive_train_current(PC_D, 1'b0, TARGET_D0);
+                    step <= step + 1;
+                end
+                31: begin
+                    check_predict(1'b1, 1'b1, TARGET_D0, 2'b10);
+                    drive_idle(PC_D);
+                    step <= step + 1;
+                end
+                32: begin
+                    check_predict(1'b1, 1'b0, TARGET_D0, 2'b01);
+                    drive_train_current(PC_D, 1'b1, TARGET_D0);
+                    step <= step + 1;
+                end
+                33: begin
+                    check_predict(1'b1, 1'b0, TARGET_D0, 2'b01);
+                    drive_idle(PC_D);
+                    step <= step + 1;
+                end
+                34: begin
+                    check_predict(1'b1, 1'b1, TARGET_D0, 2'b10);
+                    drive_train_current(PC_D, 1'b0, TARGET_D0);
+                    step <= step + 1;
+                end
+                35: begin
+                    // Four alternating outcomes saturate confidence. The
+                    // side table predicts the inverse of the latest outcome.
+                    check_predict(1'b1, 1'b1, TARGET_D0, 2'b10);
+                    drive_idle(PC_D);
+                    step <= step + 1;
+                end
+                36: begin
+                    check_predict(1'b1, 1'b1, TARGET_D0, 2'b01);
+                    drive_train_current(PC_D, 1'b0, TARGET_D0);
+                    step <= step + 1;
+                end
+                37: begin
+                    check_predict(1'b1, 1'b0, TARGET_D0, 2'b01);
+                    drive_idle(PC_D);
+                    step <= step + 1;
+                end
+                38: begin
+                    check_predict(1'b1, 1'b0, TARGET_D0, 2'b00);
+                    drive_train_current(PC_D, 1'b0, TARGET_D0);
+                    step <= step + 1;
+                end
+                39: begin
+                    // Repeated equal outcomes lower confidence and hand the
+                    // decision back to the bimodal counter.
+                    check_predict(1'b1, 1'b0, TARGET_D0, 2'b00);
+                    drive_idle(PC_D);
+                    step <= step + 1;
+                end
+                40: begin
+                    check_predict(1'b1, 1'b0, TARGET_D0, 2'b00);
                     $display("TEST_PASS");
                     $finish;
                 end

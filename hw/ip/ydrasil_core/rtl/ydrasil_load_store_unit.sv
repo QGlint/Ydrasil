@@ -3,6 +3,8 @@ import ydrasil_pkg::*;
 (
     input  wire                            clk,
 	    input  wire                            rst_n,
+	    input  wire                            flush_i,
+	    input  wire [PRODUCER_NUM-1:0]         flush_keep_mask_i,
 	    input  ydrasil_lsu_req_pkt_t           req_i,
 		    input  ydrasil_completion_meta_t       completion_meta_i [COMPLETION_LANES],
 		    input  wire [REGS_DATA_WIDTH-1:0]      completion_data_i [COMPLETION_LANES],
@@ -156,9 +158,19 @@ import ydrasil_pkg::*;
     wire [BUS_DATA_WIDTH-1:0] active_store_data = active_pkt.store_data;
     wire [3:0] active_store_mask = active_pkt.store_mask;
     wire active_store_data_valid = active_pkt.store_data_valid;
-    wire active_dtcm_load = active_valid && active_addr_is_dtcm && active_is_load;
-    wire active_dtcm_store = active_valid && active_addr_is_dtcm && active_is_store;
-    wire active_mmio = active_valid && !active_addr_is_dtcm;
+    wire req_survives_flush = !flush_i || !req_i.producer_tracked ||
+        flush_keep_mask_i[
+            req_i.producer_id[PRODUCER_SLOT_WIDTH-1:0]];
+    wire active_survives_flush = !flush_i ||
+        !active_producer_tracked ||
+        flush_keep_mask_i[
+            active_producer_id[PRODUCER_SLOT_WIDTH-1:0]];
+    wire active_dtcm_load = active_valid && active_survives_flush &&
+        active_addr_is_dtcm && active_is_load;
+    wire active_dtcm_store = active_valid && active_survives_flush &&
+        active_addr_is_dtcm && active_is_store;
+    wire active_mmio = active_valid && active_survives_flush &&
+        !active_addr_is_dtcm;
 
     reg mmio_req_valid_q;
     reg mmio_is_load_q;
@@ -198,6 +210,7 @@ import ydrasil_pkg::*;
     // and MMIO always enter the request queue, keeping their readiness logic
     // out of the E-stage request-to-enqueue path.
 	    wire direct_dtcm_load_candidate = queue_empty && req_i.valid &&
+	        req_survives_flush &&
 	        req_i.addr_is_dtcm && req_i.is_load && !load_issue_hold;
 	    wire queued_dtcm_load_candidate = active_dtcm_load && !load_issue_hold;
 	    wire [BUS_ADDR_WIDTH-1:0] load_launch_addr = queue_empty ?
@@ -252,9 +265,14 @@ import ydrasil_pkg::*;
     // younger DTCM requests can proceed independently while APB is busy.
     wire mmio_fire = active_mmio && !mmio_busy && store_buf_empty &&
         (!active_is_store || active_store_data_valid);
-    wire queue_dequeue = queued_dtcm_load_fire || dtcm_store_fire || mmio_fire;
+    wire queue_invalid_head = !queue_empty &&
+        !queue_q[queue_head_q].valid;
+    wire queue_flush_drop = active_valid && !active_survives_flush;
+    wire queue_dequeue = queue_invalid_head || queue_flush_drop ||
+        queued_dtcm_load_fire || dtcm_store_fire || mmio_fire;
     wire queue_has_room_after_dequeue = !queue_full || queue_dequeue;
-    wire queue_enqueue = req_i.valid && !direct_dtcm_load_fire &&
+    wire queue_enqueue = req_i.valid && req_survives_flush &&
+        !direct_dtcm_load_fire &&
         queue_has_room_after_dequeue;
     wire store_buf_enqueue = dtcm_store_fire;
 `ifndef SYNTHESIS
@@ -345,9 +363,21 @@ import ydrasil_pkg::*;
     // cycle before the value becomes usable.
     wire dtcm_wb_valid = load_s1_valid_q;
     wire mmio_wb_out_valid = mmio_wb_valid_q && !dtcm_wb_valid;
+    wire load_s1_survives_flush = !flush_i ||
+        !load_s1_producer_tracked_q ||
+        flush_keep_mask_i[
+            load_s1_producer_id_q[PRODUCER_SLOT_WIDTH-1:0]];
+    wire mmio_wb_survives_flush = !flush_i ||
+        !mmio_wb_producer_tracked_q ||
+        flush_keep_mask_i[
+            mmio_wb_producer_id_q[PRODUCER_SLOT_WIDTH-1:0]];
+    wire dtcm_completion_tracked = load_s1_producer_tracked_q &&
+        load_s1_survives_flush;
+    wire mmio_completion_tracked = mmio_wb_producer_tracked_q &&
+        mmio_wb_survives_flush;
     assign completion_valid_o = dtcm_wb_valid ?
-        load_s1_producer_tracked_q :
-        (mmio_wb_out_valid && mmio_wb_producer_tracked_q);
+        dtcm_completion_tracked :
+        (mmio_wb_out_valid && mmio_completion_tracked);
     assign completion_data_o = dtcm_wb_valid ?
         dtcm_load_result : mmio_wb_result_q;
     assign completion_addr_o = dtcm_wb_valid ?
@@ -355,12 +385,12 @@ import ydrasil_pkg::*;
     assign completion_producer_id_o = dtcm_wb_valid ?
         load_s1_producer_id_q : mmio_wb_producer_id_q;
     assign completion_producer_tracked_o = dtcm_wb_valid ?
-        load_s1_producer_tracked_q : mmio_wb_producer_tracked_q;
+        dtcm_completion_tracked : mmio_completion_tracked;
 
     // DTCM is fixed-latency. Its registered identity is separate from the
     // MMIO/LSU completion stream; data is only a matched local operand bypass.
     assign dtcm_reservation_o.valid = dtcm_wb_valid;
-    assign dtcm_reservation_o.producer_tracked = load_s1_producer_tracked_q;
+    assign dtcm_reservation_o.producer_tracked = dtcm_completion_tracked;
     assign dtcm_reservation_o.producer_id = load_s1_producer_id_q;
     assign dtcm_reservation_o.arch_addr = load_s1_rd_addr_q;
     assign dtcm_reservation_o.result_class = RESULT_LSU;
@@ -514,8 +544,15 @@ import ydrasil_pkg::*;
 	                completion_meta_i[COMPLETION_LSU].producer_id;
 	            completion_shadow_data_q[4] <=
 	                completion_data_i[COMPLETION_LSU];
-	            for (queue_idx = 0; queue_idx < QUEUE_DEPTH; queue_idx++)
+	            for (queue_idx = 0; queue_idx < QUEUE_DEPTH; queue_idx++) begin
 	                queue_q[queue_idx] <= patch_queue_store(queue_q[queue_idx]);
+	                if (flush_i && queue_q[queue_idx].valid &&
+	                    queue_q[queue_idx].producer_tracked &&
+	                    !flush_keep_mask_i[
+	                        queue_q[queue_idx].producer_id[
+	                            PRODUCER_SLOT_WIDTH-1:0]])
+	                    queue_q[queue_idx] <= '0;
+	            end
 	            if (queue_dequeue) begin
                 queue_q[queue_head_q] <= '0;
                 queue_head_q <= queue_head_q + 1'b1;
@@ -593,7 +630,11 @@ import ydrasil_pkg::*;
                     mmio_wb_result_q <= mmio_load_result;
                     mmio_wb_rd_addr_q <= mmio_rd_addr_q;
                     mmio_wb_producer_id_q <= mmio_producer_id_q;
-                    mmio_wb_producer_tracked_q <= mmio_producer_tracked_q;
+                    mmio_wb_producer_tracked_q <=
+                        mmio_producer_tracked_q &&
+                        (!flush_i || flush_keep_mask_i[
+                            mmio_producer_id_q[
+                                PRODUCER_SLOT_WIDTH-1:0]]);
                 end
             end
             if (mmio_fire) begin
@@ -608,6 +649,16 @@ import ydrasil_pkg::*;
                 mmio_producer_id_q <= active_producer_id;
                 mmio_producer_tracked_q <= active_producer_tracked;
             end
+	        if (flush_i && mmio_req_valid_q &&
+	            mmio_producer_tracked_q &&
+	            !flush_keep_mask_i[
+	                mmio_producer_id_q[PRODUCER_SLOT_WIDTH-1:0]])
+	            mmio_producer_tracked_q <= 1'b0;
+	        if (flush_i && mmio_wb_valid_q &&
+	            mmio_wb_producer_tracked_q &&
+	            !flush_keep_mask_i[
+	                mmio_wb_producer_id_q[PRODUCER_SLOT_WIDTH-1:0]])
+	            mmio_wb_producer_tracked_q <= 1'b0;
 
 `ifndef SYNTHESIS
 	            if (dtcm_load_fire) begin

@@ -3,8 +3,7 @@ import ydrasil_pkg::*;
 #(
     parameter int BP_ENTRIES  = 0,
     parameter int BTB_ENTRIES = (BP_ENTRIES != 0) ? BP_ENTRIES : ydrasil_pkg::BP_BTB_ENTRIES,
-    parameter int BHT_ENTRIES = (BP_ENTRIES != 0) ? BP_ENTRIES : ydrasil_pkg::BP_BHT_ENTRIES,
-    parameter bit USE_GSHARE  = 1'b0
+    parameter int BHT_ENTRIES = (BP_ENTRIES != 0) ? BP_ENTRIES : ydrasil_pkg::BP_BHT_ENTRIES
 ) (
     input  wire                            clk,
     input  wire                            rst_n,
@@ -15,9 +14,6 @@ import ydrasil_pkg::*;
     output wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] predict_target_o,
     output wire [1:0]                      predict_counter_o,
     output bp_bht_index_t                    predict_bht_index_o,
-    input  wire                            predict0_spec_valid_i,
-    input  wire                            predict0_spec_conditional_i,
-    input  wire                            predict0_spec_taken_i,
 
     input  wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] predict_pc1_i,
     output wire                            predict1_hit_o,
@@ -38,7 +34,6 @@ import ydrasil_pkg::*;
     localparam int BHT_ROW_WIDTH = $clog2(BHT_BANK_DEPTH);
     localparam int BTB_LOCAL_ADDR_WIDTH = ydrasil_pkg::ITCM_ADDR_WIDTH + 1;
     localparam int BTB_TAG_WIDTH = BTB_LOCAL_ADDR_WIDTH - BTB_INDEX_WIDTH;
-    localparam int GHR_WIDTH = (BHT_ROW_WIDTH > 4) ? 4 : BHT_ROW_WIDTH;
     // Six generations fit in both the 32-bit BTB word and the existing 8-bit
     // BHT word. Sixty-three invalidations remain zero-cycle; the next one
     // performs a parallel two-bank scrub before the generation wraps.
@@ -48,6 +43,12 @@ import ydrasil_pkg::*;
     localparam int BTB_MEM_DATA_WIDTH = ((BTB_DATA_WIDTH + 7) / 8) * 8;
     localparam int BHT_DATA_WIDTH = EPOCH_WIDTH + 2;
     localparam int BHT_MEM_DATA_WIDTH = 8;
+    localparam int ALT_ENTRIES = 64;
+    localparam int ALT_BANK_DEPTH = ALT_ENTRIES / 2;
+    localparam int ALT_INDEX_WIDTH = $clog2(ALT_ENTRIES);
+    localparam int ALT_ROW_WIDTH = $clog2(ALT_BANK_DEPTH);
+    localparam int ALT_TAG_WIDTH = BTB_LOCAL_ADDR_WIDTH - ALT_INDEX_WIDTH;
+    localparam int ALT_DATA_WIDTH = ALT_TAG_WIDTH + 3;
 
     if ((BTB_ENTRIES < 4) || ((BTB_ENTRIES & (BTB_ENTRIES - 1)) != 0)) begin : g_bad_btb_entries
         initial $fatal(1, "BTB_ENTRIES must be a power of two and at least 4");
@@ -61,15 +62,6 @@ import ydrasil_pkg::*;
     if (BHT_INDEX_WIDTH > ydrasil_pkg::BP_BHT_INDEX_WIDTH) begin : g_bad_bht_index_width
         initial $fatal(1, "BHT_ENTRIES exceeds the carried BHT index width");
     end
-
-    wire [GHR_WIDTH-1:0] ghr_value;
-    wire [GHR_WIDTH-1:0] lane1_ghr =
-        (predict0_spec_valid_i && predict0_spec_conditional_i) ?
-        ((ghr_value << 1) | GHR_WIDTH'(predict0_spec_taken_i)) : ghr_value;
-    wire [BHT_ROW_WIDTH-1:0] ghr_row_mask = USE_GSHARE ?
-        BHT_ROW_WIDTH'(ghr_value) : '0;
-    wire [BHT_ROW_WIDTH-1:0] lane1_ghr_row_mask = USE_GSHARE ?
-        BHT_ROW_WIDTH'(lane1_ghr) : '0;
 
     wire [BTB_LOCAL_ADDR_WIDTH-1:0] predict_btb_addr = {
         predict_pc_i[ydrasil_pkg::INST_ADDR_WIDTH-1:
@@ -94,18 +86,29 @@ import ydrasil_pkg::*;
     wire [BTB_TAG_WIDTH-1:0] predict_btb_tag1 =
         predict_btb_addr1[BTB_LOCAL_ADDR_WIDTH-1:BTB_INDEX_WIDTH];
 
-    // Keep PC[2] as the physical bank bit. GShare hashes only the row, so a
-    // naturally aligned 64-bit fetch always reads one entry from each bank.
+    // Keep PC[2] as the physical bank bit so an aligned 64-bit fetch reads
+    // one entry from each bank.
     wire predict_bht_bank = predict_pc_i[2];
     wire predict_bht_bank1 = predict_pc1_i[2];
     wire [BHT_ROW_WIDTH-1:0] predict_bht_row =
-        BHT_ROW_WIDTH'(predict_pc_i >> 3) ^ ghr_row_mask;
+        BHT_ROW_WIDTH'(predict_pc_i >> 3);
     wire [BHT_ROW_WIDTH-1:0] predict_bht_row1 =
-        BHT_ROW_WIDTH'(predict_pc1_i >> 3) ^ lane1_ghr_row_mask;
+        BHT_ROW_WIDTH'(predict_pc1_i >> 3);
     wire [BHT_INDEX_WIDTH-1:0] predict_bht_index =
         {predict_bht_row, predict_bht_bank};
     wire [BHT_INDEX_WIDTH-1:0] predict_bht_index1 =
         {predict_bht_row1, predict_bht_bank1};
+
+    wire predict_alt_bank = predict_btb_addr[0];
+    wire predict_alt_bank1 = predict_btb_addr1[0];
+    wire [ALT_ROW_WIDTH-1:0] predict_alt_row =
+        predict_btb_addr[ALT_INDEX_WIDTH-1:1];
+    wire [ALT_ROW_WIDTH-1:0] predict_alt_row1 =
+        predict_btb_addr1[ALT_INDEX_WIDTH-1:1];
+    wire [ALT_TAG_WIDTH-1:0] predict_alt_tag =
+        predict_btb_addr[BTB_LOCAL_ADDR_WIDTH-1:ALT_INDEX_WIDTH];
+    wire [ALT_TAG_WIDTH-1:0] predict_alt_tag1 =
+        predict_btb_addr1[BTB_LOCAL_ADDR_WIDTH-1:ALT_INDEX_WIDTH];
 
     wire [BTB_LOCAL_ADDR_WIDTH-1:0] train_btb_addr = {
         train_i.pc[ydrasil_pkg::INST_ADDR_WIDTH-1:
@@ -121,6 +124,11 @@ import ydrasil_pkg::*;
     wire train_bht_bank = train_i.bht_index[0];
     wire [BHT_ROW_WIDTH-1:0] train_bht_row =
         train_i.bht_index[BHT_INDEX_WIDTH-1:1];
+    wire train_alt_bank = train_btb_addr[0];
+    wire [ALT_ROW_WIDTH-1:0] train_alt_row =
+        train_btb_addr[ALT_INDEX_WIDTH-1:1];
+    wire [ALT_TAG_WIDTH-1:0] train_alt_tag =
+        train_btb_addr[BTB_LOCAL_ADDR_WIDTH-1:ALT_INDEX_WIDTH];
 
     wire [BTB_ROW_WIDTH-1:0] btb_read_row0 =
         predict_btb_bank ? predict_btb_row1 : predict_btb_row;
@@ -213,6 +221,12 @@ import ydrasil_pkg::*;
     logic [BTB_TAG_WIDTH-1:0] predict_btb_tag1_q;
     logic [BHT_INDEX_WIDTH-1:0] predict_bht_index_q;
     logic [BHT_INDEX_WIDTH-1:0] predict_bht_index1_q;
+    logic predict_alt_bank_q;
+    logic predict_alt_bank1_q;
+    logic [ALT_ROW_WIDTH-1:0] predict_alt_row_q;
+    logic [ALT_ROW_WIDTH-1:0] predict_alt_row1_q;
+    logic [ALT_TAG_WIDTH-1:0] predict_alt_tag_q;
+    logic [ALT_TAG_WIDTH-1:0] predict_alt_tag1_q;
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -222,6 +236,12 @@ import ydrasil_pkg::*;
             predict_btb_tag1_q <= '0;
             predict_bht_index_q <= '0;
             predict_bht_index1_q <= '0;
+            predict_alt_bank_q <= 1'b0;
+            predict_alt_bank1_q <= 1'b1;
+            predict_alt_row_q <= '0;
+            predict_alt_row1_q <= '0;
+            predict_alt_tag_q <= '0;
+            predict_alt_tag1_q <= '0;
         end else begin
             predict_btb_bank_q <= predict_btb_bank;
             predict_btb_bank1_q <= predict_btb_bank1;
@@ -229,6 +249,53 @@ import ydrasil_pkg::*;
             predict_btb_tag1_q <= predict_btb_tag1;
             predict_bht_index_q <= predict_bht_index;
             predict_bht_index1_q <= predict_bht_index1;
+            predict_alt_bank_q <= predict_alt_bank;
+            predict_alt_bank1_q <= predict_alt_bank1;
+            predict_alt_row_q <= predict_alt_row;
+            predict_alt_row1_q <= predict_alt_row1;
+            predict_alt_tag_q <= predict_alt_tag;
+            predict_alt_tag1_q <= predict_alt_tag1;
+        end
+    end
+
+    logic [ALT_DATA_WIDTH-1:0] alt_bank0_q [0:ALT_BANK_DEPTH-1];
+    logic [ALT_DATA_WIDTH-1:0] alt_bank1_q [0:ALT_BANK_DEPTH-1];
+    logic [ALT_BANK_DEPTH-1:0] alt_valid0_q;
+    logic [ALT_BANK_DEPTH-1:0] alt_valid1_q;
+    wire [ALT_DATA_WIDTH-1:0] alt_train_data = train_alt_bank ?
+        alt_bank1_q[train_alt_row] : alt_bank0_q[train_alt_row];
+    wire [ALT_TAG_WIDTH-1:0] alt_train_old_tag =
+        alt_train_data[ALT_DATA_WIDTH-1:3];
+    wire alt_train_old_taken = alt_train_data[2];
+    wire [1:0] alt_train_old_conf = alt_train_data[1:0];
+    wire alt_train_valid = train_alt_bank ? alt_valid1_q[train_alt_row] :
+        alt_valid0_q[train_alt_row];
+    wire alt_train_match = alt_train_valid &&
+        (alt_train_old_tag == train_alt_tag);
+    wire alt_train_alternates = alt_train_match &&
+        (alt_train_old_taken != train_i.taken);
+    wire [1:0] alt_train_next_conf = !alt_train_match ? 2'b00 :
+        (alt_train_alternates ?
+         ((alt_train_old_conf == 2'b11) ? 2'b11 : alt_train_old_conf + 1'b1) :
+         ((alt_train_old_conf == 2'b00) ? 2'b00 : alt_train_old_conf - 1'b1));
+    wire [ALT_DATA_WIDTH-1:0] alt_train_next_data =
+        {train_alt_tag, train_i.taken, alt_train_next_conf};
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            alt_valid0_q <= '0;
+            alt_valid1_q <= '0;
+        end else if (invalidate_i) begin
+            alt_valid0_q <= '0;
+            alt_valid1_q <= '0;
+        end else if (train_fire && train_i.conditional) begin
+            if (train_alt_bank) begin
+                alt_bank1_q[train_alt_row] <= alt_train_next_data;
+                alt_valid1_q[train_alt_row] <= 1'b1;
+            end else begin
+                alt_bank0_q[train_alt_row] <= alt_train_next_data;
+                alt_valid0_q[train_alt_row] <= 1'b1;
+            end
         end
     end
 
@@ -270,21 +337,6 @@ import ydrasil_pkg::*;
             end
         end
     end
-
-    generate
-        if (USE_GSHARE) begin : g_gshare_history
-            logic [GHR_WIDTH-1:0] ghr_q;
-            assign ghr_value = ghr_q;
-            always_ff @(posedge clk or negedge rst_n) begin
-                if (!rst_n || invalidate_i)
-                    ghr_q <= '0;
-                else if (train_fire && train_i.conditional)
-                    ghr_q <= (ghr_q << 1) | GHR_WIDTH'(train_i.taken);
-            end
-        end else begin : g_no_gshare_history
-            assign ghr_value = '0;
-        end
-    endgenerate
 
     wire [BTB_DATA_WIDTH-1:0] lane0_btb_data = predict_btb_bank_q ?
         btb_mem_rdata1[BTB_DATA_WIDTH-1:0] : btb_mem_rdata0[BTB_DATA_WIDTH-1:0];
@@ -328,6 +380,25 @@ import ydrasil_pkg::*;
     wire [1:0] lane1_bht_counter = (lane1_bht_epoch == epoch_q) ?
         (lane1_bht_data[1:0] ^ 2'b01) : 2'b01;
 
+    wire [ALT_DATA_WIDTH-1:0] lane0_alt_data = predict_alt_bank_q ?
+        alt_bank1_q[predict_alt_row_q] : alt_bank0_q[predict_alt_row_q];
+    wire [ALT_DATA_WIDTH-1:0] lane1_alt_data = predict_alt_bank1_q ?
+        alt_bank1_q[predict_alt_row1_q] : alt_bank0_q[predict_alt_row1_q];
+    wire lane0_alt_valid = predict_alt_bank_q ?
+        alt_valid1_q[predict_alt_row_q] : alt_valid0_q[predict_alt_row_q];
+    wire lane1_alt_valid = predict_alt_bank1_q ?
+        alt_valid1_q[predict_alt_row1_q] : alt_valid0_q[predict_alt_row1_q];
+    wire [ALT_TAG_WIDTH-1:0] lane0_alt_tag =
+        lane0_alt_data[ALT_DATA_WIDTH-1:3];
+    wire [ALT_TAG_WIDTH-1:0] lane1_alt_tag =
+        lane1_alt_data[ALT_DATA_WIDTH-1:3];
+    wire lane0_alt_use = lane0_alt_valid &&
+        (lane0_alt_tag == predict_alt_tag_q) && (&lane0_alt_data[1:0]);
+    wire lane1_alt_use = lane1_alt_valid &&
+        (lane1_alt_tag == predict_alt_tag1_q) && (&lane1_alt_data[1:0]);
+    wire lane0_alt_taken = !lane0_alt_data[2];
+    wire lane1_alt_taken = !lane1_alt_data[2];
+
     wire lane0_btb_hit = lane0_btb_valid && (lane0_btb_epoch == epoch_q) &&
         (lane0_btb_tag == predict_btb_tag_q);
     wire lane1_btb_hit = lane1_btb_valid && (lane1_btb_epoch == epoch_q) &&
@@ -335,13 +406,15 @@ import ydrasil_pkg::*;
 
     assign predict_hit_o = predict_ready && lane0_btb_hit;
     assign predict_counter_o = predict_ready ? lane0_bht_counter : 2'b01;
-    assign predict_taken_o = predict_hit_o && predict_counter_o[1];
+    assign predict_taken_o = predict_hit_o &&
+        (lane0_alt_use ? lane0_alt_taken : predict_counter_o[1]);
     assign predict_target_o = lane0_btb_target;
     assign predict_bht_index_o = ydrasil_pkg::BP_BHT_INDEX_WIDTH'(predict_bht_index_q);
 
     assign predict1_hit_o = predict_ready && lane1_btb_hit;
     assign predict1_counter_o = predict_ready ? lane1_bht_counter : 2'b01;
-    assign predict1_taken_o = predict1_hit_o && predict1_counter_o[1];
+    assign predict1_taken_o = predict1_hit_o &&
+        (lane1_alt_use ? lane1_alt_taken : predict1_counter_o[1]);
     assign predict1_target_o = lane1_btb_target;
     assign predict1_bht_index_o = ydrasil_pkg::BP_BHT_INDEX_WIDTH'(predict_bht_index1_q);
 

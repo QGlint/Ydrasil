@@ -246,12 +246,16 @@ import ydrasil_pkg::*;
     input  wire        branch_jump_i,
     input  wire [31:0] branch_target_i,
 
+    input  wire        bp_predict_hit_i,
     input  wire        bp_predict_taken_i,
     input  wire [31:0] bp_predict_target_i,
     input  wire [1:0]  bp_predict_counter_i,
+    input  bp_bht_index_t bp_predict_bht_index_i,
+    input  wire        bp_predict1_hit_i,
     input  wire        bp_predict1_taken_i,
     input  wire [31:0] bp_predict1_target_i,
     input  wire [1:0]  bp_predict1_counter_i,
+    input  bp_bht_index_t bp_predict1_bht_index_i,
     input  wire        bp_invalidate_i,
     input  wire [31:0] bp_invalidate_target_i,
     // Install L0 entries only after EX has resolved real control flow.
@@ -287,7 +291,7 @@ import ydrasil_pkg::*;
 );
 
     localparam int COUNT_WIDTH = $clog2(FETCHQ_DEPTH + 1);
-    localparam int RESERVED_WIDTH = $clog2(FETCHQ_DEPTH + 3);
+    localparam int RESERVED_WIDTH = $clog2(FETCHQ_DEPTH + 5);
     localparam int FETCH_ADDR_TOKEN_WIDTH = ITCM_ADDR_WIDTH + 1;
     localparam int BHT_INDEX_WIDTH = $clog2(BHT_ENTRIES);
 
@@ -295,9 +299,11 @@ import ydrasil_pkg::*;
     typedef struct packed {
         fetch_addr_token_t pc;
         logic [31:0] instr;
+        logic pred_hit;
         logic pred_taken;
         fetch_addr_token_t pred_target;
         logic [1:0] pred_counter;
+        bp_bht_index_t pred_bht_index;
     } fetch_payload_t;
     localparam int FETCH_PAYLOAD_WIDTH = $bits(fetch_payload_t);
 
@@ -307,6 +313,13 @@ import ydrasil_pkg::*;
     reg [31:0] mem_req_pc_q;
     reg [31:0] mem_req_next_pc_q;
 	reg        mem_req_target_ff_hit_q;
+	reg        fetch_resp_valid_q;
+	reg [1:0]  fetch_resp_lane_valid_q;
+	reg [31:0] fetch_resp_pc_q;
+	reg [31:0] fetch_resp_next_pc_q;
+	reg        fetch_resp_target_ff_hit_q;
+	fetch_payload_t fetch_resp_payload0_q;
+	fetch_payload_t fetch_resp_payload1_q;
     reg        pending_redirect_valid_q;
     reg [31:0] pending_redirect_target_q;
 
@@ -381,23 +394,37 @@ import ydrasil_pkg::*;
     wire [31:0] flush_target = branch_jump_i ? branch_target_i : pc_plus4;
     wire [1:0] pop_count = (!flush_fetch && decode_ready_i && fetchq_valid0) ?
         ((consume_two_i && fetchq_valid1) ? 2'd2 : 2'd1) : 2'd0;
-    wire mem_resp_valid = !flush_fetch && mem_req_valid_q;
+    wire mem_resp_valid = !flush_fetch && fetch_resp_valid_q;
     wire [31:0] sequential_next_pc =
-        mem_req_pc_q + (mem_req_lane_valid_q[1] ? 32'd8 : 32'd4);
-    wire lane1_pred_taken = mem_req_lane_valid_q[1] && bp_predict1_taken_i;
-    wire bram_pred_taken_any = bp_predict_taken_i || lane1_pred_taken;
+        fetch_resp_pc_q + (fetch_resp_lane_valid_q[1] ? 32'd8 : 32'd4);
+    wire lane1_pred_taken = fetch_resp_lane_valid_q[1] &&
+        fetch_resp_payload1_q.pred_taken;
+    wire bram_pred_taken_any = fetch_resp_payload0_q.pred_taken ||
+        lane1_pred_taken;
+    wire [31:0] fetch_resp_pred_target0 = {
+        fetch_resp_payload0_q.pred_target[FETCH_ADDR_TOKEN_WIDTH-1] ?
+            DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2] :
+            ITCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2],
+        fetch_resp_payload0_q.pred_target[ITCM_ADDR_WIDTH-1:0], 2'b00};
+    wire [31:0] fetch_resp_pred_target1 = {
+        fetch_resp_payload1_q.pred_target[FETCH_ADDR_TOKEN_WIDTH-1] ?
+            DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2] :
+            ITCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2],
+        fetch_resp_payload1_q.pred_target[ITCM_ADDR_WIDTH-1:0], 2'b00};
     // Keep target selection out of the control path to the next request.
     // Each candidate compares in parallel, and only the one-bit result is
     // selected using the established lane0-over-lane1 priority.
-    wire [31:0] predict_next_pc = bp_predict_taken_i ? bp_predict_target_i :
-        (lane1_pred_taken ? bp_predict1_target_i : sequential_next_pc);
+    wire [31:0] predict_next_pc = fetch_resp_payload0_q.pred_taken ?
+        fetch_resp_pred_target0 :
+        (lane1_pred_taken ? fetch_resp_pred_target1 : sequential_next_pc);
     (* keep = "true" *) wire lane0_target_mismatch =
-        bp_predict_target_i != mem_req_next_pc_q;
+        fetch_resp_pred_target0 != fetch_resp_next_pc_q;
     (* keep = "true" *) wire lane1_target_mismatch =
-        bp_predict1_target_i != mem_req_next_pc_q;
+        fetch_resp_pred_target1 != fetch_resp_next_pc_q;
     (* keep = "true" *) wire seq_target_mismatch =
-        sequential_next_pc != mem_req_next_pc_q;
-    (* keep = "true" *) wire bram_next_pc_mismatch = bp_predict_taken_i ?
+        sequential_next_pc != fetch_resp_next_pc_q;
+    (* keep = "true" *) wire bram_next_pc_mismatch =
+        fetch_resp_payload0_q.pred_taken ?
         lane0_target_mismatch :
         (lane1_pred_taken ? lane1_target_mismatch : seq_target_mismatch);
     wire predict_redirect_resp = mem_resp_valid && bram_pred_taken_any;
@@ -405,15 +432,18 @@ import ydrasil_pkg::*;
 	// The registered L0 decision, rather than the returning BRAM data, releases
 	// the next fetch.  A stale entry kills that speculative request below and
 	// retains the existing one-cycle correction through pending_redirect_target_q.
-	wire target_ff_hit = mem_resp_valid && mem_req_target_ff_hit_q;
+	wire target_ff_hit = mem_resp_valid && fetch_resp_target_ff_hit_q;
     wire target_ff_correction_resp = target_ff_hit &&
         bram_next_pc_mismatch;
     wire [1:0] push_count = mem_resp_valid ?
-        (bp_predict_taken_i ? 2'd1 :
-         ({1'b0, mem_req_lane_valid_q[0]} +
-          {1'b0, mem_req_lane_valid_q[1]})) : 2'd0;
+        (fetch_resp_payload0_q.pred_taken ? 2'd1 :
+         ({1'b0, fetch_resp_lane_valid_q[0]} +
+          {1'b0, fetch_resp_lane_valid_q[1]})) : 2'd0;
     wire [RESERVED_WIDTH-1:0] reserved_count =
         RESERVED_WIDTH'(fetchq_count_q) +
+        (fetch_resp_valid_q ?
+         (fetch_resp_lane_valid_q[1] ? RESERVED_WIDTH'(2) :
+          RESERVED_WIDTH'(1)) : '0) +
         (mem_req_valid_q ? (mem_req_lane_valid_q[1] ? RESERVED_WIDTH'(2) :
          RESERVED_WIDTH'(1)) : '0);
     wire pair_capacity = reserved_count <= RESERVED_WIDTH'(FETCHQ_DEPTH - 2);
@@ -425,35 +455,39 @@ import ydrasil_pkg::*;
     // to the fetch queue on the following cycle.
     wire fetch_issue = !flush_fetch && !bp_invalidate_i && pair_capacity;
 
-    fetch_payload_t fetchq_push_payload0;
-    fetch_payload_t fetchq_push_payload1;
+    fetch_payload_t mem_resp_payload0;
+    fetch_payload_t mem_resp_payload1;
     wire [31:0] mem_req_pc_plus4 = mem_req_pc_q + 32'd4;
     always_comb begin
-        fetchq_push_payload0 = '0;
-        fetchq_push_payload0.pc = {
+        mem_resp_payload0 = '0;
+        mem_resp_payload0.pc = {
             mem_req_pc_q[31:ITCM_ADDR_WIDTH+2] ==
                 DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2],
             mem_req_pc_q[ITCM_ADDR_WIDTH+1:2]};
-        fetchq_push_payload0.instr = if_mem_rdata_i;
-        fetchq_push_payload0.pred_taken = bp_predict_taken_i;
-        fetchq_push_payload0.pred_target = {
+        mem_resp_payload0.instr = if_mem_rdata_i;
+        mem_resp_payload0.pred_hit = bp_predict_hit_i;
+        mem_resp_payload0.pred_taken = bp_predict_taken_i;
+        mem_resp_payload0.pred_target = {
             bp_predict_target_i[31:ITCM_ADDR_WIDTH+2] ==
                 DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2],
             bp_predict_target_i[ITCM_ADDR_WIDTH+1:2]};
-        fetchq_push_payload0.pred_counter = bp_predict_counter_i;
+        mem_resp_payload0.pred_counter = bp_predict_counter_i;
+        mem_resp_payload0.pred_bht_index = bp_predict_bht_index_i;
 
-        fetchq_push_payload1 = '0;
-        fetchq_push_payload1.pc = {
+        mem_resp_payload1 = '0;
+        mem_resp_payload1.pc = {
             mem_req_pc_plus4[31:ITCM_ADDR_WIDTH+2] ==
                 DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2],
             mem_req_pc_plus4[ITCM_ADDR_WIDTH+1:2]};
-        fetchq_push_payload1.instr = if_mem_rdata1_i;
-        fetchq_push_payload1.pred_taken = bp_predict1_taken_i;
-        fetchq_push_payload1.pred_target = {
+        mem_resp_payload1.instr = if_mem_rdata1_i;
+        mem_resp_payload1.pred_hit = bp_predict1_hit_i;
+        mem_resp_payload1.pred_taken = bp_predict1_taken_i;
+        mem_resp_payload1.pred_target = {
             bp_predict1_target_i[31:ITCM_ADDR_WIDTH+2] ==
                 DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2],
             bp_predict1_target_i[ITCM_ADDR_WIDTH+1:2]};
-        fetchq_push_payload1.pred_counter = bp_predict1_counter_i;
+        mem_resp_payload1.pred_counter = bp_predict1_counter_i;
+        mem_resp_payload1.pred_bht_index = bp_predict1_bht_index_i;
     end
     ydrasil_fetch_queue #(
         .DEPTH      (FETCHQ_DEPTH),
@@ -465,8 +499,8 @@ import ydrasil_pkg::*;
         .flush_i        (flush_fetch || bp_invalidate_i),
         .pop_count_i    (pop_count),
         .push_count_i   (push_count),
-        .push_payload0_i(fetchq_push_payload0),
-        .push_payload1_i(fetchq_push_payload1),
+        .push_payload0_i(fetch_resp_payload0_q),
+        .push_payload1_i(fetch_resp_payload1_q),
         .count_o        (fetchq_count_q),
         .valid0_o       (fetchq_valid0),
         .valid1_o       (fetchq_valid1),
@@ -542,7 +576,8 @@ import ydrasil_pkg::*;
     // the queue was just flushed, use the in-flight request before the next
     // fetch address advances past the redirect target.
     assign if_resume_pc_o = fetchq_valid0 ? fetchq_pc0 :
-        (mem_req_valid_q ? mem_req_pc_q : fetch_addr);
+        (fetch_resp_valid_q ? fetch_resp_pc_q :
+         (mem_req_valid_q ? mem_req_pc_q : fetch_addr));
     wire [31:0] fetchq_pred_target0 = {
         fetchq_payload0.pred_target[FETCH_ADDR_TOKEN_WIDTH-1] ?
             DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2] :
@@ -563,24 +598,20 @@ import ydrasil_pkg::*;
     // head is invalid; stale payload is architecturally invisible.
     assign if_id_pc_o = fetchq_pc0;
     assign if_id_instr_o = fetchq_payload0.instr;
-    assign if_id_pred_hit_o = fetchq_payload0.pred_taken;
+    assign if_id_pred_hit_o = fetchq_payload0.pred_hit;
     assign if_id_pred_taken_o = fetchq_payload0.pred_taken;
     assign if_id_pred_target_o = fetchq_pred_target0;
     assign if_id_pred_counter_o = fetchq_payload0.pred_counter;
-    wire [BHT_INDEX_WIDTH-1:0] fetchq_bht_index0 =
-        BHT_INDEX_WIDTH'(fetchq_pc0 >> 2);
-    assign if_id_pred_bht_index_o = BP_BHT_INDEX_WIDTH'(fetchq_bht_index0);
+    assign if_id_pred_bht_index_o = fetchq_payload0.pred_bht_index;
 
     assign if_id1_valid_o = fetchq_valid1;
     assign if_id1_pc_o = fetchq_pc1;
     assign if_id1_instr_o = fetchq_payload1.instr;
-    assign if_id1_pred_hit_o = fetchq_payload1.pred_taken;
+    assign if_id1_pred_hit_o = fetchq_payload1.pred_hit;
     assign if_id1_pred_taken_o = fetchq_payload1.pred_taken;
     assign if_id1_pred_target_o = fetchq_pred_target1;
     assign if_id1_pred_counter_o = fetchq_payload1.pred_counter;
-    wire [BHT_INDEX_WIDTH-1:0] fetchq_bht_index1 =
-        BHT_INDEX_WIDTH'(fetchq_pc1 >> 2);
-    assign if_id1_pred_bht_index_o = BP_BHT_INDEX_WIDTH'(fetchq_bht_index1);
+    assign if_id1_pred_bht_index_o = fetchq_payload1.pred_bht_index;
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -590,6 +621,13 @@ import ydrasil_pkg::*;
             mem_req_pc_q <= RESET_INS;
             mem_req_next_pc_q <= RESET_INS + 32'd8;
 			mem_req_target_ff_hit_q <= 1'b0;
+			fetch_resp_valid_q <= 1'b0;
+			fetch_resp_lane_valid_q <= '0;
+			fetch_resp_pc_q <= RESET_INS;
+			fetch_resp_next_pc_q <= RESET_INS + 32'd8;
+			fetch_resp_target_ff_hit_q <= 1'b0;
+			fetch_resp_payload0_q <= '0;
+			fetch_resp_payload1_q <= '0;
             pending_redirect_valid_q <= 1'b0;
             pending_redirect_target_q <= '0;
             target_ff_valid0_q <= '0;
@@ -601,6 +639,13 @@ import ydrasil_pkg::*;
             mem_req_pc_q <= flush_fetch ? flush_target : bp_invalidate_target_i;
             mem_req_next_pc_q <= flush_fetch ? flush_target : bp_invalidate_target_i;
 			mem_req_target_ff_hit_q <= 1'b0;
+			fetch_resp_valid_q <= 1'b0;
+			fetch_resp_lane_valid_q <= '0;
+			fetch_resp_pc_q <= flush_fetch ? flush_target :
+				bp_invalidate_target_i;
+			fetch_resp_next_pc_q <= flush_fetch ? flush_target :
+				bp_invalidate_target_i;
+			fetch_resp_target_ff_hit_q <= 1'b0;
             pending_redirect_valid_q <= 1'b0;
             pending_redirect_target_q <= '0;
 			if (bp_invalidate_i) begin
@@ -611,8 +656,18 @@ import ydrasil_pkg::*;
 			// On an L0 mismatch the request issued from the stale target is
 			// intentionally discarded; pending_redirect_target_q retries the
 			// corrected address on the following cycle.
+			fetch_resp_valid_q <= mem_req_valid_q &&
+				!predict_correction_resp;
+			if (mem_req_valid_q) begin
+				fetch_resp_lane_valid_q <= mem_req_lane_valid_q;
+				fetch_resp_pc_q <= mem_req_pc_q;
+				fetch_resp_next_pc_q <= mem_req_next_pc_q;
+				fetch_resp_target_ff_hit_q <= mem_req_target_ff_hit_q;
+				fetch_resp_payload0_q <= mem_resp_payload0;
+				fetch_resp_payload1_q <= mem_resp_payload1;
+			end
 			mem_req_valid_q <= fetch_issue && !target_ff_correction_resp &&
-                !predict_correction_resp;
+	                !predict_correction_resp;
             if (fetch_issue) begin
                 mem_req_pc_q <= fetch_addr;
                 // The 64-bit ITCM adapter maps an odd target's upper word to

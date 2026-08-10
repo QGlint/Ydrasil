@@ -26,6 +26,9 @@ import ydrasil_pkg::*;
     input  wire                            csr_valid_i,
     input  wire [OPERATOR_WIDTH-1:0]       mul_operator_i,
     input  wire [OPERATOR_TYPE_WIDTH-1:0]  mul_operator_type_i,
+    input  wire [REGS_ADDR_WIDTH-1:0]      mul_rf_waddr_i,
+    input  wire                            mul_rf_wen_i,
+    input  producer_id_t                   mul_producer_id_i,
     input  wire [OPERATOR_TYPE_WIDTH-1:0]  csr_operator_type_i,
     input  wire [REGS_ADDR_WIDTH-1:0]      id_rf_waddr_rd_i,
     input  wire                            id_alu_rf_wen_rd_i,
@@ -169,9 +172,9 @@ import ydrasil_pkg::*;
          mul_operator_i[OP_MUL_REMU]);
 
     assign mul_issue_valid = mul_valid_i & op_mul & mul_issue_ready & !trap_redirect_i & !flush_ex_i;
-    assign mul_issue_wen = id_alu_rf_wen_rd_i & (id_rf_waddr_rd_i != '0);
+    assign mul_issue_wen = mul_rf_wen_i & (mul_rf_waddr_i != '0);
     assign mul_issue_o = mul_issue_valid & mul_issue_wen;
-    assign mul_issue_waddr_o = id_rf_waddr_rd_i;
+    assign mul_issue_waddr_o = mul_rf_waddr_i;
 
     assign div_start = mul_valid_i & op_div & !div_active_q &
         !div_pending_q & !div_busy & !div_done & !trap_redirect_i &
@@ -245,17 +248,17 @@ import ydrasil_pkg::*;
         !trap_redirect_i & !flush_ex_i;
     assign normal_alu_rf_wen_rd = alu_valid_i & alu_rf_wen_rd &
         (operator_type_i[OPERATOR_TYPE_ALU] | operator_type_i[OPERATOR_TYPE_BJP]) &
-        !op_m_unit & !op_bitmanip & !flush_ex_i;
+        !op_bitmanip & !flush_ex_i;
     assign ex_rf_wen_rd =
         bitmanip_rf_wen_rd | fast_bitmanip_rf_wen_rd |
         normal_alu_rf_wen_rd | op_csr;
     assign mul_result_valid_o = mul_result_valid | div_complete;
     assign ex_instret_inc_o =
-			(alu_valid_i & !trap_redirect_i & !flush_ex_i & !op_mul & !op_div) |
+			(alu_valid_i & !trap_redirect_i & !flush_ex_i) |
         div_complete;
 
     wire fast_alu_op =
-        operator_type_i[OPERATOR_TYPE_ALU] & !op_m_unit & !op_bitmanip &
+        operator_type_i[OPERATOR_TYPE_ALU] & !op_bitmanip &
         (operator_i[OP_ALU_ADD]  |
          operator_i[OP_ALU_SUB]  |
          operator_i[OP_ALU_SLT]  |
@@ -266,7 +269,7 @@ import ydrasil_pkg::*;
          operator_i[OP_ALU_LUI]  |
          operator_i[OP_ALU_AUIPC]);
     wire fast_result_wen = alu_valid_i && !trap_redirect_i && !flush_ex_i &&
-        !op_m_unit && !op_bitmanip && fast_alu_op;
+        !op_bitmanip && fast_alu_op;
     assign fast_add_result = operand_a + operand_b;
     wire [32:0] fast_sub_result_ext = {1'b0, operand_a} + {1'b0, ~operand_b} + 33'd1;
     wire        fast_signs_differ = operand_a[31] ^ operand_b[31];
@@ -300,6 +303,7 @@ import ydrasil_pkg::*;
         fast_alu_result : alu_result;
     assign early_bypass_data_o = early_lite_bitmanip_op ?
         early_lite_bitmanip_result :
+		operator_type_i[OPERATOR_TYPE_BJP] ? fast_add_result :
 		operator_type_i[OPERATOR_TYPE_ALU] ? early_plain_alu_result : '0;
 
     ydrasil_alu #(
@@ -343,8 +347,8 @@ import ydrasil_pkg::*;
         .operand_b_i     (mul_operand_b),
         .operator_i      (mul_operator_i),
         .issue_wen_i     (mul_issue_wen),
-        .issue_waddr_i   (id_rf_waddr_rd_i),
-        .issue_producer_id_i(id_ex_producer_id_i),
+        .issue_waddr_i   (mul_rf_waddr_i),
+        .issue_producer_id_i(mul_producer_id_i),
         .result_valid_o  (mul_result_valid),
         .result_wen_o    (mul_pipe_wen),
         .result_waddr_o  (mul_pipe_waddr),
@@ -479,9 +483,9 @@ import ydrasil_pkg::*;
         end else begin
             if (div_start) begin
                 div_active_q <= 1'b1;
-                div_wen_q    <= id_alu_rf_wen_rd_i & (id_rf_waddr_rd_i != '0);
-                div_waddr_q  <= id_rf_waddr_rd_i;
-                div_producer_id_q <= id_ex_producer_id_i;
+                div_wen_q    <= mul_rf_wen_i & (mul_rf_waddr_i != '0);
+                div_waddr_q  <= mul_rf_waddr_i;
+                div_producer_id_q <= mul_producer_id_i;
                 div_operator_q <= mul_operator_i;
             end
             if (div_done && div_active_q) begin

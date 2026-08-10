@@ -160,22 +160,17 @@ import ydrasil_axi_pkg::*;
 	wire                        dbg_bp_mispredict;
 `endif
 
-	// Branch predictor
-	wire                        bp_predict_taken;
-	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] bp_predict_target;
-	wire [1:0]                  bp_predict_counter;
-	wire                        bp_predict1_taken;
-	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] bp_predict1_target;
-	wire [1:0]                  bp_predict1_counter;
-	// Raw BRAM predictor outputs.  The architectural prediction path first
-		// Feed fetch directly from the BRAM branch predictor.
+	// Raw BRAM predictor outputs are captured by the IF response boundary.
 	wire                        bp_bram_predict_hit;
 	wire                        bp_bram_predict_taken;
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] bp_bram_predict_target;
 	wire [1:0]                  bp_bram_predict_counter;
+	bp_bht_index_t              bp_bram_predict_bht_index;
+	wire                        bp_bram_predict1_hit;
 	wire                        bp_bram_predict1_taken;
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] bp_bram_predict1_target;
 	wire [1:0]                  bp_bram_predict1_counter;
+	bp_bht_index_t              bp_bram_predict1_bht_index;
 		// Compatibility observability now reflects the FF target table.
 		wire l0_hit;
 		wire l0_hit1;
@@ -263,6 +258,12 @@ import ydrasil_axi_pkg::*;
 	wire                            issue_at_rob_head;
 	wire [ydrasil_pkg::PRODUCER_NUM-1:0]
 	                                branch_recovery_keep_mask;
+	wire [ydrasil_pkg::PRODUCER_NUM-1:0] lsu_flush_keep_mask =
+		branch_recovery_keep_mask |
+		(commit_pkt.valid ?
+		 (ydrasil_pkg::PRODUCER_NUM'(1) << retire_value_slot0) : '0) |
+		(commit_pkt1.valid ?
+		 (ydrasil_pkg::PRODUCER_NUM'(1) << retire_value_slot1) : '0);
 	ydrasil_issue_pkt_t             id_issue_pkt;
 	ydrasil_issue_pkt_t             id_issue_pkt1;
 	ydrasil_issue_pkt_t             dispatch_issue_pkt;
@@ -373,9 +374,11 @@ import ydrasil_axi_pkg::*;
 		.completion_rd_o   (completion_rd)
 	);
 	ydrasil_load_store_unit u_ydrasil_load_store_unit (
-		.clk               (clk),
-		.rst_n             (rst_n),
-		.req_i             (lsu_req_pkt),
+			.clk               (clk),
+			.rst_n             (rst_n),
+			.flush_i           (flush_ex),
+			.flush_keep_mask_i (lsu_flush_keep_mask),
+			.req_i             (lsu_req_pkt),
 		.completion_meta_i (completion_meta),
 		.completion_data_i (completion_data),
 		.dtcm_rdata_i      (dtcm_rdata),
@@ -420,16 +423,13 @@ import ydrasil_axi_pkg::*;
 			.predict_taken_o  (bp_bram_predict_taken),
 			.predict_target_o (bp_bram_predict_target),
 			.predict_counter_o(bp_bram_predict_counter),
-			.predict_bht_index_o(),
-			.predict0_spec_valid_i(1'b0),
-			.predict0_spec_conditional_i(1'b0),
-			.predict0_spec_taken_i(1'b0),
+			.predict_bht_index_o(bp_bram_predict_bht_index),
 			.predict_pc1_i    (if_mem_addr1),
-			.predict1_hit_o   (),
+			.predict1_hit_o   (bp_bram_predict1_hit),
 			.predict1_taken_o (bp_bram_predict1_taken),
 			.predict1_target_o(bp_bram_predict1_target),
 			.predict1_counter_o(bp_bram_predict1_counter),
-			.predict1_bht_index_o(),
+			.predict1_bht_index_o(bp_bram_predict1_bht_index),
 			.train_i          (ex_bp_train_pkt),
 			.invalidate_i     (id_fence_i)
 		);
@@ -445,12 +445,16 @@ import ydrasil_axi_pkg::*;
 			.consume_two_i   (decode_consume_two),
 			.branch_jump_i   (branch_jump),
 			.branch_target_i (branch_target),
+				.bp_predict_hit_i(bp_bram_predict_hit),
 				.bp_predict_taken_i(bp_bram_predict_taken),
 				.bp_predict_target_i(bp_bram_predict_target),
 				.bp_predict_counter_i(bp_bram_predict_counter),
+				.bp_predict_bht_index_i(bp_bram_predict_bht_index),
+				.bp_predict1_hit_i(bp_bram_predict1_hit),
 				.bp_predict1_taken_i(bp_bram_predict1_taken),
 				.bp_predict1_target_i(bp_bram_predict1_target),
 				.bp_predict1_counter_i(bp_bram_predict1_counter),
+				.bp_predict1_bht_index_i(bp_bram_predict1_bht_index),
 			.bp_invalidate_i(id_fence_i),
 				.bp_invalidate_target_i(issue_fence_next_pc),
 			.target_ff_train_i(ex_bp_train_pkt),

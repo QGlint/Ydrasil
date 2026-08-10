@@ -26,9 +26,6 @@ import ydrasil_pkg::*;
     wire [CSR_ADDR_WIDTH-1:0] csr_waddr;
     wire [OP_CSR_INFO_WIDTH-1:0] csr_op_info;
     wire [OP_SYS_INFO_WIDTH-1:0] sys_op_info;
-    wire [OPERATOR_WIDTH-1:0] operator_info;
-    wire [OP_LSU_INFO_WIDTH-1:0] operator_lsu;
-    wire [OPERATOR_TYPE_WIDTH-1:0] operator_type;
 	logic [UOP_CLASS_WIDTH-1:0] op_class;
 	logic [UOP_SUBOP_WIDTH-1:0] subop;
 	logic [UOP_LSU_SUBOP_WIDTH-1:0] lsu_subop;
@@ -60,9 +57,6 @@ import ydrasil_pkg::*;
         .csr_ex_waddr_o(csr_waddr),
         .csr_op_info_o(csr_op_info),
         .sys_op_info_o(sys_op_info),
-        .operator_o(operator_info),
-        .operator_lsu_o(operator_lsu),
-		.operator_type_o(operator_type),
 		.uop_class_o(op_class),
 		.uop_subop_o(subop),
 		.uop_lsu_subop_o(lsu_subop),
@@ -151,6 +145,18 @@ import ydrasil_pkg::*;
 );
     ydrasil_decode_pkt_t decoded0;
     ydrasil_decode_pkt_t decoded1;
+    ydrasil_issue_pkt_t incoming_pkt0;
+    ydrasil_issue_pkt_t incoming_pkt1;
+    ydrasil_issue_pkt_t id_queue_q0;
+    ydrasil_issue_pkt_t id_queue_q1;
+    ydrasil_issue_pkt_t id_queue_q2;
+    ydrasil_issue_pkt_t id_queue_q3;
+    reg [2:0] id_queue_count_q;
+    reg [1:0] id_queue_head_q;
+    reg [1:0] id_queue_tail_q;
+    reg [3:0] id_queue_valid_q;
+    reg id_ready_q;
+    reg id_two_room_q;
 
     ydrasil_decode_slot u_decode0 (
         .pc_i(if_id_pc_i), .instr_i(if_id_instr_i),
@@ -176,80 +182,228 @@ import ydrasil_pkg::*;
     wire decoded1_serial = (decoded1.op_class == UOP_CLASS_CSR) ||
         (decoded1.op_class == UOP_CLASS_SYS) || decoded1.fence_i ||
         decoded1.illegal_instr;
-    // A younger instruction must remain in FetchQ while slot 0 establishes a
-    // serializing redirect or CSR boundary. This keeps FetchQ pop, Issue FIFO
-    // push, and ROB allocation on the same one-entry transaction.
-    wire decode_valid1 = if_id1_valid_i && !decoded0_serial;
+    wire decode_valid1 = if_id1_valid_i;
     wire slot0_writes = (decoded0.rd_addr != '0) &&
 		(decoded0.rd_wen || (decoded0.op_class == UOP_CLASS_LOAD));
     wire slot1_writes = (decoded1.rd_addr != '0) &&
 		(decoded1.rd_wen || (decoded1.op_class == UOP_CLASS_LOAD));
-    wire slot0_a_capable = (decoded0.op_class != UOP_CLASS_BJP) &&
+    // Lane A resolves control flow; lane B owns memory and MDU. This lets the
+    // much more frequent branch/LSU combinations use both execution lanes.
+    wire slot0_a_capable = (decoded0.op_class != UOP_CLASS_MUL) &&
         !decoded0_memory;
-    wire slot0_b_capable = (decoded0.op_class != UOP_CLASS_MUL) &&
+    wire slot0_b_capable = (decoded0.op_class != UOP_CLASS_BJP) &&
         !decoded0.full_bitmanip && !decoded0_serial;
-    wire slot1_a_capable = (decoded1.op_class != UOP_CLASS_BJP) &&
+    wire slot1_a_capable = (decoded1.op_class != UOP_CLASS_MUL) &&
         !decoded1_memory;
-    wire slot1_b_capable = (decoded1.op_class != UOP_CLASS_MUL) &&
+    wire slot1_b_capable = (decoded1.op_class != UOP_CLASS_BJP) &&
         !decoded1.full_bitmanip && !decoded1_serial;
-    assign if_id_ready_o = issue_ready_i;
-    assign if_id_consume_two_o = issue_ready_i && decode_valid1;
+    // Entrance credit depends only on registered occupancy. The extra pair of
+    // storage absorbs one cycle of downstream backpressure without exposing
+    // Issue/CTRL ready to FetchQ.
+    wire id_queue_push = !flush_i && id_ready_q && if_id_valid_i;
+    wire id_queue_push_two = id_queue_push && id_two_room_q &&
+        if_id1_valid_i;
+    wire [1:0] id_queue_push_count = id_queue_push ?
+        (id_queue_push_two ? 2'd2 : 2'd1) : 2'd0;
+    wire id_queue_pop = !flush_i && issue_ready_i && issue_pkt_o.valid;
+    wire id_queue_pop_two = id_queue_pop && issue_pkt1_o.valid;
+    wire [1:0] id_queue_pop_count = id_queue_pop ?
+        (id_queue_pop_two ? 2'd2 : 2'd1) : 2'd0;
+    wire [2:0] id_queue_count_next = id_queue_count_q +
+        id_queue_push_count - id_queue_pop_count;
+
+    // IF already qualifies these registered credits with its own valid and
+    // flush state. Keeping the boundary credit-only avoids a combinational
+    // FetchQ -> Decode -> FetchQ control loop.
+    assign if_id_ready_o = id_ready_q;
+    assign if_id_consume_two_o = id_two_room_q;
 
     always_comb begin
-        issue_pkt_o = '0;
-        issue_pkt_o.valid = decode_valid;
-        issue_pkt_o.decode = decoded0;
-        issue_pkt_o.uop_class = decoded0.op_class;
-        issue_pkt_o.uop_subop = decoded0.subop;
-        issue_pkt_o.uop_lsu_subop = decoded0.lsu_subop;
-        issue_pkt_o.lane_mask = {slot0_b_capable, slot0_a_capable};
-        issue_pkt_o.src0.used = decode_valid && decoded0.rs1_ren;
-        issue_pkt_o.src0.arch_addr = decoded0.rs1_addr;
-        issue_pkt_o.src1.used = decode_valid &&
+        incoming_pkt0 = '0;
+        incoming_pkt0.valid = decode_valid;
+        incoming_pkt0.decode = decoded0;
+        incoming_pkt0.uop_class = decoded0.op_class;
+        incoming_pkt0.uop_subop = decoded0.subop;
+        incoming_pkt0.uop_lsu_subop = decoded0.lsu_subop;
+        incoming_pkt0.lane_mask = {slot0_b_capable, slot0_a_capable};
+        incoming_pkt0.src0.used = decode_valid && decoded0.rs1_ren;
+        incoming_pkt0.src0.arch_addr = decoded0.rs1_addr;
+        incoming_pkt0.src1.used = decode_valid &&
 			(decoded0.rs2_ren || (decoded0.op_class == UOP_CLASS_STORE));
-        issue_pkt_o.src1.arch_addr = decoded0.rs2_addr;
-        issue_pkt_o.dst.writes_gpr = decode_valid && slot0_writes;
-        issue_pkt_o.dst.rd_addr = decoded0.rd_addr;
-        issue_pkt_o.ctrl.rs1_addr = decoded0.rs1_addr;
-        issue_pkt_o.ctrl.valid = decode_valid;
-        issue_pkt_o.ctrl.rs2_addr = decoded0.rs2_addr;
-        issue_pkt_o.ctrl.rd_addr = decoded0.rd_addr;
-        issue_pkt_o.ctrl.rs1_ren = decode_valid && decoded0.rs1_ren;
-        issue_pkt_o.ctrl.rs2_ren = decode_valid &&
+        incoming_pkt0.src1.arch_addr = decoded0.rs2_addr;
+        incoming_pkt0.dst.writes_gpr = decode_valid && slot0_writes;
+        incoming_pkt0.dst.rd_addr = decoded0.rd_addr;
+        incoming_pkt0.ctrl.rs1_addr = decoded0.rs1_addr;
+        incoming_pkt0.ctrl.valid = decode_valid;
+        incoming_pkt0.ctrl.rs2_addr = decoded0.rs2_addr;
+        incoming_pkt0.ctrl.rd_addr = decoded0.rd_addr;
+        incoming_pkt0.ctrl.rs1_ren = decode_valid && decoded0.rs1_ren;
+        incoming_pkt0.ctrl.rs2_ren = decode_valid &&
 			(decoded0.rs2_ren || (decoded0.op_class == UOP_CLASS_STORE));
-        issue_pkt_o.ctrl.rd_wen = decode_valid && slot0_writes;
-        issue_pkt_o.ctrl.lsu_req = decode_valid && decoded0_memory;
-        issue_pkt_o.ctrl.store_req = decode_valid &&
+        incoming_pkt0.ctrl.rd_wen = decode_valid && slot0_writes;
+        incoming_pkt0.ctrl.lsu_req = decode_valid && decoded0_memory;
+        incoming_pkt0.ctrl.store_req = decode_valid &&
             (decoded0.op_class == UOP_CLASS_STORE);
-        issue_pkt_o.ctrl.serialize_before = decode_valid && decoded0_serial;
+        incoming_pkt0.ctrl.serialize_before = decode_valid && decoded0_serial;
 
-        issue_pkt1_o = '0;
-        issue_pkt1_o.valid = decode_valid1;
-        issue_pkt1_o.decode = decoded1;
-        issue_pkt1_o.uop_class = decoded1.op_class;
-        issue_pkt1_o.uop_subop = decoded1.subop;
-        issue_pkt1_o.uop_lsu_subop = decoded1.lsu_subop;
-        issue_pkt1_o.lane_mask = {slot1_b_capable, slot1_a_capable};
-        issue_pkt1_o.src0.used = decode_valid1 && decoded1.rs1_ren;
-        issue_pkt1_o.src0.arch_addr = decoded1.rs1_addr;
-        issue_pkt1_o.src1.used = decode_valid1 &&
+        incoming_pkt1 = '0;
+        incoming_pkt1.valid = decode_valid1;
+        incoming_pkt1.decode = decoded1;
+        incoming_pkt1.uop_class = decoded1.op_class;
+        incoming_pkt1.uop_subop = decoded1.subop;
+        incoming_pkt1.uop_lsu_subop = decoded1.lsu_subop;
+        incoming_pkt1.lane_mask = {slot1_b_capable, slot1_a_capable};
+        incoming_pkt1.src0.used = decode_valid1 && decoded1.rs1_ren;
+        incoming_pkt1.src0.arch_addr = decoded1.rs1_addr;
+        incoming_pkt1.src1.used = decode_valid1 &&
 			(decoded1.rs2_ren || (decoded1.op_class == UOP_CLASS_STORE));
-        issue_pkt1_o.src1.arch_addr = decoded1.rs2_addr;
-        issue_pkt1_o.dst.writes_gpr = decode_valid1 && slot1_writes;
-        issue_pkt1_o.dst.rd_addr = decoded1.rd_addr;
-        issue_pkt1_o.ctrl.rs1_addr = decoded1.rs1_addr;
-        issue_pkt1_o.ctrl.valid = decode_valid1;
-        issue_pkt1_o.ctrl.rs2_addr = decoded1.rs2_addr;
-        issue_pkt1_o.ctrl.rd_addr = decoded1.rd_addr;
-        issue_pkt1_o.ctrl.rs1_ren = decode_valid1 && decoded1.rs1_ren;
-        issue_pkt1_o.ctrl.rs2_ren = decode_valid1 &&
+        incoming_pkt1.src1.arch_addr = decoded1.rs2_addr;
+        incoming_pkt1.dst.writes_gpr = decode_valid1 && slot1_writes;
+        incoming_pkt1.dst.rd_addr = decoded1.rd_addr;
+        incoming_pkt1.ctrl.rs1_addr = decoded1.rs1_addr;
+        incoming_pkt1.ctrl.valid = decode_valid1;
+        incoming_pkt1.ctrl.rs2_addr = decoded1.rs2_addr;
+        incoming_pkt1.ctrl.rd_addr = decoded1.rd_addr;
+        incoming_pkt1.ctrl.rs1_ren = decode_valid1 && decoded1.rs1_ren;
+        incoming_pkt1.ctrl.rs2_ren = decode_valid1 &&
 			(decoded1.rs2_ren || (decoded1.op_class == UOP_CLASS_STORE));
-        issue_pkt1_o.ctrl.rd_wen = decode_valid1 && slot1_writes;
-        issue_pkt1_o.ctrl.lsu_req = decode_valid1 && decoded1_memory;
-        issue_pkt1_o.ctrl.store_req = decode_valid1 &&
+        incoming_pkt1.ctrl.rd_wen = decode_valid1 && slot1_writes;
+        incoming_pkt1.ctrl.lsu_req = decode_valid1 && decoded1_memory;
+        incoming_pkt1.ctrl.store_req = decode_valid1 &&
             (decoded1.op_class == UOP_CLASS_STORE);
-        issue_pkt1_o.ctrl.serialize_before = decode_valid1 && decoded1_serial;
+        incoming_pkt1.ctrl.serialize_before = decode_valid1 && decoded1_serial;
     end
 
-    wire unused = &{1'b0, clk, rst_n, flush_i};
+    always_comb begin
+        unique case (id_queue_head_q)
+            2'd0: begin
+                issue_pkt_o = id_queue_q0;
+                issue_pkt1_o = id_queue_q1;
+                issue_pkt_o.valid = id_queue_valid_q[0];
+                issue_pkt1_o.valid = id_queue_valid_q[1];
+            end
+            2'd1: begin
+                issue_pkt_o = id_queue_q1;
+                issue_pkt1_o = id_queue_q2;
+                issue_pkt_o.valid = id_queue_valid_q[1];
+                issue_pkt1_o.valid = id_queue_valid_q[2];
+            end
+            2'd2: begin
+                issue_pkt_o = id_queue_q2;
+                issue_pkt1_o = id_queue_q3;
+                issue_pkt_o.valid = id_queue_valid_q[2];
+                issue_pkt1_o.valid = id_queue_valid_q[3];
+            end
+            default: begin
+                issue_pkt_o = id_queue_q3;
+                issue_pkt1_o = id_queue_q0;
+                issue_pkt_o.valid = id_queue_valid_q[3];
+                issue_pkt1_o.valid = id_queue_valid_q[0];
+            end
+        endcase
+        issue_pkt_o.ctrl.valid = issue_pkt_o.valid;
+        issue_pkt1_o.ctrl.valid = issue_pkt1_o.valid;
+        if (!issue_pkt_o.valid) begin
+            issue_pkt_o.valid = 1'b0;
+            issue_pkt_o.ctrl.valid = 1'b0;
+            issue_pkt_o.lane_mask = '0;
+        end
+        if (!issue_pkt1_o.valid || issue_pkt_o.ctrl.serialize_before) begin
+            issue_pkt1_o.valid = 1'b0;
+            issue_pkt1_o.ctrl.valid = 1'b0;
+            issue_pkt1_o.lane_mask = '0;
+        end
+    end
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            id_queue_count_q <= '0;
+            id_queue_head_q <= '0;
+            id_queue_tail_q <= '0;
+            id_queue_valid_q <= '0;
+            id_ready_q <= 1'b1;
+            id_two_room_q <= 1'b1;
+        end else if (flush_i) begin
+            id_queue_count_q <= '0;
+            id_queue_head_q <= '0;
+            id_queue_tail_q <= '0;
+            id_queue_valid_q <= '0;
+            id_ready_q <= 1'b1;
+            id_two_room_q <= 1'b1;
+        end else begin
+            if (id_queue_pop) begin
+                unique case (id_queue_head_q)
+                    2'd0: begin
+                        id_queue_valid_q[0] <= 1'b0;
+                        if (id_queue_pop_two)
+                            id_queue_valid_q[1] <= 1'b0;
+                    end
+                    2'd1: begin
+                        id_queue_valid_q[1] <= 1'b0;
+                        if (id_queue_pop_two)
+                            id_queue_valid_q[2] <= 1'b0;
+                    end
+                    2'd2: begin
+                        id_queue_valid_q[2] <= 1'b0;
+                        if (id_queue_pop_two)
+                            id_queue_valid_q[3] <= 1'b0;
+                    end
+                    default: begin
+                        id_queue_valid_q[3] <= 1'b0;
+                        if (id_queue_pop_two)
+                            id_queue_valid_q[0] <= 1'b0;
+                    end
+                endcase
+            end
+            if (id_queue_push) begin
+                unique case (id_queue_tail_q)
+                    2'd0: begin
+                        id_queue_q0 <= incoming_pkt0;
+                        id_queue_valid_q[0] <= 1'b1;
+                        if (id_queue_push_two)
+                            id_queue_q1 <= incoming_pkt1;
+                        if (id_queue_push_two)
+                            id_queue_valid_q[1] <= 1'b1;
+                    end
+                    2'd1: begin
+                        id_queue_q1 <= incoming_pkt0;
+                        id_queue_valid_q[1] <= 1'b1;
+                        if (id_queue_push_two)
+                            id_queue_q2 <= incoming_pkt1;
+                        if (id_queue_push_two)
+                            id_queue_valid_q[2] <= 1'b1;
+                    end
+                    2'd2: begin
+                        id_queue_q2 <= incoming_pkt0;
+                        id_queue_valid_q[2] <= 1'b1;
+                        if (id_queue_push_two)
+                            id_queue_q3 <= incoming_pkt1;
+                        if (id_queue_push_two)
+                            id_queue_valid_q[3] <= 1'b1;
+                    end
+                    default: begin
+                        id_queue_q3 <= incoming_pkt0;
+                        id_queue_valid_q[3] <= 1'b1;
+                        if (id_queue_push_two)
+                            id_queue_q0 <= incoming_pkt1;
+                        if (id_queue_push_two)
+                            id_queue_valid_q[0] <= 1'b1;
+                    end
+                endcase
+            end
+            id_queue_head_q <= id_queue_head_q + 2'(id_queue_pop_count);
+            id_queue_tail_q <= id_queue_tail_q + 2'(id_queue_push_count);
+            id_queue_count_q <= id_queue_count_next;
+            id_ready_q <= id_queue_count_next < 3'd4;
+            id_two_room_q <= id_queue_count_next <= 3'd2;
+        end
+    end
+
+`ifndef SYNTHESIS
+    always_ff @(posedge clk) begin
+        if (rst_n)
+            assert (id_queue_count_q <= 3'd4)
+                else $fatal(1, "ID elastic queue occupancy overflow");
+    end
+`endif
 endmodule
