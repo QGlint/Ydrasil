@@ -138,6 +138,16 @@ end
     integer     perf_stall_snapshot_cycles_q;
     reg         perf_stall_snapshot_printed_q;
     integer     perf_stall_snapshot_idx;
+    reg         execution_wave_en;
+    string      execution_wave_file;
+    integer     execution_wave_fd;
+    integer     execution_wave_start;
+    integer     execution_wave_end;
+    reg [31:0]  execution_wave_measure_start_pc;
+    reg [31:0]  execution_wave_measure_stop_pc;
+    reg         execution_wave_measure_filter_en;
+    reg         execution_wave_measure_active;
+    reg         execution_wave_measure_done;
     initial begin
         raw_debug_en = $test$plusargs("raw_debug");
         lsu_local_debug_en = $test$plusargs("lsu_local_debug");
@@ -156,6 +166,15 @@ end
         perf_refill_scan_count = 0;
         perf_empty_scan_count = 0;
         perf_stall_snapshot_threshold = 64;
+        execution_wave_en = 1'b0;
+        execution_wave_fd = 0;
+        execution_wave_start = 0;
+        execution_wave_end = 32'h7fffffff;
+        execution_wave_measure_start_pc = '0;
+        execution_wave_measure_stop_pc = '0;
+        execution_wave_measure_filter_en = 1'b0;
+        execution_wave_measure_active = 1'b1;
+        execution_wave_measure_done = 1'b0;
         if (!$value$plusargs("perf_local_start=%d", perf_local_start))
             perf_local_start = 0;
         if (!$value$plusargs("perf_local_end=%d", perf_local_end))
@@ -163,6 +182,27 @@ end
         if (!$value$plusargs("perf_stall_threshold=%d",
                              perf_stall_snapshot_threshold))
             perf_stall_snapshot_threshold = 64;
+        if ($value$plusargs("execution_wave=%s", execution_wave_file)) begin
+            execution_wave_fd = $fopen(execution_wave_file, "w");
+            if (execution_wave_fd == 0)
+                $fatal(1, "unable to open execution wave CSV: %s",
+                       execution_wave_file);
+            execution_wave_en = 1'b1;
+            $fdisplay(execution_wave_fd,
+                "reset,sample_valid,halted,cycle,instret,fetch_pc,issue_pc0,issue_pc1,issue_tag0,issue_tag1,selected_pc0,selected_pc1,selected_tag0,selected_tag1,ex_pc0,ex_pc1,ex_tag0,ex_tag1,if_valid0,if_valid1,decode_valid0,decode_valid1,dispatch_accept0,dispatch_accept1,rs_valid_mask,rs_dep_mask,rs_order_mask,rs_resource_mask,rs_ready_mask,rs_candidate_mask,rs_selected_mask,select_valid0,select_valid1,select_push,select_head_valid,select_head_pair,select_skid_valid,head0_b_only,operand_accept0,operand_accept1,ex_valid0,ex_valid1,ex_accept0,ex_accept1,retire0,retire1,rob_count,producer_full,lsu_credit,lsu_reserved,lsu_queue_count,lsu_idle,lsu_struct_stall,serialize_stall,mdu_available,flush,redirect,recovery_pending,pipeline_flush,fence_issue,trap_redirect,frontend_queue_count,fetch_req_valid,fetch_resp_valid,pending_redirect,completion_wakeup_mask,alloc_wakeup_mask,select_wakeup_mask,dtcm_wakeup,mdu_wakeup,dep_blocker_mask,alu_credit,p0_credit,p1_credit,physical_exec0,physical_exec1,branch_mispredict,direct_fire,direct_pair,retire_pc0,retire_pc1");
+        end
+        if (!$value$plusargs("execution_wave_start=%d", execution_wave_start))
+            execution_wave_start = 0;
+        if (!$value$plusargs("execution_wave_end=%d", execution_wave_end))
+            execution_wave_end = 32'h7fffffff;
+        if ($value$plusargs("execution_wave_measure_start_pc=%h",
+                            execution_wave_measure_start_pc) &&
+            $value$plusargs("execution_wave_measure_stop_pc=%h",
+                            execution_wave_measure_stop_pc)) begin
+            execution_wave_measure_filter_en = 1'b1;
+            execution_wave_measure_active = 1'b0;
+            execution_wave_measure_done = 1'b0;
+        end
     end
 
     wire bp_branch_valid = dbg_bp_resolve_valid;
@@ -6801,6 +6841,146 @@ end
             end
         end
     endtask
+
+`ifndef SYNTHESIS
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            execution_wave_measure_active <=
+                !execution_wave_measure_filter_en;
+            execution_wave_measure_done <= 1'b0;
+        end else if (execution_wave_measure_filter_en) begin
+            if ((u_dut.ex_accept_valid &&
+                 (u_dut.id_instr_addr == execution_wave_measure_start_pc)) ||
+                (u_dut.ex_accept_valid1 &&
+                 (u_dut.dual_id_ex_pc == execution_wave_measure_start_pc)) ||
+                (retire0_valid &&
+                 (retire0_pc == execution_wave_measure_start_pc)) ||
+                (retire1_valid &&
+                 (retire1_pc == execution_wave_measure_start_pc))) begin
+                execution_wave_measure_active <= 1'b1;
+                execution_wave_measure_done <= 1'b0;
+            end else if ((u_dut.ex_accept_valid &&
+                          (u_dut.id_instr_addr ==
+                           execution_wave_measure_stop_pc)) ||
+                         (u_dut.ex_accept_valid1 &&
+                          (u_dut.dual_id_ex_pc ==
+                           execution_wave_measure_stop_pc)) ||
+                         (retire0_valid &&
+                      (retire0_pc == execution_wave_measure_stop_pc)) ||
+                         (retire1_valid &&
+                          (retire1_pc == execution_wave_measure_stop_pc))) begin
+                execution_wave_measure_active <= 1'b0;
+                execution_wave_measure_done <= 1'b1;
+            end
+        end
+    end
+
+    // Compact full-run waveform probe.  This is deliberately CSV rather than
+    // a full hierarchical dump so a complete CoreMark run stays small enough
+    // to scan for representative execution bubbles.
+    always @(posedge clk) begin
+        if (execution_wave_en && rst_n &&
+            (cycle_count >= execution_wave_start) &&
+            (cycle_count <= execution_wave_end)) begin
+            $fwrite(execution_wave_fd,
+                "%0d,%0d,%0d,%0d,%0d,0x%08h,0x%08h,0x%08h,%0d,%0d,0x%08h,0x%08h,%0d,%0d,0x%08h,0x%08h,%0d,%0d,",
+                !rst_n,
+                rst_n && execution_wave_measure_active,
+                execution_wave_measure_filter_en ?
+                    execution_wave_measure_done : pc_write_to_host_flag,
+                cycle_count, instruction_count,
+                u_dut.if_id_pc,
+                u_dut.u_ydrasil_issue_stage.issue_pkt_i.pc,
+                u_dut.u_ydrasil_issue_stage.issue_pkt1_i.pc,
+                u_dut.u_ydrasil_issue_stage.issue_pkt_i.dst.rob_tag,
+                u_dut.u_ydrasil_issue_stage.issue_pkt1_i.dst.rob_tag,
+                u_dut.u_ydrasil_issue_stage.selected_uop0.pc,
+                u_dut.u_ydrasil_issue_stage.selected_uop1.pc,
+                u_dut.u_ydrasil_issue_stage.selected_uop0.dst.rob_tag,
+                u_dut.u_ydrasil_issue_stage.selected_uop1.dst.rob_tag,
+                u_dut.id_instr_addr, u_dut.dual_id_ex_pc,
+                u_dut.alu_in_valid ? u_dut.alu_in_producer_id :
+                    u_dut.agu_in_req.producer_id,
+                u_dut.dual_meta.producer_id);
+            $fwrite(execution_wave_fd,
+                "%0d,%0d,%0d,%0d,%0d,%0d,0x%03h,0x%03h,0x%03h,0x%03h,0x%03h,0x%04h,0x%03h,",
+                u_dut.if_id_valid, u_dut.if_id1_valid,
+                u_dut.id_issue_pkt.valid, u_dut.id_issue_pkt1.valid,
+                u_dut.u_ydrasil_issue_stage.dispatch_accept_o,
+                u_dut.u_ydrasil_issue_stage.dispatch_accept1_o,
+                u_dut.u_ydrasil_issue_stage.issue_window_valid_q,
+                perf_rs_dep_mask_now, perf_rs_order_mask_now,
+                perf_rs_resource_mask_now, perf_rs_ready_mask_now,
+                perf_rs_candidate_mask_now, perf_rs_selected_mask_now);
+            $fwrite(execution_wave_fd,
+                "%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,",
+                u_dut.u_ydrasil_issue_stage.selected_valid0,
+                u_dut.u_ydrasil_issue_stage.selected_valid1,
+                u_dut.u_ydrasil_issue_stage.select_buf_push,
+                u_dut.u_ydrasil_issue_stage.select_head_valid_q,
+                u_dut.u_ydrasil_issue_stage.select_head_pair_q,
+                u_dut.u_ydrasil_issue_stage.select_skid_valid_q,
+                u_dut.u_ydrasil_issue_stage.head0_b_only,
+                u_dut.u_ydrasil_issue_stage.lane_a_accept,
+                u_dut.u_ydrasil_issue_stage.lane_b_accept,
+                u_dut.alu_in_valid || u_dut.agu_in_valid,
+                u_dut.ex_hzd_pkt1.valid,
+                (u_dut.alu_in_valid && u_dut.ex_accept_valid) ||
+                    (u_dut.agu_in_valid && u_dut.lsu_req_pkt.valid),
+                u_dut.ex_accept_valid1,
+                u_dut.commit_pkt.valid, u_dut.commit_pkt1.valid);
+            $fwrite(execution_wave_fd,
+                "%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,",
+                u_dut.u_ctrl.queue_count_q,
+                u_dut.u_ctrl.producer_full_stall,
+                u_dut.lsu_issue_credit,
+                u_dut.u_ydrasil_issue_stage.lsu_select_reserved_q,
+                u_dut.u_ydrasil_load_store_unit.queue_count_q,
+                u_dut.lsu_status_pkt.idle,
+                u_dut.issue_lsu_struct_stall,
+                u_dut.issue_serialize_stall,
+                u_dut.mdu_div_available,
+                u_dut.flush_ex, u_dut.ex_pc_redirect,
+                u_dut.u_ydrasil_issue_stage.recovery_pending_q,
+                u_dut.pipeline_flush, u_dut.id_fence_i,
+                u_dut.trap_ctrl_pkt.redirect,
+                u_dut.u_ydrasil_if_stage.fetchq_count_q,
+                u_dut.u_ydrasil_if_stage.mem_req_valid_q,
+                u_dut.u_ydrasil_if_stage.mem_resp_valid,
+                u_dut.u_ydrasil_if_stage.pending_redirect_valid_q);
+            $fwrite(execution_wave_fd,
+                "0x%03h,0x%03h,0x%03h,%0d,%0d,0x%02h,%0d,%0d,%0d,%0d,%0d,%0d,%0d,%0d,0x%08h,0x%08h\n",
+                u_dut.u_ydrasil_issue_stage.issue_src0_completion_wakeup |
+                    u_dut.u_ydrasil_issue_stage.issue_src1_completion_wakeup,
+                u_dut.u_ydrasil_issue_stage.issue_src0_alloc_wakeup |
+                    u_dut.u_ydrasil_issue_stage.issue_src1_alloc_wakeup,
+                u_dut.u_ydrasil_issue_stage.issue_src0_fast_main |
+                    u_dut.u_ydrasil_issue_stage.issue_src0_fast_dual |
+                    u_dut.u_ydrasil_issue_stage.issue_src1_fast_main |
+                    u_dut.u_ydrasil_issue_stage.issue_src1_fast_dual,
+                u_dut.u_ydrasil_issue_stage.dtcm_launch_wakeup_valid_i,
+                u_dut.u_ydrasil_issue_stage.mdu_due_i.valid,
+                perf_rs_dep_blocker_mask_now,
+                u_dut.u_ydrasil_issue_stage.alu_free_credit_q,
+                u_dut.u_ydrasil_issue_stage.p0_free_credit_q,
+                u_dut.u_ydrasil_issue_stage.p1_free_credit_q,
+                u_dut.alu_in_valid || u_dut.agu_in_valid,
+                u_dut.dual_alu_valid || u_dut.dual_bit_valid ||
+                    u_dut.dual_bru_valid || u_dut.mul_in_valid ||
+                    u_dut.csr_in_valid,
+                u_dut.ex_branch_mispredict,
+                u_dut.u_ydrasil_issue_stage.select_direct_fire,
+                u_dut.u_ydrasil_issue_stage.select_direct_fire &&
+                    u_dut.u_ydrasil_issue_stage.selected_valid1,
+                retire0_pc, retire1_pc);
+        end
+    end
+
+    final begin
+        if (execution_wave_fd != 0)
+            $fclose(execution_wave_fd);
+    end
+`endif
 
 
 

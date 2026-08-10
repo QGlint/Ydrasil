@@ -1,7 +1,16 @@
 module ydrasil_issue_stage
 import ydrasil_pkg::*;
 #(
-    parameter int DATA_WIDTH = 32
+    parameter int DATA_WIDTH = 32,
+    // Experimental Select->Operand refill bypass.  The default preserves
+    // the registered two-cell Select FIFO.  Enable only for A/B builds; the
+    // FU input registers below remain the architectural timing boundary.
+    parameter bit ENABLE_SELECT_DIRECT_BYPASS = 1'b0,
+    // Same-cycle P0 (LSU) release+allocate A/B.  A selected P0 RS entry is
+    // treated as a free allocation slot on the same edge.  The normal
+    // registered dispatch-credit contract remains unchanged; this only
+    // changes the local RS slot map used by the write enables.
+    parameter bit ENABLE_P0_SAME_CYCLE_REPLACE = 1'b0
 )(
     input  wire                        clk,
     input  wire                        rst_n,
@@ -188,8 +197,24 @@ import ydrasil_pkg::*;
     wire [ISSUE_WINDOW_DEPTH-1:0] issue_src1_completion_wakeup;
     wire select_skid_merge_pair = 1'b0;
 
+`ifdef YDRASIL_ENABLE_SELECT_DIRECT_BYPASS
+    localparam bit SELECT_DIRECT_BYPASS_EN = 1'b1;
+`else
+    localparam bit SELECT_DIRECT_BYPASS_EN = ENABLE_SELECT_DIRECT_BYPASS;
+`endif
+
+`ifdef YDRASIL_ENABLE_P0_SAME_CYCLE_REPLACE
+    localparam bit P0_SAME_CYCLE_REPLACE_EN = 1'b1;
+`else
+    localparam bit P0_SAME_CYCLE_REPLACE_EN = ENABLE_P0_SAME_CYCLE_REPLACE;
+`endif
+
     wire select_direct_fire;
-    wire issue_pair_execute = select_head_valid_q && select_head_pair_q;
+    // A direct pair has no registered head cell, so pair execution must use
+    // the direct lane contract explicitly.  Without this term lane B would
+    // be silently dropped while RS lane-1 is still removed.
+    wire issue_pair_execute = (select_head_valid_q && select_head_pair_q) ||
+        (SELECT_DIRECT_BYPASS_EN && select_direct_fire && selected_valid1);
 
     // Capacity feedback depends only on registered occupancy. Selection does
     // not feed Fetch/Decode ready in the same cycle.
@@ -215,10 +240,18 @@ import ydrasil_pkg::*;
     assign issue_pkt1_o = issue_pkt1_i;
 
     always_comb begin
-        issue_pkt_i = select_head_uop0_q;
-        issue_pkt1_i = select_head_uop1_q;
-        issue_pkt_i.valid = select_head_valid_q;
-        issue_pkt1_i.valid = issue_pair_execute;
+        // Direct fire consumes the selected RS entry at this edge.  The
+        // packet is still captured by the existing FU input FFs, so no
+        // combinational path reaches an execution unit output.
+        if (SELECT_DIRECT_BYPASS_EN && select_direct_fire) begin
+            issue_pkt_i = select_direct_uop0;
+            issue_pkt1_i = select_direct_uop1;
+        end else begin
+            issue_pkt_i = select_head_uop0_q;
+            issue_pkt1_i = select_head_uop1_q;
+            issue_pkt_i.valid = select_head_valid_q;
+            issue_pkt1_i.valid = issue_pair_execute;
+        end
     end
 
     // Operand reads only the fixed head cell.  Skid movement and replay are
@@ -388,7 +421,14 @@ import ydrasil_pkg::*;
     wire dispatch0_p0 = decode_domain_i == DISPATCH_DOMAIN_P0;
     wire dispatch1_p0 = decode_domain1_i == DISPATCH_DOMAIN_P0;
     wire [3:0] alu_free_local = ~issue_window_valid_q[3:0];
-    wire [3:0] p0_free_local = ~issue_window_valid_q[7:4];
+    // A P0 issue grant removes exactly the selected RS bit at this edge.  By
+    // exposing that bit only to the local allocation decoder, a full P0 bank
+    // can accept a replacement without creating a Select->Fetch ready path.
+    wire [3:0] p0_release_local =
+        (P0_SAME_CYCLE_REPLACE_EN && select_commit) ?
+        issue_select_mask[7:4] : 4'b0;
+    wire [3:0] p0_free_local = ~issue_window_valid_q[7:4] |
+        p0_release_local;
     wire [3:0] p1_free_local = ~issue_window_valid_q[11:8];
     wire [3:0] alu_alloc0_local;
     wire [3:0] p0_alloc0_local;
@@ -399,6 +439,12 @@ import ydrasil_pkg::*;
         ~(dispatch0_p0 ? p0_alloc0_local : '0);
     wire [3:0] p1_free1_local = p1_free_local &
         ~((!dispatch0_alu && !dispatch0_p0) ? p1_alloc0_local : '0);
+	// A selected P0 entry is removed on this edge. Fold only that one-bit
+	// release into the local dispatch capacity; RS allocation still uses the
+	// exact free mask above, so a stale release cannot create a write slot.
+	wire [4:0] p0_effective_credit_now_ext =
+	    {1'b0, p0_effective_credit} +
+	    ((P0_SAME_CYCLE_REPLACE_EN && (|p0_release_local)) ? 5'd1 : 5'd0);
     wire [3:0] alu_alloc1_local;
     wire [3:0] p0_alloc1_local;
     wire [3:0] p1_alloc1_local;
@@ -846,12 +892,12 @@ import ydrasil_pkg::*;
         {1'b0, p1_free_credit_q} + {1'b0, p1_release_credit_q};
     assign dispatch_slots_available =
         (dispatch0_alu ? (alu_effective_credit != '0) :
-         dispatch0_p0 ? (p0_effective_credit != '0) :
+         dispatch0_p0 ? (p0_effective_credit_now_ext != '0) :
                         (p1_effective_credit != '0)) &&
         (credit_resync_q == '0);
     assign dispatch_pair_slots_available =
         (alu_effective_credit >= {2'b0, alu_dispatch_demand}) &&
-        (p0_effective_credit >= {2'b0, p0_dispatch_demand}) &&
+        (p0_effective_credit_now_ext >= {3'b0, p0_dispatch_demand}) &&
         (p1_effective_credit >= {2'b0, p1_dispatch_demand}) &&
         (credit_resync_q == '0);
 
@@ -969,9 +1015,22 @@ import ydrasil_pkg::*;
     wire selected1_alloc_fast =
         (selected1_alloc0_match && alloc_fast0_data_stored) ||
         (selected1_alloc1_match && alloc_fast1_data_stored);
+    // The current direct payload does not carry an independent completion
+    // snapshot.  Keep tagged load/ALU consumers on the normal Operand path
+    // until the Value File/current-completion contract is proven for them.
+    // This conservative A/B subset is still useful for measuring truly
+    // independent Select refill bubbles without risking stale operands.
+    wire selected0_direct_no_live_tag =
+        (!selected_uop0.src0.used || selected_uop0.src0.arch_addr == '0) &&
+        (!selected_uop0.src1.used || selected_uop0.src1.arch_addr == '0);
+    wire selected1_direct_no_live_tag =
+        (!selected_uop1.src0.used || selected_uop1.src0.arch_addr == '0) &&
+        (!selected_uop1.src1.used || selected_uop1.src1.arch_addr == '0);
     assign select_direct_fire = selected_valid0 &&
         !select_head_valid_q && !select_skid_valid_q &&
         selected0_alloc_fast && (!selected_valid1 || selected1_alloc_fast) &&
+        selected0_direct_no_live_tag &&
+        (!selected_valid1 || selected1_direct_no_live_tag) &&
         !flush_id_i && !trap_flush_i &&
         !branch_recovery_i && !recovery_pending_q;
 
@@ -1004,8 +1063,11 @@ import ydrasil_pkg::*;
     wire select_buf_pop = issue_ready_o && select_head_valid_q;
     wire select_buf_push = selected_valid0 &&
         !branch_recovery_i && !recovery_pending_q &&
-        (!select_skid_valid_q || select_buf_pop);
-    wire select_commit = select_buf_push;
+        (!select_skid_valid_q || select_buf_pop) &&
+        !(SELECT_DIRECT_BYPASS_EN && select_direct_fire);
+    // A direct packet bypasses the FIFO but still removes its RS entry.
+    wire select_commit = select_buf_push ||
+        (SELECT_DIRECT_BYPASS_EN && select_direct_fire);
 
     // Wake dependents when Select has committed the producer to the local
     // Operand queue. A dependent selected on the next cycle is ordered behind
@@ -1163,8 +1225,10 @@ import ydrasil_pkg::*;
             // Direct allocation execution has an earlier EX phase. Keep its
             // RS wakeup, but do not stamp a normal Select bypass onto a
             // consumer that crosses the Operand register boundary later.
-            select_wakeup_bypass_valid_q[0] <= selected_main_due_valid;
-            select_wakeup_bypass_valid_q[1] <= selected_dual_due_valid;
+            select_wakeup_bypass_valid_q[0] <= selected_main_due_valid &&
+                !(SELECT_DIRECT_BYPASS_EN && select_direct_fire);
+            select_wakeup_bypass_valid_q[1] <= selected_dual_due_valid &&
+                !(SELECT_DIRECT_BYPASS_EN && select_direct_fire);
             select_wakeup_id_q[0] <= selected_main_due_id;
             select_wakeup_id_q[1] <= selected_dual_due_id;
             mdu_replay_valid_q <= mdu_due_i.valid &&
@@ -1460,9 +1524,9 @@ import ydrasil_pkg::*;
             PRODUCER_SLOT_WIDTH-1:0]),
         .read_slot1_i      (issue_pkt_i.src1.producer_tag[
             PRODUCER_SLOT_WIDTH-1:0]),
-        .read_slot2_i      (select_head_uop1.src0.producer_tag[
+        .read_slot2_i      (issue_pkt1_i.src0.producer_tag[
             PRODUCER_SLOT_WIDTH-1:0]),
-        .read_slot3_i      (select_head_uop1.src1.producer_tag[
+        .read_slot3_i      (issue_pkt1_i.src1.producer_tag[
             PRODUCER_SLOT_WIDTH-1:0]),
         .retire_id0_i      (retire_id0_i),
         .retire_id1_i      (retire_id1_i),

@@ -500,7 +500,11 @@ import ydrasil_axi_pkg::*;
 		ydrasil_branch_predictor #(
 			.BP_ENTRIES(BP_ENTRIES),
 			.BTB_ENTRIES(BTB_ENTRIES),
-			.BHT_ENTRIES(BHT_ENTRIES)
+			.BHT_ENTRIES(BHT_ENTRIES),
+			// The predictor's carried training packet has no speculative GHR
+			// checkpoint.  Keep the indexed BHT mode until that recovery contract
+			// exists; enabling GShare here corrupts the history after redirects.
+			.USE_GSHARE(1'b0)
 		) u_ydrasil_branch_predictor (
 			.clk              (clk),
 			.rst_n            (rst_n),
