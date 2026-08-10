@@ -9,22 +9,22 @@ ITERATIONS ?= 1
 
 OUT_ROOT ?= $(ROOT)/build/app/rtthread-coremark
 RESULT_ROOT ?= $(ROOT)/build/log/test_results/rtthread-coremark
-MODEL_DIR ?= $(ROOT)/build/ydrasil_core_tb-rtthread-64k
-MODEL_LOG_DIR ?= $(ROOT)/build/log/rtthread-64k
-ITCM_BYTES ?= 65536
-ITCM_ADDR_WIDTH ?= 14
-LINKER ?= $(OUT_ROOT)/itcm-64K.lds
+MODEL_DIR ?= $(ROOT)/build/ydrasil_core_tb-rtthread-128k
+MODEL_LOG_DIR ?= $(ROOT)/build/log/rtthread-128k
+ITCM_BYTES ?= 131072
+ITCM_ADDR_WIDTH ?= 15
+LINKER ?= $(ROOT)/sw/bsp/link.lds
 PPA_DIR ?= $(ROOT)/build/PPA
 COREMARK_PPA_LOG ?= $(PPA_DIR)/coremark_opt_summary.log
 COREMARK_REPORT_SCRIPT ?= $(ROOT)/sw/bsp/rtthread/coremark_report.sh
 
 UTEST_OUT_ROOT ?= $(ROOT)/build/app/rtthread-utest
 UTEST_RESULT_ROOT ?= $(ROOT)/build/log/test_results/rtthread-utest
-UTEST_MODEL_DIR ?= $(ROOT)/build/ydrasil_core_tb-rtthread-utest-64k
-UTEST_MODEL_LOG_DIR ?= $(ROOT)/build/log/rtthread-utest-64k
-UTEST_ITCM_BYTES ?= 65536
-UTEST_ITCM_ADDR_WIDTH ?= 14
-UTEST_LINKER ?= $(UTEST_OUT_ROOT)/itcm-64K.lds
+UTEST_MODEL_DIR ?= $(ROOT)/build/ydrasil_core_tb-rtthread-utest-128k
+UTEST_MODEL_LOG_DIR ?= $(ROOT)/build/log/rtthread-utest-128k
+UTEST_ITCM_BYTES ?= 131072
+UTEST_ITCM_ADDR_WIDTH ?= 15
+UTEST_LINKER ?= $(ROOT)/sw/bsp/link.lds
 UTEST_PPA_LOG ?= $(PPA_DIR)/rtthread_utest_summary.log
 
 OPT_Os := -Os
@@ -57,11 +57,6 @@ coremark-build-$(1): $(LINKER)
 		rtthread-coremark-build-$(1)
 endef
 $(foreach profile,$(PROFILES),$(eval $(call COREMARK_BUILD_template,$(profile))))
-
-$(LINKER): $(ROOT)/sw/bsp/link.lds
-	@mkdir -p "$(dir $@)"
-	@sed 's/LENGTH = 16K/LENGTH = 64K/' "$<" > "$@"
-	@grep -q 'LENGTH = 64K' "$@"
 
 coremark-model:
 	@mkdir -p "$(MODEL_DIR)" "$(MODEL_LOG_DIR)"
@@ -127,11 +122,6 @@ utest-build: $(UTEST_LINKER)
 		RTTHREAD_UTEST_OUTPUT_ROOT="$(UTEST_OUT_ROOT)" \
 		RTTHREAD_UTEST_LINKER="$(UTEST_LINKER)" \
 		rtthread-utest-build
-
-$(UTEST_LINKER): $(ROOT)/sw/bsp/link.lds
-	@mkdir -p "$(dir $@)"
-	@sed 's/LENGTH = 16K/LENGTH = 64K/' "$<" > "$@"
-	@grep -q 'LENGTH = 64K' "$@"
 
 utest-model:
 	@mkdir -p "$(UTEST_MODEL_DIR)" "$(UTEST_MODEL_LOG_DIR)"

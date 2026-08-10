@@ -1,100 +1,100 @@
-# Ydrasil RT-Thread BSP preparation
+# Ydrasil RT-Thread monitor BSP
 
-This is an external BSP for the trimmed RT-Thread 5.2.2 tree. The BSP stays
-under `sw/bsp`; `RTT_ROOT` points to `sw/rt-thread-5.2.2`.
+This external BSP uses the trimmed RT-Thread 5.2.2 tree under `sw/`.
 
 ## Build
 
-Required host tools:
-
-- SCons 4.x
-- `riscv64-unknown-elf-gcc`
-- the RISC-V picolibc package and `picolibc.specs`
-
-The canonical software entry point is `sw/Makefile`:
+Required host tools are SCons 4.x and the repository's
+`riscv64-unknown-elf-gcc` toolchain. The canonical entry point is:
 
 ```sh
 make -C sw rtthread
 ```
 
-The repository-root Makefile exposes the same individual actions:
+The default image uses RV32IM with the `ilp32` ABI. RT-Thread, MSH and device
+code use `-O2`; only the CoreMark sources receive the benchmark-tuned `-O3`
+flag set. The FPU remains disabled. Outputs are written below
+`build/app/rtthread/`:
+
+- `rtthread.elf`, `rtthread.map` and `rtthread.dump`
+- `rtthread.itcm` and `rtthread.dtcm` for RTL or FPGA memory loading
+- matching binary images and intermediate objects
+
+## Shell commands
+
+- `help`: list built-in and board commands.
+- `coremark [iterations]`: run CoreMark. With no argument it runs 10000
+  iterations; a positive decimal argument selects the exact iteration count.
+- `sensor [all|temp|imu]`: read the selected sensors, print their values and
+  refresh the OLED. With no argument, `all` is used.
+
+The BSP remains reusable. Set `RTTHREAD_APP=<directory-name>` to select another
+manifest under `sw/apps/`.
+
+## Monitor wiring
+
+- UART0 is the 115200 baud MSH console.
+- On the digital-twin board, LM75B I2C0 uses SCL `K20` and SDA `K19`;
+  ATK-MS601M UART1 uses FPGA RX `G17` and TX `G18`; SSD1306 uses SCLK `B19`,
+  bidirectional SDIO `B18`, GPIO1/DC `A18` and GPIO2/RESET_n `A20`.
+- On the AG10/AH10 board, LM75B I2C0 uses SCL `E16` and SDA `F16`;
+  ATK-MS601M UART1 uses FPGA RX `A13` and TX `C14`; SSD1306 uses SCLK `G13`,
+  bidirectional SDIO `A15`, GPIO1/DC `B15` and GPIO2/RESET_n `C15`.
+- FPGA UART1 RX connects to the sensor TX. UART1 TX remains available for
+  configuration commands. The display CS input is tied directly to ground and
+  does not consume an FPGA pin. SPI0 releases SDIO during read data phases.
+
+The RISC-V port is integer-only. LM75B values preserve the sensor's 0.125 C
+resolution. MS601M attitude frames use the reference driver's `55 55` upload
+format and checksum, then convert roll, pitch and yaw to tenths of a degree.
+
+Device and transport drivers live under `sw/app/driver`; sensor acquisition,
+formatting and the four-line display layout live under `sw/app/sensor`. The
+OLED driver links only the small 5x7 glyph subset used by those four lines.
+Run the host-side sensor and framebuffer simulation with:
+
+```sh
+make driver_sim_test
+```
+
+## CoreMark isolation and clocks
+
+RT-Thread's CLINT `mtime` remains in the 50 MHz APB domain because it is a
+system tick source, not the benchmark clock. Moving it would add CDC work
+without improving measurement. CoreMark uses the existing 64-bit monitor in
+the CPU clock domain. `start_time()` disables interrupts before starting the
+monitor; `stop_time()` stops the monitor, captures its stable cycle count and
+restores the previous interrupt state. The measured interval therefore
+excludes the 1 kHz tick, shell RX handling and background scheduling.
+
+The monitor frequency is injected with `RTTHREAD_CPU_FREQ_HZ` (150 MHz unless
+overridden). Synthesis memory staging derives it from `SYN_PLL_FREQ_MHZ`; for
+example, the 225 MHz target embeds 225000000. The CPU-domain monitor count, not
+the configured frequency, determines the measured cycle count. For field
+overclock sweeps, rebuild with the applied frequency or convert the printed raw
+cycle count externally when reusing one image at several frequencies.
+
+The monitor `active` signal drives LED0 in hardware. It becomes active at the
+start of the timed region and inactive before interrupts are restored.
+
+## Memory image contract
+
+The linker and RTL both define a 128 KiB ITCM and 64 KiB DTCM. The existing
+generation is retained: `.itcm` contains one 64-bit value (16 hex digits) per
+line and `.dtcm` one 32-bit value (8 hex digits) per line. The established
+8-byte function/jump/label/loop alignment is also retained so control-flow
+targets keep their current ITCM fetch-slot placement.
+
+Profile and Utest targets remain available from the repository root:
 
 ```sh
 make rtthread-coremark-build
 make rtthread-coremark-sim
 make rtthread-coremark-report
-make rtthread-coremark-compare
 make rtthread-utest-build
 make rtthread-utest-sim
 make rtthread-utest-report
 ```
 
-`rtthread-coremark-report` appends the RT-Thread single-iteration results and
-their bare-metal deltas to `build/PPA/coremark_opt_summary.log`. The Utest
-smoke run writes `build/PPA/rtthread_utest_summary.log` and returns failure if
-the testcase does not emit `RT_UTEST PASS`.
-
-The direct SCons command remains useful for BSP bring-up, but application
-builds should normally go through `sw/Makefile` so all software programs use
-the same output and toolchain rules.
-
-The default build uses RV32IM, the `ilp32` ABI and `-Os`. The FPU is disabled
-and the resulting startup path contains no floating-point instructions. All
-generated files are placed under `build/app/rtthread/`:
-
-- `rtthread.elf` and `rtthread.map`
-- `rtthread.dump`
-- `rtthread.itcm` and `rtthread.dtcm` for RTL memory loading
-- matching binary images and intermediate objects
-
-## Application interface
-
-The BSP does not contain benchmark sources. Set `RTT_APP` to an application
-directory under `sw/apps`; that directory provides one `SConscript` manifest
-which lists its source files with `DefineGroup`. Sources are compiled directly,
-so a C file never includes another C file. The default `RTT_APP=default` keeps
-`applications/main.c` as the RT-Thread user program.
-
-For example, CoreMark is built as an external application with the existing
-64 KiB simulation linker variant:
-
-```sh
-make -C sw rtthread-coremark-build-Os
-```
-
-To port another program, create `sw/apps/<name>/SConscript`, list its source
-files, include paths and defines there, then select it with `RTT_APP=<name>`.
-This keeps one RT-Thread BSP reusable for multiple applications.
-
-## Current hardware boundary
-
-`BSP_USING_SIM_CONSOLE` is enabled because the `0x80200060` write-only
-simulation output register exists. FinSH is disabled because this endpoint has
-no input path.
-
-The following options are intentionally disabled until their hardware paths
-are implemented and verified:
-
-- `BSP_USING_MTIME_TICK`: MTIME/MTIMECMP and machine-timer interrupt
-- `BSP_USING_UART0`: UART at `0x84004000`, including clock/reset and IRQ
-- `BSP_USING_PLIC`: machine-external interrupt delivery
-
-Do not enable timed RT-Thread services or automatic Utest execution before the
-machine-timer path works. The Utest framework itself remains compiled in so
-test cases can be added without restoring removed components.
-
-No RTL change is part of this BSP preparation.
-
-## CoreMark comparison
-
-Run one CoreMark iteration under RT-Thread and bare metal with `-Os`, `-O2`
-and `-O3`:
-
-```sh
-make -C sw/bsp/rtthread coremark-compare
-```
-
-The RT-Thread image needs more than the physical 16 KiB ITCM. The benchmark
-target uses the repository's existing parameterized simulation flow with a
-64 KiB ITCM model; it does not edit RTL source files. CoreMark is an integer
-benchmark, so all comparison runs use `FPU=0`.
+All current RT-Thread model targets use the physical 128 KiB ITCM width and
+depth. CoreMark is an integer benchmark, so comparison runs use `FPU=0`.

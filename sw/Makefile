@@ -5,7 +5,14 @@ PROJECT_ROOT ?= $(abspath ..)
 
 # This standalone software makefile is also invoked directly, so it cannot
 # rely on the top-level config.mk to select the repository toolchain.
-RISCV_TOOLCHAIN_ROOT ?= $(PROJECT_ROOT)/tools/riscv
+GIT_COMMON_DIR := $(shell git -C "$(PROJECT_ROOT)" rev-parse \
+	--path-format=absolute --git-common-dir 2>/dev/null)
+PRIMARY_WORKTREE_ROOT := $(patsubst %/.git,%,$(GIT_COMMON_DIR))
+LOCAL_RISCV_TOOLCHAIN := $(PROJECT_ROOT)/tools/riscv
+PRIMARY_RISCV_TOOLCHAIN := $(PRIMARY_WORKTREE_ROOT)/tools/riscv
+RISCV_TOOLCHAIN_ROOT ?= $(if \
+	$(wildcard $(LOCAL_RISCV_TOOLCHAIN)/bin/riscv64-unknown-elf-gcc), \
+	$(LOCAL_RISCV_TOOLCHAIN),$(PRIMARY_RISCV_TOOLCHAIN))
 RISCV_TOOLCHAIN_BIN ?= $(RISCV_TOOLCHAIN_ROOT)/bin
 RISCV_TOOLCHAIN_TRIPLE ?= riscv64-unknown-elf
 override RISCV_TOOLCHAIN_PREFIX := $(RISCV_TOOLCHAIN_BIN)/$(RISCV_TOOLCHAIN_TRIPLE)
@@ -118,10 +125,11 @@ rtthread_abs = $(abspath $(if $(filter /%,$(1)),$(1),$(PROJECT_ROOT)/$(1)))
 RTTHREAD_BSP_DIR := $(PROJECT_ROOT)/sw/bsp/rtthread
 RTTHREAD_SCONS ?= $(if $(strip $(SCONS)),$(SCONS),scons)
 RTTHREAD_JOBS ?= $(shell nproc 2>/dev/null || echo 1)
-RTTHREAD_APP ?= default
-RTTHREAD_PROFILE ?= custom
+RTTHREAD_APP ?= rtthread-coremark
+RTTHREAD_PROFILE ?= monitor
 RTTHREAD_OPT ?= -Os
-RTTHREAD_ITERATIONS ?= 1
+RTTHREAD_ITERATIONS ?= 10000
+RTTHREAD_CPU_FREQ_HZ ?= 150000000
 RTTHREAD_OUTPUT_DIR ?= $(PROJECT_ROOT)/build/app/rtthread
 RTTHREAD_OUTPUT_BASENAME ?= rtthread
 RTTHREAD_LINKER ?= $(BSP_LINKER_SCRIPT)
@@ -135,12 +143,32 @@ RTTHREAD_COREMARK_PROFILES ?= Os O2 O3
 RTTHREAD_COREMARK_OPT_Os := -Os
 RTTHREAD_COREMARK_OPT_O2 := -O2
 RTTHREAD_COREMARK_OPT_O3 := -O3
-# Optional per-source optimization for the CoreMark algorithm group.  Keep
-# empty by default so the existing profile targets remain comparable.
-RTTHREAD_COREMARK_CORE_CFLAGS ?=
+# Keep RT-Thread and the monitor drivers at -O2.  These flags are applied only
+# to the five CoreMark sources and retain the BSP's final 8-byte control-flow
+# alignment, which keeps branch targets on the established ITCM fetch slots.
+RTTHREAD_COREMARK_BEST_CFLAGS ?= -O3 -funroll-loops \
+	-finline-functions -finline-small-functions \
+	-findirect-inlining -finline-functions-called-once \
+	--param=max-inline-insns-auto=4000 \
+	--param=large-function-insns=4000 \
+	--param=large-function-growth=4000 \
+	--param=inline-unit-growth=4000 \
+	-finline-limit=4000 \
+	-frename-registers -fweb -fomit-frame-pointer -fno-caller-saves \
+	-fno-tree-loop-distribute-patterns \
+	-fno-tree-loop-vectorize -fno-tree-slp-vectorize \
+	-fno-peel-loops -fno-split-loops \
+	-fno-branch-count-reg -fno-crossjumping \
+	-fno-if-conversion -fno-if-conversion2 -fno-code-hoisting \
+	-fno-tree-dse -fno-section-anchors \
+	-fno-tree-forwprop -fno-tree-partial-pre
+# Nano's default profile favors ITCM capacity. The former aggressive CoreMark
+# tuning remains available through RTTHREAD_COREMARK_BEST_CFLAGS when a
+# performance-only build is required.
+RTTHREAD_COREMARK_CORE_CFLAGS ?= -Os
 RTTHREAD_COREMARK_OUTPUT_ROOT ?= $(PROJECT_ROOT)/build/app/rtthread-coremark
 RTTHREAD_COREMARK_LINKER ?= $(BSP_LINKER_SCRIPT)
-RTTHREAD_COREMARK_ITERATIONS ?= 1
+RTTHREAD_COREMARK_ITERATIONS ?= 10000
 override RTTHREAD_COREMARK_OUTPUT_ROOT := $(call rtthread_abs,$(RTTHREAD_COREMARK_OUTPUT_ROOT))
 override RTTHREAD_COREMARK_LINKER := $(call rtthread_abs,$(RTTHREAD_COREMARK_LINKER))
 RTTHREAD_COREMARK_BUILD_TARGETS := $(addprefix rtthread-coremark-build-,$(RTTHREAD_COREMARK_PROFILES))
@@ -469,6 +497,7 @@ rtthread-build:
 		RTT_APP="$(RTTHREAD_APP)" \
 		RTT_APP_PROFILE="$(RTTHREAD_PROFILE)" \
 		RTT_APP_ITERATIONS="$(RTTHREAD_ITERATIONS)" \
+		RTT_CPU_FREQ_HZ="$(RTTHREAD_CPU_FREQ_HZ)" \
 		RTT_OPT="$(RTTHREAD_OPT)" \
 		RTT_OUTPUT_DIR="$(RTTHREAD_OUTPUT_DIR)" \
 		RTT_OUTPUT_BASENAME="$(RTTHREAD_OUTPUT_BASENAME)" \

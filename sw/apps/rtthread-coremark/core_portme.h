@@ -3,7 +3,9 @@
 
 #include <rtthread.h>
 
-#define HAS_FLOAT  1
+#ifndef HAS_FLOAT
+#define HAS_FLOAT  0
+#endif
 #define HAS_TIME_H 0
 #define USE_CLOCK  0
 #define HAS_STDIO  0
@@ -23,6 +25,7 @@ typedef signed int     ee_s32;
 typedef double         ee_f32;
 typedef unsigned char  ee_u8;
 typedef unsigned int   ee_u32;
+typedef unsigned long long ee_u64;
 typedef ee_u32         ee_ptr_int;
 typedef unsigned int   ee_size_t;
 
@@ -52,8 +55,8 @@ typedef unsigned int   ee_size_t;
 #define MAIN_HAS_NORETURN 0
 #endif
 
-#define CORETIMETYPE ee_u32
-typedef ee_u32 CORE_TICKS;
+#define CORETIMETYPE ee_u64
+typedef ee_u64 CORE_TICKS;
 
 extern ee_u32 default_num_contexts;
 
