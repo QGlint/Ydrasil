@@ -342,17 +342,6 @@ package ydrasil_pkg;
 		ydrasil_result_class_t        producer_class;
 	} ydrasil_source_desc_t;
 
-	// A local, generation-tagged wakeup contract. Identity and valid are
-	// registered at the producer boundary; data is consumed only after the
-	// same identity and result class match.
-	typedef struct packed {
-		logic                         valid;
-		logic                         producer_tracked;
-		producer_id_t                 producer_id;
-		logic [REGS_ADDR_WIDTH-1:0]   arch_addr;
-		ydrasil_result_class_t        result_class;
-	} ydrasil_reservation_pkt_t;
-
 	typedef struct packed {
 		logic                         writes_gpr;
 		logic [REGS_ADDR_WIDTH-1:0]   rd_addr;
@@ -375,11 +364,6 @@ package ydrasil_pkg;
 		logic                         live;
 		logic                         done;
 	} ydrasil_rob_source_state_t;
-	typedef enum logic [1:0] {
-		BYPASS_NONE  = 2'b00,
-		BYPASS_LANE0 = 2'b01,
-		BYPASS_LANE1 = 2'b10
-	} ydrasil_bypass_sel_t;
 	localparam int COMPLETION_LANES = 4;
 	localparam int COMPLETION_ALU = 0;
 	localparam int COMPLETION_LSU = 1;
@@ -489,6 +473,9 @@ package ydrasil_pkg;
 		logic                                addr_is_dtcm;
 		logic [REGS_ADDR_WIDTH-1:0]          rd_addr;
 		producer_id_t                        producer_id;
+		// Assigned in program order when a memory uop enters the LSQ.  The
+		// AGU later updates this exact row; arrival order never identifies it.
+		producer_slot_t                      lsq_index;
 		logic                                producer_tracked;
 		logic [BUS_DATA_WIDTH-1:0]           store_data;
 		logic [3:0]                          store_mask;
@@ -562,8 +549,8 @@ package ydrasil_pkg;
 
 	typedef enum logic [1:0] {
 		DISPATCH_DOMAIN_ALU = 2'b00,
-		DISPATCH_DOMAIN_P0  = 2'b01,
-		DISPATCH_DOMAIN_P1  = 2'b10
+		DISPATCH_DOMAIN_LANE_A = 2'b01,
+		DISPATCH_DOMAIN_LANE_B = 2'b10
 	} ydrasil_dispatch_domain_t;
 
 	typedef struct packed {
@@ -575,21 +562,21 @@ package ydrasil_pkg;
 		ydrasil_source_desc_t                  src0;
 		ydrasil_source_desc_t                  src1;
 		ydrasil_dest_desc_t                    dst;
+		producer_slot_t                        lsq_index;
 		ydrasil_id_ctrl_pkt_t                  ctrl;
 		ydrasil_decode_pkt_t                   decode;
 	} ydrasil_issue_pkt_t;
 
 	// The decoded elastic boundary stores only execution class and class-local
 	// sub-op. Fields duplicated by source/destination descriptors or derived
-	// from PC/class are reconstructed at the two-entry Issue skid output.
+	// from PC/class are reconstructed at the independent lane outputs.
 	typedef struct packed {
 		logic                                  valid;
 		logic [1:0]                            lane_mask;
 		ydrasil_source_desc_t                  src0;
 		ydrasil_source_desc_t                  src1;
-		ydrasil_bypass_sel_t                   src0_bypass;
-		ydrasil_bypass_sel_t                   src1_bypass;
 		ydrasil_dest_desc_t                    dst;
+		producer_slot_t                        lsq_index;
 		logic [UOP_CLASS_WIDTH-1:0]            op_class;
 		logic [UOP_SUBOP_WIDTH-1:0]            subop;
 		logic [UOP_LSU_SUBOP_WIDTH-1:0]        lsu_subop;

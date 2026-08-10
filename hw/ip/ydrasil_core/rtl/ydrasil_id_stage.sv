@@ -219,8 +219,8 @@ import ydrasil_pkg::*;
     );
 
     wire decode_valid = if_id_valid_i;
-    wire decoded0_memory = if_id_domain_i == DISPATCH_DOMAIN_P0;
-    wire decoded1_memory = if_id1_domain_i == DISPATCH_DOMAIN_P0;
+    wire decoded0_memory = if_id_domain_i == DISPATCH_DOMAIN_LANE_A;
+    wire decoded1_memory = if_id1_domain_i == DISPATCH_DOMAIN_LANE_A;
     wire decoded0_store = if_id_instr_i[6:0] == RV32I_INS_TYPE_S;
     wire decoded1_store = if_id1_instr_i[6:0] == RV32I_INS_TYPE_S;
     // A younger instruction must remain in FetchQ while slot 0 establishes a
@@ -231,14 +231,13 @@ import ydrasil_pkg::*;
         (if_id_instr_i[11:7] != '0);
     wire slot1_writes = if_id1_dst_writes_i &&
         (if_id1_instr_i[11:7] != '0);
-    // P0 owns ALU/LSU. P1 owns ALU/Zb/BRU/MDU/SERIAL. Keeping the two
-    // capability bits class-local prevents payload-dependent lane assignment
-    // from re-entering the Issue select cone, and keeps every Zb operation off
-    // the main ALU datapath.
-    wire slot0_a_capable = if_id_domain_i != DISPATCH_DOMAIN_P1;
-    wire slot0_b_capable = if_id_domain_i != DISPATCH_DOMAIN_P0;
-    wire slot1_a_capable = if_id1_domain_i != DISPATCH_DOMAIN_P1;
-    wire slot1_b_capable = if_id1_domain_i != DISPATCH_DOMAIN_P0;
+    // Loads and stores require lane A. Branch, MDU, serial, and Zb uops
+    // require lane B. Keeping the capability bits class-local prevents
+    // payload-dependent lane assignment from re-entering the select cone.
+    wire slot0_a_capable = if_id_domain_i != DISPATCH_DOMAIN_LANE_B;
+    wire slot0_b_capable = if_id_domain_i != DISPATCH_DOMAIN_LANE_A;
+    wire slot1_a_capable = if_id1_domain_i != DISPATCH_DOMAIN_LANE_B;
+    wire slot1_b_capable = if_id1_domain_i != DISPATCH_DOMAIN_LANE_A;
     assign if_id_ready_o = issue_ready_i;
     assign if_id_consume_two_o = issue_ready_i && decode_valid1;
     assign decode_dst0_addr_o = if_id_instr_i[11:7];

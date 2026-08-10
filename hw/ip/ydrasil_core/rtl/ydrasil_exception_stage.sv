@@ -34,7 +34,7 @@ import ydrasil_pkg::*;
         exception_req.ebreak = sys_info_i[OP_SYS_EBREAK];
         exception_req.mret = sys_info_i[OP_SYS_MRET];
         exception_req.illegal = illegal_instr_i;
-        // SERIAL uops, including illegal encodings, execute on P1. Use the
+        // SERIAL uops, including illegal encodings, execute on lane B. Use the
         // PC carried by that registered token even though illegal retains the
         // SYS base class for serialization and ROB draining.
         exception_req.pc = lane_b_pc_i;

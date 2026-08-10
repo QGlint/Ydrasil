@@ -68,55 +68,58 @@ import ydrasil_pkg::*;
     wire issue_src_hzd = rs1_pending_stall || rs2_pending_stall;
     wire issue_load_producer =
         (rs1_pending_stall &&
-         ($root.ydrasil_core_tb.u_dut.issue_head_compact_uop.src0.producer_class == RESULT_LSU)) ||
+         ($root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_uop_q.src0.producer_class == RESULT_LSU)) ||
         (rs2_pending_stall &&
-         ($root.ydrasil_core_tb.u_dut.issue_head_compact_uop.src1.producer_class == RESULT_LSU));
+         ($root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_uop_q.src1.producer_class == RESULT_LSU));
     wire issue_alu_producer =
         (rs1_pending_stall &&
-         ($root.ydrasil_core_tb.u_dut.issue_head_compact_uop.src0.producer_class == RESULT_ALU)) ||
+         ($root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_uop_q.src0.producer_class == RESULT_ALU)) ||
         (rs2_pending_stall &&
-         ($root.ydrasil_core_tb.u_dut.issue_head_compact_uop.src1.producer_class == RESULT_ALU));
+         ($root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_uop_q.src1.producer_class == RESULT_ALU));
     wire issue_mul_div_producer =
         (rs1_pending_stall &&
-         ($root.ydrasil_core_tb.u_dut.issue_head_compact_uop.src0.producer_class == RESULT_MDU)) ||
+         ($root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_uop_q.src0.producer_class == RESULT_MDU)) ||
         (rs2_pending_stall &&
-         ($root.ydrasil_core_tb.u_dut.issue_head_compact_uop.src1.producer_class == RESULT_MDU));
+         ($root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_uop_q.src1.producer_class == RESULT_MDU));
 
     wire [REGS_ADDR_WIDTH-1:0] id_ctrl_rs1_addr =
-        $root.ydrasil_core_tb.u_dut.issue_head_compact_uop.src0.arch_addr;
+        $root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_uop_q.src0.arch_addr;
     wire [REGS_ADDR_WIDTH-1:0] id_ctrl_rs2_addr =
-        $root.ydrasil_core_tb.u_dut.issue_head_compact_uop.src1.arch_addr;
+        $root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_uop_q.src1.arch_addr;
     wire id_ctrl_rs1_ren =
-        $root.ydrasil_core_tb.u_dut.issue_head_compact_uop.src0.used;
+        $root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_uop_q.src0.used;
     wire id_ctrl_rs2_ren =
-        $root.ydrasil_core_tb.u_dut.issue_head_compact_uop.src1.used;
+        $root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_uop_q.src1.used;
     wire [REGS_ADDR_WIDTH-1:0] id_ctrl_rd_addr =
-        $root.ydrasil_core_tb.u_dut.issue_head_compact_uop.dst.rd_addr;
+        $root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_uop_q.dst.rd_addr;
     wire id_ctrl_rd_wen =
-        $root.ydrasil_core_tb.u_dut.issue_head_compact_uop.dst.writes_gpr;
+        $root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_uop_q.dst.writes_gpr;
     wire id_ctrl_lsu_req =
-        ($root.ydrasil_core_tb.u_dut.issue_head_compact_uop.op_class == UOP_CLASS_LOAD) ||
-        ($root.ydrasil_core_tb.u_dut.issue_head_compact_uop.op_class == UOP_CLASS_STORE);
+        ($root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_uop_q.op_class == UOP_CLASS_LOAD) ||
+        ($root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_uop_q.op_class == UOP_CLASS_STORE);
     wire id_ex_rd_issue =
         $root.ydrasil_core_tb.u_dut.ex_accept_valid &&
         $root.ydrasil_core_tb.u_dut.ex_hzd_pkt.producer_tracked;
+    // Banked scheduler observability: ingress occupancy and selected lanes
+    // are independent registered state.
     wire [1:0] select_buf_count =
-        {1'b0, $root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.
-            select_head_valid_q};
-    wire select_bundle0_pair =
-        $root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.select_head_pair_q;
+        $root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.u_scheduler.
+            ingress_count_q;
+    wire select_lane_b_valid =
+        $root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.u_scheduler.
+            lane_b_valid_q;
     wire [2:0] select_buf_uop_count =
-        ($root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.
-            select_head_valid_q ?
-         (3'd1 + {2'b0, select_bundle0_pair}) : 3'd0);
+        {1'b0, $root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.u_scheduler.
+            ingress_count_q};
     wire [3:0] issue_pending_uop_count = {1'b0, select_buf_uop_count};
-    wire [2:0] issue_pipe_count_q = (issue_pending_uop_count >= 4) ?
-        3'd4 : issue_pending_uop_count[2:0];
+    wire [2:0] issue_pipe_count_q = issue_pending_uop_count[2:0];
     wire issue_pair_execute =
-        $root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.issue_pair_execute;
+        $root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.u_scheduler.
+            lane_a_valid_q &&
+        $root.ydrasil_core_tb.u_dut.u_ydrasil_issue_stage.u_scheduler.
+            lane_b_valid_q;
 
-    wire decode_valid =
-        $root.ydrasil_core_tb.u_dut.issue_head_compact_uop.valid;
+    wire decode_valid = select_buf_uop_count != 0;
     wire decode_if_ready = $root.ydrasil_core_tb.u_dut.decode_if_ready;
     wire wb_backpressure = 1'b0;
     wire rf_wen_rd = 1'b0;

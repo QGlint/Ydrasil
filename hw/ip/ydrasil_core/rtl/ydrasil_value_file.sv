@@ -31,11 +31,15 @@ import ydrasil_pkg::*;
 	    output wire                         read_valid1_o,
 	    output wire                         read_valid2_o,
 	    output wire                         read_valid3_o,
-    output wire                         lookup_resident0_o,
-    output wire                         lookup_resident1_o,
-    output wire                         lookup_resident2_o,
-    output wire                         lookup_resident3_o,
-    output wire [REGS_DATA_WIDTH-1:0]   retire_data0_o,
+	    output wire                         lookup_resident0_o,
+	    output wire                         lookup_resident1_o,
+	    output wire                         lookup_resident2_o,
+	    output wire                         lookup_resident3_o,
+	    output wire                         lookup_reallocated0_o,
+	    output wire                         lookup_reallocated1_o,
+	    output wire                         lookup_reallocated2_o,
+	    output wire                         lookup_reallocated3_o,
+	    output wire [REGS_DATA_WIDTH-1:0]   retire_data0_o,
     output wire [REGS_DATA_WIDTH-1:0]   retire_data1_o
 );
     localparam int BANK_DEPTH = PRODUCER_NUM / 2;
@@ -283,6 +287,18 @@ import ydrasil_pkg::*;
         lookup_slot2[PRODUCER_SLOT_WIDTH-1:1];
     wire [BANK_INDEX_WIDTH-1:0] lookup_index3 =
         lookup_slot3[PRODUCER_SLOT_WIDTH-1:1];
+    wire lookup_alloc_match0 = alloc0_valid_i &&
+        (lookup_tag0_i == alloc0_id_i) || alloc1_valid_i &&
+        (lookup_tag0_i == alloc1_id_i);
+    wire lookup_alloc_match1 = alloc0_valid_i &&
+        (lookup_tag1_i == alloc0_id_i) || alloc1_valid_i &&
+        (lookup_tag1_i == alloc1_id_i);
+    wire lookup_alloc_match2 = alloc0_valid_i &&
+        (lookup_tag2_i == alloc0_id_i) || alloc1_valid_i &&
+        (lookup_tag2_i == alloc1_id_i);
+    wire lookup_alloc_match3 = alloc0_valid_i &&
+        (lookup_tag3_i == alloc0_id_i) || alloc1_valid_i &&
+        (lookup_tag3_i == alloc1_id_i);
     wire producer_slot_t retire_slot0 =
         retire_id0_i[PRODUCER_SLOT_WIDTH-1:0];
     wire producer_slot_t retire_slot1 =
@@ -368,6 +384,32 @@ import ydrasil_pkg::*;
         (value_valid_even_q[lookup_index3] &&
          (value_epoch_even_q[lookup_index3] ==
           lookup_tag3_i[PRODUCER_ID_WIDTH-1]));
+    // A nonresident value with a different generation is an old RAT tag, not
+    // a live producer waiting for completion.  Consumers must use ARF for it.
+    assign lookup_reallocated0_o = !lookup_alloc_match0 &&
+        (lookup_slot0[0] ?
+        (value_epoch_odd_q[lookup_index0] !=
+         lookup_tag0_i[PRODUCER_ID_WIDTH-1]) :
+        (value_epoch_even_q[lookup_index0] !=
+         lookup_tag0_i[PRODUCER_ID_WIDTH-1]));
+    assign lookup_reallocated1_o = !lookup_alloc_match1 &&
+        (lookup_slot1[0] ?
+        (value_epoch_odd_q[lookup_index1] !=
+         lookup_tag1_i[PRODUCER_ID_WIDTH-1]) :
+        (value_epoch_even_q[lookup_index1] !=
+         lookup_tag1_i[PRODUCER_ID_WIDTH-1]));
+    assign lookup_reallocated2_o = !lookup_alloc_match2 &&
+        (lookup_slot2[0] ?
+        (value_epoch_odd_q[lookup_index2] !=
+         lookup_tag2_i[PRODUCER_ID_WIDTH-1]) :
+        (value_epoch_even_q[lookup_index2] !=
+         lookup_tag2_i[PRODUCER_ID_WIDTH-1]));
+    assign lookup_reallocated3_o = !lookup_alloc_match3 &&
+        (lookup_slot3[0] ?
+        (value_epoch_odd_q[lookup_index3] !=
+         lookup_tag3_i[PRODUCER_ID_WIDTH-1]) :
+        (value_epoch_even_q[lookup_index3] !=
+         lookup_tag3_i[PRODUCER_ID_WIDTH-1]));
     // Ready is captured from raw narrow metadata on the same edge that the
     // registered completion lane captures data. Retire therefore bypasses the
     // just-registered lane by full producer identity instead of reading the

@@ -5,64 +5,31 @@ import ydrasil_pkg::*;
 )(
     input  wire                        clk,
     input  wire                        rst_n,
-    input  wire                        stall_id_i,
-    input  wire                        bubble_id_i,
     input  wire                        flush_id_i,
     input  wire                        branch_recovery_i,
     input  wire                        trap_flush_i,
     input  producer_slot_t             recovery_head_slot_i,
     input  producer_slot_t             recovery_branch_slot_i,
-    input  ydrasil_issue_pkt_t         decode_pkt_i,
-    input  ydrasil_issue_pkt_t         decode_pkt1_i,
-    input  wire                        decode_valid_i,
-    input  wire                        decode_valid1_i,
-    input  ydrasil_dispatch_domain_t   decode_domain_i,
-    input  ydrasil_dispatch_domain_t   decode_domain1_i,
-    input  wire [31:0]                 decode_instr_i,
-    input  wire [31:0]                 decode_instr1_i,
-    input  wire                        decode_serial_i,
-    input  wire                        decode_serial1_i,
-    input  wire                        decode_dst_writes_i,
-    input  wire                        decode_dst_writes1_i,
-    input  ydrasil_issue_pkt_t         dispatch_pkt_i,
-    input  ydrasil_issue_pkt_t         dispatch_pkt1_i,
-    input  ydrasil_source_desc_t       renamed_src0_i,
-    input  ydrasil_source_desc_t       renamed_src1_i,
-    input  ydrasil_source_desc_t       renamed_src2_i,
-    input  ydrasil_source_desc_t       renamed_src3_i,
-    input  wire                        renamed_src0_static_ready_i,
-    input  wire                        renamed_src1_static_ready_i,
-    input  wire                        renamed_src2_static_ready_i,
-    input  wire                        renamed_src3_static_ready_i,
-    input  wire                        dispatch_ready_i,
-    input  wire                        dispatch_two_ready_i,
-    // DTCM has fixed latency. Its registered launch identity wakes only the
-    // local RS ready bits; Operand still resolves the matching result after
-    // the BRAM response boundary.
-    input  wire                        dtcm_launch_wakeup_valid_i,
-    input  producer_id_t               dtcm_launch_wakeup_id_i,
+    // Queue entries are already renamed and hold their ROB/LSQ allocation.
+    // Scheduler admission is therefore a dequeue handshake only.
+    input  ydrasil_issue_pkt_t         queue_pkt_i,
+    input  ydrasil_issue_pkt_t         queue_pkt1_i,
+    input  wire                        queue_valid_i,
+    input  wire                        queue_valid1_i,
+    input  wire                        value_alloc0_valid_i,
+    input  producer_id_t               value_alloc0_id_i,
+    input  wire                        value_alloc1_valid_i,
+    input  producer_id_t               value_alloc1_id_i,
     input  ydrasil_completion_meta_t   completion_meta_i [COMPLETION_LANES],
     input  wire [REGS_DATA_WIDTH-1:0]  completion_data_i [COMPLETION_LANES],
     input  ydrasil_commit_pkt_t        commit_pkt_i,
     input  ydrasil_commit_pkt_t        commit_pkt1_i,
     input  producer_id_t               retire_id0_i,
     input  producer_id_t               retire_id1_i,
-    input  wire [DATA_WIDTH-1:0]       early_main_bypass_data_i,
-    input  wire [DATA_WIDTH-1:0]       early_dual_bypass_data_i,
     input  wire                        lsu_idle_i,
-	input  wire [1:0]                  lsu_credit_i,
-	input  ydrasil_reservation_pkt_t   dtcm_reservation_i,
-	input  ydrasil_reservation_pkt_t   mdu_due_i,
-    input  wire                        mdu_div_available_i,
-    input  ydrasil_reservation_pkt_t   mdu_result_reservation_i,
-    input  wire [DATA_WIDTH-1:0]       mdu_bypass_data_i,
-    input  wire [DATA_WIDTH-1:0]       dtcm_resp_data_i,
-    input  wire                        issue_at_rob_head_i,
     input  producer_id_t               rob_head_id_i,
-    output wire                        decode_ready_o,
-    output wire                        decode_consume_two_o,
-    output wire                        dispatch_accept_o,
-    output wire                        dispatch_accept1_o,
+    output wire                        queue_consume0_o,
+    output wire                        queue_consume1_o,
     output ydrasil_compact_uop_t       issue_pkt_o,
     output ydrasil_compact_uop_t       issue_pkt1_o,
     output wire [REGS_DATA_WIDTH-1:0]  retire_value0_o,
@@ -81,8 +48,8 @@ import ydrasil_pkg::*;
     output wire                        src0_wait_o,
     output wire                        src1_wait_o,
     output wire                        src2_wait_o,
-	output wire                        src3_wait_o,
-	output wire                        illegal_instr_o,
+    output wire                        src3_wait_o,
+    output wire                        illegal_instr_o,
     output wire                        alu_in_valid_o,
     output wire [DATA_WIDTH-1:0]       alu_in_operand_a_o,
     output wire [DATA_WIDTH-1:0]       alu_in_operand_b_o,
@@ -123,1854 +90,281 @@ import ydrasil_pkg::*;
     output wire [DATA_WIDTH-1:0]       dual_bru_operand_a_o,
     output wire [DATA_WIDTH-1:0]       dual_bru_operand_b_o
 );
-    localparam int ISSUE_WINDOW_DEPTH = 12;
-    wire ydrasil_compact_uop_t issue_window_q [0:ISSUE_WINDOW_DEPTH-1];
-    wire [ISSUE_WINDOW_DEPTH-1:0] issue_window_valid_q;
-    wire issue_window_src0_ready_q [0:ISSUE_WINDOW_DEPTH-1];
-    wire issue_window_src1_ready_q [0:ISSUE_WINDOW_DEPTH-1];
-    wire [ISSUE_WINDOW_DEPTH-1:0] issue_order_mask_q
-        [0:ISSUE_WINDOW_DEPTH-1];
-    wire [ISSUE_WINDOW_DEPTH-1:0] issue_memory_q;
-    wire [ISSUE_WINDOW_DEPTH-1:0] issue_mul_q;
-    wire [ISSUE_WINDOW_DEPTH-1:0] issue_serial_q;
-    wire [ISSUE_WINDOW_DEPTH-1:0] issue_store_q;
-    wire [ISSUE_WINDOW_DEPTH-1:0] issue_divrem_q;
-    wire [ISSUE_WINDOW_DEPTH-1:0] issue_early_writes_q;
-    wire [ISSUE_WINDOW_DEPTH-1:0] issue_branch_q;
-    ydrasil_compact_uop_t dispatch_compact_uop;
-    ydrasil_compact_uop_t dispatch_compact_uop1;
-    ydrasil_compact_uop_t issue_pkt_i;
-    ydrasil_compact_uop_t issue_pkt1_i;
-    ydrasil_compact_uop_t select_head_uop0_q;
-    ydrasil_compact_uop_t select_head_uop1_q;
-    // Operand is a two-cell queue.  The head is consumed by EX while the
-    // skid cell absorbs a Select result from the same cycle.  Keeping this
-    // queue local prevents Select/RS readiness from becoming a Dispatch
-    // backpressure path.
-    ydrasil_compact_uop_t select_skid_uop0_q;
-    ydrasil_compact_uop_t select_skid_uop1_q;
-    ydrasil_compact_uop_t select_head_uop1;
-    ydrasil_compact_uop_t alloc_fast_uop_q [0:1];
-    ydrasil_compact_uop_t select_direct_uop0;
-    ydrasil_compact_uop_t select_direct_uop1;
-    reg select_head_pair_q;
-    reg select_skid_pair_q;
-    reg select_head_valid_q;
-    reg select_skid_valid_q;
-    wire [REGS_ADDR_WIDTH-1:0] rf_addr_rs1;
-    wire [REGS_ADDR_WIDTH-1:0] rf_addr_rs2;
-    wire [REGS_ADDR_WIDTH-1:0] rf_addr_rs3;
-    wire [REGS_ADDR_WIDTH-1:0] rf_addr_rs4;
-    wire [DATA_WIDTH-1:0] rf_rdata_rs1_i;
-    wire [DATA_WIDTH-1:0] rf_rdata_rs2_i;
-    wire [DATA_WIDTH-1:0] rf_rdata_rs3_i;
-    wire [DATA_WIDTH-1:0] rf_rdata_rs4_i;
-    wire [DATA_WIDTH-1:0] issue_src0_value_i;
-    wire [DATA_WIDTH-1:0] issue_src1_value_i;
-    wire [DATA_WIDTH-1:0] issue_src2_value_i;
-    wire [DATA_WIDTH-1:0] issue_src3_value_i;
-    wire issue_src0_epoch_i;
-    wire issue_src1_epoch_i;
-    wire issue_src2_epoch_i;
-    wire issue_src3_epoch_i;
-	    wire issue_src0_value_valid_i;
-	    wire issue_src1_value_valid_i;
-    wire issue_src2_value_valid_i;
-    wire issue_src3_value_valid_i;
-    wire dispatch_src0_resident;
-    wire dispatch_src1_resident;
-    wire dispatch_src2_resident;
-    wire dispatch_src3_resident;
-    // Completion wakeup vectors are exported by each RS entry for
-    // performance observation. They are not used by Select or Dispatch;
-    // ready state remains controlled by the entry's registered wakeup path.
-    wire [ISSUE_WINDOW_DEPTH-1:0] issue_src0_completion_wakeup;
-    wire [ISSUE_WINDOW_DEPTH-1:0] issue_src1_completion_wakeup;
-    wire select_skid_merge_pair = 1'b0;
-
-    wire select_direct_fire;
-    wire issue_pair_execute = select_head_valid_q && select_head_pair_q;
-
-    // Capacity feedback depends only on registered occupancy. Selection does
-    // not feed Fetch/Decode ready in the same cycle.
-    wire dispatch_slots_available;
-    wire dispatch_pair_slots_available;
-    wire issue_pipe_has_room = dispatch_ready_i && dispatch_slots_available;
-    wire issue_pipe_push = !flush_id_i && issue_pipe_has_room &&
-        decode_valid_i;
-    wire issue_pipe_push_two = issue_pipe_push && decode_valid1_i &&
-        dispatch_two_ready_i && dispatch_pair_slots_available;
-    wire decode_pair_capacity = issue_pipe_has_room &&
-        dispatch_two_ready_i && dispatch_pair_slots_available;
-
-    assign decode_ready_o = issue_pipe_has_room;
-    // FetchQ owns queue validity, while Issue owns the pair admission contract.
-    // A serial lane-0 uop intentionally prevents lane-1 dispatch, so it must
-    // also prevent a two-entry FetchQ pop; otherwise the unaccepted lane-1
-    // instruction is discarded between Decode and the RS.
-    assign decode_consume_two_o = decode_pair_capacity && !decode_serial_i;
-    assign dispatch_accept_o = issue_pipe_push;
-    assign dispatch_accept1_o = issue_pipe_push_two;
-    assign issue_pkt_o = issue_pkt_i;
-    assign issue_pkt1_o = issue_pkt1_i;
-
-    always_comb begin
-        issue_pkt_i = select_head_uop0_q;
-        issue_pkt1_i = select_head_uop1_q;
-        issue_pkt_i.valid = select_head_valid_q;
-        issue_pkt1_i.valid = issue_pair_execute;
-    end
-
-    // Operand reads only the fixed head cell.  Skid movement and replay are
-    // completed at the preceding clock edge, so neither a pointer nor tail
-    // occupancy can select an RF or value-file address.
-    always_comb begin
-        select_head_uop1 = select_head_uop1_q;
-        select_head_uop1.valid = issue_pair_execute;
-    end
-
-    ydrasil_issue_compactor u_issue_compactor0 (
-        .issue_pkt_i   (dispatch_pkt_i),
-        .compact_uop_o (dispatch_compact_uop)
-    );
-
-    ydrasil_issue_compactor u_issue_compactor1 (
-        .issue_pkt_i   (dispatch_pkt1_i),
-        .compact_uop_o (dispatch_compact_uop1)
-    );
-
-    producer_id_t rob_head_select_q;
-    reg lsu_idle_select_q;
-    reg [ISSUE_WINDOW_DEPTH-1:0] issued_slot_mask_q;
-    reg select_wakeup_valid_q [0:1];
-    producer_id_t select_wakeup_id_q [0:1];
-    // RS readiness and Operand bypass have different phase contracts. A
-    // direct allocation fire reaches EX one cycle earlier than the normal
-    // Select->Operand queue path, so its wakeup token must not be reused as a
-    // next-cycle lane bypass selector.
-    reg select_wakeup_bypass_valid_q [0:1];
-    reg mdu_replay_valid_q;
-    producer_id_t mdu_replay_id_q;
-    reg dtcm_launch_wakeup_valid_q;
-    producer_id_t dtcm_launch_wakeup_id_q;
-    reg dtcm_result_replay_valid_q;
-    producer_id_t dtcm_result_replay_id_q;
-    reg mdu_div_available_q;
-    reg div_select_reserved_q;
-    reg div_busy_seen_q;
-    reg [1:0] lsu_select_reserved_q;
-    reg recovery_pending_q;
-    producer_slot_t recovery_head_slot_q;
-    producer_slot_t recovery_branch_slot_q;
-    reg [2:0] alu_free_credit_q;
-    reg [2:0] p0_free_credit_q;
-    reg [2:0] p1_free_credit_q;
-    reg [2:0] alu_release_credit_q;
-    reg [2:0] p0_release_credit_q;
-    reg [2:0] p1_release_credit_q;
-    reg [1:0] credit_resync_q;
-    wire p0_select_valid, p1_select_valid;
-    wire alu_select0_valid, alu_select1_valid;
-    logic [ISSUE_WINDOW_DEPTH-1:0] issue_select_mask;
-    logic [ISSUE_WINDOW_DEPTH-1:0] selected0_mask;
-    logic [ISSUE_WINDOW_DEPTH-1:0] selected1_mask;
-    ydrasil_compact_uop_t selected_uop0, selected_uop1;
-    logic selected_valid0, selected_valid1;
-    wire free_valid0, free_valid1;
-    wire [3:0] alu_candidate_local;
-    wire [3:0] alu_select0_local;
-    wire [3:0] alu_after_first_local;
-    wire [3:0] alu_select1_local;
-    wire [3:0] p0_candidate_local;
-    wire [3:0] p0_select_local;
-    wire [3:0] p1_candidate_local;
-    wire [3:0] p1_select_local;
-    wire [3:0] p1_serial_candidate_local;
-    wire [3:0] p1_serial_select_local;
-    ydrasil_compact_uop_t alu_selected_uop0, alu_selected_uop1;
-    ydrasil_compact_uop_t p0_selected_uop, p1_selected_uop;
-    ydrasil_compact_uop_t p1_serial_selected_uop;
-    logic p0_selected_src1_due;
-    wire [ISSUE_WINDOW_DEPTH-1:0] issue_src0_fast_main;
-    wire [ISSUE_WINDOW_DEPTH-1:0] issue_src0_fast_dual;
-    wire [ISSUE_WINDOW_DEPTH-1:0] issue_src1_fast_main;
-    wire [ISSUE_WINDOW_DEPTH-1:0] issue_src1_fast_dual;
-    wire [ISSUE_WINDOW_DEPTH-1:0] issue_src0_alloc_wakeup;
-    wire [ISSUE_WINDOW_DEPTH-1:0] issue_src1_alloc_wakeup;
-    wire [ISSUE_WINDOW_DEPTH-1:0] issue_src0_ready_for_select;
-    wire [ISSUE_WINDOW_DEPTH-1:0] issue_src1_ready_for_select;
-    wire [ISSUE_WINDOW_DEPTH-1:0] issue_order_blocked;
-    reg [1:0] alloc_wakeup_valid_q;
-    reg [ISSUE_WINDOW_DEPTH-1:0] alloc_wakeup_target_q [0:1];
-    producer_id_t alloc_lookup_src0_id_q [0:1];
-    producer_id_t alloc_lookup_src1_id_q [0:1];
-    reg [1:0] value_alloc_valid_q;
-    producer_id_t value_alloc_id_q [0:1];
-    // RS control is predecoded from narrow instruction fields.  The complete
-    // execution packet crosses the same edge as data only; its long Zb decode
-    // cone is not allowed to drive RS valid/order/resource control.
-    wire [6:0] dispatch0_opcode = decode_instr_i[6:0];
-    wire [6:0] dispatch1_opcode = decode_instr1_i[6:0];
-    wire [2:0] dispatch0_funct3 = decode_instr_i[14:12];
-    wire [2:0] dispatch1_funct3 = decode_instr1_i[14:12];
-    wire [6:0] dispatch0_funct7 = decode_instr_i[31:25];
-    wire [6:0] dispatch1_funct7 = decode_instr1_i[31:25];
-    wire dispatch0_memory = decode_domain_i == DISPATCH_DOMAIN_P0;
-    wire dispatch1_memory = decode_domain1_i == DISPATCH_DOMAIN_P0;
-    wire dispatch0_store = dispatch0_opcode == RV32I_INS_TYPE_S;
-    wire dispatch1_store = dispatch1_opcode == RV32I_INS_TYPE_S;
-    wire dispatch0_branch = (dispatch0_opcode == RV32I_INS_TYPE_B) ||
-        (dispatch0_opcode == RV32I_INS_JAL) ||
-        (dispatch0_opcode == RV32I_INS_JALR);
-    wire dispatch1_branch = (dispatch1_opcode == RV32I_INS_TYPE_B) ||
-        (dispatch1_opcode == RV32I_INS_JAL) ||
-        (dispatch1_opcode == RV32I_INS_JALR);
-    wire dispatch0_mul = (dispatch0_opcode == RV32I_INS_TYPE_R_M) &&
-        (dispatch0_funct7 == 7'b0000001);
-    wire dispatch1_mul = (dispatch1_opcode == RV32I_INS_TYPE_R_M) &&
-        (dispatch1_funct7 == 7'b0000001);
-    wire dispatch0_serial = decode_serial_i;
-    wire dispatch1_serial = decode_serial1_i;
-    wire dispatch0_divrem = dispatch0_mul && dispatch0_funct3[2];
-    wire dispatch1_divrem = dispatch1_mul && dispatch1_funct3[2];
-    wire dispatch0_early_bit_group0 =
-        (dispatch0_opcode == RV32I_INS_TYPE_R_M) &&
-        (dispatch0_funct7 == 7'b0010000) &&
-        ((dispatch0_funct3 == 3'b010) ||
-         (dispatch0_funct3 == 3'b100) ||
-         (dispatch0_funct3 == 3'b110));
-    wire dispatch1_early_bit_group0 =
-        (dispatch1_opcode == RV32I_INS_TYPE_R_M) &&
-        (dispatch1_funct7 == 7'b0010000) &&
-        ((dispatch1_funct3 == 3'b010) ||
-         (dispatch1_funct3 == 3'b100) ||
-         (dispatch1_funct3 == 3'b110));
-    wire dispatch0_early_bit_group1 =
-        (dispatch0_opcode == RV32I_INS_TYPE_R_M) &&
-        (dispatch0_funct7 == 7'b0000100) &&
-        ((dispatch0_funct3 == 3'b100) ||
-         (dispatch0_funct3 == 3'b111));
-    wire dispatch1_early_bit_group1 =
-        (dispatch1_opcode == RV32I_INS_TYPE_R_M) &&
-        (dispatch1_funct7 == 7'b0000100) &&
-        ((dispatch1_funct3 == 3'b100) ||
-         (dispatch1_funct3 == 3'b111));
-    wire dispatch0_early_bit_group2 =
-        (dispatch0_opcode == RV32I_INS_TYPE_I) &&
-        (((dispatch0_funct7 == 7'b0110000) &&
-          (dispatch0_funct3 == 3'b001) &&
-          ((decode_instr_i[24:20] == 5'b00100) ||
-           (decode_instr_i[24:20] == 5'b00101))) ||
-         ((dispatch0_funct7 == 7'b0110100) &&
-          (dispatch0_funct3 == 3'b101) &&
-          (decode_instr_i[24:20] == 5'b11000)));
-    wire dispatch1_early_bit_group2 =
-        (dispatch1_opcode == RV32I_INS_TYPE_I) &&
-        (((dispatch1_funct7 == 7'b0110000) &&
-          (dispatch1_funct3 == 3'b001) &&
-          ((decode_instr1_i[24:20] == 5'b00100) ||
-           (decode_instr1_i[24:20] == 5'b00101))) ||
-         ((dispatch1_funct7 == 7'b0110100) &&
-          (dispatch1_funct3 == 3'b101) &&
-          (decode_instr1_i[24:20] == 5'b11000)));
-    wire dispatch0_early = (decode_domain_i == DISPATCH_DOMAIN_ALU) ||
-        dispatch0_branch || dispatch0_early_bit_group0 ||
-        dispatch0_early_bit_group1 || dispatch0_early_bit_group2;
-    wire dispatch1_early = (decode_domain1_i == DISPATCH_DOMAIN_ALU) ||
-        dispatch1_branch || dispatch1_early_bit_group0 ||
-        dispatch1_early_bit_group1 || dispatch1_early_bit_group2;
-    wire dispatch0_early_writes = dispatch0_early && decode_dst_writes_i;
-    wire dispatch1_early_writes = dispatch1_early && decode_dst_writes1_i;
-    // Fence and illegal encodings retain an ALU base class from Decode, but
-    // their serial attribute owns the P1 path and must win RS-domain routing.
-    wire dispatch0_alu = decode_domain_i == DISPATCH_DOMAIN_ALU;
-    wire dispatch1_alu = decode_domain1_i == DISPATCH_DOMAIN_ALU;
-    wire dispatch0_p0 = decode_domain_i == DISPATCH_DOMAIN_P0;
-    wire dispatch1_p0 = decode_domain1_i == DISPATCH_DOMAIN_P0;
-    wire [3:0] alu_free_local = ~issue_window_valid_q[3:0];
-    wire [3:0] p0_free_local = ~issue_window_valid_q[7:4];
-    wire [3:0] p1_free_local = ~issue_window_valid_q[11:8];
-    wire [3:0] alu_alloc0_local;
-    wire [3:0] p0_alloc0_local;
-    wire [3:0] p1_alloc0_local;
-    wire [3:0] alu_free1_local = alu_free_local &
-        ~(dispatch0_alu ? alu_alloc0_local : '0);
-    wire [3:0] p0_free1_local = p0_free_local &
-        ~(dispatch0_p0 ? p0_alloc0_local : '0);
-    wire [3:0] p1_free1_local = p1_free_local &
-        ~((!dispatch0_alu && !dispatch0_p0) ? p1_alloc0_local : '0);
-    wire [3:0] alu_alloc1_local;
-    wire [3:0] p0_alloc1_local;
-    wire [3:0] p1_alloc1_local;
-    wire [ISSUE_WINDOW_DEPTH-1:0] free_select0_vec = dispatch0_alu ?
-        {8'b0, alu_alloc0_local} : dispatch0_p0 ?
-        {4'b0, p0_alloc0_local, 4'b0} : {p1_alloc0_local, 8'b0};
-    wire [ISSUE_WINDOW_DEPTH-1:0] free_select1_vec = dispatch1_alu ?
-        {8'b0, alu_alloc1_local} : dispatch1_p0 ?
-        {4'b0, p0_alloc1_local, 4'b0} : {p1_alloc1_local, 8'b0};
-    genvar branch_order_idx;
-    generate
-        for (branch_order_idx = 0; branch_order_idx < ISSUE_WINDOW_DEPTH;
-             branch_order_idx = branch_order_idx + 1) begin : g_branch_order
-            assign issue_branch_q[branch_order_idx] =
-                issue_window_q[branch_order_idx].op_class == UOP_CLASS_BJP;
-        end
-    endgenerate
-    wire [ISSUE_WINDOW_DEPTH-1:0] unresolved_control_mask =
-        issue_window_valid_q & (issue_branch_q | issue_serial_q);
-    // Loads may pass older loads; only an older store can create an unknown
-    // address/data dependence. Stores retain full memory ordering. This turns
-    // the P0 bank into a real memory-level OoO window without weakening store
-    // order or feeding address-generation state into Select.
-    wire [ISSUE_WINDOW_DEPTH-1:0] dispatch0_order_mask =
-        dispatch0_branch ? unresolved_control_mask :
-        dispatch0_memory ? (issue_window_valid_q &
-            (dispatch0_store ? issue_memory_q : issue_store_q)) :
-        dispatch0_divrem ? (issue_window_valid_q & issue_mul_q) : '0;
-    wire [ISSUE_WINDOW_DEPTH-1:0] dispatch1_control_prior_mask =
-        (dispatch0_branch || dispatch0_serial) ? free_select0_vec : '0;
-    wire dispatch1_waits_for_dispatch0_memory = dispatch1_store ?
-        dispatch0_memory : dispatch0_store;
-    wire [ISSUE_WINDOW_DEPTH-1:0] dispatch1_memory_prior_mask =
-        dispatch1_waits_for_dispatch0_memory ? free_select0_vec : '0;
-    wire [ISSUE_WINDOW_DEPTH-1:0] dispatch1_mul_prior_mask =
-        dispatch0_mul ? free_select0_vec : '0;
-    wire [ISSUE_WINDOW_DEPTH-1:0] dispatch1_order_mask =
-        dispatch1_branch ?
-            (unresolved_control_mask | dispatch1_control_prior_mask) :
-        dispatch1_memory ? ((issue_window_valid_q &
-                             (dispatch1_store ? issue_memory_q : issue_store_q)) |
-                            dispatch1_memory_prior_mask) :
-        dispatch1_divrem ? ((issue_window_valid_q & issue_mul_q) |
-                            dispatch1_mul_prior_mask) : '0;
-
-    // Pair lane 1 may name lane 0's newly allocated producer. The allocation
-    // wakeup below compares the registered RS tag with value_alloc_id_q[0], so
-    // stale Value File contents cannot qualify this intra-pair dependency.
-    always_ff @(posedge clk) begin
-        if (!rst_n || trap_flush_i || flush_id_i) begin
-            alloc_wakeup_valid_q <= '0;
-            alloc_wakeup_target_q[0] <= '0;
-            alloc_wakeup_target_q[1] <= '0;
-            alloc_lookup_src0_id_q[0] <= '0;
-            alloc_lookup_src0_id_q[1] <= '0;
-            alloc_lookup_src1_id_q[0] <= '0;
-            alloc_lookup_src1_id_q[1] <= '0;
-            value_alloc_valid_q <= '0;
-            value_alloc_id_q[0] <= '0;
-            value_alloc_id_q[1] <= '0;
-            alloc_fast_uop_q[0] <= '0;
-            alloc_fast_uop_q[1] <= '0;
-        end else begin
-            alloc_wakeup_valid_q[0] <= issue_pipe_push && free_valid0;
-            alloc_wakeup_valid_q[1] <= issue_pipe_push_two && free_valid1;
-            alloc_wakeup_target_q[0] <= free_select0_vec;
-            alloc_wakeup_target_q[1] <= free_select1_vec;
-            alloc_lookup_src0_id_q[0] <= renamed_src0_i.producer_tag;
-            alloc_lookup_src1_id_q[0] <= renamed_src1_i.producer_tag;
-            alloc_lookup_src0_id_q[1] <= renamed_src2_i.producer_tag;
-            alloc_lookup_src1_id_q[1] <= renamed_src3_i.producer_tag;
-            value_alloc_valid_q[0] <= issue_pipe_push;
-            value_alloc_valid_q[1] <= issue_pipe_push_two;
-            value_alloc_id_q[0] <= dispatch_compact_uop.dst.rob_tag;
-            value_alloc_id_q[1] <= dispatch_compact_uop1.dst.rob_tag;
-            alloc_fast_uop_q[0] <= dispatch_compact_uop;
-            alloc_fast_uop_q[1] <= dispatch_compact_uop1;
-        end
-    end
-
-    // Single-cycle ALU dependencies use the two registered lane tokens so a
-    // consumer can follow without a bubble and retain its Operand bypass lane.
-    // DTCM/MDU result tokens update only local RS ready FFs. A DTCM launch
-    // token is deliberately absent here: launch means only that the address
-    // request entered BRAM, while dtcm_reservation_i marks the data boundary.
-    genvar select_due_idx;
-    generate
-        for (select_due_idx = 0; select_due_idx < ISSUE_WINDOW_DEPTH;
-             select_due_idx = select_due_idx + 1) begin : g_select_due
-            assign issue_src0_fast_main[select_due_idx] =
-                issue_window_q[select_due_idx].src0.tag_valid &&
-                select_wakeup_bypass_valid_q[0] &&
-                (select_wakeup_id_q[0] ==
-                 issue_window_q[select_due_idx].src0.producer_tag);
-            assign issue_src0_fast_dual[select_due_idx] =
-                issue_window_q[select_due_idx].src0.tag_valid &&
-                select_wakeup_bypass_valid_q[1] &&
-                (select_wakeup_id_q[1] ==
-                 issue_window_q[select_due_idx].src0.producer_tag);
-            assign issue_src1_fast_main[select_due_idx] =
-                issue_window_q[select_due_idx].src1.tag_valid &&
-                select_wakeup_bypass_valid_q[0] &&
-                (select_wakeup_id_q[0] ==
-                 issue_window_q[select_due_idx].src1.producer_tag);
-            assign issue_src1_fast_dual[select_due_idx] =
-                issue_window_q[select_due_idx].src1.tag_valid &&
-                select_wakeup_bypass_valid_q[1] &&
-                (select_wakeup_id_q[1] ==
-                 issue_window_q[select_due_idx].src1.producer_tag);
-            assign issue_src0_alloc_wakeup[select_due_idx] =
-                (alloc_wakeup_valid_q[0] &&
-                 issue_window_q[select_due_idx].src0.tag_valid &&
-                 dispatch_src0_resident &&
-                 alloc_wakeup_target_q[0][select_due_idx]) ||
-                (alloc_wakeup_valid_q[1] &&
-                 issue_window_q[select_due_idx].src0.tag_valid &&
-                 (issue_window_q[select_due_idx].src0.producer_tag !=
-                  value_alloc_id_q[0]) && dispatch_src2_resident &&
-                 alloc_wakeup_target_q[1][select_due_idx]);
-            assign issue_src1_alloc_wakeup[select_due_idx] =
-                (alloc_wakeup_valid_q[0] &&
-                 issue_window_q[select_due_idx].src1.tag_valid &&
-                 dispatch_src1_resident &&
-                 alloc_wakeup_target_q[0][select_due_idx]) ||
-                (alloc_wakeup_valid_q[1] &&
-                 issue_window_q[select_due_idx].src1.tag_valid &&
-                 (issue_window_q[select_due_idx].src1.producer_tag !=
-                  value_alloc_id_q[0]) && dispatch_src3_resident &&
-                 alloc_wakeup_target_q[1][select_due_idx]);
-            assign issue_src0_ready_for_select[select_due_idx] =
-                issue_window_src0_ready_q[select_due_idx] ||
-                issue_src0_fast_main[select_due_idx] ||
-                issue_src0_fast_dual[select_due_idx];
-            assign issue_src1_ready_for_select[select_due_idx] =
-                issue_window_src1_ready_q[select_due_idx] ||
-                issue_src1_fast_main[select_due_idx] ||
-                issue_src1_fast_dual[select_due_idx];
-            // issued_slot_mask_q is the registered Select release token.  Use
-            // it immediately for candidacy while the entry updates its stored
-            // order mask on the same edge.  This keeps Select out of Dispatch
-            // ready and still permits ordered banks to issue every cycle.
-            assign issue_order_blocked[select_due_idx] =
-                |(issue_order_mask_q[select_due_idx] & ~issued_slot_mask_q);
-        end
-    endgenerate
-
-    // The three RS domains have physically separate candidate networks. The
-    // ALU bank can provide both lanes; P0 and P1 each provide at most one.
-    assign alu_candidate_local[0] = issue_window_valid_q[0] &&
-        issue_src0_ready_for_select[0] && issue_src1_ready_for_select[0];
-    assign alu_candidate_local[1] = issue_window_valid_q[1] &&
-        issue_src0_ready_for_select[1] && issue_src1_ready_for_select[1];
-    assign alu_candidate_local[2] = issue_window_valid_q[2] &&
-        issue_src0_ready_for_select[2] && issue_src1_ready_for_select[2];
-    assign alu_candidate_local[3] = issue_window_valid_q[3] &&
-        issue_src0_ready_for_select[3] && issue_src1_ready_for_select[3];
-    assign alu_select0_local[0] = alu_candidate_local[0];
-    assign alu_select0_local[1] = alu_candidate_local[1] &&
-        !alu_candidate_local[0];
-    assign alu_select0_local[2] = alu_candidate_local[2] &&
-        !(|alu_candidate_local[1:0]);
-    assign alu_select0_local[3] = alu_candidate_local[3] &&
-        !(|alu_candidate_local[2:0]);
-    assign alu_after_first_local = alu_candidate_local & ~alu_select0_local;
-    assign alu_select1_local[0] = alu_after_first_local[0];
-    assign alu_select1_local[1] = alu_after_first_local[1] &&
-        !alu_after_first_local[0];
-    assign alu_select1_local[2] = alu_after_first_local[2] &&
-        !(|alu_after_first_local[1:0]);
-    assign alu_select1_local[3] = alu_after_first_local[3] &&
-        !(|alu_after_first_local[2:0]);
-
-    assign p0_candidate_local[0] = issue_window_valid_q[4] &&
-        issue_src0_ready_for_select[4] &&
-        (issue_src1_ready_for_select[4] || issue_store_q[4]) &&
-        (!issue_memory_q[4] ||
-         ({1'b0, lsu_credit_i} > {1'b0, lsu_select_reserved_q})) &&
-        !issue_order_blocked[4];
-    assign p0_candidate_local[1] = issue_window_valid_q[5] &&
-        issue_src0_ready_for_select[5] &&
-        (issue_src1_ready_for_select[5] || issue_store_q[5]) &&
-        (!issue_memory_q[5] ||
-         ({1'b0, lsu_credit_i} > {1'b0, lsu_select_reserved_q})) &&
-        !issue_order_blocked[5];
-    assign p0_candidate_local[2] = issue_window_valid_q[6] &&
-        issue_src0_ready_for_select[6] &&
-        (issue_src1_ready_for_select[6] || issue_store_q[6]) &&
-        (!issue_memory_q[6] ||
-         ({1'b0, lsu_credit_i} > {1'b0, lsu_select_reserved_q})) &&
-        !issue_order_blocked[6];
-    assign p0_candidate_local[3] = issue_window_valid_q[7] &&
-        issue_src0_ready_for_select[7] &&
-        (issue_src1_ready_for_select[7] || issue_store_q[7]) &&
-        (!issue_memory_q[7] ||
-         ({1'b0, lsu_credit_i} > {1'b0, lsu_select_reserved_q})) &&
-        !issue_order_blocked[7];
-    assign p0_select_local[0] = p0_candidate_local[0];
-    assign p0_select_local[1] = p0_candidate_local[1] &&
-        !p0_candidate_local[0];
-    assign p0_select_local[2] = p0_candidate_local[2] &&
-        !(|p0_candidate_local[1:0]);
-    assign p0_select_local[3] = p0_candidate_local[3] &&
-        !(|p0_candidate_local[2:0]);
-
-    assign p1_candidate_local[0] = issue_window_valid_q[8] &&
-        issue_src0_ready_for_select[8] && issue_src1_ready_for_select[8] &&
-        !issue_serial_q[8] &&
-        !issue_order_blocked[8] &&
-        (!issue_divrem_q[8] ||
-         (mdu_div_available_q && !div_select_reserved_q));
-    assign p1_candidate_local[1] = issue_window_valid_q[9] &&
-        issue_src0_ready_for_select[9] && issue_src1_ready_for_select[9] &&
-        !issue_serial_q[9] &&
-        !issue_order_blocked[9] &&
-        (!issue_divrem_q[9] ||
-         (mdu_div_available_q && !div_select_reserved_q));
-    assign p1_candidate_local[2] = issue_window_valid_q[10] &&
-        issue_src0_ready_for_select[10] && issue_src1_ready_for_select[10] &&
-        !issue_serial_q[10] &&
-        !issue_order_blocked[10] &&
-        (!issue_divrem_q[10] ||
-         (mdu_div_available_q && !div_select_reserved_q));
-    assign p1_candidate_local[3] = issue_window_valid_q[11] &&
-        issue_src0_ready_for_select[11] && issue_src1_ready_for_select[11] &&
-        !issue_serial_q[11] &&
-        !issue_order_blocked[11] &&
-        (!issue_divrem_q[11] ||
-         (mdu_div_available_q && !div_select_reserved_q));
-    assign p1_select_local[0] = p1_candidate_local[0];
-    assign p1_select_local[1] = p1_candidate_local[1] &&
-        !p1_candidate_local[0];
-    assign p1_select_local[2] = p1_candidate_local[2] &&
-        !(|p1_candidate_local[1:0]);
-    assign p1_select_local[3] = p1_candidate_local[3] &&
-        !(|p1_candidate_local[2:0]);
-
-    assign p1_serial_candidate_local[0] = issue_window_valid_q[8] &&
-        issue_src0_ready_for_select[8] && issue_src1_ready_for_select[8] &&
-        issue_serial_q[8] && !issue_order_blocked[8] &&
-        (issue_window_q[8].dst.rob_tag == rob_head_select_q) &&
-        lsu_idle_select_q;
-    assign p1_serial_candidate_local[1] = issue_window_valid_q[9] &&
-        issue_src0_ready_for_select[9] && issue_src1_ready_for_select[9] &&
-        issue_serial_q[9] && !issue_order_blocked[9] &&
-        (issue_window_q[9].dst.rob_tag == rob_head_select_q) &&
-        lsu_idle_select_q;
-    assign p1_serial_candidate_local[2] = issue_window_valid_q[10] &&
-        issue_src0_ready_for_select[10] && issue_src1_ready_for_select[10] &&
-        issue_serial_q[10] && !issue_order_blocked[10] &&
-        (issue_window_q[10].dst.rob_tag == rob_head_select_q) &&
-        lsu_idle_select_q;
-    assign p1_serial_candidate_local[3] = issue_window_valid_q[11] &&
-        issue_src0_ready_for_select[11] && issue_src1_ready_for_select[11] &&
-        issue_serial_q[11] && !issue_order_blocked[11] &&
-        (issue_window_q[11].dst.rob_tag == rob_head_select_q) &&
-        lsu_idle_select_q;
-    assign p1_serial_select_local[0] = p1_serial_candidate_local[0];
-    assign p1_serial_select_local[1] = p1_serial_candidate_local[1] &&
-        !p1_serial_candidate_local[0];
-    assign p1_serial_select_local[2] = p1_serial_candidate_local[2] &&
-        !(|p1_serial_candidate_local[1:0]);
-    assign p1_serial_select_local[3] = p1_serial_candidate_local[3] &&
-        !(|p1_serial_candidate_local[2:0]);
-
-    assign p0_select_valid = |p0_select_local;
-    assign p1_select_valid = |p1_select_local;
-    assign alu_select0_valid = |alu_select0_local;
-    assign alu_select1_valid = |alu_select1_local;
-    wire select_control_enable = !branch_recovery_i && !recovery_pending_q;
-    wire p1_serial_issue_grant = select_control_enable &&
-        (|p1_serial_select_local);
-    wire p0_issue_grant = select_control_enable &&
-        !(|p1_serial_select_local) && p0_select_valid;
-    wire p1_issue_grant = select_control_enable &&
-        !(|p1_serial_select_local) && p1_select_valid;
-    wire alu0_issue_grant = select_control_enable &&
-        !(|p1_serial_select_local) &&
-        alu_select0_valid && (!p0_select_valid || !p1_select_valid);
-    wire alu1_issue_grant = select_control_enable &&
-        !(|p1_serial_select_local) &&
-        !p0_select_valid && !p1_select_valid && alu_select1_valid;
-
-    wire producer_id_t alu_selected_id0 = alu_select0_local[0] ?
-        issue_window_q[0].dst.rob_tag : alu_select0_local[1] ?
-        issue_window_q[1].dst.rob_tag : alu_select0_local[2] ?
-        issue_window_q[2].dst.rob_tag : issue_window_q[3].dst.rob_tag;
-    wire producer_id_t alu_selected_id1 = alu_select1_local[0] ?
-        issue_window_q[0].dst.rob_tag : alu_select1_local[1] ?
-        issue_window_q[1].dst.rob_tag : alu_select1_local[2] ?
-        issue_window_q[2].dst.rob_tag : issue_window_q[3].dst.rob_tag;
-    wire producer_id_t p1_selected_id = p1_select_local[0] ?
-        issue_window_q[8].dst.rob_tag : p1_select_local[1] ?
-        issue_window_q[9].dst.rob_tag : p1_select_local[2] ?
-        issue_window_q[10].dst.rob_tag : issue_window_q[11].dst.rob_tag;
-    wire producer_id_t p1_serial_selected_id = p1_serial_select_local[0] ?
-        issue_window_q[8].dst.rob_tag : p1_serial_select_local[1] ?
-        issue_window_q[9].dst.rob_tag : p1_serial_select_local[2] ?
-        issue_window_q[10].dst.rob_tag : issue_window_q[11].dst.rob_tag;
-    wire alu_selected0_early =
-        |(alu_select0_local & issue_early_writes_q[3:0]);
-    wire alu_selected1_early =
-        |(alu_select1_local & issue_early_writes_q[3:0]);
-    wire p1_selected_early =
-        |(p1_select_local & issue_early_writes_q[11:8]);
-    wire p1_serial_selected_early =
-        |(p1_serial_select_local & issue_early_writes_q[11:8]);
-
-    always_comb begin
-        alu_selected_uop0 = issue_window_q[3];
-        if (alu_select0_local[0])
-            alu_selected_uop0 = issue_window_q[0];
-        else if (alu_select0_local[1])
-            alu_selected_uop0 = issue_window_q[1];
-        else if (alu_select0_local[2])
-            alu_selected_uop0 = issue_window_q[2];
-        alu_selected_uop0.valid = alu_select0_valid;
-        alu_selected_uop0.src0.ready = alu_select0_valid;
-        alu_selected_uop0.src1.ready = alu_select0_valid;
-
-        alu_selected_uop1 = issue_window_q[3];
-        if (alu_select1_local[0])
-            alu_selected_uop1 = issue_window_q[0];
-        else if (alu_select1_local[1])
-            alu_selected_uop1 = issue_window_q[1];
-        else if (alu_select1_local[2])
-            alu_selected_uop1 = issue_window_q[2];
-        alu_selected_uop1.valid = alu_select1_valid;
-        alu_selected_uop1.src0.ready = alu_select1_valid;
-        alu_selected_uop1.src1.ready = alu_select1_valid;
-
-        p0_selected_uop = issue_window_q[7];
-        p0_selected_src1_due = issue_src1_ready_for_select[7];
-        if (p0_select_local[0]) begin
-            p0_selected_uop = issue_window_q[4];
-            p0_selected_src1_due = issue_src1_ready_for_select[4];
-        end else if (p0_select_local[1]) begin
-            p0_selected_uop = issue_window_q[5];
-            p0_selected_src1_due = issue_src1_ready_for_select[5];
-        end else if (p0_select_local[2]) begin
-            p0_selected_uop = issue_window_q[6];
-            p0_selected_src1_due = issue_src1_ready_for_select[6];
-        end
-        p0_selected_uop.valid = p0_select_valid;
-        p0_selected_uop.lane_mask = 2'b01;
-        p0_selected_uop.src0.ready = p0_select_valid;
-        p0_selected_uop.src1.ready = p0_select_valid &&
-            p0_selected_src1_due;
-
-        p1_selected_uop = issue_window_q[11];
-        if (p1_select_local[0]) begin
-            p1_selected_uop = issue_window_q[8];
-        end else if (p1_select_local[1]) begin
-            p1_selected_uop = issue_window_q[9];
-        end else if (p1_select_local[2]) begin
-            p1_selected_uop = issue_window_q[10];
-        end
-        p1_selected_uop.valid = p1_select_valid;
-        p1_selected_uop.lane_mask = 2'b10;
-        p1_selected_uop.src0.ready = p1_select_valid;
-        p1_selected_uop.src1.ready = p1_select_valid;
-
-        p1_serial_selected_uop = issue_window_q[11];
-        if (p1_serial_select_local[0])
-            p1_serial_selected_uop = issue_window_q[8];
-        else if (p1_serial_select_local[1])
-            p1_serial_selected_uop = issue_window_q[9];
-        else if (p1_serial_select_local[2])
-            p1_serial_selected_uop = issue_window_q[10];
-        p1_serial_selected_uop.valid = |p1_serial_select_local;
-        p1_serial_selected_uop.lane_mask = 2'b10;
-        p1_serial_selected_uop.src0.ready = |p1_serial_select_local;
-        p1_serial_selected_uop.src1.ready = |p1_serial_select_local;
-    end
-
-    assign alu_alloc0_local[0] = alu_free_local[0];
-    assign alu_alloc0_local[1] = alu_free_local[1] && !alu_free_local[0];
-    assign alu_alloc0_local[2] = alu_free_local[2] &&
-        !(|alu_free_local[1:0]);
-    assign alu_alloc0_local[3] = alu_free_local[3] &&
-        !(|alu_free_local[2:0]);
-    assign p0_alloc0_local[0] = p0_free_local[0];
-    assign p0_alloc0_local[1] = p0_free_local[1] && !p0_free_local[0];
-    assign p0_alloc0_local[2] = p0_free_local[2] &&
-        !(|p0_free_local[1:0]);
-    assign p0_alloc0_local[3] = p0_free_local[3] &&
-        !(|p0_free_local[2:0]);
-    assign p1_alloc0_local[0] = p1_free_local[0];
-    assign p1_alloc0_local[1] = p1_free_local[1] && !p1_free_local[0];
-    assign p1_alloc0_local[2] = p1_free_local[2] &&
-        !(|p1_free_local[1:0]);
-    assign p1_alloc0_local[3] = p1_free_local[3] &&
-        !(|p1_free_local[2:0]);
-
-    assign alu_alloc1_local[0] = alu_free1_local[0];
-    assign alu_alloc1_local[1] = alu_free1_local[1] && !alu_free1_local[0];
-    assign alu_alloc1_local[2] = alu_free1_local[2] &&
-        !(|alu_free1_local[1:0]);
-    assign alu_alloc1_local[3] = alu_free1_local[3] &&
-        !(|alu_free1_local[2:0]);
-    assign p0_alloc1_local[0] = p0_free1_local[0];
-    assign p0_alloc1_local[1] = p0_free1_local[1] && !p0_free1_local[0];
-    assign p0_alloc1_local[2] = p0_free1_local[2] &&
-        !(|p0_free1_local[1:0]);
-    assign p0_alloc1_local[3] = p0_free1_local[3] &&
-        !(|p0_free1_local[2:0]);
-    assign p1_alloc1_local[0] = p1_free1_local[0];
-    assign p1_alloc1_local[1] = p1_free1_local[1] && !p1_free1_local[0];
-    assign p1_alloc1_local[2] = p1_free1_local[2] &&
-        !(|p1_free1_local[1:0]);
-    assign p1_alloc1_local[3] = p1_free1_local[3] &&
-        !(|p1_free1_local[2:0]);
-
-    assign free_valid0 = |free_select0_vec;
-    assign free_valid1 = |free_select1_vec;
-    wire [2:0] alu_free_count =
-        3'(alu_free_local[0]) + 3'(alu_free_local[1]) +
-        3'(alu_free_local[2]) + 3'(alu_free_local[3]);
-    wire [2:0] p0_free_count =
-        3'(p0_free_local[0]) + 3'(p0_free_local[1]) +
-        3'(p0_free_local[2]) + 3'(p0_free_local[3]);
-    wire [2:0] p1_free_count =
-        3'(p1_free_local[0]) + 3'(p1_free_local[1]) +
-        3'(p1_free_local[2]) + 3'(p1_free_local[3]);
-    // This is a two-entry capacity contract, not an accept decision. Count
-    // both decoded domains unconditionally so FetchQ valid/count cannot feed
-    // through Issue and back into its own pop/write controls.
-    wire [1:0] alu_dispatch_demand =
-        {1'b0, dispatch0_alu} + {1'b0, dispatch1_alu};
-    wire [1:0] p0_dispatch_demand =
-        {1'b0, !dispatch0_alu && dispatch0_p0} +
-        {1'b0, !dispatch1_alu && dispatch1_p0};
-    wire [1:0] p1_dispatch_demand =
-        {1'b0, !dispatch0_alu && !dispatch0_p0} +
-        {1'b0, !dispatch1_alu && !dispatch1_p0};
-    wire [2:0] alu_release_credit_d =
-        3'(alu0_issue_grant) + 3'(alu1_issue_grant);
-    wire [2:0] p0_release_credit_d = 3'(p0_issue_grant);
-    wire [2:0] p1_release_credit_d =
-        3'(p1_serial_issue_grant || p1_issue_grant);
-    wire [3:0] alu_effective_credit =
-        {1'b0, alu_free_credit_q} + {1'b0, alu_release_credit_q};
-    wire [3:0] p0_effective_credit =
-        {1'b0, p0_free_credit_q} + {1'b0, p0_release_credit_q};
-    wire [3:0] p1_effective_credit =
-        {1'b0, p1_free_credit_q} + {1'b0, p1_release_credit_q};
-    assign dispatch_slots_available =
-        (dispatch0_alu ? (alu_effective_credit != '0) :
-         dispatch0_p0 ? (p0_effective_credit != '0) :
-                        (p1_effective_credit != '0)) &&
-        (credit_resync_q == '0);
-    assign dispatch_pair_slots_available =
-        (alu_effective_credit >= {2'b0, alu_dispatch_demand}) &&
-        (p0_effective_credit >= {2'b0, p0_dispatch_demand}) &&
-        (p1_effective_credit >= {2'b0, p1_dispatch_demand}) &&
-        (credit_resync_q == '0);
-
-    always_comb begin
-        selected_uop0 = '0;
-        selected_uop1 = '0;
-        selected_valid0 = 1'b0;
-        selected_valid1 = 1'b0;
-        selected0_mask = '0;
-        selected1_mask = '0;
-        if (|p1_serial_select_local) begin
-            selected_uop0 = p1_serial_selected_uop;
-            selected_valid0 = 1'b1;
-            selected0_mask[11:8] = p1_serial_select_local;
-        end else if (p0_select_valid) begin
-            selected_uop0 = p0_selected_uop;
-            selected_valid0 = 1'b1;
-            selected0_mask[7:4] = p0_select_local;
-            if (p1_select_valid) begin
-                selected_uop1 = p1_selected_uop;
-                selected_valid1 = 1'b1;
-                selected1_mask[11:8] = p1_select_local;
-            end else if (alu_select0_valid) begin
-                selected_uop1 = alu_selected_uop0;
-                selected_uop1.lane_mask = 2'b10;
-                selected_valid1 = 1'b1;
-                selected1_mask[3:0] = alu_select0_local;
-            end
-        end else if (p1_select_valid) begin
-            if (alu_select0_valid) begin
-                selected_uop0 = alu_selected_uop0;
-                selected_uop0.lane_mask = 2'b01;
-                selected_valid0 = 1'b1;
-                selected0_mask[3:0] = alu_select0_local;
-                selected_uop1 = p1_selected_uop;
-                selected_valid1 = 1'b1;
-                selected1_mask[11:8] = p1_select_local;
-            end else begin
-                selected_uop0 = p1_selected_uop;
-                selected_valid0 = 1'b1;
-                selected0_mask[11:8] = p1_select_local;
-            end
-        end else if (alu_select0_valid) begin
-            selected_uop0 = alu_selected_uop0;
-            selected_uop0.lane_mask = 2'b01;
-            selected_valid0 = 1'b1;
-            selected0_mask[3:0] = alu_select0_local;
-            if (alu_select1_valid) begin
-                selected_uop1 = alu_selected_uop1;
-                selected_uop1.lane_mask = 2'b10;
-                selected_valid1 = 1'b1;
-                selected1_mask[3:0] = alu_select1_local;
-            end
-        end
-        selected_uop0.valid = selected_valid0;
-        selected_uop1.valid = selected_valid1;
-        selected_uop0.src0_bypass =
-            (|(selected0_mask & issue_src0_fast_main)) ? BYPASS_LANE0 :
-            (|(selected0_mask & issue_src0_fast_dual)) ? BYPASS_LANE1 :
-            BYPASS_NONE;
-        selected_uop0.src1_bypass =
-            (|(selected0_mask & issue_src1_fast_main)) ? BYPASS_LANE0 :
-            (|(selected0_mask & issue_src1_fast_dual)) ? BYPASS_LANE1 :
-            BYPASS_NONE;
-        selected_uop1.src0_bypass =
-            (|(selected1_mask & issue_src0_fast_main)) ? BYPASS_LANE0 :
-            (|(selected1_mask & issue_src0_fast_dual)) ? BYPASS_LANE1 :
-            BYPASS_NONE;
-        selected_uop1.src1_bypass =
-            (|(selected1_mask & issue_src1_fast_main)) ? BYPASS_LANE0 :
-            (|(selected1_mask & issue_src1_fast_dual)) ? BYPASS_LANE1 :
-            BYPASS_NONE;
-        issue_select_mask = selected0_mask | selected1_mask;
-    end
-
-    // The allocation payload is already registered on the preceding edge.
-    // When the normal selector chooses that exact RS identity and every
-    // required tagged operand is generation-qualified resident, a narrow
-    // grant may feed Operand without first copying the same wide payload into
-    // the bundle head. Pending completion data and mixed old/new bundles keep
-    // using the normal registered queue.
-    wire alloc_fast0_src0_stored =
-        !alloc_fast_uop_q[0].src0.used ||
-        (alloc_fast_uop_q[0].src0.arch_addr == '0) ||
-        (alloc_fast_uop_q[0].src0.tag_valid && dispatch_src0_resident);
-    wire alloc_fast0_src1_stored =
-        !alloc_fast_uop_q[0].src1.used ||
-        (alloc_fast_uop_q[0].src1.arch_addr == '0) ||
-        (alloc_fast_uop_q[0].src1.tag_valid && dispatch_src1_resident);
-    wire alloc_fast1_src0_stored =
-        !alloc_fast_uop_q[1].src0.used ||
-        (alloc_fast_uop_q[1].src0.arch_addr == '0) ||
-        (alloc_fast_uop_q[1].src0.tag_valid && dispatch_src2_resident);
-    wire alloc_fast1_src1_stored =
-        !alloc_fast_uop_q[1].src1.used ||
-        (alloc_fast_uop_q[1].src1.arch_addr == '0) ||
-        (alloc_fast_uop_q[1].src1.tag_valid && dispatch_src3_resident);
-    wire alloc_fast0_data_stored = alloc_fast0_src0_stored &&
-        ((alloc_fast_uop_q[0].op_class == UOP_CLASS_STORE) ||
-         alloc_fast0_src1_stored);
-    wire alloc_fast1_data_stored = alloc_fast1_src0_stored &&
-        ((alloc_fast_uop_q[1].op_class == UOP_CLASS_STORE) ||
-         alloc_fast1_src1_stored);
-    wire selected0_alloc0_match = alloc_wakeup_valid_q[0] &&
-        (|(selected0_mask & alloc_wakeup_target_q[0]));
-    wire selected0_alloc1_match = alloc_wakeup_valid_q[1] &&
-        (|(selected0_mask & alloc_wakeup_target_q[1]));
-    wire selected1_alloc0_match = alloc_wakeup_valid_q[0] &&
-        (|(selected1_mask & alloc_wakeup_target_q[0]));
-    wire selected1_alloc1_match = alloc_wakeup_valid_q[1] &&
-        (|(selected1_mask & alloc_wakeup_target_q[1]));
-    wire selected0_alloc_fast =
-        (selected0_alloc0_match && alloc_fast0_data_stored) ||
-        (selected0_alloc1_match && alloc_fast1_data_stored);
-    wire selected1_alloc_fast =
-        (selected1_alloc0_match && alloc_fast0_data_stored) ||
-        (selected1_alloc1_match && alloc_fast1_data_stored);
-    assign select_direct_fire = selected_valid0 &&
-        !select_head_valid_q && !select_skid_valid_q &&
-        selected0_alloc_fast && (!selected_valid1 || selected1_alloc_fast) &&
-        !flush_id_i && !trap_flush_i &&
-        !branch_recovery_i && !recovery_pending_q;
-
-    always_comb begin
-        select_direct_uop0 = selected0_alloc0_match ? alloc_fast_uop_q[0] :
-            alloc_fast_uop_q[1];
-        select_direct_uop1 = selected1_alloc0_match ? alloc_fast_uop_q[0] :
-            alloc_fast_uop_q[1];
-        select_direct_uop0.valid = select_direct_fire;
-        select_direct_uop1.valid = select_direct_fire && selected_valid1;
-        select_direct_uop0.lane_mask = selected_uop0.lane_mask;
-        select_direct_uop1.lane_mask = selected_uop1.lane_mask;
-        select_direct_uop0.src0.ready = select_direct_fire;
-        select_direct_uop0.src1.ready = select_direct_fire &&
-            ((select_direct_uop0.op_class == UOP_CLASS_STORE) ?
-                 selected_uop0.src1.ready : 1'b1);
-        select_direct_uop1.src0.ready = select_direct_fire && selected_valid1;
-        select_direct_uop1.src1.ready = select_direct_fire && selected_valid1 &&
-            ((select_direct_uop1.op_class == UOP_CLASS_STORE) ?
-                 selected_uop1.src1.ready : 1'b1);
-        select_direct_uop0.src0_bypass = BYPASS_NONE;
-        select_direct_uop0.src1_bypass = BYPASS_NONE;
-        select_direct_uop1.src0_bypass = BYPASS_NONE;
-        select_direct_uop1.src1_bypass = BYPASS_NONE;
-    end
-
-    // Operand is a two-cell FIFO. A valid head is consumed every cycle, so a
-    // full skid cell can accept a new Select result while the old skid cell is
-    // promoted. Select never bypasses the registered Operand boundary.
-    wire select_buf_pop = issue_ready_o && select_head_valid_q;
-    wire select_buf_push = selected_valid0 &&
-        !branch_recovery_i && !recovery_pending_q &&
-        (!select_skid_valid_q || select_buf_pop);
-    wire select_commit = select_buf_push;
-
-    // Wake dependents when Select has committed the producer to the local
-    // Operand queue. A dependent selected on the next cycle is ordered behind
-    // that producer by the queue, while the global completion/resolver cone no
-    // longer feeds back into every RS entry's ready D/CE pins.
-    // Generate the two physical-lane tokens from local bank grants. P0 owns
-    // lane A but has no early result. P1 always executes on lane B; ALU0 uses
-    // lane A unless P0 owns it, and ALU1 is granted only when both P0/P1 are
-    // absent. Avoid remuxing either full selected uop to form wakeup control.
-    wire p1_serial_due_valid = p1_serial_issue_grant &&
-        p1_serial_selected_early;
-    wire p1_due_valid = p1_issue_grant && p1_selected_early;
-    wire alu0_main_due_valid = alu0_issue_grant &&
-        !p0_select_valid && alu_selected0_early;
-    wire alu0_dual_due_valid = alu0_issue_grant &&
-        p0_select_valid && alu_selected0_early;
-    wire alu1_dual_due_valid = alu1_issue_grant && alu_selected1_early;
-    wire selected_main_due_valid = alu0_main_due_valid;
-    wire producer_id_t selected_main_due_id = alu_selected_id0;
-    wire selected_dual_due_valid = p1_serial_due_valid || p1_due_valid ||
-        alu0_dual_due_valid || alu1_dual_due_valid;
-    wire producer_id_t selected_dual_due_id = p1_serial_due_valid ?
-        p1_serial_selected_id : p1_due_valid ? p1_selected_id :
-        alu0_dual_due_valid ? alu_selected_id0 : alu_selected_id1;
-    wire div_select_pick = p1_issue_grant &&
-        (|(p1_select_local & issue_divrem_q[11:8]));
-    // Every P0 entry is an LSU operation.  Its credit reservation is local to
-    // the P0 pick and must not depend on the combined P0/P1/ALU select mask.
-    wire lsu_select_pick = p0_issue_grant;
-    // Preserve the zero-backlog launch wakeup: a newly selected consumer lands
-    // on the response cycle without crossing an occupied Operand cell. Busy
-    // Operand cases use the registered token and response history instead.
-    wire dtcm_launch_fast_wakeup_to_rs = dtcm_launch_wakeup_valid_i &&
-        !select_head_valid_q && !select_skid_valid_q && !select_buf_push;
-    wire dtcm_launch_wakeup_to_rs = dtcm_launch_wakeup_valid_q;
-
-    // Registered pending releases are visible to Dispatch without exposing the
-    // current Select mask or live RS valid bits to frontend ready.
-    wire [2:0] alu_alloc_count =
-        3'(issue_pipe_push && dispatch0_alu) +
-        3'(issue_pipe_push_two && dispatch1_alu);
-    wire [1:0] p0_alloc_count =
-        2'(issue_pipe_push && dispatch0_p0) +
-        2'(issue_pipe_push_two && dispatch1_p0);
-    wire [1:0] p1_alloc_count =
-        2'(issue_pipe_push && !dispatch0_alu && !dispatch0_p0) +
-        2'(issue_pipe_push_two && !dispatch1_alu && !dispatch1_p0);
-
-    // Dispatch sees only registered per-domain credits. The release token is a
-    // compact per-bank count, so the 12-bit Select/remove mask stays local to
-    // the RS and cannot become a wide ready path back to FetchQ.
-    always_ff @(posedge clk) begin
-        if (!rst_n || trap_flush_i ||
-            (flush_id_i && !branch_recovery_i)) begin
-            alu_free_credit_q <= 3'd4;
-            p0_free_credit_q <= 3'd4;
-            p1_free_credit_q <= 3'd4;
-            alu_release_credit_q <= '0;
-            p0_release_credit_q <= '0;
-            p1_release_credit_q <= '0;
-            credit_resync_q <= '0;
-        end else if (branch_recovery_i) begin
-            alu_free_credit_q <= '0;
-            p0_free_credit_q <= '0;
-            p1_free_credit_q <= '0;
-            alu_release_credit_q <= '0;
-            p0_release_credit_q <= '0;
-            p1_release_credit_q <= '0;
-            credit_resync_q <= 2'd2;
-        end else if (credit_resync_q != '0) begin
-            alu_release_credit_q <= '0;
-            p0_release_credit_q <= '0;
-            p1_release_credit_q <= '0;
-            credit_resync_q <= credit_resync_q - 1'b1;
-            if (credit_resync_q == 2'd1) begin
-                alu_free_credit_q <= alu_free_count;
-                p0_free_credit_q <= p0_free_count;
-                p1_free_credit_q <= p1_free_count;
-            end
-        end else begin
-            alu_release_credit_q <= alu_release_credit_d;
-            p0_release_credit_q <= p0_release_credit_d;
-            p1_release_credit_q <= p1_release_credit_d;
-            // Rebase the registered credit on the local RS occupancy.  The
-            // release register remains the one-cycle lookahead term used by
-            // effective_credit, so this preserves the decoupled Dispatch
-            // boundary while removing accumulated release/allocate phase
-            // error from the credit state itself.
-            alu_free_credit_q <= alu_free_count - alu_alloc_count;
-            p0_free_credit_q <= p0_free_count - p0_alloc_count;
-            p1_free_credit_q <= p1_free_count - p1_alloc_count;
-        end
-    end
-
-    integer recovery_idx;
-    logic [ISSUE_WINDOW_DEPTH-1:0] recovery_slot_mask;
-    always_comb begin
-        recovery_slot_mask = '0;
-        for (recovery_idx = 0; recovery_idx < ISSUE_WINDOW_DEPTH;
-             recovery_idx = recovery_idx + 1) begin
-            if (issue_window_valid_q[recovery_idx] &&
-                producer_slot_in_window(
-                    issue_window_q[recovery_idx].dst.rob_tag[
-                        PRODUCER_SLOT_WIDTH-1:0],
-                    recovery_head_slot_q,
-                    recovery_branch_slot_q)) begin
-                recovery_slot_mask[recovery_idx] = 1'b1;
-            end
-        end
-    end
-
-    always_ff @(posedge clk) begin
-        if (!rst_n || trap_flush_i ||
-            (flush_id_i && !branch_recovery_i)) begin
-            recovery_pending_q <= 1'b0;
-            recovery_head_slot_q <= '0;
-            recovery_branch_slot_q <= '0;
-        end else begin
-            recovery_pending_q <= branch_recovery_i;
-            if (branch_recovery_i) begin
-                recovery_head_slot_q <= recovery_head_slot_i;
-                recovery_branch_slot_q <= recovery_branch_slot_i;
-            end
-        end
-    end
-
-    always_ff @(posedge clk) begin
-        if (!rst_n || (flush_id_i && !branch_recovery_i) ||
-            trap_flush_i || branch_recovery_i) begin
-            rob_head_select_q <= '0;
-            lsu_idle_select_q <= 1'b0;
-            issued_slot_mask_q <= '0;
-            select_wakeup_valid_q[0] <= 1'b0;
-            select_wakeup_valid_q[1] <= 1'b0;
-            select_wakeup_bypass_valid_q[0] <= 1'b0;
-            select_wakeup_bypass_valid_q[1] <= 1'b0;
-            select_wakeup_id_q[0] <= '0;
-            select_wakeup_id_q[1] <= '0;
-            mdu_replay_valid_q <= 1'b0;
-            mdu_replay_id_q <= '0;
-            dtcm_launch_wakeup_valid_q <= 1'b0;
-            dtcm_launch_wakeup_id_q <= '0;
-            dtcm_result_replay_valid_q <= 1'b0;
-            dtcm_result_replay_id_q <= '0;
-            mdu_div_available_q <= 1'b1;
-            div_select_reserved_q <= 1'b0;
-            div_busy_seen_q <= 1'b0;
-        end else begin
-            rob_head_select_q <= rob_head_id_i;
-            lsu_idle_select_q <= lsu_idle_i;
-            issued_slot_mask_q <=
-                select_commit ? issue_select_mask : '0;
-            select_wakeup_valid_q[0] <= selected_main_due_valid;
-            select_wakeup_valid_q[1] <= selected_dual_due_valid;
-            // Direct allocation execution has an earlier EX phase. Keep its
-            // RS wakeup, but do not stamp a normal Select bypass onto a
-            // consumer that crosses the Operand register boundary later.
-            select_wakeup_bypass_valid_q[0] <= selected_main_due_valid;
-            select_wakeup_bypass_valid_q[1] <= selected_dual_due_valid;
-            select_wakeup_id_q[0] <= selected_main_due_id;
-            select_wakeup_id_q[1] <= selected_dual_due_id;
-            mdu_replay_valid_q <= mdu_due_i.valid &&
-                mdu_due_i.producer_tracked;
-            mdu_replay_id_q <= mdu_due_i.producer_id;
-            dtcm_launch_wakeup_valid_q <= dtcm_launch_wakeup_valid_i;
-            dtcm_launch_wakeup_id_q <= dtcm_launch_wakeup_id_i;
-            dtcm_result_replay_valid_q <= dtcm_reservation_i.valid &&
-                dtcm_reservation_i.producer_tracked;
-            dtcm_result_replay_id_q <= dtcm_reservation_i.producer_id;
-            mdu_div_available_q <= mdu_div_available_i;
-            if (div_select_reserved_q && !mdu_div_available_q)
-                div_busy_seen_q <= 1'b1;
-            if (div_select_reserved_q && div_busy_seen_q &&
-                mdu_div_available_q) begin
-                div_select_reserved_q <= 1'b0;
-                div_busy_seen_q <= 1'b0;
-            end
-            if (div_select_pick) begin
-                div_select_reserved_q <= 1'b1;
-                div_busy_seen_q <= 1'b0;
-            end
-        end
-    end
-
-    genvar rs_entry_idx;
-    generate
-        for (rs_entry_idx = 0; rs_entry_idx < ISSUE_WINDOW_DEPTH;
-             rs_entry_idx = rs_entry_idx + 1) begin : g_rs_entry
-            ydrasil_issue_rs_entry #(
-                .SLOT_COUNT(ISSUE_WINDOW_DEPTH)
-            ) u_entry (
-                .clk(clk),
-                .rst_n(rst_n),
-                .hard_flush_i((flush_id_i && !branch_recovery_i) ||
-                              trap_flush_i),
-                .branch_recovery_i(recovery_pending_q),
-                .recovery_keep_i(producer_slot_in_window(
-                    issue_window_q[rs_entry_idx].dst.rob_tag[
-                        PRODUCER_SLOT_WIDTH-1:0],
-                    recovery_head_slot_q,
-                    recovery_branch_slot_q)),
-                .recovery_slot_mask_i(recovery_slot_mask),
-                .issued_slot_mask_i(issued_slot_mask_q),
-                .remove_i(select_commit &&
-                          issue_select_mask[rs_entry_idx]),
-                .dispatch0_write_i(issue_pipe_push && free_valid0 &&
-                                   free_select0_vec[rs_entry_idx]),
-                .dispatch1_write_i(issue_pipe_push_two && free_valid1 &&
-                                   free_select1_vec[rs_entry_idx]),
-                .dispatch0_uop_i(dispatch_compact_uop),
-                .dispatch1_uop_i(dispatch_compact_uop1),
-                .dispatch0_src0_ready_i(renamed_src0_static_ready_i),
-                .dispatch0_src1_ready_i(renamed_src1_static_ready_i),
-                .dispatch1_src0_ready_i(renamed_src2_static_ready_i),
-                .dispatch1_src1_ready_i(renamed_src3_static_ready_i),
-                .dispatch0_order_mask_i(dispatch0_order_mask),
-                .dispatch1_order_mask_i(dispatch1_order_mask),
-                .dispatch0_memory_i(dispatch0_memory),
-                .dispatch1_memory_i(dispatch1_memory),
-                .dispatch0_store_i(dispatch0_store),
-                .dispatch1_store_i(dispatch1_store),
-                .dispatch0_mul_i(dispatch0_mul),
-                .dispatch1_mul_i(dispatch1_mul),
-                .dispatch0_divrem_i(dispatch0_divrem),
-                .dispatch1_divrem_i(dispatch1_divrem),
-                .dispatch0_serial_i(dispatch0_serial),
-                .dispatch1_serial_i(dispatch1_serial),
-                .dispatch0_early_writes_i(dispatch0_early_writes),
-                .dispatch1_early_writes_i(dispatch1_early_writes),
-                .wakeup0_valid_i(select_wakeup_valid_q[0]),
-                .wakeup0_id_i(select_wakeup_id_q[0]),
-                .wakeup1_valid_i(select_wakeup_valid_q[1]),
-                .wakeup1_id_i(select_wakeup_id_q[1]),
-                .alloc_wakeup_src0_i(issue_src0_alloc_wakeup[rs_entry_idx]),
-                .alloc_wakeup_src1_i(issue_src1_alloc_wakeup[rs_entry_idx]),
-		                .dtcm_launch_fast_wakeup_valid_i(
-		                    dtcm_launch_fast_wakeup_to_rs),
-		                .dtcm_launch_fast_wakeup_id_i(
-		                    dtcm_launch_wakeup_id_i),
-		                .dtcm_launch_wakeup_valid_i(
-		                    dtcm_launch_wakeup_to_rs),
-		                .dtcm_launch_wakeup_id_i(
-		                    dtcm_launch_wakeup_id_q),
-		                .dtcm_result_wakeup_valid_i(
-		                    dtcm_reservation_i.valid &&
-	                    dtcm_reservation_i.producer_tracked),
-	                .dtcm_result_wakeup_id_i(
-	                    dtcm_reservation_i.producer_id),
-	                .dtcm_result_replay_valid_i(
-	                    dtcm_result_replay_valid_q),
-	                .dtcm_result_replay_id_i(
-	                    dtcm_result_replay_id_q),
-	                .mdu_wakeup_valid_i(mdu_due_i.valid &&
-	                    mdu_due_i.producer_tracked),
-	                .mdu_wakeup_id_i(mdu_due_i.producer_id),
-	                .mdu_replay_valid_i(mdu_replay_valid_q),
-	                .mdu_replay_id_i(mdu_replay_id_q),
-                .completion_meta_i(completion_meta_i),
-                .uop_o(issue_window_q[rs_entry_idx]),
-                .valid_o(issue_window_valid_q[rs_entry_idx]),
-                .src0_ready_o(issue_window_src0_ready_q[rs_entry_idx]),
-                .src1_ready_o(issue_window_src1_ready_q[rs_entry_idx]),
-                .order_mask_o(issue_order_mask_q[rs_entry_idx]),
-                .memory_o(issue_memory_q[rs_entry_idx]),
-                .store_o(issue_store_q[rs_entry_idx]),
-                .mul_o(issue_mul_q[rs_entry_idx]),
-                .divrem_o(issue_divrem_q[rs_entry_idx]),
-                .serial_o(issue_serial_q[rs_entry_idx]),
-                .early_writes_o(issue_early_writes_q[rs_entry_idx]),
-                .completion_wakeup_src0_o(
-                    issue_src0_completion_wakeup[rs_entry_idx]),
-                .completion_wakeup_src1_o(
-                    issue_src1_completion_wakeup[rs_entry_idx])
-            );
-        end
-    endgenerate
-
-    wire select_recovery_keep0 = select_head_valid_q &&
-        producer_slot_in_window(
-            select_head_uop0_q.dst.rob_tag[PRODUCER_SLOT_WIDTH-1:0],
-            recovery_head_slot_i, recovery_branch_slot_i);
-    wire select_recovery_keep1 = issue_pair_execute &&
-        producer_slot_in_window(
-            select_head_uop1_q.dst.rob_tag[PRODUCER_SLOT_WIDTH-1:0],
-            recovery_head_slot_i, recovery_branch_slot_i);
-    wire select_skid_recovery_keep0 = select_skid_valid_q &&
-        producer_slot_in_window(
-            select_skid_uop0_q.dst.rob_tag[PRODUCER_SLOT_WIDTH-1:0],
-            recovery_head_slot_i, recovery_branch_slot_i);
-    wire select_skid_recovery_keep1 = select_skid_valid_q &&
-        select_skid_pair_q &&
-        producer_slot_in_window(
-            select_skid_uop1_q.dst.rob_tag[PRODUCER_SLOT_WIDTH-1:0],
-            recovery_head_slot_i, recovery_branch_slot_i);
-
-    always_ff @(posedge clk) begin
-        if (!rst_n) begin
-            select_head_uop0_q <= '0;
-            select_head_uop1_q <= '0;
-            select_skid_uop0_q <= '0;
-            select_skid_uop1_q <= '0;
-            select_head_pair_q <= 1'b0;
-            select_skid_pair_q <= 1'b0;
-            select_head_valid_q <= 1'b0;
-            select_skid_valid_q <= 1'b0;
-        end else if (trap_flush_i ||
-                     (flush_id_i && !branch_recovery_i)) begin
-            select_head_pair_q <= 1'b0;
-            select_skid_pair_q <= 1'b0;
-            select_head_valid_q <= 1'b0;
-            select_skid_valid_q <= 1'b0;
-        end else if (branch_recovery_i) begin
-            // The queue contains at most two selected bundles.  Preserve the
-            // head bundle first and retain a surviving skid bundle; a killed
-            // lane-0 with a surviving lane-1 is compacted to a single
-            // lane-B-only head, matching the normal Operand contract.
-            if (select_recovery_keep0) begin
-                select_head_uop0_q.src0_bypass <= BYPASS_NONE;
-                select_head_uop0_q.src1_bypass <= BYPASS_NONE;
-                select_head_uop1_q.src0_bypass <= BYPASS_NONE;
-                select_head_uop1_q.src1_bypass <= BYPASS_NONE;
-                select_head_pair_q <= select_recovery_keep1;
-                select_head_valid_q <= 1'b1;
-                if (select_skid_recovery_keep0) begin
-                    select_skid_uop0_q.src0_bypass <= BYPASS_NONE;
-                    select_skid_uop0_q.src1_bypass <= BYPASS_NONE;
-                    select_skid_uop1_q.src0_bypass <= BYPASS_NONE;
-                    select_skid_uop1_q.src1_bypass <= BYPASS_NONE;
-                    select_skid_pair_q <= select_skid_recovery_keep1;
-                    select_skid_valid_q <= 1'b1;
-                end else begin
-                    select_skid_pair_q <= 1'b0;
-                    select_skid_valid_q <= 1'b0;
-                end
-            end else if (select_recovery_keep1) begin
-                select_head_uop0_q <= select_head_uop1_q;
-                select_head_uop0_q.src0_bypass <= BYPASS_NONE;
-                select_head_uop0_q.src1_bypass <= BYPASS_NONE;
-                select_head_pair_q <= 1'b0;
-                select_head_valid_q <= 1'b1;
-                if (select_skid_recovery_keep0) begin
-                    select_skid_uop0_q.src0_bypass <= BYPASS_NONE;
-                    select_skid_uop0_q.src1_bypass <= BYPASS_NONE;
-                    select_skid_uop1_q.src0_bypass <= BYPASS_NONE;
-                    select_skid_uop1_q.src1_bypass <= BYPASS_NONE;
-                    select_skid_pair_q <= select_skid_recovery_keep1;
-                    select_skid_valid_q <= 1'b1;
-                end else begin
-                    select_skid_pair_q <= 1'b0;
-                    select_skid_valid_q <= 1'b0;
-                end
-            end else begin
-                // Head was killed. Promote a surviving skid bundle if one is
-                // available; otherwise empty the queue.
-                if (select_skid_recovery_keep0) begin
-                    select_head_uop0_q <= select_skid_uop0_q;
-                    select_head_uop0_q.src0_bypass <= BYPASS_NONE;
-                    select_head_uop0_q.src1_bypass <= BYPASS_NONE;
-                    select_head_uop1_q <= select_skid_uop1_q;
-                    select_head_uop1_q.src0_bypass <= BYPASS_NONE;
-                    select_head_uop1_q.src1_bypass <= BYPASS_NONE;
-                    select_head_pair_q <= select_skid_recovery_keep1;
-                    select_head_valid_q <= 1'b1;
-                end else if (select_skid_recovery_keep1) begin
-                    select_head_uop0_q <= select_skid_uop1_q;
-                    select_head_uop0_q.src0_bypass <= BYPASS_NONE;
-                    select_head_uop0_q.src1_bypass <= BYPASS_NONE;
-                    select_head_pair_q <= 1'b0;
-                    select_head_valid_q <= 1'b1;
-                end else begin
-                    select_head_pair_q <= 1'b0;
-                    select_head_valid_q <= 1'b0;
-                end
-                select_skid_pair_q <= 1'b0;
-                select_skid_valid_q <= 1'b0;
-            end
-        end else begin
-            if (select_buf_pop) begin
-                if (select_skid_valid_q) begin
-                    select_head_uop0_q <= select_skid_uop0_q;
-                    select_head_uop1_q <= select_skid_uop1_q;
-                    select_head_pair_q <= select_skid_pair_q;
-                    select_head_valid_q <= 1'b1;
-                    if (select_buf_push) begin
-                        select_skid_uop0_q <= selected_uop0;
-                        select_skid_uop1_q <= selected_uop1;
-                        select_skid_pair_q <= selected_valid1;
-                        select_skid_valid_q <= 1'b1;
-                    end else begin
-                        select_skid_pair_q <= 1'b0;
-                        select_skid_valid_q <= 1'b0;
-                    end
-                end else if (select_buf_push) begin
-                    select_head_uop0_q <= selected_uop0;
-                    select_head_uop1_q <= selected_uop1;
-                    select_head_pair_q <= selected_valid1;
-                    select_head_valid_q <= 1'b1;
-                    select_skid_pair_q <= 1'b0;
-                    select_skid_valid_q <= 1'b0;
-                end else begin
-                    select_head_pair_q <= 1'b0;
-                    select_head_valid_q <= 1'b0;
-                    select_skid_pair_q <= 1'b0;
-                    select_skid_valid_q <= 1'b0;
-                end
-            end else begin
-                // With no head to consume, the only legal push is into the
-                // empty head.  The capacity predicate prevents a skid-only
-                // state from being created.
-                if (select_buf_push && !select_head_valid_q) begin
-                    // The allocation qualification remains a registered
-                    // observation, while the Operand head always receives
-                    // the selector's registered bundle contract.
-                    select_head_uop0_q <= selected_uop0;
-                    select_head_uop1_q <= selected_uop1;
-                    select_head_pair_q <= selected_valid1;
-                    select_head_valid_q <= 1'b1;
-                end
-            end
-        end
-    end
-
-    ydrasil_registers u_registers (
-        .clk             (clk),
-        .rst_n           (rst_n),
-        .commit_pkt_i    (commit_pkt_i),
-        .commit_pkt1_i   (commit_pkt1_i),
-        .rf_raddr_rs1_i  (rf_addr_rs1),
-        .rf_rdata_rs1_o  (rf_rdata_rs1_i),
-        .rf_raddr_rs2_i  (rf_addr_rs2),
-        .rf_rdata_rs2_o  (rf_rdata_rs2_i),
-        .rf_raddr_rs3_i  (rf_addr_rs3),
-        .rf_rdata_rs3_o  (rf_rdata_rs3_i),
-        .rf_raddr_rs4_i  (rf_addr_rs4),
-        .rf_rdata_rs4_o  (rf_rdata_rs4_i)
-    );
-
-    ydrasil_value_file u_value_file (
-        .clk               (clk),
-	        .rst_n             (rst_n),
-	        .alloc0_valid_i    (value_alloc_valid_q[0]),
-	        .alloc0_id_i       (value_alloc_id_q[0]),
-	        .alloc1_valid_i    (value_alloc_valid_q[1]),
-	        .alloc1_id_i       (value_alloc_id_q[1]),
-        .completion_meta_i (completion_meta_i),
-        .completion_data_i (completion_data_i),
-        .lookup_tag0_i     (alloc_lookup_src0_id_q[0]),
-        .lookup_tag1_i     (alloc_lookup_src1_id_q[0]),
-        .lookup_tag2_i     (alloc_lookup_src0_id_q[1]),
-        .lookup_tag3_i     (alloc_lookup_src1_id_q[1]),
-        .read_slot0_i      (issue_pkt_i.src0.producer_tag[
-            PRODUCER_SLOT_WIDTH-1:0]),
-        .read_slot1_i      (issue_pkt_i.src1.producer_tag[
-            PRODUCER_SLOT_WIDTH-1:0]),
-        .read_slot2_i      (select_head_uop1.src0.producer_tag[
-            PRODUCER_SLOT_WIDTH-1:0]),
-        .read_slot3_i      (select_head_uop1.src1.producer_tag[
-            PRODUCER_SLOT_WIDTH-1:0]),
-        .retire_id0_i      (retire_id0_i),
-        .retire_id1_i      (retire_id1_i),
-        .read_data0_o      (issue_src0_value_i),
-        .read_data1_o      (issue_src1_value_i),
-        .read_data2_o      (issue_src2_value_i),
-        .read_data3_o      (issue_src3_value_i),
-        .read_epoch0_o     (issue_src0_epoch_i),
-        .read_epoch1_o     (issue_src1_epoch_i),
-        .read_epoch2_o     (issue_src2_epoch_i),
-        .read_epoch3_o     (issue_src3_epoch_i),
-	        .read_valid0_o     (issue_src0_value_valid_i),
-	        .read_valid1_o     (issue_src1_value_valid_i),
-	        .read_valid2_o     (issue_src2_value_valid_i),
-	        .read_valid3_o     (issue_src3_value_valid_i),
-        .lookup_resident0_o(dispatch_src0_resident),
-        .lookup_resident1_o(dispatch_src1_resident),
-        .lookup_resident2_o(dispatch_src2_resident),
-        .lookup_resident3_o(dispatch_src3_resident),
-        .retire_data0_o    (retire_value0_o),
-        .retire_data1_o    (retire_value1_o)
-    );
-
-    // Completion state is committed into the producer file on the same edge
-    // that the global completion bus is observed. Early ALU data is available
-    // at the Issue/EX capture edge. DTCM reservation arrives before its data,
-    // so only its narrow selector crosses that edge.
-    reg lsu_idle_q;
-    reg issue_at_rob_head_q;
-
-    reg alu_in_valid_q;
-    reg [DATA_WIDTH-1:0] alu_in_operand_a_q, alu_in_operand_b_q;
-    reg [OPERATOR_WIDTH-1:0] alu_in_operator_q;
-    reg [OPERATOR_TYPE_WIDTH-1:0] alu_in_operator_type_q;
-    reg alu_in_rd_wen_q;
-    reg [REGS_ADDR_WIDTH-1:0] alu_in_rd_addr_q;
-    producer_id_t alu_in_producer_id_q;
-    reg [DATA_WIDTH-1:0] lane_a_pc_q;
-    reg agu_in_valid_q;
-    reg [DATA_WIDTH-1:0] agu_in_operand_a_q, agu_in_operand_b_q;
-    ydrasil_lsu_req_pkt_t agu_in_req_q;
-    reg csr_in_valid_q;
-    reg [DATA_WIDTH-1:0] csr_in_operand_a_q;
-    reg [OPERATOR_TYPE_WIDTH-1:0] csr_in_operator_type_q;
-    reg [CSR_ADDR_WIDTH-1:0] csr_in_raddr_q, csr_in_waddr_q;
-    reg [OP_CSR_INFO_WIDTH-1:0] csr_in_op_info_q;
-	reg [OP_SYS_INFO_WIDTH-1:0] csr_in_sys_info_q;
-	reg illegal_instr_q;
-    reg mul_in_valid_q;
-    reg [DATA_WIDTH-1:0] mul_in_operand_a_q, mul_in_operand_b_q;
-    reg [OPERATOR_WIDTH-1:0] mul_in_operator_q;
-    reg [OPERATOR_TYPE_WIDTH-1:0] mul_in_operator_type_q;
-    ydrasil_lane_b_meta_t dual_meta_q;
-    reg dual_alu_valid_q, dual_bit_valid_q, dual_bru_valid_q;
-    ydrasil_lane_b_alu_payload_t dual_alu_payload_q;
-    ydrasil_lane_b_bit_payload_t dual_bit_payload_q;
-    ydrasil_lane_b_bru_payload_t dual_bru_payload_q;
-    ydrasil_reservation_pkt_t dtcm_operand_reservation_q;
-    ydrasil_reservation_pkt_t dtcm_operand_history_q;
-    reg [DATA_WIDTH-1:0] dtcm_operand_history_data_q;
-    ydrasil_reservation_pkt_t mdu_operand_reservation_q;
-    reg [DATA_WIDTH-1:0] mdu_operand_data_q;
-    wire src0_ready;
-    wire src1_ready;
-    wire src2_ready;
-    wire src3_ready;
-    wire [DATA_WIDTH-1:0] slot0_src0;
-    wire [DATA_WIDTH-1:0] slot0_src1;
-    wire [DATA_WIDTH-1:0] slot1_src0;
-    wire [DATA_WIDTH-1:0] slot1_src1;
-    wire slot0_src0_data_valid;
-    wire slot0_src1_data_valid;
-    wire slot1_src0_data_valid;
-    wire slot1_src1_data_valid;
-    wire slot0_src0_dtcm_current_hit;
-    wire slot0_src1_dtcm_current_hit;
-    wire slot1_src0_dtcm_current_hit;
-    wire slot1_src1_dtcm_current_hit;
-    wire slot0_src0_dtcm_history_hit;
-    wire slot0_src1_dtcm_history_hit;
-    wire slot1_src0_dtcm_history_hit;
-    wire slot1_src1_dtcm_history_hit;
-    wire slot0_src0_dtcm_hit = slot0_src0_dtcm_current_hit ||
-        slot0_src0_dtcm_history_hit;
-    wire slot0_src1_dtcm_hit = slot0_src1_dtcm_current_hit ||
-        slot0_src1_dtcm_history_hit;
-    wire slot1_src0_dtcm_hit = slot1_src0_dtcm_current_hit ||
-        slot1_src0_dtcm_history_hit;
-    wire slot1_src1_dtcm_hit = slot1_src1_dtcm_current_hit ||
-        slot1_src1_dtcm_history_hit;
-    wire slot0_src1_mdu_hit;
-
-    ydrasil_issue_source_resolver #(.DATA_WIDTH(DATA_WIDTH)) u_source0 (
-        .source_i(select_head_uop0_q.src0),
-        .value_i(issue_src0_value_i), .value_epoch_i(issue_src0_epoch_i),
-        .value_valid_i(issue_src0_value_valid_i),
-        .arf_i(rf_rdata_rs1_i),
-        .commit_pkt_i(commit_pkt_i),
-        .commit_pkt1_i(commit_pkt1_i),
-        .completion_meta_i(completion_meta_i),
-        .completion_data_i(completion_data_i),
-        .dtcm_reservation_i(dtcm_operand_reservation_q),
-        .dtcm_history_reservation_i(dtcm_operand_history_q),
-        .mdu_reservation_i(mdu_operand_reservation_q),
-        .mdu_bypass_data_i(mdu_operand_data_q),
-        .ready_o(src0_ready), .data_o(slot0_src0),
-        .data_valid_o(slot0_src0_data_valid),
-        .dtcm_hit_o(slot0_src0_dtcm_current_hit),
-        .dtcm_history_hit_o(slot0_src0_dtcm_history_hit),
-        .mdu_hit_o());
-    ydrasil_issue_source_resolver #(.DATA_WIDTH(DATA_WIDTH)) u_source1 (
-        .source_i(select_head_uop0_q.src1),
-        .value_i(issue_src1_value_i), .value_epoch_i(issue_src1_epoch_i),
-        .value_valid_i(issue_src1_value_valid_i),
-        .arf_i(rf_rdata_rs2_i),
-        .commit_pkt_i(commit_pkt_i),
-        .commit_pkt1_i(commit_pkt1_i),
-        .completion_meta_i(completion_meta_i),
-        .completion_data_i(completion_data_i),
-        .dtcm_reservation_i(dtcm_operand_reservation_q),
-        .dtcm_history_reservation_i(dtcm_operand_history_q),
-        .mdu_reservation_i(mdu_operand_reservation_q),
-        .mdu_bypass_data_i(mdu_operand_data_q),
-        .ready_o(src1_ready), .data_o(slot0_src1),
-        .data_valid_o(slot0_src1_data_valid),
-        .dtcm_hit_o(slot0_src1_dtcm_current_hit),
-        .dtcm_history_hit_o(slot0_src1_dtcm_history_hit),
-        .mdu_hit_o(slot0_src1_mdu_hit));
-    ydrasil_issue_source_resolver #(.DATA_WIDTH(DATA_WIDTH)) u_source2 (
-        .source_i(select_head_uop1_q.src0),
-        .value_i(issue_src2_value_i), .value_epoch_i(issue_src2_epoch_i),
-        .value_valid_i(issue_src2_value_valid_i),
-        .arf_i(rf_rdata_rs3_i),
-        .commit_pkt_i(commit_pkt_i),
-        .commit_pkt1_i(commit_pkt1_i),
-        .completion_meta_i(completion_meta_i),
-        .completion_data_i(completion_data_i),
-        .dtcm_reservation_i(dtcm_operand_reservation_q),
-        .dtcm_history_reservation_i(dtcm_operand_history_q),
-        .mdu_reservation_i(mdu_operand_reservation_q),
-        .mdu_bypass_data_i(mdu_operand_data_q),
-        .ready_o(src2_ready), .data_o(slot1_src0),
-        .data_valid_o(slot1_src0_data_valid),
-        .dtcm_hit_o(slot1_src0_dtcm_current_hit),
-        .dtcm_history_hit_o(slot1_src0_dtcm_history_hit),
-        .mdu_hit_o());
-    ydrasil_issue_source_resolver #(.DATA_WIDTH(DATA_WIDTH)) u_source3 (
-        .source_i(select_head_uop1_q.src1),
-        .value_i(issue_src3_value_i), .value_epoch_i(issue_src3_epoch_i),
-        .value_valid_i(issue_src3_value_valid_i),
-        .arf_i(rf_rdata_rs4_i),
-        .commit_pkt_i(commit_pkt_i),
-        .commit_pkt1_i(commit_pkt1_i),
-        .completion_meta_i(completion_meta_i),
-        .completion_data_i(completion_data_i),
-        .dtcm_reservation_i(dtcm_operand_reservation_q),
-        .dtcm_history_reservation_i(dtcm_operand_history_q),
-        .mdu_reservation_i(mdu_operand_reservation_q),
-        .mdu_bypass_data_i(mdu_operand_data_q),
-        .ready_o(src3_ready), .data_o(slot1_src1),
-        .data_valid_o(slot1_src1_data_valid),
-        .dtcm_hit_o(slot1_src1_dtcm_current_hit),
-        .dtcm_history_hit_o(slot1_src1_dtcm_history_hit),
-        .mdu_hit_o());
-    wire slot0_store = issue_pkt_i.op_class == UOP_CLASS_STORE;
-    wire slot0_dependency_wait = issue_pkt_i.valid &&
-        (!src0_ready || (!src1_ready && !slot0_store));
-    wire slot0_memory =
-        (issue_pkt_i.op_class == UOP_CLASS_LOAD) ||
-        (issue_pkt_i.op_class == UOP_CLASS_STORE);
-    wire pair_eligible = issue_pair_execute;
-    wire slot1_active = pair_eligible;
-    wire slot1_store = issue_pkt1_i.op_class == UOP_CLASS_STORE;
-    wire slot1_dependency_wait = slot1_active &&
-        (!src2_ready || (!src3_ready && !slot1_store));
-    wire serialize_stall = ((issue_pkt_i.op_class == UOP_CLASS_CSR) ||
-        (issue_pkt_i.op_class == UOP_CLASS_SYS) || issue_pkt_i.fence_i) &&
-        (!lsu_idle_q || !issue_at_rob_head_q);
-    // Select admits only source-ready uops and reserves structural resources.
-    // Operand is consequently a fire-through register boundary; its diagnostic
-    // checks never feed payload enables or the preceding priority network.
-    wire id_advance = 1'b1;
-    wire pair_issue = pair_eligible;
-    wire head0_b_only = issue_pkt_i.lane_mask[1] &&
-        !issue_pkt_i.lane_mask[0];
-
-    assign issue_ready_o = id_advance;
-    assign issue_consume_two_o = pair_eligible;
-    assign issue_slot1_replay_o = 1'b0;
-    reg issue_fence_q;
-    producer_id_t issue_fence_tag_q;
-    reg [INST_ADDR_WIDTH-1:0] issue_fence_next_pc_q;
-    wire issue_fence_accept = id_advance && issue_pkt_i.valid &&
-        issue_pkt_i.fence_i;
-
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            issue_fence_q <= 1'b0;
-            issue_fence_tag_q <= '0;
-            issue_fence_next_pc_q <= '0;
-        end else if (flush_id_i) begin
-            issue_fence_q <= 1'b0;
-            issue_fence_tag_q <= '0;
-            issue_fence_next_pc_q <= '0;
-        end else begin
-            issue_fence_q <= issue_fence_accept;
-            if (issue_fence_accept) begin
-                issue_fence_tag_q <= issue_pkt_i.dst.rob_tag;
-                issue_fence_next_pc_q <= issue_pkt_i.pc + 32'd4;
-            end
-        end
-    end
-
-    assign issue_fence_o = issue_fence_q;
-    assign issue_fence_tag_o = issue_fence_tag_q;
-    assign issue_fence_next_pc_o = issue_fence_next_pc_q;
-    assign lsu_struct_stall_o = 1'b0;
-    assign lsu_struct_stall1_o = 1'b0;
-    assign serialize_stall_o = serialize_stall;
-    assign src0_wait_o = issue_pkt_i.valid && issue_pkt_i.src0.used &&
-        !src0_ready;
-    assign src1_wait_o = issue_pkt_i.valid && issue_pkt_i.src1.used &&
-        !src1_ready;
-    assign src2_wait_o = issue_pkt1_i.valid && issue_pkt1_i.src0.used &&
-        !src2_ready;
-    assign src3_wait_o = issue_pkt1_i.valid && issue_pkt1_i.src1.used &&
-        !src3_ready;
+    ydrasil_compact_uop_t dispatch_compact0;
+    ydrasil_compact_uop_t dispatch_compact1;
+    ydrasil_compact_uop_t dispatch_compact0_raw;
+    ydrasil_compact_uop_t dispatch_compact1_raw;
     ydrasil_compact_uop_t lane_a_uop;
     ydrasil_compact_uop_t lane_b_uop;
-    reg lane_a_valid;
-    reg lane_b_valid;
-    logic [OPERATOR_WIDTH-1:0] lane_a_operator_info;
-    logic [OPERATOR_WIDTH-1:0] lane_b_operator_info;
-    logic [OPERATOR_TYPE_WIDTH-1:0] lane_a_operator_type;
-    logic [OPERATOR_TYPE_WIDTH-1:0] lane_b_operator_type;
+    wire lane_a_valid;
+    wire lane_b_valid;
+    wire [PRODUCER_NUM-1:0] issue_remove_mask;
+    wire lookup_valid;
+    producer_id_t lookup_tag0;
+    producer_id_t lookup_tag1;
+    producer_id_t lookup_tag2;
+    producer_id_t lookup_tag3;
+    wire lookup_resident0;
+    wire lookup_resident1;
+    wire lookup_resident2;
+    wire lookup_resident3;
+    wire lookup_reallocated0;
+    wire lookup_reallocated1;
+    wire lookup_reallocated2;
+    wire lookup_reallocated3;
+
+    ydrasil_issue_compactor u_compact0(
+        .issue_pkt_i(queue_pkt_i), .compact_uop_o(dispatch_compact0_raw));
+    ydrasil_issue_compactor u_compact1(
+        .issue_pkt_i(queue_pkt1_i), .compact_uop_o(dispatch_compact1_raw));
     always_comb begin
-        lane_a_uop = issue_pkt_i;
-        lane_b_uop = head0_b_only ? issue_pkt_i : issue_pkt1_i;
-        lane_a_valid = issue_pkt_i.valid && !head0_b_only;
-        lane_b_valid = head0_b_only ? issue_pkt_i.valid : pair_issue;
+        dispatch_compact0 = dispatch_compact0_raw;
+        dispatch_compact1 = dispatch_compact1_raw;
+        // Queue occupancy owns admission validity. Do not let the packed
+        // payload's stale valid bit feed scheduler credit or ingress state.
+        dispatch_compact0.valid = queue_valid_i;
+        dispatch_compact1.valid = queue_valid1_i;
     end
 
-    always_comb begin
-        lane_a_operator_info = '0;
-        lane_b_operator_info = '0;
-        if (lane_a_uop.subop < UOP_SUBOP_WIDTH'(OPERATOR_WIDTH))
-            lane_a_operator_info[lane_a_uop.subop] = 1'b1;
-        if (lane_b_uop.subop < UOP_SUBOP_WIDTH'(OPERATOR_WIDTH))
-            lane_b_operator_info[lane_b_uop.subop] = 1'b1;
+    ydrasil_banked_scheduler u_scheduler(
+        .clk(clk), .rst_n(rst_n),
+        // A redirect presents both flush_id_i and branch_recovery_i. Keep the
+        // latter distinct so an older in-flight DIV is not discarded.
+        .hard_flush_i(trap_flush_i || (flush_id_i && !branch_recovery_i)),
+        .branch_recovery_i(branch_recovery_i),
+        .recovery_head_slot_i(recovery_head_slot_i),
+        .recovery_branch_slot_i(recovery_branch_slot_i),
+        .queue0_i(dispatch_compact0), .queue1_i(dispatch_compact1),
+        .queue_valid0_i(queue_valid_i), .queue_valid1_i(queue_valid1_i),
+        .completion_meta_i(completion_meta_i),
+        .lookup_resident0_i(lookup_resident0),
+        .lookup_resident1_i(lookup_resident1),
+        .lookup_resident2_i(lookup_resident2),
+        .lookup_resident3_i(lookup_resident3),
+        .lookup_reallocated0_i(lookup_reallocated0),
+        .lookup_reallocated1_i(lookup_reallocated1),
+        .lookup_reallocated2_i(lookup_reallocated2),
+        .lookup_reallocated3_i(lookup_reallocated3),
+        .lsu_idle_i(lsu_idle_i),
+        .rob_head_id_i(rob_head_id_i),
+        .queue_consume0_o(queue_consume0_o),
+        .queue_consume1_o(queue_consume1_o),
+        .lane_a_uop_o(lane_a_uop), .lane_a_valid_o(lane_a_valid),
+        .lane_b_uop_o(lane_b_uop), .lane_b_valid_o(lane_b_valid),
+        .issue_remove_mask_o(issue_remove_mask),
+        .lookup_valid_o(lookup_valid),
+        .lookup_tag0_o(lookup_tag0), .lookup_tag1_o(lookup_tag1),
+        .lookup_tag2_o(lookup_tag2), .lookup_tag3_o(lookup_tag3));
 
-        lane_a_operator_type = '0;
-        unique case (lane_a_uop.op_class)
-            UOP_CLASS_BJP:
-                lane_a_operator_type[OPERATOR_TYPE_BJP] = 1'b1;
-            UOP_CLASS_LOAD:
-                lane_a_operator_type[OPERATOR_TYPE_LOAD] = 1'b1;
-            UOP_CLASS_STORE:
-                lane_a_operator_type[OPERATOR_TYPE_STORE] = 1'b1;
-            UOP_CLASS_CSR:
-                lane_a_operator_type[OPERATOR_TYPE_CSR] = 1'b1;
-            UOP_CLASS_SYS: begin
-                lane_a_operator_type[OPERATOR_TYPE_CSR] = 1'b1;
-                lane_a_operator_type[OPERATOR_TYPE_SYS] = 1'b1;
-            end
-            UOP_CLASS_MUL:
-                lane_a_operator_type[OPERATOR_TYPE_MUL] = 1'b1;
-            UOP_CLASS_BITMANIP:
-                lane_a_operator_type[OPERATOR_TYPE_BITMANIP] = 1'b1;
-            default:
-                lane_a_operator_type[OPERATOR_TYPE_ALU] = 1'b1;
-        endcase
+    assign issue_pkt_o = lane_a_uop;
+    assign issue_pkt1_o = lane_b_uop;
+    assign issue_ready_o = 1'b1;
+    assign issue_consume_two_o = lane_a_valid && lane_b_valid;
+    assign issue_slot1_replay_o = 1'b0;
 
-        lane_b_operator_type = '0;
-        unique case (lane_b_uop.op_class)
-            UOP_CLASS_BJP:
-                lane_b_operator_type[OPERATOR_TYPE_BJP] = 1'b1;
-            UOP_CLASS_LOAD:
-                lane_b_operator_type[OPERATOR_TYPE_LOAD] = 1'b1;
-            UOP_CLASS_STORE:
-                lane_b_operator_type[OPERATOR_TYPE_STORE] = 1'b1;
-            UOP_CLASS_CSR:
-                lane_b_operator_type[OPERATOR_TYPE_CSR] = 1'b1;
-            UOP_CLASS_SYS: begin
-                lane_b_operator_type[OPERATOR_TYPE_CSR] = 1'b1;
-                lane_b_operator_type[OPERATOR_TYPE_SYS] = 1'b1;
-            end
-            UOP_CLASS_MUL:
-                lane_b_operator_type[OPERATOR_TYPE_MUL] = 1'b1;
-            UOP_CLASS_BITMANIP:
-                lane_b_operator_type[OPERATOR_TYPE_BITMANIP] = 1'b1;
-            default:
-                lane_b_operator_type[OPERATOR_TYPE_ALU] = 1'b1;
-        endcase
-    end
+    wire [REGS_ADDR_WIDTH-1:0] rf_addr0 = lane_a_uop.src0.arch_addr;
+    wire [REGS_ADDR_WIDTH-1:0] rf_addr1 = lane_a_uop.src1.arch_addr;
+    wire [REGS_ADDR_WIDTH-1:0] rf_addr2 = lane_b_uop.src0.arch_addr;
+    wire [REGS_ADDR_WIDTH-1:0] rf_addr3 = lane_b_uop.src1.arch_addr;
+    wire [DATA_WIDTH-1:0] rf_data0;
+    wire [DATA_WIDTH-1:0] rf_data1;
+    wire [DATA_WIDTH-1:0] rf_data2;
+    wire [DATA_WIDTH-1:0] rf_data3;
+    ydrasil_registers u_registers(
+        .clk(clk), .rst_n(rst_n), .commit_pkt_i(commit_pkt_i),
+        .commit_pkt1_i(commit_pkt1_i), .rf_raddr_rs1_i(rf_addr0),
+        .rf_rdata_rs1_o(rf_data0), .rf_raddr_rs2_i(rf_addr1),
+        .rf_rdata_rs2_o(rf_data1), .rf_raddr_rs3_i(rf_addr2),
+        .rf_rdata_rs3_o(rf_data2), .rf_raddr_rs4_i(rf_addr3),
+        .rf_rdata_rs4_o(rf_data3));
 
-    wire [DATA_WIDTH-1:0] slot0_src0_local =
-        (issue_pkt_i.src0_bypass == BYPASS_LANE0) ?
-        early_main_bypass_data_i :
-        (issue_pkt_i.src0_bypass == BYPASS_LANE1) ?
-        early_dual_bypass_data_i : slot0_src0;
-    wire [DATA_WIDTH-1:0] slot0_src1_local =
-        (issue_pkt_i.src1_bypass == BYPASS_LANE0) ?
-        early_main_bypass_data_i :
-        (issue_pkt_i.src1_bypass == BYPASS_LANE1) ?
-        early_dual_bypass_data_i : slot0_src1;
-    wire [DATA_WIDTH-1:0] slot1_src0_local =
-        (issue_pkt1_i.src0_bypass == BYPASS_LANE0) ?
-        early_main_bypass_data_i :
-        (issue_pkt1_i.src0_bypass == BYPASS_LANE1) ?
-        early_dual_bypass_data_i : slot1_src0;
-    wire [DATA_WIDTH-1:0] slot1_src1_local =
-        (issue_pkt1_i.src1_bypass == BYPASS_LANE0) ?
-        early_main_bypass_data_i :
-        (issue_pkt1_i.src1_bypass == BYPASS_LANE1) ?
-        early_dual_bypass_data_i : slot1_src1;
-    wire lane_b_uses_slot0 = head0_b_only;
-    wire lane_a_src1_ready = src1_ready;
-    wire slot0_src0_contract_valid = slot0_src0_data_valid ||
-        slot0_src0_dtcm_hit || (issue_pkt_i.src0_bypass != BYPASS_NONE);
-    wire slot0_src1_contract_valid = slot0_src1_data_valid ||
-        slot0_src1_dtcm_hit || (issue_pkt_i.src1_bypass != BYPASS_NONE);
-    wire slot1_src0_contract_valid = slot1_src0_data_valid ||
-        slot1_src0_dtcm_hit || (issue_pkt1_i.src0_bypass != BYPASS_NONE);
-    wire slot1_src1_contract_valid = slot1_src1_data_valid ||
-        slot1_src1_dtcm_hit || (issue_pkt1_i.src1_bypass != BYPASS_NONE);
-    wire lane_a_src1_value_ready = slot0_src1_contract_valid;
-    wire lane_b_src1_ready = lane_b_uses_slot0 ? src1_ready : src3_ready;
-    wire [DATA_WIDTH-1:0] lane_a_src0_local = slot0_src0_local;
-    wire [DATA_WIDTH-1:0] lane_a_src1_local = slot0_src1_local;
-    wire [DATA_WIDTH-1:0] lane_b_src0_local = lane_b_uses_slot0 ?
-        slot0_src0_local : slot1_src0_local;
-    wire [DATA_WIDTH-1:0] lane_b_src1_local = lane_b_uses_slot0 ?
-        slot0_src1_local : slot1_src1_local;
-    wire lane_a_src0_dtcm_hit = slot0_src0_dtcm_hit;
-    wire lane_a_src1_dtcm_hit = slot0_src1_dtcm_hit;
-    wire lane_b_src0_dtcm_hit = (lane_b_uses_slot0 ?
-        slot0_src0_dtcm_hit : slot1_src0_dtcm_hit);
-    wire lane_b_src1_dtcm_hit = (lane_b_uses_slot0 ?
-        slot0_src1_dtcm_hit : slot1_src1_dtcm_hit);
-    wire [DATA_WIDTH-1:0] dtcm_operand_current_data =
-        completion_data_i[COMPLETION_LSU];
-    wire [DATA_WIDTH-1:0] slot0_src0_dtcm_data =
-        slot0_src0_dtcm_current_hit ? dtcm_operand_current_data :
-        dtcm_operand_history_data_q;
-    wire [DATA_WIDTH-1:0] slot0_src1_dtcm_data =
-        slot0_src1_dtcm_current_hit ? dtcm_operand_current_data :
-        dtcm_operand_history_data_q;
-    wire [DATA_WIDTH-1:0] slot1_src0_dtcm_data =
-        slot1_src0_dtcm_current_hit ? dtcm_operand_current_data :
-        dtcm_operand_history_data_q;
-    wire [DATA_WIDTH-1:0] slot1_src1_dtcm_data =
-        slot1_src1_dtcm_current_hit ? dtcm_operand_current_data :
-        dtcm_operand_history_data_q;
-    wire [DATA_WIDTH-1:0] lane_a_src0_dtcm_data = slot0_src0_dtcm_data;
-    wire [DATA_WIDTH-1:0] lane_a_src1_dtcm_data = slot0_src1_dtcm_data;
-    wire [DATA_WIDTH-1:0] lane_b_src0_dtcm_data = lane_b_uses_slot0 ?
-        slot0_src0_dtcm_data : slot1_src0_dtcm_data;
-    wire [DATA_WIDTH-1:0] lane_b_src1_dtcm_data = lane_b_uses_slot0 ?
-        slot0_src1_dtcm_data : slot1_src1_dtcm_data;
-    wire lane_a_accept = id_advance && lane_a_valid;
-    wire lane_b_accept = id_advance && lane_b_valid;
-    wire lane_a_op_a_src = !lane_a_uop.operand_a_pc_sel &&
-        !lane_a_uop.operand_a_imm_sel;
-    wire lane_a_op_b_src = !lane_a_uop.operand_b_jump_sel &&
-        lane_a_uop.operand_b_rs_sel;
-    wire lane_b_op_a_src = !lane_b_uop.operand_a_pc_sel &&
-        !lane_b_uop.operand_a_imm_sel;
-    wire lane_b_op_b_src = !lane_b_uop.operand_b_jump_sel &&
-        lane_b_uop.operand_b_rs_sel;
-    wire lane_a_operand_contract_miss = lane_a_accept &&
-        ((lane_a_op_a_src && lane_a_uop.src0.used &&
-          !slot0_src0_contract_valid) ||
-         (lane_a_op_b_src && lane_a_uop.src1.used &&
-          !slot0_src1_contract_valid));
-    wire lane_b_operand_contract_miss = lane_b_accept &&
-        ((lane_b_op_a_src && lane_b_uop.src0.used &&
-          !(lane_b_uses_slot0 ?
-            slot0_src0_contract_valid : slot1_src0_contract_valid)) ||
-         (lane_b_op_b_src && lane_b_uop.src1.used &&
-          !(lane_b_uses_slot0 ?
-            slot0_src1_contract_valid : slot1_src1_contract_valid)));
-    assign dependency_wait_o = lane_a_operand_contract_miss;
-    assign dependency_wait1_o = lane_b_operand_contract_miss;
-    assign rf_addr_rs1 = select_head_uop0_q.src0.arch_addr;
-    assign rf_addr_rs2 = select_head_uop0_q.src1.arch_addr;
-    assign rf_addr_rs3 = select_head_uop1_q.src0.arch_addr;
-    assign rf_addr_rs4 = select_head_uop1_q.src1.arch_addr;
+    wire [DATA_WIDTH-1:0] value_data0;
+    wire [DATA_WIDTH-1:0] value_data1;
+    wire [DATA_WIDTH-1:0] value_data2;
+    wire [DATA_WIDTH-1:0] value_data3;
+    wire value_epoch0, value_epoch1, value_epoch2, value_epoch3;
+    wire value_valid0, value_valid1, value_valid2, value_valid3;
+    wire src0_ready, src1_ready, src2_ready, src3_ready;
+    wire [DATA_WIDTH-1:0] src0_data, src1_data, src2_data, src3_data;
+    wire src0_data_valid, src1_data_valid, src2_data_valid, src3_data_valid;
+    ydrasil_value_file u_value_file(
+        .clk(clk), .rst_n(rst_n),
+        .alloc0_valid_i(value_alloc0_valid_i),
+        .alloc0_id_i(value_alloc0_id_i),
+        .alloc1_valid_i(value_alloc1_valid_i),
+        .alloc1_id_i(value_alloc1_id_i),
+        .completion_meta_i(completion_meta_i),
+        .completion_data_i(completion_data_i),
+        .lookup_tag0_i(lookup_tag0), .lookup_tag1_i(lookup_tag1),
+        .lookup_tag2_i(lookup_tag2), .lookup_tag3_i(lookup_tag3),
+        .read_slot0_i(lane_a_uop.src0.producer_tag[PRODUCER_SLOT_WIDTH-1:0]),
+        .read_slot1_i(lane_a_uop.src1.producer_tag[PRODUCER_SLOT_WIDTH-1:0]),
+        .read_slot2_i(lane_b_uop.src0.producer_tag[PRODUCER_SLOT_WIDTH-1:0]),
+        .read_slot3_i(lane_b_uop.src1.producer_tag[PRODUCER_SLOT_WIDTH-1:0]),
+        .retire_id0_i(retire_id0_i), .retire_id1_i(retire_id1_i),
+        .read_data0_o(value_data0), .read_data1_o(value_data1),
+        .read_data2_o(value_data2), .read_data3_o(value_data3),
+        .read_epoch0_o(value_epoch0), .read_epoch1_o(value_epoch1),
+        .read_epoch2_o(value_epoch2), .read_epoch3_o(value_epoch3),
+        .read_valid0_o(value_valid0), .read_valid1_o(value_valid1),
+        .read_valid2_o(value_valid2), .read_valid3_o(value_valid3),
+        .lookup_resident0_o(lookup_resident0),
+        .lookup_resident1_o(lookup_resident1),
+        .lookup_resident2_o(lookup_resident2),
+        .lookup_resident3_o(lookup_resident3),
+        .lookup_reallocated0_o(lookup_reallocated0),
+        .lookup_reallocated1_o(lookup_reallocated1),
+        .lookup_reallocated2_o(lookup_reallocated2),
+        .lookup_reallocated3_o(lookup_reallocated3),
+        .retire_data0_o(retire_value0_o), .retire_data1_o(retire_value1_o));
 
-    wire [DATA_WIDTH-1:0] lane_b_operand_a_local =
-        lane_b_uop.operand_a_pc_sel ? lane_b_uop.pc :
-        lane_b_uop.operand_a_imm_sel ? lane_b_uop.imm :
-        lane_b_src0_local;
-    wire [DATA_WIDTH-1:0] lane_b_operand_b_local =
-        lane_b_uop.operand_b_jump_sel ? 32'd4 :
-        lane_b_uop.operand_b_rs_sel ? lane_b_src1_local :
-        lane_b_uop.imm;
-    wire [DATA_WIDTH-1:0] lane_a_operand_a_local =
-        lane_a_uop.operand_a_pc_sel ? lane_a_uop.pc :
-        lane_a_uop.operand_a_imm_sel ? lane_a_uop.imm :
-        lane_a_src0_local;
-    wire [DATA_WIDTH-1:0] lane_a_operand_b_local =
-        lane_a_uop.operand_b_jump_sel ? 32'd4 :
-        lane_a_uop.operand_b_rs_sel ? lane_a_src1_local :
-        lane_a_uop.imm;
-    // DTCM identity is resolved in Operand. Select the matching registered LSU
-    // response on the FU input D side so no data or selector bypasses the
-    // Operand/EX register boundary.
-    wire [DATA_WIDTH-1:0] lane_a_operand_a_capture =
-        (lane_a_op_a_src && lane_a_src0_dtcm_hit) ?
-        lane_a_src0_dtcm_data : lane_a_operand_a_local;
-    wire [DATA_WIDTH-1:0] lane_a_operand_b_capture =
-        (lane_a_op_b_src && lane_a_src1_dtcm_hit) ?
-        lane_a_src1_dtcm_data : lane_a_operand_b_local;
-    wire [DATA_WIDTH-1:0] lane_b_operand_a_capture =
-        (lane_b_op_a_src && lane_b_src0_dtcm_hit) ?
-        lane_b_src0_dtcm_data : lane_b_operand_a_local;
-    wire [DATA_WIDTH-1:0] lane_b_operand_b_capture =
-        (lane_b_op_b_src && lane_b_src1_dtcm_hit) ?
-        lane_b_src1_dtcm_data : lane_b_operand_b_local;
-    wire [DATA_WIDTH-1:0] lane_b_src0_capture = lane_b_src0_dtcm_hit ?
-        lane_b_src0_dtcm_data : lane_b_src0_local;
-    wire [DATA_WIDTH-1:0] lane_b_src1_capture = lane_b_src1_dtcm_hit ?
-        lane_b_src1_dtcm_data : lane_b_src1_local;
+    ydrasil_issue_source_resolver #(.DATA_WIDTH(DATA_WIDTH)) u_src0(
+        .source_i(lane_a_uop.src0), .value_i(value_data0),
+        .value_epoch_i(value_epoch0), .value_valid_i(value_valid0),
+        .arf_i(rf_data0), .commit_pkt_i(commit_pkt_i),
+        .commit_pkt1_i(commit_pkt1_i), .completion_meta_i(completion_meta_i),
+        .completion_data_i(completion_data_i),
+        .ready_o(src0_ready), .data_o(src0_data),
+        .data_valid_o(src0_data_valid));
+    ydrasil_issue_source_resolver #(.DATA_WIDTH(DATA_WIDTH)) u_src1(
+        .source_i(lane_a_uop.src1), .value_i(value_data1),
+        .value_epoch_i(value_epoch1), .value_valid_i(value_valid1),
+        .arf_i(rf_data1), .commit_pkt_i(commit_pkt_i),
+        .commit_pkt1_i(commit_pkt1_i), .completion_meta_i(completion_meta_i),
+        .completion_data_i(completion_data_i),
+        .ready_o(src1_ready), .data_o(src1_data),
+        .data_valid_o(src1_data_valid));
+    ydrasil_issue_source_resolver #(.DATA_WIDTH(DATA_WIDTH)) u_src2(
+        .source_i(lane_b_uop.src0), .value_i(value_data2),
+        .value_epoch_i(value_epoch2), .value_valid_i(value_valid2),
+        .arf_i(rf_data2), .commit_pkt_i(commit_pkt_i),
+        .commit_pkt1_i(commit_pkt1_i), .completion_meta_i(completion_meta_i),
+        .completion_data_i(completion_data_i),
+        .ready_o(src2_ready), .data_o(src2_data),
+        .data_valid_o(src2_data_valid));
+    ydrasil_issue_source_resolver #(.DATA_WIDTH(DATA_WIDTH)) u_src3(
+        .source_i(lane_b_uop.src1), .value_i(value_data3),
+        .value_epoch_i(value_epoch3), .value_valid_i(value_valid3),
+        .arf_i(rf_data3), .commit_pkt_i(commit_pkt_i),
+        .commit_pkt1_i(commit_pkt1_i), .completion_meta_i(completion_meta_i),
+        .completion_data_i(completion_data_i),
+        .ready_o(src3_ready), .data_o(src3_data),
+        .data_valid_o(src3_data_valid));
 
-    wire lane_a_fu_valid = lane_a_accept && !lane_a_uop.fence_i;
-    wire lane_a_alu_accept = lane_a_accept &&
-        ((lane_a_uop.op_class == UOP_CLASS_ALU) ||
-         (lane_a_uop.op_class == UOP_CLASS_BITMANIP));
-    wire lane_a_agu_accept = lane_a_accept &&
+    assign src0_wait_o = lane_a_valid && lane_a_uop.src0.used && !src0_ready;
+    assign src1_wait_o = lane_a_valid && lane_a_uop.src1.used && !src1_ready;
+    assign src2_wait_o = lane_b_valid && lane_b_uop.src0.used && !src2_ready;
+    assign src3_wait_o = lane_b_valid && lane_b_uop.src1.used && !src3_ready;
+    assign dependency_wait_o = src0_wait_o ||
+        (lane_a_uop.op_class != UOP_CLASS_STORE && src1_wait_o);
+    assign dependency_wait1_o = src2_wait_o || src3_wait_o;
+    assign lsu_struct_stall_o = 1'b0;
+    assign lsu_struct_stall1_o = 1'b0;
+    assign serialize_stall_o = 1'b0;
+
+    function automatic [OPERATOR_WIDTH-1:0] op_onehot(
+        input [UOP_SUBOP_WIDTH-1:0] subop
+    );
+        reg [OPERATOR_WIDTH-1:0] value;
+        begin
+            value = '0;
+            if (subop < UOP_SUBOP_WIDTH'(OPERATOR_WIDTH))
+                value[subop] = 1'b1;
+            op_onehot = value;
+        end
+    endfunction
+
+    wire lane_a_alu_valid = lane_a_valid &&
+        (lane_a_uop.op_class == UOP_CLASS_ALU);
+    wire lane_a_mem_valid = lane_a_valid &&
         ((lane_a_uop.op_class == UOP_CLASS_LOAD) ||
          (lane_a_uop.op_class == UOP_CLASS_STORE));
-    wire lane_b_alu_accept = lane_b_accept &&
+    wire lane_b_alu_valid = lane_b_valid &&
         (lane_b_uop.op_class == UOP_CLASS_ALU);
-    wire lane_b_bit_accept = lane_b_accept &&
+    wire lane_b_bit_valid = lane_b_valid &&
         (lane_b_uop.op_class == UOP_CLASS_BITMANIP);
-    wire lane_b_bru_accept = lane_b_accept &&
+    wire lane_b_bru_valid = lane_b_valid &&
         (lane_b_uop.op_class == UOP_CLASS_BJP);
-    wire lane_b_mul_accept = lane_b_accept &&
+    wire lane_b_mul_valid = lane_b_valid &&
         (lane_b_uop.op_class == UOP_CLASS_MUL);
-    wire lane_b_csr_accept = lane_b_accept &&
+    wire lane_b_csr_valid = lane_b_valid &&
         ((lane_b_uop.op_class == UOP_CLASS_CSR) ||
          (lane_b_uop.op_class == UOP_CLASS_SYS));
 
-    always_ff @(posedge clk) begin
-        if (!rst_n || flush_id_i || trap_flush_i || branch_recovery_i) begin
-            lsu_select_reserved_q <= '0;
-        end else begin
-            unique case ({lsu_select_pick, agu_in_valid_q})
-                2'b10: lsu_select_reserved_q <= lsu_select_reserved_q + 1'b1;
-                2'b01: begin
-                    if (lsu_select_reserved_q != '0)
-                        lsu_select_reserved_q <= lsu_select_reserved_q - 1'b1;
-                end
-                default: begin
-                end
-            endcase
-        end
-    end
+    wire [DATA_WIDTH-1:0] lane_a_op_a = lane_a_uop.operand_a_pc_sel ?
+        lane_a_uop.pc : lane_a_uop.operand_a_imm_sel ? lane_a_uop.imm : src0_data;
+    wire [DATA_WIDTH-1:0] lane_a_op_b = lane_a_uop.operand_b_jump_sel ? 32'd4 :
+        lane_a_uop.operand_b_rs_sel ? src1_data : lane_a_uop.imm;
+    wire [DATA_WIDTH-1:0] lane_b_op_a = lane_b_uop.operand_a_pc_sel ?
+        lane_b_uop.pc : lane_b_uop.operand_a_imm_sel ? lane_b_uop.imm : src2_data;
+    wire [DATA_WIDTH-1:0] lane_b_op_b = lane_b_uop.operand_b_jump_sel ? 32'd4 :
+        lane_b_uop.operand_b_rs_sel ? src3_data : lane_b_uop.imm;
 
-    ydrasil_lsu_req_pkt_t shared_agu_req_d;
+    wire [OPERATOR_TYPE_WIDTH-1:0] main_operator_type =
+        lane_a_alu_valid ? ({{(OPERATOR_TYPE_WIDTH-1){1'b0}}, 1'b1} << OPERATOR_TYPE_ALU) : '0;
+    wire [OPERATOR_TYPE_WIDTH-1:0] dual_alu_type =
+        lane_b_alu_valid ? ({{(OPERATOR_TYPE_WIDTH-1){1'b0}}, 1'b1} << OPERATOR_TYPE_ALU) : '0;
+    wire [OPERATOR_TYPE_WIDTH-1:0] dual_bit_type =
+        lane_b_bit_valid ? ({{(OPERATOR_TYPE_WIDTH-1){1'b0}}, 1'b1} << OPERATOR_TYPE_BITMANIP) : '0;
+    wire [OPERATOR_TYPE_WIDTH-1:0] dual_bru_type =
+        lane_b_bru_valid ? ({{(OPERATOR_TYPE_WIDTH-1){1'b0}}, 1'b1} << OPERATOR_TYPE_BJP) : '0;
+    wire [OPERATOR_TYPE_WIDTH-1:0] dual_mul_type =
+        lane_b_mul_valid ? ({{(OPERATOR_TYPE_WIDTH-1){1'b0}}, 1'b1} << OPERATOR_TYPE_MUL) : '0;
+    // CSR and SYS share the lane-B adapter but are distinct execution
+    // operators.  Keep the type one-hot and mutually exclusive: ex_block
+    // treats the CSR bit as a real CSR read/modify/write operation, while the
+    // SYS bit is consumed by the precise exception controller.
+    wire [OPERATOR_TYPE_WIDTH-1:0] dual_csr_type =
+        lane_b_uop.op_class == UOP_CLASS_SYS ?
+            ({{(OPERATOR_TYPE_WIDTH-1){1'b0}}, 1'b1} << OPERATOR_TYPE_SYS) :
+        lane_b_uop.op_class == UOP_CLASS_CSR ?
+            ({{(OPERATOR_TYPE_WIDTH-1){1'b0}}, 1'b1} << OPERATOR_TYPE_CSR) : '0;
+
+    wire [REGS_DATA_WIDTH-1:0] lane_a_store_data = src1_data;
+    ydrasil_lsu_req_pkt_t agu_req_d;
+    always_comb begin
+        agu_req_d = '0;
+        agu_req_d.valid = lane_a_mem_valid;
+        agu_req_d.is_load = lane_a_uop.op_class == UOP_CLASS_LOAD;
+        agu_req_d.is_store = lane_a_uop.op_class == UOP_CLASS_STORE;
+        agu_req_d.op[lane_a_uop.lsu_subop] = lane_a_mem_valid;
+        agu_req_d.rd_addr = lane_a_uop.dst.rd_addr;
+        agu_req_d.producer_id = lane_a_uop.dst.rob_tag;
+        agu_req_d.lsq_index = lane_a_uop.lsq_index;
+        agu_req_d.producer_tracked = lane_a_mem_valid;
+        agu_req_d.store_data = lane_a_store_data;
+        agu_req_d.store_data_valid = !agu_req_d.is_store || src1_data_valid;
+        agu_req_d.store_producer_id = lane_a_uop.src1.producer_tag;
+        agu_req_d.store_producer_tracked = agu_req_d.is_store &&
+            lane_a_uop.src1.tag_valid && !src1_data_valid;
+    end
+    assign agu_in_req_o = agu_req_q;
+    assign agu_in_store_data_o = agu_store_data_q;
+
     ydrasil_lane_b_meta_t dual_meta_d;
     ydrasil_lane_b_alu_payload_t dual_alu_payload_d;
     ydrasil_lane_b_bit_payload_t dual_bit_payload_d;
     ydrasil_lane_b_bru_payload_t dual_bru_payload_d;
     always_comb begin
-        shared_agu_req_d = '0;
-        shared_agu_req_d.valid = lane_a_agu_accept;
-        shared_agu_req_d.is_load = lane_a_uop.op_class == UOP_CLASS_LOAD;
-        shared_agu_req_d.is_store = lane_a_uop.op_class == UOP_CLASS_STORE;
-        shared_agu_req_d.op[lane_a_uop.lsu_subop] = 1'b1;
-        shared_agu_req_d.rd_addr = lane_a_uop.dst.rd_addr;
-        shared_agu_req_d.producer_id = lane_a_uop.dst.rob_tag;
-        shared_agu_req_d.producer_tracked = lane_a_agu_accept;
-        shared_agu_req_d.store_data = lane_a_src1_dtcm_hit ?
-            lane_a_src1_dtcm_data : lane_a_src1_local;
-        shared_agu_req_d.store_data_valid = lane_a_agu_accept &&
-            (!shared_agu_req_d.is_store || lane_a_src1_value_ready);
-        shared_agu_req_d.store_producer_id =
-            lane_a_uop.src1.producer_tag;
-        shared_agu_req_d.store_producer_tracked = lane_a_agu_accept &&
-            shared_agu_req_d.is_store &&
-	        !lane_a_src1_value_ready && lane_a_uop.src1.tag_valid;
-        shared_agu_req_d.retired = 1'b0;
-    end
-
-    always_comb begin
         dual_meta_d = '0;
         dual_meta_d.rd_addr = lane_b_uop.dst.rd_addr;
-        dual_meta_d.rd_wen = lane_b_accept && lane_b_uop.dst.writes_gpr;
+        dual_meta_d.rd_wen = lane_b_valid && lane_b_uop.dst.writes_gpr;
         dual_meta_d.producer_id = lane_b_uop.dst.rob_tag;
-        dual_meta_d.producer_tracked = lane_b_accept;
+        dual_meta_d.producer_tracked = lane_b_valid;
         dual_meta_d.pc = lane_b_uop.pc;
         dual_meta_d.instr = lane_b_uop.instr;
-
         dual_alu_payload_d = '0;
         dual_alu_payload_d.subop = lane_b_uop.subop;
-        dual_alu_payload_d.operand_a = lane_b_operand_a_capture;
-        dual_alu_payload_d.operand_b = lane_b_operand_b_capture;
-
+        dual_alu_payload_d.operand_a = lane_b_op_a;
+        dual_alu_payload_d.operand_b = lane_b_op_b;
         dual_bit_payload_d = '0;
         dual_bit_payload_d.subop = lane_b_uop.subop;
-        dual_bit_payload_d.operand_a = lane_b_operand_a_capture;
-        dual_bit_payload_d.operand_b = lane_b_operand_b_capture;
-
+        dual_bit_payload_d.operand_a = lane_b_op_a;
+        dual_bit_payload_d.operand_b = lane_b_op_b;
         dual_bru_payload_d = '0;
         dual_bru_payload_d.subop = lane_b_uop.subop;
-        dual_bru_payload_d.operand_a = lane_b_src0_capture;
-        dual_bru_payload_d.operand_b = lane_b_src1_capture;
+        dual_bru_payload_d.operand_a = src2_data;
+        dual_bru_payload_d.operand_b = src3_data;
         dual_bru_payload_d.imm = lane_b_uop.imm;
         dual_bru_payload_d.jalr = lane_b_uop.bt_a_rs_sel;
         dual_bru_payload_d.pred_hit = lane_b_uop.pred_hit;
@@ -1980,427 +374,1192 @@ import ydrasil_pkg::*;
         dual_bru_payload_d.pred_bht_index = lane_b_uop.pred_bht_index;
     end
 
-    // Return-channel identity and data cross into Operand together. No live
-    // EX result qualification is allowed to feed Operand control or FU D pins.
-    always_ff @(posedge clk) begin
-        if (!rst_n || trap_flush_i ||
-            (flush_id_i && !branch_recovery_i)) begin
-            dtcm_operand_reservation_q <= '0;
-            dtcm_operand_history_q <= '0;
-            dtcm_operand_history_data_q <= '0;
-            mdu_operand_reservation_q <= '0;
-            mdu_operand_data_q <= '0;
-        end else begin
-            dtcm_operand_reservation_q <= dtcm_reservation_i;
-            dtcm_operand_history_q <= dtcm_operand_reservation_q;
-            if (dtcm_operand_reservation_q.valid)
-                dtcm_operand_history_data_q <= dtcm_operand_current_data;
-            mdu_operand_reservation_q <= mdu_result_reservation_i;
-            mdu_operand_data_q <= mdu_bypass_data_i;
-        end
-    end
+    reg alu_valid_q;
+    reg [DATA_WIDTH-1:0] alu_a_q, alu_b_q;
+    reg [OPERATOR_WIDTH-1:0] alu_op_q;
+    reg [OPERATOR_TYPE_WIDTH-1:0] alu_type_q;
+    reg alu_rd_wen_q;
+    reg [REGS_ADDR_WIDTH-1:0] alu_rd_addr_q;
+    producer_id_t alu_producer_q;
+    reg [DATA_WIDTH-1:0] lane_a_pc_q;
+    reg agu_valid_q;
+    reg [DATA_WIDTH-1:0] agu_a_q, agu_b_q;
+    ydrasil_lsu_req_pkt_t agu_req_q;
+    reg [DATA_WIDTH-1:0] agu_store_data_q;
+    reg csr_valid_q;
+    reg [DATA_WIDTH-1:0] csr_a_q;
+    reg [OPERATOR_TYPE_WIDTH-1:0] csr_type_q;
+    reg [CSR_ADDR_WIDTH-1:0] csr_raddr_q, csr_waddr_q;
+    reg [OP_CSR_INFO_WIDTH-1:0] csr_op_info_q;
+    reg [OP_SYS_INFO_WIDTH-1:0] csr_sys_info_q;
+    reg mul_valid_q;
+    reg [DATA_WIDTH-1:0] mul_a_q, mul_b_q;
+    reg [OPERATOR_WIDTH-1:0] mul_op_q;
+    reg [OPERATOR_TYPE_WIDTH-1:0] mul_type_q;
+    reg dual_alu_valid_q, dual_bit_valid_q, dual_bru_valid_q;
+    ydrasil_lane_b_meta_t dual_meta_q;
+    ydrasil_lane_b_alu_payload_t dual_alu_payload_q;
+    ydrasil_lane_b_bit_payload_t dual_bit_payload_q;
+    ydrasil_lane_b_bru_payload_t dual_bru_payload_q;
+    reg illegal_q;
 
-    always_ff @(posedge clk) begin
-        if (!rst_n || flush_id_i) begin
-            lsu_idle_q <= 1'b1;
-            issue_at_rob_head_q <= 1'b0;
-			illegal_instr_q <= 1'b0;
-            alu_in_valid_q <= 1'b0;
-            alu_in_operand_a_q <= '0;
-            alu_in_operand_b_q <= '0;
-            alu_in_operator_q <= '0;
-            alu_in_operator_type_q <= '0;
-            alu_in_rd_wen_q <= 1'b0;
-            alu_in_rd_addr_q <= '0;
-            alu_in_producer_id_q <= '0;
-            lane_a_pc_q <= '0;
-            agu_in_valid_q <= 1'b0;
-            agu_in_operand_a_q <= '0;
-            agu_in_operand_b_q <= '0;
-            agu_in_req_q <= '0;
-            csr_in_valid_q <= 1'b0;
-            csr_in_operand_a_q <= '0;
-            csr_in_operator_type_q <= '0;
-            csr_in_raddr_q <= '0;
-            csr_in_waddr_q <= '0;
-            csr_in_op_info_q <= '0;
-            csr_in_sys_info_q <= '0;
-            mul_in_valid_q <= 1'b0;
-            mul_in_operand_a_q <= '0;
-            mul_in_operand_b_q <= '0;
-            mul_in_operator_q <= '0;
-            mul_in_operator_type_q <= '0;
-            dual_meta_q <= '0;
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n || flush_id_i || trap_flush_i || branch_recovery_i) begin
+            alu_valid_q <= 1'b0;
+            agu_valid_q <= 1'b0;
+            csr_valid_q <= 1'b0;
+            mul_valid_q <= 1'b0;
             dual_alu_valid_q <= 1'b0;
-            dual_alu_payload_q <= '0;
             dual_bit_valid_q <= 1'b0;
-            dual_bit_payload_q <= '0;
             dual_bru_valid_q <= 1'b0;
-            dual_bru_payload_q <= '0;
+            dual_meta_q <= '0;
+            agu_req_q <= '0;
+            agu_store_data_q <= '0;
+            illegal_q <= 1'b0;
         end else begin
-            lsu_idle_q <= lsu_idle_i;
-            issue_at_rob_head_q <= issue_at_rob_head_i;
-                    illegal_instr_q <= lane_b_accept && lane_b_uop.illegal_instr;
-                    // Each execution class has its own input cell.  The
-					// values are captured at the same architectural boundary.
-					// Their local completion result supplies
-                    // the matching registered early token in the next cycle.
-                    alu_in_valid_q <= lane_a_fu_valid;
-                    alu_in_operand_a_q <= lane_a_operand_a_capture;
-                    alu_in_operand_b_q <= lane_a_operand_b_capture;
-                    alu_in_operator_q <= lane_a_operator_info;
-                    alu_in_operator_type_q <= lane_a_operator_type;
-                    alu_in_rd_wen_q <= lane_a_fu_valid &&
-                        lane_a_uop.dst.writes_gpr;
-                    alu_in_rd_addr_q <= lane_a_uop.dst.rd_addr;
-                    alu_in_producer_id_q <= lane_a_uop.dst.rob_tag;
-                    lane_a_pc_q <= lane_a_uop.pc;
-                    agu_in_valid_q <= lane_a_agu_accept;
-                    if (lane_a_agu_accept) begin
-                        agu_in_operand_a_q <= lane_a_operand_a_capture;
-                        agu_in_operand_b_q <= lane_a_operand_b_capture;
-                        agu_in_req_q <= shared_agu_req_d;
-                    end else begin
-                        agu_in_req_q.valid <= 1'b0;
-                    end
-                    csr_in_valid_q <= lane_b_csr_accept;
-                    if (lane_b_csr_accept) begin
-                        csr_in_operand_a_q <= lane_b_operand_a_capture;
-                        csr_in_operator_type_q <= lane_b_operator_type;
-                        csr_in_raddr_q <= lane_b_uop.csr_raddr;
-                        csr_in_waddr_q <= lane_b_uop.csr_waddr;
-                        csr_in_op_info_q <= lane_b_uop.csr_op_info;
-                        csr_in_sys_info_q <= lane_b_uop.sys_op_info;
-                    end
-                    mul_in_valid_q <= lane_b_mul_accept;
-                    if (lane_b_mul_accept) begin
-                        mul_in_operand_a_q <= lane_b_operand_a_capture;
-                        mul_in_operand_b_q <= lane_b_operand_b_capture;
-                        mul_in_operator_q <= lane_b_operator_info;
-                        mul_in_operator_type_q <= lane_b_operator_type;
-                    end
-                    dual_alu_valid_q <= lane_b_alu_accept;
-                    dual_bit_valid_q <= lane_b_bit_accept;
-                    dual_bru_valid_q <= lane_b_bru_accept;
-                    if (lane_b_accept)
-                        dual_meta_q <= dual_meta_d;
-                    if (lane_b_alu_accept)
-                        dual_alu_payload_q <= dual_alu_payload_d;
-                    if (lane_b_bit_accept)
-                        dual_bit_payload_q <= dual_bit_payload_d;
-                    if (lane_b_bru_accept)
-                        dual_bru_payload_q <= dual_bru_payload_d;
+            alu_valid_q <= lane_a_alu_valid;
+            alu_a_q <= lane_a_op_a;
+            alu_b_q <= lane_a_op_b;
+            alu_op_q <= op_onehot(lane_a_uop.subop);
+            alu_type_q <= main_operator_type;
+            alu_rd_wen_q <= lane_a_valid && lane_a_uop.dst.writes_gpr;
+            alu_rd_addr_q <= lane_a_uop.dst.rd_addr;
+            alu_producer_q <= lane_a_uop.dst.rob_tag;
+            lane_a_pc_q <= lane_a_uop.pc;
+            agu_valid_q <= lane_a_mem_valid;
+            agu_a_q <= lane_a_op_a;
+            agu_b_q <= lane_a_op_b;
+            agu_req_q <= agu_req_d;
+            agu_store_data_q <= lane_a_store_data;
+            csr_valid_q <= lane_b_csr_valid;
+            csr_a_q <= lane_b_op_a;
+            csr_type_q <= dual_csr_type;
+            csr_raddr_q <= lane_b_uop.csr_raddr;
+            csr_waddr_q <= lane_b_uop.csr_waddr;
+            csr_op_info_q <= lane_b_uop.csr_op_info;
+            csr_sys_info_q <= lane_b_uop.sys_op_info;
+            mul_valid_q <= lane_b_mul_valid;
+            mul_a_q <= lane_b_op_a;
+            mul_b_q <= lane_b_op_b;
+            mul_op_q <= op_onehot(lane_b_uop.subop);
+            mul_type_q <= dual_mul_type;
+            dual_alu_valid_q <= lane_b_alu_valid;
+            dual_bit_valid_q <= lane_b_bit_valid;
+            dual_bru_valid_q <= lane_b_bru_valid;
+            dual_meta_q <= dual_meta_d;
+            dual_alu_payload_q <= dual_alu_payload_d;
+            dual_bit_payload_q <= dual_bit_payload_d;
+            dual_bru_payload_q <= dual_bru_payload_d;
+            // Illegal encodings retain SYS/lane-B classification through the
+            // scheduler, so capture the exception identity with that token.
+            illegal_q <= lane_b_valid && lane_b_uop.illegal_instr;
         end
     end
 
-	assign illegal_instr_o = illegal_instr_q;
-	assign alu_in_valid_o = alu_in_valid_q;
-	assign alu_in_operand_a_o = alu_in_operand_a_q;
-	assign alu_in_operand_b_o = alu_in_operand_b_q;
-    assign alu_in_operator_o = alu_in_operator_q;
-    assign alu_in_operator_type_o = alu_in_operator_type_q;
-    assign alu_in_rd_wen_o = alu_in_rd_wen_q;
-    assign alu_in_rd_addr_o = alu_in_rd_addr_q;
-    assign alu_in_producer_id_o = alu_in_producer_id_q;
-	assign lane_a_pc_o = lane_a_pc_q;
-    assign agu_in_valid_o = agu_in_valid_q;
-	assign agu_in_operand_a_o = agu_in_operand_a_q;
-    assign agu_in_operand_b_o = agu_in_operand_b_q;
-	assign agu_in_req_o = agu_in_req_q;
-	assign agu_in_store_data_o = agu_in_req_q.store_data;
-    assign csr_in_valid_o = csr_in_valid_q;
-	assign csr_in_operand_a_o = csr_in_operand_a_q;
-    assign csr_in_operator_type_o = csr_in_operator_type_q;
-    assign csr_in_raddr_o = csr_in_raddr_q;
-    assign csr_in_waddr_o = csr_in_waddr_q;
-    assign csr_in_op_info_o = csr_in_op_info_q;
-    assign csr_in_sys_info_o = csr_in_sys_info_q;
-    assign mul_in_valid_o = mul_in_valid_q;
-	assign mul_in_operand_a_o = mul_in_operand_a_q;
-	assign mul_in_operand_b_o = mul_in_operand_b_q;
-    assign mul_in_operator_o = mul_in_operator_q;
-    assign mul_in_operator_type_o = mul_in_operator_type_q;
-	assign dual_meta_o = dual_meta_q;
-	assign dual_alu_valid_o = dual_alu_valid_q;
-	assign dual_alu_payload_o = dual_alu_payload_q;
-	assign dual_alu_operand_a_o = dual_alu_payload_q.operand_a;
-	assign dual_alu_operand_b_o = dual_alu_payload_q.operand_b;
-	assign dual_bit_valid_o = dual_bit_valid_q;
-	assign dual_bit_payload_o = dual_bit_payload_q;
-	assign dual_bit_operand_a_o = dual_bit_payload_q.operand_a;
-	assign dual_bit_operand_b_o = dual_bit_payload_q.operand_b;
-	assign dual_bru_valid_o = dual_bru_valid_q;
-	assign dual_bru_payload_o = dual_bru_payload_q;
-	assign dual_bru_operand_a_o = dual_bru_payload_q.operand_a;
-	assign dual_bru_operand_b_o = dual_bru_payload_q.operand_b;
-
-`ifndef SYNTHESIS
-    wire issue_valid_ff = issue_pkt_i.valid;
-    logic [OPERATOR_TYPE_WIDTH-1:0] issue_operator_type_ff;
-    always_comb begin
-        issue_operator_type_ff = '0;
-        unique case (issue_pkt_i.op_class)
-            UOP_CLASS_BJP:
-                issue_operator_type_ff[OPERATOR_TYPE_BJP] = 1'b1;
-            UOP_CLASS_LOAD:
-                issue_operator_type_ff[OPERATOR_TYPE_LOAD] = 1'b1;
-            UOP_CLASS_STORE:
-                issue_operator_type_ff[OPERATOR_TYPE_STORE] = 1'b1;
-            UOP_CLASS_CSR:
-                issue_operator_type_ff[OPERATOR_TYPE_CSR] = 1'b1;
-            UOP_CLASS_SYS: begin
-                issue_operator_type_ff[OPERATOR_TYPE_CSR] = 1'b1;
-                issue_operator_type_ff[OPERATOR_TYPE_SYS] = 1'b1;
+    reg issue_fence_q;
+    producer_id_t issue_fence_tag_q;
+    reg [INST_ADDR_WIDTH-1:0] issue_fence_next_pc_q;
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n || flush_id_i || trap_flush_i || branch_recovery_i) begin
+            issue_fence_q <= 1'b0;
+            issue_fence_tag_q <= '0;
+            issue_fence_next_pc_q <= '0;
+        end else begin
+            issue_fence_q <= (lane_a_valid && lane_a_uop.fence_i) ||
+                (lane_b_valid && lane_b_uop.fence_i);
+            if (lane_a_valid && lane_a_uop.fence_i) begin
+                issue_fence_tag_q <= lane_a_uop.dst.rob_tag;
+                issue_fence_next_pc_q <= lane_a_uop.pc + 32'd4;
+            end else if (lane_b_valid && lane_b_uop.fence_i) begin
+                issue_fence_tag_q <= lane_b_uop.dst.rob_tag;
+                issue_fence_next_pc_q <= lane_b_uop.pc + 32'd4;
             end
-            UOP_CLASS_MUL:
-                issue_operator_type_ff[OPERATOR_TYPE_MUL] = 1'b1;
-            UOP_CLASS_BITMANIP:
-                issue_operator_type_ff[OPERATOR_TYPE_BITMANIP] = 1'b1;
-            default:
-                issue_operator_type_ff[OPERATOR_TYPE_ALU] = 1'b1;
-        endcase
+        end
     end
-    wire rs1_completion_fwd = 1'b0;
-    wire rs2_completion_fwd = 1'b0;
-    wire issue_plain_alu_op =
-        issue_operator_type_ff[OPERATOR_TYPE_ALU] &&
-        !issue_operator_type_ff[OPERATOR_TYPE_BITMANIP];
-    wire issue_early_alu_valid_ff = 1'b0;
-    wire [5:0] issue_early_kind_ff = '0;
-    wire [REGS_ADDR_WIDTH-1:0] issue_early_alu_addr_ff = '0;
-    wire rs1_issue_early_alu_fwd = 1'b0;
-    wire rs2_issue_early_alu_fwd = 1'b0;
-    wire issue_simple_alu_op = issue_plain_alu_op;
-`endif
+
+    assign issue_fence_o = issue_fence_q;
+    assign issue_fence_tag_o = issue_fence_tag_q;
+    assign issue_fence_next_pc_o = issue_fence_next_pc_q;
+    assign illegal_instr_o = illegal_q;
+    assign alu_in_valid_o = alu_valid_q;
+    assign alu_in_operand_a_o = alu_a_q;
+    assign alu_in_operand_b_o = alu_b_q;
+    assign alu_in_operator_o = alu_op_q;
+    assign alu_in_operator_type_o = alu_type_q;
+    assign alu_in_rd_wen_o = alu_rd_wen_q;
+    assign alu_in_rd_addr_o = alu_rd_addr_q;
+    assign alu_in_producer_id_o = alu_producer_q;
+    assign lane_a_pc_o = lane_a_pc_q;
+    assign agu_in_valid_o = agu_valid_q;
+    assign agu_in_operand_a_o = agu_a_q;
+    assign agu_in_operand_b_o = agu_b_q;
+    assign csr_in_valid_o = csr_valid_q;
+    assign csr_in_operand_a_o = csr_a_q;
+    assign csr_in_operator_type_o = csr_type_q;
+    assign csr_in_raddr_o = csr_raddr_q;
+    assign csr_in_waddr_o = csr_waddr_q;
+    assign csr_in_op_info_o = csr_op_info_q;
+    assign csr_in_sys_info_o = csr_sys_info_q;
+    assign mul_in_valid_o = mul_valid_q;
+    assign mul_in_operand_a_o = mul_a_q;
+    assign mul_in_operand_b_o = mul_b_q;
+    assign mul_in_operator_o = mul_op_q;
+    assign mul_in_operator_type_o = mul_type_q;
+    assign dual_meta_o = dual_meta_q;
+    assign dual_alu_valid_o = dual_alu_valid_q;
+    assign dual_alu_payload_o = dual_alu_payload_q;
+    assign dual_alu_operand_a_o = dual_alu_payload_q.operand_a;
+    assign dual_alu_operand_b_o = dual_alu_payload_q.operand_b;
+    assign dual_bit_valid_o = dual_bit_valid_q;
+    assign dual_bit_payload_o = dual_bit_payload_q;
+    assign dual_bit_operand_a_o = dual_bit_payload_q.operand_a;
+    assign dual_bit_operand_b_o = dual_bit_payload_q.operand_b;
+    assign dual_bru_valid_o = dual_bru_valid_q;
+    assign dual_bru_payload_o = dual_bru_payload_q;
+    assign dual_bru_operand_a_o = dual_bru_payload_q.operand_a;
+    assign dual_bru_operand_b_o = dual_bru_payload_q.operand_b;
+
+    // ------------------------------------------------------------------
 endmodule
 
-module ydrasil_issue_rs_entry
+// Two physical scheduler banks.  Bank membership is storage-only: operation
+// class selects a lane candidate, never a reservation-store domain.  The
+// registered ingress is deliberately independent of issue removal, so no
+// queue intake and scheduler selection have separate registered boundaries.
+module ydrasil_banked_scheduler
 import ydrasil_pkg::*;
-#(
-    parameter int SLOT_COUNT = 10
-)(
+(
     input  wire                         clk,
     input  wire                         rst_n,
     input  wire                         hard_flush_i,
     input  wire                         branch_recovery_i,
-    input  wire                         recovery_keep_i,
-    input  wire [SLOT_COUNT-1:0]        recovery_slot_mask_i,
-    input  wire [SLOT_COUNT-1:0]        issued_slot_mask_i,
-    input  wire                         remove_i,
-    input  wire                         dispatch0_write_i,
-    input  wire                         dispatch1_write_i,
-    input  ydrasil_compact_uop_t        dispatch0_uop_i,
-    input  ydrasil_compact_uop_t        dispatch1_uop_i,
-    input  wire                         dispatch0_src0_ready_i,
-    input  wire                         dispatch0_src1_ready_i,
-    input  wire                         dispatch1_src0_ready_i,
-    input  wire                         dispatch1_src1_ready_i,
-    input  wire [SLOT_COUNT-1:0]        dispatch0_order_mask_i,
-    input  wire [SLOT_COUNT-1:0]        dispatch1_order_mask_i,
-    input  wire                         dispatch0_memory_i,
-    input  wire                         dispatch1_memory_i,
-    input  wire                         dispatch0_store_i,
-    input  wire                         dispatch1_store_i,
-    input  wire                         dispatch0_mul_i,
-    input  wire                         dispatch1_mul_i,
-    input  wire                         dispatch0_divrem_i,
-    input  wire                         dispatch1_divrem_i,
-    input  wire                         dispatch0_serial_i,
-    input  wire                         dispatch1_serial_i,
-    input  wire                         dispatch0_early_writes_i,
-    input  wire                         dispatch1_early_writes_i,
-    input  wire                         wakeup0_valid_i,
-    input  producer_id_t                wakeup0_id_i,
-    input  wire                         wakeup1_valid_i,
-    input  producer_id_t                wakeup1_id_i,
-    input  wire                         alloc_wakeup_src0_i,
-    input  wire                         alloc_wakeup_src1_i,
-	    input  wire                         dtcm_launch_fast_wakeup_valid_i,
-	    input  producer_id_t                dtcm_launch_fast_wakeup_id_i,
-	    input  wire                         dtcm_launch_wakeup_valid_i,
-	    input  producer_id_t                dtcm_launch_wakeup_id_i,
-	    input  wire                         dtcm_result_wakeup_valid_i,
-	    input  producer_id_t                dtcm_result_wakeup_id_i,
-	    input  wire                         dtcm_result_replay_valid_i,
-	    input  producer_id_t                dtcm_result_replay_id_i,
-	    input  wire                         mdu_wakeup_valid_i,
-	    input  producer_id_t                mdu_wakeup_id_i,
-	    input  wire                         mdu_replay_valid_i,
-	    input  producer_id_t                mdu_replay_id_i,
+    input  producer_slot_t              recovery_head_slot_i,
+    input  producer_slot_t              recovery_branch_slot_i,
+    input  ydrasil_compact_uop_t        queue0_i,
+    input  ydrasil_compact_uop_t        queue1_i,
+    input  wire                         queue_valid0_i,
+    input  wire                         queue_valid1_i,
     input  ydrasil_completion_meta_t    completion_meta_i [COMPLETION_LANES],
-    output ydrasil_compact_uop_t        uop_o,
-    output wire                         valid_o,
-    output wire                         src0_ready_o,
-    output wire                         src1_ready_o,
-    output wire [SLOT_COUNT-1:0]        order_mask_o,
-    output wire                         memory_o,
-    output wire                         store_o,
-    output wire                         mul_o,
-    output wire                         divrem_o,
-    output wire                         serial_o,
-    output wire                         early_writes_o,
-    // Observability only: these are the actual completion-bus tag matches
-    // seen by this entry in the current cycle. They are exported separately
-    // so performance accounting does not infer wakeups from aggregate ready
-    // state (which loses the wakeup source).
-    output wire                         completion_wakeup_src0_o,
-    output wire                         completion_wakeup_src1_o
+    input  wire                         lookup_resident0_i,
+    input  wire                         lookup_resident1_i,
+    input  wire                         lookup_resident2_i,
+    input  wire                         lookup_resident3_i,
+    input  wire                         lookup_reallocated0_i,
+    input  wire                         lookup_reallocated1_i,
+    input  wire                         lookup_reallocated2_i,
+    input  wire                         lookup_reallocated3_i,
+    input  wire                         lsu_idle_i,
+    input  producer_id_t                rob_head_id_i,
+    output wire                         queue_consume0_o,
+    output wire                         queue_consume1_o,
+    output ydrasil_compact_uop_t        lane_a_uop_o,
+    output wire                         lane_a_valid_o,
+    output ydrasil_compact_uop_t        lane_b_uop_o,
+    output wire                         lane_b_valid_o,
+    output wire [PRODUCER_NUM-1:0]      issue_remove_mask_o,
+    output wire                         lookup_valid_o,
+    output producer_id_t                lookup_tag0_o,
+    output producer_id_t                lookup_tag1_o,
+    output producer_id_t                lookup_tag2_o,
+    output producer_id_t                lookup_tag3_o
 );
-    ydrasil_compact_uop_t uop_q;
-    reg valid_q;
-    reg src0_ready_q;
-    reg src1_ready_q;
-    reg [SLOT_COUNT-1:0] order_mask_q;
-    reg memory_q;
-    reg store_q;
-    reg mul_q;
-    reg divrem_q;
-    reg serial_q;
-    reg early_writes_q;
-    wire [COMPLETION_LANES-1:0] current_src0_completion_hit;
-    wire [COMPLETION_LANES-1:0] current_src1_completion_hit;
-    genvar completion_hit_idx;
+    localparam int ENTRY_DEPTH = PRODUCER_NUM;
+    localparam int BANK_DEPTH = PRODUCER_NUM / 2;
+    localparam int INGRESS_COUNT_WIDTH = $clog2(3);
+    localparam int AGE_WIDTH = PRODUCER_SLOT_WIDTH + 1;
+
+    ydrasil_compact_uop_t ingress_q [0:1];
+    reg [INGRESS_COUNT_WIDTH-1:0] ingress_count_q;
+    ydrasil_compact_uop_t entry_uop_q [0:ENTRY_DEPTH-1];
+    reg [ENTRY_DEPTH-1:0] entry_valid_q;
+    reg entry_src0_ready_q [0:ENTRY_DEPTH-1];
+    reg entry_src1_ready_q [0:ENTRY_DEPTH-1];
+    reg [ENTRY_DEPTH-1:0] entry_order_q [0:ENTRY_DEPTH-1];
+    // Candidate qualification is registered before the bank compare network.
+    // This keeps completion/ready and cross-block control inputs off the
+    // selected-mask D path while retaining the registered wakeup contract.
+    reg [ENTRY_DEPTH-1:0] entry_candidate_q;
+    reg                    div_issue_q;
+    producer_id_t          div_issue_id_q;
+    reg                    div_inflight_q;
+    producer_id_t          div_inflight_id_q;
+
+    function automatic producer_slot_t ptr_add(
+        input producer_slot_t base,
+        input integer amount
+    );
+        integer value;
+        begin
+            value = integer'(base) + amount;
+            if (value >= ENTRY_DEPTH)
+                value = value - ENTRY_DEPTH;
+            if (value >= ENTRY_DEPTH)
+                value = value - ENTRY_DEPTH;
+            ptr_add = producer_slot_t'(value);
+        end
+    endfunction
+
+    function automatic [AGE_WIDTH-1:0] producer_age(
+        input producer_id_t id,
+        input producer_id_t head
+    );
+        integer value;
+        begin
+            value = integer'(id[PRODUCER_SLOT_WIDTH-1:0]) -
+                integer'(head[PRODUCER_SLOT_WIDTH-1:0]);
+            if (value < 0)
+                value = value + ENTRY_DEPTH;
+            producer_age = AGE_WIDTH'(value);
+        end
+    endfunction
+
+    function automatic logic uop_memory(input ydrasil_compact_uop_t uop);
+        uop_memory = (uop.op_class == UOP_CLASS_LOAD) ||
+            (uop.op_class == UOP_CLASS_STORE);
+    endfunction
+    function automatic logic uop_store(input ydrasil_compact_uop_t uop);
+        uop_store = uop.op_class == UOP_CLASS_STORE;
+    endfunction
+    function automatic logic uop_branch(input ydrasil_compact_uop_t uop);
+        uop_branch = uop.op_class == UOP_CLASS_BJP;
+    endfunction
+    function automatic logic uop_serial(input ydrasil_compact_uop_t uop);
+        uop_serial = uop.fence_i || (uop.op_class == UOP_CLASS_CSR) ||
+            (uop.op_class == UOP_CLASS_SYS);
+    endfunction
+    function automatic logic uop_lane_b_only(input ydrasil_compact_uop_t uop);
+        uop_lane_b_only = uop_branch(uop) || uop_serial(uop) ||
+            (uop.op_class == UOP_CLASS_MUL) ||
+            (uop.op_class == UOP_CLASS_BITMANIP);
+    endfunction
+    function automatic logic uop_divrem(input ydrasil_compact_uop_t uop);
+        uop_divrem = (uop.op_class == UOP_CLASS_MUL) &&
+            (uop.instr[14:12] != 3'b000) && uop.instr[25];
+    endfunction
+
+    wire incoming0 = queue_valid0_i;
+    wire incoming1_raw = queue_valid1_i;
+    wire ingress_has_room0 = ingress_count_q < 2;
+    wire ingress_has_room1 = ingress_count_q == 0;
+    // Queue ownership includes ROB, RAT, checkpoint, and LSQ allocation.
+    // Scheduler admission only consumes already-reserved ingress tokens.
+    // Flush/recovery owns the next-state boundary below.  Do not let that
+    // synchronous priority signal reach the upstream queue-consume credit:
+    // any same-edge accept is discarded with ingress_q in the flush branch.
+    wire accept0 = incoming0 && ingress_has_room0;
+    wire accept1 = accept0 && incoming1_raw && !uop_serial(queue0_i) &&
+        ingress_has_room1;
+    assign queue_consume0_o = accept0;
+    assign queue_consume1_o = accept1;
+
+    wire [ENTRY_DEPTH-1:0] entry_branch_mask;
+    wire [ENTRY_DEPTH-1:0] entry_serial_mask;
+    genvar entry_idx;
     generate
-        for (completion_hit_idx = 0; completion_hit_idx < COMPLETION_LANES;
-             completion_hit_idx = completion_hit_idx + 1) begin : g_completion_hit
-            assign current_src0_completion_hit[completion_hit_idx] =
-                completion_meta_i[completion_hit_idx].valid &&
-                completion_meta_i[completion_hit_idx].producer_tracked &&
-                (completion_meta_i[completion_hit_idx].producer_id ==
-                 uop_q.src0.producer_tag);
-            assign current_src1_completion_hit[completion_hit_idx] =
-                completion_meta_i[completion_hit_idx].valid &&
-                completion_meta_i[completion_hit_idx].producer_tracked &&
-                (completion_meta_i[completion_hit_idx].producer_id ==
-                 uop_q.src1.producer_tag);
+        for (entry_idx = 0; entry_idx < ENTRY_DEPTH; entry_idx = entry_idx + 1) begin : g_entry_class
+            assign entry_branch_mask[entry_idx] = entry_valid_q[entry_idx] &&
+                uop_branch(entry_uop_q[entry_idx]);
+            assign entry_serial_mask[entry_idx] = entry_valid_q[entry_idx] &&
+                uop_serial(entry_uop_q[entry_idx]);
+        end
+    endgenerate
+    wire [ENTRY_DEPTH-1:0] unresolved_control_mask =
+        entry_branch_mask | entry_serial_mask;
+
+    // Performance/DV state is expressed in scheduler terms. These masks
+    // describe the live ready window and its operation classes.
+    wire [ENTRY_DEPTH-1:0] entry_memory_mask;
+    wire [ENTRY_DEPTH-1:0] entry_store_mask;
+    wire [ENTRY_DEPTH-1:0] entry_lane_b_only_mask;
+    wire [ENTRY_DEPTH-1:0] entry_divrem_mask;
+    genvar class_idx;
+    generate
+        for (class_idx = 0; class_idx < ENTRY_DEPTH; class_idx = class_idx + 1) begin : g_entry_perf_class
+            assign entry_memory_mask[class_idx] = entry_valid_q[class_idx] &&
+                uop_memory(entry_uop_q[class_idx]);
+            assign entry_store_mask[class_idx] = entry_valid_q[class_idx] &&
+                uop_store(entry_uop_q[class_idx]);
+            assign entry_lane_b_only_mask[class_idx] = entry_valid_q[class_idx] &&
+                uop_lane_b_only(entry_uop_q[class_idx]);
+            assign entry_divrem_mask[class_idx] = entry_valid_q[class_idx] &&
+                uop_divrem(entry_uop_q[class_idx]);
         end
     endgenerate
 
-    wire current_src0_wakeup = alloc_wakeup_src0_i ||
-        (wakeup0_valid_i && (wakeup0_id_i == uop_q.src0.producer_tag)) ||
-        (wakeup1_valid_i && (wakeup1_id_i == uop_q.src0.producer_tag)) ||
-	        (dtcm_launch_fast_wakeup_valid_i &&
-	         (dtcm_launch_fast_wakeup_id_i == uop_q.src0.producer_tag)) ||
-	        (dtcm_launch_wakeup_valid_i &&
-	         (dtcm_launch_wakeup_id_i == uop_q.src0.producer_tag)) ||
-	        (dtcm_result_wakeup_valid_i &&
-	         (dtcm_result_wakeup_id_i == uop_q.src0.producer_tag)) ||
-	        (dtcm_result_replay_valid_i &&
-	         (dtcm_result_replay_id_i == uop_q.src0.producer_tag)) ||
-	        (mdu_wakeup_valid_i &&
-	         (mdu_wakeup_id_i == uop_q.src0.producer_tag)) ||
-	        (mdu_replay_valid_i &&
-	         (mdu_replay_id_i == uop_q.src0.producer_tag)) ||
-        (|current_src0_completion_hit);
-    wire current_src1_wakeup = alloc_wakeup_src1_i ||
-        (wakeup0_valid_i && (wakeup0_id_i == uop_q.src1.producer_tag)) ||
-        (wakeup1_valid_i && (wakeup1_id_i == uop_q.src1.producer_tag)) ||
-	        (dtcm_launch_fast_wakeup_valid_i &&
-	         (dtcm_launch_fast_wakeup_id_i == uop_q.src1.producer_tag)) ||
-	        (dtcm_launch_wakeup_valid_i &&
-	         (dtcm_launch_wakeup_id_i == uop_q.src1.producer_tag)) ||
-	        (dtcm_result_wakeup_valid_i &&
-	         (dtcm_result_wakeup_id_i == uop_q.src1.producer_tag)) ||
-	        (dtcm_result_replay_valid_i &&
-	         (dtcm_result_replay_id_i == uop_q.src1.producer_tag)) ||
-	        (mdu_wakeup_valid_i &&
-	         (mdu_wakeup_id_i == uop_q.src1.producer_tag)) ||
-	        (mdu_replay_valid_i &&
-	         (mdu_replay_id_i == uop_q.src1.producer_tag)) ||
-        (|current_src1_completion_hit);
+    wire [ENTRY_DEPTH-1:0] entry_wakeup0;
+    wire [ENTRY_DEPTH-1:0] entry_wakeup1;
+    generate
+        for (entry_idx = 0; entry_idx < ENTRY_DEPTH; entry_idx = entry_idx + 1) begin : g_entry_wakeup
+            assign entry_wakeup0[entry_idx] = entry_valid_q[entry_idx] &&
+                entry_uop_q[entry_idx].src0.tag_valid &&
+                ((completion_meta_i[COMPLETION_ALU].valid &&
+                  completion_meta_i[COMPLETION_ALU].producer_tracked &&
+                  completion_meta_i[COMPLETION_ALU].producer_id ==
+                  entry_uop_q[entry_idx].src0.producer_tag) ||
+                 (completion_meta_i[COMPLETION_LSU].valid &&
+                  completion_meta_i[COMPLETION_LSU].producer_tracked &&
+                  completion_meta_i[COMPLETION_LSU].producer_id ==
+                  entry_uop_q[entry_idx].src0.producer_tag) ||
+                 (completion_meta_i[COMPLETION_MUL].valid &&
+                  completion_meta_i[COMPLETION_MUL].producer_tracked &&
+                  completion_meta_i[COMPLETION_MUL].producer_id ==
+                  entry_uop_q[entry_idx].src0.producer_tag) ||
+                 (completion_meta_i[COMPLETION_DUAL_ALU].valid &&
+                  completion_meta_i[COMPLETION_DUAL_ALU].producer_tracked &&
+                  completion_meta_i[COMPLETION_DUAL_ALU].producer_id ==
+                  entry_uop_q[entry_idx].src0.producer_tag));
+            assign entry_wakeup1[entry_idx] = entry_valid_q[entry_idx] &&
+                entry_uop_q[entry_idx].src1.tag_valid &&
+                ((completion_meta_i[COMPLETION_ALU].valid &&
+                  completion_meta_i[COMPLETION_ALU].producer_tracked &&
+                  completion_meta_i[COMPLETION_ALU].producer_id ==
+                  entry_uop_q[entry_idx].src1.producer_tag) ||
+                 (completion_meta_i[COMPLETION_LSU].valid &&
+                  completion_meta_i[COMPLETION_LSU].producer_tracked &&
+                  completion_meta_i[COMPLETION_LSU].producer_id ==
+                  entry_uop_q[entry_idx].src1.producer_tag) ||
+                 (completion_meta_i[COMPLETION_MUL].valid &&
+                  completion_meta_i[COMPLETION_MUL].producer_tracked &&
+                  completion_meta_i[COMPLETION_MUL].producer_id ==
+                  entry_uop_q[entry_idx].src1.producer_tag) ||
+                 (completion_meta_i[COMPLETION_DUAL_ALU].valid &&
+                  completion_meta_i[COMPLETION_DUAL_ALU].producer_tracked &&
+                  completion_meta_i[COMPLETION_DUAL_ALU].producer_id ==
+                  entry_uop_q[entry_idx].src1.producer_tag));
+        end
+    endgenerate
 
-    assign completion_wakeup_src0_o = valid_q &&
-        !src0_ready_q && (|current_src0_completion_hit);
-    assign completion_wakeup_src1_o = valid_q &&
-        !src1_ready_q && (|current_src1_completion_hit);
-    always_ff @(posedge clk) begin
-        if (!rst_n || hard_flush_i) begin
-            uop_q <= '0;
-            valid_q <= 1'b0;
-            src0_ready_q <= 1'b0;
-            src1_ready_q <= 1'b0;
-            order_mask_q <= '0;
-            memory_q <= 1'b0;
-            store_q <= 1'b0;
-            mul_q <= 1'b0;
-            divrem_q <= 1'b0;
-            serial_q <= 1'b0;
-            early_writes_q <= 1'b0;
-        end else if (branch_recovery_i) begin
-            if (valid_q && recovery_keep_i) begin
-                order_mask_q <= order_mask_q & recovery_slot_mask_i;
-                // Recovery rebuild and surviving completions can coincide.
-                // Keep accepting identity-matched local tokens while pruning
-                // younger ordering state, otherwise a one-cycle completion is
-                // lost and the surviving entry can never become selectable.
-                if (current_src0_wakeup)
-                    src0_ready_q <= 1'b1;
-                if (current_src1_wakeup)
-                    src1_ready_q <= 1'b1;
-            end else begin
-                valid_q <= 1'b0;
-                order_mask_q <= '0;
-                memory_q <= 1'b0;
-                store_q <= 1'b0;
-                mul_q <= 1'b0;
-                divrem_q <= 1'b0;
-                serial_q <= 1'b0;
-                early_writes_q <= 1'b0;
+    wire [ENTRY_DEPTH-1:0] entry_ready_mask;
+    wire [ENTRY_DEPTH-1:0] entry_candidate_mask;
+    generate
+        for (entry_idx = 0; entry_idx < ENTRY_DEPTH; entry_idx = entry_idx + 1) begin : g_entry_ready
+            assign entry_ready_mask[entry_idx] = entry_valid_q[entry_idx] &&
+                entry_src0_ready_q[entry_idx] &&
+                (entry_src1_ready_q[entry_idx] ||
+                 uop_store(entry_uop_q[entry_idx]));
+            assign entry_candidate_mask[entry_idx] = entry_candidate_q[entry_idx] &&
+                // The registered candidate is invalidated alongside its
+                // entry. Bank tokens add a producer-ID check below, so this
+                // qualification does not read the remove token combinationally
+                // and cannot recreate a selected-mask feedback path.
+                entry_valid_q[entry_idx] &&
+                (!uop_divrem(entry_uop_q[entry_idx]) ||
+                 (!div_issue_q && !div_inflight_q));
+        end
+    endgenerate
+
+    // Capture all current-cycle qualification one register before select.
+    // Divider occupancy is local scheduler state; completion clears it and a
+    // selected divide sets it, so no EX reservation/bypass token is needed.
+    wire [ENTRY_DEPTH-1:0] entry_candidate_now;
+    generate
+        for (entry_idx = 0; entry_idx < ENTRY_DEPTH; entry_idx = entry_idx + 1) begin : g_entry_candidate_now
+            assign entry_candidate_now[entry_idx] = entry_ready_mask[entry_idx] &&
+                !(|(entry_order_q[entry_idx] & entry_valid_q)) &&
+                (!uop_divrem(entry_uop_q[entry_idx]) ||
+                 (!div_inflight_q && !div_issue_q)) &&
+                (!uop_serial(entry_uop_q[entry_idx]) ||
+                 ((entry_uop_q[entry_idx].dst.rob_tag == rob_head_id_i) &&
+                  lsu_idle_i));
+        end
+    endgenerate
+
+    // Fixed compare network for each six-entry physical bank.  Every rank is
+    // computed from the registered entry state; no found/best accumulator is
+    // read after being assigned in the same always_comb block.
+    wire [AGE_WIDTH-1:0] bank_age [0:1][0:BANK_DEPTH-1];
+    wire [BANK_DEPTH-1:0] bank_mem_candidate [0:1];
+    wire [BANK_DEPTH-1:0] bank_alu_candidate [0:1];
+    wire [BANK_DEPTH-1:0] bank_bonly_candidate [0:1];
+    wire [BANK_DEPTH-1:0] bank_mem_older [0:1][0:BANK_DEPTH-1];
+    wire [BANK_DEPTH-1:0] bank_alu_older [0:1][0:BANK_DEPTH-1];
+    wire [BANK_DEPTH-1:0] bank_bonly_older [0:1][0:BANK_DEPTH-1];
+    wire [BANK_DEPTH-1:0] bank_mem_best [0:1];
+    wire [BANK_DEPTH-1:0] bank_alu_best [0:1];
+    wire [BANK_DEPTH-1:0] bank_alu_second [0:1];
+    wire [BANK_DEPTH-1:0] bank_bonly_best [0:1];
+    wire [3:0] bank_alu_rank [0:1][0:BANK_DEPTH-1];
+    genvar bank_g, local_g, cmp_g;
+    generate
+        for (bank_g = 0; bank_g < 2; bank_g = bank_g + 1) begin : g_bank_compare
+            for (local_g = 0; local_g < BANK_DEPTH; local_g = local_g + 1) begin : g_bank_entry
+                localparam int ENTRY_INDEX = bank_g * BANK_DEPTH + local_g;
+                assign bank_age[bank_g][local_g] = producer_age(
+                    entry_uop_q[ENTRY_INDEX].dst.rob_tag, rob_head_id_i);
+                assign bank_mem_candidate[bank_g][local_g] =
+                    entry_candidate_mask[ENTRY_INDEX] &&
+                    uop_memory(entry_uop_q[ENTRY_INDEX]);
+                assign bank_alu_candidate[bank_g][local_g] =
+                    entry_candidate_mask[ENTRY_INDEX] &&
+                    !uop_memory(entry_uop_q[ENTRY_INDEX]) &&
+                    !uop_lane_b_only(entry_uop_q[ENTRY_INDEX]);
+                assign bank_bonly_candidate[bank_g][local_g] =
+                    entry_candidate_mask[ENTRY_INDEX] &&
+                    uop_lane_b_only(entry_uop_q[ENTRY_INDEX]);
+                assign bank_alu_rank[bank_g][local_g] =
+                    4'($countones(bank_alu_older[bank_g][local_g]));
+                assign bank_mem_best[bank_g][local_g] =
+                    bank_mem_candidate[bank_g][local_g] &&
+                    !(|bank_mem_older[bank_g][local_g]);
+                assign bank_alu_best[bank_g][local_g] =
+                    bank_alu_candidate[bank_g][local_g] &&
+                    (bank_alu_rank[bank_g][local_g] == 4'd0);
+                assign bank_alu_second[bank_g][local_g] =
+                    bank_alu_candidate[bank_g][local_g] &&
+                    (bank_alu_rank[bank_g][local_g] == 4'd1);
+                assign bank_bonly_best[bank_g][local_g] =
+                    bank_bonly_candidate[bank_g][local_g] &&
+                    !(|bank_bonly_older[bank_g][local_g]);
+                for (cmp_g = 0; cmp_g < BANK_DEPTH; cmp_g = cmp_g + 1) begin : g_bank_cmp
+                    if (cmp_g == local_g) begin : g_self_compare
+                        assign bank_mem_older[bank_g][local_g][cmp_g] = 1'b0;
+                        assign bank_alu_older[bank_g][local_g][cmp_g] = 1'b0;
+                        assign bank_bonly_older[bank_g][local_g][cmp_g] = 1'b0;
+                    end else begin : g_other_compare
+                        assign bank_mem_older[bank_g][local_g][cmp_g] =
+                            bank_mem_candidate[bank_g][cmp_g] &&
+                            ((bank_age[bank_g][cmp_g] < bank_age[bank_g][local_g]) ||
+                             ((bank_age[bank_g][cmp_g] == bank_age[bank_g][local_g]) &&
+                              (cmp_g < local_g)));
+                        assign bank_alu_older[bank_g][local_g][cmp_g] =
+                            bank_alu_candidate[bank_g][cmp_g] &&
+                            ((bank_age[bank_g][cmp_g] < bank_age[bank_g][local_g]) ||
+                             ((bank_age[bank_g][cmp_g] == bank_age[bank_g][local_g]) &&
+                              (cmp_g < local_g)));
+                        assign bank_bonly_older[bank_g][local_g][cmp_g] =
+                            bank_bonly_candidate[bank_g][cmp_g] &&
+                            ((bank_age[bank_g][cmp_g] < bank_age[bank_g][local_g]) ||
+                             ((bank_age[bank_g][cmp_g] == bank_age[bank_g][local_g]) &&
+                              (cmp_g < local_g)));
+                    end
+                end
             end
-        end else begin
-            if (valid_q) begin
-                order_mask_q <= order_mask_q & ~issued_slot_mask_i;
-                if (current_src0_wakeup)
-                    src0_ready_q <= 1'b1;
-                if (current_src1_wakeup)
-                    src1_ready_q <= 1'b1;
-                if (remove_i)
-                    valid_q <= 1'b0;
+        end
+    endgenerate
+    wire bank_mem_valid_d [0:1];
+    wire bank_alu0_valid_d [0:1];
+    wire bank_alu1_valid_d [0:1];
+    wire bank_bonly_valid_d [0:1];
+    producer_slot_t bank_mem_slot_d [0:1];
+    producer_slot_t bank_alu0_slot_d [0:1];
+    producer_slot_t bank_alu1_slot_d [0:1];
+    producer_slot_t bank_bonly_slot_d [0:1];
+    producer_id_t bank_mem_id_d [0:1];
+    producer_id_t bank_alu0_id_d [0:1];
+    producer_id_t bank_alu1_id_d [0:1];
+    producer_id_t bank_bonly_id_d [0:1];
+    generate
+        for (bank_g = 0; bank_g < 2; bank_g = bank_g + 1) begin : g_bank_pick
+            assign bank_mem_valid_d[bank_g] = |bank_mem_best[bank_g];
+            assign bank_alu0_valid_d[bank_g] = |bank_alu_best[bank_g];
+            assign bank_alu1_valid_d[bank_g] = |bank_alu_second[bank_g];
+            assign bank_bonly_valid_d[bank_g] = |bank_bonly_best[bank_g];
+            assign bank_mem_slot_d[bank_g] = bank_mem_best[bank_g][0] ?
+                producer_slot_t'(bank_g * BANK_DEPTH + 0) :
+                bank_mem_best[bank_g][1] ? producer_slot_t'(bank_g * BANK_DEPTH + 1) :
+                bank_mem_best[bank_g][2] ? producer_slot_t'(bank_g * BANK_DEPTH + 2) :
+                bank_mem_best[bank_g][3] ? producer_slot_t'(bank_g * BANK_DEPTH + 3) :
+                bank_mem_best[bank_g][4] ? producer_slot_t'(bank_g * BANK_DEPTH + 4) :
+                producer_slot_t'(bank_g * BANK_DEPTH + 5);
+            assign bank_alu0_slot_d[bank_g] = bank_alu_best[bank_g][0] ?
+                producer_slot_t'(bank_g * BANK_DEPTH + 0) :
+                bank_alu_best[bank_g][1] ? producer_slot_t'(bank_g * BANK_DEPTH + 1) :
+                bank_alu_best[bank_g][2] ? producer_slot_t'(bank_g * BANK_DEPTH + 2) :
+                bank_alu_best[bank_g][3] ? producer_slot_t'(bank_g * BANK_DEPTH + 3) :
+                bank_alu_best[bank_g][4] ? producer_slot_t'(bank_g * BANK_DEPTH + 4) :
+                producer_slot_t'(bank_g * BANK_DEPTH + 5);
+            assign bank_alu1_slot_d[bank_g] = bank_alu_second[bank_g][0] ?
+                producer_slot_t'(bank_g * BANK_DEPTH + 0) :
+                bank_alu_second[bank_g][1] ? producer_slot_t'(bank_g * BANK_DEPTH + 1) :
+                bank_alu_second[bank_g][2] ? producer_slot_t'(bank_g * BANK_DEPTH + 2) :
+                bank_alu_second[bank_g][3] ? producer_slot_t'(bank_g * BANK_DEPTH + 3) :
+                bank_alu_second[bank_g][4] ? producer_slot_t'(bank_g * BANK_DEPTH + 4) :
+                producer_slot_t'(bank_g * BANK_DEPTH + 5);
+            assign bank_bonly_slot_d[bank_g] = bank_bonly_best[bank_g][0] ?
+                producer_slot_t'(bank_g * BANK_DEPTH + 0) :
+                bank_bonly_best[bank_g][1] ? producer_slot_t'(bank_g * BANK_DEPTH + 1) :
+                bank_bonly_best[bank_g][2] ? producer_slot_t'(bank_g * BANK_DEPTH + 2) :
+                bank_bonly_best[bank_g][3] ? producer_slot_t'(bank_g * BANK_DEPTH + 3) :
+                bank_bonly_best[bank_g][4] ? producer_slot_t'(bank_g * BANK_DEPTH + 4) :
+                producer_slot_t'(bank_g * BANK_DEPTH + 5);
+            assign bank_mem_id_d[bank_g] =
+                entry_uop_q[bank_mem_slot_d[bank_g]].dst.rob_tag;
+            assign bank_alu0_id_d[bank_g] =
+                entry_uop_q[bank_alu0_slot_d[bank_g]].dst.rob_tag;
+            assign bank_alu1_id_d[bank_g] =
+                entry_uop_q[bank_alu1_slot_d[bank_g]].dst.rob_tag;
+            assign bank_bonly_id_d[bank_g] =
+                entry_uop_q[bank_bonly_slot_d[bank_g]].dst.rob_tag;
+        end
+    endgenerate
+
+    // Bank-local picks cross an explicit registered boundary before the pair
+    // arbiter. A token is live only while its referenced entry remains a
+    // current qualified candidate; removal or same-slot reallocation kills
+    // stale picks before they can be selected again.
+    reg bank_mem_valid_q [0:1];
+    reg bank_alu0_valid_q [0:1];
+    reg bank_alu1_valid_q [0:1];
+    reg bank_bonly_valid_q [0:1];
+    producer_slot_t bank_mem_slot_q [0:1];
+    producer_slot_t bank_alu0_slot_q [0:1];
+    producer_slot_t bank_alu1_slot_q [0:1];
+    producer_slot_t bank_bonly_slot_q [0:1];
+    producer_id_t bank_mem_id_q [0:1];
+    producer_id_t bank_alu0_id_q [0:1];
+    producer_id_t bank_alu1_id_q [0:1];
+    producer_id_t bank_bonly_id_q [0:1];
+    reg bank_mem_live_q [0:1];
+    reg bank_alu0_live_q [0:1];
+    reg bank_alu1_live_q [0:1];
+    reg bank_bonly_live_q [0:1];
+    wire bank_mem_live_d [0:1];
+    wire bank_alu0_live_d [0:1];
+    wire bank_alu1_live_d [0:1];
+    wire bank_bonly_live_d [0:1];
+    reg [AGE_WIDTH-1:0] bank_mem_age_q [0:1];
+    reg [AGE_WIDTH-1:0] bank_alu0_age_q [0:1];
+    reg [AGE_WIDTH-1:0] bank_alu1_age_q [0:1];
+    reg [AGE_WIDTH-1:0] bank_bonly_age_q [0:1];
+    wire [AGE_WIDTH-1:0] bank_mem_age_d [0:1];
+    wire [AGE_WIDTH-1:0] bank_alu0_age_d [0:1];
+    wire [AGE_WIDTH-1:0] bank_alu1_age_d [0:1];
+    wire [AGE_WIDTH-1:0] bank_bonly_age_d [0:1];
+    wire bank_mem_valid [0:1];
+    wire bank_alu0_valid [0:1];
+    wire bank_alu1_valid [0:1];
+    wire bank_bonly_valid [0:1];
+    producer_slot_t bank_mem_slot [0:1];
+    producer_slot_t bank_alu0_slot [0:1];
+    producer_slot_t bank_alu1_slot [0:1];
+    producer_slot_t bank_bonly_slot [0:1];
+    generate
+        for (bank_g = 0; bank_g < 2; bank_g = bank_g + 1) begin : g_bank_token
+            assign bank_mem_age_d[bank_g] = producer_age(
+                entry_uop_q[bank_mem_slot_d[bank_g]].dst.rob_tag, rob_head_id_i);
+            assign bank_alu0_age_d[bank_g] = producer_age(
+                entry_uop_q[bank_alu0_slot_d[bank_g]].dst.rob_tag, rob_head_id_i);
+            assign bank_alu1_age_d[bank_g] = producer_age(
+                entry_uop_q[bank_alu1_slot_d[bank_g]].dst.rob_tag, rob_head_id_i);
+            assign bank_bonly_age_d[bank_g] = producer_age(
+                entry_uop_q[bank_bonly_slot_d[bank_g]].dst.rob_tag, rob_head_id_i);
+            // Live is a registered copy of the bank pick. Entry validity and
+            // producer identity are checked only when the token is consumed
+            // below, keeping the candidate/rank network off this D path.
+            assign bank_mem_live_d[bank_g] = bank_mem_valid_d[bank_g];
+            assign bank_alu0_live_d[bank_g] = bank_alu0_valid_d[bank_g];
+            assign bank_alu1_live_d[bank_g] = bank_alu1_valid_d[bank_g];
+            assign bank_bonly_live_d[bank_g] = bank_bonly_valid_d[bank_g];
+            assign bank_mem_valid[bank_g] = bank_mem_valid_q[bank_g] &&
+                bank_mem_live_q[bank_g] &&
+                entry_valid_q[bank_mem_slot_q[bank_g]] &&
+                (entry_uop_q[bank_mem_slot_q[bank_g]].dst.rob_tag ==
+                 bank_mem_id_q[bank_g]);
+            assign bank_alu0_valid[bank_g] = bank_alu0_valid_q[bank_g] &&
+                bank_alu0_live_q[bank_g] &&
+                entry_valid_q[bank_alu0_slot_q[bank_g]] &&
+                (entry_uop_q[bank_alu0_slot_q[bank_g]].dst.rob_tag ==
+                 bank_alu0_id_q[bank_g]);
+            assign bank_alu1_valid[bank_g] = bank_alu1_valid_q[bank_g] &&
+                bank_alu1_live_q[bank_g] &&
+                entry_valid_q[bank_alu1_slot_q[bank_g]] &&
+                (entry_uop_q[bank_alu1_slot_q[bank_g]].dst.rob_tag ==
+                 bank_alu1_id_q[bank_g]);
+            assign bank_bonly_valid[bank_g] = bank_bonly_valid_q[bank_g] &&
+                bank_bonly_live_q[bank_g] &&
+                entry_valid_q[bank_bonly_slot_q[bank_g]] &&
+                (entry_uop_q[bank_bonly_slot_q[bank_g]].dst.rob_tag ==
+                 bank_bonly_id_q[bank_g]);
+            assign bank_mem_slot[bank_g] = bank_mem_slot_q[bank_g];
+            assign bank_alu0_slot[bank_g] = bank_alu0_slot_q[bank_g];
+            assign bank_alu1_slot[bank_g] = bank_alu1_slot_q[bank_g];
+            assign bank_bonly_slot[bank_g] = bank_bonly_slot_q[bank_g];
+        end
+    endgenerate
+
+    wire [AGE_WIDTH-1:0] bank_mem_age0 = bank_mem_age_q[0];
+    wire [AGE_WIDTH-1:0] bank_mem_age1 = bank_mem_age_q[1];
+    wire [AGE_WIDTH-1:0] bank_alu0_age0 = bank_alu0_age_q[0];
+    wire [AGE_WIDTH-1:0] bank_alu0_age1 = bank_alu0_age_q[1];
+    wire any_mem_candidate = bank_mem_valid[0] || bank_mem_valid[1];
+    wire any_alu_a_candidate = bank_alu0_valid[0] || bank_alu0_valid[1];
+    wire mem_bank0_wins = bank_mem_valid[0] &&
+        (!bank_mem_valid[1] || (bank_mem_age0 <= bank_mem_age1));
+    wire alu_bank0_wins = bank_alu0_valid[0] &&
+        (!bank_alu0_valid[1] || (bank_alu0_age0 <= bank_alu0_age1));
+    wire selected_a_valid = any_mem_candidate || any_alu_a_candidate;
+    wire producer_slot_t selected_a_slot = any_mem_candidate ?
+        (mem_bank0_wins ? bank_mem_slot[0] : bank_mem_slot[1]) :
+        (alu_bank0_wins ? bank_alu0_slot[0] : bank_alu0_slot[1]);
+    wire producer_id_t selected_a_id;
+    assign selected_a_id = entry_uop_q[selected_a_slot].dst.rob_tag;
+
+    // Bank A arbitration is its own registered decision. The B arbiter only
+    // consumes this identity-qualified token, so a cross-bank A age compare
+    // cannot extend into the B rank/selection path.
+    reg pair_a_valid_q;
+    producer_slot_t pair_a_slot_q;
+    producer_id_t pair_a_id_q;
+    wire pair_a_live_q = pair_a_valid_q &&
+        entry_valid_q[pair_a_slot_q] &&
+        (entry_uop_q[pair_a_slot_q].dst.rob_tag == pair_a_id_q);
+
+    wire b_bonly0_valid = bank_bonly_valid[0] &&
+        (!pair_a_live_q || (bank_bonly_slot[0] != pair_a_slot_q));
+    wire b_bonly1_valid = bank_bonly_valid[1] &&
+        (!pair_a_live_q || (bank_bonly_slot[1] != pair_a_slot_q));
+    wire [AGE_WIDTH-1:0] b_bonly_age0 = bank_bonly_age_q[0];
+    wire [AGE_WIDTH-1:0] b_bonly_age1 = bank_bonly_age_q[1];
+    wire b_bonly_any = b_bonly0_valid || b_bonly1_valid;
+    wire b_bonly0_wins = b_bonly0_valid &&
+        (!b_bonly1_valid || (b_bonly_age0 <= b_bonly_age1));
+    wire producer_slot_t b_bonly_slot_winner = b_bonly0_wins ?
+        bank_bonly_slot[0] : bank_bonly_slot[1];
+
+    wire [3:0] b_alu_valid;
+    wire producer_slot_t b_alu_slot [0:3];
+    wire [AGE_WIDTH-1:0] b_alu_age [0:3];
+    assign b_alu_valid[0] = bank_alu0_valid[0] &&
+        (!pair_a_live_q || (bank_alu0_slot[0] != pair_a_slot_q));
+    assign b_alu_valid[1] = bank_alu1_valid[0] &&
+        (!pair_a_live_q || (bank_alu1_slot[0] != pair_a_slot_q));
+    assign b_alu_valid[2] = bank_alu0_valid[1] &&
+        (!pair_a_live_q || (bank_alu0_slot[1] != pair_a_slot_q));
+    assign b_alu_valid[3] = bank_alu1_valid[1] &&
+        (!pair_a_live_q || (bank_alu1_slot[1] != pair_a_slot_q));
+    assign b_alu_slot[0] = bank_alu0_slot[0];
+    assign b_alu_slot[1] = bank_alu1_slot[0];
+    assign b_alu_slot[2] = bank_alu0_slot[1];
+    assign b_alu_slot[3] = bank_alu1_slot[1];
+    assign b_alu_age[0] = bank_alu0_age_q[0];
+    assign b_alu_age[1] = bank_alu1_age_q[0];
+    assign b_alu_age[2] = bank_alu0_age_q[1];
+    assign b_alu_age[3] = bank_alu1_age_q[1];
+    wire [3:0] b_alu_best;
+    assign b_alu_best[0] = b_alu_valid[0] &&
+        !( (b_alu_valid[1] && (b_alu_age[1] < b_alu_age[0])) ||
+           (b_alu_valid[2] && (b_alu_age[2] < b_alu_age[0])) ||
+           (b_alu_valid[3] && (b_alu_age[3] < b_alu_age[0])) );
+    assign b_alu_best[1] = b_alu_valid[1] &&
+        !( (b_alu_valid[0] && (b_alu_age[0] <= b_alu_age[1])) ||
+           (b_alu_valid[2] && (b_alu_age[2] < b_alu_age[1])) ||
+           (b_alu_valid[3] && (b_alu_age[3] < b_alu_age[1])) );
+    assign b_alu_best[2] = b_alu_valid[2] &&
+        !( (b_alu_valid[0] && (b_alu_age[0] <= b_alu_age[2])) ||
+           (b_alu_valid[1] && (b_alu_age[1] <= b_alu_age[2])) ||
+           (b_alu_valid[3] && (b_alu_age[3] < b_alu_age[2])) );
+    assign b_alu_best[3] = b_alu_valid[3] &&
+        !( (b_alu_valid[0] && (b_alu_age[0] <= b_alu_age[3])) ||
+           (b_alu_valid[1] && (b_alu_age[1] <= b_alu_age[3])) ||
+           (b_alu_valid[2] && (b_alu_age[2] <= b_alu_age[3])) );
+    wire b_alu_any = |b_alu_best;
+    wire producer_slot_t b_alu_slot_winner = b_alu_best[0] ? b_alu_slot[0] :
+        b_alu_best[1] ? b_alu_slot[1] : b_alu_best[2] ? b_alu_slot[2] :
+        b_alu_slot[3];
+    wire selected_b_valid = b_bonly_any || b_alu_any;
+    wire producer_slot_t selected_b_slot = b_bonly_any ?
+        b_bonly_slot_winner : b_alu_slot_winner;
+    wire producer_id_t selected_b_id;
+    assign selected_b_id = entry_uop_q[selected_b_slot].dst.rob_tag;
+    // Registered selection tokens feed the independent lane input cells.
+    // Their producer identities remain separate from the later release tokens:
+    // a physical slot can be reallocated before another bank/pair selection
+    // reaches this stage.
+    reg selected_a_valid_q;
+    reg selected_b_valid_q;
+    producer_slot_t selected_a_slot_q;
+    producer_slot_t selected_b_slot_q;
+    producer_id_t selected_a_id_q;
+    producer_id_t selected_b_id_q;
+
+    // Pair tokens are identity-qualified until their lane input register
+    // captures the uop. This rejects a stale slot after a remove/reallocate
+    // edge without making the lane input depend on scheduler selection.
+    wire selected_a_token_live_q = selected_a_valid_q &&
+        entry_valid_q[selected_a_slot_q] &&
+        (entry_uop_q[selected_a_slot_q].dst.rob_tag == selected_a_id_q);
+    wire selected_b_token_live_q = selected_b_valid_q &&
+        entry_valid_q[selected_b_slot_q] &&
+        (entry_uop_q[selected_b_slot_q].dst.rob_tag == selected_b_id_q);
+    // A release token is created only when its lane input register captures a
+    // selected uop.  Keep the producer ID alongside the physical slot so a
+    // same-edge release/reallocate cannot remove the new occupant on the next
+    // cycle.  The identity-qualified mask is the sole source of scheduler
+    // free credit, state removal, and the externally visible remove event.
+    reg release_a_valid_q;
+    reg release_b_valid_q;
+    producer_slot_t release_a_slot_q;
+    producer_slot_t release_b_slot_q;
+    producer_id_t release_a_id_q;
+    producer_id_t release_b_id_q;
+    wire release_a_live_q = release_a_valid_q &&
+        entry_valid_q[release_a_slot_q] &&
+        (entry_uop_q[release_a_slot_q].dst.rob_tag == release_a_id_q);
+    wire release_b_live_q = release_b_valid_q &&
+        entry_valid_q[release_b_slot_q] &&
+        (entry_uop_q[release_b_slot_q].dst.rob_tag == release_b_id_q);
+    wire selected_a_release_pending_q =
+        ((release_a_valid_q && (release_a_slot_q == selected_a_slot_q) &&
+          (release_a_id_q == selected_a_id_q)) ||
+         (release_b_valid_q && (release_b_slot_q == selected_a_slot_q) &&
+          (release_b_id_q == selected_a_id_q)));
+    wire selected_b_release_pending_q =
+        ((release_a_valid_q && (release_a_slot_q == selected_b_slot_q) &&
+          (release_a_id_q == selected_b_id_q)) ||
+         (release_b_valid_q && (release_b_slot_q == selected_b_slot_q) &&
+          (release_b_id_q == selected_b_id_q)));
+    // A pair token can remain resident in a bank token register until the
+    // release edge reaches the entry array. Fire it once, when the lane input
+    // captures it. The B guard is defensive: pair arbitration should already
+    // avoid an A/B alias, but a staged token must never duplicate execution.
+    wire selected_a_token_fire_q = selected_a_token_live_q &&
+        !selected_a_release_pending_q;
+    wire selected_b_token_fire_q = selected_b_token_live_q &&
+        !selected_b_release_pending_q &&
+        !(selected_a_token_fire_q &&
+          (selected_a_slot_q == selected_b_slot_q));
+    wire [ENTRY_DEPTH-1:0] selected_mask_q =
+        (release_a_live_q ? (ENTRY_DEPTH'(1) << release_a_slot_q) : '0) |
+        (release_b_live_q ? (ENTRY_DEPTH'(1) << release_b_slot_q) : '0);
+
+    // Recovery is a simultaneous survivor filter for the scheduler window.
+    // Build the post-recovery control set from producer identity and the
+    // selected/release mask, rather than from the pre-edge entry_valid_q.  An
+    // order token may only point at a control uop that remains live after the
+    // redirect; otherwise a stale dependency bit can permanently suppress a
+    // ready survivor from the bank candidate network.
+    wire [ENTRY_DEPTH-1:0] recovery_survivor_mask;
+    wire [ENTRY_DEPTH-1:0] recovery_live_control_mask;
+    genvar recovery_entry_idx;
+    generate
+        for (recovery_entry_idx = 0; recovery_entry_idx < ENTRY_DEPTH;
+             recovery_entry_idx = recovery_entry_idx + 1) begin : g_recovery_order_mask
+            wire recovery_entry_in_window =
+                producer_slot_in_window(
+                    entry_uop_q[recovery_entry_idx].dst.rob_tag[
+                        PRODUCER_SLOT_WIDTH-1:0],
+                    recovery_head_slot_i, recovery_branch_slot_i);
+            assign recovery_survivor_mask[recovery_entry_idx] =
+                entry_valid_q[recovery_entry_idx] &&
+                recovery_entry_in_window &&
+                (entry_uop_q[recovery_entry_idx].dst.rob_tag[
+                    PRODUCER_SLOT_WIDTH-1:0] != recovery_branch_slot_i) &&
+                !selected_mask_q[recovery_entry_idx];
+            assign recovery_live_control_mask[recovery_entry_idx] =
+                recovery_survivor_mask[recovery_entry_idx] &&
+                (uop_branch(entry_uop_q[recovery_entry_idx]) ||
+                 uop_serial(entry_uop_q[recovery_entry_idx]));
+        end
+    endgenerate
+
+    wire [ENTRY_DEPTH-1:0] issue_remove_mask = selected_mask_q;
+    assign issue_remove_mask_o = issue_remove_mask;
+    // Downstream Issue/EX registers have synchronous flush priority. Keep
+    // redirect control out of the lane data-valid cone; recovery clears the
+    // registered lane tokens at the edge instead of gating their outputs.
+    assign lane_a_valid_o = lane_a_valid_q;
+    assign lane_b_valid_o = lane_b_valid_q;
+    // Keep the compact payload's valid bit aligned with the independent lane
+    // token. Without this boundary an idle lane could expose a stale
+    // producer tag while lane_*_valid_o=0.
+    assign lane_a_uop_o = lane_a_valid_o ? lane_a_uop_q : '0;
+    assign lane_b_uop_o = lane_b_valid_o ? lane_b_uop_q : '0;
+
+    assign lookup_valid_o = ({2'b0, ingress_count_q} != '0);
+    assign lookup_tag0_o = ingress_q[0].src0.producer_tag;
+    assign lookup_tag1_o = ingress_q[0].src1.producer_tag;
+    assign lookup_tag2_o = ingress_q[1].src0.producer_tag;
+    assign lookup_tag3_o = ingress_q[1].src1.producer_tag;
+
+    // A lane register is a real elastic handoff.  The current six-stage
+    // execute adapter consumes both registers every cycle, but the valid bits
+    // remain independent and recovery can discard either lane without a
+    // independent lane registers.
+    reg lane_a_valid_q;
+    reg lane_b_valid_q;
+    ydrasil_compact_uop_t lane_a_uop_q;
+    ydrasil_compact_uop_t lane_b_uop_q;
+    // Divider reservation is derived only from the registered lane-B input
+    // cell.  This keeps the long bank-age/pair compare network out of the
+    // divider control path while preserving the issue-to-inflight identity.
+    wire lane_b_div_valid = lane_b_valid_q && uop_divrem(lane_b_uop_q);
+    wire producer_id_t lane_b_div_id = lane_b_uop_q.dst.rob_tag;
+    // During the one-cycle handoff from lane token to issue token, either
+    // token can be the only visible reservation. Recovery must classify that
+    // token by producer identity before deciding whether the physical MDU
+    // state may survive the redirect.
+    wire div_reservation_valid = div_inflight_q || div_issue_q ||
+        lane_b_div_valid;
+    wire producer_id_t div_reservation_id = div_inflight_q ? div_inflight_id_q :
+        div_issue_q ? div_issue_id_q : lane_b_div_id;
+    wire div_reservation_survives_recovery = div_reservation_valid &&
+        producer_slot_in_window(
+            div_reservation_id[PRODUCER_SLOT_WIDTH-1:0],
+            recovery_head_slot_i, recovery_branch_slot_i) &&
+        (div_reservation_id[PRODUCER_SLOT_WIDTH-1:0] !=
+         recovery_branch_slot_i);
+    wire free_any = |(~entry_valid_q | selected_mask_q);
+    wire free_two = ($countones(~entry_valid_q | selected_mask_q) >= 2);
+    reg [PRODUCER_SLOT_WIDTH-1:0] alloc_slot0_d;
+    reg [PRODUCER_SLOT_WIDTH-1:0] alloc_slot1_d;
+    reg alloc_slot0_valid_d;
+    reg alloc_slot1_valid_d;
+    integer free_scan;
+    always_comb begin
+        alloc_slot0_d = '0;
+        alloc_slot1_d = '0;
+        alloc_slot0_valid_d = 1'b0;
+        alloc_slot1_valid_d = 1'b0;
+        for (free_scan = 0; free_scan < ENTRY_DEPTH; free_scan = free_scan + 1) begin
+            if ((!entry_valid_q[free_scan] || selected_mask_q[free_scan]) &&
+                !alloc_slot0_valid_d) begin
+                alloc_slot0_d = producer_slot_t'(free_scan);
+                alloc_slot0_valid_d = 1'b1;
+            end else if ((!entry_valid_q[free_scan] || selected_mask_q[free_scan]) &&
+                         !alloc_slot1_valid_d) begin
+                alloc_slot1_d = producer_slot_t'(free_scan);
+                alloc_slot1_valid_d = 1'b1;
             end
-            if (dispatch0_write_i) begin
-                uop_q <= dispatch0_uop_i;
-                valid_q <= 1'b1;
-                src0_ready_q <= dispatch0_src0_ready_i;
-                src1_ready_q <= dispatch0_src1_ready_i;
-                order_mask_q <= dispatch0_order_mask_i;
-                memory_q <= dispatch0_memory_i;
-                store_q <= dispatch0_store_i;
-                mul_q <= dispatch0_mul_i;
-                divrem_q <= dispatch0_divrem_i;
-                serial_q <= dispatch0_serial_i;
-                early_writes_q <= dispatch0_early_writes_i;
-            end else if (dispatch1_write_i) begin
-                uop_q <= dispatch1_uop_i;
-                valid_q <= 1'b1;
-                src0_ready_q <= dispatch1_src0_ready_i;
-                src1_ready_q <= dispatch1_src1_ready_i;
-                order_mask_q <= dispatch1_order_mask_i;
-                memory_q <= dispatch1_memory_i;
-                store_q <= dispatch1_store_i;
-                mul_q <= dispatch1_mul_i;
-                divrem_q <= dispatch1_divrem_i;
-                serial_q <= dispatch1_serial_i;
-                early_writes_q <= dispatch1_early_writes_i;
+        end
+    end
+    // As with queue acceptance, recovery discards this edge's drain in the
+    // synchronous priority branch.  Keeping it local removes redirect/trap
+    // control from the bank-free credit and allocation-select cone.
+    wire drain0 = ingress_count_q != '0 && alloc_slot0_valid_d;
+    wire drain1 = ingress_count_q > 1 && alloc_slot1_valid_d;
+    reg [INGRESS_COUNT_WIDTH-1:0] ingress_count_d;
+    ydrasil_compact_uop_t ingress0_d;
+    ydrasil_compact_uop_t ingress1_d;
+    always_comb begin
+        ingress_count_d = ingress_count_q;
+        ingress0_d = ingress_q[0];
+        ingress1_d = ingress_q[1];
+        if (drain1) begin
+            ingress_count_d = ingress_count_d - 2'd2;
+            ingress0_d = '0;
+            ingress1_d = '0;
+        end else if (drain0) begin
+            ingress_count_d = ingress_count_d - 1'b1;
+            ingress0_d = ingress_count_q > 1 ? ingress_q[1] : '0;
+            ingress1_d = '0;
+        end
+        if (accept0) begin
+            if (ingress_count_d == 0)
+                ingress0_d = queue0_i;
+            else
+                ingress1_d = queue0_i;
+            ingress_count_d = ingress_count_d + 1'b1;
+        end
+        if (accept1) begin
+            if (ingress_count_d == 0)
+                ingress0_d = queue1_i;
+            else
+                ingress1_d = queue1_i;
+            ingress_count_d = ingress_count_d + 1'b1;
+        end
+    end
+
+    reg new_src0_ready0;
+    reg new_src1_ready0;
+    reg new_src0_ready1;
+    reg new_src1_ready1;
+    integer wake_scan;
+    always_comb begin
+        new_src0_ready0 = !ingress_q[0].src0.tag_valid ||
+            ingress_q[0].src0.ready || lookup_resident0_i ||
+            (ingress_q[0].src0.tag_valid && lookup_reallocated0_i);
+        new_src1_ready0 = !ingress_q[0].src1.tag_valid ||
+            ingress_q[0].src1.ready || lookup_resident1_i ||
+            (ingress_q[0].src1.tag_valid && lookup_reallocated1_i);
+        new_src0_ready1 = !ingress_q[1].src0.tag_valid ||
+            ingress_q[1].src0.ready || lookup_resident2_i ||
+            (ingress_q[1].src0.tag_valid && lookup_reallocated2_i);
+        new_src1_ready1 = !ingress_q[1].src1.tag_valid ||
+            ingress_q[1].src1.ready || lookup_resident3_i ||
+            (ingress_q[1].src1.tag_valid && lookup_reallocated3_i);
+        for (wake_scan = 0; wake_scan < COMPLETION_LANES; wake_scan = wake_scan + 1) begin
+            if (completion_meta_i[wake_scan].valid &&
+                completion_meta_i[wake_scan].producer_tracked) begin
+                new_src0_ready0 = new_src0_ready0 ||
+                    (ingress_q[0].src0.producer_tag ==
+                     completion_meta_i[wake_scan].producer_id);
+                new_src1_ready0 = new_src1_ready0 ||
+                    (ingress_q[0].src1.producer_tag ==
+                     completion_meta_i[wake_scan].producer_id);
+                new_src0_ready1 = new_src0_ready1 ||
+                    (ingress_q[1].src0.producer_tag ==
+                     completion_meta_i[wake_scan].producer_id);
+                new_src1_ready1 = new_src1_ready1 ||
+                    (ingress_q[1].src1.producer_tag ==
+                     completion_meta_i[wake_scan].producer_id);
             end
         end
     end
 
-    assign uop_o = uop_q;
-    assign valid_o = valid_q;
-    assign src0_ready_o = src0_ready_q;
-    assign src1_ready_o = src1_ready_q;
-    assign order_mask_o = order_mask_q;
-    assign memory_o = memory_q;
-    assign store_o = store_q;
-    assign mul_o = mul_q;
-    assign divrem_o = divrem_q;
-    assign serial_o = serial_q;
-    assign early_writes_o = early_writes_q;
+    wire [ENTRY_DEPTH-1:0] order_base_mask =
+        unresolved_control_mask & ~selected_mask_q;
+    integer state_idx;
+    integer bank_state_idx;
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            ingress_count_q <= '0;
+            ingress_q[0] <= '0;
+            ingress_q[1] <= '0;
+            entry_valid_q <= '0;
+            lane_a_valid_q <= 1'b0;
+            lane_b_valid_q <= 1'b0;
+            lane_a_uop_q <= '0;
+            lane_b_uop_q <= '0;
+            pair_a_valid_q <= 1'b0;
+            pair_a_slot_q <= '0;
+            pair_a_id_q <= '0;
+            selected_a_valid_q <= 1'b0;
+            selected_b_valid_q <= 1'b0;
+            selected_a_slot_q <= '0;
+            selected_b_slot_q <= '0;
+            selected_a_id_q <= '0;
+            selected_b_id_q <= '0;
+            release_a_valid_q <= 1'b0;
+            release_b_valid_q <= 1'b0;
+            release_a_slot_q <= '0;
+            release_b_slot_q <= '0;
+            release_a_id_q <= '0;
+            release_b_id_q <= '0;
+            entry_candidate_q <= '0;
+            div_issue_q <= 1'b0;
+            div_issue_id_q <= '0;
+            div_inflight_q <= 1'b0;
+            div_inflight_id_q <= '0;
+            for (bank_state_idx = 0; bank_state_idx < 2;
+                 bank_state_idx = bank_state_idx + 1) begin
+                bank_mem_valid_q[bank_state_idx] <= 1'b0;
+                bank_alu0_valid_q[bank_state_idx] <= 1'b0;
+                bank_alu1_valid_q[bank_state_idx] <= 1'b0;
+                bank_bonly_valid_q[bank_state_idx] <= 1'b0;
+                bank_mem_slot_q[bank_state_idx] <= '0;
+                bank_alu0_slot_q[bank_state_idx] <= '0;
+                bank_alu1_slot_q[bank_state_idx] <= '0;
+                bank_bonly_slot_q[bank_state_idx] <= '0;
+                bank_mem_id_q[bank_state_idx] <= '0;
+                bank_alu0_id_q[bank_state_idx] <= '0;
+                bank_alu1_id_q[bank_state_idx] <= '0;
+                bank_bonly_id_q[bank_state_idx] <= '0;
+                bank_mem_live_q[bank_state_idx] <= 1'b0;
+                bank_alu0_live_q[bank_state_idx] <= 1'b0;
+                bank_alu1_live_q[bank_state_idx] <= 1'b0;
+                bank_bonly_live_q[bank_state_idx] <= 1'b0;
+                bank_mem_age_q[bank_state_idx] <= '0;
+                bank_alu0_age_q[bank_state_idx] <= '0;
+                bank_alu1_age_q[bank_state_idx] <= '0;
+                bank_bonly_age_q[bank_state_idx] <= '0;
+            end
+            for (state_idx = 0; state_idx < ENTRY_DEPTH; state_idx = state_idx + 1) begin
+                entry_uop_q[state_idx] <= '0;
+                entry_src0_ready_q[state_idx] <= 1'b0;
+                entry_src1_ready_q[state_idx] <= 1'b0;
+                entry_order_q[state_idx] <= '0;
+            end
+        end else if (hard_flush_i || branch_recovery_i) begin
+            ingress_count_q <= '0;
+            ingress_q[0] <= '0;
+            ingress_q[1] <= '0;
+            lane_a_valid_q <= 1'b0;
+            lane_b_valid_q <= 1'b0;
+            pair_a_valid_q <= 1'b0;
+            pair_a_slot_q <= '0;
+            pair_a_id_q <= '0;
+            selected_a_valid_q <= 1'b0;
+            selected_b_valid_q <= 1'b0;
+            selected_a_slot_q <= '0;
+            selected_b_slot_q <= '0;
+            selected_a_id_q <= '0;
+            selected_b_id_q <= '0;
+            release_a_valid_q <= 1'b0;
+            release_b_valid_q <= 1'b0;
+            release_a_slot_q <= '0;
+            release_b_slot_q <= '0;
+            release_a_id_q <= '0;
+            release_b_id_q <= '0;
+            entry_candidate_q <= '0;
+            div_issue_q <= 1'b0;
+            div_issue_id_q <= '0;
+            if (hard_flush_i || !div_reservation_survives_recovery) begin
+                div_inflight_q <= 1'b0;
+                div_inflight_id_q <= '0;
+            end else if (completion_meta_i[COMPLETION_MUL].valid &&
+                         div_reservation_valid &&
+                         (completion_meta_i[COMPLETION_MUL].producer_id ==
+                          div_reservation_id)) begin
+                // A completion concurrent with redirect still retires the
+                // older divide; producer_tracked is intentionally ignored so
+                // rd=x0 DIV cannot leave occupancy stuck.
+                div_inflight_q <= 1'b0;
+                div_inflight_id_q <= '0;
+            end else begin
+                // Carry a survivor forward even when recovery occurs during
+                // the registered lane-to-issue handoff. Without this update
+                // the physical MDU may remain live while scheduler occupancy
+                // is cleared for one cycle.
+                div_inflight_q <= 1'b1;
+                div_inflight_id_q <= div_reservation_id;
+            end
+            for (bank_state_idx = 0; bank_state_idx < 2;
+                 bank_state_idx = bank_state_idx + 1) begin
+                bank_mem_valid_q[bank_state_idx] <= 1'b0;
+                bank_alu0_valid_q[bank_state_idx] <= 1'b0;
+                bank_alu1_valid_q[bank_state_idx] <= 1'b0;
+                bank_bonly_valid_q[bank_state_idx] <= 1'b0;
+                bank_mem_slot_q[bank_state_idx] <= '0;
+                bank_alu0_slot_q[bank_state_idx] <= '0;
+                bank_alu1_slot_q[bank_state_idx] <= '0;
+                bank_bonly_slot_q[bank_state_idx] <= '0;
+                bank_mem_id_q[bank_state_idx] <= '0;
+                bank_alu0_id_q[bank_state_idx] <= '0;
+                bank_alu1_id_q[bank_state_idx] <= '0;
+                bank_bonly_id_q[bank_state_idx] <= '0;
+                bank_mem_live_q[bank_state_idx] <= 1'b0;
+                bank_alu0_live_q[bank_state_idx] <= 1'b0;
+                bank_alu1_live_q[bank_state_idx] <= 1'b0;
+                bank_bonly_live_q[bank_state_idx] <= 1'b0;
+                bank_mem_age_q[bank_state_idx] <= '0;
+                bank_alu0_age_q[bank_state_idx] <= '0;
+                bank_alu1_age_q[bank_state_idx] <= '0;
+                bank_bonly_age_q[bank_state_idx] <= '0;
+            end
+            for (state_idx = 0; state_idx < ENTRY_DEPTH; state_idx = state_idx + 1) begin
+                // The redirecting branch is already executed and remains in
+                // the ROB for precise in-order retirement, but it must not be
+                // reinserted into the scheduler.  producer_slot_in_window is
+                // intentionally inclusive for ROB/LSQ recovery, so exclude
+                // the branch slot explicitly at this scheduler boundary.
+                // selected_mask_q is identity-qualified and denotes a uop
+                // already captured by a lane cell; recovery leaves that uop
+                // to the downstream recovery path rather than reinserting it.
+                if (entry_valid_q[state_idx] &&
+                    producer_slot_in_window(
+                        entry_uop_q[state_idx].dst.rob_tag[
+                            PRODUCER_SLOT_WIDTH-1:0],
+                        recovery_head_slot_i, recovery_branch_slot_i) &&
+                    (entry_uop_q[state_idx].dst.rob_tag[
+                        PRODUCER_SLOT_WIDTH-1:0] != recovery_branch_slot_i) &&
+                    !selected_mask_q[state_idx]) begin
+                    entry_order_q[state_idx] <= entry_order_q[state_idx] &
+                        recovery_live_control_mask;
+                end else begin
+                    entry_valid_q[state_idx] <= 1'b0;
+                    entry_order_q[state_idx] <= '0;
+                end
+            end
+        end else begin
+            pair_a_valid_q <= selected_a_valid;
+            pair_a_slot_q <= selected_a_slot;
+            pair_a_id_q <= selected_a_valid ? selected_a_id : '0;
+            selected_a_valid_q <= pair_a_live_q;
+            selected_b_valid_q <= selected_b_valid;
+            selected_a_slot_q <= pair_a_slot_q;
+            selected_b_slot_q <= selected_b_slot;
+            selected_a_id_q <= pair_a_live_q ? pair_a_id_q : '0;
+            selected_b_id_q <= selected_b_valid ? selected_b_id : '0;
+            release_a_valid_q <= selected_a_token_fire_q;
+            release_b_valid_q <= selected_b_token_fire_q;
+            release_a_slot_q <= selected_a_slot_q;
+            release_b_slot_q <= selected_b_slot_q;
+            release_a_id_q <= selected_a_token_fire_q ? selected_a_id_q : '0;
+            release_b_id_q <= selected_b_token_fire_q ? selected_b_id_q : '0;
+            div_issue_q <= lane_b_div_valid;
+            div_issue_id_q <= lane_b_div_valid ? lane_b_div_id : '0;
+            if (completion_meta_i[COMPLETION_MUL].valid &&
+                div_inflight_q &&
+                (completion_meta_i[COMPLETION_MUL].producer_id ==
+                 div_inflight_id_q)) begin
+                div_inflight_q <= div_issue_q;
+                div_inflight_id_q <= div_issue_q ? div_issue_id_q : '0;
+            end else if (div_issue_q || lane_b_div_valid) begin
+                div_inflight_q <= 1'b1;
+                div_inflight_id_q <= div_issue_q ? div_issue_id_q :
+                    lane_b_div_id;
+            end
+            for (bank_state_idx = 0; bank_state_idx < 2;
+                 bank_state_idx = bank_state_idx + 1) begin
+                bank_mem_valid_q[bank_state_idx] <= bank_mem_valid_d[bank_state_idx];
+                bank_alu0_valid_q[bank_state_idx] <= bank_alu0_valid_d[bank_state_idx];
+                bank_alu1_valid_q[bank_state_idx] <= bank_alu1_valid_d[bank_state_idx];
+                bank_bonly_valid_q[bank_state_idx] <= bank_bonly_valid_d[bank_state_idx];
+                bank_mem_slot_q[bank_state_idx] <= bank_mem_slot_d[bank_state_idx];
+                bank_alu0_slot_q[bank_state_idx] <= bank_alu0_slot_d[bank_state_idx];
+                bank_alu1_slot_q[bank_state_idx] <= bank_alu1_slot_d[bank_state_idx];
+                bank_bonly_slot_q[bank_state_idx] <= bank_bonly_slot_d[bank_state_idx];
+                bank_mem_id_q[bank_state_idx] <= bank_mem_id_d[bank_state_idx];
+                bank_alu0_id_q[bank_state_idx] <= bank_alu0_id_d[bank_state_idx];
+                bank_alu1_id_q[bank_state_idx] <= bank_alu1_id_d[bank_state_idx];
+                bank_bonly_id_q[bank_state_idx] <= bank_bonly_id_d[bank_state_idx];
+                bank_mem_live_q[bank_state_idx] <= bank_mem_live_d[bank_state_idx];
+                bank_alu0_live_q[bank_state_idx] <= bank_alu0_live_d[bank_state_idx];
+                bank_alu1_live_q[bank_state_idx] <= bank_alu1_live_d[bank_state_idx];
+                bank_bonly_live_q[bank_state_idx] <= bank_bonly_live_d[bank_state_idx];
+                bank_mem_age_q[bank_state_idx] <= bank_mem_age_d[bank_state_idx];
+                bank_alu0_age_q[bank_state_idx] <= bank_alu0_age_d[bank_state_idx];
+                bank_alu1_age_q[bank_state_idx] <= bank_alu1_age_d[bank_state_idx];
+                bank_bonly_age_q[bank_state_idx] <= bank_bonly_age_d[bank_state_idx];
+            end
+            ingress_count_q <= ingress_count_d;
+            ingress_q[0] <= ingress0_d;
+            ingress_q[1] <= ingress1_d;
+            if (selected_a_token_fire_q) begin
+                lane_a_uop_q <= entry_uop_q[selected_a_slot_q];
+                lane_a_uop_q.valid <= 1'b1;
+                lane_a_uop_q.lane_mask <= 2'b01;
+                lane_a_valid_q <= 1'b1;
+            end else
+                lane_a_valid_q <= 1'b0;
+            if (selected_b_token_fire_q) begin
+                lane_b_uop_q <= entry_uop_q[selected_b_slot_q];
+                lane_b_uop_q.valid <= 1'b1;
+                lane_b_uop_q.lane_mask <= 2'b10;
+                lane_b_valid_q <= 1'b1;
+            end else
+                lane_b_valid_q <= 1'b0;
+
+            for (state_idx = 0; state_idx < ENTRY_DEPTH; state_idx = state_idx + 1) begin
+                if (entry_valid_q[state_idx]) begin
+                    if (entry_wakeup0[state_idx])
+                        entry_src0_ready_q[state_idx] <= 1'b1;
+                    if (entry_wakeup1[state_idx])
+                        entry_src1_ready_q[state_idx] <= 1'b1;
+                    entry_order_q[state_idx] <= entry_order_q[state_idx] &
+                        ~selected_mask_q;
+                    if (selected_mask_q[state_idx])
+                        entry_valid_q[state_idx] <= 1'b0;
+                    if (selected_mask_q[state_idx])
+                        entry_candidate_q[state_idx] <= 1'b0;
+                    else
+                        entry_candidate_q[state_idx] <= entry_candidate_now[state_idx];
+                end else begin
+                    entry_candidate_q[state_idx] <= 1'b0;
+                end
+                if (drain0 && producer_slot_t'(state_idx) == alloc_slot0_d) begin
+                    entry_uop_q[state_idx] <= ingress_q[0];
+                    entry_valid_q[state_idx] <= 1'b1;
+                    entry_src0_ready_q[state_idx] <= new_src0_ready0;
+                    entry_src1_ready_q[state_idx] <= new_src1_ready0;
+                    entry_candidate_q[state_idx] <= 1'b0;
+                    entry_order_q[state_idx] <=
+                        (uop_branch(ingress_q[0]) || uop_serial(ingress_q[0])) ?
+                        order_base_mask : order_base_mask;
+                end
+                if (drain1 && producer_slot_t'(state_idx) == alloc_slot1_d) begin
+                    entry_uop_q[state_idx] <= ingress_q[1];
+                    entry_valid_q[state_idx] <= 1'b1;
+                    entry_src0_ready_q[state_idx] <= new_src0_ready1;
+                    entry_src1_ready_q[state_idx] <= new_src1_ready1;
+                    entry_candidate_q[state_idx] <= 1'b0;
+                    entry_order_q[state_idx] <= order_base_mask;
+                end
+            end
+        end
+    end
 endmodule
 
-
-// 第二槽位仅执行无异常的单周期整数/位操作。输入与输出各打一拍，
-// 使其完成时序与主 ALU 完成总线保持一致。
 module ydrasil_dual_alu
 import ydrasil_pkg::*;
 (
@@ -2441,7 +1600,6 @@ import ydrasil_pkg::*;
     output wire                           completion_producer_tracked_o,
     output wire [REGS_ADDR_WIDTH-1:0]     completion_addr_o,
     output wire [REGS_DATA_WIDTH-1:0]     completion_data_o,
-    output wire [REGS_DATA_WIDTH-1:0]     early_bypass_data_o,
     output wire                           ex_branch_jump_o,
     output wire [INST_ADDR_WIDTH-1:0]     ex_branch_target_o,
     output wire                           ex_pc_redirect_o,
@@ -2537,23 +1695,6 @@ import ydrasil_pkg::*;
         .operator_type_i (bit_operator_type),
         .result_o        (bitmanip_result)
     );
-
-    // Keep the early-return data cone separate from min/max and other
-    // expensive bitmanip operations. The matching token is captured in
-    // Issue, and this value is selected only at the consumer FU input.
-    wire early_lite_bitmanip_op =
-        bit_valid_i &&
-        (bit_operator[OP_B_SH1ADD] | bit_operator[OP_B_SH2ADD] |
-         bit_operator[OP_B_SH3ADD] | bit_operator[OP_B_PACK] |
-         bit_operator[OP_B_PACKH]  | bit_operator[OP_B_REV8] |
-         bit_operator[OP_B_SEXT_B] | bit_operator[OP_B_SEXT_H] |
-         bit_operator[OP_B_ZEXT_H]);
-    wire [REGS_DATA_WIDTH-1:0] early_lite_bitmanip_result =
-        fast_b_shadd_result | early_b_pack_result | fast_b_extend_result;
-    assign early_bypass_data_o = early_lite_bitmanip_op ?
-        early_lite_bitmanip_result :
-        alu_valid_i ? alu_result :
-        bru_valid_i ? branch_link_result : '0;
 
     ydrasil_bru u_lane_b_bru (
         .clk(clk),

@@ -10,9 +10,8 @@ import ydrasil_pkg::*;
         compact_uop_o.lane_mask = issue_pkt_i.lane_mask;
         compact_uop_o.src0 = issue_pkt_i.src0;
         compact_uop_o.src1 = issue_pkt_i.src1;
-        compact_uop_o.src0_bypass = BYPASS_NONE;
-        compact_uop_o.src1_bypass = BYPASS_NONE;
         compact_uop_o.dst = issue_pkt_i.dst;
+        compact_uop_o.lsq_index = issue_pkt_i.lsq_index;
 
         compact_uop_o.op_class = issue_pkt_i.uop_class;
         compact_uop_o.subop = issue_pkt_i.uop_subop;

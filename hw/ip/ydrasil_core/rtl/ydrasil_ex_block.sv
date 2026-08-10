@@ -39,6 +39,9 @@ import ydrasil_pkg::*;
     input  producer_id_t                   id_ex_producer_id_i,
     input  wire                            trap_redirect_i,
     input  wire [INST_ADDR_WIDTH-1:0]      trap_redirect_addr_i,
+    input  wire                            branch_recovery_i,
+    input  producer_slot_t                 recovery_head_slot_i,
+    input  producer_slot_t                 recovery_branch_slot_i,
 
     input  wire [CSR_ADDR_WIDTH-1:0]       id_ex_csr_waddr_i,
     input  wire [OP_CSR_INFO_WIDTH-1:0]    id_op_csr_info_i,
@@ -61,7 +64,6 @@ import ydrasil_pkg::*;
     output wire                            completion_producer_tracked_o,
     output wire [REGS_ADDR_WIDTH-1:0]      completion_addr_o,
     output wire [REGS_DATA_WIDTH-1:0]      completion_data_o,
-    output wire [REGS_DATA_WIDTH-1:0]      early_bypass_data_o,
 
     output wire                            mul_issue_o,
     output wire [REGS_ADDR_WIDTH-1:0]      mul_issue_waddr_o,
@@ -69,13 +71,9 @@ import ydrasil_pkg::*;
     output wire                            mul_rf_wen_rd_o,
     output wire [REGS_ADDR_WIDTH-1:0]      mul_rf_waddr_rd_o,
     output producer_id_t                   mul_producer_id_o,
-    output wire                            mul_result_valid_o,
-    output ydrasil_reservation_pkt_t       mdu_due_o,
-    output ydrasil_reservation_pkt_t       mdu_result_reservation_o,
-    output wire [REGS_DATA_WIDTH-1:0]      mdu_bypass_data_o,
+	output wire                            mul_result_valid_o,
 
 	output wire                            ex_instret_inc_o,
-	output wire                            div_available_o,
 	output wire                            ex_mul_stall_o
 );
 
@@ -119,11 +117,16 @@ import ydrasil_pkg::*;
     reg [OPERATOR_WIDTH-1:0]   div_operator_q;
     reg [REGS_DATA_WIDTH-1:0]  div_result_q;
 
-    // Producer identity includes the allocation epoch. A result from a
-    // squashed long-latency operation is harmless: ROB qualification rejects
-    // it even after the physical slot has been reused. Keeping MDU state
-    // independent of recovery also removes the recovery-to-completion loop.
-    wire div_kill = trap_redirect_i;
+    // A redirecting branch may squash a younger divider already resident in
+    // the MDU. Older DIV state remains live and is allowed to complete, so the
+    // scheduler identity token and physical reservation agree.
+    wire div_recovery_keep = producer_slot_in_window(
+        div_producer_id_q[PRODUCER_SLOT_WIDTH-1:0],
+        recovery_head_slot_i, recovery_branch_slot_i) &&
+        (div_producer_id_q[PRODUCER_SLOT_WIDTH-1:0] !=
+         recovery_branch_slot_i);
+    wire div_kill = trap_redirect_i ||
+        (branch_recovery_i && !div_recovery_keep);
 
     reg [REGS_DATA_WIDTH-1:0] alu_result_ff;
     reg                       alu_rf_wen_rd_ff;
@@ -182,23 +185,20 @@ import ydrasil_pkg::*;
     assign mul_issue_waddr_o = mul_rf_waddr_i;
 
     assign div_start = mul_valid_i & op_div & !div_active_q &
-        !div_pending_q & !div_busy & !div_done & !trap_redirect_i &
+        !div_pending_q & !div_busy & !div_done & !div_kill &
         !lane_b_flush_i;
     // A multiply result cannot be backpressured. Hold DIV completion state
     // until the single typed MDU result port is available.
-    assign div_complete = div_pending_q & !mul_pipe_wen &
-        !trap_redirect_i;
+    assign div_complete = div_pending_q & !mul_pipe_wen & !div_kill;
     assign div_rf_wen_rd = div_complete & div_wen_q;
     assign ex_mul_stall_o = mul_valid_i & op_div &
         (div_active_q | div_pending_q | div_busy | div_done) &
         !lane_b_flush_i;
-    assign div_available_o = !div_active_q && !div_pending_q &&
-        !div_busy && !div_done;
 `ifndef SYNTHESIS
     always_ff @(posedge clk) begin
         if (rst_n && !lane_b_flush_i)
             assert (!ex_mul_stall_o)
-                else $fatal(1, "P1 issued DIV without a local reservation");
+                else $fatal(1, "lane B issued DIV without a local reservation");
     end
 `endif
 
@@ -213,9 +213,6 @@ import ydrasil_pkg::*;
     assign ex_instret_inc_o =
 			(alu_valid_i & !trap_redirect_i & !flush_ex_i) |
         div_complete;
-
-    assign early_bypass_data_o = operator_type_i[OPERATOR_TYPE_ALU] ?
-        alu_result : '0;
 
     ydrasil_alu #(
         .DATAWIDTH(DATA_WIDTH)
@@ -268,41 +265,11 @@ import ydrasil_pkg::*;
         .due_producer_id_o(mul_due_producer_id)
     );
 
-    // The raw s3 value remains available for same-cycle MDU reservation and
-    // bypass. Redirect filtering applies only to architectural completion/WB.
     assign mul_rf_wen_rd_o = mul_pipe_wen | div_rf_wen_rd;
     assign mul_rf_waddr_rd_o = div_rf_wen_rd ? div_waddr_q : mul_pipe_waddr;
     assign mul_producer_id_o = div_rf_wen_rd ?
         div_producer_id_q : mul_pipe_producer_id;
     assign mul_wdata_rd_o = div_rf_wen_rd ? div_result_q : mul_pipe_wdata;
-
-	    always_comb begin
-        mdu_due_o = '0;
-        // Wake consumers only once the MDU result is on the architectural
-        // completion boundary. The earlier s2 "due" token is an internal
-        // pipeline reservation and is not a usable operand value.
-        mdu_due_o.valid = mul_pipe_wen || (div_done && div_active_q);
-        mdu_due_o.producer_tracked = mdu_due_o.valid;
-        mdu_due_o.producer_id = (div_done && div_active_q) ?
-            div_producer_id_q : mul_pipe_producer_id;
-        mdu_due_o.arch_addr = (div_done && div_active_q) ?
-            div_waddr_q : mul_pipe_waddr;
-        mdu_due_o.result_class = RESULT_MDU;
-
-        mdu_result_reservation_o = '0;
-	        mdu_result_reservation_o.valid = mul_pipe_wen ||
-	            (div_pending_q && !mul_pipe_wen);
-	        mdu_result_reservation_o.producer_tracked =
-	            mdu_result_reservation_o.valid;
-	        mdu_result_reservation_o.producer_id =
-	            (div_pending_q && !mul_pipe_wen) ?
-	            div_producer_id_q : mul_pipe_producer_id;
-	        mdu_result_reservation_o.arch_addr =
-	            (div_pending_q && !mul_pipe_wen) ?
-	            div_waddr_q : mul_pipe_waddr;
-        mdu_result_reservation_o.result_class = RESULT_MDU;
-    end
-    assign mdu_bypass_data_o = mul_wdata_rd_o;
 
     wire [31:0] slow_result;
     wire        slow_result_wen;

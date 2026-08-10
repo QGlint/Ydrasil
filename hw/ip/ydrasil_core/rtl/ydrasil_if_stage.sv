@@ -65,35 +65,15 @@ import ydrasil_pkg::*;
         endcase
     end
 
-    wire [BACK_INDEX_WIDTH:0] back_head1_sum =
-        {1'b0, back_head_q} + (BACK_INDEX_WIDTH + 1)'(1);
-    wire [BACK_INDEX_WIDTH:0] back_tail1_sum =
-        {1'b0, back_tail_q} + (BACK_INDEX_WIDTH + 1)'(1);
-    wire [BACK_INDEX_WIDTH-1:0] back_head1 =
-        (back_head1_sum >= (BACK_INDEX_WIDTH + 1)'(BACK_DEPTH)) ?
-        BACK_INDEX_WIDTH'(back_head1_sum -
-            (BACK_INDEX_WIDTH + 1)'(BACK_DEPTH)) :
-        BACK_INDEX_WIDTH'(back_head1_sum);
-    wire [BACK_INDEX_WIDTH-1:0] back_tail1 =
-        (back_tail1_sum >= (BACK_INDEX_WIDTH + 1)'(BACK_DEPTH)) ?
-        BACK_INDEX_WIDTH'(back_tail1_sum -
-            (BACK_INDEX_WIDTH + 1)'(BACK_DEPTH)) :
-        BACK_INDEX_WIDTH'(back_tail1_sum);
-    wire [BACK_INDEX_WIDTH:0] back_head_advance_sum =
-        {1'b0, back_head_q} +
-        (BACK_INDEX_WIDTH + 1)'(back_head_advance);
-    wire [BACK_INDEX_WIDTH:0] back_tail_advance_sum =
-        {1'b0, back_tail_q} + (BACK_INDEX_WIDTH + 1)'(push_count_i);
-    wire [BACK_INDEX_WIDTH-1:0] back_head_advanced =
-        (back_head_advance_sum >= (BACK_INDEX_WIDTH + 1)'(BACK_DEPTH)) ?
-        BACK_INDEX_WIDTH'(back_head_advance_sum -
-            (BACK_INDEX_WIDTH + 1)'(BACK_DEPTH)) :
-        BACK_INDEX_WIDTH'(back_head_advance_sum);
-    wire [BACK_INDEX_WIDTH-1:0] back_tail_advanced =
-        (back_tail_advance_sum >= (BACK_INDEX_WIDTH + 1)'(BACK_DEPTH)) ?
-        BACK_INDEX_WIDTH'(back_tail_advance_sum -
-            (BACK_INDEX_WIDTH + 1)'(BACK_DEPTH)) :
-        BACK_INDEX_WIDTH'(back_tail_advance_sum);
+    // Both supported FetchQ configurations use a power-of-two backing ring
+    // (depth 2 for the unit default, depth 8 in the core).  Natural pointer
+    // truncation eliminates the compare/subtract loop from back_head_q.D.
+    wire [BACK_INDEX_WIDTH-1:0] back_head1 = back_head_q + 1'b1;
+    wire [BACK_INDEX_WIDTH-1:0] back_tail1 = back_tail_q + 1'b1;
+    wire [BACK_INDEX_WIDTH-1:0] back_head_advanced = back_head_q +
+        BACK_INDEX_WIDTH'(back_head_advance);
+    wire [BACK_INDEX_WIDTH-1:0] back_tail_advanced = back_tail_q +
+        BACK_INDEX_WIDTH'(push_count_i);
     wire [BANK_ADDR_WIDTH-1:0] back_head_addr =
         back_head_q[BACK_INDEX_WIDTH-1:1];
     wire [BANK_ADDR_WIDTH-1:0] back_head1_addr =
@@ -225,6 +205,8 @@ import ydrasil_pkg::*;
     initial begin
         assert ((DEPTH >= 4) && ((DEPTH % 2) == 0))
             else $fatal(1, "fetch queue depth must be even and at least four");
+        assert ((BACK_DEPTH & (BACK_DEPTH - 1)) == 0)
+            else $fatal(1, "fetch queue backing depth must be a power of two");
     end
     always_ff @(posedge clk) begin
         if (rst_n && !flush_i) begin
@@ -287,9 +269,9 @@ import ydrasil_pkg::*;
         (opcode == 7'b1010011);
 
     always_comb begin
-        domain_o = DISPATCH_DOMAIN_P1;
+        domain_o = DISPATCH_DOMAIN_LANE_B;
         if (memory)
-            domain_o = DISPATCH_DOMAIN_P0;
+            domain_o = DISPATCH_DOMAIN_LANE_A;
         else if (base_alu)
             domain_o = DISPATCH_DOMAIN_ALU;
     end
@@ -463,51 +445,98 @@ import ydrasil_pkg::*;
 	);
 
     wire [COUNT_WIDTH-1:0] fetchq_count_q;
-    wire fetchq_valid0;
-    wire fetchq_valid1;
     fetch_payload_t fetchq_payload0;
     fetch_payload_t fetchq_payload1;
+
+    // ITCM and predictor outputs terminate at this response register.  FetchQ
+    // only observes the registered response payload and count on the next
+    // cycle, never a raw BRAM/predictor output.
+    reg                     fetch_resp_valid_q;
+    reg [1:0]               fetch_resp_push_count_q;
+    reg [1:0]               fetch_resp_lane_valid_q;
+    reg [31:0]              fetch_resp_pc_q;
+    reg [31:0]              fetch_resp_next_pc_q;
+    reg                     fetch_resp_target_ff_hit_q;
+    fetch_payload_t         fetch_resp_payload0_q;
+    fetch_payload_t         fetch_resp_payload1_q;
+    fetch_payload_t         fetch_resp_payload0_d;
+    fetch_payload_t         fetch_resp_payload1_d;
+    reg [1:0]               fetch_resp_push_count_d;
+
+    // FetchQ pop is a registered refill token. It breaks the current
+    // scheduler-credit to FetchQ back-head path while preserving in-order
+    // transfer into the decode ingress.
+    reg [1:0]               fetchq_pop_q;
+
+    // Registered elastic boundary between FetchQ and Decode.  Backend ready
+    // may stall for an arbitrary number of cycles without exposing the
+    // FetchQ payload/backing-head cone to rename or scheduler control.
+    reg                     decode_ingress_valid0_q;
+    reg                     decode_ingress_valid1_q;
+    fetch_payload_t         decode_ingress_payload0_q;
+    fetch_payload_t         decode_ingress_payload1_q;
+    reg                     decode_ingress_valid0_d;
+    reg                     decode_ingress_valid1_d;
+    fetch_payload_t         decode_ingress_payload0_d;
+    fetch_payload_t         decode_ingress_payload1_d;
 
     wire flush_fetch = flush_if_i | branch_jump_i;
     wire [31:0] pc_plus4 = pc_q + 32'd4;
     wire [31:0] flush_target = branch_jump_i ? branch_target_i : pc_plus4;
-    wire [1:0] pop_count = (!flush_fetch && decode_ready_i && fetchq_valid0) ?
-        ((consume_two_i && fetchq_valid1) ? 2'd2 : 2'd1) : 2'd0;
+    wire decode_ingress_consume0 = decode_ingress_valid0_q && decode_ready_i;
+    wire decode_ingress_consume1 = decode_ingress_consume0 && consume_two_i &&
+        decode_ingress_valid1_q;
+    wire [1:0] pop_count = !(flush_fetch || bp_invalidate_i) ?
+        fetchq_pop_q : 2'd0;
     wire mem_resp_valid = !flush_fetch && mem_req_valid_q;
     wire [31:0] sequential_next_pc =
-        mem_req_pc_q + (mem_req_lane_valid_q[1] ? 32'd8 : 32'd4);
-    wire lane1_pred_taken = mem_req_lane_valid_q[1] && bp_predict1_taken_i;
-    wire bram_pred_taken_any = bp_predict_taken_i || lane1_pred_taken;
+        fetch_resp_pc_q + (fetch_resp_lane_valid_q[1] ? 32'd8 : 32'd4);
+    wire lane1_pred_taken = fetch_resp_lane_valid_q[1] &&
+        fetch_resp_payload1_q.pred_taken;
+    wire bram_pred_taken_any = fetch_resp_payload0_q.pred_taken ||
+        lane1_pred_taken;
     // Keep target selection out of the control path to the next request.
     // Each candidate compares in parallel, and only the one-bit result is
     // selected using the established lane0-over-lane1 priority.
-    wire [31:0] predict_next_pc = bp_predict_taken_i ? bp_predict_target_i :
-        (lane1_pred_taken ? bp_predict1_target_i : sequential_next_pc);
+    wire [31:0] fetch_resp_pred_target0 = {
+        fetch_resp_payload0_q.pred_target[FETCH_ADDR_TOKEN_WIDTH-1] ?
+            DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2] :
+            ITCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2],
+        fetch_resp_payload0_q.pred_target[ITCM_ADDR_WIDTH-1:0], 2'b00};
+    wire [31:0] fetch_resp_pred_target1 = {
+        fetch_resp_payload1_q.pred_target[FETCH_ADDR_TOKEN_WIDTH-1] ?
+            DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2] :
+            ITCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2],
+        fetch_resp_payload1_q.pred_target[ITCM_ADDR_WIDTH-1:0], 2'b00};
+    wire [31:0] predict_next_pc = fetch_resp_payload0_q.pred_taken ?
+        fetch_resp_pred_target0 :
+        (lane1_pred_taken ? fetch_resp_pred_target1 : sequential_next_pc);
     (* keep = "true" *) wire lane0_target_mismatch =
-        bp_predict_target_i != mem_req_next_pc_q;
+        fetch_resp_pred_target0 != fetch_resp_next_pc_q;
     (* keep = "true" *) wire lane1_target_mismatch =
-        bp_predict1_target_i != mem_req_next_pc_q;
+        fetch_resp_pred_target1 != fetch_resp_next_pc_q;
     (* keep = "true" *) wire seq_target_mismatch =
-        sequential_next_pc != mem_req_next_pc_q;
-    (* keep = "true" *) wire bram_next_pc_mismatch = bp_predict_taken_i ?
+        sequential_next_pc != fetch_resp_next_pc_q;
+    (* keep = "true" *) wire bram_next_pc_mismatch =
+        fetch_resp_payload0_q.pred_taken ?
         lane0_target_mismatch :
         (lane1_pred_taken ? lane1_target_mismatch : seq_target_mismatch);
-    wire predict_redirect_resp = mem_resp_valid && bram_pred_taken_any;
-    wire predict_correction_resp = mem_resp_valid && bram_next_pc_mismatch;
+    wire predict_redirect_resp = fetch_resp_valid_q && bram_pred_taken_any;
+    wire predict_correction_resp = fetch_resp_valid_q && bram_next_pc_mismatch;
 	// The registered L0 decision, rather than the returning BRAM data, releases
 	// the next fetch.  A stale entry kills that speculative request below and
 	// retains the existing one-cycle correction through pending_redirect_target_q.
-	wire target_ff_hit = mem_resp_valid && mem_req_target_ff_hit_q;
+	wire target_ff_hit = fetch_resp_valid_q && fetch_resp_target_ff_hit_q;
     wire target_ff_correction_resp = target_ff_hit &&
         bram_next_pc_mismatch;
-    wire [1:0] push_count = mem_resp_valid ?
-        (bp_predict_taken_i ? 2'd1 :
-         ({1'b0, mem_req_lane_valid_q[0]} +
-          {1'b0, mem_req_lane_valid_q[1]})) : 2'd0;
+    wire [1:0] push_count = fetch_resp_valid_q ?
+        fetch_resp_push_count_q : 2'd0;
     wire [RESERVED_WIDTH-1:0] reserved_count =
         RESERVED_WIDTH'(fetchq_count_q) +
         (mem_req_valid_q ? (mem_req_lane_valid_q[1] ? RESERVED_WIDTH'(2) :
-         RESERVED_WIDTH'(1)) : '0);
+         RESERVED_WIDTH'(1)) : '0) +
+        (fetch_resp_valid_q ?
+         RESERVED_WIDTH'(fetch_resp_push_count_q) : '0);
     wire pair_capacity = reserved_count <= RESERVED_WIDTH'(FETCHQ_DEPTH - 2);
     // Launch the next physical fetch whenever queue capacity permits.  A BTB
     // response that corrects the sequential launch is still captured into the
@@ -517,8 +546,6 @@ import ydrasil_pkg::*;
     // to the fetch queue on the following cycle.
     wire fetch_issue = !flush_fetch && !bp_invalidate_i && pair_capacity;
 
-    fetch_payload_t fetchq_push_payload0;
-    fetch_payload_t fetchq_push_payload1;
     wire [31:0] mem_req_pc_plus4 = mem_req_pc_q + 32'd4;
     ydrasil_dispatch_domain_t push_domain0;
     ydrasil_dispatch_domain_t push_domain1;
@@ -547,41 +574,45 @@ import ydrasil_pkg::*;
         .dst_writes_o(push_dst_writes1)
     );
     always_comb begin
-        fetchq_push_payload0 = '0;
-        fetchq_push_payload0.pc = {
+        fetch_resp_payload0_d = '0;
+        fetch_resp_payload0_d.pc = {
             mem_req_pc_q[31:ITCM_ADDR_WIDTH+2] ==
                 DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2],
             mem_req_pc_q[ITCM_ADDR_WIDTH+1:2]};
-        fetchq_push_payload0.instr = if_mem_rdata_i;
-        fetchq_push_payload0.pred_taken = bp_predict_taken_i;
-        fetchq_push_payload0.pred_target = {
+        fetch_resp_payload0_d.instr = if_mem_rdata_i;
+        fetch_resp_payload0_d.pred_taken = bp_predict_taken_i;
+        fetch_resp_payload0_d.pred_target = {
             bp_predict_target_i[31:ITCM_ADDR_WIDTH+2] ==
                 DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2],
             bp_predict_target_i[ITCM_ADDR_WIDTH+1:2]};
-        fetchq_push_payload0.pred_counter = bp_predict_counter_i;
-        fetchq_push_payload0.domain = push_domain0;
-        fetchq_push_payload0.serial = push_serial0;
-        fetchq_push_payload0.src0_used = push_src0_used0;
-        fetchq_push_payload0.src1_used = push_src1_used0;
-        fetchq_push_payload0.dst_writes = push_dst_writes0;
+        fetch_resp_payload0_d.pred_counter = bp_predict_counter_i;
+        fetch_resp_payload0_d.domain = push_domain0;
+        fetch_resp_payload0_d.serial = push_serial0;
+        fetch_resp_payload0_d.src0_used = push_src0_used0;
+        fetch_resp_payload0_d.src1_used = push_src1_used0;
+        fetch_resp_payload0_d.dst_writes = push_dst_writes0;
 
-        fetchq_push_payload1 = '0;
-        fetchq_push_payload1.pc = {
+        fetch_resp_payload1_d = '0;
+        fetch_resp_payload1_d.pc = {
             mem_req_pc_plus4[31:ITCM_ADDR_WIDTH+2] ==
                 DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2],
             mem_req_pc_plus4[ITCM_ADDR_WIDTH+1:2]};
-        fetchq_push_payload1.instr = if_mem_rdata1_i;
-        fetchq_push_payload1.pred_taken = bp_predict1_taken_i;
-        fetchq_push_payload1.pred_target = {
+        fetch_resp_payload1_d.instr = if_mem_rdata1_i;
+        fetch_resp_payload1_d.pred_taken = bp_predict1_taken_i;
+        fetch_resp_payload1_d.pred_target = {
             bp_predict1_target_i[31:ITCM_ADDR_WIDTH+2] ==
                 DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2],
             bp_predict1_target_i[ITCM_ADDR_WIDTH+1:2]};
-        fetchq_push_payload1.pred_counter = bp_predict1_counter_i;
-        fetchq_push_payload1.domain = push_domain1;
-        fetchq_push_payload1.serial = push_serial1;
-        fetchq_push_payload1.src0_used = push_src0_used1;
-        fetchq_push_payload1.src1_used = push_src1_used1;
-        fetchq_push_payload1.dst_writes = push_dst_writes1;
+        fetch_resp_payload1_d.pred_counter = bp_predict1_counter_i;
+        fetch_resp_payload1_d.domain = push_domain1;
+        fetch_resp_payload1_d.serial = push_serial1;
+        fetch_resp_payload1_d.src0_used = push_src0_used1;
+        fetch_resp_payload1_d.src1_used = push_src1_used1;
+        fetch_resp_payload1_d.dst_writes = push_dst_writes1;
+
+        fetch_resp_push_count_d = bp_predict_taken_i ? 2'd1 :
+            ({1'b0, mem_req_lane_valid_q[0]} +
+             {1'b0, mem_req_lane_valid_q[1]});
     end
     ydrasil_fetch_queue #(
         .DEPTH      (FETCHQ_DEPTH),
@@ -593,14 +624,88 @@ import ydrasil_pkg::*;
         .flush_i        (flush_fetch || bp_invalidate_i),
         .pop_count_i    (pop_count),
         .push_count_i   (push_count),
-        .push_payload0_i(fetchq_push_payload0),
-        .push_payload1_i(fetchq_push_payload1),
+        .push_payload0_i(fetch_resp_payload0_q),
+        .push_payload1_i(fetch_resp_payload1_q),
         .count_o        (fetchq_count_q),
-        .valid0_o       (fetchq_valid0),
-        .valid1_o       (fetchq_valid1),
+        .valid0_o       (),
+        .valid1_o       (),
         .payload0_o     (fetchq_payload0),
         .payload1_o     (fetchq_payload1)
     );
+
+    // `decode_ingress_*_d` includes both this cycle's backend consumption and
+    // the old pop token's fill.  Reserve the next token from that post-edge
+    // state, never from the pre-fill occupancy that caused a repeated pop.
+    wire [1:0] decode_ingress_post_count =
+        {1'b0, decode_ingress_valid0_d} +
+        {1'b0, decode_ingress_valid1_d};
+    wire [1:0] decode_ingress_post_space = 2'd2 -
+        decode_ingress_post_count;
+    wire [COUNT_WIDTH:0] fetchq_post_count =
+        {1'b0, fetchq_count_q} - (COUNT_WIDTH + 1)'(pop_count) +
+        (COUNT_WIDTH + 1)'(push_count);
+    wire [1:0] fetchq_post_available =
+        (fetchq_post_count >= (COUNT_WIDTH + 1)'(2)) ? 2'd2 :
+        (fetchq_post_count != '0) ? 2'd1 : 2'd0;
+    wire [1:0] fetchq_pop_next = !(flush_fetch || bp_invalidate_i) ?
+        ((decode_ingress_post_space < fetchq_post_available) ?
+         decode_ingress_post_space : fetchq_post_available) : 2'd0;
+
+    // Consume/shift and FetchQ fill form one ingress state transaction.  The
+    // fill decision must observe the post-consume slots, and valid/payload
+    // must be updated together so an empty slot never receives a valid token
+    // without its matching FetchQ payload.
+    always_comb begin
+        decode_ingress_valid0_d = decode_ingress_valid0_q;
+        decode_ingress_valid1_d = decode_ingress_valid1_q;
+        decode_ingress_payload0_d = decode_ingress_payload0_q;
+        decode_ingress_payload1_d = decode_ingress_payload1_q;
+
+        if (decode_ingress_consume1) begin
+            decode_ingress_valid0_d = 1'b0;
+            decode_ingress_valid1_d = 1'b0;
+            decode_ingress_payload0_d = '0;
+            decode_ingress_payload1_d = '0;
+        end else if (decode_ingress_consume0) begin
+            decode_ingress_valid0_d = decode_ingress_valid1_q;
+            decode_ingress_valid1_d = 1'b0;
+            decode_ingress_payload0_d = decode_ingress_payload1_q;
+            decode_ingress_payload1_d = '0;
+        end
+
+        if (pop_count != 2'd0) begin
+            if (!decode_ingress_valid0_d) begin
+                decode_ingress_valid0_d = 1'b1;
+                decode_ingress_payload0_d = fetchq_payload0;
+                if (pop_count == 2'd2) begin
+                    decode_ingress_valid1_d = 1'b1;
+                    decode_ingress_payload1_d = fetchq_payload1;
+                end
+            end else if (!decode_ingress_valid1_d) begin
+                decode_ingress_valid1_d = 1'b1;
+                decode_ingress_payload1_d = fetchq_payload0;
+            end
+        end
+    end
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n || flush_fetch || bp_invalidate_i) begin
+            fetchq_pop_q <= 2'd0;
+            decode_ingress_valid0_q <= 1'b0;
+            decode_ingress_valid1_q <= 1'b0;
+            decode_ingress_payload0_q <= '0;
+            decode_ingress_payload1_q <= '0;
+        end else begin
+            // Only this registered token may advance FetchQ. The next value
+            // observes scheduler credit, but FetchQ sees it one cycle later.
+            fetchq_pop_q <= fetchq_pop_next;
+            decode_ingress_valid0_q <= decode_ingress_valid0_d;
+            decode_ingress_valid1_q <= decode_ingress_valid1_d;
+            decode_ingress_payload0_q <= decode_ingress_payload0_d;
+            decode_ingress_payload1_q <= decode_ingress_payload1_d;
+        end
+    end
+
     assign fetch_addr = pending_redirect_valid_q ?
         pending_redirect_target_q : pc_q;
     wire fetch_addr_is_dtcm =
@@ -660,59 +765,59 @@ import ydrasil_pkg::*;
     assign if_mem_addr1_o = fetch_addr1;
     assign bp_lookup_pc_o = fetch_addr;
 
-    assign if_id_valid_o = fetchq_valid0;
-    wire [31:0] fetchq_pc0 = {
-        fetchq_payload0.pc[FETCH_ADDR_TOKEN_WIDTH-1] ?
+    wire [31:0] decode_ingress_pc0 = {
+        decode_ingress_payload0_q.pc[FETCH_ADDR_TOKEN_WIDTH-1] ?
             DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2] :
             ITCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2],
-        fetchq_payload0.pc[ITCM_ADDR_WIDTH-1:0], 2'b00};
-    wire [31:0] fetchq_pred_target0 = {
-        fetchq_payload0.pred_target[FETCH_ADDR_TOKEN_WIDTH-1] ?
+        decode_ingress_payload0_q.pc[ITCM_ADDR_WIDTH-1:0], 2'b00};
+    wire [31:0] decode_ingress_pred_target0 = {
+        decode_ingress_payload0_q.pred_target[FETCH_ADDR_TOKEN_WIDTH-1] ?
             DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2] :
             ITCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2],
-        fetchq_payload0.pred_target[ITCM_ADDR_WIDTH-1:0], 2'b00};
-    wire [31:0] fetchq_pc1 = {
-        fetchq_payload1.pc[FETCH_ADDR_TOKEN_WIDTH-1] ?
+        decode_ingress_payload0_q.pred_target[ITCM_ADDR_WIDTH-1:0], 2'b00};
+    wire [31:0] decode_ingress_pc1 = {
+        decode_ingress_payload1_q.pc[FETCH_ADDR_TOKEN_WIDTH-1] ?
             DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2] :
             ITCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2],
-        fetchq_payload1.pc[ITCM_ADDR_WIDTH-1:0], 2'b00};
-    wire [31:0] fetchq_pred_target1 = {
-        fetchq_payload1.pred_target[FETCH_ADDR_TOKEN_WIDTH-1] ?
+        decode_ingress_payload1_q.pc[ITCM_ADDR_WIDTH-1:0], 2'b00};
+    wire [31:0] decode_ingress_pred_target1 = {
+        decode_ingress_payload1_q.pred_target[FETCH_ADDR_TOKEN_WIDTH-1] ?
             DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2] :
             ITCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2],
-        fetchq_payload1.pred_target[ITCM_ADDR_WIDTH-1:0], 2'b00};
+        decode_ingress_payload1_q.pred_target[ITCM_ADDR_WIDTH-1:0], 2'b00};
     // Valid qualifies the complete payload at Decode. Do not spread queue
     // occupancy into every data bit by substituting NOP/zero values while the
     // head is invalid; stale payload is architecturally invisible.
-    assign if_id_pc_o = fetchq_pc0;
-    assign if_id_instr_o = fetchq_payload0.instr;
-    assign if_id_domain_o = fetchq_payload0.domain;
-    assign if_id_serial_o = fetchq_payload0.serial;
-    assign if_id_src0_used_o = fetchq_payload0.src0_used;
-    assign if_id_src1_used_o = fetchq_payload0.src1_used;
-    assign if_id_dst_writes_o = fetchq_payload0.dst_writes;
-    assign if_id_pred_hit_o = fetchq_payload0.pred_taken;
-    assign if_id_pred_taken_o = fetchq_payload0.pred_taken;
-    assign if_id_pred_target_o = fetchq_pred_target0;
-    assign if_id_pred_counter_o = fetchq_payload0.pred_counter;
+    assign if_id_valid_o = decode_ingress_valid0_q;
+    assign if_id_pc_o = decode_ingress_pc0;
+    assign if_id_instr_o = decode_ingress_payload0_q.instr;
+    assign if_id_domain_o = decode_ingress_payload0_q.domain;
+    assign if_id_serial_o = decode_ingress_payload0_q.serial;
+    assign if_id_src0_used_o = decode_ingress_payload0_q.src0_used;
+    assign if_id_src1_used_o = decode_ingress_payload0_q.src1_used;
+    assign if_id_dst_writes_o = decode_ingress_payload0_q.dst_writes;
+    assign if_id_pred_hit_o = decode_ingress_payload0_q.pred_taken;
+    assign if_id_pred_taken_o = decode_ingress_payload0_q.pred_taken;
+    assign if_id_pred_target_o = decode_ingress_pred_target0;
+    assign if_id_pred_counter_o = decode_ingress_payload0_q.pred_counter;
     wire [BHT_INDEX_WIDTH-1:0] fetchq_bht_index0 =
-        BHT_INDEX_WIDTH'(fetchq_pc0 >> 2);
+        BHT_INDEX_WIDTH'(decode_ingress_pc0 >> 2);
     assign if_id_pred_bht_index_o = BP_BHT_INDEX_WIDTH'(fetchq_bht_index0);
 
-    assign if_id1_valid_o = fetchq_valid1;
-    assign if_id1_pc_o = fetchq_pc1;
-    assign if_id1_instr_o = fetchq_payload1.instr;
-    assign if_id1_domain_o = fetchq_payload1.domain;
-    assign if_id1_serial_o = fetchq_payload1.serial;
-    assign if_id1_src0_used_o = fetchq_payload1.src0_used;
-    assign if_id1_src1_used_o = fetchq_payload1.src1_used;
-    assign if_id1_dst_writes_o = fetchq_payload1.dst_writes;
-    assign if_id1_pred_hit_o = fetchq_payload1.pred_taken;
-    assign if_id1_pred_taken_o = fetchq_payload1.pred_taken;
-    assign if_id1_pred_target_o = fetchq_pred_target1;
-    assign if_id1_pred_counter_o = fetchq_payload1.pred_counter;
+    assign if_id1_valid_o = decode_ingress_valid1_q;
+    assign if_id1_pc_o = decode_ingress_pc1;
+    assign if_id1_instr_o = decode_ingress_payload1_q.instr;
+    assign if_id1_domain_o = decode_ingress_payload1_q.domain;
+    assign if_id1_serial_o = decode_ingress_payload1_q.serial;
+    assign if_id1_src0_used_o = decode_ingress_payload1_q.src0_used;
+    assign if_id1_src1_used_o = decode_ingress_payload1_q.src1_used;
+    assign if_id1_dst_writes_o = decode_ingress_payload1_q.dst_writes;
+    assign if_id1_pred_hit_o = decode_ingress_payload1_q.pred_taken;
+    assign if_id1_pred_taken_o = decode_ingress_payload1_q.pred_taken;
+    assign if_id1_pred_target_o = decode_ingress_pred_target1;
+    assign if_id1_pred_counter_o = decode_ingress_payload1_q.pred_counter;
     wire [BHT_INDEX_WIDTH-1:0] fetchq_bht_index1 =
-        BHT_INDEX_WIDTH'(fetchq_pc1 >> 2);
+        BHT_INDEX_WIDTH'(decode_ingress_pc1 >> 2);
     assign if_id1_pred_bht_index_o = BP_BHT_INDEX_WIDTH'(fetchq_bht_index1);
 
     always_ff @(posedge clk or negedge rst_n) begin
@@ -723,6 +828,14 @@ import ydrasil_pkg::*;
             mem_req_pc_q <= RESET_INS;
             mem_req_next_pc_q <= RESET_INS + 32'd8;
 			mem_req_target_ff_hit_q <= 1'b0;
+            fetch_resp_valid_q <= 1'b0;
+            fetch_resp_push_count_q <= 2'd0;
+            fetch_resp_lane_valid_q <= '0;
+            fetch_resp_pc_q <= RESET_INS;
+            fetch_resp_next_pc_q <= RESET_INS + 32'd8;
+            fetch_resp_target_ff_hit_q <= 1'b0;
+            fetch_resp_payload0_q <= '0;
+            fetch_resp_payload1_q <= '0;
             pending_redirect_valid_q <= 1'b0;
             pending_redirect_target_q <= '0;
             target_ff_valid0_q <= '0;
@@ -734,6 +847,14 @@ import ydrasil_pkg::*;
             mem_req_pc_q <= flush_fetch ? flush_target : bp_invalidate_target_i;
             mem_req_next_pc_q <= flush_fetch ? flush_target : bp_invalidate_target_i;
 			mem_req_target_ff_hit_q <= 1'b0;
+            fetch_resp_valid_q <= 1'b0;
+            fetch_resp_push_count_q <= 2'd0;
+            fetch_resp_lane_valid_q <= '0;
+            fetch_resp_pc_q <= flush_fetch ? flush_target : bp_invalidate_target_i;
+            fetch_resp_next_pc_q <= flush_fetch ? flush_target : bp_invalidate_target_i;
+            fetch_resp_target_ff_hit_q <= 1'b0;
+            fetch_resp_payload0_q <= '0;
+            fetch_resp_payload1_q <= '0;
             pending_redirect_valid_q <= 1'b0;
             pending_redirect_target_q <= '0;
 			if (bp_invalidate_i) begin
@@ -741,6 +862,19 @@ import ydrasil_pkg::*;
 				target_ff_valid1_q <= '0;
 			end
         end else begin
+			// Response capture is the only BRAM/predictor sink in the frontend.
+			// A correction discards the already-launched stale response while the
+			// older response in fetch_resp_q is consumed by FetchQ on this edge.
+            fetch_resp_valid_q <= mem_resp_valid && !predict_correction_resp;
+            if (mem_resp_valid && !predict_correction_resp) begin
+                fetch_resp_push_count_q <= fetch_resp_push_count_d;
+                fetch_resp_lane_valid_q <= mem_req_lane_valid_q;
+                fetch_resp_pc_q <= mem_req_pc_q;
+                fetch_resp_next_pc_q <= mem_req_next_pc_q;
+                fetch_resp_target_ff_hit_q <= mem_req_target_ff_hit_q;
+                fetch_resp_payload0_q <= fetch_resp_payload0_d;
+                fetch_resp_payload1_q <= fetch_resp_payload1_d;
+            end
 			// On an L0 mismatch the request issued from the stale target is
 			// intentionally discarded; pending_redirect_target_q retries the
 			// corrected address on the following cycle.

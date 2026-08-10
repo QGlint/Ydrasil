@@ -122,9 +122,8 @@ end
     reg         lsu_local_debug_en;
     reg         perf_local_debug_en;
     reg         perf_event_scan_en;
-    reg         perf_bank_scan_en;
     reg         perf_issue_scan_en;
-    reg         perf_refill_scan_en;
+    reg         perf_ingress_scan_en;
     reg         perf_stall_snapshot_en;
     integer     raw_debug_cycle;
     integer     lsu_local_debug_cycle;
@@ -132,7 +131,7 @@ end
     integer     perf_local_start;
     integer     perf_local_end;
     integer     perf_issue_scan_count;
-    integer     perf_refill_scan_count;
+    integer     perf_ingress_scan_count;
     integer     perf_empty_scan_count;
     integer     perf_stall_snapshot_threshold;
     integer     perf_stall_snapshot_cycles_q;
@@ -143,9 +142,8 @@ end
         lsu_local_debug_en = $test$plusargs("lsu_local_debug");
         perf_local_debug_en = $test$plusargs("perf_local_debug");
         perf_event_scan_en = $test$plusargs("perf_event_scan");
-        perf_bank_scan_en = $test$plusargs("perf_bank_scan");
         perf_issue_scan_en = $test$plusargs("perf_issue_scan");
-        perf_refill_scan_en = $test$plusargs("perf_refill_scan");
+        perf_ingress_scan_en = $test$plusargs("perf_ingress_scan");
         perf_stall_snapshot_en = $test$plusargs("perf_stall_snapshot");
         raw_debug_cycle = 0;
         lsu_local_debug_cycle = 0;
@@ -153,7 +151,7 @@ end
         perf_local_start = 0;
         perf_local_end = 32'h7fffffff;
         perf_issue_scan_count = 0;
-        perf_refill_scan_count = 0;
+        perf_ingress_scan_count = 0;
         perf_empty_scan_count = 0;
         perf_stall_snapshot_threshold = 64;
         if (!$value$plusargs("perf_local_start=%d", perf_local_start))
@@ -296,8 +294,8 @@ end
     reg [31:0] perf_ex_empty_recovery_count;
     reg [31:0] perf_ex_empty_fence_count;
     reg [31:0] perf_ex_empty_b_only_count;
-    reg [31:0] perf_ex_empty_single_head_count;
-    reg [31:0] perf_ex_empty_select_refill_count;
+    reg [31:0] perf_ex_empty_single_lane_count;
+    reg [31:0] perf_ex_empty_select_ingress_count;
     reg [31:0] perf_ex_empty_rs_dependency_count;
     reg [31:0] perf_ex_empty_rs_order_count;
     reg [31:0] perf_ex_empty_rs_resource_count;
@@ -331,7 +329,7 @@ end
     reg [31:0] noif_pending_redirect_count;
     reg [31:0] noif_other_count;
     // Slot-weighted subcauses for the mutually-exclusive NO_IF_VALID bucket.
-    // The existing noif_* counters remain cycle counts for compatibility.
+    // The noif_* counters remain cycle counts; the counters below add slots.
     reg [31:0] perf_noif_control_redirect_slots;
     reg [31:0] perf_noif_predict_redirect_slots;
     reg [31:0] perf_noif_fence_refill_slots;
@@ -339,12 +337,12 @@ end
     reg [31:0] perf_noif_fetch_launch_slots;
     reg [31:0] perf_noif_pending_redirect_slots;
     reg [31:0] perf_noif_other_slots;
-    reg [31:0] other_issue_refill_count;
-    reg [31:0] other_decode_refill_count;
-    reg [31:0] decode_refill_after_control_count;
-    reg [31:0] decode_refill_after_predict_count;
-    reg [31:0] decode_refill_after_fence_count;
-    reg [31:0] decode_refill_after_supply_count;
+    reg [31:0] other_issue_supply_count;
+    reg [31:0] other_decode_supply_count;
+    reg [31:0] decode_supply_after_control_count;
+    reg [31:0] decode_supply_after_predict_count;
+    reg [31:0] decode_supply_after_fence_count;
+    reg [31:0] decode_supply_after_supply_count;
     reg [31:0] other_issue_blocked_count;
     reg [31:0] other_unclassified_count;
     // Slot-weighted subcauses for the mutually-exclusive ISSUE bucket.
@@ -381,7 +379,7 @@ end
     reg [31:0] producer_wait_ready_count;
     reg [31:0] producer_both_ready_count;
     reg [31:0] producer_retire_held_count;
-    // The backend has one RS/Select stage followed by one Operand stage.
+    // The backend has a unified scheduler followed by independent lane inputs.
     // Every histogram below is mutually exclusive within its own family.
     reg [31:0] perf_rob_occ_count [0:PRODUCER_NUM];
     reg [31:0] perf_rs_occ_count [0:12];
@@ -410,30 +408,30 @@ end
     reg [31:0] perf_head_ni_absent_count;
     reg [31:0] perf_loss_flush_slots;
     reg [31:0] perf_loss_operand_block_slots;
-    reg [31:0] perf_loss_single_bundle_slots;
-    reg [31:0] perf_loss_select_refill_slots;
+    reg [31:0] perf_loss_single_lane_slots;
+    reg [31:0] perf_loss_select_ingress_slots;
     reg [31:0] perf_loss_rs_dependency_slots;
     reg [31:0] perf_loss_rs_order_slots;
     reg [31:0] perf_loss_rs_resource_slots;
     reg [31:0] perf_loss_rs_other_slots;
     reg [31:0] perf_loss_rob_full_slots;
-    reg [31:0] perf_loss_rs_refill_slots;
-    reg [31:0] perf_loss_decode_refill_slots;
+    reg [31:0] perf_loss_rs_ingress_slots;
+    reg [31:0] perf_loss_decode_supply_slots;
     reg [31:0] perf_loss_frontend_slots;
     reg [31:0] perf_loss_other_slots;
     // Mutually-exclusive leaves for the three largest backend-loss parents.
     // They are slot-weighted and must sum to their corresponding parent.
-    reg [31:0] perf_single_p0_only_slots;
-    reg [31:0] perf_single_p1_only_slots;
+    reg [31:0] perf_single_bank0_only_slots;
+    reg [31:0] perf_single_bank1_only_slots;
     reg [31:0] perf_single_alu_only_slots;
     reg [31:0] perf_single_serial_slots;
     reg [31:0] perf_single_other_slots;
-    reg [31:0] perf_select_refill_pair_slots;
-    reg [31:0] perf_select_refill_p0_slots;
-    reg [31:0] perf_select_refill_p1_slots;
-    reg [31:0] perf_select_refill_alu_slots;
-    reg [31:0] perf_select_refill_serial_slots;
-    reg [31:0] perf_select_refill_other_slots;
+    reg [31:0] perf_select_ingress_pair_slots;
+    reg [31:0] perf_select_ingress_bank0_slots;
+    reg [31:0] perf_select_ingress_bank1_slots;
+    reg [31:0] perf_select_ingress_alu_slots;
+    reg [31:0] perf_select_ingress_serial_slots;
+    reg [31:0] perf_select_ingress_other_slots;
     reg [31:0] perf_dep_src0_slots;
     reg [31:0] perf_dep_src1_slots;
     reg [31:0] perf_dep_both_src_slots;
@@ -443,23 +441,23 @@ end
     reg [31:0] perf_dep_mul_slots;
     reg [31:0] perf_dep_branch_slots;
     reg [31:0] perf_dep_other_slots;
-    // Independent operation-class and wakeup-source projections of the same
-    // three parent loss buckets. Each projection has its own closure check.
+    // Operation-class and wakeup-source views of the same three parent loss
+    // buckets. Each view has its own closure check.
     reg [31:0] perf_single_op_alu_slots;
     reg [31:0] perf_single_op_load_slots;
     reg [31:0] perf_single_op_store_slots;
     reg [31:0] perf_single_op_mul_slots;
     reg [31:0] perf_single_op_csr_sys_slots;
     reg [31:0] perf_single_op_other_slots;
-    reg [31:0] perf_refill_shape_p0_p1_slots;
-    reg [31:0] perf_refill_shape_p0_alu_slots;
-    reg [31:0] perf_refill_shape_p1_alu_slots;
-    reg [31:0] perf_refill_shape_alu_alu_slots;
-    reg [31:0] perf_refill_shape_single_p0_slots;
-    reg [31:0] perf_refill_shape_single_p1_slots;
-    reg [31:0] perf_refill_shape_single_alu_slots;
-    reg [31:0] perf_refill_shape_serial_slots;
-    reg [31:0] perf_refill_shape_other_slots;
+    reg [31:0] perf_ingress_shape_bank0_bank1_slots;
+    reg [31:0] perf_ingress_shape_bank0_alu_slots;
+    reg [31:0] perf_ingress_shape_bank1_alu_slots;
+    reg [31:0] perf_ingress_shape_alu_alu_slots;
+    reg [31:0] perf_ingress_shape_single_bank0_slots;
+    reg [31:0] perf_ingress_shape_single_bank1_slots;
+    reg [31:0] perf_ingress_shape_single_alu_slots;
+    reg [31:0] perf_ingress_shape_serial_slots;
+    reg [31:0] perf_ingress_shape_other_slots;
     reg [31:0] perf_dep_wake_both_slots;
     reg [31:0] perf_dep_wake_mixed_slots;
     reg [31:0] perf_dep_wake_src0_completion_slots;
@@ -473,7 +471,7 @@ end
     reg [31:0] perf_dep_op_mul_slots;
     reg [31:0] perf_dep_op_branch_slots;
     reg [31:0] perf_dep_op_other_slots;
-    // Orthogonal dependency projection. The mask keeps simultaneous blocker
+    // Dependency mask. The mask keeps simultaneous blocker
     // classes coupled instead of forcing them into an arbitrary priority bin.
     // Bits are ALU, LOAD, MDU, OTHER, and stale/missing producer identity.
     reg [31:0] perf_dep_blocker_mask_slots [0:31];
@@ -481,50 +479,21 @@ end
     // Decompose the execution-slot OTHER bucket. These counters are mutually
     // exclusive and are charged only in the final cycle-accounting OTHER arm.
     reg [31:0] perf_other_rob_block_slots;
-    reg [31:0] perf_other_rs_bank_block_slots;
+    reg [31:0] perf_other_sched_ingress_block_slots;
     reg [31:0] perf_other_recovery_resync_slots;
-    reg [31:0] perf_other_alu_bank_block_slots;
-    reg [31:0] perf_other_p0_bank_block_slots;
-    reg [31:0] perf_other_p1_bank_block_slots;
-    reg [31:0] perf_bank_alu_local_full_slots;
-    reg [31:0] perf_bank_alu_credit_stale_slots;
-    reg [31:0] perf_bank_p0_local_full_slots;
-    reg [31:0] perf_bank_p0_credit_stale_slots;
-    reg [31:0] perf_bank_p1_local_full_slots;
-    reg [31:0] perf_bank_p1_credit_stale_slots;
-    reg [31:0] perf_bank_unclassified_slots;
-    reg [31:0] perf_p0_full_dependency_slots;
-    reg [31:0] perf_p0_full_order_slots;
-    reg [31:0] perf_p0_full_resource_slots;
-    reg [31:0] perf_p0_full_ready_release_slots;
-    reg [31:0] perf_p0_full_no_candidate_slots;
-    // Progressive existential classification of the four resident P0 entries.
-    // Unlike the legacy priority bucket, one blocked entry cannot hide a
-    // different entry that has already passed dependency or order gating.
-    reg [31:0] perf_p0_pipe_selectable_slots;
-    reg [31:0] perf_p0_pipe_credit_blocked_slots;
-    reg [31:0] perf_p0_pipe_order_blocked_slots;
-    reg [31:0] perf_p0_pipe_dependency_blocked_slots;
-    // Slot-weighted LSU registered-credit x Select-to-AGU reservation matrix.
-    // Index is credit*3+reservation; both protocols are bounded by two.
-    reg [31:0] perf_p0_credit_resv_slots [0:8];
-    reg [31:0] perf_p0_full_store_mix_slots [0:4];
-    reg [31:0] perf_p0_full_blocked_load_slots;
-    reg [31:0] perf_p0_full_blocked_store_slots;
-    reg [31:0] perf_p0_full_blocked_other_slots;
-    reg [31:0] perf_p0_completion_wakeup_cycles;
+    // Unified scheduler backpressure is accounted at the scheduler boundary;
+    // it is not attributed to an operation-class or LSU reservation bank.
     reg [31:0] perf_operand_merge_pair_cycles;
     // Entry-weighted wakeup observations. These are intentionally separate
     // from slot-loss counters: a single cycle can wake several RS entries.
     reg [31:0] perf_rs_completion_wakeup_entries;
     reg [31:0] perf_rs_alloc_wakeup_entries;
     reg [31:0] perf_rs_select_wakeup_entries;
-    reg [31:0] perf_dtcm_launch_wakeup_events;
     reg [31:0] perf_dtcm_result_wakeup_events;
     reg [31:0] perf_mdu_wakeup_events;
     reg [31:0] perf_replay_wakeup_events;
-    reg [31:0] perf_other_rs_pair_limit_slots;
-    reg [31:0] perf_other_select_refill_slots;
+    reg [31:0] perf_other_sched_pair_ingress_block_slots;
+    reg [31:0] perf_other_select_ingress_slots;
     reg [31:0] perf_other_rs_dependency_slots;
     reg [31:0] perf_other_rs_order_slots;
     reg [31:0] perf_other_rs_resource_slots;
@@ -536,8 +505,6 @@ end
     reg [31:0] perf_rs_order_entry_cycles;
     reg [31:0] perf_rs_resource_entry_cycles;
     reg [31:0] perf_rs_selectable_entry_cycles;
-    reg [31:0] perf_rs_bank_full_cycles;
-    reg [31:0] perf_rs_pair_bank_limit_cycles;
     reg [31:0] perf_rob_full_cycles;
     reg [31:0] perf_lsu_credit_wait_cycles;
     reg [31:0] perf_lsu_age_repair_cycles;
@@ -547,21 +514,17 @@ end
     reg [31:0] perf_operand_dependency_miss_cycles;
     reg [31:0] perf_recovery_cycles;
     reg [31:0] perf_recovery_resync_cycles;
-    reg [31:0] perf_alu_bank_entry_cycles;
-    reg [31:0] perf_p0_bank_entry_cycles;
-    reg [31:0] perf_p1_bank_entry_cycles;
-    reg [31:0] perf_alu_bank_full_cycles;
-    reg [31:0] perf_p0_bank_full_cycles;
-    reg [31:0] perf_p1_bank_full_cycles;
+    reg [31:0] perf_alu_entry_cycles;
+    reg [31:0] perf_bank0_entry_cycles;
+    reg [31:0] perf_bank1_entry_cycles;
+    reg [31:0] perf_alu_entry_saturated_cycles;
+    reg [31:0] perf_bank0_full_cycles;
+    reg [31:0] perf_bank1_full_cycles;
     reg [31:0] perf_alu_due_select_cycles;
-    reg [31:0] perf_dtcm_due_select_cycles;
-    reg [31:0] perf_mdu_due_select_cycles;
-    reg [31:0] perf_dtcm_local_wake_cycles;
-    reg [31:0] perf_mdu_local_wake_cycles;
     reg [31:0] perf_resident_wakeup_entry_cycles;
     reg [31:0] perf_resident_due_select_cycles;
-    // Orthogonal backend observations.  The legacy loss counters below are
-    // intentionally exclusive; these counters preserve simultaneous causes
+    // Complementary backend observations. The loss counters below are
+    // intentionally exclusive; these counters retain simultaneous causes
     // so an optimization can be evaluated against the actual coupled state.
     reg [31:0] perf_coupling_mask_count [0:255];
     reg [31:0] perf_cpl_bank_dep_count;
@@ -581,8 +544,8 @@ end
     reg [31:0] perf_cpl_bank_dep_select_count;
     reg [31:0] perf_cpl_bank_rob_select_count;
     reg [31:0] perf_cpl_dep_select_operand_count;
-    // Loss-weighted coupling.  The legacy coupling mask is a state
-    // observation over all cycles; this mask is charged only when an EX
+    // Loss-weighted coupling. The full-cycle mask is a state observation
+    // over all cycles; this mask is charged only when an EX
     // capacity slot was actually lost, and stores both cycle and slot weight.
     localparam integer PERF_LOSS_COUPLING_BITS = 12;
     localparam integer PERF_LOSS_COUPLING_DEPTH =
@@ -598,11 +561,11 @@ end
     reg [31:0] perf_select_actual_width_count [0:2];
     reg [31:0] perf_select_raw_shape_count [0:15];
     reg [31:0] perf_select_raw_alu_entries;
-    reg [31:0] perf_select_raw_p0_entries;
-    reg [31:0] perf_select_raw_p1_entries;
+    reg [31:0] perf_select_raw_bank0_entries;
+    reg [31:0] perf_select_raw_bank1_entries;
     reg [31:0] perf_select_drop_alu_entries;
-    reg [31:0] perf_select_drop_p0_entries;
-    reg [31:0] perf_select_drop_p1_entries;
+    reg [31:0] perf_select_drop_bank0_entries;
+    reg [31:0] perf_select_drop_bank1_entries;
     reg [31:0] perf_select_width_gap_slots;
     reg [31:0] perf_select_pair_capable_single_cycles;
     reg [31:0] perf_select_pair_capable_single_slots;
@@ -611,44 +574,43 @@ end
     reg [31:0] perf_select_gap_recovery_cycles;
     reg [31:0] perf_select_gap_no_push_cycles;
     reg [31:0] perf_select_gap_policy_cycles;
-    reg [31:0] perf_select_queue_state_count [0:15];
-    reg [31:0] perf_select_hol_pair_cycles;
-    reg [31:0] perf_select_hol_pair_lost_slots;
-    reg [31:0] perf_select_pair_push_cycles;
-    reg [31:0] perf_select_pair_issue_cycles;
-    reg [31:0] perf_select_pair_push_single_head_cycles;
-    reg [31:0] perf_select_pair_push_single_head_slots;
-    reg [31:0] perf_select_refill_head_empty_cycles;
-    reg [31:0] perf_select_refill_head_empty_slots;
-    reg [31:0] perf_select_refill_head_empty_pair_slots;
-    reg [31:0] perf_select_refill_head_empty_single_slots;
-    reg [31:0] perf_select_refill_head_empty_uops;
-    localparam integer PERF_REFILL_LIFECYCLE_COUNT = 6;
-    reg [31:0] perf_select_refill_lifecycle_data_uops
-        [0:PERF_REFILL_LIFECYCLE_COUNT-1][0:1];
+    reg [31:0] perf_lane_ingress_state_count [0:15];
+    reg [31:0] perf_lane_b_elastic_empty_cycles;
+    reg [31:0] perf_lane_b_elastic_empty_lost_slots;
+    reg [31:0] perf_select_pair_selected_cycles;
+    reg [31:0] perf_lane_pair_active_cycles;
+    reg [31:0] perf_select_pair_after_lane_a_only_cycles;
+    reg [31:0] perf_select_pair_after_lane_a_only_slots;
+    reg [31:0] perf_select_selected_with_lane_a_empty_cycles;
+    reg [31:0] perf_select_selected_with_lane_a_empty_slots;
+    reg [31:0] perf_select_selected_with_lane_a_empty_pair_slots;
+    reg [31:0] perf_select_selected_with_lane_a_empty_single_slots;
+    reg [31:0] perf_select_selected_with_lane_a_empty_uops;
+    localparam integer PERF_INGRESS_LIFECYCLE_COUNT = 6;
+    reg [31:0] perf_select_ingress_lifecycle_data_uops
+        [0:PERF_INGRESS_LIFECYCLE_COUNT-1][0:1];
     // Prior blocker mask uses bits DEP/ORDER/RESOURCE. Indices 8 and 9 are
     // newly allocated/replaced identity and unclassified respectively.
-    reg [31:0] perf_select_refill_prior_mask_uops [0:9];
-    reg [31:0] perf_select_refill_pending_mask_uops [0:15];
-    reg [11:0] perf_refill_prev_valid_q;
-    reg [11:0] perf_refill_prev_dep_q;
-    reg [11:0] perf_refill_prev_order_q;
-    reg [11:0] perf_refill_prev_resource_q;
-    reg [11:0] perf_refill_prev_ready_q;
-    producer_id_t perf_refill_prev_tag_q [0:11];
-    integer perf_refill_lifecycle_idx;
-    integer perf_refill_data_idx;
-    integer perf_refill_mask_idx;
-    integer perf_refill_prior_mask_idx;
-    integer perf_refill_prev_idx;
-    // Per-bank state is needed to distinguish a genuinely full bank from a
-    // bank that is merely selected by the exclusive legacy reason priority.
-    reg [31:0] perf_bank_dep_entry_cycles [0:2];
-    reg [31:0] perf_bank_order_entry_cycles [0:2];
-    reg [31:0] perf_bank_resource_entry_cycles [0:2];
-    reg [31:0] perf_bank_ready_entry_cycles [0:2];
-    reg [31:0] perf_bank_candidate_entry_cycles [0:2];
-    reg [31:0] perf_bank_selected_entry_cycles [0:2];
+    reg [31:0] perf_select_ingress_prior_mask_uops [0:9];
+    reg [31:0] perf_select_ingress_pending_mask_uops [0:15];
+    reg [11:0] perf_ingress_prev_valid_q;
+    reg [11:0] perf_ingress_prev_dep_q;
+    reg [11:0] perf_ingress_prev_order_q;
+    reg [11:0] perf_ingress_prev_resource_q;
+    reg [11:0] perf_ingress_prev_ready_q;
+    producer_id_t perf_ingress_prev_tag_q [0:11];
+    integer perf_ingress_lifecycle_idx;
+    integer perf_ingress_data_idx;
+    integer perf_ingress_mask_idx;
+    integer perf_ingress_prior_mask_idx;
+    integer perf_ingress_prev_idx;
+    // Per-bank state is kept separate from operation-class counters.
+    reg [31:0] perf_bank_dep_entry_cycles [0:1];
+    reg [31:0] perf_bank_order_entry_cycles [0:1];
+    reg [31:0] perf_bank_resource_entry_cycles [0:1];
+    reg [31:0] perf_bank_ready_entry_cycles [0:1];
+    reg [31:0] perf_bank_candidate_entry_cycles [0:1];
+    reg [31:0] perf_bank_selected_entry_cycles [0:1];
     // Transaction timing is keyed by the generation-qualified producer ID.
     // It exposes whether the extra pipeline is spent in RS, Operand, FU, or
     // retirement rather than charging the whole delay to one parent bucket.
@@ -668,38 +630,22 @@ end
     integer perf_lifecycle_idx;
     reg [PRODUCER_NUM-1:0] perf_producer_issued_q;
     reg perf_producer_full_q;
-    reg perf_p0_bank_block_q;
     integer perf_producer_full_start_q;
     reg [31:0] producer_normal_drain_count;
     reg [31:0] producer_flush_drain_count;
     reg [31:0] producer_trap_free_count;
     reg        producer_nonempty_q;
     reg        producer_flush_q;
-    reg [31:0] lsu_head_wrap_count;
-    reg [31:0] lsu_tail_wrap_count;
-    reg [31:0] lsu_queue_empty_count;
-    reg [31:0] lsu_queue_near_full_count;
-    reg [31:0] lsu_queue_full_count;
-    reg [31:0] lsu_queue_pop_count;
+    reg [31:0] lsq_head_wrap_count;
+    reg [31:0] lsq_tail_wrap_count;
+    reg [31:0] lsq_empty_count;
+    reg [31:0] lsq_near_full_count;
+    reg [31:0] lsq_full_count;
+    reg [31:0] lsq_head_remove_count;
     reg [31:0] lsu_struct_mmio_count;
     reg [31:0] lsu_struct_pending_store_count;
     reg [31:0] lsu_struct_store_capture_count;
     reg [31:0] lsu_struct_other_count;
-    reg [31:0] early_arith_count;
-    reg [31:0] early_logic_count;
-    reg [31:0] early_shift_count;
-    reg [31:0] early_pass_count;
-    reg [31:0] early_rs1_fwd_count;
-    reg [31:0] early_rs2_fwd_count;
-    reg [31:0] early_both_fwd_count;
-    reg [31:0] early_to_alu_count;
-    reg [31:0] early_to_load_count;
-    reg [31:0] early_to_store_count;
-    reg [31:0] early_completion_source_count;
-    reg [31:0] early_stall_hold_count;
-    reg [31:0] early_flush_clear_count;
-    reg [31:0] early_bubble_clear_count;
-    reg [31:0] non_early_alu_count;
     integer perf_stat_idx;
     integer perf_width_idx;
     integer perf_width_idx2;
@@ -724,33 +670,59 @@ end
     wire [2:0] perf_lost_slots = 3'd2 - {1'b0, perf_executed_slots};
     wire [31:0] perf_lost_slots_ext = {{29{1'b0}}, perf_lost_slots};
     wire [1:0] perf_operand_admit_slots =
-        {1'b0, u_dut.u_ydrasil_issue_stage.lane_a_accept} +
-        {1'b0, u_dut.u_ydrasil_issue_stage.lane_b_accept};
-    wire perf_p0_completion_wakeup_now =
-        (|u_dut.u_ydrasil_issue_stage.issue_src0_completion_wakeup[7:4]) ||
-        (|u_dut.u_ydrasil_issue_stage.issue_src1_completion_wakeup[7:4]);
+        {1'b0, u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_valid_q} +
+        {1'b0, u_dut.u_ydrasil_issue_stage.u_scheduler.lane_b_valid_q};
     wire perf_rs_completion_wakeup_now =
-        (|u_dut.u_ydrasil_issue_stage.issue_src0_completion_wakeup) ||
-        (|u_dut.u_ydrasil_issue_stage.issue_src1_completion_wakeup);
+        (|u_dut.u_ydrasil_issue_stage.u_scheduler.entry_wakeup0) ||
+        (|u_dut.u_ydrasil_issue_stage.u_scheduler.entry_wakeup1);
     wire perf_rs_alloc_wakeup_now =
-        (|u_dut.u_ydrasil_issue_stage.issue_src0_alloc_wakeup) ||
-        (|u_dut.u_ydrasil_issue_stage.issue_src1_alloc_wakeup);
+        (|u_dut.u_ydrasil_issue_stage.u_scheduler.entry_wakeup0) ||
+        (|u_dut.u_ydrasil_issue_stage.u_scheduler.entry_wakeup1);
     wire [3:0] perf_rs_completion_wakeup_entries_now =
-        4'($countones(u_dut.u_ydrasil_issue_stage.
-            issue_src0_completion_wakeup | u_dut.u_ydrasil_issue_stage.
-            issue_src1_completion_wakeup));
+        4'($countones(u_dut.u_ydrasil_issue_stage.u_scheduler.entry_wakeup0 | u_dut.u_ydrasil_issue_stage.u_scheduler.entry_wakeup1));
     wire [3:0] perf_rs_alloc_wakeup_entries_now =
-        4'($countones(u_dut.u_ydrasil_issue_stage.
-            issue_src0_alloc_wakeup | u_dut.u_ydrasil_issue_stage.
-            issue_src1_alloc_wakeup));
+        4'($countones(u_dut.u_ydrasil_issue_stage.u_scheduler.entry_wakeup0 | u_dut.u_ydrasil_issue_stage.u_scheduler.entry_wakeup1));
     wire [3:0] perf_rs_select_wakeup_entries_now =
-        4'($countones(u_dut.u_ydrasil_issue_stage.
-            issue_src0_fast_main | u_dut.u_ydrasil_issue_stage.
-            issue_src0_fast_dual | u_dut.u_ydrasil_issue_stage.
-            issue_src1_fast_main | u_dut.u_ydrasil_issue_stage.
-            issue_src1_fast_dual));
+        4'($countones(u_dut.u_ydrasil_issue_stage.u_scheduler.entry_wakeup0 | u_dut.u_ydrasil_issue_stage.u_scheduler.entry_wakeup0 | u_dut.u_ydrasil_issue_stage.u_scheduler.entry_wakeup1 | u_dut.u_ydrasil_issue_stage.u_scheduler.entry_wakeup1));
     wire perf_operand_merge_pair_now =
-        u_dut.u_ydrasil_issue_stage.select_skid_merge_pair;
+        u_dut.u_ydrasil_issue_stage.u_scheduler.selected_a_valid && u_dut.u_ydrasil_issue_stage.u_scheduler.selected_b_valid;
+    // Class masks are derived from the unified scheduler entry payload.
+    wire [PRODUCER_NUM-1:0] perf_entry_memory_mask;
+    wire [PRODUCER_NUM-1:0] perf_entry_store_mask;
+    wire [PRODUCER_NUM-1:0] perf_entry_lane_b_only_mask;
+    wire [PRODUCER_NUM-1:0] perf_entry_divrem_mask;
+    wire [PRODUCER_NUM-1:0] perf_entry_serial_mask;
+    genvar perf_entry_mask_idx;
+    generate
+        for (perf_entry_mask_idx = 0; perf_entry_mask_idx < PRODUCER_NUM;
+             perf_entry_mask_idx = perf_entry_mask_idx + 1) begin : g_perf_entry_masks
+            assign perf_entry_memory_mask[perf_entry_mask_idx] =
+                u_dut.u_ydrasil_issue_stage.u_scheduler.entry_valid_q[perf_entry_mask_idx] &&
+                ((u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[perf_entry_mask_idx].op_class == UOP_CLASS_LOAD) ||
+                 (u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[perf_entry_mask_idx].op_class == UOP_CLASS_STORE));
+            assign perf_entry_store_mask[perf_entry_mask_idx] =
+                u_dut.u_ydrasil_issue_stage.u_scheduler.entry_valid_q[perf_entry_mask_idx] &&
+                (u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[perf_entry_mask_idx].op_class == UOP_CLASS_STORE);
+            assign perf_entry_lane_b_only_mask[perf_entry_mask_idx] =
+                u_dut.u_ydrasil_issue_stage.u_scheduler.entry_valid_q[perf_entry_mask_idx] &&
+                ((u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[perf_entry_mask_idx].op_class == UOP_CLASS_BJP) ||
+                 (u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[perf_entry_mask_idx].op_class == UOP_CLASS_CSR) ||
+                 (u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[perf_entry_mask_idx].op_class == UOP_CLASS_SYS) ||
+                 (u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[perf_entry_mask_idx].op_class == UOP_CLASS_MUL) ||
+                 (u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[perf_entry_mask_idx].op_class == UOP_CLASS_BITMANIP) ||
+                 u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[perf_entry_mask_idx].fence_i);
+            assign perf_entry_divrem_mask[perf_entry_mask_idx] =
+                u_dut.u_ydrasil_issue_stage.u_scheduler.entry_valid_q[perf_entry_mask_idx] &&
+                (u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[perf_entry_mask_idx].op_class == UOP_CLASS_MUL) &&
+                (u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[perf_entry_mask_idx].instr[14:12] != 3'b000) &&
+                u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[perf_entry_mask_idx].instr[25];
+            assign perf_entry_serial_mask[perf_entry_mask_idx] =
+                u_dut.u_ydrasil_issue_stage.u_scheduler.entry_valid_q[perf_entry_mask_idx] &&
+                (u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[perf_entry_mask_idx].fence_i ||
+                 (u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[perf_entry_mask_idx].op_class == UOP_CLASS_CSR) ||
+                 (u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[perf_entry_mask_idx].op_class == UOP_CLASS_SYS));
+        end
+    endgenerate
     wire [2:0] perf_operand_lost_slots =
         3'd2 - {1'b0, perf_operand_admit_slots};
     wire [31:0] perf_operand_lost_slots_ext =
@@ -759,8 +731,8 @@ end
     localparam [4:0] PERF_SRC_RECOVERY = 5'd1;
     localparam [4:0] PERF_SRC_FENCE = 5'd2;
     localparam [4:0] PERF_SRC_B_ONLY = 5'd3;
-    localparam [4:0] PERF_SRC_SINGLE_HEAD = 5'd4;
-    localparam [4:0] PERF_SRC_SELECT_REFILL = 5'd5;
+    localparam [4:0] PERF_SRC_SINGLE_LANE = 5'd4;
+    localparam [4:0] PERF_SRC_SELECT_INGRESS = 5'd5;
     localparam [4:0] PERF_SRC_RS_DEPENDENCY = 5'd6;
     localparam [4:0] PERF_SRC_RS_ORDER = 5'd7;
     localparam [4:0] PERF_SRC_RS_RESOURCE = 5'd8;
@@ -771,64 +743,91 @@ end
     localparam [4:0] PERF_SRC_LAUNCH = 5'd13;
     localparam [3:0] PERF_SEL_REASON_OTHER = 4'd0;
     localparam [3:0] PERF_SEL_REASON_SERIAL = 4'd1;
-    localparam [3:0] PERF_SEL_REASON_P0 = 4'd2;
-    localparam [3:0] PERF_SEL_REASON_P1 = 4'd3;
+    localparam [3:0] PERF_SEL_REASON_BANK0 = 4'd2;
+    localparam [3:0] PERF_SEL_REASON_BANK1 = 4'd3;
     localparam [3:0] PERF_SEL_REASON_ALU = 4'd4;
     localparam [3:0] PERF_SEL_REASON_PAIR = 4'd5;
     reg [3:0] perf_select_reason_d;
     reg [3:0] perf_select_reason_q;
     reg [4:0] perf_src_kind0_d;
     reg [4:0] perf_src_kind1_d;
-    wire perf_select_head_serial =
-        u_dut.u_ydrasil_issue_stage.select_head_valid_q &&
-        ((u_dut.u_ydrasil_issue_stage.select_head_uop0_q.op_class ==
+    wire perf_lane_a_serial =
+        u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_valid_q &&
+        ((u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_uop_q.op_class ==
           UOP_CLASS_CSR) ||
-         (u_dut.u_ydrasil_issue_stage.select_head_uop0_q.op_class ==
+         (u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_uop_q.op_class ==
           UOP_CLASS_SYS) ||
-         u_dut.u_ydrasil_issue_stage.select_head_uop0_q.fence_i);
-    wire perf_serial_pending = perf_select_head_serial;
+         u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_uop_q.fence_i);
+    wire perf_serial_pending = perf_lane_a_serial;
     producer_id_t perf_serial_tag;
     assign perf_serial_tag =
-        u_dut.u_ydrasil_issue_stage.select_head_uop0_q.dst.rob_tag;
+        u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_uop_q.dst.rob_tag;
     wire [INST_ADDR_WIDTH-1:0] perf_serial_pc =
-        u_dut.u_ydrasil_issue_stage.select_head_uop0_q.pc;
+        u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_uop_q.pc;
     wire [1:0] perf_select_buf_count =
-        {1'b0, u_dut.u_ydrasil_issue_stage.select_head_valid_q};
+        {1'b0, u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_valid_q};
     wire [2:0] perf_select_admit_slots =
-        (u_dut.u_ydrasil_issue_stage.select_buf_push ?
-         (3'd1 + {2'b0, u_dut.u_ydrasil_issue_stage.selected_valid1}) :
+        (u_dut.u_ydrasil_issue_stage.u_scheduler.selected_a_valid ?
+         (3'd1 + {2'b0, u_dut.u_ydrasil_issue_stage.u_scheduler.selected_b_valid}) :
          3'd0);
     wire [2:0] perf_complete_slots =
         3'($countones(u_dut.u_ctrl.producer_complete_mask));
     wire [1:0] perf_retire_slots =
         {1'b0, u_dut.commit_pkt.valid} +
         {1'b0, u_dut.commit_pkt1.valid};
+    // Rename-dispatch enqueue owns ROB/RAT/LSQ allocation. Scheduler dequeue
+    // is a later movement event and must not be counted as a new producer.
+    wire perf_rob_alloc0 = u_dut.rename_dispatch_enqueue0;
+    wire perf_rob_alloc1 = u_dut.rename_dispatch_enqueue1;
+    wire [PRODUCER_NUM-1:0] perf_rob_alloc_mask =
+        (perf_rob_alloc0 ?
+         (PRODUCER_NUM'(1) << u_dut.rename_enqueue_pkt0.dst.rob_tag[
+             PRODUCER_SLOT_WIDTH-1:0]) : '0) |
+        (perf_rob_alloc1 ?
+         (PRODUCER_NUM'(1) << u_dut.rename_enqueue_pkt1.dst.rob_tag[
+             PRODUCER_SLOT_WIDTH-1:0]) : '0);
+    // Source diagnostics observe the actual registered lane-A token, which
+    // is the source consumed by the Issue-to-EX boundary.
+    wire perf_issue_src0_has_producer =
+        u_dut.lane_a_compact_uop.src0.tag_valid;
+    wire perf_issue_src1_has_producer =
+        u_dut.lane_a_compact_uop.src1.tag_valid;
+    wire producer_slot_t perf_issue_src0_slot =
+        u_dut.lane_a_compact_uop.src0.producer_tag[
+            PRODUCER_SLOT_WIDTH-1:0];
+    wire producer_slot_t perf_issue_src1_slot =
+        u_dut.lane_a_compact_uop.src1.producer_tag[
+            PRODUCER_SLOT_WIDTH-1:0];
+    wire perf_issue_src0_done = perf_issue_src0_has_producer &&
+        u_dut.u_ctrl.producer_done_q[perf_issue_src0_slot];
+    wire perf_issue_src1_done = perf_issue_src1_has_producer &&
+        u_dut.u_ctrl.producer_done_q[perf_issue_src1_slot];
     wire [3:0] perf_candidate_mask = {
-        |u_dut.u_ydrasil_issue_stage.p1_serial_select_local,
-        u_dut.u_ydrasil_issue_stage.p1_select_valid,
-        u_dut.u_ydrasil_issue_stage.p0_select_valid,
-        u_dut.u_ydrasil_issue_stage.alu_select0_valid};
+        |u_dut.u_ydrasil_issue_stage.u_scheduler.selected_b_valid,
+        u_dut.u_ydrasil_issue_stage.u_scheduler.selected_b_valid,
+        u_dut.u_ydrasil_issue_stage.u_scheduler.selected_a_valid,
+        u_dut.u_ydrasil_issue_stage.u_scheduler.selected_a_valid};
     wire perf_head_issued_now =
-        (u_dut.u_ydrasil_issue_stage.lane_a_accept &&
-         (u_dut.u_ydrasil_issue_stage.lane_a_uop.dst.rob_tag ==
+        (u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_valid_q &&
+         (u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_uop_q.dst.rob_tag ==
           u_dut.u_ctrl.queue_head_id)) ||
-        (u_dut.u_ydrasil_issue_stage.lane_b_accept &&
-         (u_dut.u_ydrasil_issue_stage.lane_b_uop.dst.rob_tag ==
+        (u_dut.u_ydrasil_issue_stage.u_scheduler.lane_b_valid_q &&
+         (u_dut.u_ydrasil_issue_stage.u_scheduler.lane_b_uop_q.dst.rob_tag ==
           u_dut.u_ctrl.queue_head_id));
     wire perf_head_selected_now =
-        u_dut.u_ydrasil_issue_stage.select_buf_push &&
-        (((u_dut.u_ydrasil_issue_stage.selected_valid0) &&
-          (u_dut.u_ydrasil_issue_stage.selected_uop0.dst.rob_tag ==
+        u_dut.u_ydrasil_issue_stage.u_scheduler.selected_a_valid &&
+        (((u_dut.u_ydrasil_issue_stage.u_scheduler.selected_a_valid) &&
+          (u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[u_dut.u_ydrasil_issue_stage.u_scheduler.selected_a_slot].dst.rob_tag ==
            u_dut.u_ctrl.queue_head_id)) ||
-         ((u_dut.u_ydrasil_issue_stage.selected_valid1) &&
-          (u_dut.u_ydrasil_issue_stage.selected_uop1.dst.rob_tag ==
+         ((u_dut.u_ydrasil_issue_stage.u_scheduler.selected_b_valid) &&
+          (u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[u_dut.u_ydrasil_issue_stage.u_scheduler.selected_b_slot].dst.rob_tag ==
            u_dut.u_ctrl.queue_head_id)));
     wire perf_head_in_select_cell =
-        u_dut.u_ydrasil_issue_stage.select_head_valid_q &&
-        ((u_dut.u_ydrasil_issue_stage.select_head_uop0_q.dst.rob_tag ==
+        u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_valid_q &&
+        ((u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_uop_q.dst.rob_tag ==
           u_dut.u_ctrl.queue_head_id) ||
-         (u_dut.u_ydrasil_issue_stage.select_head_pair_q &&
-          (u_dut.u_ydrasil_issue_stage.select_head_uop1_q.dst.rob_tag ==
+         (u_dut.u_ydrasil_issue_stage.u_scheduler.lane_b_valid_q &&
+          (u_dut.u_ydrasil_issue_stage.u_scheduler.lane_b_uop_q.dst.rob_tag ==
            u_dut.u_ctrl.queue_head_id)));
     reg perf_head_rs_found;
     reg perf_head_rs_dependency;
@@ -844,45 +843,28 @@ end
         perf_head_rs_ready = 1'b0;
         for (perf_head_rs_idx = 0; perf_head_rs_idx < 12;
              perf_head_rs_idx = perf_head_rs_idx + 1) begin
-            if (u_dut.u_ydrasil_issue_stage.issue_window_valid_q[
+            if (u_dut.u_ydrasil_issue_stage.u_scheduler.entry_valid_q[
                     perf_head_rs_idx] &&
-                (u_dut.u_ydrasil_issue_stage.issue_window_q[
+                (u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[
                     perf_head_rs_idx].dst.rob_tag ==
                  u_dut.u_ctrl.queue_head_id)) begin
                 perf_head_rs_found = 1'b1;
-                if (!u_dut.u_ydrasil_issue_stage.
-                        issue_src0_ready_for_select[perf_head_rs_idx] ||
-                    (!u_dut.u_ydrasil_issue_stage.
-                         issue_src1_ready_for_select[perf_head_rs_idx] &&
-                     !u_dut.u_ydrasil_issue_stage.issue_store_q[
+                if (!u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src0_ready_q[perf_head_rs_idx] ||
+                    (!u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src1_ready_q[perf_head_rs_idx] &&
+                     !perf_entry_store_mask[
                          perf_head_rs_idx])) begin
                     perf_head_rs_dependency = 1'b1;
-                end else if (u_dut.u_ydrasil_issue_stage.issue_order_blocked[
-                                 perf_head_rs_idx]) begin
+                end else if (|u_dut.u_ydrasil_issue_stage.u_scheduler.entry_order_q[
+                                  perf_head_rs_idx]) begin
                     perf_head_rs_order = 1'b1;
-                end else if (((perf_head_rs_idx >= 4) &&
-                              (perf_head_rs_idx <= 7) &&
-                              u_dut.u_ydrasil_issue_stage.issue_memory_q[
-                                  perf_head_rs_idx] &&
-                              ({1'b0, u_dut.lsu_issue_credit} <=
-                               {1'b0, u_dut.u_ydrasil_issue_stage.
-                                   lsu_select_reserved_q})) ||
-                             ((perf_head_rs_idx >= 8) &&
-                              u_dut.u_ydrasil_issue_stage.issue_divrem_q[
-                                  perf_head_rs_idx] &&
-                              (!u_dut.u_ydrasil_issue_stage.
-                                   mdu_div_available_q ||
-                               u_dut.u_ydrasil_issue_stage.
-                                   div_select_reserved_q)) ||
-                             ((perf_head_rs_idx >= 8) &&
-                              u_dut.u_ydrasil_issue_stage.issue_serial_q[
-                                  perf_head_rs_idx] &&
-                              ((u_dut.u_ydrasil_issue_stage.issue_window_q[
+                end else if ((perf_entry_divrem_mask[perf_head_rs_idx] &&
+                              (u_dut.u_ydrasil_issue_stage.u_scheduler.div_issue_q ||
+                               u_dut.u_ydrasil_issue_stage.u_scheduler.div_inflight_q)) ||
+                             (perf_entry_serial_mask[perf_head_rs_idx] &&
+                              ((u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[
                                     perf_head_rs_idx].dst.rob_tag !=
-                                u_dut.u_ydrasil_issue_stage.
-                                    rob_head_select_q) ||
-                               !u_dut.u_ydrasil_issue_stage.
-                                   lsu_idle_select_q))) begin
+                                u_dut.u_ctrl.queue_head_id) ||
+                               !u_dut.lsu_status_pkt.idle))) begin
                     perf_head_rs_resource = 1'b1;
                 end else begin
                     perf_head_rs_ready = 1'b1;
@@ -893,7 +875,6 @@ end
     reg perf_rs_dependency_wait;
     reg perf_rs_order_wait;
     reg perf_rs_resource_wait;
-    reg perf_rs_lsu_credit_wait;
     reg perf_rs_div_credit_wait;
     reg perf_rs_serial_gate_wait;
     reg [3:0] perf_rs_dependency_entries_now;
@@ -918,9 +899,6 @@ end
     localparam logic [4:0] PERF_DEP_BLOCKER_MDU = 5'b00100;
     localparam logic [4:0] PERF_DEP_BLOCKER_OTHER = 5'b01000;
     localparam logic [4:0] PERF_DEP_BLOCKER_STALE = 5'b10000;
-    localparam logic [2:0] PERF_DBG_PRODUCER_ALU = 3'd1;
-    localparam logic [2:0] PERF_DBG_PRODUCER_LOAD = 3'd2;
-    localparam logic [2:0] PERF_DBG_PRODUCER_MDU = 3'd3;
     reg [4:0] perf_rs_dep_blocker_mask_now;
     reg [4:0] perf_dep_blocker_operand_count_now [0:4];
     reg [4:0] perf_dep_blocker_kind_now;
@@ -940,12 +918,12 @@ end
                  producer_tag[PRODUCER_ID_WIDTH-1])) begin
                 perf_dep_blocker_kind = PERF_DEP_BLOCKER_STALE;
             end else begin
-                case (u_dut.u_ctrl.dbg_producer_kind_q[producer_slot])
-                    PERF_DBG_PRODUCER_ALU:
+                case (u_dut.u_ctrl.producer_result_class_q[producer_slot])
+                    RESULT_ALU:
                         perf_dep_blocker_kind = PERF_DEP_BLOCKER_ALU;
-                    PERF_DBG_PRODUCER_LOAD:
+                    RESULT_LSU:
                         perf_dep_blocker_kind = PERF_DEP_BLOCKER_LOAD;
-                    PERF_DBG_PRODUCER_MDU:
+                    RESULT_MDU:
                         perf_dep_blocker_kind = PERF_DEP_BLOCKER_MDU;
                     default:
                         perf_dep_blocker_kind = PERF_DEP_BLOCKER_OTHER;
@@ -958,7 +936,6 @@ end
         perf_rs_dependency_wait = 1'b0;
         perf_rs_order_wait = 1'b0;
         perf_rs_resource_wait = 1'b0;
-        perf_rs_lsu_credit_wait = 1'b0;
         perf_rs_div_credit_wait = 1'b0;
         perf_rs_serial_gate_wait = 1'b0;
         perf_rs_dependency_entries_now = '0;
@@ -985,24 +962,24 @@ end
             perf_dep_blocker_operand_count_now[perf_dep_blocker_idx] = '0;
         for (perf_rs_reason_idx = 0; perf_rs_reason_idx < 12;
              perf_rs_reason_idx = perf_rs_reason_idx + 1) begin
-            if (u_dut.u_ydrasil_issue_stage.issue_window_valid_q[
+            if (u_dut.u_ydrasil_issue_stage.u_scheduler.entry_valid_q[
                     perf_rs_reason_idx]) begin
-                if (!u_dut.u_ydrasil_issue_stage.issue_src0_ready_for_select[
+                if (!u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src0_ready_q[
                         perf_rs_reason_idx] ||
-                    (!u_dut.u_ydrasil_issue_stage.issue_src1_ready_for_select[
+                    (!u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src1_ready_q[
                          perf_rs_reason_idx] &&
-                     !u_dut.u_ydrasil_issue_stage.issue_store_q[
+                     !perf_entry_store_mask[
                          perf_rs_reason_idx])) begin
                     perf_rs_dependency_wait = 1'b1;
                     perf_rs_dependency_entries_now =
                         perf_rs_dependency_entries_now + 1'b1;
-                    if (!u_dut.u_ydrasil_issue_stage.issue_src0_ready_for_select[
+                    if (!u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src0_ready_q[
                             perf_rs_reason_idx]) begin
                         perf_rs_dep_src0_wait_now = 1'b1;
                         perf_dep_blocker_kind_now = perf_dep_blocker_kind(
-                            u_dut.u_ydrasil_issue_stage.issue_window_q[
+                            u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[
                                 perf_rs_reason_idx].src0.tag_valid,
-                            u_dut.u_ydrasil_issue_stage.issue_window_q[
+                            u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[
                                 perf_rs_reason_idx].src0.producer_tag);
                         perf_rs_dep_blocker_mask_now =
                             perf_rs_dep_blocker_mask_now |
@@ -1016,15 +993,15 @@ end
                                     perf_dep_blocker_operand_count_now[
                                         perf_dep_blocker_idx] + 1'b1;
                     end
-                    if (!u_dut.u_ydrasil_issue_stage.issue_src1_ready_for_select[
+                    if (!u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src1_ready_q[
                             perf_rs_reason_idx] &&
-                        !u_dut.u_ydrasil_issue_stage.issue_store_q[
+                        !perf_entry_store_mask[
                             perf_rs_reason_idx]) begin
                         perf_rs_dep_src1_wait_now = 1'b1;
                         perf_dep_blocker_kind_now = perf_dep_blocker_kind(
-                            u_dut.u_ydrasil_issue_stage.issue_window_q[
+                            u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[
                                 perf_rs_reason_idx].src1.tag_valid,
-                            u_dut.u_ydrasil_issue_stage.issue_window_q[
+                            u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[
                                 perf_rs_reason_idx].src1.producer_tag);
                         perf_rs_dep_blocker_mask_now =
                             perf_rs_dep_blocker_mask_now |
@@ -1038,114 +1015,77 @@ end
                                     perf_dep_blocker_operand_count_now[
                                         perf_dep_blocker_idx] + 1'b1;
                     end
-                    if (u_dut.u_ydrasil_issue_stage.issue_memory_q[
+                    if (perf_entry_memory_mask[
                             perf_rs_reason_idx])
-                        if (u_dut.u_ydrasil_issue_stage.issue_store_q[
+                        if (perf_entry_store_mask[
                                 perf_rs_reason_idx])
                             perf_rs_dep_store_now = 1'b1;
                         else
                             perf_rs_dep_load_now = 1'b1;
-                    else if (u_dut.u_ydrasil_issue_stage.issue_mul_q[
+                    else if (perf_entry_lane_b_only_mask[
                                  perf_rs_reason_idx])
                         perf_rs_dep_mul_now = 1'b1;
-                    else if (u_dut.u_ydrasil_issue_stage.issue_branch_q[
+                    else if (u_dut.u_ydrasil_issue_stage.u_scheduler.entry_branch_mask[
                                  perf_rs_reason_idx])
                         perf_rs_dep_branch_now = 1'b1;
 
-                    // Use the stored ready bits for this projection.  The
+                    // Use the stored ready bits for this classification. The
                     // *_ready_for_select wires already include the current
                     // wakeup, so looking only at them would hide the exact
                     // wakeup that missed the Select window.
-                    if (!u_dut.u_ydrasil_issue_stage.
-                            issue_window_src0_ready_q[perf_rs_reason_idx] &&
-                        u_dut.u_ydrasil_issue_stage.
-                            issue_src0_completion_wakeup[perf_rs_reason_idx])
+                    if (!u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src0_ready_q[perf_rs_reason_idx] &&
+                        u_dut.u_ydrasil_issue_stage.u_scheduler.entry_wakeup0[perf_rs_reason_idx])
                         perf_rs_dep_src0_completion_now = 1'b1;
-                    if (!u_dut.u_ydrasil_issue_stage.
-                            issue_window_src1_ready_q[perf_rs_reason_idx] &&
-                        !u_dut.u_ydrasil_issue_stage.issue_store_q[
+                    if (!u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src1_ready_q[perf_rs_reason_idx] &&
+                        !perf_entry_store_mask[
                             perf_rs_reason_idx] &&
-                        u_dut.u_ydrasil_issue_stage.
-                            issue_src1_completion_wakeup[perf_rs_reason_idx])
+                        u_dut.u_ydrasil_issue_stage.u_scheduler.entry_wakeup1[perf_rs_reason_idx])
                         perf_rs_dep_src1_completion_now = 1'b1;
-                    if (!u_dut.u_ydrasil_issue_stage.
-                            issue_window_src0_ready_q[perf_rs_reason_idx] &&
-                        u_dut.u_ydrasil_issue_stage.
-                            issue_src0_alloc_wakeup[perf_rs_reason_idx])
+                    if (!u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src0_ready_q[perf_rs_reason_idx] &&
+                        u_dut.u_ydrasil_issue_stage.u_scheduler.entry_wakeup0[perf_rs_reason_idx])
                         perf_rs_dep_src0_alloc_now = 1'b1;
-                    if (!u_dut.u_ydrasil_issue_stage.
-                            issue_window_src1_ready_q[perf_rs_reason_idx] &&
-                        !u_dut.u_ydrasil_issue_stage.issue_store_q[
+                    if (!u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src1_ready_q[perf_rs_reason_idx] &&
+                        !perf_entry_store_mask[
                             perf_rs_reason_idx] &&
-                        u_dut.u_ydrasil_issue_stage.
-                            issue_src1_alloc_wakeup[perf_rs_reason_idx])
+                        u_dut.u_ydrasil_issue_stage.u_scheduler.entry_wakeup1[perf_rs_reason_idx])
                         perf_rs_dep_src1_alloc_now = 1'b1;
-                    if ((!u_dut.u_ydrasil_issue_stage.
-                             issue_window_src0_ready_q[perf_rs_reason_idx] &&
-                         u_dut.u_ydrasil_issue_stage.
-                             issue_src0_completion_wakeup[perf_rs_reason_idx]) &&
-                        (!u_dut.u_ydrasil_issue_stage.
-                             issue_window_src1_ready_q[perf_rs_reason_idx] &&
-                         !u_dut.u_ydrasil_issue_stage.issue_store_q[
+                    if ((!u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src0_ready_q[perf_rs_reason_idx] &&
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_wakeup0[perf_rs_reason_idx]) &&
+                        (!u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src1_ready_q[perf_rs_reason_idx] &&
+                         !perf_entry_store_mask[
                              perf_rs_reason_idx] &&
-                         u_dut.u_ydrasil_issue_stage.
-                             issue_src1_completion_wakeup[perf_rs_reason_idx]))
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_wakeup1[perf_rs_reason_idx]))
                         perf_rs_dep_both_wakeup_now = 1'b1;
-                    if (((!u_dut.u_ydrasil_issue_stage.
-                              issue_window_src0_ready_q[perf_rs_reason_idx] &&
-                          u_dut.u_ydrasil_issue_stage.
-                              issue_src0_completion_wakeup[perf_rs_reason_idx]) &&
-                         (!u_dut.u_ydrasil_issue_stage.
-                              issue_window_src1_ready_q[perf_rs_reason_idx] &&
-                          !u_dut.u_ydrasil_issue_stage.issue_store_q[
+                    if (((!u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src0_ready_q[perf_rs_reason_idx] &&
+                          u_dut.u_ydrasil_issue_stage.u_scheduler.entry_wakeup0[perf_rs_reason_idx]) &&
+                         (!u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src1_ready_q[perf_rs_reason_idx] &&
+                          !perf_entry_store_mask[
                               perf_rs_reason_idx] &&
-                          u_dut.u_ydrasil_issue_stage.
-                              issue_src1_alloc_wakeup[perf_rs_reason_idx])) ||
-                        ((!u_dut.u_ydrasil_issue_stage.
-                              issue_window_src0_ready_q[perf_rs_reason_idx] &&
-                          u_dut.u_ydrasil_issue_stage.
-                              issue_src0_alloc_wakeup[perf_rs_reason_idx]) &&
-                         (!u_dut.u_ydrasil_issue_stage.
-                              issue_window_src1_ready_q[perf_rs_reason_idx] &&
-                          !u_dut.u_ydrasil_issue_stage.issue_store_q[
+                          u_dut.u_ydrasil_issue_stage.u_scheduler.entry_wakeup1[perf_rs_reason_idx])) ||
+                        ((!u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src0_ready_q[perf_rs_reason_idx] &&
+                          u_dut.u_ydrasil_issue_stage.u_scheduler.entry_wakeup0[perf_rs_reason_idx]) &&
+                         (!u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src1_ready_q[perf_rs_reason_idx] &&
+                          !perf_entry_store_mask[
                               perf_rs_reason_idx] &&
-                          u_dut.u_ydrasil_issue_stage.
-                              issue_src1_completion_wakeup[perf_rs_reason_idx])))
+                          u_dut.u_ydrasil_issue_stage.u_scheduler.entry_wakeup1[perf_rs_reason_idx])))
                         perf_rs_dep_mixed_wakeup_now = 1'b1;
-                end else if (u_dut.u_ydrasil_issue_stage.issue_order_blocked[
-                                 perf_rs_reason_idx]) begin
+                end else if (|u_dut.u_ydrasil_issue_stage.u_scheduler.entry_order_q[
+                                  perf_rs_reason_idx]) begin
                     perf_rs_order_wait = 1'b1;
                     perf_rs_order_entries_now =
                         perf_rs_order_entries_now + 1'b1;
-                end else if ((perf_rs_reason_idx >= 4) &&
-                             (perf_rs_reason_idx <= 7) &&
-                             u_dut.u_ydrasil_issue_stage.issue_memory_q[
-                                 perf_rs_reason_idx] &&
-                             ({1'b0, u_dut.lsu_issue_credit} <=
-                              ({1'b0, u_dut.u_ydrasil_issue_stage.
-                                  lsu_select_reserved_q} +
-                               u_dut.u_ydrasil_issue_stage.agu_in_valid_q))) begin
-                    perf_rs_resource_wait = 1'b1;
-                    perf_rs_lsu_credit_wait = 1'b1;
-                    perf_rs_resource_entries_now =
-                        perf_rs_resource_entries_now + 1'b1;
-                end else if ((perf_rs_reason_idx >= 8) &&
-                             u_dut.u_ydrasil_issue_stage.issue_divrem_q[
-                                 perf_rs_reason_idx] &&
-                             (!u_dut.u_ydrasil_issue_stage.mdu_div_available_q ||
-                              u_dut.u_ydrasil_issue_stage.
-                                  div_select_reserved_q)) begin
+                end else if (perf_entry_divrem_mask[perf_rs_reason_idx] &&
+                             (u_dut.u_ydrasil_issue_stage.u_scheduler.div_issue_q ||
+                              u_dut.u_ydrasil_issue_stage.u_scheduler.div_inflight_q)) begin
                     perf_rs_resource_wait = 1'b1;
                     perf_rs_div_credit_wait = 1'b1;
                     perf_rs_resource_entries_now =
                         perf_rs_resource_entries_now + 1'b1;
-                end else if ((perf_rs_reason_idx >= 8) &&
-                             u_dut.u_ydrasil_issue_stage.issue_serial_q[
-                                 perf_rs_reason_idx] &&
-                             ((u_dut.u_ydrasil_issue_stage.issue_window_q[
+                end else if (perf_entry_serial_mask[perf_rs_reason_idx] &&
+                             ((u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[
                                    perf_rs_reason_idx].dst.rob_tag !=
-                               u_dut.u_ydrasil_issue_stage.rob_head_select_q) ||
-                              !u_dut.u_ydrasil_issue_stage.lsu_idle_select_q ||
+                               u_dut.u_ctrl.queue_head_id) ||
+                              !u_dut.lsu_status_pkt.idle ||
                               perf_serial_pending)) begin
                     perf_rs_resource_wait = 1'b1;
                     perf_rs_serial_gate_wait = 1'b1;
@@ -1160,107 +1100,77 @@ end
         perf_rs_dep_both_src_now = perf_rs_dep_src0_wait_now &&
             perf_rs_dep_src1_wait_now;
     end
-    reg perf_p0_dependency_wait;
-    reg perf_p0_order_wait;
-    reg perf_p0_resource_wait;
-    reg perf_p0_ready_wait;
-    integer perf_p0_reason_idx;
-    // P0 is the memory bank.  Apply the same priority as the RTL candidate
-    // predicate so a full-bank loss has one and only one root cause.
-    always_comb begin
-        perf_p0_dependency_wait = 1'b0;
-        perf_p0_order_wait = 1'b0;
-        perf_p0_resource_wait = 1'b0;
-        perf_p0_ready_wait = 1'b0;
-        for (perf_p0_reason_idx = 4; perf_p0_reason_idx < 8;
-             perf_p0_reason_idx = perf_p0_reason_idx + 1) begin
-            if (u_dut.u_ydrasil_issue_stage.issue_window_valid_q[
-                    perf_p0_reason_idx]) begin
-                if (!u_dut.u_ydrasil_issue_stage.
-                        issue_src0_ready_for_select[perf_p0_reason_idx] ||
-                    (!u_dut.u_ydrasil_issue_stage.
-                         issue_src1_ready_for_select[perf_p0_reason_idx] &&
-                     !u_dut.u_ydrasil_issue_stage.issue_store_q[
-                         perf_p0_reason_idx]))
-                    perf_p0_dependency_wait = 1'b1;
-                else if (u_dut.u_ydrasil_issue_stage.issue_order_blocked[
-                             perf_p0_reason_idx])
-                    perf_p0_order_wait = 1'b1;
-                else if (u_dut.u_ydrasil_issue_stage.issue_memory_q[
-                             perf_p0_reason_idx] &&
-                         ({1'b0, u_dut.lsu_issue_credit} <=
-                          {1'b0, u_dut.u_ydrasil_issue_stage.
-                              lsu_select_reserved_q}))
-                    perf_p0_resource_wait = 1'b1;
-                else
-                    perf_p0_ready_wait = 1'b1;
-            end
-        end
-    end
-    wire perf_rs_bank_full_now =
-        u_dut.u_ydrasil_issue_stage.decode_valid_i &&
-        u_dut.u_ydrasil_issue_stage.dispatch_ready_i &&
-        !u_dut.u_ydrasil_issue_stage.dispatch_slots_available;
-    wire perf_rs_pair_bank_limit_now =
-        u_dut.u_ydrasil_issue_stage.decode_valid1_i &&
-        u_dut.u_ydrasil_issue_stage.dispatch_ready_i &&
-        u_dut.u_ydrasil_issue_stage.dispatch_slots_available &&
-        !u_dut.u_ydrasil_issue_stage.dispatch_pair_slots_available;
-    wire perf_rob_full_now =
-        u_dut.u_ydrasil_issue_stage.decode_valid_i &&
-        !u_dut.u_ydrasil_issue_stage.dispatch_ready_i;
-    // Raw Select opportunity.  The old SELECT_WIDTH predicate compared the
-    // number of ready entries with the number already admitted in the same
-    // cycle, which made every idle Select cycle look width-limited.  These
-    // signals use the actual bank candidate vectors and the actual bundle
-    // crossing the Select/Operand boundary.
-    wire [2:0] perf_raw_alu_candidate_entries_now =
-        3'($countones(u_dut.u_ydrasil_issue_stage.alu_candidate_local));
-    wire perf_raw_p0_candidate_now =
-        |u_dut.u_ydrasil_issue_stage.p0_candidate_local;
-    wire perf_raw_p1_candidate_now =
-        |u_dut.u_ydrasil_issue_stage.p1_candidate_local;
+    wire perf_rob_full_now = u_dut.u_ctrl.producer_full_stall;
+    // Raw Select opportunity is derived from both six-entry physical banks.
+    // Operation classes describe lane eligibility; they do not define storage
+    // partitions.
+    wire [5:0] perf_bank0_candidate_mask_now =
+        u_dut.u_ydrasil_issue_stage.u_scheduler.bank_mem_candidate[0] |
+        u_dut.u_ydrasil_issue_stage.u_scheduler.bank_alu_candidate[0] |
+        u_dut.u_ydrasil_issue_stage.u_scheduler.bank_bonly_candidate[0];
+    wire [5:0] perf_bank1_candidate_mask_now =
+        u_dut.u_ydrasil_issue_stage.u_scheduler.bank_mem_candidate[1] |
+        u_dut.u_ydrasil_issue_stage.u_scheduler.bank_alu_candidate[1] |
+        u_dut.u_ydrasil_issue_stage.u_scheduler.bank_bonly_candidate[1];
+    wire [3:0] perf_raw_alu_candidate_entries_now =
+        4'($countones(u_dut.u_ydrasil_issue_stage.u_scheduler.bank_alu_candidate[0]) +
+            $countones(u_dut.u_ydrasil_issue_stage.u_scheduler.bank_alu_candidate[1]));
+    wire [3:0] perf_raw_bank0_candidate_entries_now =
+        4'($countones(perf_bank0_candidate_mask_now));
+    wire [3:0] perf_raw_bank1_candidate_entries_now =
+        4'($countones(perf_bank1_candidate_mask_now));
+    wire perf_raw_bank0_candidate_now = |perf_bank0_candidate_mask_now;
+    wire perf_raw_bank1_candidate_now = |perf_bank1_candidate_mask_now;
     wire perf_raw_serial_candidate_now =
-        |u_dut.u_ydrasil_issue_stage.p1_serial_candidate_local;
-    wire [2:0] perf_raw_bank_supply_now =
-        (perf_raw_alu_candidate_entries_now > 3'd2 ? 3'd2 :
-         perf_raw_alu_candidate_entries_now) +
-        {2'b0, perf_raw_p0_candidate_now} +
-        {2'b0, perf_raw_p1_candidate_now};
+        |(u_dut.u_ydrasil_issue_stage.u_scheduler.bank_bonly_candidate[0] &
+          perf_entry_serial_mask[5:0]) ||
+        |(u_dut.u_ydrasil_issue_stage.u_scheduler.bank_bonly_candidate[1] &
+          perf_entry_serial_mask[11:6]);
+    wire perf_raw_lane_a_candidate_now =
+        (|u_dut.u_ydrasil_issue_stage.u_scheduler.bank_mem_candidate[0]) ||
+        (|u_dut.u_ydrasil_issue_stage.u_scheduler.bank_mem_candidate[1]) ||
+        (perf_raw_alu_candidate_entries_now != 0);
+    wire perf_raw_lane_b_candidate_now =
+        (|u_dut.u_ydrasil_issue_stage.u_scheduler.bank_bonly_candidate[0]) ||
+        (|u_dut.u_ydrasil_issue_stage.u_scheduler.bank_bonly_candidate[1]) ||
+        (perf_raw_alu_candidate_entries_now > 4'd1);
+    wire [1:0] perf_raw_bank_supply_now =
+        {1'b0, perf_raw_lane_a_candidate_now} +
+        {1'b0, perf_raw_lane_b_candidate_now};
     wire [1:0] perf_select_ideal_width_now =
-        perf_raw_serial_candidate_now ? 2'd1 :
-        (perf_raw_bank_supply_now >= 3'd2 ? 2'd2 :
-         perf_raw_bank_supply_now[1:0]);
+        perf_raw_bank_supply_now;
     wire [1:0] perf_select_actual_width_now =
-        u_dut.u_ydrasil_issue_stage.select_buf_push ?
-        ({1'b0, u_dut.u_ydrasil_issue_stage.selected_valid0} +
-         {1'b0, u_dut.u_ydrasil_issue_stage.selected_valid1}) : 2'd0;
+        u_dut.u_ydrasil_issue_stage.u_scheduler.selected_a_valid ?
+        ({1'b0, u_dut.u_ydrasil_issue_stage.u_scheduler.selected_a_valid} +
+         {1'b0, u_dut.u_ydrasil_issue_stage.u_scheduler.selected_b_valid}) : 2'd0;
     wire [31:0] perf_select_width_gap_now =
         (perf_select_ideal_width_now > perf_select_actual_width_now) ?
         ({{30{1'b0}}, perf_select_ideal_width_now} -
          {{30{1'b0}}, perf_select_actual_width_now}) : 32'd0;
     wire perf_select_gap_recovery_now =
         (perf_select_width_gap_now != 0) &&
-        (u_dut.u_ydrasil_issue_stage.branch_recovery_i ||
-         u_dut.u_ydrasil_issue_stage.recovery_pending_q);
+        (u_dut.ex_pc_redirect ||
+         u_dut.ex_pc_redirect);
     wire perf_select_gap_no_push_now =
         (perf_select_width_gap_now != 0) && !perf_select_gap_recovery_now &&
-        !u_dut.u_ydrasil_issue_stage.select_buf_push;
+        !u_dut.u_ydrasil_issue_stage.u_scheduler.selected_a_valid;
     wire [3:0] perf_select_raw_shape_now = {
-        perf_raw_serial_candidate_now, perf_raw_p1_candidate_now,
-        perf_raw_p0_candidate_now, (perf_raw_alu_candidate_entries_now != 0)};
-    wire [2:0] perf_select_drop_alu_entries_now =
-        3'($countones(u_dut.u_ydrasil_issue_stage.alu_candidate_local &
-                      ~u_dut.u_ydrasil_issue_stage.issue_select_mask[3:0]));
-    wire [2:0] perf_select_drop_p0_entries_now =
-        3'($countones(u_dut.u_ydrasil_issue_stage.p0_candidate_local &
-                      ~u_dut.u_ydrasil_issue_stage.issue_select_mask[7:4]));
-    wire [2:0] perf_select_drop_p1_entries_now =
-        3'($countones(u_dut.u_ydrasil_issue_stage.p1_candidate_local &
-                      ~u_dut.u_ydrasil_issue_stage.issue_select_mask[11:8]));
+        perf_raw_serial_candidate_now, perf_raw_bank1_candidate_now,
+        perf_raw_bank0_candidate_now, (perf_raw_alu_candidate_entries_now != 0)};
+    wire [3:0] perf_select_drop_alu_entries_now =
+        4'($countones(u_dut.u_ydrasil_issue_stage.u_scheduler.bank_alu_candidate[0] &
+                      ~u_dut.u_ydrasil_issue_stage.u_scheduler.selected_mask_q[5:0]) +
+            $countones(u_dut.u_ydrasil_issue_stage.u_scheduler.bank_alu_candidate[1] &
+                      ~u_dut.u_ydrasil_issue_stage.u_scheduler.selected_mask_q[11:6]));
+    wire [3:0] perf_select_drop_bank0_entries_now =
+        4'($countones(perf_bank0_candidate_mask_now &
+                      ~u_dut.u_ydrasil_issue_stage.u_scheduler.selected_mask_q[5:0]));
+    wire [3:0] perf_select_drop_bank1_entries_now =
+        4'($countones(perf_bank1_candidate_mask_now &
+                      ~u_dut.u_ydrasil_issue_stage.u_scheduler.selected_mask_q[11:6]));
     wire perf_select_width_limit_now =
-        !u_dut.u_ydrasil_issue_stage.branch_recovery_i &&
-        !u_dut.u_ydrasil_issue_stage.recovery_pending_q &&
+        !u_dut.ex_pc_redirect &&
+        !u_dut.ex_pc_redirect &&
         (perf_select_ideal_width_now > perf_select_actual_width_now);
     wire perf_operand_dependency_miss_now =
         u_dut.issue_dependency_wait || u_dut.issue_dependency_wait1;
@@ -1269,23 +1179,23 @@ end
         !u_dut.commit_pkt.valid && !u_dut.commit_pkt1.valid &&
         !u_dut.u_ctrl.producer_complete_mask[u_dut.u_ctrl.queue_head_q];
     wire perf_frontend_empty_now = !u_dut.if_id_valid;
-    wire perf_lsu_wait_now = perf_rs_lsu_credit_wait ||
+    wire perf_lsq_wait_now = !u_dut.lsq_alloc_ready ||
         perf_rs_serial_gate_wait ||
-        (u_dut.u_ydrasil_load_store_unit.queue_count_q == 2'd2);
+        (u_dut.u_ydrasil_load_store_unit.count_q >= 4'd11);
     wire perf_fu_wait_now = u_dut.ex_mul_stall;
     // Loss mask bits (LSB first): BANK, ROB_CAP, DEP, ORDER, RESOURCE,
-    // SELECT, OPERAND, RECOVERY, FRONTEND, ROB_HEAD, LSU, FU.
+    // SELECT, OPERAND, RECOVERY, FRONTEND, ROB_HEAD, LSQ, FU.
     wire [PERF_LOSS_COUPLING_BITS-1:0] perf_loss_coupling_mask_now = {
-        perf_fu_wait_now, perf_lsu_wait_now, perf_rob_head_wait_now,
+        perf_fu_wait_now, perf_lsq_wait_now, perf_rob_head_wait_now,
         perf_frontend_empty_now,
         (u_dut.ex_pc_redirect ||
-         u_dut.u_ydrasil_issue_stage.recovery_pending_q),
+         u_dut.ex_pc_redirect),
         perf_operand_dependency_miss_now,
         perf_select_width_limit_now,
-        (perf_rs_resource_wait || perf_rs_pair_bank_limit_now),
+        perf_rs_resource_wait,
         perf_rs_order_wait, perf_rs_dependency_wait,
         perf_rob_full_now,
-        (perf_bank_full_any_now || perf_rs_bank_full_now)
+        perf_bank_full_any_now
     };
     // Primary cycle-cause partition used by the slot accounting below.  The
     // ordering is intentional: a cycle with several asserted controls is
@@ -1347,8 +1257,8 @@ end
         !perf_cycle_lsu_struct && !perf_cycle_producer_full &&
         !perf_cycle_wb && !perf_cycle_clint &&
         !perf_cycle_lsu_serialize && !perf_cycle_no_if_valid &&
-        u_dut.u_ydrasil_issue_stage.issue_valid_ff &&
-        u_dut.u_ydrasil_issue_stage.id_advance;
+        u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_valid_q &&
+        u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_valid_q;
     wire perf_cycle_other =
         !(perf_cycle_flush | perf_cycle_mul_hold | perf_cycle_multi_cause |
           perf_cycle_dependency | perf_cycle_lsu_struct |
@@ -1366,17 +1276,17 @@ end
     always_comb begin
         perf_src_kind0_d = PERF_SRC_OTHER;
         perf_src_kind1_d = PERF_SRC_OTHER;
-        if (u_dut.u_ydrasil_issue_stage.flush_id_i ||
-            u_dut.u_ydrasil_issue_stage.trap_flush_i ||
-            u_dut.u_ydrasil_issue_stage.branch_recovery_i ||
-            u_dut.u_ydrasil_issue_stage.recovery_pending_q) begin
+        if (u_dut.flush_id ||
+            u_dut.trap_ctrl_pkt.redirect ||
+            u_dut.ex_pc_redirect ||
+            u_dut.ex_pc_redirect) begin
             perf_src_kind0_d = PERF_SRC_RECOVERY;
             perf_src_kind1_d = PERF_SRC_RECOVERY;
-        end else if (!u_dut.u_ydrasil_issue_stage.issue_pkt_i.valid) begin
-            if (u_dut.u_ydrasil_issue_stage.select_buf_push) begin
-                perf_src_kind0_d = PERF_SRC_SELECT_REFILL;
-                perf_src_kind1_d = PERF_SRC_SELECT_REFILL;
-            end else if (|u_dut.u_ydrasil_issue_stage.issue_window_valid_q) begin
+        end else if (!u_dut.lane_a_compact_uop.valid) begin
+            if (u_dut.u_ydrasil_issue_stage.u_scheduler.selected_a_valid) begin
+                perf_src_kind0_d = PERF_SRC_SELECT_INGRESS;
+                perf_src_kind1_d = PERF_SRC_SELECT_INGRESS;
+            end else if (|u_dut.u_ydrasil_issue_stage.u_scheduler.entry_valid_q) begin
                 if (perf_rs_dependency_wait) begin
                     perf_src_kind0_d = PERF_SRC_RS_DEPENDENCY;
                     perf_src_kind1_d = PERF_SRC_RS_DEPENDENCY;
@@ -1398,38 +1308,42 @@ end
                 perf_src_kind1_d = PERF_SRC_RS_EMPTY;
             end
         end else begin
-            if (u_dut.u_ydrasil_issue_stage.lane_a_fu_valid)
+            if (u_dut.ex_accept_valid)
                 perf_src_kind0_d = PERF_SRC_LAUNCH;
-            else if (u_dut.u_ydrasil_issue_stage.lane_a_accept &&
-                     u_dut.u_ydrasil_issue_stage.issue_pkt_i.fence_i)
+            else if (u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_valid_q &&
+                     u_dut.lane_a_compact_uop.fence_i)
                 perf_src_kind0_d = PERF_SRC_FENCE;
-            else if (u_dut.u_ydrasil_issue_stage.lane_b_accept)
+            else if (u_dut.u_ydrasil_issue_stage.u_scheduler.lane_b_valid_q)
                 perf_src_kind0_d = PERF_SRC_B_ONLY;
-            else if (u_dut.u_ydrasil_issue_stage.lane_a_accept)
-                perf_src_kind0_d = PERF_SRC_SINGLE_HEAD;
-            if (u_dut.u_ydrasil_issue_stage.lane_b_accept)
+            else if (u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_valid_q)
+                perf_src_kind0_d = PERF_SRC_SINGLE_LANE;
+            if (u_dut.u_ydrasil_issue_stage.u_scheduler.lane_b_valid_q)
                 perf_src_kind1_d = PERF_SRC_LAUNCH;
-            else if (u_dut.u_ydrasil_issue_stage.lane_a_accept)
-                perf_src_kind1_d = PERF_SRC_SINGLE_HEAD;
+            else if (u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_valid_q)
+                perf_src_kind1_d = PERF_SRC_SINGLE_LANE;
         end
     end
 
-    // Snapshot the producer of each selected Operand bundle.  The snapshot is
-    // consumed after the Select/Operand register boundary, so the loss leaves
-    // below describe the bundle that actually became a singleton or refill,
-    // rather than a live candidate signal from a different cycle.
+    // Snapshot the producer of each selected lane. The snapshot is consumed
+    // after the registered Select/Operand boundary.
     always_comb begin
         perf_select_reason_d = PERF_SEL_REASON_OTHER;
-        if (|u_dut.u_ydrasil_issue_stage.p1_serial_select_local)
-            perf_select_reason_d = PERF_SEL_REASON_SERIAL;
-        else if (u_dut.u_ydrasil_issue_stage.selected_valid1)
+        if (u_dut.u_ydrasil_issue_stage.u_scheduler.selected_b_valid)
             perf_select_reason_d = PERF_SEL_REASON_PAIR;
-        else if (|u_dut.u_ydrasil_issue_stage.selected0_mask[7:4])
-            perf_select_reason_d = PERF_SEL_REASON_P0;
-        else if (|u_dut.u_ydrasil_issue_stage.selected0_mask[11:8])
-            perf_select_reason_d = PERF_SEL_REASON_P1;
-        else if (|u_dut.u_ydrasil_issue_stage.selected0_mask[3:0])
-            perf_select_reason_d = PERF_SEL_REASON_ALU;
+        else if (u_dut.u_ydrasil_issue_stage.u_scheduler.selected_a_valid) begin
+            if (perf_entry_serial_mask[
+                    u_dut.u_ydrasil_issue_stage.u_scheduler.selected_a_slot])
+                perf_select_reason_d = PERF_SEL_REASON_SERIAL;
+            else if (!perf_entry_memory_mask[
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.selected_a_slot] &&
+                     !perf_entry_lane_b_only_mask[
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.selected_a_slot])
+                perf_select_reason_d = PERF_SEL_REASON_ALU;
+            else if (u_dut.u_ydrasil_issue_stage.u_scheduler.selected_a_slot < 6)
+                perf_select_reason_d = PERF_SEL_REASON_BANK0;
+            else
+                perf_select_reason_d = PERF_SEL_REASON_BANK1;
+        end
     end
     function automatic [1:0] perf_empty_kind_slots(input [4:0] kind);
         perf_empty_kind_slots =
@@ -1443,8 +1357,8 @@ end
                   (perf_src_kind0_q == PERF_SRC_RECOVERY) ||
                   (perf_src_kind0_q == PERF_SRC_FENCE) ||
                   (perf_src_kind0_q == PERF_SRC_B_ONLY) ||
-                  (perf_src_kind0_q == PERF_SRC_SINGLE_HEAD) ||
-                  (perf_src_kind0_q == PERF_SRC_SELECT_REFILL) ||
+                  (perf_src_kind0_q == PERF_SRC_SINGLE_LANE) ||
+                  (perf_src_kind0_q == PERF_SRC_SELECT_INGRESS) ||
                   (perf_src_kind0_q == PERF_SRC_RS_DEPENDENCY) ||
                   (perf_src_kind0_q == PERF_SRC_RS_ORDER) ||
                   (perf_src_kind0_q == PERF_SRC_RS_RESOURCE) ||
@@ -1458,8 +1372,8 @@ end
                   (perf_src_kind1_q == PERF_SRC_RECOVERY) ||
                   (perf_src_kind1_q == PERF_SRC_FENCE) ||
                   (perf_src_kind1_q == PERF_SRC_B_ONLY) ||
-                  (perf_src_kind1_q == PERF_SRC_SINGLE_HEAD) ||
-                  (perf_src_kind1_q == PERF_SRC_SELECT_REFILL) ||
+                  (perf_src_kind1_q == PERF_SRC_SINGLE_LANE) ||
+                  (perf_src_kind1_q == PERF_SRC_SELECT_INGRESS) ||
                   (perf_src_kind1_q == PERF_SRC_RS_DEPENDENCY) ||
                   (perf_src_kind1_q == PERF_SRC_RS_ORDER) ||
                   (perf_src_kind1_q == PERF_SRC_RS_RESOURCE) ||
@@ -1477,8 +1391,8 @@ end
         perf_empty_kind_slots(PERF_SRC_RECOVERY) +
         perf_empty_kind_slots(PERF_SRC_FENCE) +
         perf_empty_kind_slots(PERF_SRC_B_ONLY) +
-        perf_empty_kind_slots(PERF_SRC_SINGLE_HEAD) +
-        perf_empty_kind_slots(PERF_SRC_SELECT_REFILL) +
+        perf_empty_kind_slots(PERF_SRC_SINGLE_LANE) +
+        perf_empty_kind_slots(PERF_SRC_SELECT_INGRESS) +
         perf_empty_kind_slots(PERF_SRC_RS_DEPENDENCY) +
         perf_empty_kind_slots(PERF_SRC_RS_ORDER) +
         perf_empty_kind_slots(PERF_SRC_RS_RESOURCE) +
@@ -1488,32 +1402,26 @@ end
         perf_empty_kind_slots(PERF_SRC_OTHER) +
         perf_empty_kind_slots(PERF_SRC_LAUNCH) +
         perf_empty_unmapped_slots();
-    wire [2:0] perf_alu_bank_occ_now =
-        3'($countones(u_dut.u_ydrasil_issue_stage.issue_window_valid_q[3:0]));
-    wire [2:0] perf_p0_bank_occ_now =
-        3'($countones(u_dut.u_ydrasil_issue_stage.issue_window_valid_q[7:4]));
-    wire [2:0] perf_p1_bank_occ_now =
-        3'($countones(u_dut.u_ydrasil_issue_stage.issue_window_valid_q[11:8]));
+    wire [3:0] perf_alu_entry_occ_now =
+        4'($countones(u_dut.u_ydrasil_issue_stage.u_scheduler.entry_valid_q &
+            ~perf_entry_memory_mask & ~perf_entry_lane_b_only_mask));
+    wire [3:0] perf_bank0_occ_now =
+        4'($countones(u_dut.u_ydrasil_issue_stage.u_scheduler.entry_valid_q[5:0]));
+    wire [3:0] perf_bank1_occ_now =
+        4'($countones(u_dut.u_ydrasil_issue_stage.u_scheduler.entry_valid_q[11:6]));
     wire perf_alu_due_select_now =
-        |(u_dut.u_ydrasil_issue_stage.issue_select_mask &
-          (u_dut.u_ydrasil_issue_stage.issue_src0_fast_main |
-           u_dut.u_ydrasil_issue_stage.issue_src0_fast_dual |
-           u_dut.u_ydrasil_issue_stage.issue_src1_fast_main |
-           u_dut.u_ydrasil_issue_stage.issue_src1_fast_dual));
-    wire perf_dtcm_due_select_now = 1'b0;
-    wire perf_mdu_due_select_now = 1'b0;
-    wire perf_dtcm_local_wake_now =
-        u_dut.u_ydrasil_issue_stage.dtcm_launch_wakeup_valid_i;
-    wire perf_mdu_local_wake_now =
-        u_dut.u_ydrasil_issue_stage.mdu_due_i.valid &&
-        u_dut.u_ydrasil_issue_stage.mdu_due_i.producer_tracked;
+        |(u_dut.u_ydrasil_issue_stage.u_scheduler.selected_mask_q &
+          (u_dut.u_ydrasil_issue_stage.u_scheduler.entry_wakeup0 |
+           u_dut.u_ydrasil_issue_stage.u_scheduler.entry_wakeup0 |
+           u_dut.u_ydrasil_issue_stage.u_scheduler.entry_wakeup1 |
+           u_dut.u_ydrasil_issue_stage.u_scheduler.entry_wakeup1));
     wire [3:0] perf_resident_wakeup_entries_now =
-        4'($countones(u_dut.u_ydrasil_issue_stage.issue_src0_alloc_wakeup |
-                      u_dut.u_ydrasil_issue_stage.issue_src1_alloc_wakeup));
+        4'($countones(u_dut.u_ydrasil_issue_stage.u_scheduler.entry_wakeup0 |
+                      u_dut.u_ydrasil_issue_stage.u_scheduler.entry_wakeup1));
     wire perf_resident_due_select_now =
-        |(u_dut.u_ydrasil_issue_stage.issue_select_mask &
-          (u_dut.u_ydrasil_issue_stage.issue_src0_alloc_wakeup |
-           u_dut.u_ydrasil_issue_stage.issue_src1_alloc_wakeup));
+        |(u_dut.u_ydrasil_issue_stage.u_scheduler.selected_mask_q &
+          (u_dut.u_ydrasil_issue_stage.u_scheduler.entry_wakeup0 |
+           u_dut.u_ydrasil_issue_stage.u_scheduler.entry_wakeup1));
 
     // Raw RS masks.  These are deliberately independent predicates; unlike
     // perf_rs_*_wait, an entry can appear in more than one mask and therefore
@@ -1530,36 +1438,24 @@ end
         perf_rs_ready_mask_now = '0;
         for (perf_rs_mask_idx = 0; perf_rs_mask_idx < 12;
              perf_rs_mask_idx = perf_rs_mask_idx + 1) begin
-            if (u_dut.u_ydrasil_issue_stage.issue_window_valid_q[
+            if (u_dut.u_ydrasil_issue_stage.u_scheduler.entry_valid_q[
                     perf_rs_mask_idx]) begin
-                if (!u_dut.u_ydrasil_issue_stage.
-                        issue_src0_ready_for_select[perf_rs_mask_idx] ||
-                    (!u_dut.u_ydrasil_issue_stage.
-                         issue_src1_ready_for_select[perf_rs_mask_idx] &&
-                     !u_dut.u_ydrasil_issue_stage.issue_store_q[
+                if (!u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src0_ready_q[perf_rs_mask_idx] ||
+                    (!u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src1_ready_q[perf_rs_mask_idx] &&
+                     !perf_entry_store_mask[
                          perf_rs_mask_idx]))
                     perf_rs_dep_mask_now[perf_rs_mask_idx] = 1'b1;
-                if (u_dut.u_ydrasil_issue_stage.issue_order_blocked[
-                        perf_rs_mask_idx])
+                if (|u_dut.u_ydrasil_issue_stage.u_scheduler.entry_order_q[
+                         perf_rs_mask_idx])
                     perf_rs_order_mask_now[perf_rs_mask_idx] = 1'b1;
-                if (((perf_rs_mask_idx >= 4) && (perf_rs_mask_idx <= 7) &&
-                     u_dut.u_ydrasil_issue_stage.issue_memory_q[
-                         perf_rs_mask_idx] &&
-                     ({1'b0, u_dut.lsu_issue_credit} <=
-                      {1'b0, u_dut.u_ydrasil_issue_stage.
-                          lsu_select_reserved_q})) ||
-                    ((perf_rs_mask_idx >= 8) &&
-                     u_dut.u_ydrasil_issue_stage.issue_divrem_q[
-                         perf_rs_mask_idx] &&
-                     (!u_dut.u_ydrasil_issue_stage.mdu_div_available_q ||
-                      u_dut.u_ydrasil_issue_stage.div_select_reserved_q)) ||
-                    ((perf_rs_mask_idx >= 8) &&
-                     u_dut.u_ydrasil_issue_stage.issue_serial_q[
-                         perf_rs_mask_idx] &&
-                     ((u_dut.u_ydrasil_issue_stage.issue_window_q[
+                if ((perf_entry_divrem_mask[perf_rs_mask_idx] &&
+                     (u_dut.u_ydrasil_issue_stage.u_scheduler.div_issue_q ||
+                      u_dut.u_ydrasil_issue_stage.u_scheduler.div_inflight_q)) ||
+                    (perf_entry_serial_mask[perf_rs_mask_idx] &&
+                     ((u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[
                            perf_rs_mask_idx].dst.rob_tag !=
-                       u_dut.u_ydrasil_issue_stage.rob_head_select_q) ||
-                      !u_dut.u_ydrasil_issue_stage.lsu_idle_select_q)))
+                       u_dut.u_ctrl.queue_head_id) ||
+                      !u_dut.lsu_status_pkt.idle)))
                     perf_rs_resource_mask_now[perf_rs_mask_idx] = 1'b1;
                 if (!perf_rs_dep_mask_now[perf_rs_mask_idx] &&
                     !perf_rs_order_mask_now[perf_rs_mask_idx] &&
@@ -1569,51 +1465,42 @@ end
         end
     end
 
-    wire [15:0] perf_rs_candidate_mask_now = {
-        u_dut.u_ydrasil_issue_stage.p1_serial_candidate_local,
-        u_dut.u_ydrasil_issue_stage.p1_candidate_local,
-        u_dut.u_ydrasil_issue_stage.p0_candidate_local,
-        u_dut.u_ydrasil_issue_stage.alu_candidate_local};
+    wire [11:0] perf_rs_candidate_mask_now = {
+        perf_bank1_candidate_mask_now, perf_bank0_candidate_mask_now};
     wire [11:0] perf_rs_selected_mask_now =
-        u_dut.u_ydrasil_issue_stage.issue_select_mask;
+        u_dut.u_ydrasil_issue_stage.u_scheduler.selected_mask_q;
     wire perf_bank_full_any_now =
-        (perf_alu_bank_occ_now == 3'd4) ||
-        (perf_p0_bank_occ_now == 3'd4) ||
-        (perf_p1_bank_occ_now == 3'd4);
+        (perf_bank0_occ_now == 4'd6) ||
+        (perf_bank1_occ_now == 4'd6);
     wire perf_select_single_now =
-        u_dut.u_ydrasil_issue_stage.select_buf_push &&
-        u_dut.u_ydrasil_issue_stage.selected_valid0 &&
-        !u_dut.u_ydrasil_issue_stage.selected_valid1;
-    wire [3:0] perf_select_queue_state_now = {
-        u_dut.u_ydrasil_issue_stage.select_skid_valid_q,
-        u_dut.u_ydrasil_issue_stage.select_skid_pair_q,
-        u_dut.u_ydrasil_issue_stage.select_head_valid_q,
-        u_dut.u_ydrasil_issue_stage.select_head_pair_q
+        u_dut.u_ydrasil_issue_stage.u_scheduler.selected_a_valid &&
+        !u_dut.u_ydrasil_issue_stage.u_scheduler.selected_b_valid;
+    wire [3:0] perf_lane_ingress_state_now = {
+        u_dut.u_ydrasil_issue_stage.u_scheduler.ingress_count_q != 0,
+        u_dut.u_ydrasil_issue_stage.u_scheduler.ingress_count_q == 2,
+        u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_valid_q,
+        u_dut.u_ydrasil_issue_stage.u_scheduler.lane_b_valid_q
     };
-    // A single head plus a pair waiting in skid is the exact bundle HOL case:
-    // one selected uop is available but cannot share the already-issued head.
-    wire perf_select_hol_pair_now =
-        u_dut.u_ydrasil_issue_stage.select_head_valid_q &&
-        !u_dut.u_ydrasil_issue_stage.select_head_pair_q &&
-        u_dut.u_ydrasil_issue_stage.select_skid_valid_q &&
-        u_dut.u_ydrasil_issue_stage.select_skid_pair_q;
-    // The queue state after the edge can hide this event: a singleton head
-    // may be consumed while a pair is pushed into the freed cell.  The cycle
-    // still lost one execution slot before that pair reaches the head.  Count
-    // this edge explicitly instead of relying on a persistent skid state.
-    wire perf_select_pair_push_single_head_now =
-        u_dut.u_ydrasil_issue_stage.select_buf_push &&
-        u_dut.u_ydrasil_issue_stage.selected_valid1 &&
-        u_dut.u_ydrasil_issue_stage.select_head_valid_q &&
-        !u_dut.u_ydrasil_issue_stage.select_head_pair_q;
-    wire perf_select_refill_head_empty_now =
-        !u_dut.u_ydrasil_issue_stage.select_head_valid_q &&
-        u_dut.u_ydrasil_issue_stage.select_buf_push;
+    // Lane A and B are independently elastic. This records the observable
+    // single-lane state, independent of scheduler ingress occupancy.
+    wire perf_lane_b_elastic_empty_now =
+        u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_valid_q &&
+        !u_dut.u_ydrasil_issue_stage.u_scheduler.lane_b_valid_q;
+    // A pair can be selected while an earlier lane-A-only transaction is in
+    // flight. This is a lane-pipeline transition, not a coupled-lane dependency.
+    wire perf_select_pair_after_lane_a_only_now =
+        u_dut.u_ydrasil_issue_stage.u_scheduler.selected_a_valid &&
+        u_dut.u_ydrasil_issue_stage.u_scheduler.selected_b_valid &&
+        u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_valid_q &&
+        !u_dut.u_ydrasil_issue_stage.u_scheduler.lane_b_valid_q;
+    wire perf_select_selected_with_lane_a_empty_now =
+        !u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_valid_q &&
+        u_dut.u_ydrasil_issue_stage.u_scheduler.selected_a_valid;
 
-    // Refill is a boundary event, not a recoverable-cycle estimate.  Classify
-    // each pushed uop by the same entry's state on the preceding cycle and by
+    // Scheduler ingress is a boundary event, not a recoverable-cycle estimate.
+    // Classify each selected uop by its state on the preceding cycle and by
     // whether all required operand data already exists in registered storage.
-    function automatic logic perf_refill_source_registered(
+    function automatic logic perf_ingress_source_registered(
         input ydrasil_source_desc_t source
     );
         producer_slot_t source_slot;
@@ -1622,7 +1509,7 @@ end
         logic source_value_epoch;
         begin
             if (!source.used || (source.arch_addr == '0) || !source.tag_valid) begin
-                perf_refill_source_registered = 1'b1;
+                perf_ingress_source_registered = 1'b1;
             end else begin
                 source_slot = source.producer_tag[PRODUCER_SLOT_WIDTH-1:0];
                 source_bank_index = integer'(
@@ -1640,29 +1527,23 @@ end
                 end
                 // An epoch mismatch is also registered-resolvable: Operand
                 // legally falls back to the architectural file after reuse.
-                perf_refill_source_registered =
+                perf_ingress_source_registered =
                     (source_value_epoch !=
                      source.producer_tag[PRODUCER_ID_WIDTH-1]) ||
                     source_value_valid ||
-                    (u_dut.u_ydrasil_issue_stage.
-                         dtcm_operand_history_q.valid &&
-                     u_dut.u_ydrasil_issue_stage.
-                         dtcm_operand_history_q.producer_tracked &&
-                     (u_dut.u_ydrasil_issue_stage.
-                          dtcm_operand_history_q.producer_id ==
+                    (1'b0 &&
+                     1'b0 &&
+                     ('0 ==
                       source.producer_tag)) ||
-                    (u_dut.u_ydrasil_issue_stage.
-                         mdu_operand_reservation_q.valid &&
-                     u_dut.u_ydrasil_issue_stage.
-                         mdu_operand_reservation_q.producer_tracked &&
-                     (u_dut.u_ydrasil_issue_stage.
-                          mdu_operand_reservation_q.producer_id ==
+                    (1'b0 &&
+                     1'b0 &&
+                     ('0 ==
                       source.producer_tag));
             end
         end
     endfunction
 
-    function automatic logic [3:0] perf_refill_prior_mask(
+    function automatic logic [3:0] perf_ingress_prior_mask(
         input logic [11:0] selected_mask,
         input producer_id_t selected_tag
     );
@@ -1672,61 +1553,61 @@ end
         begin
             // 0..7 are exact DEP/ORDER/RESOURCE masks, 8 is new/replaced,
             // and 9 catches an invalid selection for closure diagnostics.
-            perf_refill_prior_mask = 4'd9;
+            perf_ingress_prior_mask = 4'd9;
             selected_entry_seen = 1'b0;
             prior_identity_match = 1'b0;
             for (refill_entry_idx = 0; refill_entry_idx < 12;
                  refill_entry_idx = refill_entry_idx + 1) begin
                 if (selected_mask[refill_entry_idx]) begin
                     selected_entry_seen = 1'b1;
-                    if (perf_refill_prev_valid_q[refill_entry_idx] &&
-                        (perf_refill_prev_tag_q[refill_entry_idx] ==
+                    if (perf_ingress_prev_valid_q[refill_entry_idx] &&
+                        (perf_ingress_prev_tag_q[refill_entry_idx] ==
                          selected_tag)) begin
                         prior_identity_match = 1'b1;
-                        perf_refill_prior_mask = {
+                        perf_ingress_prior_mask = {
                             1'b0,
-                            perf_refill_prev_resource_q[refill_entry_idx],
-                            perf_refill_prev_order_q[refill_entry_idx],
-                            perf_refill_prev_dep_q[refill_entry_idx]
+                            perf_ingress_prev_resource_q[refill_entry_idx],
+                            perf_ingress_prev_order_q[refill_entry_idx],
+                            perf_ingress_prev_dep_q[refill_entry_idx]
                         };
                     end
                 end
             end
             if (selected_entry_seen && !prior_identity_match)
-                perf_refill_prior_mask = 4'd8;
+                perf_ingress_prior_mask = 4'd8;
         end
     endfunction
 
-    function automatic logic [3:0] perf_refill_source_pending_class(
+    function automatic logic [3:0] perf_ingress_source_pending_class(
         input ydrasil_source_desc_t source
     );
         begin
-            perf_refill_source_pending_class = 4'b0;
-            if (!perf_refill_source_registered(source)) begin
+            perf_ingress_source_pending_class = 4'b0;
+            if (!perf_ingress_source_registered(source)) begin
                 case (source.producer_class)
-                    RESULT_ALU: perf_refill_source_pending_class = 4'b0001;
-                    RESULT_LSU: perf_refill_source_pending_class = 4'b0010;
-                    RESULT_MDU: perf_refill_source_pending_class = 4'b0100;
-                    default:    perf_refill_source_pending_class = 4'b1000;
+                    RESULT_ALU: perf_ingress_source_pending_class = 4'b0001;
+                    RESULT_LSU: perf_ingress_source_pending_class = 4'b0010;
+                    RESULT_MDU: perf_ingress_source_pending_class = 4'b0100;
+                    default:    perf_ingress_source_pending_class = 4'b1000;
                 endcase
             end
         end
     endfunction
 
-    function automatic logic [3:0] perf_refill_uop_pending_mask(
+    function automatic logic [3:0] perf_ingress_uop_pending_mask(
         input ydrasil_compact_uop_t uop
     );
         logic [3:0] pending_mask;
         begin
-            pending_mask = perf_refill_source_pending_class(uop.src0);
+            pending_mask = perf_ingress_source_pending_class(uop.src0);
             if (uop.op_class != UOP_CLASS_STORE)
                 pending_mask = pending_mask |
-                    perf_refill_source_pending_class(uop.src1);
-            perf_refill_uop_pending_mask = pending_mask;
+                    perf_ingress_source_pending_class(uop.src1);
+            perf_ingress_uop_pending_mask = pending_mask;
         end
     endfunction
 
-    function automatic logic [2:0] perf_refill_lifecycle(
+    function automatic logic [2:0] perf_ingress_lifecycle(
         input logic [11:0] selected_mask,
         input producer_id_t selected_tag
     );
@@ -1734,102 +1615,90 @@ end
         logic prior_identity_match;
         begin
             // 0 eligible, 1 dependency, 2 order, 3 resource, 4 new, 5 other.
-            perf_refill_lifecycle = 3'd5;
+            perf_ingress_lifecycle = 3'd5;
             prior_identity_match = 1'b0;
             for (refill_entry_idx = 0; refill_entry_idx < 12;
                  refill_entry_idx = refill_entry_idx + 1) begin
                 if (selected_mask[refill_entry_idx] &&
-                    perf_refill_prev_valid_q[refill_entry_idx] &&
-                    (perf_refill_prev_tag_q[refill_entry_idx] == selected_tag)) begin
+                    perf_ingress_prev_valid_q[refill_entry_idx] &&
+                    (perf_ingress_prev_tag_q[refill_entry_idx] == selected_tag)) begin
                     prior_identity_match = 1'b1;
-                    if (perf_refill_prev_dep_q[refill_entry_idx])
-                        perf_refill_lifecycle = 3'd1;
-                    else if (perf_refill_prev_order_q[refill_entry_idx])
-                        perf_refill_lifecycle = 3'd2;
-                    else if (perf_refill_prev_resource_q[refill_entry_idx])
-                        perf_refill_lifecycle = 3'd3;
-                    else if (perf_refill_prev_ready_q[refill_entry_idx])
-                        perf_refill_lifecycle = 3'd0;
+                    if (perf_ingress_prev_dep_q[refill_entry_idx])
+                        perf_ingress_lifecycle = 3'd1;
+                    else if (perf_ingress_prev_order_q[refill_entry_idx])
+                        perf_ingress_lifecycle = 3'd2;
+                    else if (perf_ingress_prev_resource_q[refill_entry_idx])
+                        perf_ingress_lifecycle = 3'd3;
+                    else if (perf_ingress_prev_ready_q[refill_entry_idx])
+                        perf_ingress_lifecycle = 3'd0;
                 end
             end
             if (!prior_identity_match)
-                perf_refill_lifecycle = 3'd4;
+                perf_ingress_lifecycle = 3'd4;
         end
     endfunction
 
-    wire [2:0] perf_refill_lifecycle0_now = perf_refill_lifecycle(
-        u_dut.u_ydrasil_issue_stage.selected0_mask,
-        u_dut.u_ydrasil_issue_stage.selected_uop0.dst.rob_tag);
-    wire [2:0] perf_refill_lifecycle1_now = perf_refill_lifecycle(
-        u_dut.u_ydrasil_issue_stage.selected1_mask,
-        u_dut.u_ydrasil_issue_stage.selected_uop1.dst.rob_tag);
-    wire [3:0] perf_refill_pending_mask0_now = perf_refill_uop_pending_mask(
-        u_dut.u_ydrasil_issue_stage.selected_uop0);
-    wire [3:0] perf_refill_pending_mask1_now = perf_refill_uop_pending_mask(
-        u_dut.u_ydrasil_issue_stage.selected_uop1);
-    wire [3:0] perf_refill_prior_mask0_now = perf_refill_prior_mask(
-        u_dut.u_ydrasil_issue_stage.selected0_mask,
-        u_dut.u_ydrasil_issue_stage.selected_uop0.dst.rob_tag);
-    wire [3:0] perf_refill_prior_mask1_now = perf_refill_prior_mask(
-        u_dut.u_ydrasil_issue_stage.selected1_mask,
-        u_dut.u_ydrasil_issue_stage.selected_uop1.dst.rob_tag);
+    wire [2:0] perf_ingress_lifecycle0_now = perf_ingress_lifecycle(
+        u_dut.u_ydrasil_issue_stage.u_scheduler.selected_mask_q,
+        u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[u_dut.u_ydrasil_issue_stage.u_scheduler.selected_a_slot].dst.rob_tag);
+    wire [2:0] perf_ingress_lifecycle1_now = perf_ingress_lifecycle(
+        u_dut.u_ydrasil_issue_stage.u_scheduler.selected_mask_q,
+        u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[u_dut.u_ydrasil_issue_stage.u_scheduler.selected_b_slot].dst.rob_tag);
+    wire [3:0] perf_ingress_pending_mask0_now = perf_ingress_uop_pending_mask(
+        u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[u_dut.u_ydrasil_issue_stage.u_scheduler.selected_a_slot]);
+    wire [3:0] perf_ingress_pending_mask1_now = perf_ingress_uop_pending_mask(
+        u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[u_dut.u_ydrasil_issue_stage.u_scheduler.selected_b_slot]);
+    wire [3:0] perf_ingress_prior_mask0_now = perf_ingress_prior_mask(
+        u_dut.u_ydrasil_issue_stage.u_scheduler.selected_mask_q,
+        u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[u_dut.u_ydrasil_issue_stage.u_scheduler.selected_a_slot].dst.rob_tag);
+    wire [3:0] perf_ingress_prior_mask1_now = perf_ingress_prior_mask(
+        u_dut.u_ydrasil_issue_stage.u_scheduler.selected_mask_q,
+        u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[u_dut.u_ydrasil_issue_stage.u_scheduler.selected_b_slot].dst.rob_tag);
     // Coupling mask bits: BANK, ROB, DEP, ORDER, RESOURCE, SELECT, OPERAND,
     // RECOVERY.  The mask is a state vector, not a one-hot attribution.
     wire [7:0] perf_coupling_mask_now = {
         (u_dut.ex_pc_redirect ||
-         u_dut.u_ydrasil_issue_stage.recovery_pending_q),
+         u_dut.ex_pc_redirect),
         perf_operand_dependency_miss_now,
         (perf_select_width_limit_now || perf_select_single_now ||
-         perf_select_hol_pair_now),
-        (perf_rs_resource_wait || perf_rs_pair_bank_limit_now),
+         perf_lane_b_elastic_empty_now),
+        perf_rs_resource_wait,
         perf_rs_order_wait,
         perf_rs_dependency_wait,
         perf_rob_full_now,
-        (perf_bank_full_any_now || perf_rs_bank_full_now)
+        perf_bank_full_any_now
     };
 
-    wire [2:0] perf_bank_dep_entries_now [0:2];
-    wire [2:0] perf_bank_order_entries_now [0:2];
-    wire [2:0] perf_bank_resource_entries_now [0:2];
-    wire [2:0] perf_bank_ready_entries_now [0:2];
-    wire [2:0] perf_bank_candidate_entries_now [0:2];
-    wire [2:0] perf_bank_selected_entries_now [0:2];
+    wire [2:0] perf_bank_dep_entries_now [0:1];
+    wire [2:0] perf_bank_order_entries_now [0:1];
+    wire [2:0] perf_bank_resource_entries_now [0:1];
+    wire [2:0] perf_bank_ready_entries_now [0:1];
+    wire [2:0] perf_bank_candidate_entries_now [0:1];
+    wire [2:0] perf_bank_selected_entries_now [0:1];
     assign perf_bank_dep_entries_now[0] =
-        3'($countones(perf_rs_dep_mask_now[3:0]));
+        3'($countones(perf_rs_dep_mask_now[5:0]));
     assign perf_bank_dep_entries_now[1] =
-        3'($countones(perf_rs_dep_mask_now[7:4]));
-    assign perf_bank_dep_entries_now[2] =
-        3'($countones(perf_rs_dep_mask_now[11:8]));
+        3'($countones(perf_rs_dep_mask_now[11:6]));
     assign perf_bank_order_entries_now[0] =
-        3'($countones(perf_rs_order_mask_now[3:0]));
+        3'($countones(perf_rs_order_mask_now[5:0]));
     assign perf_bank_order_entries_now[1] =
-        3'($countones(perf_rs_order_mask_now[7:4]));
-    assign perf_bank_order_entries_now[2] =
-        3'($countones(perf_rs_order_mask_now[11:8]));
+        3'($countones(perf_rs_order_mask_now[11:6]));
     assign perf_bank_resource_entries_now[0] =
-        3'($countones(perf_rs_resource_mask_now[3:0]));
+        3'($countones(perf_rs_resource_mask_now[5:0]));
     assign perf_bank_resource_entries_now[1] =
-        3'($countones(perf_rs_resource_mask_now[7:4]));
-    assign perf_bank_resource_entries_now[2] =
-        3'($countones(perf_rs_resource_mask_now[11:8]));
+        3'($countones(perf_rs_resource_mask_now[11:6]));
     assign perf_bank_ready_entries_now[0] =
-        3'($countones(perf_rs_ready_mask_now[3:0]));
+        3'($countones(perf_rs_ready_mask_now[5:0]));
     assign perf_bank_ready_entries_now[1] =
-        3'($countones(perf_rs_ready_mask_now[7:4]));
-    assign perf_bank_ready_entries_now[2] =
-        3'($countones(perf_rs_ready_mask_now[11:8]));
+        3'($countones(perf_rs_ready_mask_now[11:6]));
     assign perf_bank_candidate_entries_now[0] =
-        3'($countones(perf_rs_candidate_mask_now[3:0]));
+        3'($countones(perf_rs_candidate_mask_now[5:0]));
     assign perf_bank_candidate_entries_now[1] =
-        3'($countones(perf_rs_candidate_mask_now[7:4]));
-    assign perf_bank_candidate_entries_now[2] =
-        3'($countones(perf_rs_candidate_mask_now[11:8]));
+        3'($countones(perf_rs_candidate_mask_now[11:6]));
     assign perf_bank_selected_entries_now[0] =
-        3'($countones(perf_rs_selected_mask_now[3:0]));
+        3'($countones(perf_rs_selected_mask_now[5:0]));
     assign perf_bank_selected_entries_now[1] =
-        3'($countones(perf_rs_selected_mask_now[7:4]));
-    assign perf_bank_selected_entries_now[2] =
-        3'($countones(perf_rs_selected_mask_now[11:8]));
+        3'($countones(perf_rs_selected_mask_now[11:6]));
 
     function automatic integer perf_latency_bucket(input integer latency);
         if (latency < 4)
@@ -1882,7 +1751,6 @@ end
 
 `ifndef SYNTHESIS
     logic interrupt_q;
-    logic early_clear_q;
     logic [(1 << ydrasil_pkg::PRODUCER_ID_WIDTH)-1:0]
         squashed_completion_pending_q;
     integer completion_assert_lane;
@@ -1892,11 +1760,9 @@ end
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             interrupt_q <= 1'b0;
-            early_clear_q <= 1'b0;
             squashed_completion_pending_q <= '0;
         end else begin
             interrupt_q <= u_dut.u_ydrasil_commit_trace.interrupt;
-            early_clear_q <= u_dut.flush_id || u_dut.bubble_id;
 
             // Fixed-latency EX results may drain after recovery has removed
             // their ROB entries. Keep the killed full tags as tombstones so
@@ -1936,25 +1802,6 @@ end
                 squashed_completion_pending_q[
                     u_dut.u_ctrl.producer_alloc_id1] <= 1'b0;
 
-            if (u_dut.u_ydrasil_issue_stage.issue_early_alu_valid_ff) begin
-                assert ($onehot(u_dut.u_ydrasil_issue_stage.issue_early_kind_ff))
-                    else $fatal(1, "ASSERT_EARLY_KIND_NOT_ONEHOT kind=0x%0h",
-                                u_dut.u_ydrasil_issue_stage.issue_early_kind_ff);
-                assert (u_dut.u_ydrasil_issue_stage.issue_early_alu_addr_ff != '0)
-                    else $fatal(1, "ASSERT_EARLY_TRACKS_X0");
-            end else begin
-                assert (u_dut.u_ydrasil_issue_stage.issue_early_kind_ff == '0)
-                    else $fatal(1, "ASSERT_EARLY_KIND_WITHOUT_VALID kind=0x%0h",
-                                u_dut.u_ydrasil_issue_stage.issue_early_kind_ff);
-            end
-            if (early_clear_q) begin
-                assert (!u_dut.u_ydrasil_issue_stage.issue_early_alu_valid_ff &&
-                        (u_dut.u_ydrasil_issue_stage.issue_early_kind_ff == '0))
-                    else $fatal(1, "ASSERT_EARLY_NOT_CLEARED valid=%0b kind=0x%0h",
-                                u_dut.u_ydrasil_issue_stage.issue_early_alu_valid_ff,
-                                u_dut.u_ydrasil_issue_stage.issue_early_kind_ff);
-            end
-
             assert (u_dut.u_ydrasil_issue_stage.u_registers.registers[0] == 32'b0)
                 else $fatal(1, "ASSERT_X0_NONZERO value=0x%08h",
                             u_dut.u_ydrasil_issue_stage.u_registers.registers[0]);
@@ -1979,13 +1826,13 @@ end
                 assert (u_dut.u_ctrl.producer_valid_q == '0)
                     else $fatal(1, "ASSERT_TOKEN_AFTER_INTERRUPT valid=0x%0h",
                                 u_dut.u_ctrl.producer_valid_q);
-                assert (u_dut.u_ydrasil_load_store_unit.queue_count_q == '0)
-                    else $fatal(1, "ASSERT_LSU_QUEUE_AFTER_INTERRUPT count=%0d",
-                                u_dut.u_ydrasil_load_store_unit.queue_count_q);
+                assert (u_dut.u_ydrasil_load_store_unit.count_q == '0)
+                    else $fatal(1, "ASSERT_LSQ_AFTER_INTERRUPT count=%0d",
+                                u_dut.u_ydrasil_load_store_unit.count_q);
             end
-            assert (u_dut.u_ydrasil_load_store_unit.queue_count_q <= 2'd2)
-                else $fatal(1, "ASSERT_LSU_QUEUE_COUNT count=%0d",
-                            u_dut.u_ydrasil_load_store_unit.queue_count_q);
+            assert (u_dut.u_ydrasil_load_store_unit.count_q <= 4'd12)
+                else $fatal(1, "ASSERT_LSQ_COUNT count=%0d",
+                            u_dut.u_ydrasil_load_store_unit.count_q);
             if (u_dut.u_ydrasil_commit_trace.clint_csr_we) begin
                 assert ((u_dut.u_ydrasil_commit_trace.clint_csr_waddr == ydrasil_pkg::CSR_MSTATUS) ||
                         (u_dut.u_ydrasil_commit_trace.clint_csr_waddr == ydrasil_pkg::CSR_MEPC) ||
@@ -2010,11 +1857,11 @@ end
                              u_dut.u_ydrasil_commit_trace.completion_bus[
                                 completion_assert_lane].producer_id[
                                     ydrasil_pkg::PRODUCER_ID_WIDTH-1]) ||
-                            (u_dut.u_ctrl.producer_alloc_ex &&
-                             (u_dut.ex_hzd_pkt.producer_id ==
+                            (perf_rob_alloc0 &&
+                             (u_dut.dispatch_issue_pkt.dst.rob_tag ==
                               u_dut.u_ydrasil_commit_trace.completion_bus[completion_assert_lane].producer_id)) ||
-                            (u_dut.u_ctrl.producer_alloc_ex1 &&
-                             (u_dut.ex_hzd_pkt1.producer_id ==
+                            (perf_rob_alloc1 &&
+                             (u_dut.dispatch_issue_pkt1.dst.rob_tag ==
                               u_dut.u_ydrasil_commit_trace.completion_bus[completion_assert_lane].producer_id)) ||
                             squashed_completion_pending_q[
                                 u_dut.u_ydrasil_commit_trace.completion_bus[
@@ -2071,33 +1918,31 @@ end
         end else begin
             lsu_local_debug_cycle <= lsu_local_debug_cycle + 1;
             if (lsu_local_debug_en) begin
-                if (u_dut.u_ydrasil_issue_stage.lane_a_agu_accept &&
-                    ((u_dut.u_ydrasil_issue_stage.lane_a_uop.pc ==
+                if (u_dut.agu_in_valid &&
+                    ((u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_uop_q.pc ==
                       32'h80003e9c) ||
-                     (u_dut.u_ydrasil_issue_stage.lane_a_uop.pc ==
+                     (u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_uop_q.pc ==
                       32'h80003fd8)))
                     $display("LSULOC cyc=%0d LOADSEL pc=0x%08h id=%0d src0=%0d/tag=%0b/%0d/ready=%0b epoch=%0b values=ff:0x%08h arf:0x%08h resolved:0x%08h ready=%0b hit=dtcm:%0b/main:%0b/dual:%0b replay=main:%0b/%0d dual:%0b/%0d completion=alu:%0b/%0d/0x%08h dual:%0b/%0d/0x%08h",
                              lsu_local_debug_cycle,
-                             u_dut.u_ydrasil_issue_stage.lane_a_uop.pc,
-                             u_dut.u_ydrasil_issue_stage.lane_a_uop.dst.rob_tag,
-                             u_dut.u_ydrasil_issue_stage.lane_a_uop.src0.arch_addr,
-                             u_dut.u_ydrasil_issue_stage.lane_a_uop.src0.tag_valid,
-                             u_dut.u_ydrasil_issue_stage.lane_a_uop.src0.producer_tag,
-                             u_dut.u_ydrasil_issue_stage.lane_a_uop.src0.ready,
-                             u_dut.u_ydrasil_issue_stage.issue_src0_epoch_i,
-                             u_dut.u_ydrasil_issue_stage.issue_src0_value_i,
-                             u_dut.u_ydrasil_issue_stage.rf_rdata_rs1_i,
-                             u_dut.u_ydrasil_issue_stage.lane_a_src0_local,
-                             u_dut.u_ydrasil_issue_stage.src0_ready,
-                             u_dut.u_ydrasil_issue_stage.slot0_src0_dtcm_hit,
-                             u_dut.u_ydrasil_issue_stage.lane_a_uop.src0_bypass ==
-                                 BYPASS_LANE0,
-                             u_dut.u_ydrasil_issue_stage.lane_a_uop.src0_bypass ==
-                                 BYPASS_LANE1,
-                             u_dut.u_ydrasil_issue_stage.select_wakeup_valid_q[0],
-                             u_dut.u_ydrasil_issue_stage.select_wakeup_id_q[0],
-                             u_dut.u_ydrasil_issue_stage.select_wakeup_valid_q[1],
-                             u_dut.u_ydrasil_issue_stage.select_wakeup_id_q[1],
+                             u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_uop_q.pc,
+                             u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_uop_q.dst.rob_tag,
+                             u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_uop_q.src0.arch_addr,
+                             u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_uop_q.src0.tag_valid,
+                             u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_uop_q.src0.producer_tag,
+                             u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_uop_q.src0.ready,
+                             '0,
+                             '0,
+                             '0,
+                             u_dut.agu_in_operand_a,
+                             u_dut.issue_src0_wait,
+                             1'b0,
+                             1'b0,
+                             1'b0,
+                             1'b0,
+                             1'b0,
+                             1'b0,
+                             1'b0,
                              u_dut.completion_meta[COMPLETION_ALU].valid,
                              u_dut.completion_meta[COMPLETION_ALU].producer_id,
                              u_dut.completion_data[COMPLETION_ALU],
@@ -2118,12 +1963,12 @@ end
                              u_dut.ex_bp_train_pkt.producer_id,
                              u_dut.ex_bp_train_pkt.taken,
                              u_dut.u_ctrl.recovery_live_mask,
-                             u_dut.u_ydrasil_load_store_unit.store_buf_count_q,
-                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.valid,
-                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.retired,
-                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.store_data_valid,
-                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.producer_id,
-                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.store_producer_id);
+                             u_dut.u_ydrasil_load_store_unit.count_q,
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].valid,
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].retired,
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].store_data_valid,
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].producer_id,
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].store_producer_id);
                 if ((lsu_local_debug_cycle >= 70190) &&
                     (lsu_local_debug_cycle <= 70225) &&
                     ((u_dut.commit_pkt.valid &&
@@ -2140,46 +1985,46 @@ end
                              u_dut.commit_pkt1.valid,
                              u_dut.commit_pkt1.pc,
                              u_dut.commit_pkt1.producer_id,
-                             u_dut.u_ydrasil_load_store_unit.store_buf_count_q,
-                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.valid,
-                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.retired,
-                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.store_data_valid,
-                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.producer_id);
-                if (u_dut.u_ydrasil_issue_stage.agu_in_valid_q &&
-                    ((u_dut.u_ydrasil_issue_stage.agu_in_operand_a_q +
-                      u_dut.u_ydrasil_issue_stage.agu_in_operand_b_q) >=
+                             u_dut.u_ydrasil_load_store_unit.count_q,
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].valid,
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].retired,
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].store_data_valid,
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].producer_id);
+                if (u_dut.agu_in_valid &&
+                    ((u_dut.agu_in_operand_a +
+                      u_dut.agu_in_operand_b) >=
                      32'h80100c40) &&
-                    ((u_dut.u_ydrasil_issue_stage.agu_in_operand_a_q +
-                      u_dut.u_ydrasil_issue_stage.agu_in_operand_b_q) <
+                    ((u_dut.agu_in_operand_a +
+                      u_dut.agu_in_operand_b) <
                      32'h80100e80))
                     $display("LSULOC cyc=%0d AGU pc=0x%08h id=%0d rd=%0d load=%0b store=%0b addr=0x%08h data=0x%08h data_valid=%0b data_id=%0d src1=0x%08h/%0b/%0b/%0d/%0d src_state=%0b/%0b prodpc=0x%08h prodclass=%0d",
                              lsu_local_debug_cycle,
-                             u_dut.u_ydrasil_issue_stage.lane_a_pc_q,
-                             u_dut.u_ydrasil_issue_stage.agu_in_req_q.producer_id,
-                             u_dut.u_ydrasil_issue_stage.agu_in_req_q.rd_addr,
-                             u_dut.u_ydrasil_issue_stage.agu_in_req_q.is_load,
-                             u_dut.u_ydrasil_issue_stage.agu_in_req_q.is_store,
-                             u_dut.u_ydrasil_issue_stage.agu_in_operand_a_q +
-                             u_dut.u_ydrasil_issue_stage.agu_in_operand_b_q,
-                             u_dut.u_ydrasil_issue_stage.agu_in_req_q.store_data,
-                             u_dut.u_ydrasil_issue_stage.agu_in_req_q.store_data_valid,
-                             u_dut.u_ydrasil_issue_stage.agu_in_req_q.store_producer_id,
-                             u_dut.u_ydrasil_issue_stage.issue_pkt_i.src1.arch_addr,
-                             u_dut.u_ydrasil_issue_stage.issue_pkt_i.src1.tag_valid,
-                             u_dut.u_ydrasil_issue_stage.issue_pkt_i.src1.ready,
-                             u_dut.u_ydrasil_issue_stage.issue_pkt_i.src1.producer_tag,
-                             u_dut.u_ydrasil_issue_stage.issue_src1_epoch_i,
+                             u_dut.lane_a_pc,
+                             u_dut.agu_in_req.producer_id,
+                             u_dut.agu_in_req.rd_addr,
+                             u_dut.agu_in_req.is_load,
+                             u_dut.agu_in_req.is_store,
+                             u_dut.agu_in_operand_a +
+                             u_dut.agu_in_operand_b,
+                             u_dut.agu_in_req.store_data,
+                             u_dut.agu_in_req.store_data_valid,
+                             u_dut.agu_in_req.store_producer_id,
+                             u_dut.lane_a_compact_uop.src1.arch_addr,
+                             u_dut.lane_a_compact_uop.src1.tag_valid,
+                             u_dut.lane_a_compact_uop.src1.ready,
+                             u_dut.lane_a_compact_uop.src1.producer_tag,
+                             '0,
                              u_dut.u_ctrl.producer_valid_q[
-                                 u_dut.u_ydrasil_issue_stage.issue_pkt_i.src1.producer_tag[
+                                 u_dut.lane_a_compact_uop.src1.producer_tag[
                                      PRODUCER_SLOT_WIDTH-1:0]],
                              u_dut.u_ctrl.producer_done_q[
-                                 u_dut.u_ydrasil_issue_stage.issue_pkt_i.src1.producer_tag[
+                                 u_dut.lane_a_compact_uop.src1.producer_tag[
                                      PRODUCER_SLOT_WIDTH-1:0]],
                              u_dut.u_ctrl.producer_pc_q[
-                                 u_dut.u_ydrasil_issue_stage.issue_pkt_i.src1.producer_tag[
+                                 u_dut.lane_a_compact_uop.src1.producer_tag[
                                      PRODUCER_SLOT_WIDTH-1:0]],
                              u_dut.u_ctrl.producer_result_class_q[
-                                 u_dut.u_ydrasil_issue_stage.issue_pkt_i.src1.producer_tag[
+                                 u_dut.lane_a_compact_uop.src1.producer_tag[
                                      PRODUCER_SLOT_WIDTH-1:0]]);
                 if (u_dut.lsu_req_pkt.valid &&
                     (u_dut.lsu_req_pkt.addr >= 32'h80100c40) &&
@@ -2195,83 +2040,83 @@ end
                              u_dut.lsu_req_pkt.store_mask,
                              u_dut.lsu_req_pkt.store_data_valid,
                              u_dut.lsu_req_pkt.store_producer_id,
-                             u_dut.u_ydrasil_load_store_unit.queue_count_q,
-                             u_dut.u_ydrasil_load_store_unit.store_buf_count_q);
+                             u_dut.u_ydrasil_load_store_unit.count_q,
+                             u_dut.u_ydrasil_load_store_unit.count_q);
                 if (u_dut.u_ydrasil_load_store_unit.dtcm_load_fire &&
-                    (u_dut.u_ydrasil_load_store_unit.load_launch_addr >=
+                    (u_dut.u_ydrasil_load_store_unit.dtcm_launch_addr_q >=
                      32'h80100c40) &&
-                    (u_dut.u_ydrasil_load_store_unit.load_launch_addr <
+                    (u_dut.u_ydrasil_load_store_unit.dtcm_launch_addr_q <
                      32'h80100e80))
                     $display("LSULOC cyc=%0d LOAD_FIRE id=%0d rd=%0d addr=0x%08h fmask=0x%0h fdata=0x%08h sb0=%0b/%0b/0x%08h/0x%08h/0x%0h sb1=%0b/%0b/0x%08h/0x%08h/0x%0h",
                              lsu_local_debug_cycle,
-                             u_dut.u_ydrasil_load_store_unit.load_launch_producer_id,
-                             u_dut.u_ydrasil_load_store_unit.load_launch_rd_addr,
-                             u_dut.u_ydrasil_load_store_unit.load_launch_addr,
-                             u_dut.u_ydrasil_load_store_unit.load_forward_mask,
-                             u_dut.u_ydrasil_load_store_unit.load_forward_data,
-                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.valid,
-                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.store_data_valid,
-                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.addr,
-                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.store_data,
-                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.store_mask,
-                             u_dut.u_ydrasil_load_store_unit.store_buf1_q.valid,
-                             u_dut.u_ydrasil_load_store_unit.store_buf1_q.store_data_valid,
-                             u_dut.u_ydrasil_load_store_unit.store_buf1_q.addr,
-                             u_dut.u_ydrasil_load_store_unit.store_buf1_q.store_data,
-                             u_dut.u_ydrasil_load_store_unit.store_buf1_q.store_mask);
-                if (u_dut.u_ydrasil_load_store_unit.store_buf_enqueue &&
-                    (u_dut.u_ydrasil_load_store_unit.active_addr >=
+                             u_dut.u_ydrasil_load_store_unit.dtcm_launch_producer_id_q,
+                             u_dut.u_ydrasil_load_store_unit.dtcm_launch_rd_addr_q,
+                             u_dut.u_ydrasil_load_store_unit.dtcm_launch_addr_q,
+                             u_dut.u_ydrasil_load_store_unit.load_forward_mask_sel_d,
+                             u_dut.u_ydrasil_load_store_unit.load_forward_data_sel_d,
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].valid,
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].store_data_valid,
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].addr,
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].store_data,
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].store_mask,
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q+1].valid,
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q+1].store_data_valid,
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q+1].addr,
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q+1].store_data,
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q+1].store_mask);
+                if (u_dut.u_ydrasil_load_store_unit.dtcm_store_fire &&
+                    (u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].addr >=
                      32'h80100c40) &&
-                    (u_dut.u_ydrasil_load_store_unit.active_addr <
+                    (u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].addr <
                      32'h80100e80))
-                    $display("LSULOC cyc=%0d STORE_BUF_IN id=%0d addr=0x%08h data=0x%08h mask=0x%0h valid=%0b data_id=%0d tracked=%0b scount=%0d deq=%0b",
+                    $display("LSULOC cyc=%0d LSQ_STORE_LAUNCH id=%0d addr=0x%08h data=0x%08h mask=0x%0h data_valid=%0b data_id=%0d tracked=%0b count=%0d fire=%0b",
                              lsu_local_debug_cycle,
-                             u_dut.u_ydrasil_load_store_unit.active_producer_id,
-                             u_dut.u_ydrasil_load_store_unit.active_addr,
-                             u_dut.u_ydrasil_load_store_unit.patched_store_enqueue.store_data,
-                             u_dut.u_ydrasil_load_store_unit.patched_store_enqueue.store_mask,
-                             u_dut.u_ydrasil_load_store_unit.patched_store_enqueue.store_data_valid,
-                             u_dut.u_ydrasil_load_store_unit.patched_store_enqueue.store_producer_id,
-                             u_dut.u_ydrasil_load_store_unit.patched_store_enqueue.store_producer_tracked,
-                             u_dut.u_ydrasil_load_store_unit.store_buf_count_q,
-                             u_dut.u_ydrasil_load_store_unit.store_buf_dequeue);
-                if (u_dut.u_ydrasil_load_store_unit.store_buf_dequeue &&
-                    (u_dut.u_ydrasil_load_store_unit.store_buf0_q.addr >=
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].producer_id,
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].addr,
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.tail_q].store_data,
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.tail_q].store_mask,
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.tail_q].store_data_valid,
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.tail_q].store_producer_id,
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.tail_q].store_producer_tracked,
+                             u_dut.u_ydrasil_load_store_unit.count_q,
+                             u_dut.u_ydrasil_load_store_unit.dtcm_store_fire);
+                if (u_dut.u_ydrasil_load_store_unit.dtcm_store_fire &&
+                    (u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].addr >=
                      32'h80100c40) &&
-                    (u_dut.u_ydrasil_load_store_unit.store_buf0_q.addr <
+                    (u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].addr <
                      32'h80100e80))
                     $display("LSULOC cyc=%0d STORE_DRAIN id=%0d addr=0x%08h data=0x%08h mask=0x%0h scount=%0d",
                              lsu_local_debug_cycle,
-                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.producer_id,
-                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.addr,
-                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.store_data,
-                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.store_mask,
-                             u_dut.u_ydrasil_load_store_unit.store_buf_count_q);
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].producer_id,
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].addr,
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].store_data,
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].store_mask,
+                             u_dut.u_ydrasil_load_store_unit.count_q);
                 if (u_dut.u_ydrasil_load_store_unit.load_s1_valid_q)
                     $display("LSULOC cyc=%0d LOAD_RESP id=%0d rd=%0d raw=0x%08h result=0x%08h fmask=0x%0h fdata=0x%08h completion=%0b/0x%08h",
                              lsu_local_debug_cycle,
                              u_dut.u_ydrasil_load_store_unit.load_s1_producer_id_q,
                              u_dut.u_ydrasil_load_store_unit.load_s1_rd_addr_q,
-                             u_dut.u_ydrasil_load_store_unit.dtcm_rdata_i,
+                             u_dut.dtcm_rdata,
                              u_dut.u_ydrasil_load_store_unit.dtcm_load_result,
                              u_dut.u_ydrasil_load_store_unit.load_s1_forward_mask_q,
                              u_dut.u_ydrasil_load_store_unit.load_s1_forward_data_q,
                              u_dut.lsu_completion_valid,
                              u_dut.lsu_completion_data);
-                if ((u_dut.u_ydrasil_load_store_unit.store_buf0_q.valid &&
-                     !u_dut.u_ydrasil_load_store_unit.store_buf0_q.store_data_valid) ||
-                    (u_dut.u_ydrasil_load_store_unit.store_buf1_q.valid &&
-                     !u_dut.u_ydrasil_load_store_unit.store_buf1_q.store_data_valid))
+                if ((u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].valid &&
+                     !u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].store_data_valid) ||
+                    (u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q+1].valid &&
+                     !u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q+1].store_data_valid))
                     $display("LSULOC cyc=%0d WAIT sb0=%0b/%0d/%0d/0x%08h sb1=%0b/%0d/%0d/0x%08h comp=0:%0b/%0d/0x%08h 1:%0b/%0d/0x%08h 2:%0b/%0d/0x%08h 3:%0b/%0d/0x%08h sh=0:%0b/%0d/0x%08h 1:%0b/%0d/0x%08h 2:%0b/%0d/0x%08h 3:%0b/%0d/0x%08h 4:%0b/%0d/0x%08h",
                              lsu_local_debug_cycle,
-                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.valid,
-                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.producer_id,
-                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.store_producer_id,
-                             u_dut.u_ydrasil_load_store_unit.store_buf0_q.store_data,
-                             u_dut.u_ydrasil_load_store_unit.store_buf1_q.valid,
-                             u_dut.u_ydrasil_load_store_unit.store_buf1_q.producer_id,
-                             u_dut.u_ydrasil_load_store_unit.store_buf1_q.store_producer_id,
-                             u_dut.u_ydrasil_load_store_unit.store_buf1_q.store_data,
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].valid,
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].producer_id,
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].store_producer_id,
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].store_data,
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q+1].valid,
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q+1].producer_id,
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q+1].store_producer_id,
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q+1].store_data,
                              u_dut.completion_meta[0].valid,
                              u_dut.completion_meta[0].producer_id,
                              u_dut.completion_data[0],
@@ -2284,21 +2129,21 @@ end
                              u_dut.completion_meta[3].valid,
                              u_dut.completion_meta[3].producer_id,
                              u_dut.completion_data[3],
-                             u_dut.u_ydrasil_load_store_unit.completion_shadow_valid_q[0],
-                             u_dut.u_ydrasil_load_store_unit.completion_shadow_id_q[0],
-                             u_dut.u_ydrasil_load_store_unit.completion_shadow_data_q[0],
-                             u_dut.u_ydrasil_load_store_unit.completion_shadow_valid_q[1],
-                             u_dut.u_ydrasil_load_store_unit.completion_shadow_id_q[1],
-                             u_dut.u_ydrasil_load_store_unit.completion_shadow_data_q[1],
-                             u_dut.u_ydrasil_load_store_unit.completion_shadow_valid_q[2],
-                             u_dut.u_ydrasil_load_store_unit.completion_shadow_id_q[2],
-                             u_dut.u_ydrasil_load_store_unit.completion_shadow_data_q[2],
-                             u_dut.u_ydrasil_load_store_unit.completion_shadow_valid_q[3],
-                             u_dut.u_ydrasil_load_store_unit.completion_shadow_id_q[3],
-                             u_dut.u_ydrasil_load_store_unit.completion_shadow_data_q[3],
-                             u_dut.u_ydrasil_load_store_unit.completion_shadow_valid_q[4],
-                             u_dut.u_ydrasil_load_store_unit.completion_shadow_id_q[4],
-                             u_dut.u_ydrasil_load_store_unit.completion_shadow_data_q[4]);
+                             1'b0,
+                             1'b0,
+                             1'b0,
+                             1'b0,
+                             1'b0,
+                             1'b0,
+                             1'b0,
+                             1'b0,
+                             1'b0,
+                             1'b0,
+                             1'b0,
+                             1'b0,
+                             1'b0,
+                             1'b0,
+                             1'b0);
                 if ((retire0_valid && (retire0_pc >= 32'h80003e80) &&
                      (retire0_pc <= 32'h80004010)) ||
                     (retire1_valid && (retire1_pc >= 32'h80003e80) &&
@@ -2343,38 +2188,24 @@ end
                                      PRODUCER_SLOT_WIDTH-1:0]]);
                 if ((lsu_local_debug_cycle >= 10635) &&
                     (lsu_local_debug_cycle <= 10645))
-                    $display("LSULOC cyc=%0d DTCM_STORE sel=%0b pc=0x%08h src1=x%0d/tag=%0b/%0d ready=%0b hit=%0b local=0x%08h opres=%0b/%0d/x%0d data=0x%08h inres=%0b/%0d/x%0d resp=0x%08h agu=%0b pc=0x%08h flag=%0b raw=0x%08h out=0x%08h valid=%0b stall=%0b/0x%08h lsucomp=%0b/%0d/0x%08h",
+                    $display("LSULOC cyc=%0d LSQ_STORE pc=0x%08h src1=x%0d/tag=%0b/%0d ready=%0b agu_data=0x%08h agu=%0b/pc=0x%08h store_data=0x%08h valid=%0b lsu_complete=%0b/%0d/0x%08h",
                              lsu_local_debug_cycle,
-                             u_dut.u_ydrasil_issue_stage.lane_a_accept,
-                             u_dut.u_ydrasil_issue_stage.lane_a_uop.pc,
-                             u_dut.u_ydrasil_issue_stage.lane_a_uop.src1.arch_addr,
-                             u_dut.u_ydrasil_issue_stage.lane_a_uop.src1.tag_valid,
-                             u_dut.u_ydrasil_issue_stage.lane_a_uop.src1.producer_tag,
-                             u_dut.u_ydrasil_issue_stage.lane_a_src1_ready,
-                             u_dut.u_ydrasil_issue_stage.lane_a_src1_dtcm_hit,
-                             u_dut.u_ydrasil_issue_stage.lane_a_src1_local,
-                             u_dut.u_ydrasil_issue_stage.dtcm_operand_reservation_q.valid,
-                             u_dut.u_ydrasil_issue_stage.dtcm_operand_reservation_q.producer_id,
-                             u_dut.u_ydrasil_issue_stage.dtcm_operand_reservation_q.arch_addr,
-                             u_dut.dtcm_resp_data,
-                             u_dut.dtcm_reservation.valid,
-                             u_dut.dtcm_reservation.producer_id,
-                             u_dut.dtcm_reservation.arch_addr,
-                             u_dut.dtcm_resp_data,
-                             u_dut.u_ydrasil_issue_stage.agu_in_valid_q,
-                             u_dut.u_ydrasil_issue_stage.lane_a_pc_q,
-                             1'b0,
-                             u_dut.u_ydrasil_issue_stage.agu_in_req_q.store_data,
-                             u_dut.u_ydrasil_issue_stage.agu_in_store_data_o,
-                             u_dut.u_ydrasil_issue_stage.agu_in_req_q.store_data_valid,
-                             1'b0,
-                             32'b0,
+                             u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_uop_q.pc,
+                             u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_uop_q.src1.arch_addr,
+                             u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_uop_q.src1.tag_valid,
+                             u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_uop_q.src1.producer_tag,
+                             !u_dut.issue_src1_wait,
+                             u_dut.agu_in_operand_b,
+                             u_dut.agu_in_valid,
+                             u_dut.lane_a_pc,
+                             u_dut.agu_in_req.store_data,
+                             u_dut.agu_in_req.store_data_valid,
                              u_dut.completion_meta[COMPLETION_LSU].valid,
                              u_dut.completion_meta[COMPLETION_LSU].producer_id,
                              u_dut.completion_data[COMPLETION_LSU]);
                 if ((lsu_local_debug_cycle >= 304715) &&
                     (lsu_local_debug_cycle <= 304790))
-                    $display("LSULOC cyc=%0d MMIO_SERIAL if=%0b/0x%08h disp=%0b/%0b/0x%08h/ser=%0b issue=%0b/0x%08h/fence=%0b/%0d commit=%0b/0x%08h/%0d,%0b/0x%08h/%0d rob=head%0d/id%0d/count%0d/v=0x%0h/r=0x%0h/serial=%0b stall=%0b/%0b/%0b lsu=q%0d/active=%0b/id%0d/ret%0b/head%0b/0x%08h/store=%0b/data=%0b/%0d mmio=fire%0b/busy%0b/req%0b/%0b/0x%08h/0x%08h/rsp%0b sb=%0d",
+                    $display("LSULOC cyc=%0d MMIO_SERIAL if=%0b/0x%08h disp=%0b/%0b/0x%08h/ser=%0b lane_a=%0b/0x%08h/fence=%0b/%0d commit=%0b/0x%08h/%0d,%0b/0x%08h/%0d rob=head%0d/id%0d/count%0d/v=0x%0h/r=0x%0h/serial=%0b frontend_stall=%0b lsq=count%0d/head_valid=%0b/id%0d/ret%0b/head_addr=%0b/0x%08h/store=%0b/data=%0b/%0d mmio=fire%0b/busy%0b/req%0b/%0b/0x%08h/0x%08h/rsp%0b lsq_count=%0d",
                              lsu_local_debug_cycle,
                              u_dut.if_id_valid,
                              u_dut.if_id_pc,
@@ -2382,8 +2213,8 @@ end
                              u_dut.id_issue_pkt.valid,
                              u_dut.id_issue_pkt.decode.pc,
                              u_dut.id_issue_pkt.ctrl.serialize_before,
-                             u_dut.issue_head_compact_uop.valid,
-                             u_dut.issue_head_compact_uop.pc,
+                             u_dut.lane_a_compact_uop.valid,
+                             u_dut.lane_a_compact_uop.pc,
                              u_dut.id_fence_i,
                              u_dut.issue_fence_tag,
                              u_dut.commit_pkt.valid,
@@ -2399,17 +2230,15 @@ end
                              u_dut.u_ctrl.producer_done_q,
                              u_dut.u_ctrl.serial_pending_q,
                              u_dut.stall_if,
-                             u_dut.stall_id,
-                             u_dut.bubble_id,
-                             u_dut.u_ydrasil_load_store_unit.queue_count_q,
-                             u_dut.u_ydrasil_load_store_unit.active_valid,
-                             u_dut.u_ydrasil_load_store_unit.active_producer_id,
-                             u_dut.u_ydrasil_load_store_unit.active_pkt.retired,
-                             u_dut.u_ydrasil_load_store_unit.active_at_rob_head,
-                             u_dut.u_ydrasil_load_store_unit.active_addr,
-                             u_dut.u_ydrasil_load_store_unit.active_is_store,
-                             u_dut.u_ydrasil_load_store_unit.active_store_data_valid,
-                             u_dut.u_ydrasil_load_store_unit.active_pkt.store_producer_id,
+                             u_dut.u_ydrasil_load_store_unit.count_q,
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].valid,
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].producer_id,
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].retired,
+                             1'b1,
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].addr,
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].is_store,
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].store_data_valid,
+                             u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].store_producer_id,
                              u_dut.u_ydrasil_load_store_unit.mmio_fire,
                              u_dut.u_ydrasil_load_store_unit.mmio_busy,
                              u_dut.mmio_req_pkt.valid,
@@ -2417,7 +2246,7 @@ end
                              u_dut.mmio_req_pkt.addr,
                              u_dut.mmio_req_pkt.wdata,
                              u_dut.mmio_rsp_pkt.valid,
-                             u_dut.u_ydrasil_load_store_unit.store_buf_count_q);
+                             u_dut.u_ydrasil_load_store_unit.count_q);
             end
         end
     end
@@ -2426,17 +2255,12 @@ end
         if (!rst_n) begin
             perf_local_debug_cycle <= 0;
             perf_producer_full_q <= 1'b0;
-            perf_p0_bank_block_q <= 1'b0;
             perf_producer_full_start_q <= 0;
             perf_issue_scan_count <= 0;
-            perf_refill_scan_count <= 0;
+            perf_ingress_scan_count <= 0;
         end else begin
             perf_local_debug_cycle <= perf_local_debug_cycle + 1;
             perf_producer_full_q <= u_dut.u_ctrl.producer_full_stall;
-            perf_p0_bank_block_q <=
-                !u_dut.decode_if_ready && u_dut.dispatch_ready &&
-                !u_dut.u_ydrasil_issue_stage.dispatch_slots_available &&
-                u_dut.u_ydrasil_issue_stage.dispatch0_p0;
             // Bounded local evidence for the large ISSUE_NO_EXECUTE bucket.
             // This is intentionally observational and cannot affect RTL.
             if (perf_issue_scan_en && perf_cycle_issue &&
@@ -2444,12 +2268,12 @@ end
                 (perf_issue_scan_count < 32)) begin
                 $display("PERFISSUE cyc=%0d pkt=%0b pair=%0b lane=%0b/%0b accept=%0b/%0b ex=%0b/%0b raw=%0b/%0b br=%0b mul=%0b advance=%0b flush_id=%0b recover=%0b pending=%0b serialize=%0b dep=%0b/%0b src=%0b/%0b/%0b/%0b fence=%0b pc=0x%08h/0x%08h",
                          perf_local_debug_cycle,
-                         u_dut.u_ydrasil_issue_stage.issue_pkt_i.valid,
-                         u_dut.u_ydrasil_issue_stage.issue_pair_execute,
-                         u_dut.u_ydrasil_issue_stage.lane_a_valid,
-                         u_dut.u_ydrasil_issue_stage.lane_b_valid,
-                         u_dut.u_ydrasil_issue_stage.lane_a_accept,
-                         u_dut.u_ydrasil_issue_stage.lane_b_accept,
+                         u_dut.lane_a_compact_uop.valid,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_valid_q && u_dut.u_ydrasil_issue_stage.u_scheduler.lane_b_valid_q,
+                         '0,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.lane_b_valid_q,
+                         '0,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.lane_b_valid_q,
                          u_dut.ex_hzd_pkt.valid,
                          u_dut.ex_hzd_pkt1.valid,
                          u_dut.alu_in_valid,
@@ -2458,68 +2282,67 @@ end
                              u_dut.csr_in_valid,
                          u_dut.ex_branch_jump,
                          u_dut.ex_mul_stall,
-                         u_dut.u_ydrasil_issue_stage.id_advance,
+                         '0,
                          u_dut.flush_id,
-                         u_dut.u_ydrasil_issue_stage.branch_recovery_i,
-                         u_dut.u_ydrasil_issue_stage.recovery_pending_q,
+                         u_dut.ex_pc_redirect,
+                         u_dut.ex_pc_redirect,
                          u_dut.issue_serialize_stall,
                          u_dut.issue_dependency_wait,
                          u_dut.issue_dependency_wait1,
-                         u_dut.u_ydrasil_issue_stage.src0_ready,
-                         u_dut.u_ydrasil_issue_stage.src1_ready,
-                         u_dut.u_ydrasil_issue_stage.src2_ready,
-                         u_dut.u_ydrasil_issue_stage.src3_ready,
-                         u_dut.u_ydrasil_issue_stage.issue_pkt_i.fence_i,
-                         u_dut.u_ydrasil_issue_stage.issue_pkt_i.pc,
-                         u_dut.u_ydrasil_issue_stage.issue_pkt1_i.pc);
+                         u_dut.issue_src0_wait,
+                         u_dut.issue_src1_wait,
+                         u_dut.issue_src2_wait,
+                         u_dut.issue_src3_wait,
+                         u_dut.lane_a_compact_uop.fence_i,
+                         u_dut.lane_a_compact_uop.pc,
+                         u_dut.lane_b_compact_uop.pc);
                 perf_issue_scan_count <= perf_issue_scan_count + 1;
             end
-            if (perf_refill_scan_en &&
+            if (perf_ingress_scan_en &&
                 (perf_local_debug_cycle >= perf_local_start) &&
                 (perf_local_debug_cycle <= perf_local_end) &&
-                perf_select_refill_head_empty_now &&
+                perf_select_selected_with_lane_a_empty_now &&
                 (perf_operand_lost_slots != '0) &&
-                (perf_refill_scan_count < 32)) begin
-                $display("PERFREFILL cyc=%0d q=head%0b/pair%0b/skid%0b/%0b push=%0b/width%0d u0=pc0x%08h/tag%0d/sel0x%0h/life%0d/prior0x%0h/pending0x%0h/stored%0b u1=valid%0b/pc0x%08h/tag%0d/sel0x%0h/life%0d/prior0x%0h/pending0x%0h/stored%0b prev=v0x%0h/dep0x%0h/order0x%0h/res0x%0h/ready0x%0h now=v0x%0h/dep0x%0h/order0x%0h/res0x%0h/cand0x%0h alloc=%0b/%0b target=0x%0h/0x%0h ex=%0b/%0b",
+                (perf_ingress_scan_count < 32)) begin
+                $display("PERFINGRESS cyc=%0d ingress=%0d lane_a=%0b lane_b=%0b push=%0b/width%0d u0=pc0x%08h/tag%0d/sel0x%0h/life%0d/prior0x%0h/pending0x%0h/stored%0b u1=valid%0b/pc0x%08h/tag%0d/sel0x%0h/life%0d/prior0x%0h/pending0x%0h/stored%0b prev=v0x%0h/dep0x%0h/order0x%0h/res0x%0h/ready0x%0h now=v0x%0h/dep0x%0h/order0x%0h/res0x%0h/cand0x%0h alloc=%0b/%0b target=0x%0h/0x%0h ex=%0b/%0b",
                          perf_local_debug_cycle,
-                         u_dut.u_ydrasil_issue_stage.select_head_valid_q,
-                         u_dut.u_ydrasil_issue_stage.select_head_pair_q,
-                         u_dut.u_ydrasil_issue_stage.select_skid_valid_q,
-                         u_dut.u_ydrasil_issue_stage.select_skid_pair_q,
-                         u_dut.u_ydrasil_issue_stage.select_buf_push,
-                         1 + u_dut.u_ydrasil_issue_stage.selected_valid1,
-                         u_dut.u_ydrasil_issue_stage.selected_uop0.pc,
-                         u_dut.u_ydrasil_issue_stage.selected_uop0.dst.rob_tag,
-                         u_dut.u_ydrasil_issue_stage.selected0_mask,
-                         perf_refill_lifecycle0_now,
-                         perf_refill_prior_mask0_now,
-                         perf_refill_pending_mask0_now,
-                         perf_refill_pending_mask0_now == 4'b0,
-                         u_dut.u_ydrasil_issue_stage.selected_valid1,
-                         u_dut.u_ydrasil_issue_stage.selected_uop1.pc,
-                         u_dut.u_ydrasil_issue_stage.selected_uop1.dst.rob_tag,
-                         u_dut.u_ydrasil_issue_stage.selected1_mask,
-                         perf_refill_lifecycle1_now,
-                         perf_refill_prior_mask1_now,
-                         perf_refill_pending_mask1_now,
-                         perf_refill_pending_mask1_now == 4'b0,
-                         perf_refill_prev_valid_q,
-                         perf_refill_prev_dep_q,
-                         perf_refill_prev_order_q,
-                         perf_refill_prev_resource_q,
-                         perf_refill_prev_ready_q,
-                         u_dut.u_ydrasil_issue_stage.issue_window_valid_q,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.ingress_count_q,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_valid_q,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.lane_b_valid_q,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.selected_a_valid,
+                         1 + u_dut.u_ydrasil_issue_stage.u_scheduler.selected_b_valid,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[u_dut.u_ydrasil_issue_stage.u_scheduler.selected_a_slot].pc,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[u_dut.u_ydrasil_issue_stage.u_scheduler.selected_a_slot].dst.rob_tag,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.selected_mask_q,
+                         perf_ingress_lifecycle0_now,
+                         perf_ingress_prior_mask0_now,
+                         perf_ingress_pending_mask0_now,
+                         perf_ingress_pending_mask0_now == 4'b0,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.selected_b_valid,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[u_dut.u_ydrasil_issue_stage.u_scheduler.selected_b_slot].pc,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[u_dut.u_ydrasil_issue_stage.u_scheduler.selected_b_slot].dst.rob_tag,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.selected_mask_q,
+                         perf_ingress_lifecycle1_now,
+                         perf_ingress_prior_mask1_now,
+                         perf_ingress_pending_mask1_now,
+                         perf_ingress_pending_mask1_now == 4'b0,
+                         perf_ingress_prev_valid_q,
+                         perf_ingress_prev_dep_q,
+                         perf_ingress_prev_order_q,
+                         perf_ingress_prev_resource_q,
+                         perf_ingress_prev_ready_q,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_valid_q,
                          perf_rs_dep_mask_now,
                          perf_rs_order_mask_now,
                          perf_rs_resource_mask_now,
                          perf_rs_candidate_mask_now,
-                         u_dut.u_ydrasil_issue_stage.alloc_wakeup_valid_q[0],
-                         u_dut.u_ydrasil_issue_stage.alloc_wakeup_valid_q[1],
-                         u_dut.u_ydrasil_issue_stage.alloc_wakeup_target_q[0],
-                         u_dut.u_ydrasil_issue_stage.alloc_wakeup_target_q[1],
+                         u_dut.issue_pipe_push,
+                         u_dut.issue_pipe_push_two,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.selected_mask_q[0],
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.selected_mask_q[1],
                          u_dut.ex_hzd_pkt.valid,
                          u_dut.ex_hzd_pkt1.valid);
-                perf_refill_scan_count <= perf_refill_scan_count + 1;
+                perf_ingress_scan_count <= perf_ingress_scan_count + 1;
             end
             if (perf_event_scan_en &&
                 (perf_local_debug_cycle >= perf_local_start) &&
@@ -2534,7 +2357,7 @@ end
                          u_dut.u_ctrl.producer_valid_q,
                          u_dut.u_ctrl.producer_done_q,
                          perf_producer_issued_q,
-                         u_dut.u_ydrasil_issue_stage.issue_window_valid_q);
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_valid_q);
             end
             if (perf_event_scan_en &&
                 (perf_local_debug_cycle >= perf_local_start) &&
@@ -2547,90 +2370,10 @@ end
                          u_dut.commit_pkt.valid,
                          u_dut.commit_pkt1.valid,
                          u_dut.u_ctrl.producer_complete_mask);
-            if (perf_bank_scan_en &&
-                (perf_local_debug_cycle >= perf_local_start) &&
-                (perf_local_debug_cycle <= perf_local_end) &&
-                !perf_p0_bank_block_q &&
-                !u_dut.decode_if_ready && u_dut.dispatch_ready &&
-                !u_dut.u_ydrasil_issue_stage.dispatch_slots_available &&
-                u_dut.u_ydrasil_issue_stage.dispatch0_p0)
-                $display("PERFBANK cyc=%0d P0_BEGIN dec=%0b/%0b ifready=%0b disp=%0b/%0b room=%0b/%0b d0=%0b/%0b/%0b d1=%0b/%0b/%0b occ=alu%0d/p0%0d/p1%0d free=alu%0d/p0%0d/p1%0d credit=alu%0d/p0%0d/p1%0d release=alu%0d/p0%0d/p1%0d issue=p0%0b/p1s%0b/p1%0b/a0%0b/a1%0b sel=push%0b/%0b/%0b lane=%0b/%0b ex=%0b/%0b",
-                         perf_local_debug_cycle,
-                         u_dut.u_ydrasil_issue_stage.decode_valid_i,
-                         u_dut.u_ydrasil_issue_stage.decode_valid1_i,
-                         u_dut.decode_if_ready,
-                         u_dut.dispatch_ready,
-                         u_dut.dispatch_two_ready,
-                         u_dut.u_ydrasil_issue_stage.dispatch_slots_available,
-                         u_dut.u_ydrasil_issue_stage.dispatch_pair_slots_available,
-                         u_dut.u_ydrasil_issue_stage.dispatch0_alu,
-                         u_dut.u_ydrasil_issue_stage.dispatch0_p0,
-                         !u_dut.u_ydrasil_issue_stage.dispatch0_alu &&
-                             !u_dut.u_ydrasil_issue_stage.dispatch0_p0,
-                         u_dut.u_ydrasil_issue_stage.dispatch1_alu,
-                         u_dut.u_ydrasil_issue_stage.dispatch1_p0,
-                         !u_dut.u_ydrasil_issue_stage.dispatch1_alu &&
-                             !u_dut.u_ydrasil_issue_stage.dispatch1_p0,
-                         perf_alu_bank_occ_now,
-                         perf_p0_bank_occ_now,
-                         perf_p1_bank_occ_now,
-                         u_dut.u_ydrasil_issue_stage.alu_free_local,
-                         u_dut.u_ydrasil_issue_stage.p0_free_local,
-                         u_dut.u_ydrasil_issue_stage.p1_free_local,
-                         u_dut.u_ydrasil_issue_stage.alu_free_credit_q,
-                         u_dut.u_ydrasil_issue_stage.p0_free_credit_q,
-                         u_dut.u_ydrasil_issue_stage.p1_free_credit_q,
-                         u_dut.u_ydrasil_issue_stage.alu_release_credit_q,
-                         u_dut.u_ydrasil_issue_stage.p0_release_credit_q,
-                         u_dut.u_ydrasil_issue_stage.p1_release_credit_q,
-                         u_dut.u_ydrasil_issue_stage.p0_issue_grant,
-                         u_dut.u_ydrasil_issue_stage.p1_serial_issue_grant,
-                         u_dut.u_ydrasil_issue_stage.p1_issue_grant,
-                         u_dut.u_ydrasil_issue_stage.alu0_issue_grant,
-                         u_dut.u_ydrasil_issue_stage.alu1_issue_grant,
-                         u_dut.u_ydrasil_issue_stage.select_buf_push,
-                         u_dut.u_ydrasil_issue_stage.selected_valid0,
-                         u_dut.u_ydrasil_issue_stage.selected_valid1,
-                         u_dut.u_ydrasil_issue_stage.lane_a_accept,
-                         u_dut.u_ydrasil_issue_stage.lane_b_accept,
-                         u_dut.ex_accept_valid,
-                         u_dut.ex_accept_valid1);
-            if (perf_bank_scan_en &&
-                (perf_local_debug_cycle >= perf_local_start) &&
-                (perf_local_debug_cycle <= perf_local_end) &&
-                perf_p0_bank_block_q &&
-                (u_dut.decode_if_ready || u_dut.dispatch_ready == 1'b0 ||
-                 u_dut.u_ydrasil_issue_stage.dispatch_slots_available ||
-                 !u_dut.u_ydrasil_issue_stage.dispatch0_p0))
-                $display("PERFBANK cyc=%0d P0_END room=%0b/%0b occ=alu%0d/p0%0d/p1%0d credit=alu%0d/p0%0d/p1%0d release=alu%0d/p0%0d/p1%0d issue=p0%0b/p1s%0b/p1%0b/a0%0b/a1%0b sel=push%0b/%0b/%0b lane=%0b/%0b ex=%0b/%0b",
-                         perf_local_debug_cycle,
-                         u_dut.u_ydrasil_issue_stage.dispatch_slots_available,
-                         u_dut.u_ydrasil_issue_stage.dispatch_pair_slots_available,
-                         perf_alu_bank_occ_now,
-                         perf_p0_bank_occ_now,
-                         perf_p1_bank_occ_now,
-                         u_dut.u_ydrasil_issue_stage.alu_free_credit_q,
-                         u_dut.u_ydrasil_issue_stage.p0_free_credit_q,
-                         u_dut.u_ydrasil_issue_stage.p1_free_credit_q,
-                         u_dut.u_ydrasil_issue_stage.alu_release_credit_q,
-                         u_dut.u_ydrasil_issue_stage.p0_release_credit_q,
-                         u_dut.u_ydrasil_issue_stage.p1_release_credit_q,
-                         u_dut.u_ydrasil_issue_stage.p0_issue_grant,
-                         u_dut.u_ydrasil_issue_stage.p1_serial_issue_grant,
-                         u_dut.u_ydrasil_issue_stage.p1_issue_grant,
-                         u_dut.u_ydrasil_issue_stage.alu0_issue_grant,
-                         u_dut.u_ydrasil_issue_stage.alu1_issue_grant,
-                         u_dut.u_ydrasil_issue_stage.select_buf_push,
-                         u_dut.u_ydrasil_issue_stage.selected_valid0,
-                         u_dut.u_ydrasil_issue_stage.selected_valid1,
-                         u_dut.u_ydrasil_issue_stage.lane_a_accept,
-                         u_dut.u_ydrasil_issue_stage.lane_b_accept,
-                         u_dut.ex_accept_valid,
-                         u_dut.ex_accept_valid1);
             if (perf_local_debug_en &&
                 (perf_local_debug_cycle >= perf_local_start) &&
                 (perf_local_debug_cycle <= perf_local_end)) begin
-                $display("PERFLOC cyc=%0d FE if=%0b/0x%08h dec=%0b/%0b disp=%0b/%0b rob=head%0d/pc0x%08h/count%0d/v0x%0h/d0x%0h/issued0x%0h alloc=%0b/%0b retire=%0b/%0b comp=0x%0h RS v=0x%0h src0=0x%0h src1=0x%0h cand=a0x%0h/p00x%0h/p10x%0h/s0x%0h sel=push%0b/%0b/count%0d op=v%0b/pair%0b/pc0x%08h,0x%08h/advance%0b lane=%0b/%0b cids=%0b/%0d,%0b/%0d,%0b/%0d,%0b/%0d",
+                $display("PERFLOC cyc=%0d FE if=%0b/0x%08h dec=%0b/%0b disp=%0b/%0b rob=head%0d/pc0x%08h/count%0d/v0x%0h/d0x%0h/issued0x%0h alloc=%0b/%0b retire=%0b/%0b comp=0x%0h RS v=0x%0h src0=0x%0h src1=0x%0h cand=a0x%0h/bank0x%0h/bank1x%0h/s0x%0h sel=push%0b/%0b/count%0d op=v%0b/pair%0b/pc0x%08h,0x%08h/advance%0b lane=%0b/%0b cids=%0b/%0d,%0b/%0d,%0b/%0d,%0b/%0d",
                          perf_local_debug_cycle,
                          u_dut.if_id_valid,
                          u_dut.if_id_pc,
@@ -2649,45 +2392,45 @@ end
                          u_dut.commit_pkt.valid,
                          u_dut.commit_pkt1.valid,
                          u_dut.u_ctrl.producer_complete_mask,
-                         u_dut.u_ydrasil_issue_stage.issue_window_valid_q,
-                         {u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[11],
-                          u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[10],
-                          u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[9],
-                          u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[8],
-                          u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[7],
-                          u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[6],
-                          u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[5],
-                          u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[4],
-                          u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[3],
-                          u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[2],
-                          u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[1],
-                          u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[0]},
-                         {u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[11],
-                          u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[10],
-                          u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[9],
-                          u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[8],
-                          u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[7],
-                          u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[6],
-                          u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[5],
-                          u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[4],
-                          u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[3],
-                          u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[2],
-                          u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[1],
-                          u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[0]},
-                         u_dut.u_ydrasil_issue_stage.alu_candidate_local,
-                         u_dut.u_ydrasil_issue_stage.p0_candidate_local,
-                         u_dut.u_ydrasil_issue_stage.p1_candidate_local,
-                         u_dut.u_ydrasil_issue_stage.p1_serial_candidate_local,
-                         u_dut.u_ydrasil_issue_stage.select_buf_push,
-                         u_dut.u_ydrasil_issue_stage.selected_valid1,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_valid_q,
+                         {u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src0_ready_q[11],
+                          u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src0_ready_q[10],
+                          u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src0_ready_q[9],
+                          u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src0_ready_q[8],
+                          u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src0_ready_q[7],
+                          u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src0_ready_q[6],
+                          u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src0_ready_q[5],
+                          u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src0_ready_q[4],
+                          u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src0_ready_q[3],
+                          u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src0_ready_q[2],
+                          u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src0_ready_q[1],
+                          u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src0_ready_q[0]},
+                         {u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src1_ready_q[11],
+                          u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src1_ready_q[10],
+                          u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src1_ready_q[9],
+                          u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src1_ready_q[8],
+                          u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src1_ready_q[7],
+                          u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src1_ready_q[6],
+                          u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src1_ready_q[5],
+                          u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src1_ready_q[4],
+                          u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src1_ready_q[3],
+                          u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src1_ready_q[2],
+                          u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src1_ready_q[1],
+                          u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src1_ready_q[0]},
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.bank_alu_candidate[0],
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.bank_mem_candidate[0],
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.bank_bonly_candidate[1],
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.bank_bonly_candidate[1],
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.selected_a_valid,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.selected_b_valid,
                          perf_select_buf_count,
-                         u_dut.u_ydrasil_issue_stage.issue_pkt_i.valid,
-                         u_dut.u_ydrasil_issue_stage.issue_pair_execute,
-                         u_dut.u_ydrasil_issue_stage.issue_pkt_i.pc,
-                         u_dut.u_ydrasil_issue_stage.issue_pkt1_i.pc,
-                         u_dut.u_ydrasil_issue_stage.id_advance,
-                         u_dut.u_ydrasil_issue_stage.lane_a_accept,
-                         u_dut.u_ydrasil_issue_stage.lane_b_accept,
+                         u_dut.lane_a_compact_uop.valid,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_valid_q && u_dut.u_ydrasil_issue_stage.u_scheduler.lane_b_valid_q,
+                         u_dut.lane_a_compact_uop.pc,
+                         u_dut.lane_b_compact_uop.pc,
+                         '0,
+                         '0,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.lane_b_valid_q,
                          u_dut.completion_meta[0].valid,
                          u_dut.completion_meta[0].producer_id,
                          u_dut.completion_meta[1].valid,
@@ -2696,7 +2439,7 @@ end
                          u_dut.completion_meta[2].producer_id,
                          u_dut.completion_meta[3].valid,
                          u_dut.completion_meta[3].producer_id);
-                $display("PERFEX cyc=%0d raw=alu%0b/%0d dual%0b/%0d lsu%0b/%0d mul%0b/%0d bus=alu%0b/%0d dual%0b/%0d lsu%0b/%0d mul%0b/%0d vfwr=0x%0h lsu=fire%0b/s1%0b/%0d/due%0b/%0d mdu=s2%0b/%0d/s3%0b/%0d/due%0b/%0d/res%0b/%0d br=%0b/%0d done=0x%0h",
+                $display("PERFEX cyc=%0d raw=alu%0b/%0d dual%0b/%0d lsu%0b/%0d mul%0b/%0d result=alu%0b/%0d dual%0b/%0d lsu%0b/%0d mul%0b/%0d vfwr=0x%0h lsu=fire%0b/s1%0b/%0d mdu=s2%0b/%0d/s3%0b/%0d br=%0b/%0d done=0x%0h",
                          perf_local_debug_cycle,
                          u_dut.alu_completion_valid,
                          u_dut.alu_completion_producer_id,
@@ -2721,143 +2464,133 @@ end
                          u_dut.u_ydrasil_load_store_unit.dtcm_load_fire,
                          u_dut.u_ydrasil_load_store_unit.load_s1_valid_q,
                          u_dut.u_ydrasil_load_store_unit.load_s1_producer_id_q,
-                         u_dut.dtcm_reservation.valid,
-                         u_dut.dtcm_reservation.producer_id,
                          u_dut.u_ydrasil_execute_stage.u_main_ex.u_ydrasil_mul.s2_valid_q,
                          u_dut.u_ydrasil_execute_stage.u_main_ex.u_ydrasil_mul.s2_producer_id_q,
                          u_dut.u_ydrasil_execute_stage.u_main_ex.u_ydrasil_mul.s3_valid_q,
                          u_dut.u_ydrasil_execute_stage.u_main_ex.u_ydrasil_mul.s3_producer_id_q,
-                         u_dut.mdu_due.valid,
-                         u_dut.mdu_due.producer_id,
-                         u_dut.mdu_result_reservation.valid,
-                         u_dut.mdu_result_reservation.producer_id,
                          u_dut.ex_bp_train_pkt.valid,
                          u_dut.ex_bp_train_pkt.producer_id,
                          u_dut.u_ctrl.producer_done_q);
                 $display("PERFOP cyc=%0d direct=%0b commit=%0b issue=pc0x%08h/tag%0d src0=used%0b/arch%0d/tv%0b/tag%0d/ready%0b/class%0d/bypass%0d/vf%0b:%0b:0x%08h/arf0x%08h/res0x%08h/dv%0b src1=used%0b/arch%0d/tv%0b/tag%0d/ready%0b/class%0d/bypass%0d/vf%0b:%0b:0x%08h/arf0x%08h/res0x%08h/dv%0b alloc=v%0b/%0b/pc0x%08h:%0d,0x%08h:%0d/target0x%0h:0x%0h/resident%0b%0b%0b%0b",
                          perf_local_debug_cycle,
-                         u_dut.u_ydrasil_issue_stage.select_direct_fire,
-                         u_dut.u_ydrasil_issue_stage.select_commit,
-                         u_dut.u_ydrasil_issue_stage.issue_pkt_i.pc,
-                         u_dut.u_ydrasil_issue_stage.issue_pkt_i.dst.rob_tag,
-                         u_dut.u_ydrasil_issue_stage.issue_pkt_i.src0.used,
-                         u_dut.u_ydrasil_issue_stage.issue_pkt_i.src0.arch_addr,
-                         u_dut.u_ydrasil_issue_stage.issue_pkt_i.src0.tag_valid,
-                         u_dut.u_ydrasil_issue_stage.issue_pkt_i.src0.producer_tag,
-                         u_dut.u_ydrasil_issue_stage.issue_pkt_i.src0.ready,
-                         u_dut.u_ydrasil_issue_stage.issue_pkt_i.src0.producer_class,
-                         u_dut.u_ydrasil_issue_stage.issue_pkt_i.src0_bypass,
-                         u_dut.u_ydrasil_issue_stage.issue_src0_value_valid_i,
-                         u_dut.u_ydrasil_issue_stage.issue_src0_epoch_i,
-                         u_dut.u_ydrasil_issue_stage.issue_src0_value_i,
-                         u_dut.u_ydrasil_issue_stage.rf_rdata_rs1_i,
-                         u_dut.u_ydrasil_issue_stage.slot0_src0,
-                         u_dut.u_ydrasil_issue_stage.slot0_src0_data_valid,
-                         u_dut.u_ydrasil_issue_stage.issue_pkt_i.src1.used,
-                         u_dut.u_ydrasil_issue_stage.issue_pkt_i.src1.arch_addr,
-                         u_dut.u_ydrasil_issue_stage.issue_pkt_i.src1.tag_valid,
-                         u_dut.u_ydrasil_issue_stage.issue_pkt_i.src1.producer_tag,
-                         u_dut.u_ydrasil_issue_stage.issue_pkt_i.src1.ready,
-                         u_dut.u_ydrasil_issue_stage.issue_pkt_i.src1.producer_class,
-                         u_dut.u_ydrasil_issue_stage.issue_pkt_i.src1_bypass,
-                         u_dut.u_ydrasil_issue_stage.issue_src1_value_valid_i,
-                         u_dut.u_ydrasil_issue_stage.issue_src1_epoch_i,
-                         u_dut.u_ydrasil_issue_stage.issue_src1_value_i,
-                         u_dut.u_ydrasil_issue_stage.rf_rdata_rs2_i,
-                         u_dut.u_ydrasil_issue_stage.slot0_src1,
-                         u_dut.u_ydrasil_issue_stage.slot0_src1_data_valid,
-                         u_dut.u_ydrasil_issue_stage.alloc_wakeup_valid_q[0],
-                         u_dut.u_ydrasil_issue_stage.alloc_wakeup_valid_q[1],
-                         u_dut.u_ydrasil_issue_stage.alloc_fast_uop_q[0].pc,
-                         u_dut.u_ydrasil_issue_stage.alloc_fast_uop_q[0].dst.rob_tag,
-                         u_dut.u_ydrasil_issue_stage.alloc_fast_uop_q[1].pc,
-                         u_dut.u_ydrasil_issue_stage.alloc_fast_uop_q[1].dst.rob_tag,
-                         u_dut.u_ydrasil_issue_stage.alloc_wakeup_target_q[0],
-                         u_dut.u_ydrasil_issue_stage.alloc_wakeup_target_q[1],
-                         u_dut.u_ydrasil_issue_stage.dispatch_src0_resident,
-                         u_dut.u_ydrasil_issue_stage.dispatch_src1_resident,
-                         u_dut.u_ydrasil_issue_stage.dispatch_src2_resident,
-                         u_dut.u_ydrasil_issue_stage.dispatch_src3_resident);
-                $display("PERFLSU cyc=%0d op=valid%0b/agu%0b/tag%0d/load%0b/store%0b/sdata%0b/sprod%0b:%0d ctrl=stall%0b/bubble%0b/flush%0b/recover%0b/redirect%0b/keep%0b ex=req%0b/tag%0d q=count%0d/head%0d/active%0b/tag%0d/load%0b/store%0b/sdata%0b/sprod%0b:%0d/direct%0b/queued%0b/block%0b sb=count%0d/e0%0b/data%0b/tag%0d/sprod%0b:%0d/ret%0b/e1%0b/data%0b/tag%0d/sprod%0b:%0d/ret%0b shadow=v0x%0h/id%0d,%0d,%0d,%0d,%0d",
+                         1'b0,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.selected_a_valid,
+                         u_dut.lane_a_compact_uop.pc,
+                         u_dut.lane_a_compact_uop.dst.rob_tag,
+                         u_dut.lane_a_compact_uop.src0.used,
+                         u_dut.lane_a_compact_uop.src0.arch_addr,
+                         u_dut.lane_a_compact_uop.src0.tag_valid,
+                         u_dut.lane_a_compact_uop.src0.producer_tag,
+                         u_dut.lane_a_compact_uop.src0.ready,
+                         u_dut.lane_a_compact_uop.src0.producer_class,
+                         1'b0,
+                         1'b0,
+                         '0,
+                         '0,
+                         '0,
+                         u_dut.agu_in_operand_a,
+                         !u_dut.issue_src0_wait,
+                         u_dut.lane_a_compact_uop.src1.used,
+                         u_dut.lane_a_compact_uop.src1.arch_addr,
+                         u_dut.lane_a_compact_uop.src1.tag_valid,
+                         u_dut.lane_a_compact_uop.src1.producer_tag,
+                         u_dut.lane_a_compact_uop.src1.ready,
+                         u_dut.lane_a_compact_uop.src1.producer_class,
+                         1'b0,
+                         1'b0,
+                         '0,
+                         '0,
+                         '0,
+                         u_dut.agu_in_operand_b,
+                         !u_dut.issue_src1_wait,
+                         u_dut.issue_pipe_push,
+                         u_dut.issue_pipe_push_two,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.ingress_q[0].pc,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.ingress_q[0].dst.rob_tag,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.ingress_q[1].pc,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.ingress_q[1].dst.rob_tag,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.selected_mask_q[0],
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.selected_mask_q[1],
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.lookup_resident0_i,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.lookup_resident1_i,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.lookup_resident2_i,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.lookup_resident3_i);
+                $display("PERFLSU cyc=%0d lane_a=valid%0b/agu%0b/tag%0d/load%0b/store%0b/sdata%0b/sprod%0b:%0d ctrl=flush%0b/recover%0b/redirect%0b/live%0b dispatch=req%0b/tag%0d lsq=count%0d/head%0d/valid%0b/tag%0d/load%0b/store%0b/sdata%0b/sprod%0b:%0d/load_launch%0b/candidate%0b/block%0b entries=count%0d/e0%0b/data%0b/tag%0d/sprod%0b:%0d/ret%0b/e1%0b/data%0b/tag%0d/sprod%0b:%0d/ret%0b result_meta=v0x%0h/id%0d,%0d,%0d,%0d,%0d",
                          perf_local_debug_cycle,
-                         u_dut.u_ydrasil_issue_stage.issue_pkt_i.valid,
-                         u_dut.u_ydrasil_issue_stage.agu_in_valid_q,
-                         u_dut.u_ydrasil_issue_stage.agu_in_req_q.producer_id,
-                         u_dut.u_ydrasil_issue_stage.agu_in_req_q.is_load,
-                         u_dut.u_ydrasil_issue_stage.agu_in_req_q.is_store,
-                         u_dut.u_ydrasil_issue_stage.agu_in_req_q.store_data_valid,
-                         u_dut.u_ydrasil_issue_stage.agu_in_req_q.store_producer_tracked,
-                         u_dut.u_ydrasil_issue_stage.agu_in_req_q.store_producer_id,
-                         u_dut.stall_id,
-                         u_dut.bubble_id,
+                         u_dut.lane_a_compact_uop.valid,
+                         u_dut.agu_in_valid,
+                         u_dut.agu_in_req.producer_id,
+                         u_dut.agu_in_req.is_load,
+                         u_dut.agu_in_req.is_store,
+                         u_dut.agu_in_req.store_data_valid,
+                         u_dut.agu_in_req.store_producer_tracked,
+                         u_dut.agu_in_req.store_producer_id,
                          u_dut.flush_id,
                          u_dut.ex_pc_redirect,
                          u_dut.ex_pc_redirect,
                          u_dut.u_ctrl.recovery_live_mask[
-                             u_dut.u_ydrasil_issue_stage.agu_in_req_q.producer_id[
+                             u_dut.agu_in_req.producer_id[
                                  PRODUCER_SLOT_WIDTH-1:0]],
                          u_dut.lsu_req_pkt.valid,
                          u_dut.lsu_req_pkt.producer_id,
-                         u_dut.u_ydrasil_load_store_unit.queue_count_q,
-                         u_dut.u_ydrasil_load_store_unit.queue_head_q,
-                         u_dut.u_ydrasil_load_store_unit.active_valid,
-                         u_dut.u_ydrasil_load_store_unit.active_producer_id,
-                         u_dut.u_ydrasil_load_store_unit.active_is_load,
-                         u_dut.u_ydrasil_load_store_unit.active_is_store,
-                         u_dut.u_ydrasil_load_store_unit.active_store_data_valid,
-                         u_dut.u_ydrasil_load_store_unit.active_pkt.store_producer_tracked,
-                         u_dut.u_ydrasil_load_store_unit.active_pkt.store_producer_id,
+                         u_dut.u_ydrasil_load_store_unit.count_q,
+                         u_dut.u_ydrasil_load_store_unit.head_q,
+                         u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].valid,
+                         u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].producer_id,
+                         u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].is_load,
+                         u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].is_store,
+                         u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].store_data_valid,
+                         u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].store_producer_tracked,
+                         u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].store_producer_id,
                          1'b0,
-                         u_dut.u_ydrasil_load_store_unit.queued_dtcm_load_candidate,
-                         u_dut.u_ydrasil_load_store_unit.load_store_data_block,
-                         u_dut.u_ydrasil_load_store_unit.store_buf_count_q,
-                         u_dut.u_ydrasil_load_store_unit.store_buf0_q.valid,
-                         u_dut.u_ydrasil_load_store_unit.store_buf0_q.store_data_valid,
-                         u_dut.u_ydrasil_load_store_unit.store_buf0_q.producer_id,
-                         u_dut.u_ydrasil_load_store_unit.store_buf0_q.store_producer_tracked,
-                         u_dut.u_ydrasil_load_store_unit.store_buf0_q.store_producer_id,
-                         u_dut.u_ydrasil_load_store_unit.store_buf0_q.retired,
-                         u_dut.u_ydrasil_load_store_unit.store_buf1_q.valid,
-                         u_dut.u_ydrasil_load_store_unit.store_buf1_q.store_data_valid,
-                         u_dut.u_ydrasil_load_store_unit.store_buf1_q.producer_id,
-                         u_dut.u_ydrasil_load_store_unit.store_buf1_q.store_producer_tracked,
-                         u_dut.u_ydrasil_load_store_unit.store_buf1_q.store_producer_id,
-                         u_dut.u_ydrasil_load_store_unit.store_buf1_q.retired,
-                         {u_dut.u_ydrasil_load_store_unit.completion_shadow_valid_q[4],
-                          u_dut.u_ydrasil_load_store_unit.completion_shadow_valid_q[3],
-                          u_dut.u_ydrasil_load_store_unit.completion_shadow_valid_q[2],
-                          u_dut.u_ydrasil_load_store_unit.completion_shadow_valid_q[1],
-                          u_dut.u_ydrasil_load_store_unit.completion_shadow_valid_q[0]},
-                         u_dut.u_ydrasil_load_store_unit.completion_shadow_id_q[0],
-                         u_dut.u_ydrasil_load_store_unit.completion_shadow_id_q[1],
-                         u_dut.u_ydrasil_load_store_unit.completion_shadow_id_q[2],
-                         u_dut.u_ydrasil_load_store_unit.completion_shadow_id_q[3],
-                         u_dut.u_ydrasil_load_store_unit.completion_shadow_id_q[4]);
-                if (u_dut.u_ydrasil_issue_stage.issue_pkt_i.valid &&
-                    (u_dut.u_ydrasil_issue_stage.issue_pkt_i.op_class ==
+                         u_dut.u_ydrasil_load_store_unit.load_candidate_valid_d,
+                         !u_dut.u_ydrasil_load_store_unit.load_candidate_valid_d,
+                         u_dut.u_ydrasil_load_store_unit.count_q,
+                         u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].valid,
+                         u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].store_data_valid,
+                         u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].producer_id,
+                         u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].store_producer_tracked,
+                         u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].store_producer_id,
+                         u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].retired,
+                         u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q+1].valid,
+                         u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q+1].store_data_valid,
+                         u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q+1].producer_id,
+                         u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q+1].store_producer_tracked,
+                         u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q+1].store_producer_id,
+                         u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q+1].retired,
+                         {1'b0,
+                          1'b0,
+                          1'b0,
+                          1'b0,
+                          1'b0},
+                         1'b0,
+                         1'b0,
+                         1'b0,
+                         1'b0,
+                         1'b0);
+                if (u_dut.lane_a_compact_uop.valid &&
+                    (u_dut.lane_a_compact_uop.op_class ==
                      UOP_CLASS_STORE))
-                    $display("PERFSTORE cyc=%0d tag=%0d src=%0d ready=%0b state=live%0b/done%0b vf_epoch=%0b vf_match=%0b tracked_late=%0b early=main%0b/dual%0b data=0x%08h",
+                    $display("PERFSTORE cyc=%0d tag=%0d src=%0d ready=%0b state=live%0b/done%0b vf_epoch=%0b vf_match=%0b tracked_late=%0b bypass=main%0b/dual%0b data=0x%08h",
                              perf_local_debug_cycle,
-                             u_dut.u_ydrasil_issue_stage.issue_pkt_i.dst.rob_tag,
-                             u_dut.u_ydrasil_issue_stage.issue_pkt_i.src1.producer_tag,
-                             u_dut.u_ydrasil_issue_stage.src1_ready,
+                             u_dut.lane_a_compact_uop.dst.rob_tag,
+                             u_dut.lane_a_compact_uop.src1.producer_tag,
+                             u_dut.issue_src1_wait,
                              u_dut.u_ctrl.producer_valid_q[
-                                 u_dut.u_ydrasil_issue_stage.issue_pkt_i.src1.producer_tag[
+                                 u_dut.lane_a_compact_uop.src1.producer_tag[
                                      PRODUCER_SLOT_WIDTH-1:0]],
                              u_dut.u_ctrl.producer_done_q[
-                                 u_dut.u_ydrasil_issue_stage.issue_pkt_i.src1.producer_tag[
+                                 u_dut.lane_a_compact_uop.src1.producer_tag[
                                      PRODUCER_SLOT_WIDTH-1:0]],
-                             u_dut.u_ydrasil_issue_stage.issue_src1_epoch_i,
-                             u_dut.u_ydrasil_issue_stage.issue_src1_epoch_i ==
-                                 u_dut.u_ydrasil_issue_stage.issue_pkt_i.src1.producer_tag[
+                             '0,
+                             '0 ==
+                                 u_dut.lane_a_compact_uop.src1.producer_tag[
                                      PRODUCER_ID_WIDTH-1],
-                             u_dut.u_ydrasil_issue_stage.shared_agu_req_d.
+                             u_dut.agu_in_req.
                                  store_producer_tracked,
-                             u_dut.u_ydrasil_issue_stage.issue_pkt_i.src1_bypass ==
-                                 BYPASS_LANE0,
-                             u_dut.u_ydrasil_issue_stage.issue_pkt_i.src1_bypass ==
-                                 BYPASS_LANE1,
-                             u_dut.u_ydrasil_issue_stage.slot0_src1_local);
+                             1'b0,
+                             1'b0,
+                             u_dut.agu_in_operand_b);
             end
         end
     end
@@ -2890,44 +2623,42 @@ end
                          u_dut.u_ctrl.producer_valid_q,
                          u_dut.u_ctrl.producer_done_q,
                          perf_producer_issued_q);
-                $display("PERF_STALL_LSU: CREDIT=%0d RESERVED=%0d QUEUE_COUNT=%0d QUEUE_HEAD=%0d ACTIVE_VALID=%0b ACTIVE_ID=%0d ACTIVE_SLOT=%0d ACTIVE_ADDR=0x%08h ACTIVE_DTCM=%0b ACTIVE_SAFE=%0b SECOND_VALID=%0b SECOND_ID=%0d SECOND_SLOT=%0d SECOND_ADDR=0x%08h SECOND_DTCM=%0b AGE_REPAIR=%0b",
-                         u_dut.lsu_issue_credit,
-                         u_dut.u_ydrasil_issue_stage.lsu_select_reserved_q,
-                         u_dut.u_ydrasil_load_store_unit.queue_count_q,
-                         u_dut.u_ydrasil_load_store_unit.queue_head_q,
-                         u_dut.u_ydrasil_load_store_unit.active_valid,
-                         u_dut.u_ydrasil_load_store_unit.active_pkt.producer_id,
-                         u_dut.u_ydrasil_load_store_unit.active_pkt.producer_id[
+                $display("PERF_STALL_LSU: ALLOC_CREDIT=%0d RESERVED=%0d QUEUE_COUNT=%0d QUEUE_HEAD=%0d ACTIVE_VALID=%0b ACTIVE_ID=%0d ACTIVE_SLOT=%0d ACTIVE_ADDR=0x%08h ACTIVE_DTCM=%0b ACTIVE_SAFE=%0b SECOND_VALID=%0b SECOND_ID=%0d SECOND_SLOT=%0d SECOND_ADDR=0x%08h SECOND_DTCM=%0b AGE_REPAIR=%0b",
+                         u_dut.u_ydrasil_load_store_unit.alloc_reservation_credit,
+                         '0,
+                         u_dut.u_ydrasil_load_store_unit.count_q,
+                         u_dut.u_ydrasil_load_store_unit.head_q,
+                         u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].valid,
+                         u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].producer_id,
+                         u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].producer_id[
                              PRODUCER_SLOT_WIDTH-1:0],
-                         u_dut.u_ydrasil_load_store_unit.active_pkt.addr,
-                         u_dut.u_ydrasil_load_store_unit.active_pkt.addr_is_dtcm,
-                         u_dut.u_ydrasil_load_store_unit.active_mmio_order_safe,
-                         u_dut.u_ydrasil_load_store_unit.second_pkt.valid,
-                         u_dut.u_ydrasil_load_store_unit.second_pkt.producer_id,
-                         u_dut.u_ydrasil_load_store_unit.second_pkt.producer_id[
+                         u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].addr,
+                         u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].addr_is_dtcm,
+                         1'b1,
+                         u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q+1].valid,
+                         u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q+1].producer_id,
+                         u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q+1].producer_id[
                              PRODUCER_SLOT_WIDTH-1:0],
-                         u_dut.u_ydrasil_load_store_unit.second_pkt.addr,
-                         u_dut.u_ydrasil_load_store_unit.second_pkt.addr_is_dtcm,
-                         u_dut.u_ydrasil_load_store_unit.queue_age_repair);
+                         u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q+1].addr,
+                         u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q+1].addr_is_dtcm,
+                         1'b0);
                 for (perf_stall_snapshot_idx = 0;
                      perf_stall_snapshot_idx < 12;
                      perf_stall_snapshot_idx = perf_stall_snapshot_idx + 1) begin
-                    if (u_dut.u_ydrasil_issue_stage.issue_window_valid_q[
+                    if (u_dut.u_ydrasil_issue_stage.u_scheduler.entry_valid_q[
                             perf_stall_snapshot_idx])
                         $display("PERF_STALL_RS: ENTRY=%0d TAG=%0d SLOT=%0d PC=0x%08h SRC_READY=%0b%0b DEP=%0b ORDER=%0b RESOURCE=%0b CANDIDATE=%0b SELECTED=%0b MEMORY=%0b STORE=%0b ORDER_MASK=0x%0h",
                                  perf_stall_snapshot_idx,
-                                 u_dut.u_ydrasil_issue_stage.issue_window_q[
+                                 u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[
                                      perf_stall_snapshot_idx].dst.rob_tag,
-                                 u_dut.u_ydrasil_issue_stage.issue_window_q[
+                                 u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[
                                      perf_stall_snapshot_idx].dst.rob_tag[
                                          PRODUCER_SLOT_WIDTH-1:0],
-                                 u_dut.u_ydrasil_issue_stage.issue_window_q[
+                                 u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[
                                      perf_stall_snapshot_idx].pc,
-                                 u_dut.u_ydrasil_issue_stage.
-                                     issue_src0_ready_for_select[
+                                 u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src0_ready_q[
                                          perf_stall_snapshot_idx],
-                                 u_dut.u_ydrasil_issue_stage.
-                                     issue_src1_ready_for_select[
+                                 u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src1_ready_q[
                                          perf_stall_snapshot_idx],
                                  perf_rs_dep_mask_now[perf_stall_snapshot_idx],
                                  perf_rs_order_mask_now[perf_stall_snapshot_idx],
@@ -2937,11 +2668,11 @@ end
                                      perf_stall_snapshot_idx],
                                  perf_rs_selected_mask_now[
                                      perf_stall_snapshot_idx],
-                                 u_dut.u_ydrasil_issue_stage.issue_memory_q[
+                                 perf_entry_memory_mask[
                                      perf_stall_snapshot_idx],
-                                 u_dut.u_ydrasil_issue_stage.issue_store_q[
+                                 perf_entry_store_mask[
                                      perf_stall_snapshot_idx],
-                                 u_dut.u_ydrasil_issue_stage.issue_order_mask_q[
+                                 u_dut.u_ydrasil_issue_stage.u_scheduler.entry_order_q[
                                      perf_stall_snapshot_idx]);
                 end
             end
@@ -2967,54 +2698,50 @@ end
                          {PRODUCER_NUM{1'b0}},
                          u_dut.u_ydrasil_execute_stage.u_main_ex.u_ydrasil_mul.s2_valid_q,
                          u_dut.u_ydrasil_execute_stage.u_main_ex.u_ydrasil_mul.s2_producer_id_q);
-            if (u_dut.u_ydrasil_issue_stage.lane_b_accept &&
-                (u_dut.u_ydrasil_issue_stage.lane_b_uop.op_class == UOP_CLASS_MUL))
+            if (u_dut.u_ydrasil_issue_stage.u_scheduler.lane_b_valid_q &&
+                (u_dut.u_ydrasil_issue_stage.u_scheduler.lane_b_uop_q.op_class == UOP_CLASS_MUL))
                 $display("RAWDBG cyc=%0d ACCEPT_MUL pc=0x%08h id=%0d rd=%0d op=0x%0h",
                          raw_debug_cycle,
-                         u_dut.u_ydrasil_issue_stage.lane_b_uop.pc,
-                         u_dut.u_ydrasil_issue_stage.lane_b_uop.dst.rob_tag,
-                         u_dut.u_ydrasil_issue_stage.lane_b_uop.dst.rd_addr,
-                         u_dut.u_ydrasil_issue_stage.lane_b_uop.subop);
-            if (u_dut.u_ydrasil_issue_stage.lane_b_bru_accept)
-                $display("RAWDBG cyc=%0d ACCEPT_BR pc=0x%08h id=%0d a=0x%08h b=0x%08h src0=0x%08h src1=0x%08h tags=%0d/%0d dual=0x%08h/0x%08h cmul=%0b/%0d/0x%08h mdu_due=%0b/%0d mdu_res=%0b/%0d bypass=0x%08h",
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.lane_b_uop_q.pc,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.lane_b_uop_q.dst.rob_tag,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.lane_b_uop_q.dst.rd_addr,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.lane_b_uop_q.subop);
+            if (u_dut.ex_accept_valid1)
+                $display("RAWDBG cyc=%0d ACCEPT_BR pc=0x%08h id=%0d a=0x%08h b=0x%08h src0=0x%08h src1=0x%08h tags=%0d/%0d dual=0x%08h/0x%08h mul_result=%0b/%0d/0x%08h",
                          raw_debug_cycle,
-                         u_dut.u_ydrasil_issue_stage.lane_b_uop.pc,
-                         u_dut.u_ydrasil_issue_stage.lane_b_uop.dst.rob_tag,
-                         u_dut.u_ydrasil_issue_stage.lane_b_operand_a_local,
-                         u_dut.u_ydrasil_issue_stage.lane_b_operand_b_local,
-                         u_dut.u_ydrasil_issue_stage.lane_b_src0_local,
-                         u_dut.u_ydrasil_issue_stage.lane_b_src1_local,
-                         u_dut.u_ydrasil_issue_stage.lane_b_uop.src0.producer_tag,
-                         u_dut.u_ydrasil_issue_stage.lane_b_uop.src1.producer_tag,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.lane_b_uop_q.pc,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.lane_b_uop_q.dst.rob_tag,
+                         '0,
+                         '0,
+                         '0,
+                         '0,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.lane_b_uop_q.src0.producer_tag,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.lane_b_uop_q.src1.producer_tag,
                          u_dut.dual_bru_operand_a,
                          u_dut.dual_bru_operand_b,
                          u_dut.completion_meta[COMPLETION_MUL].valid,
                          u_dut.completion_meta[COMPLETION_MUL].producer_id,
-                         u_dut.completion_data[COMPLETION_MUL],
-                         u_dut.mdu_due.valid, u_dut.mdu_due.producer_id,
-                         u_dut.mdu_result_reservation.valid,
-                         u_dut.mdu_result_reservation.producer_id,
-                         u_dut.mdu_bypass_data);
+                         u_dut.completion_data[COMPLETION_MUL]);
             if (u_dut.dual_bru_valid)
                 $display("RAWDBG cyc=%0d BRU_INPUT pc=0x%08h id=%0d subop=%0d op=0x%0h a=0x%08h b=0x%08h",
                          raw_debug_cycle,
-                         u_dut.u_ydrasil_issue_stage.dual_meta_q.pc,
-                         u_dut.u_ydrasil_issue_stage.dual_meta_q.producer_id,
-                         u_dut.u_ydrasil_issue_stage.dual_bru_payload_q.subop,
-                         u_dut.u_ydrasil_issue_stage.lane_b_operator_info,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.lane_b_uop_q.pc,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.lane_b_uop_q.dst.rob_tag,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.lane_b_uop_q.subop,
+                         '0,
                          u_dut.dual_bru_operand_a,
                          u_dut.dual_bru_operand_b);
             if (u_dut.mul_in_valid)
                 $display("RAWDBG cyc=%0d MUL_INPUT id=%0d rd=%0d op=0x%0h a=0x%08h b=0x%08h",
                          raw_debug_cycle,
-                         u_dut.u_ydrasil_issue_stage.dual_meta_q.producer_id,
-                         u_dut.u_ydrasil_issue_stage.dual_meta_q.rd_addr,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.lane_b_uop_q.dst.rob_tag,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.lane_b_uop_q.dst.rd_addr,
                          u_dut.mul_in_operator,
                          u_dut.mul_in_operand_a, u_dut.mul_in_operand_b);
             if (u_dut.alu_in_valid)
                 $display("RAWDBG cyc=%0d ALU_INPUT pc=0x%08h id=%0d rd=%0d op=0x%0h a=0x%08h b=0x%08h",
                          raw_debug_cycle,
-                         u_dut.u_ydrasil_issue_stage.lane_a_pc_q,
+                         u_dut.lane_a_pc,
                          u_dut.alu_in_producer_id,
                          u_dut.alu_in_rd_addr,
                          u_dut.alu_in_operator,
@@ -3023,10 +2750,10 @@ end
             if (u_dut.dual_alu_valid)
                 $display("RAWDBG cyc=%0d DUAL_ALU_INPUT pc=0x%08h id=%0d rd=%0d op=0x%0h a=0x%08h b=0x%08h",
                          raw_debug_cycle,
-                         u_dut.u_ydrasil_issue_stage.dual_meta_q.pc,
-                         u_dut.u_ydrasil_issue_stage.dual_meta_q.producer_id,
-                         u_dut.u_ydrasil_issue_stage.dual_meta_q.rd_addr,
-                         u_dut.u_ydrasil_issue_stage.dual_alu_payload_q.subop,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.lane_b_uop_q.pc,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.lane_b_uop_q.dst.rob_tag,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.lane_b_uop_q.dst.rd_addr,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.lane_b_uop_q.subop,
                          u_dut.dual_alu_operand_a,
                          u_dut.dual_alu_operand_b);
             if (u_dut.u_ydrasil_execute_stage.u_main_ex.u_ydrasil_mul.s0_valid_q ||
@@ -3067,15 +2794,15 @@ end
                          u_dut.completion_rd[COMPLETION_DUAL_ALU],
                          u_dut.completion_data[COMPLETION_ALU],
                          u_dut.completion_data[COMPLETION_DUAL_ALU]);
-            if (u_dut.u_ydrasil_issue_stage.agu_in_valid_q)
+            if (u_dut.agu_in_valid)
                 $display("RAWDBG cyc=%0d LSU_INPUT id=%0d rd=%0d load=%0b store=%0b addr=0x%08h",
                          raw_debug_cycle,
-                         u_dut.u_ydrasil_issue_stage.agu_in_req_q.producer_id,
-                         u_dut.u_ydrasil_issue_stage.agu_in_req_q.rd_addr,
-                         u_dut.u_ydrasil_issue_stage.agu_in_req_q.is_load,
-                         u_dut.u_ydrasil_issue_stage.agu_in_req_q.is_store,
-                         u_dut.u_ydrasil_issue_stage.agu_in_operand_a_q +
-                         u_dut.u_ydrasil_issue_stage.agu_in_operand_b_q);
+                         u_dut.agu_in_req.producer_id,
+                         u_dut.agu_in_req.rd_addr,
+                         u_dut.agu_in_req.is_load,
+                         u_dut.agu_in_req.is_store,
+                         u_dut.agu_in_operand_a +
+                         u_dut.agu_in_operand_b);
             if (u_dut.u_ydrasil_load_store_unit.dtcm_load_fire ||
                 u_dut.u_ydrasil_load_store_unit.load_s1_valid_q ||
                 u_dut.ex_pc_redirect)
@@ -3085,7 +2812,7 @@ end
                          u_dut.lsu_req_pkt.producer_id,
                          u_dut.u_ydrasil_load_store_unit.dtcm_load_fire,
                          1'b0,
-                         u_dut.u_ydrasil_load_store_unit.queued_dtcm_load_fire,
+                         u_dut.u_ydrasil_load_store_unit.dtcm_load_fire,
                          u_dut.u_ydrasil_load_store_unit.load_s1_valid_q,
                          u_dut.u_ydrasil_load_store_unit.load_s1_producer_id_q,
                          u_dut.u_ctrl.recovery_live_mask[
@@ -3095,12 +2822,12 @@ end
                          u_dut.lsu_completion_valid,
                          u_dut.lsu_completion_producer_id);
             if (u_dut.id_fence_i ||
-                u_dut.u_ydrasil_issue_stage.issue_fence_accept ||
+                1'b0 ||
                 u_dut.pipeline_flush ||
                 perf_serial_pending)
                 $display("RAWDBG cyc=%0d FENCE accept=%0b pulse=%0b tag=%0d next=0x%08h pipe_flush=%0b serial=%0b/%0d/%08h head=%0d lsu_idle=%0b",
                          raw_debug_cycle,
-                         u_dut.u_ydrasil_issue_stage.issue_fence_accept,
+                         1'b0,
                          u_dut.id_fence_i,
                          u_dut.issue_fence_tag,
                          u_dut.issue_fence_next_pc,
@@ -3126,26 +2853,26 @@ end
                          u_dut.flush_if,
                          u_dut.id_fence_i);
             if ((raw_debug_cycle >= 206) && (raw_debug_cycle <= 235))
-                $display("RAWDBG cyc=%0d STATE issue=%0b/%0h/%0d ready=%0b waits=%0b%0b%0b%0b cand=%0b%0b/%0b/%0b qhead=%0d/0x%08h qcnt=%0d commit=%0b%0b disp=%0b valid=0x%0h readyq=0x%0h",
+                $display("RAWDBG cyc=%0d STATE issue=%0b/%0h/%0d qconsume0=%0b waits=%0b%0b%0b%0b cand=%0b%0b/%0b/%0b qhead=%0d/0x%08h qcnt=%0d commit=%0b%0b disp=%0b valid=0x%0h readyq=0x%0h",
                          raw_debug_cycle,
-                         u_dut.u_ydrasil_issue_stage.issue_pkt_i.valid,
-                         u_dut.u_ydrasil_issue_stage.issue_pkt_i.pc,
-                         u_dut.u_ydrasil_issue_stage.issue_pkt_i.dst.rob_tag,
-                         u_dut.u_ydrasil_issue_stage.issue_ready_o,
-                         u_dut.u_ydrasil_issue_stage.src0_wait_o,
-                         u_dut.u_ydrasil_issue_stage.src1_wait_o,
-                         u_dut.u_ydrasil_issue_stage.src2_wait_o,
-                         u_dut.u_ydrasil_issue_stage.src3_wait_o,
-                         u_dut.u_ydrasil_issue_stage.p0_select_valid,
-                         u_dut.u_ydrasil_issue_stage.p1_select_valid,
-                         u_dut.u_ydrasil_issue_stage.alu_select0_valid,
-                         u_dut.u_ydrasil_issue_stage.alu_select1_valid,
+                         u_dut.lane_a_compact_uop.valid,
+                         u_dut.lane_a_compact_uop.pc,
+                         u_dut.lane_a_compact_uop.dst.rob_tag,
+                         1'b1,
+                         u_dut.issue_src0_wait,
+                         u_dut.issue_src1_wait,
+                         u_dut.issue_src2_wait,
+                         u_dut.issue_src3_wait,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.selected_a_valid,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.selected_b_valid,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.selected_a_valid,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.selected_b_valid,
                          u_dut.u_ctrl.queue_head_q,
                          u_dut.u_ctrl.producer_pc_q[u_dut.u_ctrl.queue_head_q],
                          u_dut.u_ctrl.queue_count_q,
                          u_dut.u_ctrl.queue_commit0,
                          u_dut.u_ctrl.queue_commit1,
-                         u_dut.u_ydrasil_issue_stage.dispatch_ready_i,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.queue_consume0_o,
                          u_dut.u_ctrl.producer_valid_q,
                          u_dut.u_ctrl.producer_done_q);
             if ((raw_debug_cycle >= 194) && (raw_debug_cycle <= 205))
@@ -3164,70 +2891,70 @@ end
             if ((raw_debug_cycle >= 208) && (raw_debug_cycle <= 212)) begin
                 $display("RAWDBG cyc=%0d RS0 v/r=%0b/%0b%0b pc=0x%08h tag=%0d ord=0x%0h",
                          raw_debug_cycle,
-                         u_dut.u_ydrasil_issue_stage.issue_window_valid_q[0],
-                         u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[0],
-                         u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[0],
-                         u_dut.u_ydrasil_issue_stage.issue_window_q[0].pc,
-                         u_dut.u_ydrasil_issue_stage.issue_window_q[0].dst.rob_tag,
-                         u_dut.u_ydrasil_issue_stage.issue_order_mask_q[0]);
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_valid_q[0],
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src0_ready_q[0],
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src1_ready_q[0],
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[0].pc,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[0].dst.rob_tag,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_order_q[0]);
                 $display("RAWDBG cyc=%0d RS1 v/r=%0b/%0b%0b pc=0x%08h tag=%0d ord=0x%0h",
                          raw_debug_cycle,
-                         u_dut.u_ydrasil_issue_stage.issue_window_valid_q[1],
-                         u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[1],
-                         u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[1],
-                         u_dut.u_ydrasil_issue_stage.issue_window_q[1].pc,
-                         u_dut.u_ydrasil_issue_stage.issue_window_q[1].dst.rob_tag,
-                         u_dut.u_ydrasil_issue_stage.issue_order_mask_q[1]);
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_valid_q[1],
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src0_ready_q[1],
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src1_ready_q[1],
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[1].pc,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[1].dst.rob_tag,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_order_q[1]);
                 $display("RAWDBG cyc=%0d RS2 v/r=%0b/%0b%0b pc=0x%08h tag=%0d ord=0x%0h",
                          raw_debug_cycle,
-                         u_dut.u_ydrasil_issue_stage.issue_window_valid_q[2],
-                         u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[2],
-                         u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[2],
-                         u_dut.u_ydrasil_issue_stage.issue_window_q[2].pc,
-                         u_dut.u_ydrasil_issue_stage.issue_window_q[2].dst.rob_tag,
-                         u_dut.u_ydrasil_issue_stage.issue_order_mask_q[2]);
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_valid_q[2],
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src0_ready_q[2],
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src1_ready_q[2],
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[2].pc,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[2].dst.rob_tag,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_order_q[2]);
                 $display("RAWDBG cyc=%0d RS3 v/r=%0b/%0b%0b pc=0x%08h tag=%0d ord=0x%0h",
                          raw_debug_cycle,
-                         u_dut.u_ydrasil_issue_stage.issue_window_valid_q[3],
-                         u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[3],
-                         u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[3],
-                         u_dut.u_ydrasil_issue_stage.issue_window_q[3].pc,
-                         u_dut.u_ydrasil_issue_stage.issue_window_q[3].dst.rob_tag,
-                         u_dut.u_ydrasil_issue_stage.issue_order_mask_q[3]);
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_valid_q[3],
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src0_ready_q[3],
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src1_ready_q[3],
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[3].pc,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[3].dst.rob_tag,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_order_q[3]);
                 $display("RAWDBG cyc=%0d RS4-6 v=0x%0b%0b%0b r0=%0b%0b%0b r1=%0b%0b%0b pc=0x%08h/0x%08h/0x%08h ord=0x%0h/0x%0h/0x%0h",
                          raw_debug_cycle,
-                         u_dut.u_ydrasil_issue_stage.issue_window_valid_q[6],
-                         u_dut.u_ydrasil_issue_stage.issue_window_valid_q[5],
-                         u_dut.u_ydrasil_issue_stage.issue_window_valid_q[4],
-                         u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[6],
-                         u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[5],
-                         u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[4],
-                         u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[6],
-                         u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[5],
-                         u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[4],
-                         u_dut.u_ydrasil_issue_stage.issue_window_q[4].pc,
-                         u_dut.u_ydrasil_issue_stage.issue_window_q[5].pc,
-                         u_dut.u_ydrasil_issue_stage.issue_window_q[6].pc,
-                         u_dut.u_ydrasil_issue_stage.issue_order_mask_q[4],
-                         u_dut.u_ydrasil_issue_stage.issue_order_mask_q[5],
-                         u_dut.u_ydrasil_issue_stage.issue_order_mask_q[6]);
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_valid_q[6],
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_valid_q[5],
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_valid_q[4],
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src0_ready_q[6],
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src0_ready_q[5],
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src0_ready_q[4],
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src1_ready_q[6],
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src1_ready_q[5],
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src1_ready_q[4],
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[4].pc,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[5].pc,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[6].pc,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_order_q[4],
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_order_q[5],
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_order_q[6]);
                 $display("RAWDBG cyc=%0d RS7-9 v=0x%0b%0b%0b r0=%0b%0b%0b r1=%0b%0b%0b pc=0x%08h/0x%08h/0x%08h ord=0x%0h/0x%0h/0x%0h",
                          raw_debug_cycle,
-                         u_dut.u_ydrasil_issue_stage.issue_window_valid_q[9],
-                         u_dut.u_ydrasil_issue_stage.issue_window_valid_q[8],
-                         u_dut.u_ydrasil_issue_stage.issue_window_valid_q[7],
-                         u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[9],
-                         u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[8],
-                         u_dut.u_ydrasil_issue_stage.issue_window_src0_ready_q[7],
-                         u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[9],
-                         u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[8],
-                         u_dut.u_ydrasil_issue_stage.issue_window_src1_ready_q[7],
-                         u_dut.u_ydrasil_issue_stage.issue_window_q[7].pc,
-                         u_dut.u_ydrasil_issue_stage.issue_window_q[8].pc,
-                         u_dut.u_ydrasil_issue_stage.issue_window_q[9].pc,
-                         u_dut.u_ydrasil_issue_stage.issue_order_mask_q[7],
-                         u_dut.u_ydrasil_issue_stage.issue_order_mask_q[8],
-                         u_dut.u_ydrasil_issue_stage.issue_order_mask_q[9]);
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_valid_q[9],
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_valid_q[8],
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_valid_q[7],
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src0_ready_q[9],
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src0_ready_q[8],
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src0_ready_q[7],
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src1_ready_q[9],
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src1_ready_q[8],
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_src1_ready_q[7],
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[7].pc,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[8].pc,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[9].pc,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_order_q[7],
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_order_q[8],
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.entry_order_q[9]);
             end
         end
     end
@@ -3248,14 +2975,12 @@ end
         if($time >= sv_timeout) begin
             $display("[TB] timeout reached, finish simulation");
             $display("[TB] timeout pc=0x%08h cycle=%0d instret=%0d", pc, cycle_count, instruction_count);
-            $display("[TB] stall dependency=%0b lsu_struct=%0b clint=%0b wb=%0b stall_if=%0b stall_id=%0b bubble_id=%0b id_ex_valid=%0b",
+            $display("[TB] stall dependency=%0b lsu_struct=%0b clint=%0b wb=%0b frontend_stall=%0b id_ex_valid=%0b",
                      u_dut.u_ydrasil_commit_trace.dependency_wait,
                      u_dut.u_ydrasil_commit_trace.lsu_struct_stall,
                      u_dut.u_ydrasil_commit_trace.clint_stall,
                      u_dut.u_ydrasil_commit_trace.wb_backpressure,
                      u_dut.stall_if,
-                     u_dut.stall_id,
-                     u_dut.bubble_id,
                      u_dut.id_ex_valid);
             $display("[TB] operand rs1=%0d used1=%0b wait1=%0b rs2=%0d used2=%0b wait2=%0b rd=%0d wen=%0b dependency=%0b lsu_req=%0b lsu_busy=%0b",
                      u_dut.u_ydrasil_commit_trace.id_ctrl_rs1_addr,
@@ -3270,7 +2995,7 @@ end
                      u_dut.u_ydrasil_commit_trace.id_ctrl_lsu_req,
                      u_dut.u_ydrasil_commit_trace.lsu_ctrl_busy);
             $display("[TB] rs_valid=0x%03h rob_valid=0x%03h ex_accept=%0b id_rd_issue=%0b rf_wen=%0b rf_waddr=%0d alu_wen=%0b alu_waddr=%0d lsu_wen=%0b lsu_waddr=%0d mul_wen=%0b mul_waddr=%0d",
-                     u_dut.u_ydrasil_issue_stage.issue_window_valid_q,
+                     u_dut.u_ydrasil_issue_stage.u_scheduler.entry_valid_q,
                      u_dut.u_ctrl.producer_valid_q,
                      u_dut.ex_accept_valid,
                      u_dut.u_ydrasil_commit_trace.id_ex_rd_issue,
@@ -3395,8 +3120,8 @@ end
             perf_ex_empty_recovery_count <= 32'b0;
             perf_ex_empty_fence_count <= 32'b0;
             perf_ex_empty_b_only_count <= 32'b0;
-            perf_ex_empty_single_head_count <= 32'b0;
-            perf_ex_empty_select_refill_count <= 32'b0;
+            perf_ex_empty_single_lane_count <= 32'b0;
+            perf_ex_empty_select_ingress_count <= 32'b0;
             perf_ex_empty_rs_dependency_count <= 32'b0;
             perf_ex_empty_rs_order_count <= 32'b0;
             perf_ex_empty_rs_resource_count <= 32'b0;
@@ -3437,12 +3162,12 @@ end
             perf_noif_fetch_launch_slots <= 32'b0;
             perf_noif_pending_redirect_slots <= 32'b0;
             perf_noif_other_slots <= 32'b0;
-            other_issue_refill_count <= 32'b0;
-            other_decode_refill_count <= 32'b0;
-            decode_refill_after_control_count <= 32'b0;
-            decode_refill_after_predict_count <= 32'b0;
-            decode_refill_after_fence_count <= 32'b0;
-            decode_refill_after_supply_count <= 32'b0;
+            other_issue_supply_count <= 32'b0;
+            other_decode_supply_count <= 32'b0;
+            decode_supply_after_control_count <= 32'b0;
+            decode_supply_after_predict_count <= 32'b0;
+            decode_supply_after_fence_count <= 32'b0;
+            decode_supply_after_supply_count <= 32'b0;
             other_issue_blocked_count <= 32'b0;
             other_unclassified_count <= 32'b0;
             perf_issue_dependency_slots <= 32'b0;
@@ -3519,28 +3244,28 @@ end
             perf_head_ni_absent_count <= 32'b0;
             perf_loss_flush_slots <= 32'b0;
             perf_loss_operand_block_slots <= 32'b0;
-            perf_loss_single_bundle_slots <= 32'b0;
-            perf_loss_select_refill_slots <= 32'b0;
+            perf_loss_single_lane_slots <= 32'b0;
+            perf_loss_select_ingress_slots <= 32'b0;
             perf_loss_rs_dependency_slots <= 32'b0;
             perf_loss_rs_order_slots <= 32'b0;
             perf_loss_rs_resource_slots <= 32'b0;
             perf_loss_rs_other_slots <= 32'b0;
             perf_loss_rob_full_slots <= 32'b0;
-            perf_loss_rs_refill_slots <= 32'b0;
-            perf_loss_decode_refill_slots <= 32'b0;
+            perf_loss_rs_ingress_slots <= 32'b0;
+            perf_loss_decode_supply_slots <= 32'b0;
             perf_loss_frontend_slots <= 32'b0;
             perf_loss_other_slots <= 32'b0;
-            perf_single_p0_only_slots <= 32'b0;
-            perf_single_p1_only_slots <= 32'b0;
+            perf_single_bank0_only_slots <= 32'b0;
+            perf_single_bank1_only_slots <= 32'b0;
             perf_single_alu_only_slots <= 32'b0;
             perf_single_serial_slots <= 32'b0;
             perf_single_other_slots <= 32'b0;
-            perf_select_refill_pair_slots <= 32'b0;
-            perf_select_refill_p0_slots <= 32'b0;
-            perf_select_refill_p1_slots <= 32'b0;
-            perf_select_refill_alu_slots <= 32'b0;
-            perf_select_refill_serial_slots <= 32'b0;
-            perf_select_refill_other_slots <= 32'b0;
+            perf_select_ingress_pair_slots <= 32'b0;
+            perf_select_ingress_bank0_slots <= 32'b0;
+            perf_select_ingress_bank1_slots <= 32'b0;
+            perf_select_ingress_alu_slots <= 32'b0;
+            perf_select_ingress_serial_slots <= 32'b0;
+            perf_select_ingress_other_slots <= 32'b0;
             perf_dep_src0_slots <= 32'b0;
             perf_dep_src1_slots <= 32'b0;
             perf_dep_both_src_slots <= 32'b0;
@@ -3556,15 +3281,15 @@ end
             perf_single_op_mul_slots <= 32'b0;
             perf_single_op_csr_sys_slots <= 32'b0;
             perf_single_op_other_slots <= 32'b0;
-            perf_refill_shape_p0_p1_slots <= 32'b0;
-            perf_refill_shape_p0_alu_slots <= 32'b0;
-            perf_refill_shape_p1_alu_slots <= 32'b0;
-            perf_refill_shape_alu_alu_slots <= 32'b0;
-            perf_refill_shape_single_p0_slots <= 32'b0;
-            perf_refill_shape_single_p1_slots <= 32'b0;
-            perf_refill_shape_single_alu_slots <= 32'b0;
-            perf_refill_shape_serial_slots <= 32'b0;
-            perf_refill_shape_other_slots <= 32'b0;
+            perf_ingress_shape_bank0_bank1_slots <= 32'b0;
+            perf_ingress_shape_bank0_alu_slots <= 32'b0;
+            perf_ingress_shape_bank1_alu_slots <= 32'b0;
+            perf_ingress_shape_alu_alu_slots <= 32'b0;
+            perf_ingress_shape_single_bank0_slots <= 32'b0;
+            perf_ingress_shape_single_bank1_slots <= 32'b0;
+            perf_ingress_shape_single_alu_slots <= 32'b0;
+            perf_ingress_shape_serial_slots <= 32'b0;
+            perf_ingress_shape_other_slots <= 32'b0;
             perf_dep_wake_both_slots <= 32'b0;
             perf_dep_wake_mixed_slots <= 32'b0;
             perf_dep_wake_src0_completion_slots <= 32'b0;
@@ -3585,47 +3310,17 @@ end
                  perf_stat_idx = perf_stat_idx + 1)
                 perf_dep_blocker_operand_cycles[perf_stat_idx] <= 32'b0;
             perf_other_rob_block_slots <= 32'b0;
-            perf_other_rs_bank_block_slots <= 32'b0;
+            perf_other_sched_ingress_block_slots <= 32'b0;
             perf_other_recovery_resync_slots <= 32'b0;
-            perf_other_alu_bank_block_slots <= 32'b0;
-            perf_other_p0_bank_block_slots <= 32'b0;
-            perf_other_p1_bank_block_slots <= 32'b0;
-            perf_bank_alu_local_full_slots <= 32'b0;
-            perf_bank_alu_credit_stale_slots <= 32'b0;
-            perf_bank_p0_local_full_slots <= 32'b0;
-            perf_bank_p0_credit_stale_slots <= 32'b0;
-            perf_bank_p1_local_full_slots <= 32'b0;
-            perf_bank_p1_credit_stale_slots <= 32'b0;
-            perf_bank_unclassified_slots <= 32'b0;
-            perf_p0_full_dependency_slots <= 32'b0;
-            perf_p0_full_order_slots <= 32'b0;
-            perf_p0_full_resource_slots <= 32'b0;
-            perf_p0_full_ready_release_slots <= 32'b0;
-            perf_p0_full_no_candidate_slots <= 32'b0;
-            perf_p0_pipe_selectable_slots <= 32'b0;
-            perf_p0_pipe_credit_blocked_slots <= 32'b0;
-            perf_p0_pipe_order_blocked_slots <= 32'b0;
-            perf_p0_pipe_dependency_blocked_slots <= 32'b0;
-            for (perf_stat_idx = 0; perf_stat_idx < 9;
-                 perf_stat_idx = perf_stat_idx + 1)
-                perf_p0_credit_resv_slots[perf_stat_idx] <= 32'b0;
-            for (perf_stat_idx = 0; perf_stat_idx < 5;
-                 perf_stat_idx = perf_stat_idx + 1)
-                perf_p0_full_store_mix_slots[perf_stat_idx] <= 32'b0;
-            perf_p0_full_blocked_load_slots <= 32'b0;
-            perf_p0_full_blocked_store_slots <= 32'b0;
-            perf_p0_full_blocked_other_slots <= 32'b0;
-            perf_p0_completion_wakeup_cycles <= 32'b0;
             perf_operand_merge_pair_cycles <= 32'b0;
             perf_rs_completion_wakeup_entries <= 32'b0;
             perf_rs_alloc_wakeup_entries <= 32'b0;
             perf_rs_select_wakeup_entries <= 32'b0;
-            perf_dtcm_launch_wakeup_events <= 32'b0;
             perf_dtcm_result_wakeup_events <= 32'b0;
             perf_mdu_wakeup_events <= 32'b0;
             perf_replay_wakeup_events <= 32'b0;
-            perf_other_rs_pair_limit_slots <= 32'b0;
-            perf_other_select_refill_slots <= 32'b0;
+            perf_other_sched_pair_ingress_block_slots <= 32'b0;
+            perf_other_select_ingress_slots <= 32'b0;
             perf_other_rs_dependency_slots <= 32'b0;
             perf_other_rs_order_slots <= 32'b0;
             perf_other_rs_resource_slots <= 32'b0;
@@ -3637,8 +3332,6 @@ end
             perf_rs_order_entry_cycles <= 32'b0;
             perf_rs_resource_entry_cycles <= 32'b0;
             perf_rs_selectable_entry_cycles <= 32'b0;
-            perf_rs_bank_full_cycles <= 32'b0;
-            perf_rs_pair_bank_limit_cycles <= 32'b0;
             perf_rob_full_cycles <= 32'b0;
             perf_lsu_credit_wait_cycles <= 32'b0;
             perf_lsu_age_repair_cycles <= 32'b0;
@@ -3648,17 +3341,13 @@ end
             perf_operand_dependency_miss_cycles <= 32'b0;
             perf_recovery_cycles <= 32'b0;
             perf_recovery_resync_cycles <= 32'b0;
-            perf_alu_bank_entry_cycles <= 32'b0;
-            perf_p0_bank_entry_cycles <= 32'b0;
-            perf_p1_bank_entry_cycles <= 32'b0;
-            perf_alu_bank_full_cycles <= 32'b0;
-            perf_p0_bank_full_cycles <= 32'b0;
-            perf_p1_bank_full_cycles <= 32'b0;
+            perf_alu_entry_cycles <= 32'b0;
+            perf_bank0_entry_cycles <= 32'b0;
+            perf_bank1_entry_cycles <= 32'b0;
+            perf_alu_entry_saturated_cycles <= 32'b0;
+            perf_bank0_full_cycles <= 32'b0;
+            perf_bank1_full_cycles <= 32'b0;
             perf_alu_due_select_cycles <= 32'b0;
-            perf_dtcm_due_select_cycles <= 32'b0;
-            perf_mdu_due_select_cycles <= 32'b0;
-            perf_dtcm_local_wake_cycles <= 32'b0;
-            perf_mdu_local_wake_cycles <= 32'b0;
             perf_resident_wakeup_entry_cycles <= 32'b0;
             perf_resident_due_select_cycles <= 32'b0;
             perf_cpl_bank_dep_count <= 32'b0;
@@ -3681,55 +3370,55 @@ end
             perf_loss_coupling_cycles <= 32'b0;
             perf_loss_coupling_slots <= 32'b0;
             perf_select_raw_alu_entries <= 32'b0;
-            perf_select_raw_p0_entries <= 32'b0;
-            perf_select_raw_p1_entries <= 32'b0;
+            perf_select_raw_bank0_entries <= 32'b0;
+            perf_select_raw_bank1_entries <= 32'b0;
             perf_select_drop_alu_entries <= 32'b0;
-            perf_select_drop_p0_entries <= 32'b0;
-            perf_select_drop_p1_entries <= 32'b0;
+            perf_select_drop_bank0_entries <= 32'b0;
+            perf_select_drop_bank1_entries <= 32'b0;
             perf_select_width_gap_slots <= 32'b0;
             perf_select_pair_capable_single_cycles <= 32'b0;
             perf_select_pair_capable_single_slots <= 32'b0;
             perf_select_gap_recovery_cycles <= 32'b0;
             perf_select_gap_no_push_cycles <= 32'b0;
             perf_select_gap_policy_cycles <= 32'b0;
-            perf_select_hol_pair_cycles <= 32'b0;
-            perf_select_hol_pair_lost_slots <= 32'b0;
-            perf_select_pair_push_cycles <= 32'b0;
-            perf_select_pair_issue_cycles <= 32'b0;
-            perf_select_pair_push_single_head_cycles <= 32'b0;
-            perf_select_pair_push_single_head_slots <= 32'b0;
-            perf_select_refill_head_empty_cycles <= 32'b0;
-            perf_select_refill_head_empty_slots <= 32'b0;
-            perf_select_refill_head_empty_pair_slots <= 32'b0;
-            perf_select_refill_head_empty_single_slots <= 32'b0;
-            perf_select_refill_head_empty_uops <= 32'b0;
-            for (perf_refill_lifecycle_idx = 0;
-                 perf_refill_lifecycle_idx < PERF_REFILL_LIFECYCLE_COUNT;
-                 perf_refill_lifecycle_idx =
-                     perf_refill_lifecycle_idx + 1)
-                for (perf_refill_data_idx = 0; perf_refill_data_idx < 2;
-                     perf_refill_data_idx = perf_refill_data_idx + 1)
-                    perf_select_refill_lifecycle_data_uops[
-                        perf_refill_lifecycle_idx][perf_refill_data_idx] <=
+            perf_lane_b_elastic_empty_cycles <= 32'b0;
+            perf_lane_b_elastic_empty_lost_slots <= 32'b0;
+            perf_select_pair_selected_cycles <= 32'b0;
+            perf_lane_pair_active_cycles <= 32'b0;
+            perf_select_pair_after_lane_a_only_cycles <= 32'b0;
+            perf_select_pair_after_lane_a_only_slots <= 32'b0;
+            perf_select_selected_with_lane_a_empty_cycles <= 32'b0;
+            perf_select_selected_with_lane_a_empty_slots <= 32'b0;
+            perf_select_selected_with_lane_a_empty_pair_slots <= 32'b0;
+            perf_select_selected_with_lane_a_empty_single_slots <= 32'b0;
+            perf_select_selected_with_lane_a_empty_uops <= 32'b0;
+            for (perf_ingress_lifecycle_idx = 0;
+                 perf_ingress_lifecycle_idx < PERF_INGRESS_LIFECYCLE_COUNT;
+                 perf_ingress_lifecycle_idx =
+                     perf_ingress_lifecycle_idx + 1)
+                for (perf_ingress_data_idx = 0; perf_ingress_data_idx < 2;
+                     perf_ingress_data_idx = perf_ingress_data_idx + 1)
+                    perf_select_ingress_lifecycle_data_uops[
+                        perf_ingress_lifecycle_idx][perf_ingress_data_idx] <=
                         32'b0;
-            for (perf_refill_prior_mask_idx = 0;
-                 perf_refill_prior_mask_idx < 10;
-                 perf_refill_prior_mask_idx =
-                     perf_refill_prior_mask_idx + 1)
-                perf_select_refill_prior_mask_uops[
-                    perf_refill_prior_mask_idx] <= 32'b0;
-            for (perf_refill_mask_idx = 0; perf_refill_mask_idx < 16;
-                 perf_refill_mask_idx = perf_refill_mask_idx + 1)
-                perf_select_refill_pending_mask_uops[
-                    perf_refill_mask_idx] <= 32'b0;
-            perf_refill_prev_valid_q <= '0;
-            perf_refill_prev_dep_q <= '0;
-            perf_refill_prev_order_q <= '0;
-            perf_refill_prev_resource_q <= '0;
-            perf_refill_prev_ready_q <= '0;
-            for (perf_refill_prev_idx = 0; perf_refill_prev_idx < 12;
-                 perf_refill_prev_idx = perf_refill_prev_idx + 1)
-                perf_refill_prev_tag_q[perf_refill_prev_idx] <= '0;
+            for (perf_ingress_prior_mask_idx = 0;
+                 perf_ingress_prior_mask_idx < 10;
+                 perf_ingress_prior_mask_idx =
+                     perf_ingress_prior_mask_idx + 1)
+                perf_select_ingress_prior_mask_uops[
+                    perf_ingress_prior_mask_idx] <= 32'b0;
+            for (perf_ingress_mask_idx = 0; perf_ingress_mask_idx < 16;
+                 perf_ingress_mask_idx = perf_ingress_mask_idx + 1)
+                perf_select_ingress_pending_mask_uops[
+                    perf_ingress_mask_idx] <= 32'b0;
+            perf_ingress_prev_valid_q <= '0;
+            perf_ingress_prev_dep_q <= '0;
+            perf_ingress_prev_order_q <= '0;
+            perf_ingress_prev_resource_q <= '0;
+            perf_ingress_prev_ready_q <= '0;
+            for (perf_ingress_prev_idx = 0; perf_ingress_prev_idx < 12;
+                 perf_ingress_prev_idx = perf_ingress_prev_idx + 1)
+                perf_ingress_prev_tag_q[perf_ingress_prev_idx] <= '0;
             for (perf_stat_idx = 0; perf_stat_idx < PERF_LOSS_COUPLING_DEPTH;
                  perf_stat_idx = perf_stat_idx + 1) begin
                 perf_loss_coupling_cycle_count[perf_stat_idx] <= 32'b0;
@@ -3741,10 +3430,10 @@ end
             for (perf_stat_idx = 0; perf_stat_idx < 16;
                  perf_stat_idx = perf_stat_idx + 1)
                 begin
-                    perf_select_queue_state_count[perf_stat_idx] <= 32'b0;
+                    perf_lane_ingress_state_count[perf_stat_idx] <= 32'b0;
                     perf_select_raw_shape_count[perf_stat_idx] <= 32'b0;
                 end
-            for (perf_stat_idx = 0; perf_stat_idx < 3;
+            for (perf_stat_idx = 0; perf_stat_idx < 2;
                  perf_stat_idx = perf_stat_idx + 1) begin
                 perf_select_raw_width_count[perf_stat_idx] <= 32'b0;
                 perf_select_actual_width_count[perf_stat_idx] <= 32'b0;
@@ -3758,7 +3447,7 @@ end
                     perf_select_width_matrix_slots[perf_width_idx][perf_width_idx2] <=
                         32'b0;
                 end
-            for (perf_stat_idx = 0; perf_stat_idx < 3;
+            for (perf_stat_idx = 0; perf_stat_idx < 2;
                  perf_stat_idx = perf_stat_idx + 1) begin
                 perf_bank_dep_entry_cycles[perf_stat_idx] <= 32'b0;
                 perf_bank_order_entry_cycles[perf_stat_idx] <= 32'b0;
@@ -3789,31 +3478,16 @@ end
             producer_trap_free_count <= 32'b0;
             producer_nonempty_q <= 1'b0;
             producer_flush_q <= 1'b0;
-            lsu_head_wrap_count <= 32'b0;
-            lsu_tail_wrap_count <= 32'b0;
-            lsu_queue_empty_count <= 32'b0;
-            lsu_queue_near_full_count <= 32'b0;
-            lsu_queue_full_count <= 32'b0;
-            lsu_queue_pop_count <= 32'b0;
+            lsq_head_wrap_count <= 32'b0;
+            lsq_tail_wrap_count <= 32'b0;
+            lsq_empty_count <= 32'b0;
+            lsq_near_full_count <= 32'b0;
+            lsq_full_count <= 32'b0;
+            lsq_head_remove_count <= 32'b0;
             lsu_struct_mmio_count <= 32'b0;
             lsu_struct_pending_store_count <= 32'b0;
             lsu_struct_store_capture_count <= 32'b0;
             lsu_struct_other_count <= 32'b0;
-            early_arith_count <= 32'b0;
-            early_logic_count <= 32'b0;
-            early_shift_count <= 32'b0;
-            early_pass_count <= 32'b0;
-            early_rs1_fwd_count <= 32'b0;
-            early_rs2_fwd_count <= 32'b0;
-            early_both_fwd_count <= 32'b0;
-            early_to_alu_count <= 32'b0;
-            early_to_load_count <= 32'b0;
-            early_to_store_count <= 32'b0;
-            early_completion_source_count <= 32'b0;
-            early_stall_hold_count <= 32'b0;
-            early_flush_clear_count <= 32'b0;
-            early_bubble_clear_count <= 32'b0;
-            non_early_alu_count <= 32'b0;
             fe_pred_taken_redirect_count <= 32'b0;
             fe_correct_taken_redirect_count <= 32'b0;
             fe_pred_taken_bubble_count <= 32'b0;
@@ -3828,8 +3502,8 @@ end
                 operandq_occ_count[perf_stat_idx] <= 32'b0;
         end else begin
             perf_sample_cycle_count <= perf_sample_cycle_count + 1'b1;
-            perf_select_queue_state_count[perf_select_queue_state_now] <=
-                perf_select_queue_state_count[perf_select_queue_state_now] + 1'b1;
+            perf_lane_ingress_state_count[perf_lane_ingress_state_now] <=
+                perf_lane_ingress_state_count[perf_lane_ingress_state_now] + 1'b1;
             perf_select_raw_width_count[perf_select_ideal_width_now] <=
                 perf_select_raw_width_count[perf_select_ideal_width_now] + 1'b1;
             perf_select_actual_width_count[perf_select_actual_width_now] <=
@@ -3845,17 +3519,17 @@ end
             perf_select_raw_shape_count[perf_select_raw_shape_now] <=
                 perf_select_raw_shape_count[perf_select_raw_shape_now] + 1'b1;
             perf_select_raw_alu_entries <= perf_select_raw_alu_entries +
-                {{29{1'b0}}, perf_raw_alu_candidate_entries_now};
-            perf_select_raw_p0_entries <= perf_select_raw_p0_entries +
-                {31'b0, perf_raw_p0_candidate_now};
-            perf_select_raw_p1_entries <= perf_select_raw_p1_entries +
-                {31'b0, perf_raw_p1_candidate_now};
+                {{28{1'b0}}, perf_raw_alu_candidate_entries_now};
+            perf_select_raw_bank0_entries <= perf_select_raw_bank0_entries +
+                {{28{1'b0}}, perf_raw_bank0_candidate_entries_now};
+            perf_select_raw_bank1_entries <= perf_select_raw_bank1_entries +
+                {{28{1'b0}}, perf_raw_bank1_candidate_entries_now};
             perf_select_drop_alu_entries <= perf_select_drop_alu_entries +
-                {{29{1'b0}}, perf_select_drop_alu_entries_now};
-            perf_select_drop_p0_entries <= perf_select_drop_p0_entries +
-                {{29{1'b0}}, perf_select_drop_p0_entries_now};
-            perf_select_drop_p1_entries <= perf_select_drop_p1_entries +
-                {{29{1'b0}}, perf_select_drop_p1_entries_now};
+                {{28{1'b0}}, perf_select_drop_alu_entries_now};
+            perf_select_drop_bank0_entries <= perf_select_drop_bank0_entries +
+                {{28{1'b0}}, perf_select_drop_bank0_entries_now};
+            perf_select_drop_bank1_entries <= perf_select_drop_bank1_entries +
+                {{28{1'b0}}, perf_select_drop_bank1_entries_now};
             if (perf_select_ideal_width_now > perf_select_actual_width_now)
                 perf_select_width_gap_slots <= perf_select_width_gap_slots +
                     perf_select_width_gap_now;
@@ -3887,102 +3561,102 @@ end
                     perf_loss_coupling_slot_count[perf_loss_coupling_mask_now] +
                     perf_lost_slots_ext;
             end
-            if (perf_select_hol_pair_now)
-                perf_select_hol_pair_cycles <= perf_select_hol_pair_cycles + 1'b1;
-            if (perf_select_hol_pair_now && (perf_operand_lost_slots != '0))
-                perf_select_hol_pair_lost_slots <=
-                    perf_select_hol_pair_lost_slots + perf_operand_lost_slots_ext;
-            if (u_dut.u_ydrasil_issue_stage.select_buf_push &&
-                u_dut.u_ydrasil_issue_stage.selected_valid1)
-                perf_select_pair_push_cycles <= perf_select_pair_push_cycles + 1'b1;
-            if (perf_select_pair_push_single_head_now) begin
-                perf_select_pair_push_single_head_cycles <=
-                    perf_select_pair_push_single_head_cycles + 1'b1;
-                perf_select_pair_push_single_head_slots <=
-                    perf_select_pair_push_single_head_slots +
+            if (perf_lane_b_elastic_empty_now)
+                perf_lane_b_elastic_empty_cycles <= perf_lane_b_elastic_empty_cycles + 1'b1;
+            if (perf_lane_b_elastic_empty_now && (perf_operand_lost_slots != '0))
+                perf_lane_b_elastic_empty_lost_slots <=
+                    perf_lane_b_elastic_empty_lost_slots + perf_operand_lost_slots_ext;
+            if (u_dut.u_ydrasil_issue_stage.u_scheduler.selected_a_valid &&
+                u_dut.u_ydrasil_issue_stage.u_scheduler.selected_b_valid)
+                perf_select_pair_selected_cycles <= perf_select_pair_selected_cycles + 1'b1;
+            if (perf_select_pair_after_lane_a_only_now) begin
+                perf_select_pair_after_lane_a_only_cycles <=
+                    perf_select_pair_after_lane_a_only_cycles + 1'b1;
+                perf_select_pair_after_lane_a_only_slots <=
+                    perf_select_pair_after_lane_a_only_slots +
                     perf_operand_lost_slots_ext;
             end
-            if (perf_select_refill_head_empty_now &&
+            if (perf_select_selected_with_lane_a_empty_now &&
                 (perf_operand_lost_slots != '0)) begin
-                perf_select_refill_head_empty_cycles <=
-                    perf_select_refill_head_empty_cycles + 1'b1;
-                perf_select_refill_head_empty_slots <=
-                    perf_select_refill_head_empty_slots +
+                perf_select_selected_with_lane_a_empty_cycles <=
+                    perf_select_selected_with_lane_a_empty_cycles + 1'b1;
+                perf_select_selected_with_lane_a_empty_slots <=
+                    perf_select_selected_with_lane_a_empty_slots +
                     perf_operand_lost_slots_ext;
-                perf_select_refill_head_empty_uops <=
-                    perf_select_refill_head_empty_uops + 32'd1 +
-                    (u_dut.u_ydrasil_issue_stage.selected_valid1 ?
+                perf_select_selected_with_lane_a_empty_uops <=
+                    perf_select_selected_with_lane_a_empty_uops + 32'd1 +
+                    (u_dut.u_ydrasil_issue_stage.u_scheduler.selected_b_valid ?
                          32'd1 : 32'd0);
-                if (u_dut.u_ydrasil_issue_stage.selected_valid1)
-                    perf_select_refill_head_empty_pair_slots <=
-                        perf_select_refill_head_empty_pair_slots +
+                if (u_dut.u_ydrasil_issue_stage.u_scheduler.selected_b_valid)
+                    perf_select_selected_with_lane_a_empty_pair_slots <=
+                        perf_select_selected_with_lane_a_empty_pair_slots +
                         perf_operand_lost_slots_ext;
                 else
-                    perf_select_refill_head_empty_single_slots <=
-                        perf_select_refill_head_empty_single_slots +
+                    perf_select_selected_with_lane_a_empty_single_slots <=
+                        perf_select_selected_with_lane_a_empty_single_slots +
                         perf_operand_lost_slots_ext;
-                for (perf_refill_lifecycle_idx = 0;
-                     perf_refill_lifecycle_idx < PERF_REFILL_LIFECYCLE_COUNT;
-                     perf_refill_lifecycle_idx =
-                         perf_refill_lifecycle_idx + 1)
-                    for (perf_refill_data_idx = 0;
-                         perf_refill_data_idx < 2;
-                         perf_refill_data_idx = perf_refill_data_idx + 1)
-                        perf_select_refill_lifecycle_data_uops[
-                            perf_refill_lifecycle_idx][perf_refill_data_idx] <=
-                            perf_select_refill_lifecycle_data_uops[
-                                perf_refill_lifecycle_idx][
-                                    perf_refill_data_idx] +
-                            (((perf_refill_lifecycle0_now ==
-                               3'(perf_refill_lifecycle_idx)) &&
-                              ((perf_refill_pending_mask0_now == 4'b0) ==
-                               1'(perf_refill_data_idx))) ? 32'd1 : 32'd0) +
-                            ((u_dut.u_ydrasil_issue_stage.selected_valid1 &&
-                              (perf_refill_lifecycle1_now ==
-                               3'(perf_refill_lifecycle_idx)) &&
-                              ((perf_refill_pending_mask1_now == 4'b0) ==
-                               1'(perf_refill_data_idx))) ? 32'd1 : 32'd0);
-                for (perf_refill_prior_mask_idx = 0;
-                     perf_refill_prior_mask_idx < 10;
-                     perf_refill_prior_mask_idx =
-                         perf_refill_prior_mask_idx + 1)
-                    perf_select_refill_prior_mask_uops[
-                        perf_refill_prior_mask_idx] <=
-                        perf_select_refill_prior_mask_uops[
-                            perf_refill_prior_mask_idx] +
-                        ((perf_refill_prior_mask0_now ==
-                          4'(perf_refill_prior_mask_idx)) ? 32'd1 : 32'd0) +
-                        ((u_dut.u_ydrasil_issue_stage.selected_valid1 &&
-                          (perf_refill_prior_mask1_now ==
-                           4'(perf_refill_prior_mask_idx))) ? 32'd1 : 32'd0);
-                for (perf_refill_mask_idx = 0;
-                     perf_refill_mask_idx < 16;
-                     perf_refill_mask_idx = perf_refill_mask_idx + 1)
-                    perf_select_refill_pending_mask_uops[
-                        perf_refill_mask_idx] <=
-                        perf_select_refill_pending_mask_uops[
-                            perf_refill_mask_idx] +
-                        ((perf_refill_pending_mask0_now ==
-                          4'(perf_refill_mask_idx)) ? 32'd1 : 32'd0) +
-                        ((u_dut.u_ydrasil_issue_stage.selected_valid1 &&
-                          (perf_refill_pending_mask1_now ==
-                           4'(perf_refill_mask_idx))) ? 32'd1 : 32'd0);
+                for (perf_ingress_lifecycle_idx = 0;
+                     perf_ingress_lifecycle_idx < PERF_INGRESS_LIFECYCLE_COUNT;
+                     perf_ingress_lifecycle_idx =
+                         perf_ingress_lifecycle_idx + 1)
+                    for (perf_ingress_data_idx = 0;
+                         perf_ingress_data_idx < 2;
+                         perf_ingress_data_idx = perf_ingress_data_idx + 1)
+                        perf_select_ingress_lifecycle_data_uops[
+                            perf_ingress_lifecycle_idx][perf_ingress_data_idx] <=
+                            perf_select_ingress_lifecycle_data_uops[
+                                perf_ingress_lifecycle_idx][
+                                    perf_ingress_data_idx] +
+                            (((perf_ingress_lifecycle0_now ==
+                               3'(perf_ingress_lifecycle_idx)) &&
+                              ((perf_ingress_pending_mask0_now == 4'b0) ==
+                               1'(perf_ingress_data_idx))) ? 32'd1 : 32'd0) +
+                            ((u_dut.u_ydrasil_issue_stage.u_scheduler.selected_b_valid &&
+                              (perf_ingress_lifecycle1_now ==
+                               3'(perf_ingress_lifecycle_idx)) &&
+                              ((perf_ingress_pending_mask1_now == 4'b0) ==
+                               1'(perf_ingress_data_idx))) ? 32'd1 : 32'd0);
+                for (perf_ingress_prior_mask_idx = 0;
+                     perf_ingress_prior_mask_idx < 10;
+                     perf_ingress_prior_mask_idx =
+                         perf_ingress_prior_mask_idx + 1)
+                    perf_select_ingress_prior_mask_uops[
+                        perf_ingress_prior_mask_idx] <=
+                        perf_select_ingress_prior_mask_uops[
+                            perf_ingress_prior_mask_idx] +
+                        ((perf_ingress_prior_mask0_now ==
+                          4'(perf_ingress_prior_mask_idx)) ? 32'd1 : 32'd0) +
+                        ((u_dut.u_ydrasil_issue_stage.u_scheduler.selected_b_valid &&
+                          (perf_ingress_prior_mask1_now ==
+                           4'(perf_ingress_prior_mask_idx))) ? 32'd1 : 32'd0);
+                for (perf_ingress_mask_idx = 0;
+                     perf_ingress_mask_idx < 16;
+                     perf_ingress_mask_idx = perf_ingress_mask_idx + 1)
+                    perf_select_ingress_pending_mask_uops[
+                        perf_ingress_mask_idx] <=
+                        perf_select_ingress_pending_mask_uops[
+                            perf_ingress_mask_idx] +
+                        ((perf_ingress_pending_mask0_now ==
+                          4'(perf_ingress_mask_idx)) ? 32'd1 : 32'd0) +
+                        ((u_dut.u_ydrasil_issue_stage.u_scheduler.selected_b_valid &&
+                          (perf_ingress_pending_mask1_now ==
+                           4'(perf_ingress_mask_idx))) ? 32'd1 : 32'd0);
             end
-            if (u_dut.u_ydrasil_issue_stage.select_head_valid_q &&
-                u_dut.u_ydrasil_issue_stage.select_head_pair_q)
-                perf_select_pair_issue_cycles <= perf_select_pair_issue_cycles + 1'b1;
-            perf_refill_prev_valid_q <=
-                u_dut.u_ydrasil_issue_stage.issue_window_valid_q;
-            perf_refill_prev_dep_q <= perf_rs_dep_mask_now;
-            perf_refill_prev_order_q <= perf_rs_order_mask_now;
-            perf_refill_prev_resource_q <= perf_rs_resource_mask_now;
-            perf_refill_prev_ready_q <= perf_rs_ready_mask_now;
-            for (perf_refill_prev_idx = 0; perf_refill_prev_idx < 12;
-                 perf_refill_prev_idx = perf_refill_prev_idx + 1)
-                perf_refill_prev_tag_q[perf_refill_prev_idx] <=
-                    u_dut.u_ydrasil_issue_stage.issue_window_q[
-                        perf_refill_prev_idx].dst.rob_tag;
-            // Preserve the simultaneous backend state before the legacy
+            if (u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_valid_q &&
+                u_dut.u_ydrasil_issue_stage.u_scheduler.lane_b_valid_q)
+                perf_lane_pair_active_cycles <= perf_lane_pair_active_cycles + 1'b1;
+            perf_ingress_prev_valid_q <=
+                u_dut.u_ydrasil_issue_stage.u_scheduler.entry_valid_q;
+            perf_ingress_prev_dep_q <= perf_rs_dep_mask_now;
+            perf_ingress_prev_order_q <= perf_rs_order_mask_now;
+            perf_ingress_prev_resource_q <= perf_rs_resource_mask_now;
+            perf_ingress_prev_ready_q <= perf_rs_ready_mask_now;
+            for (perf_ingress_prev_idx = 0; perf_ingress_prev_idx < 12;
+                 perf_ingress_prev_idx = perf_ingress_prev_idx + 1)
+                perf_ingress_prev_tag_q[perf_ingress_prev_idx] <=
+                    u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[
+                        perf_ingress_prev_idx].dst.rob_tag;
+            // Preserve the simultaneous backend state before the exclusive
             // exclusive slot attribution is evaluated.
             perf_coupling_mask_count[perf_coupling_mask_now] <=
                 perf_coupling_mask_count[perf_coupling_mask_now] + 1'b1;
@@ -4023,7 +3697,7 @@ end
             if (&{perf_coupling_mask_now[5], perf_coupling_mask_now[2],
                   perf_coupling_mask_now[6]})
                 perf_cpl_dep_select_operand_count <= perf_cpl_dep_select_operand_count + 1'b1;
-            for (perf_lifecycle_idx = 0; perf_lifecycle_idx < 3;
+            for (perf_lifecycle_idx = 0; perf_lifecycle_idx < 2;
                  perf_lifecycle_idx = perf_lifecycle_idx + 1) begin
                 perf_bank_dep_entry_cycles[perf_lifecycle_idx] <=
                     perf_bank_dep_entry_cycles[perf_lifecycle_idx] +
@@ -4058,10 +3732,9 @@ end
                     perf_sample_cycle_count;
                 perf_alloc_live_by_id[u_dut.u_ctrl.producer_alloc_id1] = 1'b1;
             end
-            if (u_dut.u_ydrasil_issue_stage.select_buf_push) begin
-                if (u_dut.u_ydrasil_issue_stage.selected_valid0) begin
-                    perf_lifecycle_id = int'(u_dut.u_ydrasil_issue_stage.
-                        selected_uop0.dst.rob_tag);
+            if (u_dut.u_ydrasil_issue_stage.u_scheduler.selected_a_valid) begin
+                if (u_dut.u_ydrasil_issue_stage.u_scheduler.selected_a_valid) begin
+                    perf_lifecycle_id = int'(u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[u_dut.u_ydrasil_issue_stage.u_scheduler.selected_a_slot].dst.rob_tag);
                     perf_select_cycle_by_id[perf_lifecycle_id] =
                         perf_sample_cycle_count;
                     if (perf_alloc_live_by_id[perf_lifecycle_id]) begin
@@ -4073,9 +3746,8 @@ end
                             perf_latency_alloc_select[perf_lifecycle_bin] + 1'b1;
                     end
                 end
-                if (u_dut.u_ydrasil_issue_stage.selected_valid1) begin
-                    perf_lifecycle_id = int'(u_dut.u_ydrasil_issue_stage.
-                        selected_uop1.dst.rob_tag);
+                if (u_dut.u_ydrasil_issue_stage.u_scheduler.selected_b_valid) begin
+                    perf_lifecycle_id = int'(u_dut.u_ydrasil_issue_stage.u_scheduler.entry_uop_q[u_dut.u_ydrasil_issue_stage.u_scheduler.selected_b_slot].dst.rob_tag);
                     perf_select_cycle_by_id[perf_lifecycle_id] =
                         perf_sample_cycle_count;
                     if (perf_alloc_live_by_id[perf_lifecycle_id]) begin
@@ -4088,9 +3760,9 @@ end
                     end
                 end
             end
-            if (u_dut.u_ydrasil_issue_stage.lane_a_accept) begin
+            if (u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_valid_q) begin
                 perf_lifecycle_id = int'(u_dut.u_ydrasil_issue_stage.
-                    lane_a_uop.dst.rob_tag);
+                    u_scheduler.lane_a_uop_q.dst.rob_tag);
                 perf_operand_cycle_by_id[perf_lifecycle_id] =
                     perf_sample_cycle_count;
                 if (perf_select_cycle_by_id[perf_lifecycle_id] != 0) begin
@@ -4102,9 +3774,9 @@ end
                         perf_latency_select_operand[perf_lifecycle_bin] + 1'b1;
                 end
             end
-            if (u_dut.u_ydrasil_issue_stage.lane_b_accept) begin
+            if (u_dut.u_ydrasil_issue_stage.u_scheduler.lane_b_valid_q) begin
                 perf_lifecycle_id = int'(u_dut.u_ydrasil_issue_stage.
-                    lane_b_uop.dst.rob_tag);
+                    u_scheduler.lane_b_uop_q.dst.rob_tag);
                 perf_operand_cycle_by_id[perf_lifecycle_id] =
                     perf_sample_cycle_count;
                 if (perf_select_cycle_by_id[perf_lifecycle_id] != 0) begin
@@ -4179,9 +3851,6 @@ end
                     perf_alloc_live_by_id[perf_lifecycle_id] = 1'b0;
                 end
             end
-            perf_p0_completion_wakeup_cycles <=
-                perf_p0_completion_wakeup_cycles +
-                {31'b0, perf_p0_completion_wakeup_now};
             perf_operand_merge_pair_cycles <=
                 perf_operand_merge_pair_cycles +
                 {31'b0, perf_operand_merge_pair_now};
@@ -4194,21 +3863,11 @@ end
             perf_rs_select_wakeup_entries <=
                 perf_rs_select_wakeup_entries +
                 {{28{1'b0}}, perf_rs_select_wakeup_entries_now};
-            perf_dtcm_launch_wakeup_events <=
-                perf_dtcm_launch_wakeup_events +
-                {31'b0, u_dut.u_ydrasil_issue_stage.dtcm_launch_wakeup_valid_i};
-            perf_dtcm_result_wakeup_events <=
-                perf_dtcm_result_wakeup_events +
-                {31'b0, (u_dut.u_ydrasil_issue_stage.dtcm_reservation_i.valid &&
-                         u_dut.u_ydrasil_issue_stage.dtcm_reservation_i.
-                             producer_tracked)};
-            perf_mdu_wakeup_events <= perf_mdu_wakeup_events +
-                {31'b0, (u_dut.u_ydrasil_issue_stage.mdu_due_i.valid &&
-                         u_dut.u_ydrasil_issue_stage.mdu_due_i.
-                             producer_tracked)};
+            perf_dtcm_result_wakeup_events <= perf_dtcm_result_wakeup_events;
+            perf_mdu_wakeup_events <= perf_mdu_wakeup_events;
             perf_replay_wakeup_events <= perf_replay_wakeup_events +
-                {31'b0, (u_dut.u_ydrasil_issue_stage.dtcm_result_replay_valid_q ||
-                         u_dut.u_ydrasil_issue_stage.mdu_replay_valid_q)};
+                {31'b0, ('0 ||
+                         1'b0)};
             if (perf_issue_scan_en &&
                 (perf_empty_slots_now != perf_empty_classified_slots_now) &&
                 (perf_empty_scan_count < 16)) begin
@@ -4220,12 +3879,12 @@ end
                          u_dut.ex_hzd_pkt1.valid,
                          perf_src_kind0_q,
                          perf_src_kind1_q,
-                         u_dut.u_ydrasil_issue_stage.issue_pkt_i.valid,
-                         u_dut.u_ydrasil_issue_stage.issue_pair_execute,
-                         u_dut.u_ydrasil_issue_stage.lane_a_accept,
-                         u_dut.u_ydrasil_issue_stage.lane_b_accept,
-                         u_dut.u_ydrasil_issue_stage.lane_a_fu_valid,
-                         u_dut.u_ydrasil_issue_stage.lane_b_valid);
+                         u_dut.lane_a_compact_uop.valid,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_valid_q && u_dut.u_ydrasil_issue_stage.u_scheduler.lane_b_valid_q,
+                         '0,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.lane_b_valid_q,
+                         u_dut.ex_accept_valid,
+                         u_dut.u_ydrasil_issue_stage.u_scheduler.lane_b_valid_q);
                 perf_empty_scan_count <= perf_empty_scan_count + 1;
             end
             assert ($onehot(perf_cycle_cause_onehot))
@@ -4263,10 +3922,10 @@ end
                 {{30{1'b0}}, perf_empty_kind_slots(PERF_SRC_FENCE)};
             perf_ex_empty_b_only_count <= perf_ex_empty_b_only_count +
                 {{30{1'b0}}, perf_empty_kind_slots(PERF_SRC_B_ONLY)};
-            perf_ex_empty_single_head_count <= perf_ex_empty_single_head_count +
-                {{30{1'b0}}, perf_empty_kind_slots(PERF_SRC_SINGLE_HEAD)};
-            perf_ex_empty_select_refill_count <= perf_ex_empty_select_refill_count +
-                {{30{1'b0}}, perf_empty_kind_slots(PERF_SRC_SELECT_REFILL)};
+            perf_ex_empty_single_lane_count <= perf_ex_empty_single_lane_count +
+                {{30{1'b0}}, perf_empty_kind_slots(PERF_SRC_SINGLE_LANE)};
+            perf_ex_empty_select_ingress_count <= perf_ex_empty_select_ingress_count +
+                {{30{1'b0}}, perf_empty_kind_slots(PERF_SRC_SELECT_INGRESS)};
             perf_ex_empty_rs_dependency_count <= perf_ex_empty_rs_dependency_count +
                 {{30{1'b0}}, perf_empty_kind_slots(PERF_SRC_RS_DEPENDENCY)};
             perf_ex_empty_rs_order_count <= perf_ex_empty_rs_order_count +
@@ -4292,9 +3951,9 @@ end
             perf_rob_occ_count[u_dut.u_ctrl.queue_count_q] <=
                 perf_rob_occ_count[u_dut.u_ctrl.queue_count_q] + 1'b1;
             perf_rs_occ_count[$countones(
-                u_dut.u_ydrasil_issue_stage.issue_window_valid_q)] <=
+                u_dut.u_ydrasil_issue_stage.u_scheduler.entry_valid_q)] <=
                 perf_rs_occ_count[$countones(
-                    u_dut.u_ydrasil_issue_stage.issue_window_valid_q)] + 1'b1;
+                    u_dut.u_ydrasil_issue_stage.u_scheduler.entry_valid_q)] + 1'b1;
             perf_rs_alloc_count[u_dut.u_ctrl.queue_alloc_count] <=
                 perf_rs_alloc_count[u_dut.u_ctrl.queue_alloc_count] + 1'b1;
             perf_select_count[perf_select_admit_slots[1:0]] <=
@@ -4324,18 +3983,13 @@ end
             perf_rs_selectable_entry_cycles <=
                 perf_rs_selectable_entry_cycles +
                 {28'b0, perf_rs_ready_entries_now};
-            perf_rs_bank_full_cycles <= perf_rs_bank_full_cycles +
-                {31'b0, perf_rs_bank_full_now};
-            perf_rs_pair_bank_limit_cycles <=
-                perf_rs_pair_bank_limit_cycles +
-                {31'b0, perf_rs_pair_bank_limit_now};
             perf_rob_full_cycles <= perf_rob_full_cycles +
                 {31'b0, perf_rob_full_now};
             perf_lsu_credit_wait_cycles <= perf_lsu_credit_wait_cycles +
-                {31'b0, perf_rs_lsu_credit_wait};
+                {31'b0, !u_dut.lsq_alloc_ready};
             perf_lsu_age_repair_cycles <= perf_lsu_age_repair_cycles +
                 {31'b0,
-                 u_dut.u_ydrasil_load_store_unit.queue_age_repair};
+                 1'b0};
             perf_div_credit_wait_cycles <= perf_div_credit_wait_cycles +
                 {31'b0, perf_rs_div_credit_wait};
             perf_serial_gate_wait_cycles <= perf_serial_gate_wait_cycles +
@@ -4349,30 +4003,22 @@ end
             perf_recovery_cycles <= perf_recovery_cycles +
                 {31'b0, u_dut.ex_pc_redirect};
             perf_recovery_resync_cycles <= perf_recovery_resync_cycles +
-                {31'b0, (u_dut.u_ydrasil_issue_stage.recovery_pending_q ||
-                         (u_dut.u_ydrasil_issue_stage.credit_resync_q != '0))};
-            perf_alu_bank_entry_cycles <= perf_alu_bank_entry_cycles +
-                {29'b0, perf_alu_bank_occ_now};
-            perf_p0_bank_entry_cycles <= perf_p0_bank_entry_cycles +
-                {29'b0, perf_p0_bank_occ_now};
-            perf_p1_bank_entry_cycles <= perf_p1_bank_entry_cycles +
-                {29'b0, perf_p1_bank_occ_now};
-            perf_alu_bank_full_cycles <= perf_alu_bank_full_cycles +
-                {31'b0, perf_alu_bank_occ_now == 3'd4};
-            perf_p0_bank_full_cycles <= perf_p0_bank_full_cycles +
-                {31'b0, perf_p0_bank_occ_now == 3'd4};
-            perf_p1_bank_full_cycles <= perf_p1_bank_full_cycles +
-                {31'b0, perf_p1_bank_occ_now == 3'd4};
+                {31'b0, (u_dut.ex_pc_redirect ||
+                         ('0 != '0))};
+            perf_alu_entry_cycles <= perf_alu_entry_cycles +
+                {28'b0, perf_alu_entry_occ_now};
+            perf_bank0_entry_cycles <= perf_bank0_entry_cycles +
+                {28'b0, perf_bank0_occ_now};
+            perf_bank1_entry_cycles <= perf_bank1_entry_cycles +
+                {28'b0, perf_bank1_occ_now};
+            perf_alu_entry_saturated_cycles <= perf_alu_entry_saturated_cycles +
+                {31'b0, perf_alu_entry_occ_now == 4'd12};
+            perf_bank0_full_cycles <= perf_bank0_full_cycles +
+                {31'b0, perf_bank0_occ_now == 4'd6};
+            perf_bank1_full_cycles <= perf_bank1_full_cycles +
+                {31'b0, perf_bank1_occ_now == 4'd6};
             perf_alu_due_select_cycles <= perf_alu_due_select_cycles +
                 {31'b0, perf_alu_due_select_now};
-            perf_dtcm_due_select_cycles <= perf_dtcm_due_select_cycles +
-                {31'b0, perf_dtcm_due_select_now};
-            perf_mdu_due_select_cycles <= perf_mdu_due_select_cycles +
-                {31'b0, perf_mdu_due_select_now};
-            perf_dtcm_local_wake_cycles <= perf_dtcm_local_wake_cycles +
-                {31'b0, perf_dtcm_local_wake_now};
-            perf_mdu_local_wake_cycles <= perf_mdu_local_wake_cycles +
-                {31'b0, perf_mdu_local_wake_now};
             perf_resident_wakeup_entry_cycles <=
                 perf_resident_wakeup_entry_cycles +
                 {28'b0, perf_resident_wakeup_entries_now};
@@ -4442,22 +4088,22 @@ end
                 if (u_dut.flush_ex) begin
                     perf_loss_flush_slots <= perf_loss_flush_slots +
                         perf_operand_lost_slots_ext;
-                end else if (u_dut.u_ydrasil_issue_stage.issue_pkt_i.valid &&
-                             !u_dut.u_ydrasil_issue_stage.id_advance) begin
+                end else if (u_dut.lane_a_compact_uop.valid &&
+                             !u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_valid_q) begin
                     perf_loss_operand_block_slots <=
                         perf_loss_operand_block_slots +
                         perf_operand_lost_slots_ext;
-                end else if (u_dut.u_ydrasil_issue_stage.issue_pkt_i.valid) begin
-                    perf_loss_single_bundle_slots <=
-                        perf_loss_single_bundle_slots +
+                end else if (u_dut.lane_a_compact_uop.valid) begin
+                    perf_loss_single_lane_slots <=
+                        perf_loss_single_lane_slots +
                         perf_operand_lost_slots_ext;
                     case (perf_select_reason_q)
-                        PERF_SEL_REASON_P0:
-                            perf_single_p0_only_slots <=
-                                perf_single_p0_only_slots + perf_operand_lost_slots_ext;
-                        PERF_SEL_REASON_P1:
-                            perf_single_p1_only_slots <=
-                                perf_single_p1_only_slots + perf_operand_lost_slots_ext;
+                        PERF_SEL_REASON_BANK0:
+                            perf_single_bank0_only_slots <=
+                                perf_single_bank0_only_slots + perf_operand_lost_slots_ext;
+                        PERF_SEL_REASON_BANK1:
+                            perf_single_bank1_only_slots <=
+                                perf_single_bank1_only_slots + perf_operand_lost_slots_ext;
                         PERF_SEL_REASON_ALU:
                             perf_single_alu_only_slots <=
                                 perf_single_alu_only_slots + perf_operand_lost_slots_ext;
@@ -4468,7 +4114,7 @@ end
                             perf_single_other_slots <=
                                 perf_single_other_slots + perf_operand_lost_slots_ext;
                     endcase
-                    case (u_dut.u_ydrasil_issue_stage.issue_pkt_i.op_class)
+                    case (u_dut.lane_a_compact_uop.op_class)
                         UOP_CLASS_ALU:
                             perf_single_op_alu_slots <=
                                 perf_single_op_alu_slots + perf_operand_lost_slots_ext;
@@ -4488,68 +4134,54 @@ end
                             perf_single_op_other_slots <=
                                 perf_single_op_other_slots + perf_operand_lost_slots_ext;
                     endcase
-                end else if (u_dut.u_ydrasil_issue_stage.select_buf_push) begin
-                    perf_loss_select_refill_slots <=
-                        perf_loss_select_refill_slots +
+                end else if (u_dut.u_ydrasil_issue_stage.u_scheduler.selected_a_valid) begin
+                    perf_loss_select_ingress_slots <=
+                        perf_loss_select_ingress_slots +
                         perf_operand_lost_slots_ext;
                     case (perf_select_reason_d)
                         PERF_SEL_REASON_PAIR:
-                            perf_select_refill_pair_slots <=
-                                perf_select_refill_pair_slots + perf_operand_lost_slots_ext;
-                        PERF_SEL_REASON_P0:
-                            perf_select_refill_p0_slots <=
-                                perf_select_refill_p0_slots + perf_operand_lost_slots_ext;
-                        PERF_SEL_REASON_P1:
-                            perf_select_refill_p1_slots <=
-                                perf_select_refill_p1_slots + perf_operand_lost_slots_ext;
+                            perf_select_ingress_pair_slots <=
+                                perf_select_ingress_pair_slots + perf_operand_lost_slots_ext;
+                        PERF_SEL_REASON_BANK0:
+                            perf_select_ingress_bank0_slots <=
+                                perf_select_ingress_bank0_slots + perf_operand_lost_slots_ext;
+                        PERF_SEL_REASON_BANK1:
+                            perf_select_ingress_bank1_slots <=
+                                perf_select_ingress_bank1_slots + perf_operand_lost_slots_ext;
                         PERF_SEL_REASON_ALU:
-                            perf_select_refill_alu_slots <=
-                                perf_select_refill_alu_slots + perf_operand_lost_slots_ext;
+                            perf_select_ingress_alu_slots <=
+                                perf_select_ingress_alu_slots + perf_operand_lost_slots_ext;
                         PERF_SEL_REASON_SERIAL:
-                            perf_select_refill_serial_slots <=
-                                perf_select_refill_serial_slots + perf_operand_lost_slots_ext;
+                            perf_select_ingress_serial_slots <=
+                                perf_select_ingress_serial_slots + perf_operand_lost_slots_ext;
                         default:
-                            perf_select_refill_other_slots <=
-                                perf_select_refill_other_slots + perf_operand_lost_slots_ext;
+                            perf_select_ingress_other_slots <=
+                                perf_select_ingress_other_slots + perf_operand_lost_slots_ext;
                     endcase
-                    if (u_dut.u_ydrasil_issue_stage.selected_valid1) begin
-                        if ((|(u_dut.u_ydrasil_issue_stage.selected0_mask[7:4])) &&
-                            (|(u_dut.u_ydrasil_issue_stage.selected1_mask[11:8])))
-                            perf_refill_shape_p0_p1_slots <=
-                                perf_refill_shape_p0_p1_slots + perf_operand_lost_slots_ext;
-                        else if ((|(u_dut.u_ydrasil_issue_stage.selected0_mask[7:4])) &&
-                                 (|(u_dut.u_ydrasil_issue_stage.selected1_mask[3:0])))
-                            perf_refill_shape_p0_alu_slots <=
-                                perf_refill_shape_p0_alu_slots + perf_operand_lost_slots_ext;
-                        else if ((|(u_dut.u_ydrasil_issue_stage.selected0_mask[3:0])) &&
-                                 (|(u_dut.u_ydrasil_issue_stage.selected1_mask[11:8])))
-                            perf_refill_shape_p1_alu_slots <=
-                                perf_refill_shape_p1_alu_slots + perf_operand_lost_slots_ext;
-                        else if ((|(u_dut.u_ydrasil_issue_stage.selected0_mask[3:0])) &&
-                                 (|(u_dut.u_ydrasil_issue_stage.selected1_mask[3:0])))
-                            perf_refill_shape_alu_alu_slots <=
-                                perf_refill_shape_alu_alu_slots + perf_operand_lost_slots_ext;
+                    if (u_dut.u_ydrasil_issue_stage.u_scheduler.selected_b_valid) begin
+                        if (((u_dut.u_ydrasil_issue_stage.u_scheduler.selected_a_slot < 6) &&
+                             (u_dut.u_ydrasil_issue_stage.u_scheduler.selected_b_slot >= 6)) ||
+                            ((u_dut.u_ydrasil_issue_stage.u_scheduler.selected_b_slot < 6) &&
+                             (u_dut.u_ydrasil_issue_stage.u_scheduler.selected_a_slot >= 6)))
+                            perf_ingress_shape_bank0_bank1_slots <=
+                                perf_ingress_shape_bank0_bank1_slots + perf_operand_lost_slots_ext;
                         else
-                            perf_refill_shape_other_slots <=
-                                perf_refill_shape_other_slots + perf_operand_lost_slots_ext;
-                    end else if (|u_dut.u_ydrasil_issue_stage.p1_serial_select_local) begin
-                        perf_refill_shape_serial_slots <=
-                            perf_refill_shape_serial_slots + perf_operand_lost_slots_ext;
-                    end else if (|(u_dut.u_ydrasil_issue_stage.selected0_mask[7:4])) begin
-                        perf_refill_shape_single_p0_slots <=
-                            perf_refill_shape_single_p0_slots + perf_operand_lost_slots_ext;
-                    end else if (|(u_dut.u_ydrasil_issue_stage.selected0_mask[11:8])) begin
-                        perf_refill_shape_single_p1_slots <=
-                            perf_refill_shape_single_p1_slots + perf_operand_lost_slots_ext;
-                    end else if (|(u_dut.u_ydrasil_issue_stage.selected0_mask[3:0])) begin
-                        perf_refill_shape_single_alu_slots <=
-                            perf_refill_shape_single_alu_slots + perf_operand_lost_slots_ext;
+                            perf_ingress_shape_other_slots <=
+                                perf_ingress_shape_other_slots + perf_operand_lost_slots_ext;
+                    end else if (|u_dut.u_ydrasil_issue_stage.u_scheduler.selected_b_valid) begin
+                        perf_ingress_shape_serial_slots <=
+                            perf_ingress_shape_serial_slots + perf_operand_lost_slots_ext;
+                    end else if (u_dut.u_ydrasil_issue_stage.u_scheduler.selected_a_slot < 6) begin
+                        perf_ingress_shape_single_bank0_slots <=
+                            perf_ingress_shape_single_bank0_slots + perf_operand_lost_slots_ext;
+                    end else if (u_dut.u_ydrasil_issue_stage.u_scheduler.selected_a_slot >= 6) begin
+                        perf_ingress_shape_single_bank1_slots <=
+                            perf_ingress_shape_single_bank1_slots + perf_operand_lost_slots_ext;
                     end else begin
-                        perf_refill_shape_other_slots <=
-                            perf_refill_shape_other_slots + perf_operand_lost_slots_ext;
+                        perf_ingress_shape_other_slots <=
+                            perf_ingress_shape_other_slots + perf_operand_lost_slots_ext;
                     end
-                end else if (|u_dut.u_ydrasil_issue_stage.
-                                  issue_window_valid_q) begin
+                end else if (|u_dut.u_ydrasil_issue_stage.u_scheduler.entry_valid_q) begin
                     if (perf_rs_dependency_wait)
                         perf_loss_rs_dependency_slots <=
                             perf_loss_rs_dependency_slots +
@@ -4647,11 +4279,11 @@ end
                         perf_operand_lost_slots_ext;
                 end else if (u_dut.issue_pipe_push ||
                              u_dut.id_issue_pkt.valid) begin
-                    perf_loss_rs_refill_slots <= perf_loss_rs_refill_slots +
+                    perf_loss_rs_ingress_slots <= perf_loss_rs_ingress_slots +
                         perf_operand_lost_slots_ext;
                 end else if (u_dut.if_id_valid) begin
-                    perf_loss_decode_refill_slots <=
-                        perf_loss_decode_refill_slots +
+                    perf_loss_decode_supply_slots <=
+                        perf_loss_decode_supply_slots +
                         perf_operand_lost_slots_ext;
                 end else if (!u_dut.if_id_valid) begin
                     perf_loss_frontend_slots <= perf_loss_frontend_slots +
@@ -4678,13 +4310,13 @@ end
                     perf_producer_issued_q[
                         u_dut.commit_pkt1.producer_id[
                             PRODUCER_SLOT_WIDTH-1:0]] <= 1'b0;
-                if (u_dut.u_ydrasil_issue_stage.lane_a_accept)
+                if (u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_valid_q)
                     perf_producer_issued_q[
-                        u_dut.u_ydrasil_issue_stage.lane_a_uop.dst.rob_tag[
+                        u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_uop_q.dst.rob_tag[
                             PRODUCER_SLOT_WIDTH-1:0]] <= 1'b1;
-                if (u_dut.u_ydrasil_issue_stage.lane_b_accept)
+                if (u_dut.u_ydrasil_issue_stage.u_scheduler.lane_b_valid_q)
                     perf_producer_issued_q[
-                        u_dut.u_ydrasil_issue_stage.lane_b_uop.dst.rob_tag[
+                        u_dut.u_ydrasil_issue_stage.u_scheduler.lane_b_uop_q.dst.rob_tag[
                             PRODUCER_SLOT_WIDTH-1:0]] <= 1'b1;
                 if (u_dut.u_ctrl.queue_alloc0)
                     perf_producer_issued_q[u_dut.u_ctrl.alloc_slot0] <= 1'b0;
@@ -4798,7 +4430,7 @@ end
                   u_dut.u_ydrasil_commit_trace.completion_bus[ydrasil_pkg::COMPLETION_LSU].valid) ? 32'd1 : 32'd0);
             unique case ({|u_dut.u_ctrl.producer_complete_mask,
                           |u_dut.u_ctrl.producer_retire_q,
-                          u_dut.u_ctrl.producer_alloc_ex})
+                          |perf_rob_alloc_mask})
                 3'b100: lifecycle_complete_only_count <= lifecycle_complete_only_count + 1'b1;
                 3'b010: lifecycle_retire_only_count <= lifecycle_retire_only_count + 1'b1;
                 3'b001: lifecycle_allocate_only_count <= lifecycle_allocate_only_count + 1'b1;
@@ -4811,34 +4443,27 @@ end
             same_slot_complete_only_count <= same_slot_complete_only_count +
                 ((|(u_dut.u_ctrl.producer_complete_mask &
                     ~u_dut.u_ctrl.producer_retire_q &
-                    ~(u_dut.u_ctrl.producer_alloc_ex ?
-                      (ydrasil_pkg::PRODUCER_NUM'(1) << u_dut.ex_hzd_pkt.producer_id[ydrasil_pkg::PRODUCER_SLOT_WIDTH-1:0]) : '0))) ? 32'd1 : 32'd0);
+                    ~perf_rob_alloc_mask)) ? 32'd1 : 32'd0);
             same_slot_retire_only_count <= same_slot_retire_only_count +
                 ((|(u_dut.u_ctrl.producer_retire_q &
                     ~u_dut.u_ctrl.producer_complete_mask &
-                    ~(u_dut.u_ctrl.producer_alloc_ex ?
-                      (ydrasil_pkg::PRODUCER_NUM'(1) << u_dut.ex_hzd_pkt.producer_id[ydrasil_pkg::PRODUCER_SLOT_WIDTH-1:0]) : '0))) ? 32'd1 : 32'd0);
+                    ~perf_rob_alloc_mask)) ? 32'd1 : 32'd0);
             same_slot_allocate_only_count <= same_slot_allocate_only_count +
-                ((u_dut.u_ctrl.producer_alloc_ex &&
-                  !u_dut.u_ctrl.producer_complete_mask[u_dut.ex_hzd_pkt.producer_id[ydrasil_pkg::PRODUCER_SLOT_WIDTH-1:0]] &&
-                  !u_dut.u_ctrl.producer_retire_q[u_dut.ex_hzd_pkt.producer_id[ydrasil_pkg::PRODUCER_SLOT_WIDTH-1:0]]) ? 32'd1 : 32'd0);
+                ((|(perf_rob_alloc_mask & ~u_dut.u_ctrl.producer_complete_mask &
+                    ~u_dut.u_ctrl.producer_retire_q)) ? 32'd1 : 32'd0);
             same_slot_complete_retire_count <= same_slot_complete_retire_count +
                 ((|(u_dut.u_ctrl.producer_complete_mask &
                     u_dut.u_ctrl.producer_retire_q &
-                    ~(u_dut.u_ctrl.producer_alloc_ex ?
-                      (ydrasil_pkg::PRODUCER_NUM'(1) << u_dut.ex_hzd_pkt.producer_id[ydrasil_pkg::PRODUCER_SLOT_WIDTH-1:0]) : '0))) ? 32'd1 : 32'd0);
+                    ~perf_rob_alloc_mask)) ? 32'd1 : 32'd0);
             same_slot_retire_allocate_count <= same_slot_retire_allocate_count +
-                ((u_dut.u_ctrl.producer_alloc_ex &&
-                  u_dut.u_ctrl.producer_retire_q[u_dut.ex_hzd_pkt.producer_id[ydrasil_pkg::PRODUCER_SLOT_WIDTH-1:0]] &&
-                  !u_dut.u_ctrl.producer_complete_mask[u_dut.ex_hzd_pkt.producer_id[ydrasil_pkg::PRODUCER_SLOT_WIDTH-1:0]]) ? 32'd1 : 32'd0);
+                ((|(perf_rob_alloc_mask & u_dut.u_ctrl.producer_retire_q &
+                    ~u_dut.u_ctrl.producer_complete_mask)) ? 32'd1 : 32'd0);
             same_slot_complete_allocate_count <= same_slot_complete_allocate_count +
-                ((u_dut.u_ctrl.producer_alloc_ex &&
-                  u_dut.u_ctrl.producer_complete_mask[u_dut.ex_hzd_pkt.producer_id[ydrasil_pkg::PRODUCER_SLOT_WIDTH-1:0]] &&
-                  !u_dut.u_ctrl.producer_retire_q[u_dut.ex_hzd_pkt.producer_id[ydrasil_pkg::PRODUCER_SLOT_WIDTH-1:0]]) ? 32'd1 : 32'd0);
+                ((|(perf_rob_alloc_mask & u_dut.u_ctrl.producer_complete_mask &
+                    ~u_dut.u_ctrl.producer_retire_q)) ? 32'd1 : 32'd0);
             same_slot_all_count <= same_slot_all_count +
-                ((u_dut.u_ctrl.producer_alloc_ex &&
-                  u_dut.u_ctrl.producer_complete_mask[u_dut.ex_hzd_pkt.producer_id[ydrasil_pkg::PRODUCER_SLOT_WIDTH-1:0]] &&
-                  u_dut.u_ctrl.producer_retire_q[u_dut.ex_hzd_pkt.producer_id[ydrasil_pkg::PRODUCER_SLOT_WIDTH-1:0]]) ? 32'd1 : 32'd0);
+                ((|(perf_rob_alloc_mask & u_dut.u_ctrl.producer_complete_mask &
+                    u_dut.u_ctrl.producer_retire_q)) ? 32'd1 : 32'd0);
             dep_rs1_pending_count <= dep_rs1_pending_count +
                 (u_dut.u_ydrasil_commit_trace.rs1_pending_stall ? 32'd1 : 32'd0);
             dep_rs2_pending_count <= dep_rs2_pending_count +
@@ -4859,37 +4484,37 @@ end
                 ((u_dut.u_ydrasil_commit_trace.issue_mul_div_producer & u_dut.u_ydrasil_commit_trace.issue_src_hzd) ? 32'd1 : 32'd0);
             dep_branch_src_wait_count <= dep_branch_src_wait_count +
                 ((u_dut.u_ydrasil_commit_trace.dependency_wait &&
-                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP]) ? 32'd1 : 32'd0);
+                  u_dut.alu_in_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP]) ? 32'd1 : 32'd0);
             dep_store_addr_wait_count <= dep_store_addr_wait_count +
                 ((u_dut.u_ydrasil_commit_trace.dependency_wait &&
-                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
+                  u_dut.alu_in_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
                   (u_dut.u_ydrasil_commit_trace.rs1_pending_stall | u_dut.u_ydrasil_commit_trace.rs1_issue_hzd)) ? 32'd1 : 32'd0);
             dep_store_data_wait_count <= dep_store_data_wait_count +
                 ((u_dut.u_ydrasil_commit_trace.dependency_wait &&
-                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
+                  u_dut.alu_in_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE] &&
                   (u_dut.u_ydrasil_commit_trace.rs2_pending_stall | u_dut.u_ydrasil_commit_trace.rs2_issue_hzd)) ? 32'd1 : 32'd0);
             dep_load_to_alu_count <= dep_load_to_alu_count +
                 ((u_dut.u_ydrasil_commit_trace.issue_load_producer & u_dut.u_ydrasil_commit_trace.issue_src_hzd &
-                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_ALU]) ? 32'd1 : 32'd0);
+                  u_dut.alu_in_operator_type[ydrasil_pkg::OPERATOR_TYPE_ALU]) ? 32'd1 : 32'd0);
             dep_load_to_branch_count <= dep_load_to_branch_count +
                 ((u_dut.u_ydrasil_commit_trace.issue_load_producer & u_dut.u_ydrasil_commit_trace.issue_src_hzd &
-                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP]) ? 32'd1 : 32'd0);
+                  u_dut.alu_in_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP]) ? 32'd1 : 32'd0);
             dep_load_to_load_count <= dep_load_to_load_count +
                 ((u_dut.u_ydrasil_commit_trace.issue_load_producer & u_dut.u_ydrasil_commit_trace.issue_src_hzd &
-                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD]) ? 32'd1 : 32'd0);
+                  u_dut.alu_in_operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD]) ? 32'd1 : 32'd0);
             dep_load_to_store_count <= dep_load_to_store_count +
                 ((u_dut.u_ydrasil_commit_trace.issue_load_producer & u_dut.u_ydrasil_commit_trace.issue_src_hzd &
-                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) ? 32'd1 : 32'd0);
+                  u_dut.alu_in_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE]) ? 32'd1 : 32'd0);
             dep_load_to_mul_count <= dep_load_to_mul_count +
                 ((u_dut.u_ydrasil_commit_trace.issue_load_producer & u_dut.u_ydrasil_commit_trace.issue_src_hzd &
-                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL]) ? 32'd1 : 32'd0);
+                  u_dut.alu_in_operator_type[ydrasil_pkg::OPERATOR_TYPE_MUL]) ? 32'd1 : 32'd0);
             dep_load_to_other_count <= dep_load_to_other_count +
                 ((u_dut.u_ydrasil_commit_trace.issue_load_producer & u_dut.u_ydrasil_commit_trace.issue_src_hzd &
-                  !(u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_ALU] |
-                    u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] |
-                    u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] |
-                    u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] |
-                    u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL])) ? 32'd1 : 32'd0);
+                  !(u_dut.alu_in_operator_type[ydrasil_pkg::OPERATOR_TYPE_ALU] |
+                    u_dut.alu_in_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] |
+                    u_dut.alu_in_operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD] |
+                    u_dut.alu_in_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE] |
+                    u_dut.alu_in_operator_type[ydrasil_pkg::OPERATOR_TYPE_MUL])) ? 32'd1 : 32'd0);
             dep_load_rs1_count <= dep_load_rs1_count +
                 ((u_dut.u_ydrasil_commit_trace.issue_load_producer & u_dut.u_ydrasil_commit_trace.rs1_issue_hzd) ? 32'd1 : 32'd0);
             dep_load_rs2_count <= dep_load_rs2_count +
@@ -4899,54 +4524,53 @@ end
                   !(u_dut.u_ydrasil_commit_trace.rs1_issue_hzd | u_dut.u_ydrasil_commit_trace.rs2_issue_hzd)) ? 32'd1 : 32'd0);
             dep_alu_to_alu_count <= dep_alu_to_alu_count +
                 ((u_dut.u_ydrasil_commit_trace.issue_alu_producer & u_dut.u_ydrasil_commit_trace.issue_src_hzd &
-                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_ALU]) ? 32'd1 : 32'd0);
+                  u_dut.alu_in_operator_type[ydrasil_pkg::OPERATOR_TYPE_ALU]) ? 32'd1 : 32'd0);
             dep_alu_to_branch_count <= dep_alu_to_branch_count +
                 ((u_dut.u_ydrasil_commit_trace.issue_alu_producer & u_dut.u_ydrasil_commit_trace.issue_src_hzd &
-                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP]) ? 32'd1 : 32'd0);
+                  u_dut.alu_in_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP]) ? 32'd1 : 32'd0);
             dep_alu_to_load_count <= dep_alu_to_load_count +
                 ((u_dut.u_ydrasil_commit_trace.issue_alu_producer & u_dut.u_ydrasil_commit_trace.issue_src_hzd &
-                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD]) ? 32'd1 : 32'd0);
+                  u_dut.alu_in_operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD]) ? 32'd1 : 32'd0);
             dep_alu_to_store_count <= dep_alu_to_store_count +
                 ((u_dut.u_ydrasil_commit_trace.issue_alu_producer & u_dut.u_ydrasil_commit_trace.issue_src_hzd &
-                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE]) ? 32'd1 : 32'd0);
+                  u_dut.alu_in_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE]) ? 32'd1 : 32'd0);
             dep_alu_to_mul_count <= dep_alu_to_mul_count +
                 ((u_dut.u_ydrasil_commit_trace.issue_alu_producer & u_dut.u_ydrasil_commit_trace.issue_src_hzd &
-                  u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL]) ? 32'd1 : 32'd0);
+                  u_dut.alu_in_operator_type[ydrasil_pkg::OPERATOR_TYPE_MUL]) ? 32'd1 : 32'd0);
             dep_alu_to_other_count <= dep_alu_to_other_count +
                 ((u_dut.u_ydrasil_commit_trace.issue_alu_producer & u_dut.u_ydrasil_commit_trace.issue_src_hzd &
-                  !(u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_ALU] |
-                    u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_BJP] |
-                    u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_LOAD] |
-                    u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_STORE] |
-                    u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[ydrasil_pkg::OPERATOR_TYPE_MUL])) ? 32'd1 : 32'd0);
+                  !(u_dut.alu_in_operator_type[ydrasil_pkg::OPERATOR_TYPE_ALU] |
+                    u_dut.alu_in_operator_type[ydrasil_pkg::OPERATOR_TYPE_BJP] |
+                    u_dut.alu_in_operator_type[ydrasil_pkg::OPERATOR_TYPE_LOAD] |
+                    u_dut.alu_in_operator_type[ydrasil_pkg::OPERATOR_TYPE_STORE] |
+                    u_dut.alu_in_operator_type[ydrasil_pkg::OPERATOR_TYPE_MUL])) ? 32'd1 : 32'd0);
             if ((u_dut.u_ydrasil_commit_trace.rs1_pending_stall | u_dut.u_ydrasil_commit_trace.rs2_pending_stall) &&
                 !(u_dut.u_ydrasil_commit_trace.rs1_issue_hzd | u_dut.u_ydrasil_commit_trace.rs2_issue_hzd)) begin
-                if ((u_dut.u_ydrasil_commit_trace.rs1_pending_stall && u_dut.issue_head_compact_uop.src0.producer_class == ydrasil_pkg::RESULT_LSU) ||
-                    (u_dut.u_ydrasil_commit_trace.rs2_pending_stall && u_dut.issue_head_compact_uop.src1.producer_class == ydrasil_pkg::RESULT_LSU))
+                if ((u_dut.u_ydrasil_commit_trace.rs1_pending_stall && u_dut.lane_a_compact_uop.src0.producer_class == ydrasil_pkg::RESULT_LSU) ||
+                    (u_dut.u_ydrasil_commit_trace.rs2_pending_stall && u_dut.lane_a_compact_uop.src1.producer_class == ydrasil_pkg::RESULT_LSU))
                     dep_pending_load_count <= dep_pending_load_count + 1'b1;
-                else if ((u_dut.u_ydrasil_commit_trace.rs1_pending_stall && u_dut.issue_head_compact_uop.src0.producer_class == ydrasil_pkg::RESULT_MDU) ||
-                         (u_dut.u_ydrasil_commit_trace.rs2_pending_stall && u_dut.issue_head_compact_uop.src1.producer_class == ydrasil_pkg::RESULT_MDU))
+                else if ((u_dut.u_ydrasil_commit_trace.rs1_pending_stall && u_dut.lane_a_compact_uop.src0.producer_class == ydrasil_pkg::RESULT_MDU) ||
+                         (u_dut.u_ydrasil_commit_trace.rs2_pending_stall && u_dut.lane_a_compact_uop.src1.producer_class == ydrasil_pkg::RESULT_MDU))
                     dep_pending_mul_count <= dep_pending_mul_count + 1'b1;
-                else if ((u_dut.u_ydrasil_commit_trace.rs1_pending_stall && u_dut.issue_head_compact_uop.src0.producer_class == ydrasil_pkg::RESULT_ALU) ||
-                         (u_dut.u_ydrasil_commit_trace.rs2_pending_stall && u_dut.issue_head_compact_uop.src1.producer_class == ydrasil_pkg::RESULT_ALU))
+                else if ((u_dut.u_ydrasil_commit_trace.rs1_pending_stall && u_dut.lane_a_compact_uop.src0.producer_class == ydrasil_pkg::RESULT_ALU) ||
+                         (u_dut.u_ydrasil_commit_trace.rs2_pending_stall && u_dut.lane_a_compact_uop.src1.producer_class == ydrasil_pkg::RESULT_ALU))
                     dep_pending_alu_count <= dep_pending_alu_count + 1'b1;
                 else
                     dep_pending_other_count <= dep_pending_other_count + 1'b1;
             end
             dep_ready_but_stall_count <= dep_ready_but_stall_count +
                 ((u_dut.u_ydrasil_commit_trace.dependency_wait &&
-                  ((u_dut.u_ctrl.rs1_has_producer && u_dut.u_ctrl.rs1_producer_done) ||
-                   (u_dut.u_ctrl.rs2_has_producer && u_dut.u_ctrl.rs2_producer_done))) ? 32'd1 : 32'd0);
+                  (perf_issue_src0_done || perf_issue_src1_done)) ?
+                 32'd1 : 32'd0);
             dep_complete_visible_count <= dep_complete_visible_count +
-                (((u_dut.u_ctrl.rs1_has_producer &&
-                   u_dut.u_ctrl.producer_complete_mask[u_dut.u_ctrl.rs1_producer_slot]) ||
-                  (u_dut.u_ctrl.rs2_has_producer &&
-                   u_dut.u_ctrl.producer_complete_mask[u_dut.u_ctrl.rs2_producer_slot])) ? 32'd1 : 32'd0);
+                (((perf_issue_src0_has_producer &&
+                   u_dut.u_ctrl.producer_complete_mask[perf_issue_src0_slot]) ||
+                  (perf_issue_src1_has_producer &&
+                   u_dut.u_ctrl.producer_complete_mask[perf_issue_src1_slot])) ?
+                 32'd1 : 32'd0);
             dep_registered_visible_count <= dep_registered_visible_count +
-                (((u_dut.u_ctrl.rs1_has_producer &&
-                   u_dut.u_ctrl.producer_done_q[u_dut.u_ctrl.rs1_producer_slot]) ||
-                  (u_dut.u_ctrl.rs2_has_producer &&
-                   u_dut.u_ctrl.producer_done_q[u_dut.u_ctrl.rs2_producer_slot])) ? 32'd1 : 32'd0);
+                ((perf_issue_src0_done || perf_issue_src1_done) ?
+                 32'd1 : 32'd0);
             // MUL tail attribution.  A result that cannot find its producer
             // identifies a slot-lifetime problem; a matched but not-yet-ready
             // result identifies Future File ready latency; a matching blocked
@@ -4957,16 +4581,15 @@ end
             mul_tail_ready_late_count <= mul_tail_ready_late_count +
                 ((u_dut.mul_result_valid &&
                   (|u_dut.u_ctrl.producer_complete_mask) &&
-                  !((u_dut.u_ctrl.rs1_has_producer &&
-                     u_dut.u_ctrl.producer_done_q[u_dut.u_ctrl.rs1_producer_slot]) ||
-                    (u_dut.u_ctrl.rs2_has_producer &&
-                     u_dut.u_ctrl.producer_done_q[u_dut.u_ctrl.rs2_producer_slot]))) ? 32'd1 : 32'd0);
+                  !(perf_issue_src0_done || perf_issue_src1_done)) ?
+                 32'd1 : 32'd0);
             mul_tail_consumer_no_bypass_count <= mul_tail_consumer_no_bypass_count +
                 ((u_dut.mul_result_valid && u_dut.u_ydrasil_commit_trace.dependency_wait &&
-                  ((u_dut.u_ctrl.rs1_has_producer &&
-                    u_dut.u_ctrl.producer_complete_mask[u_dut.u_ctrl.rs1_producer_slot]) ||
-                   (u_dut.u_ctrl.rs2_has_producer &&
-                    u_dut.u_ctrl.producer_complete_mask[u_dut.u_ctrl.rs2_producer_slot]))) ? 32'd1 : 32'd0);
+                  ((perf_issue_src0_has_producer &&
+                    u_dut.u_ctrl.producer_complete_mask[perf_issue_src0_slot]) ||
+                   (perf_issue_src1_has_producer &&
+                    u_dut.u_ctrl.producer_complete_mask[perf_issue_src1_slot]))) ?
+                 32'd1 : 32'd0);
 
             // Mutually exclusive cycle accounting. Keep this TB-only so it cannot affect RTL.
             if (perf_cycle_flush) begin
@@ -5056,150 +4679,52 @@ end
             end else begin
                 acct_other_count <= acct_other_count + 1'b1;
                 perf_lost_other_slot_count <= perf_lost_other_slot_count + perf_lost_slots_ext;
-                if (!u_dut.u_ydrasil_issue_stage.issue_valid_ff && u_dut.u_ydrasil_commit_trace.decode_valid)
-                    other_issue_refill_count <= other_issue_refill_count + 1'b1;
-                else if (!u_dut.u_ydrasil_issue_stage.issue_valid_ff &&
+                if (!u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_valid_q && u_dut.u_ydrasil_commit_trace.decode_valid)
+                    other_issue_supply_count <= other_issue_supply_count + 1'b1;
+                else if (!u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_valid_q &&
                          !u_dut.u_ydrasil_commit_trace.decode_valid && u_dut.u_ydrasil_commit_trace.decode_if_ready) begin
-                    other_decode_refill_count <= other_decode_refill_count + 1'b1;
+                    other_decode_supply_count <= other_decode_supply_count + 1'b1;
                     if (control_refill_active_q)
-                        decode_refill_after_control_count <= decode_refill_after_control_count + 1'b1;
+                        decode_supply_after_control_count <= decode_supply_after_control_count + 1'b1;
                     else if (predict_refill_active_q)
-                        decode_refill_after_predict_count <= decode_refill_after_predict_count + 1'b1;
+                        decode_supply_after_predict_count <= decode_supply_after_predict_count + 1'b1;
                     else if (fence_refill_active_q)
-                        decode_refill_after_fence_count <= decode_refill_after_fence_count + 1'b1;
+                        decode_supply_after_fence_count <= decode_supply_after_fence_count + 1'b1;
                     else
-                        decode_refill_after_supply_count <= decode_refill_after_supply_count + 1'b1;
+                        decode_supply_after_supply_count <= decode_supply_after_supply_count + 1'b1;
                 end
-                else if (u_dut.u_ydrasil_issue_stage.issue_valid_ff &&
-                         !u_dut.u_ydrasil_issue_stage.id_advance)
+                else if (u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_valid_q &&
+                         !u_dut.u_ydrasil_issue_stage.u_scheduler.lane_a_valid_q)
                     other_issue_blocked_count <= other_issue_blocked_count + 1'b1;
                 else
                     other_unclassified_count <= other_unclassified_count + 1'b1;
 
-                // The legacy OTHER bucket was hiding several distinct
+                // The OTHER bucket contains several distinct
                 // backpressure states. Keep this decomposition in the same
                 // mutually-exclusive arm so its sum is exactly OTHER slots.
                 if (!u_dut.decode_if_ready) begin
-                    if (u_dut.u_ydrasil_issue_stage.credit_resync_q != '0)
+                    if ('0 != '0)
                         perf_other_recovery_resync_slots <=
                             perf_other_recovery_resync_slots + perf_lost_slots_ext;
                     else if (!u_dut.dispatch_ready)
                         perf_other_rob_block_slots <=
                             perf_other_rob_block_slots + perf_lost_slots_ext;
-                    else if (!u_dut.u_ydrasil_issue_stage.dispatch_slots_available) begin
-                        perf_other_rs_bank_block_slots <=
-                            perf_other_rs_bank_block_slots + perf_lost_slots_ext;
-                        if (u_dut.u_ydrasil_issue_stage.dispatch0_alu) begin
-                            perf_other_alu_bank_block_slots <=
-                                perf_other_alu_bank_block_slots + perf_lost_slots_ext;
-                            if (u_dut.u_ydrasil_issue_stage.alu_free_count == 3'd0)
-                                perf_bank_alu_local_full_slots <=
-                                    perf_bank_alu_local_full_slots + perf_lost_slots_ext;
-                            else if (u_dut.u_ydrasil_issue_stage.alu_effective_credit == 4'd0)
-                                perf_bank_alu_credit_stale_slots <=
-                                    perf_bank_alu_credit_stale_slots + perf_lost_slots_ext;
-                            else
-                                perf_bank_unclassified_slots <=
-                                    perf_bank_unclassified_slots + perf_lost_slots_ext;
-                        end else if (u_dut.u_ydrasil_issue_stage.dispatch0_p0) begin
-                            perf_other_p0_bank_block_slots <=
-                                perf_other_p0_bank_block_slots + perf_lost_slots_ext;
-                            if (u_dut.u_ydrasil_issue_stage.p0_free_count == 3'd0) begin
-                                perf_bank_p0_local_full_slots <=
-                                    perf_bank_p0_local_full_slots + perf_lost_slots_ext;
-                                perf_p0_full_store_mix_slots[$countones(
-                                    u_dut.u_ydrasil_issue_stage.issue_store_q[7:4] &
-                                    u_dut.u_ydrasil_issue_stage.issue_window_valid_q[7:4])] <=
-                                    perf_p0_full_store_mix_slots[$countones(
-                                        u_dut.u_ydrasil_issue_stage.issue_store_q[7:4] &
-                                        u_dut.u_ydrasil_issue_stage.issue_window_valid_q[7:4])] +
-                                    perf_lost_slots_ext;
-                                if (u_dut.u_ydrasil_issue_stage.dispatch_compact_uop.op_class ==
-                                    UOP_CLASS_LOAD)
-                                    perf_p0_full_blocked_load_slots <=
-                                        perf_p0_full_blocked_load_slots +
-                                        perf_lost_slots_ext;
-                                else if (u_dut.u_ydrasil_issue_stage.
-                                             dispatch_compact_uop.op_class ==
-                                         UOP_CLASS_STORE)
-                                    perf_p0_full_blocked_store_slots <=
-                                        perf_p0_full_blocked_store_slots +
-                                        perf_lost_slots_ext;
-                                else
-                                    perf_p0_full_blocked_other_slots <=
-                                        perf_p0_full_blocked_other_slots +
-                                        perf_lost_slots_ext;
-                                perf_p0_credit_resv_slots[
-                                    (3 * u_dut.lsu_issue_credit) +
-                                    u_dut.u_ydrasil_issue_stage.
-                                        lsu_select_reserved_q] <=
-                                    perf_p0_credit_resv_slots[
-                                        (3 * u_dut.lsu_issue_credit) +
-                                        u_dut.u_ydrasil_issue_stage.
-                                            lsu_select_reserved_q] +
-                                    perf_lost_slots_ext;
-                                if (u_dut.u_ydrasil_issue_stage.p0_select_valid)
-                                    perf_p0_pipe_selectable_slots <=
-                                        perf_p0_pipe_selectable_slots +
-                                        perf_lost_slots_ext;
-                                else if (perf_p0_resource_wait)
-                                    perf_p0_pipe_credit_blocked_slots <=
-                                        perf_p0_pipe_credit_blocked_slots +
-                                        perf_lost_slots_ext;
-                                else if (perf_p0_order_wait)
-                                    perf_p0_pipe_order_blocked_slots <=
-                                        perf_p0_pipe_order_blocked_slots +
-                                        perf_lost_slots_ext;
-                                else
-                                    perf_p0_pipe_dependency_blocked_slots <=
-                                        perf_p0_pipe_dependency_blocked_slots +
-                                        perf_lost_slots_ext;
-                                if (u_dut.u_ydrasil_issue_stage.p0_select_valid)
-                                    perf_p0_full_ready_release_slots <=
-                                        perf_p0_full_ready_release_slots + perf_lost_slots_ext;
-                                else if (perf_p0_dependency_wait)
-                                    perf_p0_full_dependency_slots <=
-                                        perf_p0_full_dependency_slots + perf_lost_slots_ext;
-                                else if (perf_p0_order_wait)
-                                    perf_p0_full_order_slots <=
-                                        perf_p0_full_order_slots + perf_lost_slots_ext;
-                                else if (perf_p0_resource_wait)
-                                    perf_p0_full_resource_slots <=
-                                        perf_p0_full_resource_slots + perf_lost_slots_ext;
-                                else
-                                    perf_p0_full_no_candidate_slots <=
-                                        perf_p0_full_no_candidate_slots + perf_lost_slots_ext;
-                            end
-                            else if (u_dut.u_ydrasil_issue_stage.p0_effective_credit == 4'd0)
-                                perf_bank_p0_credit_stale_slots <=
-                                    perf_bank_p0_credit_stale_slots + perf_lost_slots_ext;
-                            else
-                                perf_bank_unclassified_slots <=
-                                    perf_bank_unclassified_slots + perf_lost_slots_ext;
-                        end else begin
-                            perf_other_p1_bank_block_slots <=
-                                perf_other_p1_bank_block_slots + perf_lost_slots_ext;
-                            if (u_dut.u_ydrasil_issue_stage.p1_free_count == 3'd0)
-                                perf_bank_p1_local_full_slots <=
-                                    perf_bank_p1_local_full_slots + perf_lost_slots_ext;
-                            else if (u_dut.u_ydrasil_issue_stage.p1_effective_credit == 4'd0)
-                                perf_bank_p1_credit_stale_slots <=
-                                    perf_bank_p1_credit_stale_slots + perf_lost_slots_ext;
-                            else
-                                perf_bank_unclassified_slots <=
-                                    perf_bank_unclassified_slots + perf_lost_slots_ext;
-                        end
+                    else if (u_dut.u_ydrasil_issue_stage.u_scheduler.queue_valid0_i &&
+                             !u_dut.u_ydrasil_issue_stage.u_scheduler.queue_consume0_o) begin
+                        perf_other_sched_ingress_block_slots <=
+                            perf_other_sched_ingress_block_slots + perf_lost_slots_ext;
                     end else if (!u_dut.dispatch_two_ready ||
-                             !u_dut.u_ydrasil_issue_stage.dispatch_pair_slots_available)
-                        perf_other_rs_pair_limit_slots <=
-                            perf_other_rs_pair_limit_slots + perf_lost_slots_ext;
+                             (u_dut.u_ydrasil_issue_stage.u_scheduler.queue_valid1_i &&
+                              !u_dut.u_ydrasil_issue_stage.u_scheduler.queue_consume1_o))
+                        perf_other_sched_pair_ingress_block_slots <=
+                            perf_other_sched_pair_ingress_block_slots + perf_lost_slots_ext;
                     else
                         perf_other_decode_block_slots <=
                             perf_other_decode_block_slots + perf_lost_slots_ext;
-                end else if (u_dut.u_ydrasil_issue_stage.select_buf_push) begin
-                    perf_other_select_refill_slots <=
-                        perf_other_select_refill_slots + perf_lost_slots_ext;
-                end else if (|u_dut.u_ydrasil_issue_stage.issue_window_valid_q) begin
+                end else if (u_dut.u_ydrasil_issue_stage.u_scheduler.selected_a_valid) begin
+                    perf_other_select_ingress_slots <=
+                        perf_other_select_ingress_slots + perf_lost_slots_ext;
+                end else if (|u_dut.u_ydrasil_issue_stage.u_scheduler.entry_valid_q) begin
                     if (perf_rs_dependency_wait)
                         perf_other_rs_dependency_slots <=
                             perf_other_rs_dependency_slots + perf_lost_slots_ext;
@@ -5242,23 +4767,23 @@ end
             endcase
             if (u_dut.u_ydrasil_commit_trace.issue_pair_execute) begin
                 dual_issue_count <= dual_issue_count + 1'b1;
-                if ((u_dut.issue_head_compact_uop.op_class ==
+                if ((u_dut.lane_a_compact_uop.op_class ==
                      ydrasil_pkg::UOP_CLASS_BJP) ||
-                    (u_dut.issue_head_compact_uop1.op_class ==
+                    (u_dut.lane_b_compact_uop.op_class ==
                      ydrasil_pkg::UOP_CLASS_BJP))
                     dual_bru_alu_count <= dual_bru_alu_count + 1'b1;
-                else if ((u_dut.issue_head_compact_uop.op_class == ydrasil_pkg::UOP_CLASS_LOAD) ||
-                         (u_dut.issue_head_compact_uop.op_class == ydrasil_pkg::UOP_CLASS_STORE) ||
-                         (u_dut.issue_head_compact_uop1.op_class == ydrasil_pkg::UOP_CLASS_LOAD) ||
-                         (u_dut.issue_head_compact_uop1.op_class == ydrasil_pkg::UOP_CLASS_STORE))
+                else if ((u_dut.lane_a_compact_uop.op_class == ydrasil_pkg::UOP_CLASS_LOAD) ||
+                         (u_dut.lane_a_compact_uop.op_class == ydrasil_pkg::UOP_CLASS_STORE) ||
+                         (u_dut.lane_b_compact_uop.op_class == ydrasil_pkg::UOP_CLASS_LOAD) ||
+                         (u_dut.lane_b_compact_uop.op_class == ydrasil_pkg::UOP_CLASS_STORE))
                     dual_lsu_alu_count <= dual_lsu_alu_count + 1'b1;
-                else if ((u_dut.issue_head_compact_uop.op_class ==
+                else if ((u_dut.lane_a_compact_uop.op_class ==
                           ydrasil_pkg::UOP_CLASS_MUL) ||
-                         (u_dut.issue_head_compact_uop1.op_class ==
+                         (u_dut.lane_b_compact_uop.op_class ==
                           ydrasil_pkg::UOP_CLASS_MUL))
                     dual_muldiv_alu_count <= dual_muldiv_alu_count + 1'b1;
-                else if ((u_dut.issue_head_compact_uop.op_class == ydrasil_pkg::UOP_CLASS_ALU) ||
-                         (u_dut.issue_head_compact_uop.op_class == ydrasil_pkg::UOP_CLASS_BITMANIP))
+                else if ((u_dut.lane_a_compact_uop.op_class == ydrasil_pkg::UOP_CLASS_ALU) ||
+                         (u_dut.lane_a_compact_uop.op_class == ydrasil_pkg::UOP_CLASS_BITMANIP))
                     dual_alu_alu_count <= dual_alu_alu_count + 1'b1;
                 else
                     dual_other_count <= dual_other_count + 1'b1;
@@ -5313,76 +4838,31 @@ end
             end
             if (interrupt_q && !(|u_dut.u_ctrl.producer_valid_q))
                 producer_trap_free_count <= producer_trap_free_count + 1'b1;
-            if (u_dut.u_ydrasil_load_store_unit.queue_dequeue &&
-                (u_dut.u_ydrasil_load_store_unit.queue_head_q == 1'b1))
-                lsu_head_wrap_count <= lsu_head_wrap_count + 1'b1;
-            if (u_dut.u_ydrasil_load_store_unit.queue_enqueue &&
-                (u_dut.u_ydrasil_load_store_unit.queue_tail_q == 1'b1))
-                lsu_tail_wrap_count <= lsu_tail_wrap_count + 1'b1;
-            if (u_dut.u_ydrasil_load_store_unit.queue_empty)
-                lsu_queue_empty_count <= lsu_queue_empty_count + 1'b1;
-            if (u_dut.u_ydrasil_load_store_unit.queue_count_q == 3)
-                lsu_queue_near_full_count <= lsu_queue_near_full_count + 1'b1;
-            if (u_dut.u_ydrasil_load_store_unit.queue_full)
-                lsu_queue_full_count <= lsu_queue_full_count + 1'b1;
-            if (u_dut.u_ydrasil_load_store_unit.queue_dequeue)
-                lsu_queue_pop_count <= lsu_queue_pop_count + 1'b1;
+            if (u_dut.u_ydrasil_load_store_unit.head_remove &&
+                (u_dut.u_ydrasil_load_store_unit.head_q == 4'd1))
+                lsq_head_wrap_count <= lsq_head_wrap_count + 1'b1;
+            if ('0 &&
+                (u_dut.u_ydrasil_load_store_unit.tail_q == 4'd1))
+                lsq_tail_wrap_count <= lsq_tail_wrap_count + 1'b1;
+            if ((u_dut.u_ydrasil_load_store_unit.count_q == 0))
+                lsq_empty_count <= lsq_empty_count + 1'b1;
+            if (u_dut.u_ydrasil_load_store_unit.count_q >= 4'd11)
+                lsq_near_full_count <= lsq_near_full_count + 1'b1;
+            if ((u_dut.u_ydrasil_load_store_unit.count_q == 4'd12))
+                lsq_full_count <= lsq_full_count + 1'b1;
+            if (u_dut.u_ydrasil_load_store_unit.head_remove)
+                lsq_head_remove_count <= lsq_head_remove_count + 1'b1;
             if (u_dut.u_ydrasil_commit_trace.lsu_struct_stall) begin
                 if (u_dut.u_ydrasil_load_store_unit.mmio_busy)
                     lsu_struct_mmio_count <= lsu_struct_mmio_count + 1'b1;
-                else if (u_dut.u_ydrasil_load_store_unit.active_pkt.is_store &&
-                         !u_dut.u_ydrasil_load_store_unit.active_store_data_valid)
+                else if (u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].is_store &&
+                         !u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].store_data_valid)
                     lsu_struct_pending_store_count <= lsu_struct_pending_store_count + 1'b1;
-                else if (u_dut.u_ydrasil_load_store_unit.queue_enqueue)
+                else if ('0)
                     lsu_struct_store_capture_count <= lsu_struct_store_capture_count + 1'b1;
                 else
                     lsu_struct_other_count <= lsu_struct_other_count + 1'b1;
             end
-            if (u_dut.u_ydrasil_issue_stage.issue_early_alu_valid_ff) begin
-                early_arith_count <= early_arith_count +
-                    {31'b0, u_dut.u_ydrasil_issue_stage.issue_early_kind_ff[0]};
-                early_logic_count <= early_logic_count +
-                    {31'b0, u_dut.u_ydrasil_issue_stage.issue_early_kind_ff[1]};
-                early_shift_count <= early_shift_count +
-                    {31'b0, u_dut.u_ydrasil_issue_stage.issue_early_kind_ff[2]};
-                early_pass_count <= early_pass_count +
-                    {31'b0, u_dut.u_ydrasil_issue_stage.issue_early_kind_ff[3]};
-            end
-            if (u_dut.u_ydrasil_issue_stage.rs1_issue_early_alu_fwd)
-                early_rs1_fwd_count <= early_rs1_fwd_count + 1'b1;
-            if (u_dut.u_ydrasil_issue_stage.rs2_issue_early_alu_fwd)
-                early_rs2_fwd_count <= early_rs2_fwd_count + 1'b1;
-            if (u_dut.u_ydrasil_issue_stage.rs1_issue_early_alu_fwd &&
-                u_dut.u_ydrasil_issue_stage.rs2_issue_early_alu_fwd)
-                early_both_fwd_count <= early_both_fwd_count + 1'b1;
-            if (u_dut.u_ydrasil_issue_stage.rs1_issue_early_alu_fwd ||
-                u_dut.u_ydrasil_issue_stage.rs2_issue_early_alu_fwd) begin
-                if (u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[
-                    ydrasil_pkg::OPERATOR_TYPE_ALU])
-                    early_to_alu_count <= early_to_alu_count + 1'b1;
-                if (u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[
-                    ydrasil_pkg::OPERATOR_TYPE_LOAD])
-                    early_to_load_count <= early_to_load_count + 1'b1;
-                if (u_dut.u_ydrasil_issue_stage.issue_operator_type_ff[
-                    ydrasil_pkg::OPERATOR_TYPE_STORE])
-                    early_to_store_count <= early_to_store_count + 1'b1;
-            end
-            if (u_dut.u_ydrasil_issue_stage.issue_simple_alu_op &&
-                (u_dut.u_ydrasil_issue_stage.rs1_completion_fwd ||
-                 u_dut.u_ydrasil_issue_stage.rs2_completion_fwd))
-                early_completion_source_count <= early_completion_source_count + 1'b1;
-            if (!u_dut.u_ydrasil_issue_stage.id_advance &&
-                u_dut.u_ydrasil_issue_stage.issue_early_alu_valid_ff)
-                early_stall_hold_count <= early_stall_hold_count + 1'b1;
-            if (u_dut.flush_id)
-                early_flush_clear_count <= early_flush_clear_count + 1'b1;
-            if (u_dut.bubble_id)
-                early_bubble_clear_count <= early_bubble_clear_count + 1'b1;
-            if (u_dut.u_ydrasil_issue_stage.issue_valid_ff &&
-                u_dut.u_ydrasil_issue_stage.id_advance &&
-                u_dut.u_ydrasil_issue_stage.issue_plain_alu_op &&
-                !u_dut.u_ydrasil_issue_stage.issue_simple_alu_op)
-                non_early_alu_count <= non_early_alu_count + 1'b1;
             fe_pred_taken_redirect_count <= fe_pred_taken_redirect_count +
                 (u_dut.u_ydrasil_if_stage.bp_predict_redirect ? 32'd1 : 32'd0);
             fe_pred_taken_bubble_count <= fe_pred_taken_bubble_count +
@@ -5644,28 +5124,28 @@ end
 		if (rst) begin
 			sim_mmio_stdout_count <= 0;
 		end else if (u_dut.u_ydrasil_load_store_unit.mmio_fire &&
-		             (u_dut.u_ydrasil_load_store_unit.active_addr ==
+		             (u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].addr ==
 		              SIM_STDOUT_ADDR)) begin
 			sim_mmio_stdout_count <= sim_mmio_stdout_count + 1;
 		end
 		if (!rst && sim_mmio_debug_en &&
 			u_dut.u_ydrasil_load_store_unit.mmio_fire &&
-			(u_dut.u_ydrasil_load_store_unit.active_addr == SIM_STDOUT_ADDR))
+			(u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].addr == SIM_STDOUT_ADDR))
 			$display("[MMIO-STDOUT] time=%0t addr=0x%08h data=0x%02h producer=%0d",
 				$time,
-				u_dut.u_ydrasil_load_store_unit.active_addr,
-				u_dut.u_ydrasil_load_store_unit.active_aligned_store_data[7:0],
-				u_dut.u_ydrasil_load_store_unit.active_producer_id);
+				u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].addr,
+				u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].store_data[7:0],
+				u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].producer_id);
 		if (!rst && sim_mmio_debug_en &&
 			u_dut.u_ydrasil_load_store_unit.mmio_fire)
 			$display("[MMIO-STATE] time=%0t req_q=%0b rsp=%0b busy=%0b axi_state=%0d addr=0x%08h data=0x%02h",
 				$time,
-				u_dut.u_ydrasil_load_store_unit.mmio_req_valid_q,
+				u_dut.u_ydrasil_load_store_unit.mmio_req_valid_r,
 				u_dut.mmio_rsp_pkt.valid,
 				u_dut.u_ydrasil_load_store_unit.mmio_busy,
 				u_dut.u_ydrasil_axi_lite_master.state_q,
-				u_dut.u_ydrasil_load_store_unit.active_addr,
-				u_dut.u_ydrasil_load_store_unit.active_aligned_store_data[7:0]);
+				u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].addr,
+				u_dut.u_ydrasil_load_store_unit.lsq_q[u_dut.u_ydrasil_load_store_unit.head_q].store_data[7:0]);
 	end
 
 	always_ff @(posedge clk) begin
@@ -5843,7 +5323,7 @@ end
             // Exact state of the two physical EX acceptance slots.  This is
             // intentionally independent of front-end/RS signals, which are
             // one or more registered stages away from EX.
-            $display("PERF_EX_SLOT_STATE: ACCEPT0=%-d ACCEPT1=%-d BRANCH_DROP0=%-d BRANCH_DROP1=%-d MUL_DROP0=%-d MUL_DROP1=%-d PIPE_EMPTY0=%-d PIPE_EMPTY1=%-d ACCOUNTED=%-d EXPECTED=%-d",
+            $display("PERF_EX_SLOT_STATE: ACCEPT0=%-d ACCEPT1=%-d BRANCH_DROBANK0=%-d BRANCH_DROBANK1=%-d MUL_DROBANK0=%-d MUL_DROBANK1=%-d PIPE_EMPTY0=%-d PIPE_EMPTY1=%-d ACCOUNTED=%-d EXPECTED=%-d",
                 perf_executed_slot0_count,
                 perf_executed_slot1_count,
                 perf_ex_branch_drop0_count,
@@ -5857,13 +5337,13 @@ end
                     perf_ex_mul_drop0_count + perf_ex_mul_drop1_count +
                     perf_ex_empty0_count + perf_ex_empty1_count,
                 (perf_sample_cycle_count << 1));
-            $display("PERF_EX_EMPTY_CAUSE: RESET_PIPE=%-d RECOVERY=%-d FENCE=%-d B_ONLY=%-d SINGLE_HEAD=%-d SELECT_REFILL=%-d RS_DEPENDENCY=%-d RS_ORDER=%-d RS_RESOURCE=%-d RS_NO_CANDIDATE=%-d RS_EMPTY=%-d FRONTEND_EMPTY=%-d LAUNCH_MISMATCH=%-d OTHER=%-d UNMAPPED=%-d UNACCOUNTED_SNAPSHOT=%-d ACCOUNTED=%-d EXPECTED=%-d",
+            $display("PERF_EX_EMPTY_CAUSE: RESET_PIPE=%-d RECOVERY=%-d FENCE=%-d B_ONLY=%-d A_ONLY=%-d SELECT_INGRESS=%-d RS_DEPENDENCY=%-d RS_ORDER=%-d RS_RESOURCE=%-d RS_NO_CANDIDATE=%-d RS_EMPTY=%-d FRONTEND_EMPTY=%-d LAUNCH_MISMATCH=%-d OTHER=%-d UNMAPPED=%-d UNACCOUNTED_SNAPSHOT=%-d ACCOUNTED=%-d EXPECTED=%-d",
                 perf_ex_empty_reset_count,
                 perf_ex_empty_recovery_count,
                 perf_ex_empty_fence_count,
                 perf_ex_empty_b_only_count,
-                perf_ex_empty_single_head_count,
-                perf_ex_empty_select_refill_count,
+                perf_ex_empty_single_lane_count,
+                perf_ex_empty_select_ingress_count,
                 perf_ex_empty_rs_dependency_count,
                 perf_ex_empty_rs_order_count,
                 perf_ex_empty_rs_resource_count,
@@ -5876,8 +5356,8 @@ end
                 (perf_ex_empty0_count + perf_ex_empty1_count) -
                     (perf_ex_empty_reset_count + perf_ex_empty_recovery_count +
                      perf_ex_empty_fence_count + perf_ex_empty_b_only_count +
-                     perf_ex_empty_single_head_count +
-                     perf_ex_empty_select_refill_count +
+                     perf_ex_empty_single_lane_count +
+                     perf_ex_empty_select_ingress_count +
                      perf_ex_empty_rs_dependency_count + perf_ex_empty_rs_order_count +
                      perf_ex_empty_rs_resource_count +
                      perf_ex_empty_rs_no_candidate_count + perf_ex_empty_rs_empty_count +
@@ -5885,8 +5365,8 @@ end
                      perf_ex_empty_other_count + perf_ex_empty_unmapped_count),
                 perf_ex_empty_reset_count + perf_ex_empty_recovery_count +
                     perf_ex_empty_fence_count + perf_ex_empty_b_only_count +
-                    perf_ex_empty_single_head_count +
-                    perf_ex_empty_select_refill_count +
+                    perf_ex_empty_single_lane_count +
+                    perf_ex_empty_select_ingress_count +
                     perf_ex_empty_rs_dependency_count + perf_ex_empty_rs_order_count +
                     perf_ex_empty_rs_resource_count +
                     perf_ex_empty_rs_no_candidate_count +
@@ -5896,8 +5376,8 @@ end
                     ((perf_ex_empty0_count + perf_ex_empty1_count) -
                      (perf_ex_empty_reset_count + perf_ex_empty_recovery_count +
                       perf_ex_empty_fence_count + perf_ex_empty_b_only_count +
-                      perf_ex_empty_single_head_count +
-                      perf_ex_empty_select_refill_count +
+                      perf_ex_empty_single_lane_count +
+                      perf_ex_empty_select_ingress_count +
                       perf_ex_empty_rs_dependency_count + perf_ex_empty_rs_order_count +
                       perf_ex_empty_rs_resource_count +
                       perf_ex_empty_rs_no_candidate_count + perf_ex_empty_rs_empty_count +
@@ -5937,70 +5417,6 @@ end
                     perf_lost_no_if_valid_slot_count +
                     perf_lost_issue_slot_count + perf_lost_other_slot_count,
                 (perf_sample_cycle_count << 1));
-            // Leaf partition of the complete two-slot capacity.  Parent
-            // buckets above are useful for a high-level view, but this line
-            // deliberately expands every diagnostic family and never counts
-            // an RS-bank parent together with its bank children.
-            $display("PERF_SLOT_LEAF: EXECUTED_SLOT0=%-d EXECUTED_SLOT1=%-d FLUSH=%-d MUL_HOLD=%-d MULTI_CAUSE=%-d DEPENDENCY=%-d LSU_STRUCT=%-d PRODUCER_FULL=%-d WB=%-d CLINT=%-d LSU_SERIALIZE=%-d NOIF_CONTROL_REDIRECT=%-d NOIF_PREDICT_REDIRECT=%-d NOIF_FENCE_REFILL=%-d NOIF_MEM_RESPONSE=%-d NOIF_FETCH_LAUNCH=%-d NOIF_PENDING_REDIRECT=%-d NOIF_OTHER=%-d ISSUE_SINGLE_LANE=%-d ISSUE_NO_EXECUTE=%-d ROB_BLOCK=%-d RECOVERY_RESYNC=%-d ALU_LOCAL_FULL=%-d ALU_CREDIT_STALE=%-d P0_LOCAL_FULL=%-d P0_CREDIT_STALE=%-d P1_LOCAL_FULL=%-d P1_CREDIT_STALE=%-d RS_BANK_UNCLASSIFIED=%-d RS_PAIR_LIMIT=%-d SELECT_REFILL=%-d RS_DEPENDENCY=%-d RS_ORDER=%-d RS_RESOURCE=%-d RS_NO_CANDIDATE=%-d RS_EMPTY=%-d DECODE_BLOCK=%-d OTHER_UNCLASSIFIED=%-d ACCOUNTED=%-d EXPECTED=%-d",
-                perf_executed_slot0_count,
-                perf_executed_slot1_count,
-                perf_lost_flush_slot_count,
-                perf_lost_mul_hold_slot_count,
-                perf_lost_multi_slot_count,
-                perf_lost_dependency_slot_count,
-                perf_lost_lsu_struct_slot_count,
-                perf_lost_producer_full_slot_count,
-                perf_lost_wb_slot_count,
-                perf_lost_clint_slot_count,
-                perf_lost_lsu_serialize_slot_count,
-                perf_noif_control_redirect_slots,
-                perf_noif_predict_redirect_slots,
-                perf_noif_fence_refill_slots,
-                perf_noif_mem_response_slots,
-                perf_noif_fetch_launch_slots,
-                perf_noif_pending_redirect_slots,
-                perf_noif_other_slots,
-                perf_issue_single_lane_slots,
-                perf_issue_no_execute_slots,
-                perf_other_rob_block_slots,
-                perf_other_recovery_resync_slots,
-                perf_bank_alu_local_full_slots,
-                perf_bank_alu_credit_stale_slots,
-                perf_bank_p0_local_full_slots,
-                perf_bank_p0_credit_stale_slots,
-                perf_bank_p1_local_full_slots,
-                perf_bank_p1_credit_stale_slots,
-                perf_bank_unclassified_slots,
-                perf_other_rs_pair_limit_slots,
-                perf_other_select_refill_slots,
-                perf_other_rs_dependency_slots,
-                perf_other_rs_order_slots,
-                perf_other_rs_resource_slots,
-                perf_other_rs_no_candidate_slots,
-                perf_other_rs_empty_slots,
-                perf_other_decode_block_slots,
-                perf_other_unclassified_slots,
-                perf_executed_slot0_count + perf_executed_slot1_count +
-                    perf_lost_flush_slot_count + perf_lost_mul_hold_slot_count +
-                    perf_lost_multi_slot_count + perf_lost_dependency_slot_count +
-                    perf_lost_lsu_struct_slot_count +
-                    perf_lost_producer_full_slot_count + perf_lost_wb_slot_count +
-                    perf_lost_clint_slot_count + perf_lost_lsu_serialize_slot_count +
-                    perf_noif_control_redirect_slots + perf_noif_predict_redirect_slots +
-                    perf_noif_fence_refill_slots + perf_noif_mem_response_slots +
-                    perf_noif_fetch_launch_slots + perf_noif_pending_redirect_slots +
-                    perf_noif_other_slots + perf_issue_single_lane_slots +
-                    perf_issue_no_execute_slots + perf_other_rob_block_slots +
-                    perf_other_recovery_resync_slots +
-                    perf_bank_alu_local_full_slots + perf_bank_alu_credit_stale_slots +
-                    perf_bank_p0_local_full_slots + perf_bank_p0_credit_stale_slots +
-                    perf_bank_p1_local_full_slots + perf_bank_p1_credit_stale_slots +
-                    perf_bank_unclassified_slots + perf_other_rs_pair_limit_slots +
-                    perf_other_select_refill_slots + perf_other_rs_dependency_slots +
-                    perf_other_rs_order_slots + perf_other_rs_resource_slots +
-                    perf_other_rs_no_candidate_slots + perf_other_rs_empty_slots +
-                    perf_other_decode_block_slots + perf_other_unclassified_slots,
-                (perf_sample_cycle_count << 1));
             $display("PERF_SLOT_LOSS: FLUSH=%-d MUL_HOLD=%-d DEPENDENCY=%-d LSU_STRUCT=%-d LSU_SERIALIZE=%-d PRODUCER_FULL=%-d WB=%-d CLINT=%-d MULTI=%-d NO_IF_VALID=%-d ISSUE=%-d OTHER=%-d",
                 perf_lost_flush_slot_count,
                 perf_lost_mul_hold_slot_count,
@@ -6039,112 +5455,6 @@ end
                     perf_issue_serialize_slots +
                     perf_issue_single_lane_slots + perf_issue_no_execute_slots,
                 perf_lost_issue_slot_count);
-            $display("PERF_OTHER_SLOT_DETAIL: ROB_BLOCK=%-d RECOVERY_RESYNC=%-d RS_BANK_BLOCK=%-d ALU_BANK_BLOCK=%-d P0_BANK_BLOCK=%-d P1_BANK_BLOCK=%-d RS_PAIR_LIMIT=%-d SELECT_REFILL=%-d RS_DEPENDENCY=%-d RS_ORDER=%-d RS_RESOURCE=%-d RS_NO_CANDIDATE=%-d RS_EMPTY=%-d DECODE_BLOCK=%-d UNCLASSIFIED=%-d ACCOUNTED=%-d EXPECTED=%-d",
-                perf_other_rob_block_slots,
-                perf_other_recovery_resync_slots,
-                perf_other_rs_bank_block_slots,
-                perf_other_alu_bank_block_slots,
-                perf_other_p0_bank_block_slots,
-                perf_other_p1_bank_block_slots,
-                perf_other_rs_pair_limit_slots,
-                perf_other_select_refill_slots,
-                perf_other_rs_dependency_slots,
-                perf_other_rs_order_slots,
-                perf_other_rs_resource_slots,
-                perf_other_rs_no_candidate_slots,
-                perf_other_rs_empty_slots,
-                perf_other_decode_block_slots,
-                perf_other_unclassified_slots,
-                perf_other_rob_block_slots +
-                    perf_other_recovery_resync_slots +
-                    perf_other_rs_bank_block_slots +
-                    perf_other_rs_pair_limit_slots +
-                    perf_other_select_refill_slots +
-                    perf_other_rs_dependency_slots +
-                    perf_other_rs_order_slots +
-                    perf_other_rs_resource_slots +
-                    perf_other_rs_no_candidate_slots +
-                    perf_other_rs_empty_slots +
-                    perf_other_decode_block_slots +
-                    perf_other_unclassified_slots,
-                perf_lost_other_slot_count);
-            $display("PERF_BANK_BLOCK_DETAIL: ALU_LOCAL_FULL=%-d ALU_CREDIT_STALE=%-d P0_LOCAL_FULL=%-d P0_CREDIT_STALE=%-d P1_LOCAL_FULL=%-d P1_CREDIT_STALE=%-d UNCLASSIFIED=%-d ACCOUNTED=%-d EXPECTED=%-d",
-                perf_bank_alu_local_full_slots,
-                perf_bank_alu_credit_stale_slots,
-                perf_bank_p0_local_full_slots,
-                perf_bank_p0_credit_stale_slots,
-                perf_bank_p1_local_full_slots,
-                perf_bank_p1_credit_stale_slots,
-                perf_bank_unclassified_slots,
-                perf_bank_alu_local_full_slots +
-                    perf_bank_alu_credit_stale_slots +
-                    perf_bank_p0_local_full_slots +
-                    perf_bank_p0_credit_stale_slots +
-                    perf_bank_p1_local_full_slots +
-                    perf_bank_p1_credit_stale_slots +
-                    perf_bank_unclassified_slots,
-                perf_other_rs_bank_block_slots);
-            $display("PERF_P0_FULL_DETAIL: DEPENDENCY=%-d ORDER=%-d RESOURCE=%-d READY_RELEASE=%-d NO_CANDIDATE=%-d ACCOUNTED=%-d EXPECTED=%-d",
-                perf_p0_full_dependency_slots,
-                perf_p0_full_order_slots,
-                perf_p0_full_resource_slots,
-                perf_p0_full_ready_release_slots,
-                perf_p0_full_no_candidate_slots,
-                perf_p0_full_dependency_slots + perf_p0_full_order_slots +
-                    perf_p0_full_resource_slots +
-                    perf_p0_full_ready_release_slots +
-                perf_p0_full_no_candidate_slots,
-                perf_bank_p0_local_full_slots);
-            $display("PERF_P0_FULL_PIPELINE: SELECTABLE=%-d CREDIT_BLOCKED=%-d ORDER_BLOCKED=%-d DEPENDENCY_BLOCKED=%-d ACCOUNTED=%-d EXPECTED=%-d",
-                perf_p0_pipe_selectable_slots,
-                perf_p0_pipe_credit_blocked_slots,
-                perf_p0_pipe_order_blocked_slots,
-                perf_p0_pipe_dependency_blocked_slots,
-                perf_p0_pipe_selectable_slots +
-                    perf_p0_pipe_credit_blocked_slots +
-                    perf_p0_pipe_order_blocked_slots +
-                    perf_p0_pipe_dependency_blocked_slots,
-                perf_bank_p0_local_full_slots);
-            $display("PERF_P0_CREDIT_RESV_MATRIX: C0_R0=%-d C0_R1=%-d C0_R2=%-d C1_R0=%-d C1_R1=%-d C1_R2=%-d C2_R0=%-d C2_R1=%-d C2_R2=%-d ACCOUNTED=%-d EXPECTED=%-d",
-                perf_p0_credit_resv_slots[0],
-                perf_p0_credit_resv_slots[1],
-                perf_p0_credit_resv_slots[2],
-                perf_p0_credit_resv_slots[3],
-                perf_p0_credit_resv_slots[4],
-                perf_p0_credit_resv_slots[5],
-                perf_p0_credit_resv_slots[6],
-                perf_p0_credit_resv_slots[7],
-                perf_p0_credit_resv_slots[8],
-                perf_p0_credit_resv_slots[0] +
-                    perf_p0_credit_resv_slots[1] +
-                    perf_p0_credit_resv_slots[2] +
-                    perf_p0_credit_resv_slots[3] +
-                    perf_p0_credit_resv_slots[4] +
-                    perf_p0_credit_resv_slots[5] +
-                    perf_p0_credit_resv_slots[6] +
-                    perf_p0_credit_resv_slots[7] +
-                    perf_p0_credit_resv_slots[8],
-                perf_bank_p0_local_full_slots);
-            $display("PERF_P0_FULL_RESIDENT_MIX: STORE0=%-d STORE1=%-d STORE2=%-d STORE3=%-d STORE4=%-d ACCOUNTED=%-d EXPECTED=%-d",
-                perf_p0_full_store_mix_slots[0],
-                perf_p0_full_store_mix_slots[1],
-                perf_p0_full_store_mix_slots[2],
-                perf_p0_full_store_mix_slots[3],
-                perf_p0_full_store_mix_slots[4],
-                perf_p0_full_store_mix_slots[0] +
-                    perf_p0_full_store_mix_slots[1] +
-                    perf_p0_full_store_mix_slots[2] +
-                    perf_p0_full_store_mix_slots[3] +
-                    perf_p0_full_store_mix_slots[4],
-                perf_bank_p0_local_full_slots);
-            $display("PERF_P0_FULL_BLOCKED_OP: LOAD=%-d STORE=%-d OTHER=%-d ACCOUNTED=%-d EXPECTED=%-d",
-                perf_p0_full_blocked_load_slots,
-                perf_p0_full_blocked_store_slots,
-                perf_p0_full_blocked_other_slots,
-                perf_p0_full_blocked_load_slots +
-                    perf_p0_full_blocked_store_slots +
-                    perf_p0_full_blocked_other_slots,
-                perf_bank_p0_local_full_slots);
             $display("PERF_NOIF_DETAIL: CONTROL_REDIRECT=%-d PREDICT_REDIRECT=%-d FENCE_REFILL=%-d MEM_RESPONSE=%-d FETCH_LAUNCH=%-d PENDING_REDIRECT=%-d OTHER=%-d",
                 noif_control_redirect_count,
                 noif_predict_redirect_count,
@@ -6153,16 +5463,16 @@ end
                 noif_fetch_launch_count,
                 noif_pending_redirect_count,
                 noif_other_count);
-            $display("PERF_OTHER_DETAIL: ISSUE_REFILL=%-d DECODE_REFILL=%-d ISSUE_BLOCKED=%-d OTHER=%-d",
-                other_issue_refill_count,
-                other_decode_refill_count,
+            $display("PERF_OTHER_DETAIL: ISSUE_SUPPLY=%-d DECODE_SUPPLY=%-d ISSUE_BLOCKED=%-d OTHER=%-d",
+                other_issue_supply_count,
+                other_decode_supply_count,
                 other_issue_blocked_count,
                 other_unclassified_count);
-            $display("PERF_DECODE_REFILL_DETAIL: AFTER_CONTROL=%-d AFTER_PREDICT=%-d AFTER_FENCE=%-d AFTER_SUPPLY=%-d",
-                decode_refill_after_control_count,
-                decode_refill_after_predict_count,
-                decode_refill_after_fence_count,
-                decode_refill_after_supply_count);
+            $display("PERF_DECODE_SUPPLY_DETAIL: AFTER_CONTROL=%-d AFTER_PREDICT=%-d AFTER_FENCE=%-d AFTER_SUPPLY=%-d",
+                decode_supply_after_control_count,
+                decode_supply_after_predict_count,
+                decode_supply_after_fence_count,
+                decode_supply_after_supply_count);
             $display("PERF_HAZARD_ACCOUNT: RAW_ONLY=%-d WAW_ONLY=%-d RAW_WAW=%-d RETIRE_0=%-d RETIRE_1=%-d RETIRE_2=%-d RETIRE_3=%-d RETIRE_4=%-d",
                 acct_raw_only_count,
                 acct_waw_only_count,
@@ -6269,13 +5579,11 @@ end
                 perf_complete_count[4], perf_retire_count[0],
                 perf_retire_count[1], perf_retire_count[2],
                 perf_sample_cycle_count);
-            $display("PERF_CONTROL_DECOUPLE: DEP_TOKEN_ENTRY_CYCLES=%-d ORDER_TOKEN_ENTRY_CYCLES=%-d RESOURCE_ENTRY_CYCLES=%-d SELECTABLE_ENTRY_CYCLES=%-d RS_BANK_FULL=%-d RS_PAIR_BANK_LIMIT=%-d ROB_FULL=%-d LSU_CREDIT=%-d DIV_CREDIT=%-d SERIAL_GATE=%-d SELECT_WIDTH=%-d OPERAND_DEP_MISS=%-d RECOVERY=%-d RECOVERY_RESYNC=%-d",
+            $display("PERF_CONTROL_DECOUPLE: DEP_TOKEN_ENTRY_CYCLES=%-d ORDER_TOKEN_ENTRY_CYCLES=%-d RESOURCE_ENTRY_CYCLES=%-d SELECTABLE_ENTRY_CYCLES=%-d ROB_FULL=%-d LSU_CREDIT=%-d DIV_CREDIT=%-d SERIAL_GATE=%-d SELECT_WIDTH=%-d OPERAND_DEP_MISS=%-d RECOVERY=%-d RECOVERY_RESYNC=%-d",
                 perf_rs_dependency_entry_cycles,
                 perf_rs_order_entry_cycles,
                 perf_rs_resource_entry_cycles,
                 perf_rs_selectable_entry_cycles,
-                perf_rs_bank_full_cycles,
-                perf_rs_pair_bank_limit_cycles,
                 perf_rob_full_cycles,
                 perf_lsu_credit_wait_cycles,
                 perf_div_credit_wait_cycles,
@@ -6284,38 +5592,25 @@ end
                 perf_operand_dependency_miss_cycles,
                 perf_recovery_cycles,
                 perf_recovery_resync_cycles);
-            $display("PERF_LOCAL_CONTROL: ALU_ENTRY_CYCLES=%-d P0_ENTRY_CYCLES=%-d P1_ENTRY_CYCLES=%-d ALU_FULL=%-d P0_FULL=%-d P1_FULL=%-d ALU_DUE_SELECT=%-d DTCM_DUE_SELECT=%-d MDU_DUE_SELECT=%-d DTCM_LOCAL_WAKE=%-d MDU_LOCAL_WAKE=%-d RESIDENT_WAKE_ENTRIES=%-d RESIDENT_DUE_SELECT=%-d P0_COMPLETION_WAKEUP=%-d OPERAND_MERGE_PAIR=%-d",
-                perf_alu_bank_entry_cycles,
-                perf_p0_bank_entry_cycles,
-                perf_p1_bank_entry_cycles,
-                perf_alu_bank_full_cycles,
-                perf_p0_bank_full_cycles,
-                perf_p1_bank_full_cycles,
+            $display("PERF_SCHED_LOCAL: ALU_ENTRY_CYCLES=%-d BANK0_ENTRY_CYCLES=%-d BANK1_ENTRY_CYCLES=%-d ALU_FULL=%-d BANK0_FULL=%-d BANK1_FULL=%-d ALU_DUE_SELECT=%-d RESIDENT_WAKE_ENTRIES=%-d RESIDENT_DUE_SELECT=%-d SCHED_COMPLETION_WAKEUP_ENTRIES=%-d OPERAND_MERGE_PAIR=%-d",
+                perf_alu_entry_cycles,
+                perf_bank0_entry_cycles,
+                perf_bank1_entry_cycles,
+                perf_alu_entry_saturated_cycles,
+                perf_bank0_full_cycles,
+                perf_bank1_full_cycles,
                 perf_alu_due_select_cycles,
-                perf_dtcm_due_select_cycles,
-                perf_mdu_due_select_cycles,
-                perf_dtcm_local_wake_cycles,
-                perf_mdu_local_wake_cycles,
                 perf_resident_wakeup_entry_cycles,
                 perf_resident_due_select_cycles,
-                perf_p0_completion_wakeup_cycles,
+                perf_rs_completion_wakeup_entries,
                 perf_operand_merge_pair_cycles);
-            $display("PERF_RS_BANK_STATE: ALU_DEP=%-d P0_DEP=%-d P1_DEP=%-d ALU_ORDER=%-d P0_ORDER=%-d P1_ORDER=%-d ALU_RESOURCE=%-d P0_RESOURCE=%-d P1_RESOURCE=%-d ALU_READY=%-d P0_READY=%-d P1_READY=%-d ALU_CANDIDATE=%-d P0_CANDIDATE=%-d P1_CANDIDATE=%-d ALU_SELECTED=%-d P0_SELECTED=%-d P1_SELECTED=%-d",
+            $display("PERF_SCHED_BANK_STATE: BANK0_DEP=%-d BANK1_DEP=%-d BANK0_ORDER=%-d BANK1_ORDER=%-d BANK0_RESOURCE=%-d BANK1_RESOURCE=%-d BANK0_READY=%-d BANK1_READY=%-d BANK0_CANDIDATE=%-d BANK1_CANDIDATE=%-d BANK0_SELECTED=%-d BANK1_SELECTED=%-d",
                 perf_bank_dep_entry_cycles[0], perf_bank_dep_entry_cycles[1],
-                perf_bank_dep_entry_cycles[2],
                 perf_bank_order_entry_cycles[0], perf_bank_order_entry_cycles[1],
-                perf_bank_order_entry_cycles[2],
-                perf_bank_resource_entry_cycles[0],
-                perf_bank_resource_entry_cycles[1],
-                perf_bank_resource_entry_cycles[2],
+                perf_bank_resource_entry_cycles[0], perf_bank_resource_entry_cycles[1],
                 perf_bank_ready_entry_cycles[0], perf_bank_ready_entry_cycles[1],
-                perf_bank_ready_entry_cycles[2],
-                perf_bank_candidate_entry_cycles[0],
-                perf_bank_candidate_entry_cycles[1],
-                perf_bank_candidate_entry_cycles[2],
-                perf_bank_selected_entry_cycles[0],
-                perf_bank_selected_entry_cycles[1],
-                perf_bank_selected_entry_cycles[2]);
+                perf_bank_candidate_entry_cycles[0], perf_bank_candidate_entry_cycles[1],
+                perf_bank_selected_entry_cycles[0], perf_bank_selected_entry_cycles[1]);
             $display("PERF_COUPLING_PAIR: BANK_DEP=%-d BANK_ROB=%-d BANK_RESOURCE=%-d BANK_SELECT=%-d BANK_OPERAND=%-d ROB_DEP=%-d ROB_RESOURCE=%-d ROB_SELECT=%-d ROB_OPERAND=%-d DEP_RESOURCE=%-d DEP_SELECT=%-d DEP_OPERAND=%-d RESOURCE_SELECT=%-d SELECT_OPERAND=%-d BANK_DEP_SELECT=%-d BANK_ROB_SELECT=%-d DEP_SELECT_OPERAND=%-d",
                 perf_cpl_bank_dep_count, perf_cpl_bank_rob_count,
                 perf_cpl_bank_resource_count, perf_cpl_bank_select_count,
@@ -6327,94 +5622,94 @@ end
                 perf_cpl_bank_dep_select_count,
                 perf_cpl_bank_rob_select_count,
                 perf_cpl_dep_select_operand_count);
-            $display("PERF_SELECT_QUEUE: HOL_SINGLE_HEAD_PAIR_SKID_CYCLES=%-d HOL_LOST_SLOTS=%-d PAIR_PUSH_CYCLES=%-d PAIR_HEAD_ISSUE_CYCLES=%-d PAIR_PUSH_BEHIND_SINGLE_HEAD_CYCLES=%-d PAIR_PUSH_BEHIND_SINGLE_HEAD_SLOTS=%-d STATE_EMPTY=%-d STATE_HEAD_SINGLE=%-d STATE_HEAD_PAIR=%-d STATE_SINGLE_SINGLE=%-d STATE_SINGLE_PAIR=%-d STATE_PAIR_SINGLE=%-d STATE_PAIR_PAIR=%-d",
-                perf_select_hol_pair_cycles,
-                perf_select_hol_pair_lost_slots,
-                perf_select_pair_push_cycles,
-                perf_select_pair_issue_cycles,
-                perf_select_pair_push_single_head_cycles,
-                perf_select_pair_push_single_head_slots,
-                perf_select_queue_state_count[0],
-                perf_select_queue_state_count[2],
-                perf_select_queue_state_count[3],
-                perf_select_queue_state_count[10],
-                perf_select_queue_state_count[14],
-                perf_select_queue_state_count[11],
-                perf_select_queue_state_count[15]);
-            $display("PERF_SELECT_REFILL_BOUNDARY: HEAD_EMPTY_PUSH_CYCLES=%-d HEAD_EMPTY_PUSH_SLOTS=%-d HEAD_EMPTY_PAIR_SLOTS=%-d HEAD_EMPTY_SINGLE_SLOTS=%-d PUSHED_UOPS=%-d",
-                perf_select_refill_head_empty_cycles,
-                perf_select_refill_head_empty_slots,
-                perf_select_refill_head_empty_pair_slots,
-                perf_select_refill_head_empty_single_slots,
-                perf_select_refill_head_empty_uops);
-            $display("PERF_SELECT_REFILL_LIFECYCLE_DATA: ELIGIBLE_PENDING=%-d ELIGIBLE_STORED=%-d DEPENDENCY_PENDING=%-d DEPENDENCY_STORED=%-d ORDER_PENDING=%-d ORDER_STORED=%-d RESOURCE_PENDING=%-d RESOURCE_STORED=%-d NEW_PENDING=%-d NEW_STORED=%-d OTHER_PENDING=%-d OTHER_STORED=%-d ACCOUNTED=%-d EXPECTED=%-d",
-                perf_select_refill_lifecycle_data_uops[0][0],
-                perf_select_refill_lifecycle_data_uops[0][1],
-                perf_select_refill_lifecycle_data_uops[1][0],
-                perf_select_refill_lifecycle_data_uops[1][1],
-                perf_select_refill_lifecycle_data_uops[2][0],
-                perf_select_refill_lifecycle_data_uops[2][1],
-                perf_select_refill_lifecycle_data_uops[3][0],
-                perf_select_refill_lifecycle_data_uops[3][1],
-                perf_select_refill_lifecycle_data_uops[4][0],
-                perf_select_refill_lifecycle_data_uops[4][1],
-                perf_select_refill_lifecycle_data_uops[5][0],
-                perf_select_refill_lifecycle_data_uops[5][1],
-                perf_select_refill_lifecycle_data_uops[0][0] +
-                    perf_select_refill_lifecycle_data_uops[0][1] +
-                    perf_select_refill_lifecycle_data_uops[1][0] +
-                    perf_select_refill_lifecycle_data_uops[1][1] +
-                    perf_select_refill_lifecycle_data_uops[2][0] +
-                    perf_select_refill_lifecycle_data_uops[2][1] +
-                    perf_select_refill_lifecycle_data_uops[3][0] +
-                    perf_select_refill_lifecycle_data_uops[3][1] +
-                    perf_select_refill_lifecycle_data_uops[4][0] +
-                    perf_select_refill_lifecycle_data_uops[4][1] +
-                    perf_select_refill_lifecycle_data_uops[5][0] +
-                    perf_select_refill_lifecycle_data_uops[5][1],
-                perf_select_refill_head_empty_uops);
-            $write("PERF_SELECT_REFILL_PRIOR_MASK:");
+            $display("PERF_LANE_ELASTIC: B_EMPTY_CYCLES=%-d B_EMPTY_LOST_SLOTS=%-d PAIR_SELECTED_CYCLES=%-d PAIR_ACTIVE_CYCLES=%-d PAIR_AFTER_A_ONLY_CYCLES=%-d PAIR_AFTER_A_ONLY_SLOTS=%-d STATE_EMPTY=%-d STATE_A_ONLY=%-d STATE_B_ONLY=%-d STATE_A_B=%-d STATE_INGRESS_A=%-d STATE_INGRESS_B=%-d STATE_INGRESS_PAIR=%-d",
+                perf_lane_b_elastic_empty_cycles,
+                perf_lane_b_elastic_empty_lost_slots,
+                perf_select_pair_selected_cycles,
+                perf_lane_pair_active_cycles,
+                perf_select_pair_after_lane_a_only_cycles,
+                perf_select_pair_after_lane_a_only_slots,
+                perf_lane_ingress_state_count[0],
+                perf_lane_ingress_state_count[2],
+                perf_lane_ingress_state_count[3],
+                perf_lane_ingress_state_count[10],
+                perf_lane_ingress_state_count[14],
+                perf_lane_ingress_state_count[11],
+                perf_lane_ingress_state_count[15]);
+            $display("PERF_LANE_INGRESS_BOUNDARY: A_EMPTY_SELECTED_CYCLES=%-d A_EMPTY_SELECTED_SLOTS=%-d A_EMPTY_PAIR_SLOTS=%-d A_EMPTY_SINGLE_SLOTS=%-d SELECTED_UOPS=%-d",
+                perf_select_selected_with_lane_a_empty_cycles,
+                perf_select_selected_with_lane_a_empty_slots,
+                perf_select_selected_with_lane_a_empty_pair_slots,
+                perf_select_selected_with_lane_a_empty_single_slots,
+                perf_select_selected_with_lane_a_empty_uops);
+            $display("PERF_SELECT_INGRESS_LIFECYCLE_DATA: ELIGIBLE_PENDING=%-d ELIGIBLE_STORED=%-d DEPENDENCY_PENDING=%-d DEPENDENCY_STORED=%-d ORDER_PENDING=%-d ORDER_STORED=%-d RESOURCE_PENDING=%-d RESOURCE_STORED=%-d NEW_PENDING=%-d NEW_STORED=%-d OTHER_PENDING=%-d OTHER_STORED=%-d ACCOUNTED=%-d EXPECTED=%-d",
+                perf_select_ingress_lifecycle_data_uops[0][0],
+                perf_select_ingress_lifecycle_data_uops[0][1],
+                perf_select_ingress_lifecycle_data_uops[1][0],
+                perf_select_ingress_lifecycle_data_uops[1][1],
+                perf_select_ingress_lifecycle_data_uops[2][0],
+                perf_select_ingress_lifecycle_data_uops[2][1],
+                perf_select_ingress_lifecycle_data_uops[3][0],
+                perf_select_ingress_lifecycle_data_uops[3][1],
+                perf_select_ingress_lifecycle_data_uops[4][0],
+                perf_select_ingress_lifecycle_data_uops[4][1],
+                perf_select_ingress_lifecycle_data_uops[5][0],
+                perf_select_ingress_lifecycle_data_uops[5][1],
+                perf_select_ingress_lifecycle_data_uops[0][0] +
+                    perf_select_ingress_lifecycle_data_uops[0][1] +
+                    perf_select_ingress_lifecycle_data_uops[1][0] +
+                    perf_select_ingress_lifecycle_data_uops[1][1] +
+                    perf_select_ingress_lifecycle_data_uops[2][0] +
+                    perf_select_ingress_lifecycle_data_uops[2][1] +
+                    perf_select_ingress_lifecycle_data_uops[3][0] +
+                    perf_select_ingress_lifecycle_data_uops[3][1] +
+                    perf_select_ingress_lifecycle_data_uops[4][0] +
+                    perf_select_ingress_lifecycle_data_uops[4][1] +
+                    perf_select_ingress_lifecycle_data_uops[5][0] +
+                    perf_select_ingress_lifecycle_data_uops[5][1],
+                perf_select_selected_with_lane_a_empty_uops);
+            $write("PERF_SELECT_INGRESS_PRIOR_MASK:");
             for (perf_stat_idx = 0; perf_stat_idx < 8;
                  perf_stat_idx = perf_stat_idx + 1)
                 $write(" M%0d=%0d", perf_stat_idx,
-                       perf_select_refill_prior_mask_uops[perf_stat_idx]);
+                       perf_select_ingress_prior_mask_uops[perf_stat_idx]);
             $display(" NEW=%-d OTHER=%-d ACCOUNTED=%-d EXPECTED=%-d",
-                perf_select_refill_prior_mask_uops[8],
-                perf_select_refill_prior_mask_uops[9],
-                perf_select_refill_prior_mask_uops[0] +
-                    perf_select_refill_prior_mask_uops[1] +
-                    perf_select_refill_prior_mask_uops[2] +
-                    perf_select_refill_prior_mask_uops[3] +
-                    perf_select_refill_prior_mask_uops[4] +
-                    perf_select_refill_prior_mask_uops[5] +
-                    perf_select_refill_prior_mask_uops[6] +
-                    perf_select_refill_prior_mask_uops[7] +
-                    perf_select_refill_prior_mask_uops[8] +
-                    perf_select_refill_prior_mask_uops[9],
-                perf_select_refill_head_empty_uops);
-            $write("PERF_SELECT_REFILL_PENDING_MASK:");
+                perf_select_ingress_prior_mask_uops[8],
+                perf_select_ingress_prior_mask_uops[9],
+                perf_select_ingress_prior_mask_uops[0] +
+                    perf_select_ingress_prior_mask_uops[1] +
+                    perf_select_ingress_prior_mask_uops[2] +
+                    perf_select_ingress_prior_mask_uops[3] +
+                    perf_select_ingress_prior_mask_uops[4] +
+                    perf_select_ingress_prior_mask_uops[5] +
+                    perf_select_ingress_prior_mask_uops[6] +
+                    perf_select_ingress_prior_mask_uops[7] +
+                    perf_select_ingress_prior_mask_uops[8] +
+                    perf_select_ingress_prior_mask_uops[9],
+                perf_select_selected_with_lane_a_empty_uops);
+            $write("PERF_SELECT_INGRESS_PENDING_MASK:");
             for (perf_stat_idx = 0; perf_stat_idx < 16;
                  perf_stat_idx = perf_stat_idx + 1)
                 $write(" M%0d=%0d", perf_stat_idx,
-                       perf_select_refill_pending_mask_uops[perf_stat_idx]);
+                       perf_select_ingress_pending_mask_uops[perf_stat_idx]);
             $display(" ACCOUNTED=%-d EXPECTED=%-d",
-                perf_select_refill_pending_mask_uops[0] +
-                    perf_select_refill_pending_mask_uops[1] +
-                    perf_select_refill_pending_mask_uops[2] +
-                    perf_select_refill_pending_mask_uops[3] +
-                    perf_select_refill_pending_mask_uops[4] +
-                    perf_select_refill_pending_mask_uops[5] +
-                    perf_select_refill_pending_mask_uops[6] +
-                    perf_select_refill_pending_mask_uops[7] +
-                    perf_select_refill_pending_mask_uops[8] +
-                    perf_select_refill_pending_mask_uops[9] +
-                    perf_select_refill_pending_mask_uops[10] +
-                    perf_select_refill_pending_mask_uops[11] +
-                    perf_select_refill_pending_mask_uops[12] +
-                    perf_select_refill_pending_mask_uops[13] +
-                    perf_select_refill_pending_mask_uops[14] +
-                    perf_select_refill_pending_mask_uops[15],
-                perf_select_refill_head_empty_uops);
+                perf_select_ingress_pending_mask_uops[0] +
+                    perf_select_ingress_pending_mask_uops[1] +
+                    perf_select_ingress_pending_mask_uops[2] +
+                    perf_select_ingress_pending_mask_uops[3] +
+                    perf_select_ingress_pending_mask_uops[4] +
+                    perf_select_ingress_pending_mask_uops[5] +
+                    perf_select_ingress_pending_mask_uops[6] +
+                    perf_select_ingress_pending_mask_uops[7] +
+                    perf_select_ingress_pending_mask_uops[8] +
+                    perf_select_ingress_pending_mask_uops[9] +
+                    perf_select_ingress_pending_mask_uops[10] +
+                    perf_select_ingress_pending_mask_uops[11] +
+                    perf_select_ingress_pending_mask_uops[12] +
+                    perf_select_ingress_pending_mask_uops[13] +
+                    perf_select_ingress_pending_mask_uops[14] +
+                    perf_select_ingress_pending_mask_uops[15],
+                perf_select_selected_with_lane_a_empty_uops);
             $write("PERF_COUPLING_MASK:");
             for (perf_stat_idx = 0; perf_stat_idx < 256;
                  perf_stat_idx = perf_stat_idx + 1)
@@ -6422,7 +5717,7 @@ end
                     $write(" M%0d=%0d", perf_stat_idx,
                            perf_coupling_mask_count[perf_stat_idx]);
             $display("");
-            $display("PERF_SELECT_OPPORTUNITY: RAW_W0=%-d RAW_W1=%-d RAW_W2=%-d ACTUAL_W0=%-d ACTUAL_W1=%-d ACTUAL_W2=%-d RAW_ALU_ENTRIES=%-d RAW_P0_CYCLES=%-d RAW_P1_CYCLES=%-d DROP_ALU_ENTRIES=%-d DROP_P0_ENTRIES=%-d DROP_P1_ENTRIES=%-d WIDTH_GAP_SLOTS=%-d PAIR_CAPABLE_SINGLE_CYCLES=%-d PAIR_CAPABLE_SINGLE_LOST_SLOTS=%-d GAP_RECOVERY_CYCLES=%-d GAP_NO_PUSH_CYCLES=%-d GAP_POLICY_CYCLES=%-d",
+            $display("PERF_SELECT_OPPORTUNITY: RAW_W0=%-d RAW_W1=%-d RAW_W2=%-d ACTUAL_W0=%-d ACTUAL_W1=%-d ACTUAL_W2=%-d RAW_ALU_ENTRIES=%-d RAW_BANK0_CYCLES=%-d RAW_BANK1_CYCLES=%-d DROP_ALU_ENTRIES=%-d DROP_BANK0_ENTRIES=%-d DROP_BANK1_ENTRIES=%-d WIDTH_GAP_SLOTS=%-d PAIR_CAPABLE_SINGLE_CYCLES=%-d PAIR_CAPABLE_SINGLE_LOST_SLOTS=%-d GAP_RECOVERY_CYCLES=%-d GAP_NO_PUSH_CYCLES=%-d GAP_POLICY_CYCLES=%-d",
                 perf_select_raw_width_count[0],
                 perf_select_raw_width_count[1],
                 perf_select_raw_width_count[2],
@@ -6430,11 +5725,11 @@ end
                 perf_select_actual_width_count[1],
                 perf_select_actual_width_count[2],
                 perf_select_raw_alu_entries,
-                perf_select_raw_p0_entries,
-                perf_select_raw_p1_entries,
+                perf_select_raw_bank0_entries,
+                perf_select_raw_bank1_entries,
                 perf_select_drop_alu_entries,
-                perf_select_drop_p0_entries,
-                perf_select_drop_p1_entries,
+                perf_select_drop_bank0_entries,
+                perf_select_drop_bank1_entries,
                 perf_select_width_gap_slots,
                 perf_select_pair_capable_single_cycles,
                 perf_select_pair_capable_single_slots,
@@ -6505,15 +5800,8 @@ end
                 perf_latency_alloc_retire[0], perf_latency_alloc_retire[1],
                 perf_latency_alloc_retire[2], perf_latency_alloc_retire[3],
                 perf_latency_alloc_retire[4], perf_latency_alloc_retire[5]);
-            $display("PERF_WAKEUP: COMPLETION_ENTRIES=%-d ALLOC_ENTRIES=%-d SELECT_ENTRIES=%-d DTCM_LAUNCH=%-d DTCM_RESULT=%-d MDU_RESULT=%-d REPLAY=%-d P0_COMPLETION_CYCLES=%-d",
-                perf_rs_completion_wakeup_entries,
-                perf_rs_alloc_wakeup_entries,
-                perf_rs_select_wakeup_entries,
-                perf_dtcm_launch_wakeup_events,
-                perf_dtcm_result_wakeup_events,
-                perf_mdu_wakeup_events,
-                perf_replay_wakeup_events,
-                perf_p0_completion_wakeup_cycles);
+            $display("PERF_SCHED_WAKEUP: RESULT_ENTRIES=%-d",
+                perf_rs_completion_wakeup_entries);
             $display("PERF_ROB_HEAD_STATE: EMPTY=%-d RETIRE1=%-d RETIRE2=%-d COMPLETE_VISIBLE=%-d NOT_ISSUED=%-d WAIT_ALU=%-d WAIT_LOAD=%-d WAIT_MDU=%-d WAIT_STORE=%-d WAIT_BRANCH=%-d WAIT_OTHER=%-d ACCOUNTED=%-d SAMPLE=%-d",
                 perf_head_empty_count, perf_head_retire1_count,
                 perf_head_retire2_count, perf_head_complete_visible_count,
@@ -6544,47 +5832,47 @@ end
                     perf_head_ni_rs_ready_count +
                     perf_head_ni_absent_count,
                 perf_head_not_issued_count);
-            $display("PERF_BACKEND_LOSS: FLUSH=%-d OPERAND_BLOCK=%-d SINGLE_BUNDLE=%-d SELECT_REFILL=%-d RS_DEPENDENCY=%-d RS_ORDER=%-d RS_RESOURCE=%-d RS_OTHER=%-d ROB_FULL=%-d RS_REFILL=%-d DECODE_REFILL=%-d FRONTEND=%-d OTHER=%-d ACCOUNTED=%-d EXPECTED=%-d",
+            $display("PERF_BACKEND_LOSS: FLUSH=%-d OPERAND_BLOCK=%-d SINGLE_LANE=%-d SELECT_INGRESS=%-d RS_DEPENDENCY=%-d RS_ORDER=%-d RS_RESOURCE=%-d RS_OTHER=%-d ROB_FULL=%-d RS_INGRESS=%-d DECODE_SUPPLY=%-d FRONTEND=%-d OTHER=%-d ACCOUNTED=%-d EXPECTED=%-d",
                 perf_loss_flush_slots, perf_loss_operand_block_slots,
-                perf_loss_single_bundle_slots,
-                perf_loss_select_refill_slots,
+                perf_loss_single_lane_slots,
+                perf_loss_select_ingress_slots,
                 perf_loss_rs_dependency_slots, perf_loss_rs_order_slots,
                 perf_loss_rs_resource_slots, perf_loss_rs_other_slots,
-                perf_loss_rob_full_slots, perf_loss_rs_refill_slots,
-                perf_loss_decode_refill_slots, perf_loss_frontend_slots,
+                perf_loss_rob_full_slots, perf_loss_rs_ingress_slots,
+                perf_loss_decode_supply_slots, perf_loss_frontend_slots,
                 perf_loss_other_slots,
                 perf_loss_flush_slots + perf_loss_operand_block_slots +
-                    perf_loss_single_bundle_slots +
-                    perf_loss_select_refill_slots +
+                    perf_loss_single_lane_slots +
+                    perf_loss_select_ingress_slots +
                     perf_loss_rs_dependency_slots +
                     perf_loss_rs_order_slots +
                     perf_loss_rs_resource_slots + perf_loss_rs_other_slots +
-                    perf_loss_rob_full_slots + perf_loss_rs_refill_slots +
-                    perf_loss_decode_refill_slots +
+                    perf_loss_rob_full_slots + perf_loss_rs_ingress_slots +
+                    perf_loss_decode_supply_slots +
                     perf_loss_frontend_slots + perf_loss_other_slots,
                 (perf_sample_cycle_count << 1) - perf_operand_count[1] -
                     (perf_operand_count[2] << 1));
-            $display("PERF_SINGLE_BUNDLE_DETAIL: P0_ONLY=%-d P1_ONLY=%-d ALU_ONLY=%-d SERIAL=%-d OTHER=%-d ACCOUNTED=%-d EXPECTED=%-d",
-                perf_single_p0_only_slots,
-                perf_single_p1_only_slots,
+            $display("PERF_SINGLE_LANE_DETAIL: BANK0_ONLY=%-d BANK1_ONLY=%-d ALU_ONLY=%-d SERIAL=%-d OTHER=%-d ACCOUNTED=%-d EXPECTED=%-d",
+                perf_single_bank0_only_slots,
+                perf_single_bank1_only_slots,
                 perf_single_alu_only_slots,
                 perf_single_serial_slots,
                 perf_single_other_slots,
-                perf_single_p0_only_slots + perf_single_p1_only_slots +
+                perf_single_bank0_only_slots + perf_single_bank1_only_slots +
                     perf_single_alu_only_slots + perf_single_serial_slots +
                     perf_single_other_slots,
-                perf_loss_single_bundle_slots);
-            $display("PERF_SELECT_REFILL_DETAIL: PAIR=%-d P0_SINGLE=%-d P1_SINGLE=%-d ALU_SINGLE=%-d SERIAL=%-d OTHER=%-d ACCOUNTED=%-d EXPECTED=%-d",
-                perf_select_refill_pair_slots,
-                perf_select_refill_p0_slots,
-                perf_select_refill_p1_slots,
-                perf_select_refill_alu_slots,
-                perf_select_refill_serial_slots,
-                perf_select_refill_other_slots,
-                perf_select_refill_pair_slots + perf_select_refill_p0_slots +
-                    perf_select_refill_p1_slots + perf_select_refill_alu_slots +
-                    perf_select_refill_serial_slots + perf_select_refill_other_slots,
-                perf_loss_select_refill_slots);
+                perf_loss_single_lane_slots);
+            $display("PERF_SELECT_INGRESS_DETAIL: PAIR=%-d BANK0_SINGLE=%-d BANK1_SINGLE=%-d ALU_SINGLE=%-d SERIAL=%-d OTHER=%-d ACCOUNTED=%-d EXPECTED=%-d",
+                perf_select_ingress_pair_slots,
+                perf_select_ingress_bank0_slots,
+                perf_select_ingress_bank1_slots,
+                perf_select_ingress_alu_slots,
+                perf_select_ingress_serial_slots,
+                perf_select_ingress_other_slots,
+                perf_select_ingress_pair_slots + perf_select_ingress_bank0_slots +
+                    perf_select_ingress_bank1_slots + perf_select_ingress_alu_slots +
+                    perf_select_ingress_serial_slots + perf_select_ingress_other_slots,
+                perf_loss_select_ingress_slots);
             $display("PERF_RS_DEPENDENCY_DETAIL2: SRC0=%-d SRC1=%-d BOTH_SRC=%-d COMPLETION_WAKE=%-d ALLOC_WAKE=%-d LOAD=%-d MUL=%-d BRANCH=%-d OTHER=%-d ACCOUNTED=%-d EXPECTED=%-d",
                 perf_dep_src0_slots,
                 perf_dep_src1_slots,
@@ -6600,7 +5888,7 @@ end
                     perf_dep_load_slots + perf_dep_mul_slots + perf_dep_branch_slots +
                     perf_dep_other_slots,
                 perf_loss_rs_dependency_slots);
-            $display("PERF_SINGLE_BUNDLE_OP: ALU=%-d LOAD=%-d STORE=%-d MUL=%-d CSR_SYS=%-d OTHER=%-d ACCOUNTED=%-d EXPECTED=%-d",
+            $display("PERF_SINGLE_LANE_OP: ALU=%-d LOAD=%-d STORE=%-d MUL=%-d CSR_SYS=%-d OTHER=%-d ACCOUNTED=%-d EXPECTED=%-d",
                 perf_single_op_alu_slots,
                 perf_single_op_load_slots,
                 perf_single_op_store_slots,
@@ -6610,23 +5898,23 @@ end
                 perf_single_op_alu_slots + perf_single_op_load_slots +
                     perf_single_op_store_slots + perf_single_op_mul_slots +
                     perf_single_op_csr_sys_slots + perf_single_op_other_slots,
-                perf_loss_single_bundle_slots);
-            $display("PERF_SELECT_REFILL_SHAPE: P0_P1=%-d P0_ALU=%-d P1_ALU=%-d ALU_ALU=%-d SINGLE_P0=%-d SINGLE_P1=%-d SINGLE_ALU=%-d SERIAL=%-d OTHER=%-d ACCOUNTED=%-d EXPECTED=%-d",
-                perf_refill_shape_p0_p1_slots,
-                perf_refill_shape_p0_alu_slots,
-                perf_refill_shape_p1_alu_slots,
-                perf_refill_shape_alu_alu_slots,
-                perf_refill_shape_single_p0_slots,
-                perf_refill_shape_single_p1_slots,
-                perf_refill_shape_single_alu_slots,
-                perf_refill_shape_serial_slots,
-                perf_refill_shape_other_slots,
-                perf_refill_shape_p0_p1_slots + perf_refill_shape_p0_alu_slots +
-                    perf_refill_shape_p1_alu_slots + perf_refill_shape_alu_alu_slots +
-                    perf_refill_shape_single_p0_slots + perf_refill_shape_single_p1_slots +
-                    perf_refill_shape_single_alu_slots + perf_refill_shape_serial_slots +
-                    perf_refill_shape_other_slots,
-                perf_loss_select_refill_slots);
+                perf_loss_single_lane_slots);
+            $display("PERF_SELECT_INGRESS_SHAPE: BANK0_BANK1=%-d BANK0_ALU=%-d BANK1_ALU=%-d ALU_ALU=%-d SINGLE_BANK0=%-d SINGLE_BANK1=%-d SINGLE_ALU=%-d SERIAL=%-d OTHER=%-d ACCOUNTED=%-d EXPECTED=%-d",
+                perf_ingress_shape_bank0_bank1_slots,
+                perf_ingress_shape_bank0_alu_slots,
+                perf_ingress_shape_bank1_alu_slots,
+                perf_ingress_shape_alu_alu_slots,
+                perf_ingress_shape_single_bank0_slots,
+                perf_ingress_shape_single_bank1_slots,
+                perf_ingress_shape_single_alu_slots,
+                perf_ingress_shape_serial_slots,
+                perf_ingress_shape_other_slots,
+                perf_ingress_shape_bank0_bank1_slots + perf_ingress_shape_bank0_alu_slots +
+                    perf_ingress_shape_bank1_alu_slots + perf_ingress_shape_alu_alu_slots +
+                    perf_ingress_shape_single_bank0_slots + perf_ingress_shape_single_bank1_slots +
+                    perf_ingress_shape_single_alu_slots + perf_ingress_shape_serial_slots +
+                    perf_ingress_shape_other_slots,
+                perf_loss_select_ingress_slots);
             $display("PERF_RS_DEPENDENCY_WAKE: BOTH=%-d MIXED=%-d SRC0_COMPLETION=%-d SRC1_COMPLETION=%-d SRC0_ALLOC=%-d SRC1_ALLOC=%-d NONE=%-d ACCOUNTED=%-d EXPECTED=%-d",
                 perf_dep_wake_both_slots,
                 perf_dep_wake_mixed_slots,
@@ -6735,24 +6023,8 @@ end
                 bp_btb_miss_taken_count,
                 bp_correct_taken_count,
                 bp_correct_not_taken_count);
-            $display("PERF_LSU_STB: LOOKUP=%-d HIT=%-d BLOCK=%-d DRAIN=%-d",
-                u_dut.u_ydrasil_load_store_unit.perf_stb_lookup_q,
-                u_dut.u_ydrasil_load_store_unit.perf_stb_hit_q,
-                u_dut.u_ydrasil_load_store_unit.perf_stb_block_q,
-                u_dut.u_ydrasil_load_store_unit.perf_stb_drain_q);
             $display("PERF_LSU_AGE_REPAIR: CYCLES=%-d",
                 perf_lsu_age_repair_cycles);
-            $display("EARLY_ALU_COVER: ARITH=%-d LOGIC=%-d SHIFT=%-d PASS=%-d NON_EARLY=%-d",
-                early_arith_count, early_logic_count, early_shift_count,
-                early_pass_count, non_early_alu_count);
-            $display("EARLY_ALU_FWD_COVER: RS1=%-d RS2=%-d BOTH=%-d TO_ALU=%-d TO_LOAD=%-d TO_STORE=%-d COMPLETION_SRC=%-d",
-                early_rs1_fwd_count, early_rs2_fwd_count,
-                early_both_fwd_count, early_to_alu_count,
-                early_to_load_count, early_to_store_count,
-                early_completion_source_count);
-            $display("EARLY_ALU_STATE_COVER: STALL_HOLD=%-d FLUSH_CLEAR=%-d BUBBLE_CLEAR=%-d",
-                early_stall_hold_count, early_flush_clear_count,
-                early_bubble_clear_count);
             $display("BROADCAST_COVER: ALU_LSU=%-d ALU_MUL=%-d LSU_MUL=%-d ALL=%-d",
                 completion_alu_lsu_count, completion_alu_mul_count,
                 completion_lsu_mul_count, completion_all_count);
@@ -6772,11 +6044,11 @@ end
             $display("TOKEN_FREE_COVER: NORMAL_DRAIN=%-d FLUSH_DRAIN=%-d TRAP_FREE=%-d",
                 producer_normal_drain_count, producer_flush_drain_count,
                 producer_trap_free_count);
-            $display("LSU_QUEUE_COVER: HEAD_WRAP=%-d TAIL_WRAP=%-d EMPTY=%-d NEAR_FULL=%-d FULL=%-d POP=%-d",
-                lsu_head_wrap_count, lsu_tail_wrap_count,
-                lsu_queue_empty_count, lsu_queue_near_full_count,
-                lsu_queue_full_count,
-                lsu_queue_pop_count);
+            $display("LSQ_OCCUPANCY_COVER: HEAD_WRAP=%-d TAIL_WRAP=%-d EMPTY=%-d NEAR_FULL=%-d FULL=%-d HEAD_REMOVE=%-d",
+                lsq_head_wrap_count, lsq_tail_wrap_count,
+                lsq_empty_count, lsq_near_full_count,
+                lsq_full_count,
+                lsq_head_remove_count);
         end
     endtask
 
