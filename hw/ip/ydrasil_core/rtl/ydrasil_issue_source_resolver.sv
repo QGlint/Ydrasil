@@ -98,8 +98,6 @@ import ydrasil_pkg::*;
             completion_data_i[COMPLETION_DUAL_ALU] :
         completion_hit[COMPLETION_ALU] ?
             completion_data_i[COMPLETION_ALU] :
-        completion_hit[COMPLETION_MUL] ?
-            completion_data_i[COMPLETION_MUL] :
         completion_hit[COMPLETION_LSU] ?
             completion_data_i[COMPLETION_LSU] :
         source_value_hit ? value_i :
@@ -109,7 +107,9 @@ import ydrasil_pkg::*;
     // ARF is not a legal fallback for a still-tagged source in this cycle.
     assign data_valid_o = !source_i.used || !source_nonzero ||
         !source_i.tag_valid || mdu_hit_o || dtcm_history_hit_o ||
-        (|completion_hit) ||
+        completion_hit[COMPLETION_DUAL_ALU] ||
+        completion_hit[COMPLETION_ALU] ||
+        completion_hit[COMPLETION_LSU] ||
         source_value_hit || source_slot_reallocated ||
         commit0_hit || commit1_hit;
 

@@ -87,11 +87,9 @@ import ydrasil_pkg::*;
     wire [GHR_WIDTH-1:0] ghr_lookup = spec1_advance ?
         ((ghr_after_spec0 << 1) | GHR_WIDTH'(predict1_spec_taken_i)) :
         ghr_after_spec0;
-    wire [GHR_WIDTH-1:0] ghr_value = USE_GSHARE ? ghr_lookup : '0;
-    // Both lanes are read in parallel from the same fetch word. Lane 1 keeps
-    // the same lookup checkpoint; the lane-0 decoded direction is only known
-    // after this BRAM address has been registered.
-    wire [GHR_WIDTH-1:0] lane1_ghr = ghr_value;
+    wire [GHR_WIDTH-1:0] ghr_value = ghr_lookup;
+    // Both lanes are read in parallel from the same fetch word and therefore
+    // carry the same pre-response history checkpoint.
     // Spread the existing history across every physical BHT row bit. The
     // upper row bits previously remained plain PC bits, concentrating
     // unrelated histories in the same subset of rows. Each generated bit is
@@ -111,7 +109,6 @@ import ydrasil_pkg::*;
             end
         end
     endgenerate
-    wire [BHT_ROW_WIDTH-1:0] lane1_ghr_row_mask = ghr_row_mask;
 
     wire [BTB_LOCAL_ADDR_WIDTH-1:0] predict_btb_addr = {
         predict_pc_i[ydrasil_pkg::INST_ADDR_WIDTH-1:
@@ -143,7 +140,7 @@ import ydrasil_pkg::*;
     wire [BHT_ROW_WIDTH-1:0] predict_bht_row =
         BHT_ROW_WIDTH'(predict_pc_i >> 3) ^ ghr_row_mask;
     wire [BHT_ROW_WIDTH-1:0] predict_bht_row1 =
-        BHT_ROW_WIDTH'(predict_pc1_i >> 3) ^ lane1_ghr_row_mask;
+        BHT_ROW_WIDTH'(predict_pc1_i >> 3) ^ ghr_row_mask;
     wire [BHT_INDEX_WIDTH-1:0] predict_bht_index =
         {predict_bht_row, predict_bht_bank};
     wire [BHT_INDEX_WIDTH-1:0] predict_bht_index1 =
@@ -310,7 +307,6 @@ import ydrasil_pkg::*;
     logic [BHT_INDEX_WIDTH-1:0] predict_bht_index_q;
     logic [BHT_INDEX_WIDTH-1:0] predict_bht_index1_q;
     logic [GHR_WIDTH-1:0] predict_ghr_q;
-    logic [GHR_WIDTH-1:0] predict_ghr1_q;
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -321,7 +317,6 @@ import ydrasil_pkg::*;
             predict_bht_index_q <= '0;
             predict_bht_index1_q <= '0;
             predict_ghr_q <= '0;
-            predict_ghr1_q <= '0;
         end else begin
             predict_btb_bank_q <= predict_btb_bank;
             predict_btb_bank1_q <= predict_btb_bank1;
@@ -330,7 +325,6 @@ import ydrasil_pkg::*;
             predict_bht_index_q <= predict_bht_index;
             predict_bht_index1_q <= predict_bht_index1;
             predict_ghr_q <= ghr_value;
-            predict_ghr1_q <= lane1_ghr;
         end
     end
 
@@ -460,7 +454,7 @@ import ydrasil_pkg::*;
     assign predict1_target_o = lane1_btb_target;
     assign predict1_bht_index_o = ydrasil_pkg::BP_BHT_INDEX_WIDTH'(predict_bht_index1_q);
     assign predict1_ghr_checkpoint_o =
-        ydrasil_pkg::BP_GHR_WIDTH'(predict_ghr1_q);
+        ydrasil_pkg::BP_GHR_WIDTH'(predict_ghr_q);
 
 `ifndef SYNTHESIS
     always_ff @(posedge clk) begin

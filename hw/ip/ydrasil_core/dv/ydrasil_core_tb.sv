@@ -3052,8 +3052,8 @@ end
                          raw_debug_cycle,
                          u_dut.u_ydrasil_issue_stage.lane_b_uop.pc,
                          u_dut.u_ydrasil_issue_stage.lane_b_uop.dst.rob_tag,
-                         u_dut.u_ydrasil_issue_stage.lane_b_operand_a_local,
-                         u_dut.u_ydrasil_issue_stage.lane_b_operand_b_local,
+                         u_dut.u_ydrasil_issue_stage.lane_b_operand_a_capture,
+                         u_dut.u_ydrasil_issue_stage.lane_b_operand_b_capture,
                          u_dut.u_ydrasil_issue_stage.lane_b_src0_local,
                          u_dut.u_ydrasil_issue_stage.lane_b_src1_local,
                          u_dut.u_ydrasil_issue_stage.lane_b_uop.src0.producer_tag,
@@ -4279,8 +4279,8 @@ end
                          u_dut.u_ydrasil_issue_stage.mdu_due_i.
                              producer_tracked)};
             perf_replay_wakeup_events <= perf_replay_wakeup_events +
-                {31'b0, (u_dut.u_ydrasil_issue_stage.dtcm_result_replay_valid_q ||
-                         u_dut.u_ydrasil_issue_stage.mdu_replay_valid_q)};
+                {31'b0,
+                 u_dut.u_ydrasil_issue_stage.dtcm_result_replay_valid_q};
             if (perf_issue_scan_en &&
                 (perf_empty_slots_now != perf_empty_classified_slots_now) &&
                 (perf_empty_scan_count < 16)) begin
