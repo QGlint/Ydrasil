@@ -68,6 +68,12 @@ FPU 综合产物与默认基线隔离，位于 `build/syn/pll200m-fpu/`；200MHz
 make init
 ```
 
+只初始化 RTL/仿真环境、不安装 RISC-V 交叉编译器时：
+
+```sh
+make init INIT_INSTALL_RISCV_TOOLCHAIN=0
+```
+
 编译并运行默认 CPU 仿真：
 
 ```sh
@@ -247,13 +253,13 @@ Vivado OOC 默认器件为 `xc7k325tffg900-2`，可用 `VIVADO_OOC_PART` 覆盖�
 
 ## Vivado 环境
 
-服务器上的 Vivado 入口应使用 batch 模式，不启动 GUI。顶层 Makefile 默认在 Vivado 目标中局部 source：
+服务器 `servera437` 上的 Vivado 入口应使用 batch 模式，不启动 GUI。顶层 Makefile 仅在该主机的 Vivado 目标中局部 source：
 
 ```sh
 /opt/Xilinx/Vitis/2024.2/settings64.sh
 ```
 
-如果环境不同，可以覆盖变量：
+其他主机默认不注入 Vivado settings，直接使用已有环境中的 `vivado`。如果需要局部注入，可覆盖变量：
 
 ```sh
 make syn VIVADO_SETTINGS=/path/to/settings64.sh VIVADO=/path/to/vivado
