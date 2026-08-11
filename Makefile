@@ -1229,7 +1229,7 @@ rtl-xml: $(RTL_QC_FLIST)
 		echo "[RTL] tree JSON: $(RTL_QC_TREE_JSON)"; exit 0
 
 rtl-structure-report: rtl-xml
-	@echo "[RTL] structure timing policy: fre=$(RTL_QC_FREQ_MHZ)MHz warning=$(RTL_QC_WARNING_PERIOD_NS)ns target=$(RTL_QC_TARGET_PERIOD_NS)ns"
+	@echo "[RTL] structure timing policy: fre=$(RTL_QC_FREQ_MHZ)MHz warning=$(RTL_QC_WARNING_PERIOD_NS)ns target=$(RTL_QC_TARGET_PERIOD_NS)ns weighted-limit=$(RTL_QC_TIMING_WEIGHTED_VIOLATION_LIMIT) bram-penalty=$(RTL_QC_BRAM_LAUNCH_PENALTY_DEPTH)"
 	$(PYTHON) "$(SYN_DIR)/analyze_rtl_structure.py" \
 		--input "$(RTL_QC_TREE_JSON)" --output "$(RTL_QC_STRUCTURE_JSON)" --top "$(RTL_QC_TOP)" \
 		--source-metadata "$(RTL_QC_METADATA)" \
@@ -1238,6 +1238,7 @@ rtl-structure-report: rtl-xml
 		--warning-period-ns "$(RTL_QC_WARNING_PERIOD_NS)" \
 		--timing-possible-depth "$(RTL_QC_TIMING_POSSIBLE_DEPTH)" \
 		--timing-definite-depth "$(RTL_QC_TIMING_DEFINITE_DEPTH)" \
+		--timing-path-weighted-violation-limit "$(RTL_QC_TIMING_WEIGHTED_VIOLATION_LIMIT)" \
 		--lutram-possible-depth "$(RTL_QC_LUTRAM_POSSIBLE_DEPTH)" \
 		--fanout-timing-min-depth "$(RTL_QC_FANOUT_TIMING_MIN_DEPTH)" \
 		--bram-launch-penalty-depth "$(RTL_QC_BRAM_LAUNCH_PENALTY_DEPTH)" \

@@ -275,21 +275,27 @@ RTL_QC_ERROR_LIMIT ?= 50
 # At 200 MHz, depth 33 closes timing and depth 34 remains the zero-false-positive
 # severe boundary across the archive.  At 250 MHz, the current depth-33 fetch
 # path fails at -0.846 ns, so it is an ERROR while 3.6 ns remains the warning
-# margin.  BRAM clock-to-out is device-specific and remains unchanged.
+# margin.  With the BRAM launch penalty included, the weighted limit 1000 sits
+# above the archived passing maximum (975) while the current failing design is
+# 1301.  This also covers the short-logic BRAM paths seen in routed violations.
+# BRAM clock-to-out is device-specific and remains unchanged.
 RTL_QC_TARGET_PERIOD_NS_200 ?= 5.0
 RTL_QC_WARNING_PERIOD_NS_200 ?= 4.5
 RTL_QC_TIMING_POSSIBLE_DEPTH_200 ?= 9
 RTL_QC_TIMING_DEFINITE_DEPTH_200 ?= 34
+RTL_QC_TIMING_WEIGHTED_VIOLATION_LIMIT_200 ?= 1000
 RTL_QC_LUTRAM_POSSIBLE_DEPTH_200 ?= 6
 RTL_QC_TARGET_PERIOD_NS_250 ?= 4.0
 RTL_QC_WARNING_PERIOD_NS_250 ?= 3.6
 RTL_QC_TIMING_POSSIBLE_DEPTH_250 ?= 7
 RTL_QC_TIMING_DEFINITE_DEPTH_250 ?= 33
+RTL_QC_TIMING_WEIGHTED_VIOLATION_LIMIT_250 ?= 1000
 RTL_QC_LUTRAM_POSSIBLE_DEPTH_250 ?= 5
 RTL_QC_TARGET_PERIOD_NS ?= $(RTL_QC_TARGET_PERIOD_NS_$(RTL_QC_FREQ_MHZ))
 RTL_QC_WARNING_PERIOD_NS ?= $(RTL_QC_WARNING_PERIOD_NS_$(RTL_QC_FREQ_MHZ))
 RTL_QC_TIMING_POSSIBLE_DEPTH ?= $(RTL_QC_TIMING_POSSIBLE_DEPTH_$(RTL_QC_FREQ_MHZ))
 RTL_QC_TIMING_DEFINITE_DEPTH ?= $(RTL_QC_TIMING_DEFINITE_DEPTH_$(RTL_QC_FREQ_MHZ))
+RTL_QC_TIMING_WEIGHTED_VIOLATION_LIMIT ?= $(RTL_QC_TIMING_WEIGHTED_VIOLATION_LIMIT_$(RTL_QC_FREQ_MHZ))
 RTL_QC_LUTRAM_POSSIBLE_DEPTH ?= $(RTL_QC_LUTRAM_POSSIBLE_DEPTH_$(RTL_QC_FREQ_MHZ))
 RTL_QC_FANOUT_TIMING_MIN_DEPTH ?= 3
 RTL_QC_BRAM_LAUNCH_PENALTY_DEPTH ?= 6

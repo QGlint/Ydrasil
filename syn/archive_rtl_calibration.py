@@ -121,6 +121,15 @@ def main() -> int:
             "timing_path_warning_count",
             structure.get("summary", {}).get("timing_path_high_count", 0),
         ),
+        "timing_path_weighted_violation_total": structure.get("summary", {}).get(
+            "timing_path_weighted_violation_total", 0
+        ),
+        "timing_path_weighted_violation_limit": structure.get("summary", {}).get(
+            "timing_path_weighted_violation_limit"
+        ),
+        "timing_path_bram_launch_penalty_depth": structure.get("summary", {}).get(
+            "timing_path_bram_launch_penalty_depth"
+        ),
         "path_family_training": {
             key: comparison.get("path_family_training", {}).get(key)
             for key in ("schema_version", "dataset_count", "path_count", "family_count")

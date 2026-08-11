@@ -235,6 +235,12 @@ make yosys-slang-gate YOSYS_BASELINE_STAT=build/yosys-slang/base/stat.json
 `critical_register_to_boundary_paths` 还保留展开后的信号链和 endpoint 类型。
 Verilator tree 中 `direction=OUTPUT,varType=WIRE` 也会作为普通 SV 输出端口，
 而函数自动变量不会被误当成模块输出。
+时序路径门禁除保留单路径 ERROR 外，还计算加权违例总值：普通路径贡献
+`max(0, structural_depth - possible_depth + 1)`，BRAM 发起路径还会加入
+`RTL_QC_BRAM_LAUNCH_PENALTY_DEPTH`，覆盖 clock-to-out 已消耗时序预算但后级
+逻辑层数较少的路径。总值达到按频率配置的
+`RTL_QC_TIMING_WEIGHTED_VIOLATION_LIMIT` 时失败。这样多条接近 ERROR 边界的
+长路径会累积触发门禁，不会被短路径数量稀释。
 Yosys 目标仍保留为可选交叉检查，可通过 `YOSYS_TOP`、`YOSYS_BENDER_DIR`、`YOSYS_RUN`
 和 `YOSYS_WITH_WRAPPERS` 覆盖。
 Vivado OOC 默认器件为 `xc7k325tffg900-2`，可用 `VIVADO_OOC_PART` 覆盖。

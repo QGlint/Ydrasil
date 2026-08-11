@@ -51,6 +51,10 @@ OPERATOR_ALIASES = {
 }
 
 TIMING_SEVERITY_RANK = {"ADVISORY": 0, "WARNING": 1, "ERROR": 2}
+TIMING_PATH_WEIGHT_MODEL = (
+    "sum(max(0, structural_depth + bram_launch_penalty_depth "
+    "- possible_depth_threshold + 1))"
+)
 
 
 def classify_timing_path_severity(
@@ -74,6 +78,49 @@ def classify_timing_path_severity(
     if force_warning or conservative_delay_ns >= warning_period_ns:
         return "WARNING"
     return "ADVISORY"
+
+
+def timing_path_weighted_violation(
+    structural_depth: int,
+    possible_depth: int,
+) -> int:
+    """Charge every path level at or above the possible-risk boundary."""
+    return max(0, int(structural_depth) - int(possible_depth) + 1)
+
+
+def apply_weighted_timing_path_policy(
+    hierarchy: dict[str, Any],
+    possible_depth: int,
+    violation_limit: int,
+    bram_launch_penalty_depth: int = 6,
+) -> int:
+    """Attach per-path weights and the aggregate structural violation gate."""
+    total = 0
+    for item in hierarchy.get("timing_path_risks", []):
+        launch_penalty = (
+            bram_launch_penalty_depth
+            if item.get("launch_kind") == "bram_output"
+            else 0
+        )
+        weighted_depth = int(item.get("structural_depth", 0)) + launch_penalty
+        violation = timing_path_weighted_violation(
+            weighted_depth,
+            possible_depth,
+        )
+        item["weighted_structural_depth"] = weighted_depth
+        item["weighted_bram_launch_penalty_depth"] = launch_penalty
+        item["weighted_violation"] = violation
+        total += violation
+    hierarchy["timing_path_weight_model"] = TIMING_PATH_WEIGHT_MODEL
+    hierarchy["timing_path_weighted_violation_total"] = total
+    hierarchy["timing_path_bram_launch_penalty_depth"] = (
+        bram_launch_penalty_depth
+    )
+    hierarchy["timing_path_weighted_violation_limit"] = violation_limit
+    hierarchy["timing_path_weighted_violation_exceeded"] = (
+        total >= violation_limit
+    )
+    return total
 
 
 def operator_depth_cost(node: dict[str, Any], index: dict[str, dict[str, Any]]) -> int:
@@ -3176,6 +3223,11 @@ def main() -> int:
     parser.add_argument("--warning-period-ns", type=float, default=4.5)
     parser.add_argument("--timing-possible-depth", type=int, default=9)
     parser.add_argument("--timing-definite-depth", type=int, default=34)
+    parser.add_argument(
+        "--timing-path-weighted-violation-limit",
+        type=int,
+        default=None,
+    )
     parser.add_argument("--lutram-possible-depth", type=int, default=6)
     parser.add_argument("--fanout-timing-min-depth", type=int, default=3)
     parser.add_argument("--bram-launch-penalty-depth", type=int, default=6)
@@ -3184,13 +3236,52 @@ def main() -> int:
     args = parser.parse_args()
     if args.warning_period_ns > args.target_period_ns:
         parser.error("--warning-period-ns must not exceed --target-period-ns")
+    if args.timing_possible_depth < 0:
+        parser.error("--timing-possible-depth must not be negative")
+    if (
+        args.timing_path_weighted_violation_limit is not None
+        and args.timing_path_weighted_violation_limit <= 0
+    ):
+        parser.error("--timing-path-weighted-violation-limit must be positive")
     if args.check_output:
         try:
             checked = json.loads(args.check_output.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             print(f"error: cannot read structure report {args.check_output}: {exc}", file=sys.stderr)
             return 2
-        path_risks = checked.get("hierarchical", {}).get("timing_path_risks", [])
+        checked_summary = checked.get("summary", {})
+        checked_hierarchy = checked.get("hierarchical", {})
+        path_risks = checked_hierarchy.get("timing_path_risks", [])
+        possible_depth = int(checked_summary.get(
+            "timing_possible_depth_threshold",
+            args.timing_possible_depth,
+        ))
+        violation_limit = int(
+            args.timing_path_weighted_violation_limit
+            if args.timing_path_weighted_violation_limit is not None
+            else checked_summary.get(
+                "timing_path_weighted_violation_limit",
+                checked_hierarchy.get(
+                    "timing_path_weighted_violation_limit",
+                    1000,
+                ),
+            )
+        )
+        weighted_total = apply_weighted_timing_path_policy(
+            checked_hierarchy,
+            possible_depth,
+            violation_limit,
+            int(checked_summary.get(
+                "timing_path_bram_launch_penalty_depth",
+                checked_hierarchy.get(
+                    "timing_path_bram_launch_penalty_depth",
+                    args.bram_launch_penalty_depth,
+                ),
+            )),
+        )
+        weighted_exceeded = bool(
+            checked_hierarchy.get("timing_path_weighted_violation_exceeded")
+        )
         failures = [
             item for item in path_risks
             if item.get("severity") in {"ERROR", "FAIL"}
@@ -3215,10 +3306,35 @@ def main() -> int:
                 f"bounded-depth={cycle.get('bounded_path_depth')} "
                 f"witness={witness[:2]}"
             )
-        if failures or cycles:
+        if weighted_exceeded:
+            print(
+                "ERROR aggregate_timing_path_violation: "
+                f"weighted-total={weighted_total} limit={violation_limit} "
+                f"model={TIMING_PATH_WEIGHT_MODEL}"
+            )
+            contributors = sorted(
+                (
+                    item for item in path_risks
+                    if int(item.get("weighted_violation", 0)) > 0
+                ),
+                key=lambda item: (
+                    -int(item.get("weighted_violation", 0)),
+                    str(item.get("key", "")),
+                ),
+            )
+            for item in contributors[:5]:
+                print(
+                    f"CONTRIBUTOR {item.get('key')}: "
+                    f"weighted={item.get('weighted_violation', 0)} "
+                    f"depth={item.get('structural_depth', 0)} "
+                    f"weighted-depth={item.get('weighted_structural_depth', 0)} "
+                    f"bram-penalty={item.get('weighted_bram_launch_penalty_depth', 0)}"
+                )
+        if failures or cycles or weighted_exceeded:
             print(
                 f"error: {len(failures)} structural timing path families and "
-                f"{len(cycles)} combinational loops fail the gate",
+                f"{len(cycles)} combinational loops; weighted timing-path "
+                f"violation total={weighted_total} limit={violation_limit}",
                 file=sys.stderr,
             )
             return 1
@@ -3274,6 +3390,7 @@ def main() -> int:
         args.target_period_ns,
         memory_geometry_profile=geometry_profile,
     )
+    violation_limit = args.timing_path_weighted_violation_limit or 1000
     hierarchy = hierarchical_report(
         hierarchy_top,
         reports,
@@ -3282,6 +3399,12 @@ def main() -> int:
         warning_period_ns=args.warning_period_ns,
         definite_depth=args.timing_definite_depth,
         bram_clock_to_out_ns=args.bram_clock_to_out_ns,
+    )
+    apply_weighted_timing_path_policy(
+        hierarchy,
+        args.timing_possible_depth,
+        violation_limit,
+        args.bram_launch_penalty_depth,
     )
     for report in reports:
         report_hierarchy = hierarchy if report.get("name") == hierarchy_top else None
@@ -3344,6 +3467,21 @@ def main() -> int:
         "timing_definite_depth_threshold": args.timing_definite_depth,
         "timing_path_error_count": hierarchy.get("timing_path_error_count", 0),
         "timing_path_warning_count": hierarchy.get("timing_path_warning_count", 0),
+        "timing_path_weight_model": hierarchy.get("timing_path_weight_model"),
+        "timing_path_weighted_violation_total": hierarchy.get(
+            "timing_path_weighted_violation_total", 0
+        ),
+        "timing_path_bram_launch_penalty_depth": hierarchy.get(
+            "timing_path_bram_launch_penalty_depth",
+            args.bram_launch_penalty_depth,
+        ),
+        "timing_path_weighted_violation_limit": hierarchy.get(
+            "timing_path_weighted_violation_limit",
+            violation_limit,
+        ),
+        "timing_path_weighted_violation_exceeded": hierarchy.get(
+            "timing_path_weighted_violation_exceeded", False
+        ),
         "timing_path_error_families": [
             item.get("key") for item in hierarchy.get("timing_path_risks", [])
             if item.get("severity") == "ERROR"
@@ -3382,9 +3520,16 @@ def main() -> int:
             f"{item.get('severity')} {item.get('key')}: "
             f"estimated={item.get('estimated_upper_delay_ns')}ns "
             f"slack={item.get('estimated_slack_ns')}ns depth={item.get('structural_depth')} "
+            f"weighted={item.get('weighted_violation', 0)} "
             f"{item.get('source')} -> {item.get('destination')} "
             f"reasons={','.join(item.get('reasons', []))}"
         )
+    print(
+        "timing-path weighted-violation-total="
+        f"{hierarchy.get('timing_path_weighted_violation_total', 0)} "
+        f"limit={hierarchy.get('timing_path_weighted_violation_limit')} "
+        f"exceeded={hierarchy.get('timing_path_weighted_violation_exceeded', False)}"
+    )
     for report in reports:
         flags = report["risk_flags"]
         if flags["combinational_loop"] or flags["hierarchical_combinational_loop"] or flags["self_feedback"] or flags["high_fanout_over_32"] or flags["deep_combination_over_8"] or flags["long_register_to_boundary_over_8"] or flags.get("long_input_to_control_over_8") or flags["wide_mux_or_work"] or flags["cross_module_combination_not_cut"]:
@@ -3412,7 +3557,10 @@ def main() -> int:
                   f"hierarchical-cycle-path={report['combination']['hierarchical'].get('cycle_max_timing_path_depth', 0)}")
         if report["combinational_outputs"]:
             print(f"{report['name']}: combinational outputs: {', '.join(report['combinational_outputs'])}")
-    if args.fail_on_timing_path and hierarchy.get("timing_path_error_count", 0):
+    if args.fail_on_timing_path and (
+        hierarchy.get("timing_path_error_count", 0)
+        or hierarchy.get("timing_path_weighted_violation_exceeded", False)
+    ):
         return 1
     return 0
 
