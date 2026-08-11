@@ -347,7 +347,9 @@ SYN_LOG_DIR ?= $(SYN_FREQ_BUILD_DIR)/log
 SYN_ARTIFACT_DIR ?= $(SYN_FREQ_BUILD_DIR)/artifacts
 SYN_BIT_DIR ?= $(SYN_FREQ_BUILD_DIR)/bit
 SYN_CHECKPOINT_DIR ?= $(SYN_FREQ_BUILD_DIR)/checkpoints
-SYN_MSH_PROFILE ?= Os
+# The profile controls RT-Thread, monitor, and sensor code. CoreMark sources
+# retain their separate RTTHREAD_COREMARK_CORE_CFLAGS optimization setting.
+SYN_MSH_PROFILE ?= O2
 SYN_MSH_IMAGE_DIR ?= $(BUILD_DIR)/app/rtthread-coremark/$(SYN_MSH_PROFILE)
 SYN_MSH_ITCM ?= $(SYN_MSH_IMAGE_DIR)/rtthread_coremark.itcm
 SYN_MSH_DTCM ?= $(SYN_MSH_IMAGE_DIR)/rtthread_coremark.dtcm
@@ -1127,8 +1129,8 @@ syn-stage-memory: syn-stage-xpr rtthread-coremark-build-$(SYN_MSH_PROFILE)
 	$(PYTHON) "$(SYN_DIR)/prepare_memory_init.py" \
 		--input "$(SYN_MSH_DTCM)" --width $(SYN_DTCM_WIDTH) --depth $(SYN_DTCM_WORDS) \
 		--mem "$(SYN_PREPROJECT_DTCM_MEM)" --coe "$(SYN_PREPROJECT_DTCM_COE)"
-	@printf 'image=rtthread_coremark\nprofile=%s\nitcm_width=%s\ndtcm_width=%s\nitcm_words=%s\ndtcm_words=%s\n' \
-		"$(SYN_MSH_PROFILE)" "$(SYN_ITCM_WIDTH)" "$(SYN_DTCM_WIDTH)" "$(SYN_ITCM_WORDS)" "$(SYN_DTCM_WORDS)" \
+	@printf 'image=rtthread_coremark\nprofile=%s\ncpu_freq_hz=%s\nitcm_width=%s\ndtcm_width=%s\nitcm_words=%s\ndtcm_words=%s\n' \
+		"$(SYN_MSH_PROFILE)" "$(RTTHREAD_CPU_FREQ_HZ)" "$(SYN_ITCM_WIDTH)" "$(SYN_DTCM_WIDTH)" "$(SYN_ITCM_WORDS)" "$(SYN_DTCM_WORDS)" \
 		> "$(SYN_PREPROJECT_MEMORY_DIR)/manifest.txt"
 
 ifeq ($(SYN_REUSE_STAGE),1)
@@ -1517,7 +1519,7 @@ rtthread-utest-clean:
 define RTTHREAD_COREMARK_PROFILE_template
 rtthread-coremark-build-$(1):
 	@$(MAKE) --no-print-directory -C sw rtthread-coremark-build-$(1) \
-		RTTHREAD_CPU_FREQ_HZ="$(RTTHREAD_CPU_FREQ_HZ)"
+		RTTHREAD_CPU_FREQ_HZ="$$(RTTHREAD_CPU_FREQ_HZ)"
 
 rtthread-coremark-sim-$(1):
 	@$(MAKE) --no-print-directory -C sw/bsp/rtthread coremark-sim-$(1)

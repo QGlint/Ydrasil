@@ -10,9 +10,7 @@ GIT_COMMON_DIR := $(shell git -C "$(PROJECT_ROOT)" rev-parse \
 PRIMARY_WORKTREE_ROOT := $(patsubst %/.git,%,$(GIT_COMMON_DIR))
 LOCAL_RISCV_TOOLCHAIN := $(PROJECT_ROOT)/tools/riscv
 PRIMARY_RISCV_TOOLCHAIN := $(PRIMARY_WORKTREE_ROOT)/tools/riscv
-RISCV_TOOLCHAIN_ROOT ?= $(if \
-	$(wildcard $(LOCAL_RISCV_TOOLCHAIN)/bin/riscv64-unknown-elf-gcc), \
-	$(LOCAL_RISCV_TOOLCHAIN),$(PRIMARY_RISCV_TOOLCHAIN))
+RISCV_TOOLCHAIN_ROOT ?= $(if $(wildcard $(LOCAL_RISCV_TOOLCHAIN)/bin/riscv64-unknown-elf-gcc),$(LOCAL_RISCV_TOOLCHAIN),$(PRIMARY_RISCV_TOOLCHAIN))
 RISCV_TOOLCHAIN_BIN ?= $(RISCV_TOOLCHAIN_ROOT)/bin
 RISCV_TOOLCHAIN_TRIPLE ?= riscv64-unknown-elf
 override RISCV_TOOLCHAIN_PREFIX := $(RISCV_TOOLCHAIN_BIN)/$(RISCV_TOOLCHAIN_TRIPLE)
@@ -127,7 +125,7 @@ RTTHREAD_SCONS ?= $(if $(strip $(SCONS)),$(SCONS),scons)
 RTTHREAD_JOBS ?= $(shell nproc 2>/dev/null || echo 1)
 RTTHREAD_APP ?= rtthread-coremark
 RTTHREAD_PROFILE ?= monitor
-RTTHREAD_OPT ?= -Os
+RTTHREAD_OPT ?= -O2
 RTTHREAD_ITERATIONS ?= 10000
 RTTHREAD_CPU_FREQ_HZ ?= 150000000
 RTTHREAD_OUTPUT_DIR ?= $(PROJECT_ROOT)/build/app/rtthread
@@ -162,10 +160,9 @@ RTTHREAD_COREMARK_BEST_CFLAGS ?= -O3 -funroll-loops \
 	-fno-if-conversion -fno-if-conversion2 -fno-code-hoisting \
 	-fno-tree-dse -fno-section-anchors \
 	-fno-tree-forwprop -fno-tree-partial-pre
-# Nano's default profile favors ITCM capacity. The former aggressive CoreMark
-# tuning remains available through RTTHREAD_COREMARK_BEST_CFLAGS when a
-# performance-only build is required.
-RTTHREAD_COREMARK_CORE_CFLAGS ?= -Os
+# Apply the measured best flags only to CoreMark. The RT-Thread kernel,
+# monitor glue, drivers, and sensor code retain the selected profile flags.
+RTTHREAD_COREMARK_CORE_CFLAGS ?= $(RTTHREAD_COREMARK_BEST_CFLAGS)
 RTTHREAD_COREMARK_OUTPUT_ROOT ?= $(PROJECT_ROOT)/build/app/rtthread-coremark
 RTTHREAD_COREMARK_LINKER ?= $(BSP_LINKER_SCRIPT)
 RTTHREAD_COREMARK_ITERATIONS ?= 10000

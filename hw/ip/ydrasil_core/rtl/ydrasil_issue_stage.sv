@@ -1870,17 +1870,27 @@ import ydrasil_pkg::*;
         early_main_bypass_data_i :
         (issue_pkt_i.src1_bypass == BYPASS_LANE1) ?
         early_dual_bypass_data_i : slot0_src1;
-    wire [DATA_WIDTH-1:0] slot1_src0_local =
-        (issue_pkt1_i.src0_bypass == BYPASS_LANE0) ?
-        early_main_bypass_data_i :
-        (issue_pkt1_i.src0_bypass == BYPASS_LANE1) ?
-        early_dual_bypass_data_i : slot1_src0;
-    wire [DATA_WIDTH-1:0] slot1_src1_local =
-        (issue_pkt1_i.src1_bypass == BYPASS_LANE0) ?
-        early_main_bypass_data_i :
-        (issue_pkt1_i.src1_bypass == BYPASS_LANE1) ?
-        early_dual_bypass_data_i : slot1_src1;
     wire lane_b_uses_slot0 = head0_b_only;
+    // Lane B consumes exactly one Select slot.  Resolve that slot before
+    // choosing its fast source so the lane-B data path has one bypass mux,
+    // rather than a mux per slot followed by a slot mux.  The selects are the
+    // same registered packet fields used by the original two-stage form.
+    wire lane_b_src0_fast_main = lane_b_uses_slot0 ?
+        (issue_pkt_i.src0_bypass == BYPASS_LANE0) :
+        (issue_pkt1_i.src0_bypass == BYPASS_LANE0);
+    wire lane_b_src0_fast_dual = lane_b_uses_slot0 ?
+        (issue_pkt_i.src0_bypass == BYPASS_LANE1) :
+        (issue_pkt1_i.src0_bypass == BYPASS_LANE1);
+    wire lane_b_src1_fast_main = lane_b_uses_slot0 ?
+        (issue_pkt_i.src1_bypass == BYPASS_LANE0) :
+        (issue_pkt1_i.src1_bypass == BYPASS_LANE0);
+    wire lane_b_src1_fast_dual = lane_b_uses_slot0 ?
+        (issue_pkt_i.src1_bypass == BYPASS_LANE1) :
+        (issue_pkt1_i.src1_bypass == BYPASS_LANE1);
+    wire [DATA_WIDTH-1:0] lane_b_src0_resolved = lane_b_uses_slot0 ?
+        slot0_src0 : slot1_src0;
+    wire [DATA_WIDTH-1:0] lane_b_src1_resolved = lane_b_uses_slot0 ?
+        slot0_src1 : slot1_src1;
     wire lane_a_src1_ready = src1_ready;
     wire slot0_src0_contract_valid = slot0_src0_data_valid ||
         slot0_src0_dtcm_hit || (issue_pkt_i.src0_bypass != BYPASS_NONE);
@@ -1894,10 +1904,12 @@ import ydrasil_pkg::*;
     wire lane_b_src1_ready = lane_b_uses_slot0 ? src1_ready : src3_ready;
     wire [DATA_WIDTH-1:0] lane_a_src0_local = slot0_src0_local;
     wire [DATA_WIDTH-1:0] lane_a_src1_local = slot0_src1_local;
-    wire [DATA_WIDTH-1:0] lane_b_src0_local = lane_b_uses_slot0 ?
-        slot0_src0_local : slot1_src0_local;
-    wire [DATA_WIDTH-1:0] lane_b_src1_local = lane_b_uses_slot0 ?
-        slot0_src1_local : slot1_src1_local;
+    wire [DATA_WIDTH-1:0] lane_b_src0_local = lane_b_src0_fast_main ?
+        early_main_bypass_data_i : lane_b_src0_fast_dual ?
+        early_dual_bypass_data_i : lane_b_src0_resolved;
+    wire [DATA_WIDTH-1:0] lane_b_src1_local = lane_b_src1_fast_main ?
+        early_main_bypass_data_i : lane_b_src1_fast_dual ?
+        early_dual_bypass_data_i : lane_b_src1_resolved;
     wire lane_a_src0_dtcm_hit = slot0_src0_dtcm_hit;
     wire lane_a_src1_dtcm_hit = slot0_src1_dtcm_hit;
     wire lane_b_src0_dtcm_hit = (lane_b_uses_slot0 ?
