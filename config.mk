@@ -134,7 +134,8 @@ ifneq ($(steps),)
 endif
 
 ifeq ($(PKG_KIND),arch)
-TOOLS ?= verilator gtkwave riscv64-elf-gcc riscv64-elf-newlib riscv64-elf-gdb qemu-system-riscv
+RISCV_TOOLCHAIN_PACKAGES ?= riscv64-elf-gcc riscv64-elf-newlib
+TOOLS ?= verilator gtkwave $(RISCV_TOOLCHAIN_PACKAGES) riscv64-elf-gdb qemu-system-riscv
 SPIKE_BUILD_TOOLS ?= autoconf automake gcc make dtc boost
 PKG_EXISTS ?= pacman -Qs -q
 PKG_MANAGER ?= sudo pacman -S --needed
@@ -142,7 +143,8 @@ PKG_UPDATE ?= true
 GDB ?= gdb-multiarch
 QEMU ?= qemu-system-riscv
 else ifeq ($(PKG_KIND),ubuntu)
-TOOLS ?= verilator gtkwave gcc-riscv64-unknown-elf binutils-riscv64-unknown-elf picolibc-riscv64-unknown-elf gdb-multiarch qemu-system-misc
+RISCV_TOOLCHAIN_PACKAGES ?= gcc-riscv64-unknown-elf binutils-riscv64-unknown-elf picolibc-riscv64-unknown-elf
+TOOLS ?= verilator gtkwave $(RISCV_TOOLCHAIN_PACKAGES) gdb-multiarch qemu-system-misc
 SPIKE_BUILD_TOOLS ?= autoconf automake gcc g++ make device-tree-compiler libboost-dev libboost-regex-dev
 PKG_EXISTS ?= dpkg -l
 PKG_MANAGER ?= sudo apt-get install -y
@@ -183,6 +185,7 @@ PKG_UPDATE ?= true
 GDB ?= gdb-multiarch
 QEMU ?= qemu-system-riscv
 SPIKE_BUILD_TOOLS ?= autoconf automake gcc g++ make device-tree-compiler boost
+RISCV_TOOLCHAIN_PACKAGES ?=
 endif
 
 
@@ -197,9 +200,7 @@ GIT_COMMON_DIR := $(shell git -C "$(PROJECT_ROOT)" rev-parse \
 PRIMARY_WORKTREE_ROOT := $(patsubst %/.git,%,$(GIT_COMMON_DIR))
 LOCAL_RISCV_TOOLCHAIN := $(PROJECT_ROOT)/tools/riscv
 PRIMARY_RISCV_TOOLCHAIN := $(PRIMARY_WORKTREE_ROOT)/tools/riscv
-RISCV_TOOLCHAIN_ROOT ?= $(if \
-	$(wildcard $(LOCAL_RISCV_TOOLCHAIN)/bin/riscv64-unknown-elf-gcc), \
-	$(LOCAL_RISCV_TOOLCHAIN),$(PRIMARY_RISCV_TOOLCHAIN))
+RISCV_TOOLCHAIN_ROOT ?= $(if $(wildcard $(LOCAL_RISCV_TOOLCHAIN)/bin/riscv64-unknown-elf-gcc),$(LOCAL_RISCV_TOOLCHAIN),$(PRIMARY_RISCV_TOOLCHAIN))
 RISCV_TOOLCHAIN_BIN ?= $(RISCV_TOOLCHAIN_ROOT)/bin
 RISCV_TOOLCHAIN_TRIPLE ?= riscv64-unknown-elf
 override RISCV_PREFIX := $(RISCV_TOOLCHAIN_TRIPLE)
@@ -210,8 +211,14 @@ RISCV_TOOLCHAIN_MISSING := $(strip $(shell \
 		path="$(RISCV_TOOLCHAIN_PREFIX)-$$tool"; \
 		if [ ! -x "$$path" ]; then printf '%s ' "$$path"; fi; \
 	done))
+RISCV_TOOLCHAIN_FREE_GOALS := init check_deps install-bender get_spike \
+	download_and_extract_spike check_spike_prebuilt_abi build_spike_from_source
+RISCV_TOOLCHAIN_REQUIRED_GOALS := $(filter-out $(RISCV_TOOLCHAIN_FREE_GOALS),$(MAKECMDGOALS))
+RISCV_TOOLCHAIN_CHECK ?= $(if $(or $(RISCV_TOOLCHAIN_REQUIRED_GOALS),$(if $(MAKECMDGOALS),,1)),1,0)
+ifeq ($(RISCV_TOOLCHAIN_CHECK),1)
 ifneq ($(RISCV_TOOLCHAIN_MISSING),)
 $(error Required RISC-V toolchain is missing or not executable: $(RISCV_TOOLCHAIN_MISSING). Expected tools under $(RISCV_TOOLCHAIN_BIN); refusing to use a system compiler)
+endif
 endif
 
 override CC := $(RISCV_TOOLCHAIN_PREFIX)-gcc

@@ -365,11 +365,16 @@ SYN_DTCM_WIDTH ?= 32
 SYN_TIMING_SUMMARY_MAX_PATHS ?= 5000
 SYN_TIMING_PATH_MAX_PATHS ?= 5000
 SYN_TIMING_NWORST ?= 1
-SYN_JOBS ?= $(shell nproc)
 ifeq ($(HOSTNAME),servera437)
+SYN_JOBS ?= $(shell nproc)
 SYN_IMPL_RUNS ?= 5
 SYN_THREADS_PER_RUN ?= 8
+else ifeq ($(HOSTNAME),QGlint-Ar)
+SYN_JOBS ?= 16
+SYN_IMPL_RUNS ?= 1
+SYN_THREADS_PER_RUN ?= 16
 else
+SYN_JOBS ?= $(shell nproc)
 SYN_IMPL_RUNS ?= 1
 SYN_THREADS_PER_RUN ?= $(shell nproc)
 endif
@@ -386,9 +391,13 @@ SYN_FULL_REPORTS ?= 0
 SYN_POST_ROUTE_PHYSOPT ?= 0
 SYN_SWEEP_POST_ROUTE_PHYSOPT ?= 0
 VIVADO ?= vivado
+ifeq ($(HOSTNAME),servera437)
 VIVADO_SETTINGS ?= /opt/Xilinx/Vitis/2024.2/settings64.sh
+else
+VIVADO_SETTINGS ?=
+endif
 VIVADO_LICENSE_FILE ?= $(firstword $(wildcard $(HOME)/opt/vivado_2037.lic $(HOME)/*.lic $(HOME)/.Xilinx/*.lic))
-BENDER_INSTALL_URL ?= https://github.com/pulp-platform/bender/releases/download/v0.32.0/bender-installer.sh
+BENDER_INSTALL_URL ?= https://github.com/pulp-platform/bender/releases/download/v0.32.1/bender-installer.sh
 
 ifneq ($(VIVADO_LICENSE_FILE),)
 export XILINXD_LICENSE_FILE := $(VIVADO_LICENSE_FILE)
@@ -978,6 +987,11 @@ synf: SYN_IMPL_MODE := sweep
 synf: SYN_JOBS := 40
 synf: SYN_IMPL_RUNS := 4
 synf: SYN_THREADS_PER_RUN := 8
+else ifeq ($(HOSTNAME),QGlint-Ar)
+synf: SYN_IMPL_MODE := extreme
+synf: SYN_JOBS := 16
+synf: SYN_IMPL_RUNS := 1
+synf: SYN_THREADS_PER_RUN := 16
 else
 synf: SYN_IMPL_MODE := extreme
 synf: SYN_JOBS := 1
@@ -1010,6 +1024,10 @@ ifeq ($(HOSTNAME),servera437)
 syn225 syn240 syn250: SYN_JOBS := 40
 syn225 syn240 syn250: SYN_IMPL_RUNS := 5
 syn225 syn240 syn250: SYN_THREADS_PER_RUN := 8
+else ifeq ($(HOSTNAME),QGlint-Ar)
+syn225 syn240 syn250: SYN_JOBS := 16
+syn225 syn240 syn250: SYN_IMPL_RUNS := 1
+syn225 syn240 syn250: SYN_THREADS_PER_RUN := 16
 else
 syn225 syn240 syn250: SYN_JOBS := 1
 syn225 syn240 syn250: SYN_IMPL_RUNS := 1
@@ -1141,7 +1159,11 @@ syn-reuse-stage-check:
 
 syn-vivado: $(SYN_VIVADO_PREREQS)
 	@mkdir -p $(SYN_REPORT_DIR) $(SYN_LOG_DIR) $(SYN_ARTIFACT_DIR)
-	. $(VIVADO_SETTINGS) && $(VIVADO) -mode batch -nojournal -log $(SYN_LOG_DIR)/vivado.log \
+	@if [ -n "$(VIVADO_SETTINGS)" ]; then \
+		test -f "$(VIVADO_SETTINGS)" || { echo "Error: VIVADO_SETTINGS not found: $(VIVADO_SETTINGS)" >&2; exit 2; }; \
+		. "$(VIVADO_SETTINGS)"; \
+	fi; \
+	$(VIVADO) -mode batch -nojournal -log $(SYN_LOG_DIR)/vivado.log \
 		-source $(SYN_DIR)/run_vivado.tcl \
 		-tclargs \
 		-xpr $(SYN_XPR) \
@@ -1385,8 +1407,16 @@ $(VIVADO_OOC_FLIST): $(PROJECT_ROOT)/Makefile $(PROJECT_ROOT)/config.mk $(SYN_DI
 		--wrapper-dir "$(RTL_QC_WRAPPER_DIR)" --out "$@" --metadata "$(VIVADO_OOC_METADATA)"
 
 
+# Set to 0 for RTL-only setup. Software build targets still require the
+# repository RISC-V toolchain when they are invoked.
+INIT_INSTALL_RISCV_TOOLCHAIN ?= 1
+INIT_TOOLS := $(TOOLS)
+ifeq ($(INIT_INSTALL_RISCV_TOOLCHAIN),0)
+INIT_TOOLS := $(filter-out $(RISCV_TOOLCHAIN_PACKAGES),$(INIT_TOOLS))
+endif
+
 init:
-	@$(MAKE) check_deps
+	@$(MAKE) check_deps TOOLS="$(INIT_TOOLS)"
 	@$(MAKE) install-bender
 	git submodule update --init --recursive
 	@$(MAKE) get_spike
