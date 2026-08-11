@@ -8,7 +8,7 @@ IP   ?= ydrasil_core
 VERILATOR_MOD ?= cc
 UVM ?= 0
 USE_BENDER ?= 1
-BENDER ?= bender
+BENDER ?= $(HOME)/.cargo/bin/bender
 VERILATOR_TRACE ?= 1
 DIV_IMPL ?= lzc
 YDRASIL_PRODUCER_NUM ?= 12
@@ -205,7 +205,7 @@ RISCV_TOOLCHAIN_BIN ?= $(RISCV_TOOLCHAIN_ROOT)/bin
 RISCV_TOOLCHAIN_TRIPLE ?= riscv64-unknown-elf
 override RISCV_PREFIX := $(RISCV_TOOLCHAIN_TRIPLE)
 RISCV_TOOLCHAIN_PREFIX := $(RISCV_TOOLCHAIN_BIN)/$(RISCV_TOOLCHAIN_TRIPLE)
-RISCV_TOOLCHAIN_TOOLS := gcc g++ ar objcopy objdump size
+RISCV_TOOLCHAIN_TOOLS := gcc g++ ar objcopy objdump size nm
 RISCV_TOOLCHAIN_MISSING := $(strip $(shell \
 	for tool in $(RISCV_TOOLCHAIN_TOOLS); do \
 		path="$(RISCV_TOOLCHAIN_PREFIX)-$$tool"; \
@@ -224,6 +224,7 @@ endif
 override CC := $(RISCV_TOOLCHAIN_PREFIX)-gcc
 override OBJCOPY := $(RISCV_TOOLCHAIN_PREFIX)-objcopy
 override OBJDUMP := $(RISCV_TOOLCHAIN_PREFIX)-objdump
+override NM := $(RISCV_TOOLCHAIN_PREFIX)-nm
 
 # -----------------------------------------------------------------------------
 # RTL architecture quick-checks
