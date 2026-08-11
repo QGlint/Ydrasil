@@ -134,7 +134,7 @@ ydrasil_test_sim_%:
 	@name=$*; result_dir="$(YDRASIL_TEST_RESULT_DIR)"; mkdir -p "$$result_dir"; \
 	status="$$result_dir/$$name.status"; run_log="$$result_dir/$$name.log"; \
 	elf="$(SW_TEST_OUT_ROOT)/elf/$$name.elf"; itcm="$(SW_TEST_OUT_ROOT)/mem/$$name.itcm"; dtcm="$(SW_TEST_OUT_ROOT)/mem/$$name.dtcm"; \
-	finish_pc=$$($(RISCV_PREFIX)-nm -n "$$elf" 2>/dev/null | awk '$$3 == "write_tohost" { print "0x" $$1; exit }'); \
+	finish_pc=$$($(NM) -n "$$elf" 2>/dev/null | awk '$$3 == "write_tohost" { print "0x" $$1; exit }'); \
 	finish_define=; if [ -n "$$finish_pc" ]; then finish_define="+finish_pc=$$finish_pc"; fi; \
 	compare_mode=csv; spike_status=MISMATCH; trace_rows=N/A; \
 	case " $(YDRASIL_TEST_SPIKE_SKIP_TESTS) " in *" $$name "*) compare_mode=none; spike_status=POLICY_SKIP;; esac; \
@@ -237,7 +237,7 @@ rv_sim_%:
 	elf_dir=$(RVTESTS_OUT_ROOT)/$$typ/elf; \
 	result_dir=$(RVTESTS_RESULT_DIR)/$$typ; \
 	compare_dir=$(SIM_COMPARE_DIR)/$$typ/$$base; \
-	finish_pc=$$($(RISCV_PREFIX)-nm -n "$$elf_dir/$$base.elf" 2>/dev/null | awk '$$3 == "write_tohost" { print "0x" $$1; exit }'); \
+	finish_pc=$$($(NM) -n "$$elf_dir/$$base.elf" 2>/dev/null | awk '$$3 == "write_tohost" { print "0x" $$1; exit }'); \
 	finish_define=; if [ -n "$$finish_pc" ]; then finish_define="+finish_pc=$$finish_pc"; fi; \
 	mkdir -p $$result_dir; \
 	if $(MAKE) --no-print-directory sim_compare \

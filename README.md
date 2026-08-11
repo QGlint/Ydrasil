@@ -170,6 +170,12 @@ perl verif/tools/coe_to_mem.pl --binary input.coe output.bin
 `coverage_quick` 使用 `O3_app_unroll` CoreMark 替代基础 `coremark_sim`，并在该镜像超出
 基础 ITCM 时自动使用 64 KiB 的 coverage 仿真模型。
 独立运行 `coremark_sim` 时也使用相同的 `O3_app_unroll` 软件配置和 64 KiB 仿真 ITCM。
+默认 `coremark_sim` 会生成 Spike/HW 指令 CSV 并进行逐指令比较；只运行 RTL、跳过
+Spike 与 CSV 时使用：
+
+```sh
+make coremark_sim COREMARK_SIM_COMPARE=none
+```
 
 无 GUI 跑 Vivado 综合、实现到 route，并生成时序分析：
 
