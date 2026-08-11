@@ -4,7 +4,7 @@
 #include <rtthread.h>
 
 #ifndef HAS_FLOAT
-#define HAS_FLOAT  0
+#define HAS_FLOAT  1
 #endif
 #define HAS_TIME_H 0
 #define USE_CLOCK  0
@@ -67,8 +67,9 @@ typedef struct
 
 void portable_init(core_portable *port, int *argc, char *argv[]);
 void portable_fini(core_portable *port);
+int ydrasil_coremark_printf(const char *format, ...);
 
-#define ee_printf rt_kprintf
+#define ee_printf ydrasil_coremark_printf
 
 #if !defined(PROFILE_RUN) && !defined(PERFORMANCE_RUN) && \
     !defined(VALIDATION_RUN)

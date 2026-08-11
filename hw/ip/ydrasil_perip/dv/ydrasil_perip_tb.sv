@@ -18,9 +18,10 @@ module ydrasil_perip_tb;
     wire uart_tx;
     wire uart_irq;
     wire spi_sclk;
-    wire spi_mosi;
+    wire spi_sdio_out;
+    wire spi_sdio_oe;
     wire [3:0] spi_cs_n;
-    logic spi_miso;
+    logic spi_sdio_in;
     wire i2c_scl_low;
     wire i2c_sda_low;
     wire i2c_irq;
@@ -65,8 +66,9 @@ module ydrasil_perip_tb;
 
     ydrasil_apb_spi u_spi (
         .clk(clk), .rst_n(rst_n), .apb_req_i(apb_req),
-        .apb_rsp_o(spi_rsp), .miso_i(spi_miso), .sclk_o(spi_sclk),
-        .mosi_o(spi_mosi), .cs_n_o(spi_cs_n), .irq_o()
+        .apb_rsp_o(spi_rsp), .sdio_i(spi_sdio_in), .sclk_o(spi_sclk),
+        .sdio_o(spi_sdio_out), .sdio_oe_o(spi_sdio_oe),
+        .cs_n_o(spi_cs_n), .irq_o()
     );
 
     ydrasil_apb_i2c u_i2c (
@@ -85,7 +87,7 @@ module ydrasil_perip_tb;
         begin
             apb_req = '0;
             gpio_i = '0;
-            spi_miso = 1'b1;
+            spi_sdio_in = 1'b1;
             plic_sources = '0;
             rst_n = 1'b0;
             repeat (4) @(posedge clk);
@@ -196,6 +198,9 @@ module ydrasil_perip_tb;
         apb_write(32'h0000_0004, 32'h0000_0000);
         apb_write(32'h0000_0010, 32'h0008_0000);
         apb_write(32'h0000_0000, 32'h0000_0101);
+        repeat (2) @(posedge clk);
+        if (spi_sdio_oe)
+            $fatal(1, "SPI SDIO must be released during read data");
         timeout_count = 0;
         value = '0;
         while ((value[23:16] == 0) && (timeout_count < 100)) begin
@@ -206,6 +211,23 @@ module ydrasil_perip_tb;
             $fatal(1, "SPI 8-bit receive did not fill RX FIFO");
         apb_read(32'h0000_0020, 3, value);
         expect_equal(value, 32'h0000_00ff, "SPI short-word alignment");
+
+        reset_dut();
+        apb_write(32'h0000_0004, 32'h0000_0000);
+        apb_write(32'h0000_0010, 32'h0008_0000);
+        apb_write(32'h0000_0018, 32'ha500_0000);
+        apb_write(32'h0000_0000, 32'h0000_0002);
+        repeat (2) @(posedge clk);
+        if (!spi_sdio_oe)
+            $fatal(1, "SPI SDIO must be driven during write data");
+        timeout_count = 0;
+        value = '0;
+        while (!value[0] && (timeout_count < 100)) begin
+            apb_read(32'h0000_0000, 3, value);
+            timeout_count++;
+        end
+        if (!value[0] || spi_sdio_oe)
+            $fatal(1, "SPI write did not finish with SDIO released");
 
         reset_dut();
         apb_write(32'h0000_0000, 32'h0000_0001);
@@ -221,6 +243,40 @@ module ydrasil_perip_tb;
         if (value[1] || !value[7] || !i2c_irq)
             $fatal(1, "I2C no-ACK transaction status is invalid: %02x", value[7:0]);
         apb_write(32'h0000_0014, 32'h0000_0001);
+
+        reset_dut();
+        apb_write(32'h0000_0000, 32'h0000_0001);
+        apb_write(32'h0000_0004, 32'h0000_0080);
+        apb_write(32'h0000_0010, 32'h0000_0090);
+        apb_write(32'h0000_0014, 32'h0000_0090);
+        timeout_count = 0;
+        value = '0;
+        while (!value[1] && (timeout_count < 100)) begin
+            apb_read(32'h0000_000c, 4, value);
+            timeout_count++;
+        end
+        while (value[1] && (timeout_count < 300)) begin
+            apb_read(32'h0000_000c, 4, value);
+            timeout_count++;
+        end
+        if (value[1] || !value[7] || !value[6] || !i2c_scl_low)
+            $fatal(1, "I2C pre-recovery state is invalid: %02x", value[7:0]);
+
+        apb_write(32'h0000_0010, 32'h0000_00ff);
+        apb_write(32'h0000_0014, 32'h0000_0050);
+        timeout_count = 0;
+        value = '0;
+        while (!value[1] && (timeout_count < 100)) begin
+            apb_read(32'h0000_000c, 4, value);
+            timeout_count++;
+        end
+        while (value[1] && (timeout_count < 300)) begin
+            apb_read(32'h0000_000c, 4, value);
+            timeout_count++;
+        end
+        apb_read(32'h0000_000c, 4, value);
+        if (value[6] || value[1] || i2c_scl_low || i2c_sda_low)
+            $fatal(1, "I2C recovery did not release the bus: %02x", value[7:0]);
 
         reset_dut();
         apb_write(32'h0000_0004, 32'h0000_0001);

@@ -4,12 +4,10 @@
 #include "mock_monitor_bus.h"
 #include "monitor_bus.h"
 
-#define MOCK_LM75B_ADDRESS 0x48U
 #define MOCK_OLED_DC_GPIO  1U
-#define MOCK_OLED_WIDTH    128U
+#define MOCK_OLED_WIDTH    132U
 #define MOCK_OLED_PAGES    8U
 
-static uint8_t lm75b_temperature[2];
 static uint8_t uart_frame[32];
 static size_t uart_frame_size;
 static size_t uart_frame_offset;
@@ -18,10 +16,12 @@ static uint8_t oled_page;
 static uint8_t oled_column;
 static int oled_data_mode;
 static uint32_t elapsed_ms;
+static size_t oled_max_data_write_size;
+static size_t oled_display_off_count;
+static size_t oled_display_on_count;
 
 void mock_monitor_reset(void)
 {
-    memset(lm75b_temperature, 0, sizeof(lm75b_temperature));
     memset(uart_frame, 0, sizeof(uart_frame));
     memset(framebuffer, 0, sizeof(framebuffer));
     uart_frame_size = 0U;
@@ -30,15 +30,9 @@ void mock_monitor_reset(void)
     oled_column = 0U;
     oled_data_mode = 0;
     elapsed_ms = 0U;
-}
-
-void mock_lm75b_set_temperature(int32_t milli_celsius)
-{
-    int32_t raw_11bit = milli_celsius / 125;
-    int16_t encoded = (int16_t)(raw_11bit * 32);
-
-    lm75b_temperature[0] = (uint8_t)((uint16_t)encoded >> 8);
-    lm75b_temperature[1] = (uint8_t)encoded;
+    oled_max_data_write_size = 0U;
+    oled_display_off_count = 0U;
+    oled_display_on_count = 0U;
 }
 
 static void append_i16_le(size_t offset, int16_t value)
@@ -66,20 +60,6 @@ void mock_ms601m_set_attitude_raw(int16_t roll, int16_t pitch, int16_t yaw)
     uart_frame[10] = checksum;
     uart_frame_size = 11U;
     uart_frame_offset = 0U;
-}
-
-int ydrasil_bus_i2c_read_register(uint8_t address,
-                                  uint8_t reg,
-                                  uint8_t *data,
-                                  size_t size)
-{
-    if (address != MOCK_LM75B_ADDRESS || reg != 0U || data == NULL ||
-        size != sizeof(lm75b_temperature))
-    {
-        return YDRASIL_DRIVER_EIO;
-    }
-    memcpy(data, lm75b_temperature, sizeof(lm75b_temperature));
-    return YDRASIL_DRIVER_OK;
 }
 
 void ydrasil_bus_uart1_reset(uint32_t baudrate)
@@ -112,7 +92,15 @@ void ydrasil_bus_gpio_write(uint32_t pin, int high)
 
 static void process_oled_command(uint8_t command)
 {
-    if ((command & 0xf8U) == 0xb0U)
+    if (command == 0xaeU)
+    {
+        oled_display_off_count++;
+    }
+    else if (command == 0xafU)
+    {
+        oled_display_on_count++;
+    }
+    else if ((command & 0xf8U) == 0xb0U)
     {
         oled_page = command & 0x07U;
     }
@@ -135,6 +123,10 @@ int ydrasil_bus_spi0_write(const uint8_t *data,
     if (data == NULL && size != 0U)
     {
         return YDRASIL_DRIVER_EINVAL;
+    }
+    if (oled_data_mode != 0 && size > oled_max_data_write_size)
+    {
+        oled_max_data_write_size = size;
     }
     for (index = 0U; index < size; index++)
     {
@@ -181,6 +173,30 @@ size_t mock_display_pixel_count(void)
         }
     }
     return count;
+}
+
+uint8_t mock_display_column(size_t page, size_t column)
+{
+    if (page >= MOCK_OLED_PAGES || column >= MOCK_OLED_WIDTH)
+    {
+        return 0U;
+    }
+    return framebuffer[page][column];
+}
+
+size_t mock_oled_max_data_write_size(void)
+{
+    return oled_max_data_write_size;
+}
+
+size_t mock_oled_display_off_count(void)
+{
+    return oled_display_off_count;
+}
+
+size_t mock_oled_display_on_count(void)
+{
+    return oled_display_on_count;
 }
 
 void mock_display_print(void)

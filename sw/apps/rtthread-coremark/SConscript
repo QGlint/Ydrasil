@@ -27,7 +27,7 @@ algorithm_sources = [
 core_main_source = os.path.join(coremark_variant, 'core_main.c')
 driver_sources = [
     os.path.join(driver_variant, name + '.c')
-    for name in ('monitor_bus', 'lm75b', 'atk_ms601m', 'font_small', 'ssd1306')
+    for name in ('monitor_bus', 'atk_ms601m', 'font_small', 'ssd1306')
 ]
 sensor_sources = [os.path.join(sensor_variant, 'sensor.c')]
 
@@ -35,7 +35,7 @@ profile = os.getenv('RTT_APP_PROFILE',
                     os.getenv('RTT_COREMARK_PROFILE', 'custom'))
 iterations = int(os.getenv('RTT_APP_ITERATIONS',
                            os.getenv('RTT_COREMARK_ITERATIONS', '10000')))
-has_float = int(os.getenv('RTT_COREMARK_HAS_FLOAT', '0'))
+has_float = int(os.getenv('RTT_COREMARK_HAS_FLOAT', '1'))
 if has_float not in (0, 1):
     raise ValueError('RTT_COREMARK_HAS_FLOAT must be 0 or 1')
 
@@ -43,8 +43,8 @@ defines = [
     ('ITERATIONS', iterations),
     ('PERFORMANCE_RUN', 1),
     ('COREMARK_IGNORE_10S_ERROR', 1),
-    # Ydrasil is RV32IM, so CoreMark must not pull in software floating point
-    # unless a caller explicitly requests that larger compatibility build.
+    # The RV32IM target has no FPU. HAS_FLOAT selects CoreMark's software
+    # double-precision reporting path; libgcc supplies the arithmetic helpers.
     ('HAS_FLOAT', has_float),
     ('MAIN_HAS_NORETURN', 0),
     ('FLAGS_STR', '\\"RT-Thread-' + profile + '\\"'),
@@ -52,7 +52,7 @@ defines = [
 
 common_group = dict(
     depend=[''],
-    LOCAL_CPPPATH=[app_root, coremark_root],
+    LOCAL_CPPPATH=[app_root, coremark_root, sensor_root, driver_root],
     LOCAL_CPPDEFINES=defines,
 )
 
