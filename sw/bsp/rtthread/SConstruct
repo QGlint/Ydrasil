@@ -2,11 +2,10 @@ import os
 import sys
 
 BSP_ROOT = os.path.abspath(os.getcwd())
-RTT_ROOT = os.path.abspath(os.path.join(BSP_ROOT, '..', '..', 'rt-thread-nano-4.1.1'))
-# The Nano source subset intentionally carries only the runtime files. Reuse
-# the repository's established SCons integration helpers for build logic.
-RTT_TOOLS_ROOT = os.path.abspath(os.path.join(
-    BSP_ROOT, '..', '..', 'rt-thread-5.2.2', 'tools'))
+RTT_APP = os.getenv('RTT_APP', 'rtthread-coremark')
+RTT_ROOT = os.path.abspath(os.path.join(
+    BSP_ROOT, '..', '..', 'rt-thread-5.2.2'))
+RTT_TOOLS_ROOT = os.path.join(RTT_ROOT, 'tools')
 
 sys.path.insert(0, RTT_TOOLS_ROOT)
 
@@ -21,6 +20,19 @@ SConsign.File(os.path.join(rtconfig.OUTPUT_DIR, '.sconsign.dblite'))
 # intermediates stay with the selected application output.
 import inspect
 import building as _building
+
+# building.py parses rtconfig.h independently of the compiler command line.
+# Seed the same profile macro that rtconfig.py passes to GCC so dependency
+# selection and C preprocessing agree for the RT-Thread 5.2.2 utest build.
+if RTT_APP == 'rtthread-utest':
+    _create_preprocessor_instance = _building.create_preprocessor_instance
+
+    def _create_profile_preprocessor():
+        preprocessor = _create_preprocessor_instance()
+        preprocessor.cpp_namespace['RTT_UTEST_BUILD'] = 1
+        return preprocessor
+
+    _building.create_preprocessor_instance = _create_profile_preprocessor
 
 _variant_root = os.path.abspath(os.environ['RTT_BUILD_DIR'])
 _sconscript = _building.SConscript

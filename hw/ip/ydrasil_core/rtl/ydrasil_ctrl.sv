@@ -217,10 +217,12 @@ import ydrasil_pkg::*;
     // priority in the sequential state update, while backend stalls are
     // absorbed by the four-entry Issue queue. Keeping those current-cycle
     // signals out of ready prevents execution feedback from reaching FetchQ.
+    // Once a trap starts draining, stop allocating new ROB entries while
+    // allowing all previously allocated work to continue to completion.
     assign dispatch_ready_o = producer_has_one_free && !serial_pending_q &&
-        !recovering_q;
+        !recovering_q && !trap_stall_i;
     assign dispatch_two_ready_o = producer_has_two_free &&
-        !serial_pending_q && !recovering_q;
+        !serial_pending_q && !recovering_q && !trap_stall_i;
     wire queue_alloc0 = dispatch_accept_i;
     wire queue_alloc1 = dispatch_accept1_i;
     wire [1:0] queue_alloc_count = {1'b0, queue_alloc0} +
@@ -350,8 +352,6 @@ import ydrasil_pkg::*;
         queue_head_id;
     assign issue_at_rob_head_o = issue_at_rob_head;
     assign rob_head_id_o = queue_head_id;
-    wire decode_bubble_stall = trap_stall_i;
-
     assign ex_accept_valid_o = ex_hzd_i.valid && !ex_branch_jump_i &&
         !ex_mul_stall_i;
     assign ex_accept_valid1_o = ex_hzd1_i.valid && !ex_branch_jump_i &&
@@ -359,7 +359,7 @@ import ydrasil_pkg::*;
     // DIV admission is reserved in the P1 RS. A busy divider must not freeze
     // unrelated Operand and lane-A traffic through a global feedback path.
     assign stall_id_o = 1'b0;
-    assign bubble_id_o = decode_bubble_stall;
+    assign bubble_id_o = 1'b0;
     assign stall_if_o = 1'b0;
     assign branch_jump_o = ex_branch_jump_i;
     assign branch_target_o = ex_branch_target_i;

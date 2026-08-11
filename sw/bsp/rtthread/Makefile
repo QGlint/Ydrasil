@@ -138,7 +138,7 @@ utest-sim: utest-model utest-build
 		COMPARE_DTCM="$(UTEST_OUT_ROOT)/rtthread_utest.dtcm" \
 		OBJ_DIR="$(UTEST_MODEL_DIR)" LOG_DIR="$(UTEST_MODEL_LOG_DIR)" \
 		ITCM_ADDR_WIDTH_OVERRIDE=$(UTEST_ITCM_ADDR_WIDTH) \
-		COMPARE_SIM_EXTRA_DEFINES="+cpp_timeout=3000000 +sv_timeout=3000000" \
+		COMPARE_SIM_EXTRA_DEFINES="+cpp_timeout=3000000 +sv_timeout=3000000 +no_finish_on_tohost" \
 		> "$(UTEST_RESULT_ROOT)/run.log" 2>&1; rc=$$?; set -e; \
 	hw_log="$(ROOT)/build/sim/hw/rtthread-utest/hw.log"; \
 	result=FAIL; marker=""; \

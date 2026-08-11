@@ -359,6 +359,7 @@ import ydrasil_pkg::*;
     input  wire [31:0] if_mem_rdata_i,
     input  wire [31:0] if_mem_rdata1_i,
 
+    output wire [31:0] if_resume_pc_o,
     output wire [31:0] if_id_pc_o,
     output wire        if_id_pred_hit_o,
     output wire        if_id_pred_taken_o,
@@ -732,6 +733,10 @@ import ydrasil_pkg::*;
             DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2] :
             ITCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2],
         fetchq_payload0.pc[ITCM_ADDR_WIDTH-1:0], 2'b00};
+    // Preserve the oldest instruction that has not entered the backend. When
+    // FetchQ is empty, an outstanding memory request precedes the next fetch.
+    assign if_resume_pc_o = fetchq_valid0 ? fetchq_pc0 :
+        (mem_req_valid_q ? mem_req_pc_q : fetch_addr);
     wire [31:0] fetchq_pred_target0 = {
         fetchq_payload0.pred_target[FETCH_ADDR_TOKEN_WIDTH-1] ?
             DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2] :

@@ -58,9 +58,13 @@ if CPU_FREQ_HZ <= 0 or CPU_FREQ_HZ > 0xffffffff:
 
 CFLAGS = COMMON + ' ' + OPTIMIZATION + CONTROL_FLOW_ALIGNMENT + ' -g -Wall -Wno-unused-function -fno-builtin'
 CFLAGS += ' -DYDRASIL_CPU_FREQ_HZ={}UL'.format(CPU_FREQ_HZ)
+if os.getenv('RTT_APP') == 'rtthread-utest':
+    CFLAGS += ' -DRTT_UTEST_BUILD=1'
 if os.getenv('RTT_APP') == 'rtthread-coremark' or os.getenv('RTT_COREMARK') == '1':
     CFLAGS += ' -DRTT_COREMARK_BUILD=1'
 AFLAGS = COMMON + ' -x assembler-with-cpp -DRTOS_RTTHREAD'
+if os.getenv('RTT_APP') == 'rtthread-utest':
+    AFLAGS += ' -DRTT_UTEST_BUILD=1'
 CXXFLAGS = CFLAGS + ' -fno-exceptions -fno-rtti'
 LFLAGS = DEVICE + ' ' + LIBC_SPECS + ' -nostartfiles -static -Wl,--gc-sections -Wl,-Map=' + MAP
 LFLAGS += ' -T ' + LINK_SCRIPT + ' -Wl,--start-group -lc -lgcc -Wl,--end-group'

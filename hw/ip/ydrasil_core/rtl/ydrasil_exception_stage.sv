@@ -17,6 +17,7 @@ import ydrasil_pkg::*;
     input  wire                           lsu_idle_i,
     input  wire                           backend_empty_i,
     input  wire                           mul_stall_i,
+    input  wire                           redirect_pending_i,
     output ydrasil_csr_write_pkt_t        csr_write_o,
     output ydrasil_trap_ctrl_pkt_t        trap_ctrl_o
 );
@@ -43,7 +44,8 @@ import ydrasil_pkg::*;
     assign async_pc = lane_b_valid_i ? (lane_b_pc_i + 32'd4) :
         lane_a_valid_i ? (lane_a_pc_i + 32'd4) : frontend_pc_i;
     wire backend_idle = lsu_idle_i && backend_empty_i &&
-        !lane_a_valid_i && !lane_b_valid_i && !mul_stall_i;
+        !lane_a_valid_i && !lane_b_valid_i && !mul_stall_i &&
+        !redirect_pending_i;
     // Exception control consumes a local observation, not the live global
     // drain cone.  Normal execution is unaffected; traps spend a complete
     // cycle in S_DRAIN before this sample can advance the controller.

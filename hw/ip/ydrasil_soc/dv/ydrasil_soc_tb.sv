@@ -32,6 +32,8 @@ module ydrasil_soc_tb #(
     string uart0_rx_text;
     integer uart_start_apb_cycles = 100000;
     integer max_cpu_cycles = 200000;
+    integer local_wave_start = -1;
+    integer local_wave_end = -1;
     integer cpu_cycles = 0;
     integer retired_instructions = 0;
     logic [31:0] stop_pc = '0;
@@ -39,6 +41,7 @@ module ydrasil_soc_tb #(
     bit coremark_seen = 1'b0;
     bit finish_on_coremark = 1'b0;
     bit uart_debug = 1'b0;
+    bit core_debug = 1'b0;
     logic [2:0] uart_rx_state_prev = '0;
 
     always #3.333 cpu_clk = ~cpu_clk;
@@ -90,12 +93,64 @@ module ydrasil_soc_tb #(
         void'($value$plusargs("uart_start_apb_cycles=%d",
             uart_start_apb_cycles));
         void'($value$plusargs("max_cpu_cycles=%d", max_cpu_cycles));
+        void'($value$plusargs("local_wave_start=%d", local_wave_start));
+        void'($value$plusargs("local_wave_end=%d", local_wave_end));
         void'($value$plusargs("gpio_input=%h", gpio_external));
         finish_on_coremark = $test$plusargs("finish_on_coremark");
         uart_debug = $test$plusargs("uart_debug");
+        core_debug = $test$plusargs("core_debug");
         if ($value$plusargs("stop_pc=%h", stop_pc_arg)) begin
             stop_pc = stop_pc_arg;
             stop_pc_enable = 1'b1;
+        end
+
+        if (local_wave_start >= 0 && local_wave_end > local_wave_start) begin
+            $dumpfile("ydrasil_soc_local.vcd");
+            $dumpvars(0,
+                cpu_clk, cpu_cycles, u_soc.irq,
+                u_soc.retire0_valid, u_soc.retire0_pc,
+                u_soc.retire1_valid, u_soc.retire1_pc,
+                u_soc.u_core.if_resume_pc,
+                u_soc.u_core.if_id_valid, u_soc.u_core.if_id_pc,
+                u_soc.u_core.if_id1_valid, u_soc.u_core.if_id1_pc,
+                u_soc.u_core.id_ex_valid, u_soc.u_core.id_instr_addr,
+                u_soc.u_core.dual_id_ex_valid,
+                u_soc.u_core.dual_id_ex_pc,
+                u_soc.u_core.ex_pc_redirect,
+                u_soc.u_core.ex_pc_redirect_target,
+                u_soc.u_core.ex_bp_train_pkt,
+                u_soc.u_core.rob_head_id,
+                u_soc.u_core.u_ctrl.queue_head_q,
+                u_soc.u_core.u_ctrl.queue_tail_q,
+                u_soc.u_core.u_ctrl.queue_count_q,
+                u_soc.u_core.u_ctrl.producer_valid_q,
+                u_soc.u_core.u_ctrl.producer_done_q,
+                u_soc.u_core.u_ctrl.producer_pc_q,
+                u_soc.u_core.u_ctrl.serial_pending_q,
+                u_soc.u_core.u_ydrasil_execute_stage.agu_req_i,
+                u_soc.u_core.u_ydrasil_execute_stage.agu_recovery_keep,
+                u_soc.u_core.lsu_req_pkt,
+                u_soc.u_core.dtcm_load_valid,
+                u_soc.u_core.dtcm_load_addr,
+                u_soc.u_core.lsu_completion_valid,
+                u_soc.u_core.lsu_completion_producer_id,
+                u_soc.u_core.lsu_completion_producer_tracked,
+                u_soc.u_core.u_ydrasil_load_store_unit.queue_enqueue,
+                u_soc.u_core.u_ydrasil_load_store_unit.queue_dequeue,
+                u_soc.u_core.u_ydrasil_load_store_unit.queue_count_q,
+                u_soc.u_core.u_ydrasil_load_store_unit.queue_head_q,
+                u_soc.u_core.u_ydrasil_load_store_unit.queue_tail_q,
+                u_soc.u_core.u_ydrasil_load_store_unit.active_pkt,
+                u_soc.u_core.u_ydrasil_load_store_unit.dtcm_load_fire,
+                u_soc.u_core.u_ydrasil_load_store_unit.load_s1_valid_q,
+                u_soc.u_core.u_ydrasil_load_store_unit.
+                    load_s1_producer_id_q,
+                u_soc.u_core.u_ydrasil_load_store_unit.recovery_pending_q,
+                u_soc.u_core.u_ydrasil_load_store_unit.
+                    recovery_head_slot_q,
+                u_soc.u_core.u_ydrasil_load_store_unit.
+                    recovery_branch_slot_q);
+            $dumpoff;
         end
 
         repeat (8) @(posedge apb_clk);
@@ -176,8 +231,8 @@ module ydrasil_soc_tb #(
                 $finish;
             end
             if (finish_on_coremark && coremark_seen && !coremark_active) begin
-                $display("\n[SOC TB] CoreMark completed after %0d cycles",
-                    cpu_cycles);
+                $display("\n[SOC TB] CoreMark completed after %0d total cycles, workload cycles=%0d",
+                    cpu_cycles, u_soc.coremark_cycles);
                 $finish;
             end
             if (cpu_cycles >= max_cpu_cycles) begin
@@ -197,8 +252,91 @@ module ydrasil_soc_tb #(
                     u_soc.u_mmio.u_uart0.ier_q,
                     u_soc.u_mmio.u_plic.pending_q,
                     u_soc.u_mmio.u_plic.enable_q);
+                $display("[SOC TB] core frontend=%08x if0=%08x/%0d if1=%08x/%0d laneA=%08x/%0d laneB=%08x/%0d backend_empty=%0d rob_count=%0d",
+                    u_soc.u_core.if_resume_pc,
+                    u_soc.u_core.if_id_pc, u_soc.u_core.if_id_valid,
+                    u_soc.u_core.if_id1_pc, u_soc.u_core.if_id1_valid,
+                    u_soc.u_core.id_instr_addr, u_soc.u_core.id_ex_valid,
+                    u_soc.u_core.dual_id_ex_pc,
+                    u_soc.u_core.dual_id_ex_valid,
+                    u_soc.u_core.backend_empty,
+                    u_soc.u_core.u_ctrl.queue_count_q);
+                $display("[SOC TB] trap state=%0d stall=%0d redirect=%0d mepc=%08x mstatus=%08x mie=%08x mip=%08x irq=%03b",
+                    u_soc.u_core.u_ydrasil_exception_stage.
+                        u_exception_ctrl.state_q,
+                    u_soc.u_core.trap_ctrl_pkt.stall,
+                    u_soc.u_core.trap_ctrl_pkt.redirect,
+                    u_soc.u_core.trap_csr_state_pkt.mepc,
+                    u_soc.u_core.trap_csr_state_pkt.mstatus,
+                    u_soc.u_core.trap_csr_state_pkt.mie,
+                    u_soc.u_core.trap_csr_state_pkt.mip,
+                    u_soc.irq);
+                $display("[SOC TB] ROB head=%0d pc=%08x done=%0d class=%0d valid=%03x done_vec=%03x serial=%0d recover=%0d",
+                    u_soc.u_core.u_ctrl.queue_head_q,
+                    u_soc.u_core.u_ctrl.producer_pc_q[
+                        u_soc.u_core.u_ctrl.queue_head_q],
+                    u_soc.u_core.u_ctrl.producer_done_q[
+                        u_soc.u_core.u_ctrl.queue_head_q],
+                    u_soc.u_core.u_ctrl.producer_result_class_q[
+                        u_soc.u_core.u_ctrl.queue_head_q],
+                    u_soc.u_core.u_ctrl.producer_valid_q,
+                    u_soc.u_core.u_ctrl.producer_done_q,
+                    u_soc.u_core.u_ctrl.serial_pending_q,
+                    u_soc.u_core.u_ctrl.recovering_q);
+                $display("[SOC TB] issue dep=%0d/%0d lsu=%0d/%0d src_wait=%04b pipe_room=%0d dispatch=%0d/%0d redirect_pending=%0d",
+                    u_soc.u_core.issue_dependency_wait,
+                    u_soc.u_core.issue_dependency_wait1,
+                    u_soc.u_core.issue_lsu_struct_stall,
+                    u_soc.u_core.issue_lsu_struct_stall1,
+                    {u_soc.u_core.issue_src3_wait,
+                     u_soc.u_core.issue_src2_wait,
+                     u_soc.u_core.issue_src1_wait,
+                     u_soc.u_core.issue_src0_wait},
+                    u_soc.u_core.issue_pipe_has_room,
+                    u_soc.u_core.dispatch_ready,
+                    u_soc.u_core.dispatch_two_ready,
+                    u_soc.u_core.ex_pc_redirect || u_soc.u_core.id_fence_i);
                 $finish;
             end
+        end
+    end
+
+    always @(posedge cpu_clk) begin
+        if (local_wave_start >= 0 && cpu_cycles == local_wave_start) begin
+            $display("[SOC TB] local wave start at cycle %0d", cpu_cycles);
+            $dumpon;
+        end
+        if (local_wave_end >= 0 && cpu_cycles == local_wave_end) begin
+            $dumpoff;
+            $display("[SOC TB] local wave end at cycle %0d", cpu_cycles);
+        end
+    end
+
+    always @(posedge cpu_clk) begin
+        if (core_debug && coremark_seen && !coremark_active) begin
+            if (u_soc.retire0_valid || u_soc.retire1_valid)
+                $display("[SOC CORE] retire pc0=%08x/%0d pc1=%08x/%0d rob_head=%0d count=%0d",
+                    u_soc.retire0_pc, u_soc.retire0_valid,
+                    u_soc.retire1_pc, u_soc.retire1_valid,
+                    u_soc.u_core.u_ctrl.queue_head_q,
+                    u_soc.u_core.u_ctrl.queue_count_q);
+            if (u_soc.u_core.dtcm_load_valid)
+                $display("[SOC CORE] load launch addr=%08x producer=%0d head=%0d",
+                    u_soc.u_core.dtcm_load_addr,
+                    u_soc.u_core.u_ydrasil_load_store_unit.
+                        load_launch_producer_id,
+                    u_soc.u_core.rob_head_id);
+            if (u_soc.u_core.lsu_completion_valid)
+                $display("[SOC CORE] load complete producer=%0d tracked=%0d data=%08x",
+                    u_soc.u_core.lsu_completion_producer_id,
+                    u_soc.u_core.lsu_completion_producer_tracked,
+                    u_soc.u_core.lsu_completion_data);
+            if (u_soc.u_core.ex_pc_redirect)
+                $display("[SOC CORE] branch redirect pc=%08x target=%08x producer=%0d head=%0d",
+                    u_soc.u_core.ex_bp_train_pkt.pc,
+                    u_soc.u_core.ex_pc_redirect_target,
+                    u_soc.u_core.ex_bp_train_pkt.producer_id,
+                    u_soc.u_core.rob_head_id);
         end
     end
 endmodule

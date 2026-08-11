@@ -3,7 +3,7 @@ from building import *
 
 cwd = GetCurrentDir()
 bsp_common = os.path.abspath(os.path.join(cwd, '..', '..'))
-src = ['board.c', 'interrupt.c', 'interrupt_gcc.S', 'trap_gcc.S', 'startup.S']
+src = ['board.c', 'trap_gcc.S', 'startup.S']
 inc = [cwd, os.path.join(bsp_common, 'include')]
 
 group = DefineGroup('Ydrasil BSP', src, depend=[''], CPPPATH=inc)

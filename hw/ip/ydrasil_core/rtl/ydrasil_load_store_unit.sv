@@ -352,6 +352,12 @@ import ydrasil_pkg::*;
 	        store_buf1_q.valid &&
 	        (store_buf1_q.addr[BUS_ADDR_WIDTH-1:2] ==
 	         load_launch_addr[BUS_ADDR_WIDTH-1:2]);
+	    // A retired store spends one cycle in the launch register after leaving
+	    // the buffer. A same-word load in that cycle must not observe the
+	    // read-before-write value returned by the DTCM.
+	    wire store_launch_hit = store_launch_valid_q &&
+	        (store_launch_addr_q[BUS_ADDR_WIDTH-1:2] ==
+	         load_launch_addr[BUS_ADDR_WIDTH-1:2]);
 	    wire load_store_data_block =
 	        (store_hit0 && !store_buf0_q.store_data_valid) ||
 	        (store_hit1 && !store_buf1_q.store_data_valid);
@@ -362,16 +368,23 @@ import ydrasil_pkg::*;
 	        store_buf0_q.store_mask;
 	    wire [3:0] forward_mask1 = {4{store_hit1}} &
 	        store_buf1_q.store_mask;
-	    wire [3:0] load_forward_mask = forward_mask0 | forward_mask1;
+	    wire [3:0] forward_mask_launch = {4{store_launch_hit}} &
+	        store_launch_mask_q;
+	    wire [3:0] load_forward_mask = forward_mask_launch |
+	        forward_mask0 | forward_mask1;
 	    wire [31:0] load_forward_data = {
 	        forward_mask1[3] ? store_buf1_q.store_data[31:24] :
-	                           store_buf0_q.store_data[31:24],
+	        forward_mask0[3] ? store_buf0_q.store_data[31:24] :
+	                           store_launch_data_q[31:24],
 	        forward_mask1[2] ? store_buf1_q.store_data[23:16] :
-	                           store_buf0_q.store_data[23:16],
+	        forward_mask0[2] ? store_buf0_q.store_data[23:16] :
+	                           store_launch_data_q[23:16],
 	        forward_mask1[1] ? store_buf1_q.store_data[15:8] :
-	                           store_buf0_q.store_data[15:8],
+	        forward_mask0[1] ? store_buf0_q.store_data[15:8] :
+	                           store_launch_data_q[15:8],
 	        forward_mask1[0] ? store_buf1_q.store_data[7:0] :
-	                           store_buf0_q.store_data[7:0]
+	        forward_mask0[0] ? store_buf0_q.store_data[7:0] :
+	                           store_launch_data_q[7:0]
 	    };
 
     wire store_buf_has_room = !store_buf_full || store_buf_dequeue;

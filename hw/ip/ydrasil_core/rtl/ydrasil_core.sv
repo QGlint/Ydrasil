@@ -47,6 +47,7 @@ import ydrasil_axi_pkg::*;
 	wire [ydrasil_pkg::INST_DATA_WIDTH-1:0] if_mem_rdata1;
 
 	// IF/ID pipeline
+	wire [31:0] if_resume_pc;
 	wire [31:0] if_id_pc;
 	wire [31:0] if_id_instr;
 	wire        if_id_pred_hit;
@@ -595,6 +596,7 @@ import ydrasil_axi_pkg::*;
 			.bp_speculate1_taken_o(bp_speculate1_taken),
 			.if_mem_rdata_i  (if_mem_rdata),
 			.if_mem_rdata1_i (if_mem_rdata1),
+			.if_resume_pc_o  (if_resume_pc),
 			.if_id_pc_o      (if_id_pc),
 			.if_id_pred_hit_o(if_id_pred_hit),
 			.if_id_pred_taken_o(if_id_pred_taken),
@@ -1032,13 +1034,21 @@ import ydrasil_axi_pkg::*;
 		.lane_a_pc_i       (id_instr_addr),
 		.lane_b_valid_i    (dual_id_ex_valid),
 		.lane_b_pc_i       (dual_id_ex_pc),
-		.frontend_pc_i     (if_id_pc),
+		.frontend_pc_i     (if_resume_pc),
 		.lsu_idle_i        (lsu_status_pkt.idle),
 		.backend_empty_i   (backend_empty),
 		.mul_stall_i       (ex_mul_stall),
+		.redirect_pending_i(ex_pc_redirect || id_fence_i),
 		.csr_write_o       (trap_csr_write_pkt),
 		.trap_ctrl_o       (trap_ctrl_pkt)
 	);
+
+`ifdef YDRASIL_RETIRE_TRACE
+	assign retire0_valid_o = commit_pkt.valid;
+	assign retire0_pc_o = commit_pkt.pc;
+	assign retire1_valid_o = commit_pkt1.valid;
+	assign retire1_pc_o = commit_pkt1.pc;
+`endif
 
 `ifndef SYNTHESIS
 	ydrasil_commit_trace u_ydrasil_commit_trace (
@@ -1046,17 +1056,10 @@ import ydrasil_axi_pkg::*;
 			.rst_n            (rst_n),
 			.retire_i         (commit_pkt),
 			.retire1_i        (commit_pkt1)
-`ifdef YDRASIL_RETIRE_TRACE
-			,.retire0_valid_o (retire0_valid_o)
-			,.retire0_pc_o    (retire0_pc_o)
-			,.retire1_valid_o (retire1_valid_o)
-			,.retire1_pc_o    (retire1_pc_o)
-`else
 			,.retire0_valid_o ()
 			,.retire0_pc_o    ()
 			,.retire1_valid_o ()
 			,.retire1_pc_o    ()
-`endif
 			,.dbg_bp_predict_pc_o(dbg_bp_predict_pc_o)
 			,.dbg_bp_predict_hit_o(dbg_bp_predict_hit_o)
 			,.dbg_bp_predict_taken_o(dbg_bp_predict_taken_o)

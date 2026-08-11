@@ -1,5 +1,6 @@
 VERILATOR ?= verilator
 VERILATOR_TRACE ?= 1
+VERILATOR_TRACE_MAX_ARRAY ?= 1024
 VERILATOR_COVERAGE ?= 0
 VERILATOR_MOD ?= cc
 VERILATOR_IGNORE_ALL ?= 0
@@ -79,7 +80,8 @@ endif
 
 ifeq ($(VERILATOR_TRACE),1)
 # VERILATOR_FLAGS += --trace --trace-depth 2
-VERILATOR_FLAGS +=--trace  --trace-structs --trace-params --trace-max-array 1024
+VERILATOR_FLAGS += --trace --trace-structs --trace-params
+VERILATOR_FLAGS += --trace-max-array $(VERILATOR_TRACE_MAX_ARRAY)
 VERILATOR_FLAGS += -CFLAGS "-DVERILATOR_TRACE"
 SIM_FLAGS += +trace
 endif

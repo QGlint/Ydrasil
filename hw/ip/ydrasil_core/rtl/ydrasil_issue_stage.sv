@@ -1402,6 +1402,15 @@ import ydrasil_pkg::*;
         producer_slot_in_window(
             select_skid_uop1_q.dst.rob_tag[PRODUCER_SLOT_WIDTH-1:0],
             recovery_head_slot_i, recovery_branch_slot_i);
+    wire select_recovery_memory0 = select_recovery_keep0 &&
+        ((select_head_uop0_q.op_class == UOP_CLASS_LOAD) ||
+         (select_head_uop0_q.op_class == UOP_CLASS_STORE));
+    wire select_skid_recovery_memory0 = select_skid_recovery_keep0 &&
+        ((select_skid_uop0_q.op_class == UOP_CLASS_LOAD) ||
+         (select_skid_uop0_q.op_class == UOP_CLASS_STORE));
+    wire [1:0] lsu_recovery_reserved =
+        {1'b0, select_recovery_memory0} +
+        {1'b0, select_skid_recovery_memory0};
 
     always_ff @(posedge clk) begin
         if (!rst_n) begin
@@ -2021,8 +2030,14 @@ import ydrasil_pkg::*;
          (lane_b_uop.op_class == UOP_CLASS_SYS));
 
     always_ff @(posedge clk) begin
-        if (!rst_n || flush_id_i || trap_flush_i || branch_recovery_i) begin
+        if (!rst_n || trap_flush_i ||
+            (flush_id_i && !branch_recovery_i)) begin
             lsu_select_reserved_q <= '0;
+        end else if (branch_recovery_i) begin
+            // A redirect preserves older Operand bundles, but the current AGU
+            // request consumes its reservation at this edge. Rebuild only the
+            // reservations for surviving memory uops still waiting in Operand.
+            lsu_select_reserved_q <= lsu_recovery_reserved;
         end else begin
             unique case ({lsu_select_pick, agu_in_valid_q})
                 2'b10: lsu_select_reserved_q <= lsu_select_reserved_q + 1'b1;
