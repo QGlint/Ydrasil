@@ -105,6 +105,7 @@ import ydrasil_pkg::*;
     output wire [DATA_WIDTH-1:0]       agu_in_operand_a_o,
     output wire [DATA_WIDTH-1:0]       agu_in_operand_b_o,
     output ydrasil_lsu_req_pkt_t       agu_in_req_o,
+    output wire [DTCM_ADDR_WIDTH-1:0]  agu_in_dtcm_word_addr_o,
     output wire [DATA_WIDTH-1:0]       agu_in_store_data_o,
     output wire                        csr_in_valid_o,
     output wire [DATA_WIDTH-1:0]       csr_in_operand_a_o,
@@ -584,12 +585,6 @@ import ydrasil_pkg::*;
                 issue_window_src1_ready_q[select_due_idx] ||
                 issue_src1_fast_main[select_due_idx] ||
                 issue_src1_fast_dual[select_due_idx];
-            // issued_slot_mask_q is the registered Select release token.  Use
-            // it immediately for candidacy while the entry updates its stored
-            // order mask on the same edge.  This keeps Select out of Dispatch
-            // ready and still permits ordered banks to issue every cycle.
-            assign issue_order_blocked[select_due_idx] =
-                |(issue_order_mask_q[select_due_idx] & ~issued_slot_mask_q);
         end
     endgenerate
 
@@ -1286,7 +1281,9 @@ import ydrasil_pkg::*;
         for (rs_entry_idx = 0; rs_entry_idx < ISSUE_WINDOW_DEPTH;
              rs_entry_idx = rs_entry_idx + 1) begin : g_rs_entry
             ydrasil_issue_rs_entry #(
-                .SLOT_COUNT(ISSUE_WINDOW_DEPTH)
+                .SLOT_COUNT(ISSUE_WINDOW_DEPTH),
+                .BANK_BASE((rs_entry_idx / 4) * 4),
+                .BANK_SIZE(4)
             ) u_entry (
                 .clk(clk),
                 .rst_n(rst_n),
@@ -1362,6 +1359,7 @@ import ydrasil_pkg::*;
                 .src0_ready_o(issue_window_src0_ready_q[rs_entry_idx]),
                 .src1_ready_o(issue_window_src1_ready_q[rs_entry_idx]),
                 .order_mask_o(issue_order_mask_q[rs_entry_idx]),
+                .order_blocked_o(issue_order_blocked[rs_entry_idx]),
                 .memory_o(issue_memory_q[rs_entry_idx]),
                 .store_o(issue_store_q[rs_entry_idx]),
                 .mul_o(issue_mul_q[rs_entry_idx]),
@@ -1603,9 +1601,10 @@ import ydrasil_pkg::*;
     reg [REGS_ADDR_WIDTH-1:0] alu_in_rd_addr_q;
     producer_id_t alu_in_producer_id_q;
     reg [DATA_WIDTH-1:0] lane_a_pc_q;
-    reg agu_in_valid_q;
-    reg [DATA_WIDTH-1:0] agu_in_operand_a_q, agu_in_operand_b_q;
-    ydrasil_lsu_req_pkt_t agu_in_req_q;
+	reg agu_in_valid_q;
+	reg [DATA_WIDTH-1:0] agu_in_operand_a_q, agu_in_operand_b_q;
+	reg [DTCM_ADDR_WIDTH+1:0] agu_in_dtcm_byte_addr_q;
+	ydrasil_lsu_req_pkt_t agu_in_req_q;
     reg csr_in_valid_q;
     reg [DATA_WIDTH-1:0] csr_in_operand_a_q;
     reg [OPERATOR_TYPE_WIDTH-1:0] csr_in_operator_type_q;
@@ -2040,8 +2039,8 @@ import ydrasil_pkg::*;
         shared_agu_req_d.valid = lane_a_agu_accept;
         shared_agu_req_d.is_load = lane_a_uop.op_class == UOP_CLASS_LOAD;
         shared_agu_req_d.is_store = lane_a_uop.op_class == UOP_CLASS_STORE;
-        shared_agu_req_d.op[lane_a_uop.lsu_subop] = 1'b1;
-        shared_agu_req_d.rd_addr = lane_a_uop.dst.rd_addr;
+	    shared_agu_req_d.op[lane_a_uop.lsu_subop] = 1'b1;
+	    shared_agu_req_d.rd_addr = lane_a_uop.dst.rd_addr;
         shared_agu_req_d.producer_id = lane_a_uop.dst.rob_tag;
         shared_agu_req_d.producer_tracked = lane_a_agu_accept;
         shared_agu_req_d.store_data = lane_a_src1_capture;
@@ -2125,9 +2124,10 @@ import ydrasil_pkg::*;
             alu_in_producer_id_q <= '0;
             lane_a_pc_q <= '0;
             agu_in_valid_q <= 1'b0;
-            agu_in_operand_a_q <= '0;
-            agu_in_operand_b_q <= '0;
-            agu_in_req_q <= '0;
+	        agu_in_operand_a_q <= '0;
+	        agu_in_operand_b_q <= '0;
+	        agu_in_dtcm_byte_addr_q <= '0;
+	        agu_in_req_q <= '0;
             csr_in_valid_q <= 1'b0;
             csr_in_operand_a_q <= '0;
             csr_in_operator_type_q <= '0;
@@ -2166,10 +2166,13 @@ import ydrasil_pkg::*;
                     alu_in_producer_id_q <= lane_a_uop.dst.rob_tag;
                     lane_a_pc_q <= lane_a_uop.pc;
                     agu_in_valid_q <= lane_a_agu_accept;
-                    if (lane_a_agu_accept) begin
-                        agu_in_operand_a_q <= lane_a_operand_a_capture;
-                        agu_in_operand_b_q <= lane_a_operand_b_capture;
-                        agu_in_req_q <= shared_agu_req_d;
+	                    if (lane_a_agu_accept) begin
+	                        agu_in_operand_a_q <= lane_a_operand_a_capture;
+	                        agu_in_operand_b_q <= lane_a_operand_b_capture;
+	                        agu_in_dtcm_byte_addr_q <=
+	                            lane_a_operand_a_capture[DTCM_ADDR_WIDTH+1:0] +
+	                            lane_a_operand_b_capture[DTCM_ADDR_WIDTH+1:0];
+	                        agu_in_req_q <= shared_agu_req_d;
                     end else begin
                         agu_in_req_q.valid <= 1'b0;
                     end
@@ -2217,6 +2220,8 @@ import ydrasil_pkg::*;
 	assign agu_in_operand_a_o = agu_in_operand_a_q;
     assign agu_in_operand_b_o = agu_in_operand_b_q;
 	assign agu_in_req_o = agu_in_req_q;
+	assign agu_in_dtcm_word_addr_o =
+	    agu_in_dtcm_byte_addr_q[DTCM_ADDR_WIDTH+1:2];
 	assign agu_in_store_data_o = agu_in_req_q.store_data;
     assign csr_in_valid_o = csr_in_valid_q;
 	assign csr_in_operand_a_o = csr_in_operand_a_q;
@@ -2287,7 +2292,9 @@ endmodule
 module ydrasil_issue_rs_entry
 import ydrasil_pkg::*;
 #(
-    parameter int SLOT_COUNT = 10
+    parameter int SLOT_COUNT = 10,
+    parameter int BANK_BASE = 0,
+    parameter int BANK_SIZE = 4
 )(
     input  wire                         clk,
     input  wire                         rst_n,
@@ -2345,6 +2352,7 @@ import ydrasil_pkg::*;
     output wire                         src0_ready_o,
     output wire                         src1_ready_o,
     output wire [SLOT_COUNT-1:0]        order_mask_o,
+    output wire                         order_blocked_o,
     output wire                         memory_o,
     output wire                         store_o,
     output wire                         mul_o,
@@ -2362,7 +2370,7 @@ import ydrasil_pkg::*;
     reg valid_q;
     reg src0_ready_q;
     reg src1_ready_q;
-    reg [SLOT_COUNT-1:0] order_mask_q;
+    reg [BANK_SIZE-1:0] order_mask_q;
     reg memory_q;
     reg store_q;
     reg mul_q;
@@ -2467,7 +2475,8 @@ import ydrasil_pkg::*;
             early_writes_q <= 1'b0;
         end else if (branch_recovery_i) begin
             if (valid_q && recovery_keep_i) begin
-                order_mask_q <= order_mask_q & recovery_slot_mask_i;
+                order_mask_q <= order_mask_q &
+                    recovery_slot_mask_i[BANK_BASE +: BANK_SIZE];
                 // Recovery rebuild and surviving completions can coincide.
                 // Keep accepting identity-matched local tokens while pruning
                 // younger ordering state, otherwise a one-cycle completion is
@@ -2498,7 +2507,8 @@ import ydrasil_pkg::*;
             end
         end else begin
             if (valid_q) begin
-                order_mask_q <= order_mask_q & ~issued_slot_mask_i;
+                order_mask_q <= order_mask_q &
+                    ~issued_slot_mask_i[BANK_BASE +: BANK_SIZE];
                 if (current_src0_wakeup)
                     src0_ready_q <= 1'b1;
                 if (current_src1_wakeup)
@@ -2531,7 +2541,8 @@ import ydrasil_pkg::*;
                     uop_q.src1.tag_valid <= 1'b0;
                     uop_q.src1.ready <= 1'b1;
                 end
-                order_mask_q <= dispatch0_order_mask_i;
+                order_mask_q <=
+                    dispatch0_order_mask_i[BANK_BASE +: BANK_SIZE];
                 memory_q <= dispatch0_memory_i;
                 store_q <= dispatch0_store_i;
                 mul_q <= dispatch0_mul_i;
@@ -2553,7 +2564,8 @@ import ydrasil_pkg::*;
                     uop_q.src1.tag_valid <= 1'b0;
                     uop_q.src1.ready <= 1'b1;
                 end
-                order_mask_q <= dispatch1_order_mask_i;
+                order_mask_q <=
+                    dispatch1_order_mask_i[BANK_BASE +: BANK_SIZE];
                 memory_q <= dispatch1_memory_i;
                 store_q <= dispatch1_store_i;
                 mul_q <= dispatch1_mul_i;
@@ -2568,7 +2580,24 @@ import ydrasil_pkg::*;
     assign valid_o = valid_q;
     assign src0_ready_o = src0_ready_q;
     assign src1_ready_o = src1_ready_q;
-    assign order_mask_o = order_mask_q;
+    assign order_mask_o = SLOT_COUNT'(order_mask_q) << BANK_BASE;
+    // issued_slot_mask_i is the registered Select release token. Consume only
+    // this entry's four-slot domain and expose a single local candidacy bit.
+    // The current-cycle last predecessor still releases the entry immediately.
+    assign order_blocked_o =
+        |(order_mask_q & ~issued_slot_mask_i[BANK_BASE +: BANK_SIZE]);
+`ifndef SYNTHESIS
+    localparam logic [SLOT_COUNT-1:0] ORDER_BANK_MASK =
+        ({SLOT_COUNT{1'b1}} >> (SLOT_COUNT - BANK_SIZE)) << BANK_BASE;
+    always_ff @(posedge clk) begin
+        if (rst_n && dispatch0_write_i)
+            assert (!(|(dispatch0_order_mask_i & ~ORDER_BANK_MASK)))
+                else $fatal(1, "RS order mask crosses its execution bank");
+        if (rst_n && dispatch1_write_i)
+            assert (!(|(dispatch1_order_mask_i & ~ORDER_BANK_MASK)))
+                else $fatal(1, "RS order mask crosses its execution bank");
+    end
+`endif
     assign memory_o = memory_q;
     assign store_o = store_q;
     assign mul_o = mul_q;

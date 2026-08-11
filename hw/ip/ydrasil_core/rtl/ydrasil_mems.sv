@@ -14,6 +14,7 @@ import ydrasil_pkg::*;
     // LSU data-memory request
     input  wire                         lsu_load_valid_i,
     input  wire [BUS_ADDR_WIDTH-1:0]   lsu_load_addr_i,
+    input  wire [DTCM_ADDR_WIDTH-1:0]  lsu_load_word_addr_i,
     input  wire                         lsu_store_valid_i,
     input  wire [BUS_ADDR_WIDTH-1:0]   lsu_store_addr_i,
     input  wire [BUS_DATA_WIDTH-1:0]   lsu_store_data_i,
@@ -66,7 +67,7 @@ import ydrasil_pkg::*;
                           (if_mem_addr1_i < (DTCM_BASE_ADDR + DTCM_BYTE_SIZE));
     assign if_dtcm_access = IF_DTCM_FETCH_ENABLE & if_dtcm_sel;
     assign if_dtcm_addr = if_mem_addr_i[DTCM_ADDR_WIDTH+1:2];
-    assign lsu_dtcm_addr = lsu_load_addr_i[DTCM_ADDR_WIDTH+1:2];
+    assign lsu_dtcm_addr = lsu_load_word_addr_i;
 
     assign itcm_addr = if_mem_addr_i[ITCM_ADDR_WIDTH+1:3];
     assign itcm_instr = itcm_addr_odd_q ?
@@ -87,8 +88,11 @@ import ydrasil_pkg::*;
     assign if_mem_rdata1_o = (IF_DTCM_FETCH_ENABLE & if_dtcm_sel1) ?
         RV32I_INS_NOP : itcm_instr1;
     assign lsu_mem_data_o = dtcm_rdata;
+    // FPGA DTCM reads are harmless when no response metadata is valid. Keeping
+    // the read port enabled removes LSU qualification from the BRAM CE path;
+    // only the already-selected registered address reaches the memory macro.
     assign dtcm_ren = IF_DTCM_FETCH_ENABLE ?
-        (lsu_load_valid_i | if_dtcm_access) : lsu_load_valid_i;
+        (lsu_load_valid_i | if_dtcm_access) : 1'b1;
     assign dtcm_wen = lsu_store_valid_i;
 
     always_ff @(posedge clk or negedge rst_n) begin

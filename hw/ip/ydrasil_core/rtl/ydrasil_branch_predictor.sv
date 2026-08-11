@@ -94,21 +94,33 @@ import ydrasil_pkg::*;
     // upper row bits previously remained plain PC bits, concentrating
     // unrelated histories in the same subset of rows. Each generated bit is
     // still a direct GHR wire, so the address retains one XOR level.
-    wire [BHT_ROW_WIDTH-1:0] ghr_row_mask;
-    genvar ghr_mask_bit;
-    generate
-        for (ghr_mask_bit = 0; ghr_mask_bit < BHT_ROW_WIDTH;
-             ghr_mask_bit = ghr_mask_bit + 1) begin : g_ghr_row_mask
-            if (ghr_mask_bit < GHR_WIDTH) begin : g_direct
-                assign ghr_row_mask[ghr_mask_bit] = USE_GSHARE ?
-                    ghr_value[ghr_mask_bit] : 1'b0;
-            end else begin : g_spread
-                assign ghr_row_mask[ghr_mask_bit] = USE_GSHARE ?
-                    ghr_value[(ghr_mask_bit - GHR_WIDTH + 2) % GHR_WIDTH] :
-                    1'b0;
+    function automatic logic [BHT_ROW_WIDTH-1:0] spread_history(
+        input logic [GHR_WIDTH-1:0] history
+    );
+        integer bit_idx;
+        begin
+            for (bit_idx = 0; bit_idx < BHT_ROW_WIDTH; bit_idx = bit_idx + 1) begin
+                if (bit_idx < GHR_WIDTH)
+                    spread_history[bit_idx] = history[bit_idx];
+                else
+                    spread_history[bit_idx] =
+                        history[(bit_idx - GHR_WIDTH + 2) % GHR_WIDTH];
             end
         end
-    endgenerate
+    endfunction
+
+    wire [GHR_WIDTH-1:0] ghr_after_spec1 =
+        (ghr_q << 1) | GHR_WIDTH'(predict1_spec_taken_i);
+    wire [GHR_WIDTH-1:0] ghr_after_both =
+        (ghr_q << 2) | (GHR_WIDTH'(predict0_spec_taken_i) << 1) |
+        GHR_WIDTH'(predict1_spec_taken_i);
+    wire [BHT_ROW_WIDTH-1:0] ghr_mask_current = spread_history(ghr_q);
+    wire [BHT_ROW_WIDTH-1:0] ghr_mask_after_spec0 =
+        spread_history((ghr_q << 1) | GHR_WIDTH'(predict0_spec_taken_i));
+    wire [BHT_ROW_WIDTH-1:0] ghr_mask_after_spec1 =
+        spread_history(ghr_after_spec1);
+    wire [BHT_ROW_WIDTH-1:0] ghr_mask_after_both =
+        spread_history(ghr_after_both);
 
     wire [BTB_LOCAL_ADDR_WIDTH-1:0] predict_btb_addr = {
         predict_pc_i[ydrasil_pkg::INST_ADDR_WIDTH-1:
@@ -137,10 +149,37 @@ import ydrasil_pkg::*;
     // naturally aligned 64-bit fetch always reads one entry from each bank.
     wire predict_bht_bank = predict_pc_i[2];
     wire predict_bht_bank1 = predict_pc1_i[2];
-    wire [BHT_ROW_WIDTH-1:0] predict_bht_row =
-        BHT_ROW_WIDTH'(predict_pc_i >> 3) ^ ghr_row_mask;
-    wire [BHT_ROW_WIDTH-1:0] predict_bht_row1 =
-        BHT_ROW_WIDTH'(predict_pc1_i >> 3) ^ ghr_row_mask;
+    wire [BHT_ROW_WIDTH-1:0] predict_pc_row =
+        BHT_ROW_WIDTH'(predict_pc_i >> 3);
+    wire [BHT_ROW_WIDTH-1:0] predict_pc_row1 =
+        BHT_ROW_WIDTH'(predict_pc1_i >> 3);
+    logic [BHT_ROW_WIDTH-1:0] predict_bht_row;
+    logic [BHT_ROW_WIDTH-1:0] predict_bht_row1;
+    always_comb begin
+        if (!USE_GSHARE) begin
+            predict_bht_row = predict_pc_row;
+            predict_bht_row1 = predict_pc_row1;
+        end else begin
+            unique case ({spec1_advance, spec0_advance})
+                2'b00: begin
+                    predict_bht_row = predict_pc_row ^ ghr_mask_current;
+                    predict_bht_row1 = predict_pc_row1 ^ ghr_mask_current;
+                end
+                2'b01: begin
+                    predict_bht_row = predict_pc_row ^ ghr_mask_after_spec0;
+                    predict_bht_row1 = predict_pc_row1 ^ ghr_mask_after_spec0;
+                end
+                2'b10: begin
+                    predict_bht_row = predict_pc_row ^ ghr_mask_after_spec1;
+                    predict_bht_row1 = predict_pc_row1 ^ ghr_mask_after_spec1;
+                end
+                default: begin
+                    predict_bht_row = predict_pc_row ^ ghr_mask_after_both;
+                    predict_bht_row1 = predict_pc_row1 ^ ghr_mask_after_both;
+                end
+            endcase
+        end
+    end
     wire [BHT_INDEX_WIDTH-1:0] predict_bht_index =
         {predict_bht_row, predict_bht_bank};
     wire [BHT_INDEX_WIDTH-1:0] predict_bht_index1 =

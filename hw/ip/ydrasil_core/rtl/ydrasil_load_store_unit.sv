@@ -4,6 +4,8 @@ import ydrasil_pkg::*;
     input  wire                            clk,
 	    input  wire                            rst_n,
 	    input  ydrasil_lsu_req_pkt_t           req_i,
+	    input  wire                            req_raw_valid_i,
+	    input  wire [DTCM_ADDR_WIDTH-1:0]      req_dtcm_word_addr_i,
 	    input  wire                            commit0_valid_i,
 	    input  producer_id_t                   commit0_id_i,
 	    input  wire                            commit1_valid_i,
@@ -18,6 +20,7 @@ import ydrasil_pkg::*;
 	    input  wire [BUS_DATA_WIDTH-1:0]       dtcm_rdata_i,
 	    output wire                            dtcm_load_valid_o,
 	    output wire [BUS_ADDR_WIDTH-1:0]       dtcm_load_addr_o,
+	    output wire [DTCM_ADDR_WIDTH-1:0]      dtcm_load_word_addr_o,
 	    output wire                            dtcm_store_valid_o,
 	    output wire [BUS_ADDR_WIDTH-1:0]       dtcm_store_addr_o,
 	    output wire [BUS_DATA_WIDTH-1:0]       dtcm_store_data_o,
@@ -329,12 +332,32 @@ import ydrasil_pkg::*;
 	    // Every memory request crosses the registered request queue. The registered
 	    // queue head may launch the BRAM directly; a second launch register adds
 	    // latency without breaking another combinational control dependency.
+	    // Empty-queue loads issue a speculative BRAM read before address-space
+	    // qualification.  The enable depends only on registered request type and
+	    // registered empty state; recovery, the DTCM range compare and the store
+	    // forwarding CAM remain off the BRAM control path.  A non-DTCM request
+	    // merely causes an ignored read and still enters the normal MMIO queue.
+	    wire fast_dtcm_probe = queue_empty && req_raw_valid_i && req_i.is_load &&
+	        store_buf_empty && !store_launch_valid_q && !load_issue_hold;
+	    wire fast_dtcm_load_fire = fast_dtcm_probe && req_i.valid &&
+	        req_i.addr_is_dtcm;
 	    wire queued_dtcm_load_candidate = active_dtcm_load && !load_issue_hold;
-	    wire [BUS_ADDR_WIDTH-1:0] load_launch_addr = active_addr;
-	    wire [REGS_ADDR_WIDTH-1:0] load_launch_rd_addr = active_rd_addr;
-	    wire producer_id_t load_launch_producer_id = active_producer_id;
-	    wire load_launch_producer_tracked = active_producer_tracked;
-	    wire [OP_LSU_INFO_WIDTH-1:0] load_launch_op = active_op;
+	    // The BRAM address path has only the registered queue-empty select.  All
+	    // other qualification applies to response metadata, not to the RAM pin.
+	    wire [BUS_ADDR_WIDTH-1:0] dtcm_read_addr = queue_empty ?
+	        req_i.addr : active_addr;
+	    wire [DTCM_ADDR_WIDTH-1:0] dtcm_read_word_addr = queue_empty ?
+	        req_dtcm_word_addr_i : active_addr[DTCM_ADDR_WIDTH+1:2];
+	    wire [BUS_ADDR_WIDTH-1:0] load_launch_addr = fast_dtcm_load_fire ?
+	        req_i.addr : active_addr;
+	    wire [REGS_ADDR_WIDTH-1:0] load_launch_rd_addr = fast_dtcm_load_fire ?
+	        req_i.rd_addr : active_rd_addr;
+	    wire producer_id_t load_launch_producer_id = fast_dtcm_load_fire ?
+	        req_i.producer_id : active_producer_id;
+	    wire load_launch_producer_tracked = fast_dtcm_load_fire ?
+	        req_i.producer_tracked : active_producer_tracked;
+	    wire [OP_LSU_INFO_WIDTH-1:0] load_launch_op = fast_dtcm_load_fire ?
+	        req_i.op : active_op;
 
     // Two age-ordered entries cover the measured forwarding use while
     // removing half of the address CAM and its newest-store priority tree.
@@ -342,23 +365,24 @@ import ydrasil_pkg::*;
 	    wire store_hit0 = (store_buf_count_q > STORE_COUNT_WIDTH'(0)) &&
 	        store_buf0_q.valid &&
 	        (store_buf0_q.addr[BUS_ADDR_WIDTH-1:2] ==
-	         load_launch_addr[BUS_ADDR_WIDTH-1:2]);
+	         active_addr[BUS_ADDR_WIDTH-1:2]);
 	    wire store_hit1 = (store_buf_count_q > STORE_COUNT_WIDTH'(1)) &&
 	        store_buf1_q.valid &&
 	        (store_buf1_q.addr[BUS_ADDR_WIDTH-1:2] ==
-	         load_launch_addr[BUS_ADDR_WIDTH-1:2]);
+	         active_addr[BUS_ADDR_WIDTH-1:2]);
 	    // A retired store spends one cycle in the launch register after leaving
 	    // the buffer. A same-word load in that cycle must not observe the
 	    // read-before-write value returned by the DTCM.
 	    wire store_launch_hit = store_launch_valid_q &&
 	        (store_launch_addr_q[BUS_ADDR_WIDTH-1:2] ==
-	         load_launch_addr[BUS_ADDR_WIDTH-1:2]);
+	         active_addr[BUS_ADDR_WIDTH-1:2]);
 	    wire load_store_data_block =
 	        (store_hit0 && !store_buf0_q.store_data_valid) ||
 	        (store_hit1 && !store_buf1_q.store_data_valid);
 	    wire queued_dtcm_load_fire = queued_dtcm_load_candidate &&
 	        !load_store_data_block;
-	    wire dtcm_load_fire = queued_dtcm_load_fire;
+	    wire dtcm_load_fire = queued_dtcm_load_fire || fast_dtcm_load_fire;
+	    wire dtcm_bram_read = queued_dtcm_load_fire || fast_dtcm_probe;
 	    wire [3:0] forward_mask0 = {4{store_hit0}} &
 	        store_buf0_q.store_mask;
 	    wire [3:0] forward_mask1 = {4{store_hit1}} &
@@ -391,7 +415,8 @@ import ydrasil_pkg::*;
         (!active_is_store || active_store_data_valid);
     wire queue_dequeue = queued_dtcm_load_fire || dtcm_store_fire || mmio_fire;
     wire queue_has_room_after_dequeue = !queue_full || queue_dequeue;
-    wire queue_enqueue = req_i.valid && queue_has_room_after_dequeue;
+	    wire queue_enqueue = req_i.valid && queue_has_room_after_dequeue &&
+	        !fast_dtcm_load_fire;
     wire store_buf_enqueue = dtcm_store_fire;
 `ifndef SYNTHESIS
     reg [31:0] perf_stb_lookup_q;
@@ -415,8 +440,9 @@ import ydrasil_pkg::*;
     // of the next Issue selection cone.
     assign issue_credit_o = issue_credit_q;
 
-	    assign dtcm_load_valid_o = dtcm_load_fire;
-	    assign dtcm_load_addr_o = load_launch_addr;
+	    assign dtcm_load_valid_o = dtcm_bram_read;
+	    assign dtcm_load_addr_o = dtcm_read_addr;
+	    assign dtcm_load_word_addr_o = dtcm_read_word_addr;
 	    assign dtcm_store_valid_o = store_launch_valid_q;
 	    assign dtcm_store_addr_o = store_launch_addr_q;
 	    assign dtcm_store_data_o = store_launch_data_q;
@@ -511,9 +537,9 @@ import ydrasil_pkg::*;
     assign dtcm_reservation_o.producer_id = load_s1_producer_id_q;
     assign dtcm_reservation_o.arch_addr = load_s1_rd_addr_q;
     assign dtcm_reservation_o.result_class = RESULT_LSU;
-    assign dtcm_launch_wakeup_valid_o = queued_dtcm_load_fire &&
-        active_producer_tracked;
-    assign dtcm_launch_wakeup_id_o = active_producer_id;
+	assign dtcm_launch_wakeup_valid_o = dtcm_load_fire &&
+	    load_launch_producer_tracked;
+	assign dtcm_launch_wakeup_id_o = load_launch_producer_id;
     // Identity and formatted data describe the same registered S1 response.
     // Issue consumes this only at its Operand/FU input D boundary; it does
     // not feed Select or Dispatch control.
@@ -944,8 +970,8 @@ import ydrasil_pkg::*;
 	                perf_stb_block_q <= perf_stb_block_q + 1'b1;
             if (store_buf_dequeue)
                 perf_stb_drain_q <= perf_stb_drain_q + 1'b1;
-            if (req_i.valid && !queue_enqueue &&
-                !(queue_dequeue && queue_full)) begin
+	        if (req_i.valid && !queue_enqueue && !fast_dtcm_load_fire &&
+	            !(queue_dequeue && queue_full)) begin
                 $fatal(1, "LSU two-entry load queue overflow");
             end
             if (store_buf_enqueue && store_buf_full && !store_buf_dequeue)

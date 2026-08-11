@@ -121,7 +121,7 @@ import ydrasil_pkg::*;
     logic [OPERATOR_TYPE_WIDTH-1:0] dual_hzd_operator_type;
     wire dual_valid = dual_alu_valid_i || dual_bit_valid_i ||
         dual_bru_valid_i || mul_valid_i || csr_valid_i;
-    wire [BUS_ADDR_WIDTH-1:0] lsu_mem_addr;
+	    wire [BUS_ADDR_WIDTH-1:0] lsu_mem_addr;
     wire [REGS_DATA_WIDTH-1:0] lsu_store_result;
     wire unused_instret;
     wire branch_recovery = ex_pc_redirect_o;
@@ -248,7 +248,7 @@ import ydrasil_pkg::*;
         .ex_csr_wen_o           (ex_csr_wen_o),
         .ex_csr_wdata_o         (ex_csr_wdata_o),
         .ex_csr_waddr_o         (ex_csr_waddr_o),
-        .ex_lsu_mem_addr_o      (lsu_mem_addr),
+	        .ex_lsu_mem_addr_o      (lsu_mem_addr),
         .ex_lsu_result_o        (lsu_store_result),
         .alu_result_o           (alu_result_o),
         .alu_rf_wen_rd_o        (alu_rf_wen_o),

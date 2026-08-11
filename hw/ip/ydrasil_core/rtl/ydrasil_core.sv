@@ -111,6 +111,7 @@ import ydrasil_axi_pkg::*;
 	wire [31:0]                    agu_in_operand_a;
 	wire [31:0]                    agu_in_operand_b;
 	ydrasil_lsu_req_pkt_t          agu_in_req;
+	wire [DTCM_ADDR_WIDTH-1:0]     agu_in_dtcm_word_addr;
 	wire [31:0]                    agu_in_store_data;
 	wire                           csr_in_valid;
 	wire [31:0]                    csr_in_operand_a;
@@ -225,6 +226,7 @@ import ydrasil_axi_pkg::*;
 	// LSU request path
 	wire                        dtcm_load_valid;
 	wire [BUS_ADDR_WIDTH-1:0]  dtcm_load_addr;
+	wire [DTCM_ADDR_WIDTH-1:0] dtcm_load_word_addr;
 	wire                        dtcm_store_valid;
 	wire [BUS_ADDR_WIDTH-1:0]  dtcm_store_addr;
 	wire [BUS_DATA_WIDTH-1:0]  dtcm_store_data;
@@ -467,7 +469,9 @@ import ydrasil_axi_pkg::*;
 	ydrasil_load_store_unit u_ydrasil_load_store_unit (
 		.clk               (clk),
 		.rst_n             (rst_n),
-			.req_i             (lsu_req_pkt),
+				.req_i             (lsu_req_pkt),
+				.req_raw_valid_i   (agu_in_req.valid),
+				.req_dtcm_word_addr_i(agu_in_dtcm_word_addr),
 				.commit0_valid_i   (retire_valid),
 					.commit0_id_i      (commit_pkt.producer_id),
 				.commit1_valid_i   (retire_valid1),
@@ -483,6 +487,7 @@ import ydrasil_axi_pkg::*;
 		.dtcm_rdata_i      (dtcm_rdata),
 		.dtcm_load_valid_o (dtcm_load_valid),
 		.dtcm_load_addr_o  (dtcm_load_addr),
+		.dtcm_load_word_addr_o(dtcm_load_word_addr),
 		.dtcm_store_valid_o(dtcm_store_valid),
 		.dtcm_store_addr_o (dtcm_store_addr),
 		.dtcm_store_data_o (dtcm_store_data),
@@ -773,8 +778,9 @@ import ydrasil_axi_pkg::*;
 			.lane_a_pc_o        (lane_a_pc),
 			.agu_in_valid_o     (agu_in_valid),
 			.agu_in_operand_a_o (agu_in_operand_a),
-			.agu_in_operand_b_o (agu_in_operand_b),
-			.agu_in_req_o       (agu_in_req),
+				.agu_in_operand_b_o (agu_in_operand_b),
+				.agu_in_req_o       (agu_in_req),
+				.agu_in_dtcm_word_addr_o(agu_in_dtcm_word_addr),
 			.agu_in_store_data_o(agu_in_store_data),
 			.csr_in_valid_o     (csr_in_valid),
 			.csr_in_operand_a_o (csr_in_operand_a),
@@ -923,6 +929,7 @@ import ydrasil_axi_pkg::*;
 		.if_mem_rdata1_o(if_mem_rdata1),
 		.lsu_load_valid_i(dtcm_load_valid),
 		.lsu_load_addr_i(dtcm_load_addr),
+		.lsu_load_word_addr_i(dtcm_load_word_addr),
 		.lsu_store_valid_i(dtcm_store_valid),
 		.lsu_store_addr_i(dtcm_store_addr),
 		.lsu_store_data_i(dtcm_store_data),
