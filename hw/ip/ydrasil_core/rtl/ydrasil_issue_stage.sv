@@ -1631,7 +1631,6 @@ import ydrasil_pkg::*;
     ydrasil_lane_b_alu_payload_t dual_alu_payload_q;
     ydrasil_lane_b_bit_payload_t dual_bit_payload_q;
     ydrasil_lane_b_bru_payload_t dual_bru_payload_q;
-    ydrasil_reservation_pkt_t dtcm_operand_reservation_q;
     ydrasil_reservation_pkt_t dtcm_operand_history_q;
     reg [DATA_WIDTH-1:0] dtcm_operand_history_data_q;
     ydrasil_reservation_pkt_t mdu_operand_reservation_q;
@@ -1675,7 +1674,7 @@ import ydrasil_pkg::*;
         .commit_pkt1_i(commit_pkt1_i),
         .completion_meta_i(completion_meta_i),
         .completion_data_i(completion_data_i),
-        .dtcm_reservation_i(dtcm_operand_reservation_q),
+        .dtcm_reservation_i(dtcm_reservation_i),
         .dtcm_history_reservation_i(dtcm_operand_history_q),
         .mdu_reservation_i(mdu_operand_reservation_q),
         .mdu_bypass_data_i(mdu_operand_data_q),
@@ -1693,7 +1692,7 @@ import ydrasil_pkg::*;
         .commit_pkt1_i(commit_pkt1_i),
         .completion_meta_i(completion_meta_i),
         .completion_data_i(completion_data_i),
-        .dtcm_reservation_i(dtcm_operand_reservation_q),
+        .dtcm_reservation_i(dtcm_reservation_i),
         .dtcm_history_reservation_i(dtcm_operand_history_q),
         .mdu_reservation_i(mdu_operand_reservation_q),
         .mdu_bypass_data_i(mdu_operand_data_q),
@@ -1711,7 +1710,7 @@ import ydrasil_pkg::*;
         .commit_pkt1_i(commit_pkt1_i),
         .completion_meta_i(completion_meta_i),
         .completion_data_i(completion_data_i),
-        .dtcm_reservation_i(dtcm_operand_reservation_q),
+        .dtcm_reservation_i(dtcm_reservation_i),
         .dtcm_history_reservation_i(dtcm_operand_history_q),
         .mdu_reservation_i(mdu_operand_reservation_q),
         .mdu_bypass_data_i(mdu_operand_data_q),
@@ -1729,7 +1728,7 @@ import ydrasil_pkg::*;
         .commit_pkt1_i(commit_pkt1_i),
         .completion_meta_i(completion_meta_i),
         .completion_data_i(completion_data_i),
-        .dtcm_reservation_i(dtcm_operand_reservation_q),
+        .dtcm_reservation_i(dtcm_reservation_i),
         .dtcm_history_reservation_i(dtcm_operand_history_q),
         .mdu_reservation_i(mdu_operand_reservation_q),
         .mdu_bypass_data_i(mdu_operand_data_q),
@@ -1925,8 +1924,7 @@ import ydrasil_pkg::*;
         slot0_src0_dtcm_hit : slot1_src0_dtcm_hit);
     wire lane_b_src1_dtcm_hit = (lane_b_uses_slot0 ?
         slot0_src1_dtcm_hit : slot1_src1_dtcm_hit);
-    wire [DATA_WIDTH-1:0] dtcm_operand_current_data =
-        completion_data_i[COMPLETION_LSU];
+    wire [DATA_WIDTH-1:0] dtcm_operand_current_data = dtcm_resp_data_i;
     wire [DATA_WIDTH-1:0] slot0_src0_dtcm_data =
         slot0_src0_dtcm_current_hit ? dtcm_operand_current_data :
         dtcm_operand_history_data_q;
@@ -2119,15 +2117,13 @@ import ydrasil_pkg::*;
     always_ff @(posedge clk) begin
         if (!rst_n || trap_flush_i ||
             (flush_id_i && !branch_recovery_i)) begin
-            dtcm_operand_reservation_q <= '0;
             dtcm_operand_history_q <= '0;
             dtcm_operand_history_data_q <= '0;
             mdu_operand_reservation_q <= '0;
             mdu_operand_data_q <= '0;
         end else begin
-            dtcm_operand_reservation_q <= dtcm_reservation_i;
-            dtcm_operand_history_q <= dtcm_operand_reservation_q;
-            if (dtcm_operand_reservation_q.valid)
+            dtcm_operand_history_q <= dtcm_reservation_i;
+            if (dtcm_reservation_i.valid)
                 dtcm_operand_history_data_q <= dtcm_operand_current_data;
             mdu_operand_reservation_q <= mdu_result_reservation_i;
             mdu_operand_data_q <= mdu_bypass_data_i;

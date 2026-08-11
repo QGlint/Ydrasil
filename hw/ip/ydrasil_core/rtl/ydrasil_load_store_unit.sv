@@ -320,11 +320,6 @@ import ydrasil_pkg::*;
     reg [BUS_ADDR_WIDTH-1:0] store_launch_addr_q;
     reg [BUS_DATA_WIDTH-1:0] store_launch_data_q;
     reg [3:0] store_launch_mask_q;
-    // This is the only wide DTCM response boundary.  Issue receives the
-    // matching tag through dtcm_reservation_o and selects this registered
-    // data only after its own FU input cells.
-    reg [REGS_DATA_WIDTH-1:0] dtcm_resp_data_q;
-
     // Give a buffered peripheral response a bounded path to completion. At
     // most one already-issued DTCM response remains after this hold asserts.
     // MMIO responses are buffered in mmio_wb_valid_q. If one arrives on the
@@ -519,7 +514,10 @@ import ydrasil_pkg::*;
     assign dtcm_launch_wakeup_valid_o = queued_dtcm_load_fire &&
         active_producer_tracked;
     assign dtcm_launch_wakeup_id_o = active_producer_id;
-    assign dtcm_resp_data_o = dtcm_resp_data_q;
+    // Identity and formatted data describe the same registered S1 response.
+    // Issue consumes this only at its Operand/FU input D boundary; it does
+    // not feed Select or Dispatch control.
+    assign dtcm_resp_data_o = dtcm_load_result;
 
 	ydrasil_lsu_req_pkt_t enqueue_pkt;
 	integer shadow_match_idx;
@@ -900,8 +898,6 @@ import ydrasil_pkg::*;
                 store_launch_mask_q <= store_buf0_q.store_mask;
             end
             load_s1_valid_q <= dtcm_load_fire;
-            if (load_s1_valid_q)
-                dtcm_resp_data_q <= dtcm_load_result;
             if (dtcm_load_fire) begin
                 load_s1_rd_addr_q <= load_launch_rd_addr;
                 load_s1_producer_id_q <= load_launch_producer_id;

@@ -968,7 +968,7 @@ import ydrasil_axi_pkg::*;
 			.issue_fence_tag_i (issue_fence_tag),
 				.completion_meta_i (completion_ready_meta),
 				.completion_rd_i   (completion_ready_rd),
-				.trap_stall_i      (trap_ctrl_pkt.stall),
+				.trap_stall_i      (trap_stall),
 				.ex_mul_stall_i     (ex_mul_stall),
 			.retire_value0_i   (retire_value0),
 			.retire_value1_i   (retire_value1),
@@ -1040,6 +1040,7 @@ import ydrasil_axi_pkg::*;
 		.mul_stall_i       (ex_mul_stall),
 		.redirect_pending_i(ex_pc_redirect || id_fence_i),
 		.csr_write_o       (trap_csr_write_pkt),
+		.trap_stall_o      (trap_stall),
 		.trap_ctrl_o       (trap_ctrl_pkt)
 	);
 

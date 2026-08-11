@@ -318,6 +318,7 @@ import ydrasil_apb_pkg::*;
         .backend_idle_i(1'b1),
         .async_pc_i(async_pc),
         .csr_write_o(trap_csr_write),
+        .trap_stall_o(),
         .trap_ctrl_o(trap_ctrl)
     );
 

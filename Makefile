@@ -369,9 +369,9 @@ SYN_TIMING_SUMMARY_MAX_PATHS ?= 5000
 SYN_TIMING_PATH_MAX_PATHS ?= 5000
 SYN_TIMING_NWORST ?= 1
 ifeq ($(HOSTNAME),servera437)
-SYN_JOBS ?= $(shell nproc)
-SYN_IMPL_RUNS ?= 5
-SYN_THREADS_PER_RUN ?= 8
+SYN_JOBS ?= 39
+SYN_IMPL_RUNS ?= 3
+SYN_THREADS_PER_RUN ?= 13
 else ifeq ($(HOSTNAME),QGlint-Ar)
 SYN_JOBS ?= 16
 SYN_IMPL_RUNS ?= 1
@@ -988,9 +988,9 @@ synf: SYN_PLL_FREQ_MHZ := 200
 synf: SYN_RUN_TO := bitstream
 ifeq ($(HOSTNAME),servera437)
 synf: SYN_IMPL_MODE := sweep
-synf: SYN_JOBS := 40
-synf: SYN_IMPL_RUNS := 4
-synf: SYN_THREADS_PER_RUN := 8
+synf: SYN_JOBS := 39
+synf: SYN_IMPL_RUNS := 3
+synf: SYN_THREADS_PER_RUN := 13
 else ifeq ($(HOSTNAME),QGlint-Ar)
 synf: SYN_IMPL_MODE := extreme
 synf: SYN_JOBS := 16
@@ -1025,9 +1025,9 @@ syn240: SYN_PLL_FREQ_MHZ := 240
 syn250: SYN_PLL_FREQ_MHZ := 250
 syn225 syn240 syn250: SYN_RUN_TO := bitstream
 ifeq ($(HOSTNAME),servera437)
-syn225 syn240 syn250: SYN_JOBS := 40
-syn225 syn240 syn250: SYN_IMPL_RUNS := 5
-syn225 syn240 syn250: SYN_THREADS_PER_RUN := 8
+syn225 syn240 syn250: SYN_JOBS := 39
+syn225 syn240 syn250: SYN_IMPL_RUNS := 3
+syn225 syn240 syn250: SYN_THREADS_PER_RUN := 13
 else ifeq ($(HOSTNAME),QGlint-Ar)
 syn225 syn240 syn250: SYN_JOBS := 16
 syn225 syn240 syn250: SYN_IMPL_RUNS := 1

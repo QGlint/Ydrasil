@@ -2,13 +2,7 @@ module ydrasil_dtcm #(
     parameter int DTCM_ADDR_WIDTH = 14,
     parameter int BUS_DATA_WIDTH = 32,
     parameter string INIT_FILE = "none",
-    parameter bit INIT_ENABLE = 1'b0,
-    parameter bit ENABLE_XPM_MMI =
-`ifdef YDRASIL_XPM_MMI
-        1'b1
-`else
-        1'b0
-`endif
+    parameter bit INIT_ENABLE = 1'b0
 ) (
     input  wire                       clk,
     input  wire                       dtcm_ren,
@@ -27,7 +21,7 @@ module ydrasil_dtcm #(
         .MEMORY_PRIMITIVE("block"),
         .MEMORY_INIT_FILE(INIT_FILE),
         .USE_MEM_INIT(INIT_ENABLE),
-        .USE_MEM_INIT_MMI(ENABLE_XPM_MMI),
+        .USE_MEM_INIT_MMI(1'b1),
         .MEMORY_OPTIMIZATION("false")
     ) u_impl (
 `else

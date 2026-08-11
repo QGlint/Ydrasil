@@ -19,6 +19,7 @@ import ydrasil_pkg::*;
     input  wire                           mul_stall_i,
     input  wire                           redirect_pending_i,
     output ydrasil_csr_write_pkt_t        csr_write_o,
+    output wire                           trap_stall_o,
     output ydrasil_trap_ctrl_pkt_t        trap_ctrl_o
 );
     ydrasil_exception_req_pkt_t exception_req;
@@ -68,6 +69,7 @@ import ydrasil_pkg::*;
         .backend_idle_i (backend_idle_q),
         .async_pc_i     (async_pc_q),
         .csr_write_o    (csr_write_o),
+        .trap_stall_o   (trap_stall_o),
         .trap_ctrl_o    (trap_ctrl_o)
     );
 endmodule

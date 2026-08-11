@@ -174,7 +174,7 @@ perl verif/tools/coe_to_mem.pl --binary input.coe output.bin
 无 GUI 跑 Vivado 综合、实现到 route，并生成时序分析：
 
 ```sh
-make syn SYN_JOBS=40
+make syn SYN_JOBS=39
 ```
 
 使用 RTL MMCM 切换 CPU clock 到 200MHz，综合、实现并生成 bitstream：
@@ -200,7 +200,7 @@ make syn240 IROM_COE=/path/to/irom.coe DRAM_COE=/path/to/dram.coe
 只从已有 routed checkpoint 重新生成报告：
 
 ```sh
-make syn-vivado SYN_RUN_TO=reports SYN_FORCE=0 SYN_SYNC_SOURCES=0 SYN_JOBS=40
+make syn-vivado SYN_RUN_TO=reports SYN_FORCE=0 SYN_SYNC_SOURCES=0 SYN_JOBS=39
 make syn-analyze
 ```
 

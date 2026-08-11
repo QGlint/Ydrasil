@@ -9,6 +9,7 @@ import ydrasil_pkg::*;
     input  wire                           backend_idle_i,
     input  wire [INST_ADDR_WIDTH-1:0]     async_pc_i,
     output ydrasil_csr_write_pkt_t        csr_write_o,
+    output wire                           trap_stall_o,
     output ydrasil_trap_ctrl_pkt_t        trap_ctrl_o
 );
     typedef enum logic [3:0] {
@@ -96,7 +97,8 @@ import ydrasil_pkg::*;
     // Keep control bits structurally independent from the redirect target.
     // Requests enter the registered drain state at the next edge, so request
     // detection does not feed combinationally back into Issue/Fetch control.
-    assign trap_ctrl_o.stall = state_q != S_IDLE;
+    assign trap_stall_o = state_q != S_IDLE;
+    assign trap_ctrl_o.stall = trap_stall_o;
     assign trap_ctrl_o.retire = state_q == S_MRET_REDIRECT;
     assign trap_ctrl_o.redirect =
         (state_q == S_REDIRECT) || (state_q == S_MRET_REDIRECT);
