@@ -53,4 +53,5 @@ sources:
       - dv/ydrasil_core_tb.sv
       - dv/ydrasil_branch_predictor_tb.sv
       - dv/ydrasil_bht_clear_tb.sv
+      - dv/ydrasil_gshare_recovery_tb.sv
       - dv/ydrasil_bus_irq_tb.sv

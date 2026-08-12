@@ -2087,8 +2087,6 @@ import ydrasil_pkg::*;
             lane_b_uop.pred_global_counter;
         dual_bru_payload_d.pred_local_counter = lane_b_uop.pred_local_counter;
         dual_bru_payload_d.pred_bht_index = lane_b_uop.pred_bht_index;
-        dual_bru_payload_d.pred_ghr_checkpoint =
-            lane_b_uop.pred_ghr_checkpoint;
     end
 
     // Return-channel identity and data cross into Operand together. No live
@@ -2645,7 +2643,6 @@ import ydrasil_pkg::*;
     input  wire [1:0]                     pred_global_counter_i,
     input  wire [1:0]                     pred_local_counter_i,
     input  bp_bht_index_t                 pred_bht_index_i,
-    input  bp_ghr_t                       pred_ghr_checkpoint_i,
     input  wire [INST_ADDR_WIDTH-1:0]     trap_redirect_addr_i,
     output wire                           completion_valid_o,
     output producer_id_t                  completion_producer_id_o,
@@ -2787,7 +2784,6 @@ import ydrasil_pkg::*;
         .id_ex_pred_global_counter_i(pred_global_counter_i),
         .id_ex_pred_local_counter_i(pred_local_counter_i),
         .id_ex_pred_bht_index_i(pred_bht_index_i),
-        .id_ex_pred_ghr_checkpoint_i(pred_ghr_checkpoint_i),
         .id_ex_producer_id_i(producer_id_i),
         .trap_redirect_i(interrupt_i),
         .trap_redirect_addr_i(trap_redirect_addr_i),

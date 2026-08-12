@@ -24,7 +24,6 @@ import ydrasil_pkg::*;
     input  wire [1:0]                      id_ex_pred_global_counter_i,
     input  wire [1:0]                      id_ex_pred_local_counter_i,
     input  bp_bht_index_t                  id_ex_pred_bht_index_i,
-    input  bp_ghr_t                        id_ex_pred_ghr_checkpoint_i,
     input  producer_id_t                   id_ex_producer_id_i,
     input  wire                            trap_redirect_i,
     input  wire [INST_ADDR_WIDTH-1:0]      trap_redirect_addr_i,
@@ -124,7 +123,6 @@ import ydrasil_pkg::*;
         ex_bp_train.global_counter = id_ex_pred_global_counter_i;
         ex_bp_train.local_counter = id_ex_pred_local_counter_i;
         ex_bp_train.bht_index = id_ex_pred_bht_index_i;
-        ex_bp_train.ghr_checkpoint = id_ex_pred_ghr_checkpoint_i;
         ex_bp_train.recover = ex_pc_redirect;
     end
 

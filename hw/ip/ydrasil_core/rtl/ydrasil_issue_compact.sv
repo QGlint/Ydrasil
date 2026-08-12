@@ -35,8 +35,6 @@ import ydrasil_pkg::*;
         compact_uop_o.pred_local_counter =
             issue_pkt_i.decode.pred_local_counter;
         compact_uop_o.pred_bht_index = issue_pkt_i.decode.pred_bht_index;
-        compact_uop_o.pred_ghr_checkpoint =
-            issue_pkt_i.decode.pred_ghr_checkpoint;
         compact_uop_o.csr_raddr = issue_pkt_i.decode.csr_raddr;
         compact_uop_o.csr_waddr = issue_pkt_i.decode.csr_waddr;
         compact_uop_o.csr_op_info = issue_pkt_i.decode.csr_op_info;

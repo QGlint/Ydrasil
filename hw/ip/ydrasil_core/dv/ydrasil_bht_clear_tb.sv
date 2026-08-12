@@ -62,10 +62,8 @@ import ydrasil_pkg::*;
         .predict_global_counter_o(),
         .predict_local_counter_o(),
         .predict_bht_index_o(predict_bht_index),
-        .predict_ghr_checkpoint_o(),
         .predict0_spec_valid_i(1'b0),
         .predict0_spec_conditional_i(1'b0),
-        .predict0_spec_taken_i(1'b0),
         .predict_pc1_i(predict_pc + 32'd4),
         .predict1_hit_o(predict1_hit),
         .predict1_taken_o(predict1_taken),
@@ -74,10 +72,8 @@ import ydrasil_pkg::*;
         .predict1_global_counter_o(),
         .predict1_local_counter_o(),
         .predict1_bht_index_o(predict1_bht_index),
-        .predict1_ghr_checkpoint_o(),
         .predict1_spec_valid_i(1'b0),
         .predict1_spec_conditional_i(1'b0),
-        .predict1_spec_taken_i(1'b0),
         .train_i(train_pkt),
         .invalidate_i(invalidate)
     );

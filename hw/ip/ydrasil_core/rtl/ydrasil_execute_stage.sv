@@ -309,7 +309,6 @@ import ydrasil_pkg::*;
         .pred_global_counter_i  (dual_bru_payload_i.pred_global_counter),
         .pred_local_counter_i   (dual_bru_payload_i.pred_local_counter),
         .pred_bht_index_i       (dual_bru_payload_i.pred_bht_index),
-        .pred_ghr_checkpoint_i  (dual_bru_payload_i.pred_ghr_checkpoint),
         .trap_redirect_addr_i   (trap_redirect_addr_i),
         .completion_valid_o     (dual_completion_valid_o),
         .completion_producer_id_o(dual_completion_producer_id_o),

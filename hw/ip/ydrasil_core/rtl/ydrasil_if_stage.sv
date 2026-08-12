@@ -331,7 +331,6 @@ import ydrasil_pkg::*;
     input  wire [1:0]  bp_predict_global_counter_i,
     input  wire [1:0]  bp_predict_local_counter_i,
     input  bp_bht_index_t bp_predict_bht_index_i,
-    input  bp_ghr_t       bp_predict_ghr_checkpoint_i,
     input  wire        bp_predict1_taken_i,
     input  wire        bp_predict1_hit_i,
     input  wire [31:0] bp_predict1_target_i,
@@ -339,7 +338,6 @@ import ydrasil_pkg::*;
     input  wire [1:0]  bp_predict1_global_counter_i,
     input  wire [1:0]  bp_predict1_local_counter_i,
     input  bp_bht_index_t bp_predict1_bht_index_i,
-    input  bp_ghr_t       bp_predict1_ghr_checkpoint_i,
     input  wire        bp_invalidate_i,
     input  wire [31:0] bp_invalidate_target_i,
     // Install L0 entries only after EX has resolved real control flow.
@@ -352,10 +350,8 @@ import ydrasil_pkg::*;
     // predictor history for the following BRAM lookup; they never select PC.
     output wire        bp_speculate0_valid_o,
     output wire        bp_speculate0_conditional_o,
-    output wire        bp_speculate0_taken_o,
     output wire        bp_speculate1_valid_o,
     output wire        bp_speculate1_conditional_o,
-    output wire        bp_speculate1_taken_o,
     input  wire [31:0] if_mem_rdata_i,
     input  wire [31:0] if_mem_rdata1_i,
 
@@ -368,7 +364,6 @@ import ydrasil_pkg::*;
     output wire [1:0]  if_id_pred_global_counter_o,
     output wire [1:0]  if_id_pred_local_counter_o,
     output bp_bht_index_t if_id_pred_bht_index_o,
-    output bp_ghr_t       if_id_pred_ghr_checkpoint_o,
     output wire        if_id_valid_o,
     output wire [31:0] if_id_instr_o,
     output ydrasil_dispatch_domain_t if_id_domain_o,
@@ -385,7 +380,6 @@ import ydrasil_pkg::*;
     output wire [1:0]  if_id1_pred_global_counter_o,
     output wire [1:0]  if_id1_pred_local_counter_o,
     output bp_bht_index_t if_id1_pred_bht_index_o,
-    output bp_ghr_t       if_id1_pred_ghr_checkpoint_o,
     output wire        if_id1_valid_o,
     output wire [31:0] if_id1_instr_o,
     output ydrasil_dispatch_domain_t if_id1_domain_o,
@@ -414,7 +408,6 @@ import ydrasil_pkg::*;
         logic [1:0] pred_global_counter;
         logic [1:0] pred_local_counter;
         bp_bht_index_t pred_bht_index;
-        bp_ghr_t pred_ghr_checkpoint;
         ydrasil_dispatch_domain_t domain;
         logic serial;
         logic src0_used;
@@ -554,21 +547,8 @@ import ydrasil_pkg::*;
     wire response_conditional1 = if_mem_rdata1_i[6:0] == RV32I_INS_TYPE_B;
     assign bp_speculate0_valid_o = mem_resp_valid && mem_req_lane_valid_q[0];
     assign bp_speculate0_conditional_o = response_conditional0;
-    assign bp_speculate0_taken_o = bp_predict_taken_i;
-    assign bp_speculate1_valid_o = mem_resp_valid && mem_req_lane_valid_q[1] &&
-        !bp_predict_taken_i;
+    assign bp_speculate1_valid_o = mem_resp_valid && mem_req_lane_valid_q[1];
     assign bp_speculate1_conditional_o = response_conditional1;
-    assign bp_speculate1_taken_o = bp_predict1_taken_i;
-
-    // Both BHT lanes are looked up in parallel from the history before this
-    // fetch word.  A surviving lane-1 branch, however, is younger than a
-    // conditional in lane 0.  Its recovery checkpoint must therefore retain
-    // lane 0's predicted direction even though its BHT index did not use it.
-    wire [BP_GHR_WIDTH-1:0] response1_ghr_checkpoint =
-        response_conditional0 ?
-        ((bp_predict_ghr_checkpoint_i << 1) |
-         BP_GHR_WIDTH'(bp_predict_taken_i)) :
-        bp_predict1_ghr_checkpoint_i;
 
     fetch_payload_t fetchq_push_payload0;
     fetch_payload_t fetchq_push_payload1;
@@ -617,8 +597,6 @@ import ydrasil_pkg::*;
             bp_predict_global_counter_i;
         fetchq_push_payload0.pred_local_counter = bp_predict_local_counter_i;
         fetchq_push_payload0.pred_bht_index = bp_predict_bht_index_i;
-        fetchq_push_payload0.pred_ghr_checkpoint =
-            bp_predict_ghr_checkpoint_i;
         fetchq_push_payload0.domain = push_domain0;
         fetchq_push_payload0.serial = push_serial0;
         fetchq_push_payload0.src0_used = push_src0_used0;
@@ -641,9 +619,9 @@ import ydrasil_pkg::*;
         fetchq_push_payload1.pred_global_counter =
             bp_predict1_global_counter_i;
         fetchq_push_payload1.pred_local_counter = bp_predict1_local_counter_i;
-        fetchq_push_payload1.pred_bht_index = bp_predict1_bht_index_i;
-        fetchq_push_payload1.pred_ghr_checkpoint =
-            response1_ghr_checkpoint;
+        fetchq_push_payload1.pred_bht_index = {
+            bp_predict1_bht_index_i[BP_BHT_INDEX_WIDTH-1:1],
+            response_conditional0 && !bp_predict_taken_i};
         fetchq_push_payload1.domain = push_domain1;
         fetchq_push_payload1.serial = push_serial1;
         fetchq_push_payload1.src0_used = push_src0_used1;
@@ -722,6 +700,12 @@ import ydrasil_pkg::*;
     wire mem_req_valid_ff = mem_req_valid_q;
     wire pending_redirect_valid_ff = pending_redirect_valid_q;
     wire bp_predict_redirect = predict_redirect_resp;
+    always_ff @(posedge clk) begin
+        if (rst_n) begin
+            assert (!bp_speculate1_valid_o || !mem_req_pc_q[2])
+                else $fatal(1, "lane 1 speculation requires an aligned fetch pair");
+        end
+    end
 `endif
     assign if_mem_addr_o = fetch_addr;
     assign if_mem_addr1_o = fetch_addr1;
@@ -769,7 +753,6 @@ import ydrasil_pkg::*;
     assign if_id_pred_global_counter_o = fetchq_payload0.pred_global_counter;
     assign if_id_pred_local_counter_o = fetchq_payload0.pred_local_counter;
     assign if_id_pred_bht_index_o = fetchq_payload0.pred_bht_index;
-    assign if_id_pred_ghr_checkpoint_o = fetchq_payload0.pred_ghr_checkpoint;
 
     assign if_id1_valid_o = fetchq_valid1;
     assign if_id1_pc_o = fetchq_pc1;
@@ -786,8 +769,6 @@ import ydrasil_pkg::*;
     assign if_id1_pred_global_counter_o = fetchq_payload1.pred_global_counter;
     assign if_id1_pred_local_counter_o = fetchq_payload1.pred_local_counter;
     assign if_id1_pred_bht_index_o = fetchq_payload1.pred_bht_index;
-    assign if_id1_pred_ghr_checkpoint_o =
-        fetchq_payload1.pred_ghr_checkpoint;
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
