@@ -21,11 +21,6 @@ set_property PACKAGE_PIN A18 [get_ports {gpio[1]}]
 set_property PACKAGE_PIN A20 [get_ports {gpio[2]}]
 set_property IOSTANDARD LVCMOS33 [get_ports {spi_sclk spi_sdio gpio[1] gpio[2]}]
 
-# GPIO21-22: I2C0.
-set_property PACKAGE_PIN K20 [get_ports i2c_scl]
-set_property PACKAGE_PIN K19 [get_ports i2c_sda]
-set_property IOSTANDARD LVCMOS33 [get_ports {i2c_scl i2c_sda}]
-
 # GPIO31 and GPIO34-39: remaining software-controlled GPIO.
 set_property PACKAGE_PIN A22 [get_ports {gpio[0]}]
 set_property PACKAGE_PIN D21 [get_ports {gpio[3]}]

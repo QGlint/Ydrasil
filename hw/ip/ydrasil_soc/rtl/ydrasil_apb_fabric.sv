@@ -28,7 +28,11 @@ import ydrasil_soc_pkg::*;
     wire uart0_sel = (apb_req_i.paddr[31:12] == UART0_BASE[31:12]);
     wire uart1_sel = (apb_req_i.paddr[31:12] == UART1_BASE[31:12]);
     wire spi_sel = (apb_req_i.paddr[31:12] == SPI0_BASE[31:12]);
+`ifdef YDRASIL_ENABLE_I2C
     wire i2c_sel = (apb_req_i.paddr[31:12] == I2C0_BASE[31:12]);
+`else
+    wire i2c_sel = 1'b0;
+`endif
     wire any_sel = clint_sel || plic_sel || sysctrl_sel || gpio_sel ||
         uart0_sel || uart1_sel || spi_sel || i2c_sel;
 

@@ -12,6 +12,12 @@ BENDER ?= $(HOME)/.cargo/bin/bender
 VERILATOR_TRACE ?= 1
 DIV_IMPL ?= lzc
 YDRASIL_PRODUCER_NUM ?= 12
+YDRASIL_ENABLE_I2C ?= 0
+ifeq ($(YDRASIL_ENABLE_I2C),0)
+else ifeq ($(YDRASIL_ENABLE_I2C),1)
+else
+$(error Unsupported YDRASIL_ENABLE_I2C=$(YDRASIL_ENABLE_I2C); use 0 or 1)
+endif
 PYTHON ?= python3
 export PYTHONPYCACHEPREFIX ?= $(BUILD_DIR)/pycache
 TRACE_TO_CSV ?= $(PROJECT_ROOT)/verif/sim/riscv_trace_csv.py

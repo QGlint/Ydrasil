@@ -71,12 +71,19 @@ module ydrasil_perip_tb;
         .cs_n_o(spi_cs_n), .irq_o()
     );
 
+`ifdef YDRASIL_ENABLE_I2C
     ydrasil_apb_i2c u_i2c (
         .clk(clk), .rst_n(rst_n), .apb_req_i(apb_req),
         .apb_rsp_o(i2c_rsp), .scl_i(i2c_scl), .sda_i(i2c_sda),
         .scl_drive_low_o(i2c_scl_low),
         .sda_drive_low_o(i2c_sda_low), .irq_o(i2c_irq)
     );
+`else
+    assign i2c_rsp = '0;
+    assign i2c_scl_low = 1'b0;
+    assign i2c_sda_low = 1'b0;
+    assign i2c_irq = 1'b0;
+`endif
 
     ydrasil_plic u_plic (
         .clk(clk), .rst_n(rst_n), .apb_req_i(apb_req),
@@ -229,6 +236,7 @@ module ydrasil_perip_tb;
         if (!value[0] || spi_sdio_oe)
             $fatal(1, "SPI write did not finish with SDIO released");
 
+`ifdef YDRASIL_ENABLE_I2C
         reset_dut();
         apb_write(32'h0000_0000, 32'h0000_0001);
         apb_write(32'h0000_0004, 32'h0000_00c0);
@@ -277,6 +285,7 @@ module ydrasil_perip_tb;
         apb_read(32'h0000_000c, 4, value);
         if (value[6] || value[1] || i2c_scl_low || i2c_sda_low)
             $fatal(1, "I2C recovery did not release the bus: %02x", value[7:0]);
+`endif
 
         reset_dut();
         apb_write(32'h0000_0004, 32'h0000_0001);

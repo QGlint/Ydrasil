@@ -169,6 +169,7 @@ import ydrasil_soc_pkg::*;
         .cs_n_o(spi_cs_n_o), .irq_o(spi_irq)
     );
 
+`ifdef YDRASIL_ENABLE_I2C
     ydrasil_apb_i2c u_i2c0 (
         .clk(apb_clk_i), .rst_n(apb_rst_n_i),
         .apb_req_i(i2c_req), .apb_rsp_o(i2c_rsp),
@@ -176,6 +177,12 @@ import ydrasil_soc_pkg::*;
         .scl_drive_low_o(i2c_scl_drive_low_o),
         .sda_drive_low_o(i2c_sda_drive_low_o), .irq_o(i2c_irq)
     );
+`else
+    assign i2c_rsp = '0;
+    assign i2c_irq = 1'b0;
+    assign i2c_scl_drive_low_o = 1'b0;
+    assign i2c_sda_drive_low_o = 1'b0;
+`endif
 
     ydrasil_cdc_sync #(.WIDTH(3)) u_irq_sync (
         .clk_i(axi_clk_i),

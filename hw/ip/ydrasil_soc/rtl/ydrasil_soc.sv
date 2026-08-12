@@ -7,8 +7,6 @@ module ydrasil_soc (
     output wire       uart1_tx,
     output wire       spi_sclk,
     inout  wire       spi_sdio,
-    inout  wire       i2c_scl,
-    inout  wire       i2c_sda,
     inout  wire [8:0] gpio,
     output wire [7:0] led
 );
@@ -22,8 +20,6 @@ module ydrasil_soc (
     wire [31:0] gpio_input;
     wire [31:0] gpio_output;
     wire [31:0] gpio_oe;
-    wire i2c_scl_drive_low;
-    wire i2c_sda_drive_low;
     wire coremark_active;
     wire spi_sdio_out;
     wire spi_sdio_oe;
@@ -54,9 +50,8 @@ module ydrasil_soc (
         .spi_sdio_i(spi_sdio), .spi_sclk_o(spi_sclk),
         .spi_sdio_o(spi_sdio_out), .spi_sdio_oe_o(spi_sdio_oe),
         .spi_cs_n_o(spi_cs_n_unused),
-        .i2c_scl_i(i2c_scl), .i2c_sda_i(i2c_sda),
-        .i2c_scl_drive_low_o(i2c_scl_drive_low),
-        .i2c_sda_drive_low_o(i2c_sda_drive_low),
+        .i2c_scl_i(1'b1), .i2c_sda_i(1'b1),
+        .i2c_scl_drive_low_o(), .i2c_sda_drive_low_o(),
         .coremark_active_o(coremark_active)
     );
 
@@ -68,8 +63,6 @@ module ydrasil_soc (
     end
     assign gpio_input[31:GPIO_COUNT] = '0;
 
-    assign i2c_scl = i2c_scl_drive_low ? 1'b0 : 1'bz;
-    assign i2c_sda = i2c_sda_drive_low ? 1'b0 : 1'bz;
     assign spi_sdio = spi_sdio_oe ? spi_sdio_out : 1'bz;
 `ifdef YDRASIL_LED_ACTIVE_LOW
     assign led = {8{~coremark_active}};
