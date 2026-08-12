@@ -152,24 +152,16 @@ import ydrasil_pkg::*;
     ydrasil_compact_uop_t issue_pkt_i;
     ydrasil_compact_uop_t issue_pkt1_i;
     ydrasil_compact_uop_t select_head_uop0_q;
-    wire ydrasil_compact_uop_t select_head_uop1_q;
-    ydrasil_compact_uop_t select_head_p1_uop_q;
-    ydrasil_compact_uop_t select_head_alu_uop_q;
+    ydrasil_compact_uop_t select_head_uop1_q;
     ydrasil_compact_uop_t alloc_fast_uop_q [0:1];
     ydrasil_compact_uop_t select_direct_uop0;
     ydrasil_compact_uop_t select_direct_uop1;
     ydrasil_compact_uop_t selected_lane_a_uop;
-    ydrasil_compact_uop_t selected_lane_b_p1_uop;
-    ydrasil_compact_uop_t selected_lane_b_alu_uop;
+    ydrasil_compact_uop_t selected_lane_b_uop;
     reg select_head_pair_q;
     reg select_head_valid_q;
     reg select_head_lane_a_valid_q;
-    reg select_head_lane_b_p1_valid_q;
-    reg select_head_lane_b_alu_valid_q;
-    wire select_head_lane_b_valid_q = select_head_lane_b_p1_valid_q ||
-        select_head_lane_b_alu_valid_q;
-    assign select_head_uop1_q = select_head_lane_b_p1_valid_q ?
-        select_head_p1_uop_q : select_head_alu_uop_q;
+    reg select_head_lane_b_valid_q;
     // Operand is unconditionally ready, so Select can replace a consumed head
     // on every cycle. Keep these constant aliases for waveform compatibility.
     wire select_skid_pair_q = 1'b0;
@@ -1014,13 +1006,15 @@ import ydrasil_pkg::*;
         ({COMPACT_UOP_WIDTH{lane_b_alu1_mask[2]}} & issue_window_bits[2]) |
         ({COMPACT_UOP_WIDTH{lane_b_alu1_mask[3]}} & issue_window_bits[3]);
     wire selected_lane_a_valid = (|lane_a_p0_mask) || (|lane_a_alu0_mask);
-    wire selected_lane_b_p1_valid = |lane_b_p1_mask;
-    wire selected_lane_b_alu_valid = (|lane_b_alu0_mask) ||
-        (|lane_b_alu1_mask);
-    wire selected_lane_b_valid = selected_lane_b_p1_valid ||
-        selected_lane_b_alu_valid;
+    wire selected_lane_b_valid = (|lane_b_p1_mask) ||
+        (|lane_b_alu0_mask) || (|lane_b_alu1_mask);
     wire [ISSUE_WINDOW_DEPTH-1:0] selected_lane_a_mask =
         {4'b0, lane_a_p0_mask, lane_a_alu0_mask};
+    wire [ISSUE_WINDOW_DEPTH-1:0] selected_lane_b_mask = {
+        lane_b_p1_mask,
+        4'b0,
+        lane_b_alu0_mask | lane_b_alu1_mask
+    };
     wire p0_selected_src1_due =
         (p0_select_local[0] && issue_src1_ready_for_select[4]) ||
         (p0_select_local[1] && issue_src1_ready_for_select[5]) ||
@@ -1078,44 +1072,19 @@ import ydrasil_pkg::*;
             (|(selected_lane_a_mask & issue_src1_fast_dual)) ? BYPASS_LANE1 :
             BYPASS_NONE;
 
-        selected_lane_b_p1_uop =
-            ydrasil_compact_uop_t'(lane_b_p1_bits);
-        selected_lane_b_p1_uop.valid = selected_lane_b_p1_valid;
-        selected_lane_b_p1_uop.lane_mask = selected_lane_b_p1_valid ?
-            2'b10 : '0;
-        selected_lane_b_p1_uop.src0.ready = selected_lane_b_p1_valid;
-        selected_lane_b_p1_uop.src1.ready = selected_lane_b_p1_valid;
-        selected_lane_b_p1_uop.src0_bypass =
-            (|({lane_b_p1_mask, 8'b0} & issue_src0_fast_main)) ?
-                BYPASS_LANE0 :
-            (|({lane_b_p1_mask, 8'b0} & issue_src0_fast_dual)) ?
-                BYPASS_LANE1 :
+        selected_lane_b_uop = ydrasil_compact_uop_t'(
+            lane_b_p1_bits | lane_b_alu0_bits | lane_b_alu1_bits);
+        selected_lane_b_uop.valid = selected_lane_b_valid;
+        selected_lane_b_uop.lane_mask = selected_lane_b_valid ? 2'b10 : '0;
+        selected_lane_b_uop.src0.ready = selected_lane_b_valid;
+        selected_lane_b_uop.src1.ready = selected_lane_b_valid;
+        selected_lane_b_uop.src0_bypass =
+            (|(selected_lane_b_mask & issue_src0_fast_main)) ? BYPASS_LANE0 :
+            (|(selected_lane_b_mask & issue_src0_fast_dual)) ? BYPASS_LANE1 :
             BYPASS_NONE;
-        selected_lane_b_p1_uop.src1_bypass =
-            (|({lane_b_p1_mask, 8'b0} & issue_src1_fast_main)) ?
-                BYPASS_LANE0 :
-            (|({lane_b_p1_mask, 8'b0} & issue_src1_fast_dual)) ?
-                BYPASS_LANE1 :
-            BYPASS_NONE;
-
-        selected_lane_b_alu_uop = ydrasil_compact_uop_t'(
-            lane_b_alu0_bits | lane_b_alu1_bits);
-        selected_lane_b_alu_uop.valid = selected_lane_b_alu_valid;
-        selected_lane_b_alu_uop.lane_mask = selected_lane_b_alu_valid ?
-            2'b10 : '0;
-        selected_lane_b_alu_uop.src0.ready = selected_lane_b_alu_valid;
-        selected_lane_b_alu_uop.src1.ready = selected_lane_b_alu_valid;
-        selected_lane_b_alu_uop.src0_bypass =
-            (|({8'b0, lane_b_alu0_mask | lane_b_alu1_mask} &
-               issue_src0_fast_main)) ? BYPASS_LANE0 :
-            (|({8'b0, lane_b_alu0_mask | lane_b_alu1_mask} &
-               issue_src0_fast_dual)) ? BYPASS_LANE1 :
-            BYPASS_NONE;
-        selected_lane_b_alu_uop.src1_bypass =
-            (|({8'b0, lane_b_alu0_mask | lane_b_alu1_mask} &
-               issue_src1_fast_main)) ? BYPASS_LANE0 :
-            (|({8'b0, lane_b_alu0_mask | lane_b_alu1_mask} &
-               issue_src1_fast_dual)) ? BYPASS_LANE1 :
+        selected_lane_b_uop.src1_bypass =
+            (|(selected_lane_b_mask & issue_src1_fast_main)) ? BYPASS_LANE0 :
+            (|(selected_lane_b_mask & issue_src1_fast_dual)) ? BYPASS_LANE1 :
             BYPASS_NONE;
     end
 
@@ -1516,16 +1485,10 @@ import ydrasil_pkg::*;
         producer_slot_in_window(
             select_head_uop0_q.dst.rob_tag[PRODUCER_SLOT_WIDTH-1:0],
             recovery_head_slot_i, recovery_branch_slot_i);
-    wire select_recovery_keep1_p1 = select_head_lane_b_p1_valid_q &&
+    wire select_recovery_keep1 = select_head_lane_b_valid_q &&
         producer_slot_in_window(
-            select_head_p1_uop_q.dst.rob_tag[PRODUCER_SLOT_WIDTH-1:0],
+            select_head_uop1_q.dst.rob_tag[PRODUCER_SLOT_WIDTH-1:0],
             recovery_head_slot_i, recovery_branch_slot_i);
-    wire select_recovery_keep1_alu = select_head_lane_b_alu_valid_q &&
-        producer_slot_in_window(
-            select_head_alu_uop_q.dst.rob_tag[PRODUCER_SLOT_WIDTH-1:0],
-            recovery_head_slot_i, recovery_branch_slot_i);
-    wire select_recovery_keep1 = select_recovery_keep1_p1 ||
-        select_recovery_keep1_alu;
     wire select_recovery_memory0 = select_recovery_keep0 &&
         ((select_head_uop0_q.op_class == UOP_CLASS_LOAD) ||
          (select_head_uop0_q.op_class == UOP_CLASS_STORE));
@@ -1534,20 +1497,17 @@ import ydrasil_pkg::*;
     always_ff @(posedge clk) begin
         if (!rst_n) begin
             select_head_uop0_q <= '0;
-            select_head_p1_uop_q <= '0;
-            select_head_alu_uop_q <= '0;
+            select_head_uop1_q <= '0;
             select_head_pair_q <= 1'b0;
             select_head_valid_q <= 1'b0;
             select_head_lane_a_valid_q <= 1'b0;
-            select_head_lane_b_p1_valid_q <= 1'b0;
-            select_head_lane_b_alu_valid_q <= 1'b0;
+            select_head_lane_b_valid_q <= 1'b0;
         end else if (trap_flush_i ||
                      (flush_id_i && !branch_recovery_i)) begin
             select_head_pair_q <= 1'b0;
             select_head_valid_q <= 1'b0;
             select_head_lane_a_valid_q <= 1'b0;
-            select_head_lane_b_p1_valid_q <= 1'b0;
-            select_head_lane_b_alu_valid_q <= 1'b0;
+            select_head_lane_b_valid_q <= 1'b0;
         end else if (branch_recovery_i) begin
             // Physical lane cells remain in place across recovery. Validity is
             // compacted at the bundle level, so a surviving lane-B uop never
@@ -1555,15 +1515,10 @@ import ydrasil_pkg::*;
             if (select_recovery_keep0 || select_recovery_keep1) begin
                 select_head_uop0_q.src0_bypass <= BYPASS_NONE;
                 select_head_uop0_q.src1_bypass <= BYPASS_NONE;
-                select_head_p1_uop_q.src0_bypass <= BYPASS_NONE;
-                select_head_p1_uop_q.src1_bypass <= BYPASS_NONE;
-                select_head_alu_uop_q.src0_bypass <= BYPASS_NONE;
-                select_head_alu_uop_q.src1_bypass <= BYPASS_NONE;
+                select_head_uop1_q.src0_bypass <= BYPASS_NONE;
+                select_head_uop1_q.src1_bypass <= BYPASS_NONE;
                 select_head_lane_a_valid_q <= select_recovery_keep0;
-                select_head_lane_b_p1_valid_q <=
-                    select_recovery_keep1_p1;
-                select_head_lane_b_alu_valid_q <=
-                    select_recovery_keep1_alu;
+                select_head_lane_b_valid_q <= select_recovery_keep1;
                 select_head_pair_q <= select_recovery_keep0 &&
                     select_recovery_keep1;
                 select_head_valid_q <= 1'b1;
@@ -1571,19 +1526,14 @@ import ydrasil_pkg::*;
                 select_head_pair_q <= 1'b0;
                 select_head_valid_q <= 1'b0;
                 select_head_lane_a_valid_q <= 1'b0;
-                select_head_lane_b_p1_valid_q <= 1'b0;
-                select_head_lane_b_alu_valid_q <= 1'b0;
+                select_head_lane_b_valid_q <= 1'b0;
             end
         end else begin
             if (select_buf_push) begin
                 select_head_uop0_q <= selected_lane_a_uop;
-                if (selected_lane_b_p1_valid)
-                    select_head_p1_uop_q <= selected_lane_b_p1_uop;
-                if (selected_lane_b_alu_valid)
-                    select_head_alu_uop_q <= selected_lane_b_alu_uop;
+                select_head_uop1_q <= selected_lane_b_uop;
                 select_head_lane_a_valid_q <= selected_lane_a_valid;
-                select_head_lane_b_p1_valid_q <= selected_lane_b_p1_valid;
-                select_head_lane_b_alu_valid_q <= selected_lane_b_alu_valid;
+                select_head_lane_b_valid_q <= selected_lane_b_valid;
                 select_head_pair_q <= selected_lane_a_valid &&
                     selected_lane_b_valid;
                 select_head_valid_q <= 1'b1;
@@ -1591,8 +1541,7 @@ import ydrasil_pkg::*;
                 select_head_pair_q <= 1'b0;
                 select_head_valid_q <= 1'b0;
                 select_head_lane_a_valid_q <= 1'b0;
-                select_head_lane_b_p1_valid_q <= 1'b0;
-                select_head_lane_b_alu_valid_q <= 1'b0;
+                select_head_lane_b_valid_q <= 1'b0;
             end
         end
     end

@@ -550,14 +550,11 @@ import ydrasil_pkg::*;
     // to the fetch queue on the following cycle.
     wire fetch_issue = !flush_fetch && !bp_invalidate_i && pair_capacity;
 
-    // Keep the GShare history inputs independent from the full FetchQ
-    // predecoder. Each physical instruction lane needs only one B-type opcode
-    // compare, while domain/serial/source classification remains local to the
-    // payload write path below.
-    (* keep = "true", max_fanout = 4 *) wire response_conditional0 =
-        if_mem_rdata_i[6:0] == RV32I_INS_TYPE_B;
-    (* keep = "true", max_fanout = 4 *) wire response_conditional1 =
-        if_mem_rdata1_i[6:0] == RV32I_INS_TYPE_B;
+    // Reuse the lane-local predecode result. Keeping a second forced opcode
+    // comparator caused Vivado to retain and route two ITCM response cones to
+    // the predictor without reducing the speculative-history logic depth.
+    wire response_conditional0 = push_branch0;
+    wire response_conditional1 = push_branch1;
     assign bp_speculate0_valid_o = mem_resp_valid && mem_req_lane_valid_q[0];
     assign bp_speculate0_conditional_o = response_conditional0;
     assign bp_speculate1_valid_o = mem_resp_valid && mem_req_lane_valid_q[1];
