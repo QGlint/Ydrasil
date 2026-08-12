@@ -6952,7 +6952,8 @@ end
                 u_dut.u_ydrasil_issue_stage.select_head_valid_q,
                 u_dut.u_ydrasil_issue_stage.select_head_pair_q,
                 u_dut.u_ydrasil_issue_stage.select_skid_valid_q,
-                u_dut.u_ydrasil_issue_stage.head0_b_only,
+                u_dut.u_ydrasil_issue_stage.select_head_lane_b_valid_q &&
+                    !u_dut.u_ydrasil_issue_stage.select_head_lane_a_valid_q,
                 u_dut.u_ydrasil_issue_stage.lane_a_accept,
                 u_dut.u_ydrasil_issue_stage.lane_b_accept,
                 u_dut.alu_in_valid || u_dut.agu_in_valid,

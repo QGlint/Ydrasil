@@ -159,14 +159,19 @@ import ydrasil_pkg::*;
     // backpressure path.
     ydrasil_compact_uop_t select_skid_uop0_q;
     ydrasil_compact_uop_t select_skid_uop1_q;
-    ydrasil_compact_uop_t select_head_uop1;
     ydrasil_compact_uop_t alloc_fast_uop_q [0:1];
     ydrasil_compact_uop_t select_direct_uop0;
     ydrasil_compact_uop_t select_direct_uop1;
+    ydrasil_compact_uop_t selected_lane_a_uop;
+    ydrasil_compact_uop_t selected_lane_b_uop;
     reg select_head_pair_q;
     reg select_skid_pair_q;
     reg select_head_valid_q;
     reg select_skid_valid_q;
+    reg select_head_lane_a_valid_q;
+    reg select_head_lane_b_valid_q;
+    reg select_skid_lane_a_valid_q;
+    reg select_skid_lane_b_valid_q;
     wire [REGS_ADDR_WIDTH-1:0] rf_addr_rs1;
     wire [REGS_ADDR_WIDTH-1:0] rf_addr_rs2;
     wire [REGS_ADDR_WIDTH-1:0] rf_addr_rs3;
@@ -214,7 +219,8 @@ import ydrasil_pkg::*;
     // A direct pair has no registered head cell, so pair execution must use
     // the direct lane contract explicitly.  Without this term lane B would
     // be silently dropped while RS lane-1 is still removed.
-    wire issue_pair_execute = (select_head_valid_q && select_head_pair_q) ||
+    wire issue_pair_execute =
+        (select_head_lane_a_valid_q && select_head_lane_b_valid_q) ||
         (SELECT_DIRECT_BYPASS_EN && select_direct_fire && selected_valid1);
 
     // Capacity feedback depends only on registered occupancy. Selection does
@@ -237,7 +243,10 @@ import ydrasil_pkg::*;
     assign decode_consume_two_o = decode_pair_capacity && !decode_serial_i;
     assign dispatch_accept_o = issue_pipe_push;
     assign dispatch_accept1_o = issue_pipe_push_two;
-    assign issue_pkt_o = issue_pkt_i;
+    // Ctrl needs the oldest logical packet, while Operand consumes physical
+    // lane cells. Synthesis narrows this view to the tag fields used by Ctrl;
+    // it is not part of either 32-bit operand data path.
+    assign issue_pkt_o = issue_pkt_i.valid ? issue_pkt_i : issue_pkt1_i;
     assign issue_pkt1_o = issue_pkt1_i;
 
     always_comb begin
@@ -246,21 +255,18 @@ import ydrasil_pkg::*;
         // combinational path reaches an execution unit output.
         if (SELECT_DIRECT_BYPASS_EN && select_direct_fire) begin
             issue_pkt_i = select_direct_uop0;
-            issue_pkt1_i = select_direct_uop1;
+            issue_pkt1_i = selected_valid1 ? select_direct_uop1 :
+                select_direct_uop0;
+            issue_pkt_i.valid = select_direct_uop0.valid &&
+                select_direct_uop0.lane_mask[0];
+            issue_pkt1_i.valid = select_direct_uop0.valid &&
+                (selected_valid1 || select_direct_uop0.lane_mask[1]);
         end else begin
             issue_pkt_i = select_head_uop0_q;
             issue_pkt1_i = select_head_uop1_q;
-            issue_pkt_i.valid = select_head_valid_q;
-            issue_pkt1_i.valid = issue_pair_execute;
+            issue_pkt_i.valid = select_head_lane_a_valid_q;
+            issue_pkt1_i.valid = select_head_lane_b_valid_q;
         end
-    end
-
-    // Operand reads only the fixed head cell.  Skid movement and replay are
-    // completed at the preceding clock edge, so neither a pointer nor tail
-    // occupancy can select an RF or value-file address.
-    always_comb begin
-        select_head_uop1 = select_head_uop1_q;
-        select_head_uop1.valid = issue_pair_execute;
     end
 
     ydrasil_issue_compactor u_issue_compactor0 (
@@ -937,6 +943,10 @@ import ydrasil_pkg::*;
         ({COMPACT_UOP_WIDTH{selected1_mask[9]}} & issue_window_bits[9]) |
         ({COMPACT_UOP_WIDTH{selected1_mask[10]}} & issue_window_bits[10]) |
         ({COMPACT_UOP_WIDTH{selected1_mask[11]}} & issue_window_bits[11]);
+    wire selected_lane_a_valid = |selected0_mask[7:0];
+    wire selected_lane_b_valid = (|selected0_mask[11:8]) || selected_valid1;
+    wire [ISSUE_WINDOW_DEPTH-1:0] selected_lane_b_mask = selected1_mask |
+        (selected0_mask & {4'b1111, 8'b0});
     wire p0_selected_src1_due =
         (p0_select_local[0] && issue_src1_ready_for_select[4]) ||
         (p0_select_local[1] && issue_src1_ready_for_select[5]) ||
@@ -973,6 +983,40 @@ import ydrasil_pkg::*;
         selected_uop1.src1_bypass =
             (|(selected1_mask & issue_src1_fast_main)) ? BYPASS_LANE0 :
             (|(selected1_mask & issue_src1_fast_dual)) ? BYPASS_LANE1 :
+            BYPASS_NONE;
+
+        // Form physical-lane payloads directly from the existing bank-local
+        // one-hot trees. This avoids moving a full-uop logical-slot mux onto
+        // the Select register D path.
+        selected_lane_a_uop = ydrasil_compact_uop_t'(
+            selected0_alu_bits | selected0_p0_bits);
+        selected_lane_a_uop.valid = selected_lane_a_valid;
+        selected_lane_a_uop.lane_mask = selected_lane_a_valid ? 2'b01 : '0;
+        selected_lane_a_uop.src0.ready = selected_lane_a_valid;
+        selected_lane_a_uop.src1.ready = selected_lane_a_valid &&
+            ((|selected0_mask[7:4]) ? p0_selected_src1_due : 1'b1);
+        selected_lane_a_uop.src0_bypass =
+            (|(selected0_mask & issue_src0_fast_main)) ? BYPASS_LANE0 :
+            (|(selected0_mask & issue_src0_fast_dual)) ? BYPASS_LANE1 :
+            BYPASS_NONE;
+        selected_lane_a_uop.src1_bypass =
+            (|(selected0_mask & issue_src1_fast_main)) ? BYPASS_LANE0 :
+            (|(selected0_mask & issue_src1_fast_dual)) ? BYPASS_LANE1 :
+            BYPASS_NONE;
+
+        selected_lane_b_uop = ydrasil_compact_uop_t'(
+            selected0_p1_bits | selected1_alu_bits | selected1_p1_bits);
+        selected_lane_b_uop.valid = selected_lane_b_valid;
+        selected_lane_b_uop.lane_mask = selected_lane_b_valid ? 2'b10 : '0;
+        selected_lane_b_uop.src0.ready = selected_lane_b_valid;
+        selected_lane_b_uop.src1.ready = selected_lane_b_valid;
+        selected_lane_b_uop.src0_bypass =
+            (|(selected_lane_b_mask & issue_src0_fast_main)) ? BYPASS_LANE0 :
+            (|(selected_lane_b_mask & issue_src0_fast_dual)) ? BYPASS_LANE1 :
+            BYPASS_NONE;
+        selected_lane_b_uop.src1_bypass =
+            (|(selected_lane_b_mask & issue_src1_fast_main)) ? BYPASS_LANE0 :
+            (|(selected_lane_b_mask & issue_src1_fast_dual)) ? BYPASS_LANE1 :
             BYPASS_NONE;
     end
 
@@ -1374,20 +1418,19 @@ import ydrasil_pkg::*;
         end
     endgenerate
 
-    wire select_recovery_keep0 = select_head_valid_q &&
+    wire select_recovery_keep0 = select_head_lane_a_valid_q &&
         producer_slot_in_window(
             select_head_uop0_q.dst.rob_tag[PRODUCER_SLOT_WIDTH-1:0],
             recovery_head_slot_i, recovery_branch_slot_i);
-    wire select_recovery_keep1 = issue_pair_execute &&
+    wire select_recovery_keep1 = select_head_lane_b_valid_q &&
         producer_slot_in_window(
             select_head_uop1_q.dst.rob_tag[PRODUCER_SLOT_WIDTH-1:0],
             recovery_head_slot_i, recovery_branch_slot_i);
-    wire select_skid_recovery_keep0 = select_skid_valid_q &&
+    wire select_skid_recovery_keep0 = select_skid_lane_a_valid_q &&
         producer_slot_in_window(
             select_skid_uop0_q.dst.rob_tag[PRODUCER_SLOT_WIDTH-1:0],
             recovery_head_slot_i, recovery_branch_slot_i);
-    wire select_skid_recovery_keep1 = select_skid_valid_q &&
-        select_skid_pair_q &&
+    wire select_skid_recovery_keep1 = select_skid_lane_b_valid_q &&
         producer_slot_in_window(
             select_skid_uop1_q.dst.rob_tag[PRODUCER_SLOT_WIDTH-1:0],
             recovery_head_slot_i, recovery_branch_slot_i);
@@ -1411,76 +1454,77 @@ import ydrasil_pkg::*;
             select_skid_pair_q <= 1'b0;
             select_head_valid_q <= 1'b0;
             select_skid_valid_q <= 1'b0;
+            select_head_lane_a_valid_q <= 1'b0;
+            select_head_lane_b_valid_q <= 1'b0;
+            select_skid_lane_a_valid_q <= 1'b0;
+            select_skid_lane_b_valid_q <= 1'b0;
         end else if (trap_flush_i ||
                      (flush_id_i && !branch_recovery_i)) begin
             select_head_pair_q <= 1'b0;
             select_skid_pair_q <= 1'b0;
             select_head_valid_q <= 1'b0;
             select_skid_valid_q <= 1'b0;
+            select_head_lane_a_valid_q <= 1'b0;
+            select_head_lane_b_valid_q <= 1'b0;
+            select_skid_lane_a_valid_q <= 1'b0;
+            select_skid_lane_b_valid_q <= 1'b0;
         end else if (branch_recovery_i) begin
-            // The queue contains at most two selected bundles.  Preserve the
-            // head bundle first and retain a surviving skid bundle; a killed
-            // lane-0 with a surviving lane-1 is compacted to a single
-            // lane-B-only head, matching the normal Operand contract.
-            if (select_recovery_keep0) begin
+            // Physical lane cells remain in place across recovery. Validity is
+            // compacted at the bundle level, so a surviving lane-B uop never
+            // traverses a full-uop B-to-A mux.
+            if (select_recovery_keep0 || select_recovery_keep1) begin
                 select_head_uop0_q.src0_bypass <= BYPASS_NONE;
                 select_head_uop0_q.src1_bypass <= BYPASS_NONE;
                 select_head_uop1_q.src0_bypass <= BYPASS_NONE;
                 select_head_uop1_q.src1_bypass <= BYPASS_NONE;
-                select_head_pair_q <= select_recovery_keep1;
+                select_head_lane_a_valid_q <= select_recovery_keep0;
+                select_head_lane_b_valid_q <= select_recovery_keep1;
+                select_head_pair_q <= select_recovery_keep0 &&
+                    select_recovery_keep1;
                 select_head_valid_q <= 1'b1;
-                if (select_skid_recovery_keep0) begin
+                if (select_skid_recovery_keep0 ||
+                    select_skid_recovery_keep1) begin
                     select_skid_uop0_q.src0_bypass <= BYPASS_NONE;
                     select_skid_uop0_q.src1_bypass <= BYPASS_NONE;
                     select_skid_uop1_q.src0_bypass <= BYPASS_NONE;
                     select_skid_uop1_q.src1_bypass <= BYPASS_NONE;
-                    select_skid_pair_q <= select_skid_recovery_keep1;
+                    select_skid_lane_a_valid_q <= select_skid_recovery_keep0;
+                    select_skid_lane_b_valid_q <= select_skid_recovery_keep1;
+                    select_skid_pair_q <= select_skid_recovery_keep0 &&
+                        select_skid_recovery_keep1;
                     select_skid_valid_q <= 1'b1;
                 end else begin
                     select_skid_pair_q <= 1'b0;
                     select_skid_valid_q <= 1'b0;
-                end
-            end else if (select_recovery_keep1) begin
-                select_head_uop0_q <= select_head_uop1_q;
-                select_head_uop0_q.src0_bypass <= BYPASS_NONE;
-                select_head_uop0_q.src1_bypass <= BYPASS_NONE;
-                select_head_pair_q <= 1'b0;
-                select_head_valid_q <= 1'b1;
-                if (select_skid_recovery_keep0) begin
-                    select_skid_uop0_q.src0_bypass <= BYPASS_NONE;
-                    select_skid_uop0_q.src1_bypass <= BYPASS_NONE;
-                    select_skid_uop1_q.src0_bypass <= BYPASS_NONE;
-                    select_skid_uop1_q.src1_bypass <= BYPASS_NONE;
-                    select_skid_pair_q <= select_skid_recovery_keep1;
-                    select_skid_valid_q <= 1'b1;
-                end else begin
-                    select_skid_pair_q <= 1'b0;
-                    select_skid_valid_q <= 1'b0;
+                    select_skid_lane_a_valid_q <= 1'b0;
+                    select_skid_lane_b_valid_q <= 1'b0;
                 end
             end else begin
                 // Head was killed. Promote a surviving skid bundle if one is
                 // available; otherwise empty the queue.
-                if (select_skid_recovery_keep0) begin
+                if (select_skid_recovery_keep0 ||
+                    select_skid_recovery_keep1) begin
                     select_head_uop0_q <= select_skid_uop0_q;
                     select_head_uop0_q.src0_bypass <= BYPASS_NONE;
                     select_head_uop0_q.src1_bypass <= BYPASS_NONE;
                     select_head_uop1_q <= select_skid_uop1_q;
                     select_head_uop1_q.src0_bypass <= BYPASS_NONE;
                     select_head_uop1_q.src1_bypass <= BYPASS_NONE;
-                    select_head_pair_q <= select_skid_recovery_keep1;
-                    select_head_valid_q <= 1'b1;
-                end else if (select_skid_recovery_keep1) begin
-                    select_head_uop0_q <= select_skid_uop1_q;
-                    select_head_uop0_q.src0_bypass <= BYPASS_NONE;
-                    select_head_uop0_q.src1_bypass <= BYPASS_NONE;
-                    select_head_pair_q <= 1'b0;
+                    select_head_lane_a_valid_q <= select_skid_recovery_keep0;
+                    select_head_lane_b_valid_q <= select_skid_recovery_keep1;
+                    select_head_pair_q <= select_skid_recovery_keep0 &&
+                        select_skid_recovery_keep1;
                     select_head_valid_q <= 1'b1;
                 end else begin
                     select_head_pair_q <= 1'b0;
                     select_head_valid_q <= 1'b0;
+                    select_head_lane_a_valid_q <= 1'b0;
+                    select_head_lane_b_valid_q <= 1'b0;
                 end
                 select_skid_pair_q <= 1'b0;
                 select_skid_valid_q <= 1'b0;
+                select_skid_lane_a_valid_q <= 1'b0;
+                select_skid_lane_b_valid_q <= 1'b0;
             end
         end else begin
             if (select_buf_pop) begin
@@ -1489,27 +1533,45 @@ import ydrasil_pkg::*;
                     select_head_uop1_q <= select_skid_uop1_q;
                     select_head_pair_q <= select_skid_pair_q;
                     select_head_valid_q <= 1'b1;
+                    select_head_lane_a_valid_q <=
+                        select_skid_lane_a_valid_q;
+                    select_head_lane_b_valid_q <=
+                        select_skid_lane_b_valid_q;
                     if (select_buf_push) begin
-                        select_skid_uop0_q <= selected_uop0;
-                        select_skid_uop1_q <= selected_uop1;
-                        select_skid_pair_q <= selected_valid1;
+                        select_skid_uop0_q <= selected_lane_a_uop;
+                        select_skid_uop1_q <= selected_lane_b_uop;
+                        select_skid_lane_a_valid_q <= selected_lane_a_valid;
+                        select_skid_lane_b_valid_q <= selected_lane_b_valid;
+                        select_skid_pair_q <= selected_lane_a_valid &&
+                            selected_lane_b_valid;
                         select_skid_valid_q <= 1'b1;
                     end else begin
                         select_skid_pair_q <= 1'b0;
                         select_skid_valid_q <= 1'b0;
+                        select_skid_lane_a_valid_q <= 1'b0;
+                        select_skid_lane_b_valid_q <= 1'b0;
                     end
                 end else if (select_buf_push) begin
-                    select_head_uop0_q <= selected_uop0;
-                    select_head_uop1_q <= selected_uop1;
-                    select_head_pair_q <= selected_valid1;
+                    select_head_uop0_q <= selected_lane_a_uop;
+                    select_head_uop1_q <= selected_lane_b_uop;
+                    select_head_lane_a_valid_q <= selected_lane_a_valid;
+                    select_head_lane_b_valid_q <= selected_lane_b_valid;
+                    select_head_pair_q <= selected_lane_a_valid &&
+                        selected_lane_b_valid;
                     select_head_valid_q <= 1'b1;
                     select_skid_pair_q <= 1'b0;
                     select_skid_valid_q <= 1'b0;
+                    select_skid_lane_a_valid_q <= 1'b0;
+                    select_skid_lane_b_valid_q <= 1'b0;
                 end else begin
                     select_head_pair_q <= 1'b0;
                     select_head_valid_q <= 1'b0;
+                    select_head_lane_a_valid_q <= 1'b0;
+                    select_head_lane_b_valid_q <= 1'b0;
                     select_skid_pair_q <= 1'b0;
                     select_skid_valid_q <= 1'b0;
+                    select_skid_lane_a_valid_q <= 1'b0;
+                    select_skid_lane_b_valid_q <= 1'b0;
                 end
             end else begin
                 // With no head to consume, the only legal push is into the
@@ -1519,9 +1581,12 @@ import ydrasil_pkg::*;
                     // The allocation qualification remains a registered
                     // observation, while the Operand head always receives
                     // the selector's registered bundle contract.
-                    select_head_uop0_q <= selected_uop0;
-                    select_head_uop1_q <= selected_uop1;
-                    select_head_pair_q <= selected_valid1;
+                    select_head_uop0_q <= selected_lane_a_uop;
+                    select_head_uop1_q <= selected_lane_b_uop;
+                    select_head_lane_a_valid_q <= selected_lane_a_valid;
+                    select_head_lane_b_valid_q <= selected_lane_b_valid;
+                    select_head_pair_q <= selected_lane_a_valid &&
+                        selected_lane_b_valid;
                     select_head_valid_q <= 1'b1;
                 end
             end
@@ -1738,29 +1803,32 @@ import ydrasil_pkg::*;
         (issue_pkt_i.op_class == UOP_CLASS_LOAD) ||
         (issue_pkt_i.op_class == UOP_CLASS_STORE);
     wire pair_eligible = issue_pair_execute;
-    wire slot1_active = pair_eligible;
+    wire slot1_active = issue_pkt1_i.valid;
     wire slot1_store = issue_pkt1_i.op_class == UOP_CLASS_STORE;
     wire slot1_dependency_wait = slot1_active &&
         (!src2_ready || (!src3_ready && !slot1_store));
-    wire serialize_stall = ((issue_pkt_i.op_class == UOP_CLASS_CSR) ||
-        (issue_pkt_i.op_class == UOP_CLASS_SYS) || issue_pkt_i.fence_i) &&
+    wire lane_a_serial = issue_pkt_i.valid &&
+        ((issue_pkt_i.op_class == UOP_CLASS_CSR) ||
+         (issue_pkt_i.op_class == UOP_CLASS_SYS) || issue_pkt_i.fence_i);
+    wire lane_b_serial = issue_pkt1_i.valid &&
+        ((issue_pkt1_i.op_class == UOP_CLASS_CSR) ||
+         (issue_pkt1_i.op_class == UOP_CLASS_SYS) || issue_pkt1_i.fence_i);
+    wire serialize_stall = (lane_a_serial || lane_b_serial) &&
         (!lsu_idle_q || !issue_at_rob_head_q);
     // Select admits only source-ready uops and reserves structural resources.
     // Operand is consequently a fire-through register boundary; its diagnostic
     // checks never feed payload enables or the preceding priority network.
     wire id_advance = 1'b1;
-    wire pair_issue = pair_eligible;
-    wire head0_b_only = issue_pkt_i.lane_mask[1] &&
-        !issue_pkt_i.lane_mask[0];
-
     assign issue_ready_o = id_advance;
     assign issue_consume_two_o = pair_eligible;
     assign issue_slot1_replay_o = 1'b0;
     reg issue_fence_q;
     producer_id_t issue_fence_tag_q;
     reg [INST_ADDR_WIDTH-1:0] issue_fence_next_pc_q;
-    wire issue_fence_accept = id_advance && issue_pkt_i.valid &&
-        issue_pkt_i.fence_i;
+    wire issue_fence_accept = id_advance &&
+        ((issue_pkt_i.valid && issue_pkt_i.fence_i) ||
+         (issue_pkt1_i.valid && issue_pkt1_i.fence_i));
+    wire issue_fence_lane_b = issue_pkt1_i.valid && issue_pkt1_i.fence_i;
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -1774,8 +1842,10 @@ import ydrasil_pkg::*;
         end else begin
             issue_fence_q <= issue_fence_accept;
             if (issue_fence_accept) begin
-                issue_fence_tag_q <= issue_pkt_i.dst.rob_tag;
-                issue_fence_next_pc_q <= issue_pkt_i.pc + 32'd4;
+                issue_fence_tag_q <= issue_fence_lane_b ?
+                    issue_pkt1_i.dst.rob_tag : issue_pkt_i.dst.rob_tag;
+                issue_fence_next_pc_q <= issue_fence_lane_b ?
+                    issue_pkt1_i.pc + 32'd4 : issue_pkt_i.pc + 32'd4;
             end
         end
     end
@@ -1804,9 +1874,9 @@ import ydrasil_pkg::*;
     logic [OPERATOR_TYPE_WIDTH-1:0] lane_b_operator_type;
     always_comb begin
         lane_a_uop = issue_pkt_i;
-        lane_b_uop = head0_b_only ? issue_pkt_i : issue_pkt1_i;
-        lane_a_valid = issue_pkt_i.valid && !head0_b_only;
-        lane_b_valid = head0_b_only ? issue_pkt_i.valid : pair_issue;
+        lane_b_uop = issue_pkt1_i;
+        lane_a_valid = issue_pkt_i.valid;
+        lane_b_valid = issue_pkt1_i.valid;
     end
 
     always_comb begin
@@ -1872,27 +1942,16 @@ import ydrasil_pkg::*;
         early_main_bypass_data_i :
         (issue_pkt_i.src1_bypass == BYPASS_LANE1) ?
         early_dual_bypass_data_i : slot0_src1;
-    wire lane_b_uses_slot0 = head0_b_only;
-    // Lane B consumes exactly one Select slot.  Resolve that slot before
-    // choosing its fast source so the lane-B data path has one bypass mux,
-    // rather than a mux per slot followed by a slot mux.  The selects are the
-    // same registered packet fields used by the original two-stage form.
-    wire lane_b_src0_fast_main = lane_b_uses_slot0 ?
-        (issue_pkt_i.src0_bypass == BYPASS_LANE0) :
-        (issue_pkt1_i.src0_bypass == BYPASS_LANE0);
-    wire lane_b_src0_fast_dual = lane_b_uses_slot0 ?
-        (issue_pkt_i.src0_bypass == BYPASS_LANE1) :
-        (issue_pkt1_i.src0_bypass == BYPASS_LANE1);
-    wire lane_b_src1_fast_main = lane_b_uses_slot0 ?
-        (issue_pkt_i.src1_bypass == BYPASS_LANE0) :
-        (issue_pkt1_i.src1_bypass == BYPASS_LANE0);
-    wire lane_b_src1_fast_dual = lane_b_uses_slot0 ?
-        (issue_pkt_i.src1_bypass == BYPASS_LANE1) :
-        (issue_pkt1_i.src1_bypass == BYPASS_LANE1);
-    wire [DATA_WIDTH-1:0] lane_b_src0_resolved = lane_b_uses_slot0 ?
-        slot0_src0 : slot1_src0;
-    wire [DATA_WIDTH-1:0] lane_b_src1_resolved = lane_b_uses_slot0 ?
-        slot0_src1 : slot1_src1;
+    wire lane_b_src0_fast_main =
+        issue_pkt1_i.src0_bypass == BYPASS_LANE0;
+    wire lane_b_src0_fast_dual =
+        issue_pkt1_i.src0_bypass == BYPASS_LANE1;
+    wire lane_b_src1_fast_main =
+        issue_pkt1_i.src1_bypass == BYPASS_LANE0;
+    wire lane_b_src1_fast_dual =
+        issue_pkt1_i.src1_bypass == BYPASS_LANE1;
+    wire [DATA_WIDTH-1:0] lane_b_src0_resolved = slot1_src0;
+    wire [DATA_WIDTH-1:0] lane_b_src1_resolved = slot1_src1;
     wire lane_a_src1_ready = src1_ready;
     wire slot0_src0_contract_valid = slot0_src0_data_valid ||
         slot0_src0_dtcm_hit || (issue_pkt_i.src0_bypass != BYPASS_NONE);
@@ -1903,7 +1962,7 @@ import ydrasil_pkg::*;
     wire slot1_src1_contract_valid = slot1_src1_data_valid ||
         slot1_src1_dtcm_hit || (issue_pkt1_i.src1_bypass != BYPASS_NONE);
     wire lane_a_src1_value_ready = slot0_src1_contract_valid;
-    wire lane_b_src1_ready = lane_b_uses_slot0 ? src1_ready : src3_ready;
+    wire lane_b_src1_ready = src3_ready;
     wire [DATA_WIDTH-1:0] lane_a_src0_local = slot0_src0_local;
     wire [DATA_WIDTH-1:0] lane_a_src1_local = slot0_src1_local;
     wire [DATA_WIDTH-1:0] lane_b_src0_local = lane_b_src0_fast_main ?
@@ -1914,14 +1973,10 @@ import ydrasil_pkg::*;
         early_dual_bypass_data_i : lane_b_src1_resolved;
     wire lane_a_src0_dtcm_hit = slot0_src0_dtcm_hit;
     wire lane_a_src1_dtcm_hit = slot0_src1_dtcm_hit;
-    wire lane_b_src0_dtcm_hit = (lane_b_uses_slot0 ?
-        slot0_src0_dtcm_hit : slot1_src0_dtcm_hit);
-    wire lane_b_src1_dtcm_hit = (lane_b_uses_slot0 ?
-        slot0_src1_dtcm_hit : slot1_src1_dtcm_hit);
-    wire lane_b_src0_dtcm_current_hit = lane_b_uses_slot0 ?
-        slot0_src0_dtcm_current_hit : slot1_src0_dtcm_current_hit;
-    wire lane_b_src1_dtcm_current_hit = lane_b_uses_slot0 ?
-        slot0_src1_dtcm_current_hit : slot1_src1_dtcm_current_hit;
+    wire lane_b_src0_dtcm_hit = slot1_src0_dtcm_hit;
+    wire lane_b_src1_dtcm_hit = slot1_src1_dtcm_hit;
+    wire lane_b_src0_dtcm_current_hit = slot1_src0_dtcm_current_hit;
+    wire lane_b_src1_dtcm_current_hit = slot1_src1_dtcm_current_hit;
     wire [DATA_WIDTH-1:0] dtcm_operand_current_data = dtcm_resp_data_i;
     wire [DATA_WIDTH-1:0] lane_a_src0_dtcm_data =
         slot0_src0_dtcm_current_hit ? dtcm_operand_current_data :
@@ -1972,11 +2027,9 @@ import ydrasil_pkg::*;
           !slot0_src1_contract_valid));
     wire lane_b_operand_contract_miss = lane_b_accept &&
         ((lane_b_op_a_src && lane_b_uop.src0.used &&
-          !(lane_b_uses_slot0 ?
-            slot0_src0_contract_valid : slot1_src0_contract_valid)) ||
+          !slot1_src0_contract_valid) ||
          (lane_b_op_b_src && lane_b_uop.src1.used &&
-          !(lane_b_uses_slot0 ?
-            slot0_src1_contract_valid : slot1_src1_contract_valid)));
+          !slot1_src1_contract_valid));
     assign dependency_wait_o = lane_a_operand_contract_miss;
     assign dependency_wait1_o = lane_b_operand_contract_miss;
     assign rf_addr_rs1 = select_head_uop0_q.src0.arch_addr;
