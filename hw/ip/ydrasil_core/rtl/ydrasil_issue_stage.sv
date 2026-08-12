@@ -153,25 +153,19 @@ import ydrasil_pkg::*;
     ydrasil_compact_uop_t issue_pkt1_i;
     ydrasil_compact_uop_t select_head_uop0_q;
     ydrasil_compact_uop_t select_head_uop1_q;
-    // Operand is a two-cell queue.  The head is consumed by EX while the
-    // skid cell absorbs a Select result from the same cycle.  Keeping this
-    // queue local prevents Select/RS readiness from becoming a Dispatch
-    // backpressure path.
-    ydrasil_compact_uop_t select_skid_uop0_q;
-    ydrasil_compact_uop_t select_skid_uop1_q;
     ydrasil_compact_uop_t alloc_fast_uop_q [0:1];
     ydrasil_compact_uop_t select_direct_uop0;
     ydrasil_compact_uop_t select_direct_uop1;
     ydrasil_compact_uop_t selected_lane_a_uop;
     ydrasil_compact_uop_t selected_lane_b_uop;
     reg select_head_pair_q;
-    reg select_skid_pair_q;
     reg select_head_valid_q;
-    reg select_skid_valid_q;
     reg select_head_lane_a_valid_q;
     reg select_head_lane_b_valid_q;
-    reg select_skid_lane_a_valid_q;
-    reg select_skid_lane_b_valid_q;
+    // Operand is unconditionally ready, so Select can replace a consumed head
+    // on every cycle. Keep these constant aliases for waveform compatibility.
+    wire select_skid_pair_q = 1'b0;
+    wire select_skid_valid_q = 1'b0;
     wire [REGS_ADDR_WIDTH-1:0] rf_addr_rs1;
     wire [REGS_ADDR_WIDTH-1:0] rf_addr_rs2;
     wire [REGS_ADDR_WIDTH-1:0] rf_addr_rs3;
@@ -1104,13 +1098,11 @@ import ydrasil_pkg::*;
         select_direct_uop1.src1_bypass = BYPASS_NONE;
     end
 
-    // Operand is a two-cell FIFO. A valid head is consumed every cycle, so a
-    // full skid cell can accept a new Select result while the old skid cell is
-    // promoted. Select never bypasses the registered Operand boundary.
-    wire select_buf_pop = issue_ready_o && select_head_valid_q;
+    // Operand consumes a valid head every cycle. Select may therefore replace
+    // it at the same edge without a second queue cell or a wide promotion mux.
+    // Select never bypasses this registered Operand boundary.
     wire select_buf_push = selected_valid0 &&
         !branch_recovery_i && !recovery_pending_q &&
-        (!select_skid_valid_q || select_buf_pop) &&
         !(SELECT_DIRECT_BYPASS_EN && select_direct_fire);
     // A direct packet bypasses the FIFO but still removes its RS entry.
     wire select_commit = select_buf_push ||
@@ -1426,48 +1418,25 @@ import ydrasil_pkg::*;
         producer_slot_in_window(
             select_head_uop1_q.dst.rob_tag[PRODUCER_SLOT_WIDTH-1:0],
             recovery_head_slot_i, recovery_branch_slot_i);
-    wire select_skid_recovery_keep0 = select_skid_lane_a_valid_q &&
-        producer_slot_in_window(
-            select_skid_uop0_q.dst.rob_tag[PRODUCER_SLOT_WIDTH-1:0],
-            recovery_head_slot_i, recovery_branch_slot_i);
-    wire select_skid_recovery_keep1 = select_skid_lane_b_valid_q &&
-        producer_slot_in_window(
-            select_skid_uop1_q.dst.rob_tag[PRODUCER_SLOT_WIDTH-1:0],
-            recovery_head_slot_i, recovery_branch_slot_i);
     wire select_recovery_memory0 = select_recovery_keep0 &&
         ((select_head_uop0_q.op_class == UOP_CLASS_LOAD) ||
          (select_head_uop0_q.op_class == UOP_CLASS_STORE));
-    wire select_skid_recovery_memory0 = select_skid_recovery_keep0 &&
-        ((select_skid_uop0_q.op_class == UOP_CLASS_LOAD) ||
-         (select_skid_uop0_q.op_class == UOP_CLASS_STORE));
-    wire [1:0] lsu_recovery_reserved =
-        {1'b0, select_recovery_memory0} +
-        {1'b0, select_skid_recovery_memory0};
+    wire [1:0] lsu_recovery_reserved = {1'b0, select_recovery_memory0};
 
     always_ff @(posedge clk) begin
         if (!rst_n) begin
             select_head_uop0_q <= '0;
             select_head_uop1_q <= '0;
-            select_skid_uop0_q <= '0;
-            select_skid_uop1_q <= '0;
             select_head_pair_q <= 1'b0;
-            select_skid_pair_q <= 1'b0;
             select_head_valid_q <= 1'b0;
-            select_skid_valid_q <= 1'b0;
             select_head_lane_a_valid_q <= 1'b0;
             select_head_lane_b_valid_q <= 1'b0;
-            select_skid_lane_a_valid_q <= 1'b0;
-            select_skid_lane_b_valid_q <= 1'b0;
         end else if (trap_flush_i ||
                      (flush_id_i && !branch_recovery_i)) begin
             select_head_pair_q <= 1'b0;
-            select_skid_pair_q <= 1'b0;
             select_head_valid_q <= 1'b0;
-            select_skid_valid_q <= 1'b0;
             select_head_lane_a_valid_q <= 1'b0;
             select_head_lane_b_valid_q <= 1'b0;
-            select_skid_lane_a_valid_q <= 1'b0;
-            select_skid_lane_b_valid_q <= 1'b0;
         end else if (branch_recovery_i) begin
             // Physical lane cells remain in place across recovery. Validity is
             // compacted at the bundle level, so a surviving lane-B uop never
@@ -1482,113 +1451,26 @@ import ydrasil_pkg::*;
                 select_head_pair_q <= select_recovery_keep0 &&
                     select_recovery_keep1;
                 select_head_valid_q <= 1'b1;
-                if (select_skid_recovery_keep0 ||
-                    select_skid_recovery_keep1) begin
-                    select_skid_uop0_q.src0_bypass <= BYPASS_NONE;
-                    select_skid_uop0_q.src1_bypass <= BYPASS_NONE;
-                    select_skid_uop1_q.src0_bypass <= BYPASS_NONE;
-                    select_skid_uop1_q.src1_bypass <= BYPASS_NONE;
-                    select_skid_lane_a_valid_q <= select_skid_recovery_keep0;
-                    select_skid_lane_b_valid_q <= select_skid_recovery_keep1;
-                    select_skid_pair_q <= select_skid_recovery_keep0 &&
-                        select_skid_recovery_keep1;
-                    select_skid_valid_q <= 1'b1;
-                end else begin
-                    select_skid_pair_q <= 1'b0;
-                    select_skid_valid_q <= 1'b0;
-                    select_skid_lane_a_valid_q <= 1'b0;
-                    select_skid_lane_b_valid_q <= 1'b0;
-                end
             end else begin
-                // Head was killed. Promote a surviving skid bundle if one is
-                // available; otherwise empty the queue.
-                if (select_skid_recovery_keep0 ||
-                    select_skid_recovery_keep1) begin
-                    select_head_uop0_q <= select_skid_uop0_q;
-                    select_head_uop0_q.src0_bypass <= BYPASS_NONE;
-                    select_head_uop0_q.src1_bypass <= BYPASS_NONE;
-                    select_head_uop1_q <= select_skid_uop1_q;
-                    select_head_uop1_q.src0_bypass <= BYPASS_NONE;
-                    select_head_uop1_q.src1_bypass <= BYPASS_NONE;
-                    select_head_lane_a_valid_q <= select_skid_recovery_keep0;
-                    select_head_lane_b_valid_q <= select_skid_recovery_keep1;
-                    select_head_pair_q <= select_skid_recovery_keep0 &&
-                        select_skid_recovery_keep1;
-                    select_head_valid_q <= 1'b1;
-                end else begin
-                    select_head_pair_q <= 1'b0;
-                    select_head_valid_q <= 1'b0;
-                    select_head_lane_a_valid_q <= 1'b0;
-                    select_head_lane_b_valid_q <= 1'b0;
-                end
-                select_skid_pair_q <= 1'b0;
-                select_skid_valid_q <= 1'b0;
-                select_skid_lane_a_valid_q <= 1'b0;
-                select_skid_lane_b_valid_q <= 1'b0;
+                select_head_pair_q <= 1'b0;
+                select_head_valid_q <= 1'b0;
+                select_head_lane_a_valid_q <= 1'b0;
+                select_head_lane_b_valid_q <= 1'b0;
             end
         end else begin
-            if (select_buf_pop) begin
-                if (select_skid_valid_q) begin
-                    select_head_uop0_q <= select_skid_uop0_q;
-                    select_head_uop1_q <= select_skid_uop1_q;
-                    select_head_pair_q <= select_skid_pair_q;
-                    select_head_valid_q <= 1'b1;
-                    select_head_lane_a_valid_q <=
-                        select_skid_lane_a_valid_q;
-                    select_head_lane_b_valid_q <=
-                        select_skid_lane_b_valid_q;
-                    if (select_buf_push) begin
-                        select_skid_uop0_q <= selected_lane_a_uop;
-                        select_skid_uop1_q <= selected_lane_b_uop;
-                        select_skid_lane_a_valid_q <= selected_lane_a_valid;
-                        select_skid_lane_b_valid_q <= selected_lane_b_valid;
-                        select_skid_pair_q <= selected_lane_a_valid &&
-                            selected_lane_b_valid;
-                        select_skid_valid_q <= 1'b1;
-                    end else begin
-                        select_skid_pair_q <= 1'b0;
-                        select_skid_valid_q <= 1'b0;
-                        select_skid_lane_a_valid_q <= 1'b0;
-                        select_skid_lane_b_valid_q <= 1'b0;
-                    end
-                end else if (select_buf_push) begin
-                    select_head_uop0_q <= selected_lane_a_uop;
-                    select_head_uop1_q <= selected_lane_b_uop;
-                    select_head_lane_a_valid_q <= selected_lane_a_valid;
-                    select_head_lane_b_valid_q <= selected_lane_b_valid;
-                    select_head_pair_q <= selected_lane_a_valid &&
-                        selected_lane_b_valid;
-                    select_head_valid_q <= 1'b1;
-                    select_skid_pair_q <= 1'b0;
-                    select_skid_valid_q <= 1'b0;
-                    select_skid_lane_a_valid_q <= 1'b0;
-                    select_skid_lane_b_valid_q <= 1'b0;
-                end else begin
-                    select_head_pair_q <= 1'b0;
-                    select_head_valid_q <= 1'b0;
-                    select_head_lane_a_valid_q <= 1'b0;
-                    select_head_lane_b_valid_q <= 1'b0;
-                    select_skid_pair_q <= 1'b0;
-                    select_skid_valid_q <= 1'b0;
-                    select_skid_lane_a_valid_q <= 1'b0;
-                    select_skid_lane_b_valid_q <= 1'b0;
-                end
+            if (select_buf_push) begin
+                select_head_uop0_q <= selected_lane_a_uop;
+                select_head_uop1_q <= selected_lane_b_uop;
+                select_head_lane_a_valid_q <= selected_lane_a_valid;
+                select_head_lane_b_valid_q <= selected_lane_b_valid;
+                select_head_pair_q <= selected_lane_a_valid &&
+                    selected_lane_b_valid;
+                select_head_valid_q <= 1'b1;
             end else begin
-                // With no head to consume, the only legal push is into the
-                // empty head.  The capacity predicate prevents a skid-only
-                // state from being created.
-                if (select_buf_push && !select_head_valid_q) begin
-                    // The allocation qualification remains a registered
-                    // observation, while the Operand head always receives
-                    // the selector's registered bundle contract.
-                    select_head_uop0_q <= selected_lane_a_uop;
-                    select_head_uop1_q <= selected_lane_b_uop;
-                    select_head_lane_a_valid_q <= selected_lane_a_valid;
-                    select_head_lane_b_valid_q <= selected_lane_b_valid;
-                    select_head_pair_q <= selected_lane_a_valid &&
-                        selected_lane_b_valid;
-                    select_head_valid_q <= 1'b1;
-                end
+                select_head_pair_q <= 1'b0;
+                select_head_valid_q <= 1'b0;
+                select_head_lane_a_valid_q <= 1'b0;
+                select_head_lane_b_valid_q <= 1'b0;
             end
         end
     end
