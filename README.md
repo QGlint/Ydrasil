@@ -139,6 +139,7 @@ make syn SYN_PLL_FREQ_MHZ=240
 
 ```sh
 make synf
+make synf SYN_WAY=full  # 并行运行策略 0、1、2
 ```
 
 如果需要板级 ILA 版本，可以继续使用：
@@ -180,7 +181,7 @@ make coremark_sim COREMARK_SIM_COMPARE=none
 无 GUI 跑 Vivado 综合、实现到 route，并生成时序分析：
 
 ```sh
-make syn SYN_JOBS=39
+make syn
 ```
 
 使用 RTL MMCM 切换 CPU clock 到 200MHz，综合、实现并生成 bitstream：
@@ -206,7 +207,7 @@ make syn240 IROM_COE=/path/to/irom.coe DRAM_COE=/path/to/dram.coe
 只从已有 routed checkpoint 重新生成报告：
 
 ```sh
-make syn-vivado SYN_RUN_TO=reports SYN_FORCE=0 SYN_SYNC_SOURCES=0 SYN_JOBS=39
+make syn-vivado SYN_RUN_TO=reports SYN_FORCE=0 SYN_SYNC_SOURCES=0
 make syn-analyze
 ```
 

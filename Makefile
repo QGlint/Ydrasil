@@ -369,10 +369,15 @@ SYN_DTCM_WIDTH ?= 32
 SYN_TIMING_SUMMARY_MAX_PATHS ?= 5000
 SYN_TIMING_PATH_MAX_PATHS ?= 5000
 SYN_TIMING_NWORST ?= 1
+SYN_WAY ?= 0
+SYN_VALID_WAYS := 0 1 2 3 4 full
+ifeq ($(filter $(SYN_WAY),$(SYN_VALID_WAYS)),)
+$(error Unsupported SYN_WAY=$(SYN_WAY); supported values: $(SYN_VALID_WAYS))
+endif
 ifeq ($(HOSTNAME),servera437)
-SYN_JOBS ?= 39
-SYN_IMPL_RUNS ?= 3
-SYN_THREADS_PER_RUN ?= 13
+SYN_JOBS ?= $(if $(filter full,$(SYN_WAY)),39,16)
+SYN_IMPL_RUNS ?= $(if $(filter full,$(SYN_WAY)),3,1)
+SYN_THREADS_PER_RUN ?= $(if $(filter full,$(SYN_WAY)),13,16)
 else ifeq ($(HOSTNAME),QGlint-Ar)
 SYN_JOBS ?= 16
 SYN_IMPL_RUNS ?= 1
@@ -382,7 +387,7 @@ SYN_JOBS ?= $(shell nproc)
 SYN_IMPL_RUNS ?= 1
 SYN_THREADS_PER_RUN ?= $(shell nproc)
 endif
-SYN_IMPL_MODE ?= sweep
+SYN_IMPL_MODE ?= $(if $(filter 4,$(SYN_WAY)),extreme,sweep)
 SYN_SYNTH_STRATEGY ?= Flow_PerfOptimized_high
 SYN_RUN_TO ?= route
 SYN_FORCE ?= 1
@@ -987,21 +992,15 @@ syn: syn-vivado
 
 synf: SYN_PLL_FREQ_MHZ := 200
 synf: SYN_RUN_TO := bitstream
-ifeq ($(HOSTNAME),servera437)
-synf: SYN_IMPL_MODE := sweep
-synf: SYN_JOBS := 39
-synf: SYN_IMPL_RUNS := 3
-synf: SYN_THREADS_PER_RUN := 13
-else ifeq ($(HOSTNAME),QGlint-Ar)
-synf: SYN_IMPL_MODE := extreme
+ifeq ($(HOSTNAME),QGlint-Ar)
 synf: SYN_JOBS := 16
 synf: SYN_IMPL_RUNS := 1
 synf: SYN_THREADS_PER_RUN := 16
-else
+else ifneq ($(HOSTNAME),servera437)
 synf: SYN_IMPL_MODE := extreme
-synf: SYN_JOBS := 1
+synf: SYN_JOBS := 8
 synf: SYN_IMPL_RUNS := 1
-synf: SYN_THREADS_PER_RUN := 1
+synf: SYN_THREADS_PER_RUN := 8
 endif
 synf: syn-vivado
 	@src="$(SYN_ARTIFACT_DIR)/$(SYN_TOP).bit"; \
@@ -1025,18 +1024,14 @@ syn225: SYN_PLL_FREQ_MHZ := 225
 syn240: SYN_PLL_FREQ_MHZ := 240
 syn250: SYN_PLL_FREQ_MHZ := 250
 syn225 syn240 syn250: SYN_RUN_TO := bitstream
-ifeq ($(HOSTNAME),servera437)
-syn225 syn240 syn250: SYN_JOBS := 39
-syn225 syn240 syn250: SYN_IMPL_RUNS := 3
-syn225 syn240 syn250: SYN_THREADS_PER_RUN := 13
-else ifeq ($(HOSTNAME),QGlint-Ar)
+ifeq ($(HOSTNAME),QGlint-Ar)
 syn225 syn240 syn250: SYN_JOBS := 16
 syn225 syn240 syn250: SYN_IMPL_RUNS := 1
 syn225 syn240 syn250: SYN_THREADS_PER_RUN := 16
-else
-syn225 syn240 syn250: SYN_JOBS := 1
+else ifneq ($(HOSTNAME),servera437)
+syn225 syn240 syn250: SYN_JOBS := 8
 syn225 syn240 syn250: SYN_IMPL_RUNS := 1
-syn225 syn240 syn250: SYN_THREADS_PER_RUN := 1
+syn225 syn240 syn250: SYN_THREADS_PER_RUN := 8
 endif
 syn225 syn240 syn250: syn-vivado
 	@src="$(SYN_ARTIFACT_DIR)/$(SYN_TOP).bit"; \
@@ -1062,12 +1057,18 @@ syn-board: synf
 
 synf-board: syn-board
 
+syn-extreme: SYN_WAY := 4
 syn-extreme: SYN_PLL_FREQ_MHZ := 200
 syn-extreme: SYN_RUN_TO := bitstream
 syn-extreme: SYN_IMPL_MODE := extreme
 syn-extreme: SYN_IMPL_RUNS := 1
-syn-extreme: SYN_JOBS := 1
-syn-extreme: SYN_THREADS_PER_RUN := 1
+ifeq ($(HOSTNAME),servera437)
+syn-extreme: SYN_JOBS := 16
+syn-extreme: SYN_THREADS_PER_RUN := 16
+else
+syn-extreme: SYN_JOBS := 8
+syn-extreme: SYN_THREADS_PER_RUN := 8
+endif
 syn-extreme: syn-vivado
 	@$(MAKE) syn-analyze SYN_IMPL_MODE=extreme SYN_IMPL_RUNS=1
 
@@ -1095,7 +1096,7 @@ syn-dedup:
 syn-lowmem-synth:
 	@$(MAKE) syn-vivado \
 		SYN_PLL_FREQ_MHZ=200 SYN_RUN_TO=synth SYN_FORCE=1 \
-		SYN_IMPL_MODE=extreme SYN_IMPL_RUNS=1 SYN_JOBS=1 SYN_THREADS_PER_RUN=1 \
+		SYN_IMPL_MODE=extreme SYN_IMPL_RUNS=1 SYN_JOBS=8 SYN_THREADS_PER_RUN=8 \
 		SYN_SYNTH_STRATEGY=Flow_RuntimeOptimized SYN_SYNC_SOURCES=1 \
 		SYN_REUSE_STAGE=0 SYN_REUSE_SYNTH=0 SYN_RESET_IMPL=0 \
 		SYN_REPORT_SYNTH=0 SYN_FULL_REPORTS=0 SYN_POST_ROUTE_PHYSOPT=0 \
@@ -1104,7 +1105,7 @@ syn-lowmem-synth:
 syn-lowmem-impl:
 	@$(MAKE) syn-vivado \
 		SYN_PLL_FREQ_MHZ=200 SYN_RUN_TO=route SYN_FORCE=0 \
-		SYN_IMPL_MODE=extreme SYN_IMPL_RUNS=1 SYN_JOBS=1 SYN_THREADS_PER_RUN=1 \
+		SYN_IMPL_MODE=extreme SYN_IMPL_RUNS=1 SYN_JOBS=8 SYN_THREADS_PER_RUN=8 \
 		SYN_SYNC_SOURCES=0 SYN_REUSE_STAGE=1 SYN_REUSE_SYNTH=1 SYN_RESET_IMPL=1 \
 		SYN_REPORT_SYNTH=0 SYN_FULL_REPORTS=0 SYN_POST_ROUTE_PHYSOPT=0 \
 		SYN_SWEEP_POST_ROUTE_PHYSOPT=0
@@ -1183,6 +1184,7 @@ syn-vivado: $(SYN_VIVADO_PREREQS)
 		-threads_per_run $(SYN_THREADS_PER_RUN) \
 		-impl_runs $(SYN_IMPL_RUNS) \
 		-impl_mode $(SYN_IMPL_MODE) \
+		-impl_way $(SYN_WAY) \
 		-synth_strategy "$(SYN_SYNTH_STRATEGY)" \
 		-run_to $(SYN_RUN_TO) \
 		-sync_sources $(SYN_SYNC_SOURCES) \
@@ -2459,3 +2461,10 @@ build_spike_from_source:
 	$(SPIKE_INSTALL_SUDO) $(MAKE) -C $(SPIKE_SRC_BUILD_DIR) install CC=$(SPIKE_HOST_CC) CXX=$(SPIKE_HOST_CXX) AR=$(SPIKE_HOST_AR) RANLIB=$(SPIKE_HOST_RANLIB)
 	$(SPIKE_INSTALL_SUDO) chmod -R a+rX "$(SPIKE_SRC_INSTALL_DIR)"
 	@echo "Built Spike: $(SPIKE_SRC_INSTALL_DIR)/bin/spike"
+
+
+SYN_TIME_DIR ?= pll200m
+
+syn_time:
+	@rg 'Implementation sweep:|Synthesis result:|status:.*elapsed=|Vivado flow elapsed:' \
+		build/syn/$(SYN_TIME_DIR)/log/vivado.log

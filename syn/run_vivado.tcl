@@ -12,6 +12,7 @@ proc usage {} {
     puts "  -threads_per_run <n>    max threads used by each Vivado process"
     puts "  -impl_runs <n>          parallel implementation run count, default 1"
     puts "  -impl_mode <sweep|extreme>  implementation tuning mode, default sweep"
+    puts "  -impl_way <0|1|2|3|4|full> implementation strategy selector, default 0"
     puts "  -synth_strategy <name>  Vivado synthesis strategy, default Flow_PerfOptimized_high"
     puts "  -sweep_post_route_physopt <0|1>  enable sweep post-route phys_opt step, default 0"
     puts "  -run_to <synth|route|bitstream|reports|sync_only>"
@@ -99,39 +100,59 @@ proc configure_sweep_implementation {run_name strategy sweep_post_route_physopt}
     }
 }
 
-proc prepare_implementation_runs {count mode sweep_post_route_physopt} {
+proc prepare_implementation_runs {count mode sweep_post_route_physopt way} {
     if {$mode eq "extreme"} {
         configure_performance_implementation impl_1
+        puts "Selected implementation way: 4 (extreme)"
         return [list impl_1]
     }
     if {$mode ne "sweep"} {
         error "unknown -impl_mode value: $mode"
     }
 
-    # Move entries between these lists when changing the sweep.  Only the
-    # enabled list is selected by -impl_runs.
     set strategies [list \
         Performance_Explore \
         Performance_ExplorePostRoutePhysOpt \
-        Performance_NetDelay_high]
+        Performance_NetDelay_high \
+        Performance_ExploreWithRemap]
+    # Keep way 3 available for an explicit single run, but exclude it from
+    # the routine full sweep.
     set candidate_strategies [list \
-        Performance_ExploreWithRemap \
         Performance_ExtraTimingOpt \
         Performance_Retiming \
         Performance_RefinePlacement]
-    set count [clamp_int $count 1 [llength $strategies]]
-    puts "Enabled implementation strategies: $strategies"
+
+    if {$way eq "full"} {
+        set count [clamp_int $count 1 3]
+        set selected_strategies [lrange $strategies 0 [expr {$count - 1}]]
+    } elseif {[string is integer -strict $way] && $way >= 0 && $way < 4} {
+        set selected_strategies [list [lindex $strategies $way]]
+    } else {
+        error "unknown -impl_way value for sweep mode: $way"
+    }
+
+    set unselected_strategies [list]
+    foreach strategy $strategies {
+        if {[lsearch -exact $selected_strategies $strategy] < 0} {
+            lappend unselected_strategies $strategy
+        }
+    }
+    puts "Selected implementation way: $way"
+    puts "Selected implementation strategies: $selected_strategies"
+    puts "Unselected implementation strategies: $unselected_strategies"
     puts "Candidate implementation strategies (disabled): $candidate_strategies"
     set runs [list]
-    for {set idx 0} {$idx < $count} {incr idx} {
+    set idx 0
+    foreach strategy $selected_strategies {
         set run_name [expr {$idx == 0 ? "impl_1" : "impl_sweep_$idx"}]
         if {$idx > 0 && [llength [get_runs -quiet $run_name]] == 0} {
             create_run $run_name -parent_run synth_1 -flow {Vivado Implementation 2024} \
-                -strategy [lindex $strategies $idx]
+                -strategy $strategy
         }
-        configure_sweep_implementation $run_name [lindex $strategies $idx] $sweep_post_route_physopt
+        configure_sweep_implementation $run_name $strategy $sweep_post_route_physopt
         lappend runs $run_name
-        puts "Implementation sweep: $run_name strategy=[lindex $strategies $idx]"
+        puts "Implementation sweep: $run_name strategy=$strategy"
+        incr idx
     }
     return $runs
 }
@@ -683,6 +704,7 @@ set artifact_dir [ensure_dir [arg_value "-artifact_dir" [file join $repo_root "b
 set jobs [arg_value "-jobs" "16"]
 set impl_runs [arg_value "-impl_runs" "1"]
 set impl_mode [arg_value "-impl_mode" "sweep"]
+set impl_way [arg_value "-impl_way" "0"]
 set synth_strategy [arg_value "-synth_strategy" "Flow_PerfOptimized_high"]
 set sweep_post_route_physopt [clamp_int [arg_value "-sweep_post_route_physopt" "0"] 0 1]
 set threads_per_run [arg_value "-threads_per_run" $jobs]
@@ -705,6 +727,14 @@ set timing_nworst [arg_value "-timing_nworst" "1"]
 set full_reports [clamp_int [arg_value "-full_reports" "0"] 0 1]
 set post_route_physopt [clamp_int [arg_value "-post_route_physopt" "0"] 0 1]
 
+if {$impl_way ne "full" &&
+    (![string is integer -strict $impl_way] || $impl_way < 0 || $impl_way > 4)} {
+    error "unknown -impl_way value: $impl_way; expected 0, 1, 2, 3, 4, or full"
+}
+if {$impl_mode eq "sweep" && $impl_way eq "4"} {
+    error "-impl_way 4 requires -impl_mode extreme"
+}
+
 if {$sync_sources && ![file exists $sources_tcl]} {
     error "generated sources Tcl not found: $sources_tcl"
 }
@@ -721,7 +751,7 @@ if {$reuse_synth && $run_to ne "route" && $run_to ne "bitstream" &&
 
 puts "Vivado project: $xpr"
 puts "Vivado jobs: $jobs"
-puts "Implementation mode: $impl_mode, runs: $impl_runs"
+puts "Implementation mode: $impl_mode, runs: $impl_runs, way: $impl_way"
 puts "Synthesis strategy: $synth_strategy"
 puts "Sweep post-route phys_opt: $sweep_post_route_physopt"
 puts "Run target: $run_to"
@@ -922,7 +952,8 @@ if {$run_to eq "synth"} {
     exit 0
 }
 
-set implementation_runs [prepare_implementation_runs $impl_runs $impl_mode $sweep_post_route_physopt]
+set implementation_runs [prepare_implementation_runs \
+    $impl_runs $impl_mode $sweep_post_route_physopt $impl_way]
 if {$force_runs || $reset_impl} {
     foreach run_name $implementation_runs {
         puts "Resetting $run_name"
