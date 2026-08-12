@@ -1057,6 +1057,13 @@ syn-board: SYN_PROFILE := custom-board
 syn-board: SYN_BOARD_XDC = $(SYN_STAGE_CONSTR_DIR)/board_ag10_ah10.xdc
 syn-board: synf
 
+BOARD_TURE ?=0
+
+ifeq (BOARD_TURE,1)
+SYN_PROFILE := custom-board
+SYN_BOARD_XDC = $(SYN_STAGE_CONSTR_DIR)/board_ag10_ah10.xdc
+endif
+
 synf-board: syn-board
 
 syn-extreme: SYN_WAY := 4
