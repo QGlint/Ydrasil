@@ -12,6 +12,7 @@ import ydrasil_pkg::*;
     input  wire                         flush_i,
     input  wire [1:0]                   pop_count_i,
     input  wire [1:0]                   push_count_i,
+    input  wire [1:0]                   physical_push_count_i,
     input  wire [PAYLOAD_WIDTH-1:0]      push_payload0_i,
     input  wire [PAYLOAD_WIDTH-1:0]      push_payload1_i,
     output wire [COUNT_WIDTH-1:0]       count_o,
@@ -125,10 +126,10 @@ import ydrasil_pkg::*;
         // Every response is physically written. Entries sent directly to the
         // FF head advance both backing pointers on this edge, so the backing
         // RAM pins never depend on current-cycle pop/stall control.
-        write_even = (push_count_i == 2'd2) ||
-            ((push_count_i != 2'd0) && !back_tail_q[0]);
-        write_odd = (push_count_i == 2'd2) ||
-            ((push_count_i != 2'd0) && back_tail_q[0]);
+        write_even = (physical_push_count_i == 2'd2) ||
+            ((physical_push_count_i != 2'd0) && !back_tail_q[0]);
+        write_odd = (physical_push_count_i == 2'd2) ||
+            ((physical_push_count_i != 2'd0) && back_tail_q[0]);
         write_addr_even = back_tail_q[0] ? back_tail1_addr : back_tail_addr;
         write_addr_odd = back_tail_q[0] ? back_tail_addr : back_tail1_addr;
         write_data_even = back_tail_q[0] ? push_payload1_i : push_payload0_i;
@@ -228,6 +229,10 @@ import ydrasil_pkg::*;
     end
     always_ff @(posedge clk) begin
         if (rst_n && !flush_i) begin
+			assert ((physical_push_count_i == push_count_i) ||
+				((physical_push_count_i == 2'd2) &&
+				 (push_count_i == 2'd1)))
+				else $fatal(1, "fetch queue physical/logical push mismatch");
 			assert (({1'b0, back_head_q} <
 					 (BACK_INDEX_WIDTH + 1)'(BACK_DEPTH)) &&
 					({1'b0, back_tail_q} <
@@ -249,6 +254,7 @@ import ydrasil_pkg::*;
     input  wire [31:0] instr_i,
     output ydrasil_dispatch_domain_t domain_o,
     output wire serial_o,
+    output wire branch_o,
     output wire src0_used_o,
     output wire src1_used_o,
     output wire dst_writes_o
@@ -296,6 +302,7 @@ import ydrasil_pkg::*;
 
     assign serial_o = (opcode == RV32I_INS_CSR) || explicit_illegal ||
         ((opcode == RV32I_INS_FENCE) && (funct3 == 3'b001));
+    assign branch_o = branch;
     // Rename only needs architectural source/destination presence.  All
     // supported R-type extensions consume both encoded sources; unary Zb
     // operations use the I-type opcode, so this classification is independent
@@ -527,6 +534,9 @@ import ydrasil_pkg::*;
         (bp_predict_taken_i ? 2'd1 :
          ({1'b0, mem_req_lane_valid_q[0]} +
           {1'b0, mem_req_lane_valid_q[1]})) : 2'd0;
+    wire [1:0] physical_push_count = mem_resp_valid ?
+        ({1'b0, mem_req_lane_valid_q[0]} +
+         {1'b0, mem_req_lane_valid_q[1]}) : 2'd0;
     wire [RESERVED_WIDTH-1:0] reserved_count =
         RESERVED_WIDTH'(fetchq_count_q) +
         (mem_req_valid_q ? (mem_req_lane_valid_q[1] ? RESERVED_WIDTH'(2) :
@@ -543,8 +553,8 @@ import ydrasil_pkg::*;
     // A conditional is recognized locally only after the instruction response
     // is present. Lane 1 is speculative only when lane 0 was retained by the
     // fetch packet; a lane-0 taken prediction suppresses it from FetchQ.
-    wire response_conditional0 = if_mem_rdata_i[6:0] == RV32I_INS_TYPE_B;
-    wire response_conditional1 = if_mem_rdata1_i[6:0] == RV32I_INS_TYPE_B;
+    wire response_conditional0 = push_branch0;
+    wire response_conditional1 = push_branch1;
     assign bp_speculate0_valid_o = mem_resp_valid && mem_req_lane_valid_q[0];
     assign bp_speculate0_conditional_o = response_conditional0;
     assign bp_speculate1_valid_o = mem_resp_valid && mem_req_lane_valid_q[1];
@@ -557,6 +567,8 @@ import ydrasil_pkg::*;
     ydrasil_dispatch_domain_t push_domain1;
     wire push_serial0;
     wire push_serial1;
+    wire push_branch0;
+    wire push_branch1;
     wire push_src0_used0;
     wire push_src0_used1;
     wire push_src1_used0;
@@ -567,6 +579,7 @@ import ydrasil_pkg::*;
         .instr_i(if_mem_rdata_i),
         .domain_o(push_domain0),
         .serial_o(push_serial0),
+        .branch_o(push_branch0),
         .src0_used_o(push_src0_used0),
         .src1_used_o(push_src1_used0),
         .dst_writes_o(push_dst_writes0)
@@ -575,6 +588,7 @@ import ydrasil_pkg::*;
         .instr_i(if_mem_rdata1_i),
         .domain_o(push_domain1),
         .serial_o(push_serial1),
+        .branch_o(push_branch1),
         .src0_used_o(push_src0_used1),
         .src1_used_o(push_src1_used1),
         .dst_writes_o(push_dst_writes1)
@@ -638,6 +652,7 @@ import ydrasil_pkg::*;
         .flush_i        (flush_fetch || bp_invalidate_i),
         .pop_count_i    (pop_count),
         .push_count_i   (push_count),
+        .physical_push_count_i(physical_push_count),
         .push_payload0_i(fetchq_push_payload0),
         .push_payload1_i(fetchq_push_payload1),
         .count_o        (fetchq_count_q),
