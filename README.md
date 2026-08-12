@@ -119,17 +119,23 @@ make coe_MFlina
 继续执行原有动态结果比较。所有中间产物均位于
 `build/fpga_coe_mflina/`，不会在 `FPGA/coe/` 中生成新 COE。
 
-225MHz、240MHz 和 250MHz 超频综合入口：
+225MHz 到 300MHz 的超频综合入口：
 
 ```sh
 make syn225
 make syn240
 make syn250
+make syn260
+make syn270
+make syn275
+make syn280
+make syn290625
+make syn300
 ```
 
-三个入口都会执行 Vivado batch flow，完成综合、实现、生成 bitstream 和时序分析；结果分别写到
-`build/syn/pll225m/`、`build/syn/pll240m/` 和 `build/syn/pll250m/`。
-也可以通过通用 `syn` 入口指定支持的频率（150、200、225、240 或 250MHz）：
+这些入口都会执行 Vivado batch flow，完成综合、实现、生成 bitstream 和时序分析；结果写到对应的
+`build/syn/pllXXXm/` 目录。也可以通过通用 `syn` 入口指定支持的频率
+（150、200、225、240、250、260、270、275、280、290.625 或 300MHz）：
 
 ```sh
 make syn SYN_PLL_FREQ_MHZ=240
@@ -148,7 +154,19 @@ make synf SYN_WAY=full  # 并行运行策略 0、1、2
 make synf-board
 ```
 
-通过 `IROM_COE` 和 `DRAM_COE` 指定自定义 COE 文件；该写法适用于三个超频入口：
+任一频率入口都可以通过 `BOARD_TURE=1` 选择板级管脚约束和低有效 LED 配置。例如：
+
+```sh
+make syn250 BOARD_TURE=1
+make syn300 BOARD_TURE=1
+```
+
+板级结果写到 `build/syn/pllXXXm-custom-board/`，与默认 `digital_twin.xdc`
+构建相互隔离。`syn290625` 使用 290.625MHz CPU 时钟，并由同一个 7 系列 MMCM
+精确产生 50MHz APB 时钟；兼容入口 `make syn290` 也会构建该频率。结果写入
+`build/syn/pll290p625m[-custom-board]/`。上述所有档位的 APB 时钟均为精确 50MHz。
+
+通过 `IROM_COE` 和 `DRAM_COE` 指定自定义 COE 文件；该写法适用于所有超频入口：
 
 ```sh
 make syn225 IROM_COE=/path/to/irom.coe DRAM_COE=/path/to/dram.coe
@@ -196,6 +214,12 @@ make synf
 make syn225
 make syn240
 make syn250
+make syn260
+make syn270
+make syn275
+make syn280
+make syn290625
+make syn300
 ```
 
 自定义 COE 文件并运行综合：
@@ -289,6 +313,12 @@ make syn VIVADO_SETTINGS=/path/to/settings64.sh VIVADO=/path/to/vivado
 | `build/syn/pll225m/artifacts` | 225MHz bitstream、checkpoint 副本和 manifest，使用 `make syn225` 生成。 |
 | `build/syn/pll240m/artifacts` | 240MHz bitstream、checkpoint 副本和 manifest，使用 `make syn240` 生成。 |
 | `build/syn/pll250m/artifacts` | 250MHz bitstream、checkpoint 副本和 manifest，使用 `make syn250` 生成。 |
+| `build/syn/pll260m/artifacts` | 260MHz bitstream、checkpoint 副本和 manifest，使用 `make syn260` 生成。 |
+| `build/syn/pll270m/artifacts` | 270MHz bitstream、checkpoint 副本和 manifest，使用 `make syn270` 生成。 |
+| `build/syn/pll275m/artifacts` | 275MHz bitstream、checkpoint 副本和 manifest，使用 `make syn275` 生成。 |
+| `build/syn/pll280m/artifacts` | 280MHz bitstream、checkpoint 副本和 manifest，使用 `make syn280` 生成。 |
+| `build/syn/pll290p625m/artifacts` | 290.625MHz bitstream、checkpoint 副本和 manifest，使用 `make syn290625` 生成。 |
+| `build/syn/pll300m/artifacts` | 300MHz bitstream、checkpoint 副本和 manifest，使用 `make syn300` 生成。 |
 
 ## 备注
 

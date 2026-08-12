@@ -13,22 +13,57 @@ module ydrasil_clocking (
     assign locked = 1'b1;
 `else
 `ifdef SYN_PLL_FREQ_200
+    localparam int DIVCLK_DIVIDE = 1;
     localparam real CLKFBOUT_MULT_F = 5.000;
     localparam real APB_DIVIDE_F = 20.000;
     localparam int CPU_DIVIDE = 5;
 `elsif SYN_PLL_FREQ_225
+    localparam int DIVCLK_DIVIDE = 1;
     localparam real CLKFBOUT_MULT_F = 5.625;
     localparam real APB_DIVIDE_F = 22.500;
     localparam int CPU_DIVIDE = 5;
 `elsif SYN_PLL_FREQ_240
+    localparam int DIVCLK_DIVIDE = 1;
     localparam real CLKFBOUT_MULT_F = 6.000;
     localparam real APB_DIVIDE_F = 24.000;
     localparam int CPU_DIVIDE = 5;
 `elsif SYN_PLL_FREQ_250
+    localparam int DIVCLK_DIVIDE = 1;
     localparam real CLKFBOUT_MULT_F = 6.250;
     localparam real APB_DIVIDE_F = 25.000;
     localparam int CPU_DIVIDE = 5;
+`elsif SYN_PLL_FREQ_260
+    localparam int DIVCLK_DIVIDE = 1;
+    localparam real CLKFBOUT_MULT_F = 6.500;
+    localparam real APB_DIVIDE_F = 26.000;
+    localparam int CPU_DIVIDE = 5;
+`elsif SYN_PLL_FREQ_270
+    localparam int DIVCLK_DIVIDE = 1;
+    localparam real CLKFBOUT_MULT_F = 6.750;
+    localparam real APB_DIVIDE_F = 27.000;
+    localparam int CPU_DIVIDE = 5;
+`elsif SYN_PLL_FREQ_275
+    localparam int DIVCLK_DIVIDE = 1;
+    localparam real CLKFBOUT_MULT_F = 6.875;
+    localparam real APB_DIVIDE_F = 27.500;
+    localparam int CPU_DIVIDE = 5;
+`elsif SYN_PLL_FREQ_280
+    localparam int DIVCLK_DIVIDE = 1;
+    localparam real CLKFBOUT_MULT_F = 7.000;
+    localparam real APB_DIVIDE_F = 28.000;
+    localparam int CPU_DIVIDE = 5;
+`elsif SYN_PLL_FREQ_290P625
+    localparam int DIVCLK_DIVIDE = 2;
+    localparam real CLKFBOUT_MULT_F = 11.625;
+    localparam real APB_DIVIDE_F = 23.250;
+    localparam int CPU_DIVIDE = 4;
+`elsif SYN_PLL_FREQ_300
+    localparam int DIVCLK_DIVIDE = 1;
+    localparam real CLKFBOUT_MULT_F = 6.000;
+    localparam real APB_DIVIDE_F = 24.000;
+    localparam int CPU_DIVIDE = 4;
 `else
+    localparam int DIVCLK_DIVIDE = 1;
     localparam real CLKFBOUT_MULT_F = 5.250;
     localparam real APB_DIVIDE_F = 21.000;
     localparam int CPU_DIVIDE = 7;
@@ -64,7 +99,7 @@ module ydrasil_clocking (
         .CLKOUT4_CASCADE("FALSE"),
         .COMPENSATION("ZHOLD"),
         .STARTUP_WAIT("FALSE"),
-        .DIVCLK_DIVIDE(1),
+        .DIVCLK_DIVIDE(DIVCLK_DIVIDE),
         .CLKFBOUT_MULT_F(CLKFBOUT_MULT_F),
         .CLKFBOUT_PHASE(0.000),
         .CLKFBOUT_USE_FINE_PS("FALSE"),

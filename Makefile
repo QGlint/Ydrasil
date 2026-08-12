@@ -306,9 +306,10 @@ SYN_BUILD_DIR ?= $(BUILD_DIR)/syn
 SYN_VENV ?= $(SYN_BUILD_DIR)/.venv
 SYN_PYTHON ?= $(SYN_VENV)/bin/python
 SYN_PLL_FREQ_MHZ ?= 150
-SYN_PLL_SUPPORTED_FREQS := 150 200 225 240 250
+SYN_PLL_SUPPORTED_FREQS := 150 200 225 240 250 260 270 275 280 290.625 300
 SYN_PLL_FREQ_TAG = pll$(subst .,p,$(SYN_PLL_FREQ_MHZ))m
 SYN_PLL_DEFINE = SYN_PLL_FREQ_$(subst .,P,$(SYN_PLL_FREQ_MHZ))
+SYN_PLL_FREQ_HZ = $(shell awk 'BEGIN { printf "%.0f", $(SYN_PLL_FREQ_MHZ) * 1000000 }')
 SYN_TOP ?= ydrasil_soc
 SYN_PART ?= xc7k325tffg900-2
 SYN_BENDER_DIR ?= $(PROJECT_ROOT)/hw/ip/ydrasil_soc
@@ -421,7 +422,7 @@ endif
 .PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests regression regression_all regression_status regression_stop regression_clean regression_sort regression_sort_opt regression_suite_coverage_merge regression_coverage_report init install-bender get_spike download_and_extract_spike check_spike_prebuilt_abi build_spike_from_source check_deps spike spike_wave_to_csv sim_compare commit_check commit_spike_csv commit_hw_trace commit_hw_csv commit_compare rv_test_comp_genmem ppa_rvtest_report ppa_perf_report coe_simple coe_smoke coe_smoke_led coe_isa_probes coverage_all coverage_all_run coverage_quick coverage_closure coverage_closure_merge coverage_clean coverage_report bus_irq_test bus_irq_coverage sw_boundary_test sw_coverage sw_coverage_clean sw_run_mode sw_coverage_report driver_sim_test
 .PHONY: coremark coremark_sim coremark_run coremark_result coremark-rebuild coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map coremark_swopt_show coremark_opt_all coremark_opt_build_all coremark_opt_sim_all coremark_opt_report coremark_opt_clean $(COREMARK_OPT_BUILD_TARGETS) $(COREMARK_OPT_SIM_TARGETS) sort_app sort_all sort_sim_all sort_report sort_app_sim sort_app-rebuild sort_app-clean sort_opt_all sort_opt_build_all sort_opt_sim_all sort_opt_report sort_opt_clean $(SORT_OPT_BUILD_TARGETS) $(SORT_OPT_SIM_TARGETS) boundary_app boundary_all boundary_sim_all boundary_report boundary_app-rebuild boundary_app-clean boundary_opt_all boundary_opt_build_all boundary_opt_sim_all boundary_opt_report boundary_opt_clean $(BOUNDARY_OPT_BUILD_TARGETS) $(BOUNDARY_OPT_SIM_TARGETS) coe_m3_force coe_loop2_gen coe_loop5 coe_loop5_gen coe_loop_lina coe_loop_lina_gen loop_lina coe_MFlina coe_MFlina_gen coe_mflina coe_mflina_gen rtthread rtthread-build rtthread-clean rtthread-coremark rtthread-coremark-build rtthread-coremark-build-all rtthread-coremark-sim rtthread-coremark-sim-all rtthread-coremark-report rtthread-coremark-compare rtthread-coremark-clean rtthread-utest rtthread-utest-build rtthread-utest-sim rtthread-utest-report rtthread-utest-clean $(RTTHREAD_COREMARK_PROFILE_BUILD_TARGETS) $(RTTHREAD_COREMARK_PROFILE_SIM_TARGETS)
 .PHONY: riscv_dv_venv riscv_dv_model riscv_dv_prepare riscv_dv_run riscv_dv_random riscv_dv_random_status riscv_dv_regression riscv_dv_count riscv_dv_repro riscv_dv_estimate riscv_dv_stop riscv_dv_coverage_report riscv_dv_cleanup riscv_dv_distclean
-.PHONY: syn synf syn225 syn240 syn250 syn-board synf-board syn-extreme syn-reports syn-dedup syn-lowmem-synth syn-lowmem-impl syn-venv syn-prep syn-stage-xpr syn-stage-memory syn-reuse-stage-check syn-vivado syn-analyze syn-clean
+.PHONY: syn synf syn225 syn240 syn250 syn260 syn270 syn275 syn280 syn290 syn290625 syn300 syn-board synf-board syn-extreme syn-reports syn-dedup syn-lowmem-synth syn-lowmem-impl syn-venv syn-prep syn-stage-xpr syn-stage-memory syn-reuse-stage-check syn-vivado syn-analyze syn-clean
 .PHONY: rtl-quickcheck rtl-strict rtl-xml rtl-structure-report rtl-structure rtl-vivado-compare rtl-vivado-cross-validate rtl-vivado-archive verilator-strict verilator-xml slang-ast
 .PHONY: yosys-slang yosys-slang-gate yosys-slang-baseline yosys-slang-quick vivado-ooc vivado-ooc-synth vivado-ooc-issue
 
@@ -1025,17 +1026,24 @@ synf: syn-vivado
 syn225: SYN_PLL_FREQ_MHZ := 225
 syn240: SYN_PLL_FREQ_MHZ := 240
 syn250: SYN_PLL_FREQ_MHZ := 250
-syn225 syn240 syn250: SYN_RUN_TO := bitstream
+syn260: SYN_PLL_FREQ_MHZ := 260
+syn270: SYN_PLL_FREQ_MHZ := 270
+syn275: SYN_PLL_FREQ_MHZ := 275
+syn280: SYN_PLL_FREQ_MHZ := 280
+syn290 syn290625: SYN_PLL_FREQ_MHZ := 290.625
+syn300: SYN_PLL_FREQ_MHZ := 300
+SYN_OVERCLOCK_TARGETS := syn225 syn240 syn250 syn260 syn270 syn275 syn280 syn290 syn290625 syn300
+$(SYN_OVERCLOCK_TARGETS): SYN_RUN_TO := bitstream
 ifeq ($(HOSTNAME),QGlint-Ar)
-syn225 syn240 syn250: SYN_JOBS := 16
-syn225 syn240 syn250: SYN_IMPL_RUNS := 1
-syn225 syn240 syn250: SYN_THREADS_PER_RUN := 16
+$(SYN_OVERCLOCK_TARGETS): SYN_JOBS := 16
+$(SYN_OVERCLOCK_TARGETS): SYN_IMPL_RUNS := 1
+$(SYN_OVERCLOCK_TARGETS): SYN_THREADS_PER_RUN := 16
 else ifneq ($(HOSTNAME),servera437)
-syn225 syn240 syn250: SYN_JOBS := 8
-syn225 syn240 syn250: SYN_IMPL_RUNS := 1
-syn225 syn240 syn250: SYN_THREADS_PER_RUN := 8
+$(SYN_OVERCLOCK_TARGETS): SYN_JOBS := 8
+$(SYN_OVERCLOCK_TARGETS): SYN_IMPL_RUNS := 1
+$(SYN_OVERCLOCK_TARGETS): SYN_THREADS_PER_RUN := 8
 endif
-syn225 syn240 syn250: syn-vivado
+$(SYN_OVERCLOCK_TARGETS): syn-vivado
 	@src="$(SYN_ARTIFACT_DIR)/$(SYN_TOP).bit"; \
 	if [ ! -f "$$src" ]; then \
 		echo "Error: best bitstream not found: $$src"; \
@@ -1057,9 +1065,9 @@ syn-board: SYN_PROFILE := custom-board
 syn-board: SYN_BOARD_XDC = $(SYN_STAGE_CONSTR_DIR)/board_ag10_ah10.xdc
 syn-board: synf
 
-BOARD_TURE ?=0
+BOARD_TURE ?= 0
 
-ifeq (BOARD_TURE,1)
+ifeq ($(BOARD_TURE),1)
 SYN_PROFILE := custom-board
 SYN_BOARD_XDC = $(SYN_STAGE_CONSTR_DIR)/board_ag10_ah10.xdc
 endif
@@ -1147,7 +1155,7 @@ syn-stage-xpr:
 	cp "$(SYN_CONSTR_DIR)/digital_twin.xdc" "$(SYN_PREPROJECT_CONSTR_DIR)/digital_twin.xdc"
 	cp "$(SYN_CONSTR_DIR)/board_ag10_ah10.xdc" "$(SYN_PREPROJECT_CONSTR_DIR)/board_ag10_ah10.xdc"
 
-syn-stage-memory: RTTHREAD_CPU_FREQ_HZ = $(SYN_PLL_FREQ_MHZ)000000
+syn-stage-memory: RTTHREAD_CPU_FREQ_HZ = $(SYN_PLL_FREQ_HZ)
 syn-stage-memory: syn-stage-xpr rtthread-coremark-build-$(SYN_MSH_PROFILE)
 	@test -f "$(SYN_MSH_ITCM)" || { echo "Error: msh ITCM image not found: $(SYN_MSH_ITCM)"; exit 1; }
 	@test -f "$(SYN_MSH_DTCM)" || { echo "Error: msh DTCM image not found: $(SYN_MSH_DTCM)"; exit 1; }
