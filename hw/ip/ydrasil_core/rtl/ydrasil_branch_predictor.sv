@@ -59,6 +59,11 @@ import ydrasil_pkg::*;
         BTB_LOCAL_ADDR_WIDTH;
     localparam int BTB_MEM_DATA_WIDTH = ((BTB_DATA_WIDTH + 7) / 8) * 8;
     localparam int BHT_DATA_WIDTH = 2;
+    // Each physical BHT word is byte-wide, while only the low counter bits
+    // were previously used. Keep the chooser beside the global counter in
+    // those existing spare bits; this does not change the BRAM shape.
+    localparam int BHT_CHOOSER_LSB = BHT_DATA_WIDTH;
+    localparam int BHT_USED_WIDTH = BHT_DATA_WIDTH + 2 + 1;
     localparam int BHT_MEM_DATA_WIDTH = 8;
 
     if ((BTB_ENTRIES < 4) || ((BTB_ENTRIES & (BTB_ENTRIES - 1)) != 0)) begin : g_bad_btb_entries
@@ -251,10 +256,24 @@ import ydrasil_pkg::*;
         {1'b1, epoch_q, train_btb_tag, btb_train_target};
     wire [BTB_MEM_DATA_WIDTH-1:0] btb_train_data =
         {{(BTB_MEM_DATA_WIDTH-BTB_DATA_WIDTH){1'b0}}, btb_write_payload};
-    wire [BHT_DATA_WIDTH-1:0] bht_write_payload =
-        bht_next_counter ^ 2'b01;
+    // In GShare mode pred_counter carries the chooser state captured at
+    // prediction time. Train it only when global and local disagree.
+    wire [1:0] train_chooser = train_i.counter;
+    wire train_global_taken = train_i.global_counter[1];
+    wire train_local_taken = train_i.local_counter[1];
+    wire train_global_correct = (train_global_taken == train_i.taken);
+    wire train_local_correct = (train_local_taken == train_i.taken);
+    wire [1:0] chooser_next =
+        (!USE_GSHARE || !train_i.conditional) ? train_chooser :
+        (train_global_correct && !train_local_correct) ?
+            ((train_chooser == 2'b11) ? train_chooser : train_chooser + 2'b01) :
+        (!train_global_correct && train_local_correct) ?
+            ((train_chooser == 2'b00) ? train_chooser : train_chooser - 2'b01) :
+        train_chooser;
+    wire [BHT_USED_WIDTH-1:0] bht_write_payload = {
+        1'b1, chooser_next, bht_next_counter ^ 2'b01};
     wire [BHT_MEM_DATA_WIDTH-1:0] bht_train_data =
-        {{(BHT_MEM_DATA_WIDTH-BHT_DATA_WIDTH){1'b0}}, bht_write_payload};
+        {{(BHT_MEM_DATA_WIDTH-BHT_USED_WIDTH){1'b0}}, bht_write_payload};
 
     wire btb_wen0 = btb_clear_active_q || (train_fire && !train_btb_bank);
     wire btb_wen1 = btb_clear_active_q || (train_fire && train_btb_bank);
@@ -449,6 +468,16 @@ import ydrasil_pkg::*;
         bht_mem_rdata1[BHT_DATA_WIDTH-1:0] : bht_mem_rdata0[BHT_DATA_WIDTH-1:0];
     wire [BHT_DATA_WIDTH-1:0] lane1_bht_data = predict_bht_index1_q[0] ?
         bht_mem_rdata1[BHT_DATA_WIDTH-1:0] : bht_mem_rdata0[BHT_DATA_WIDTH-1:0];
+    wire [1:0] lane0_chooser = predict_bht_index_q[0] ?
+        bht_mem_rdata1[BHT_CHOOSER_LSB +: 2] :
+        bht_mem_rdata0[BHT_CHOOSER_LSB +: 2];
+    wire [1:0] lane1_chooser = predict_bht_index1_q[0] ?
+        bht_mem_rdata1[BHT_CHOOSER_LSB +: 2] :
+        bht_mem_rdata0[BHT_CHOOSER_LSB +: 2];
+    wire lane0_chooser_valid = predict_bht_index_q[0] ?
+        bht_mem_rdata1[BHT_USED_WIDTH-1] : bht_mem_rdata0[BHT_USED_WIDTH-1];
+    wire lane1_chooser_valid = predict_bht_index1_q[0] ?
+        bht_mem_rdata1[BHT_USED_WIDTH-1] : bht_mem_rdata0[BHT_USED_WIDTH-1];
     wire [1:0] lane0_bht_counter = lane0_bht_data ^ 2'b01;
     wire [1:0] lane1_bht_counter = lane1_bht_data ^ 2'b01;
     wire [BHT_DATA_WIDTH-1:0] lane0_local_bht_data = predict_bht_index_q[0] ?
@@ -463,9 +492,15 @@ import ydrasil_pkg::*;
         lane0_bht_counter[1] == lane0_bht_counter[0];
     wire lane1_global_confident =
         lane1_bht_counter[1] == lane1_bht_counter[0];
-    wire [1:0] lane0_selected_counter = !USE_GSHARE || lane0_global_confident ?
+    // Chooser MSB selects the source in GShare mode. The legacy confidence
+    // rule is retained for untrained rows and all non-GShare instances.
+    wire lane0_use_global = !USE_GSHARE ? 1'b1 :
+        (lane0_chooser_valid ? lane0_chooser[1] : lane0_global_confident);
+    wire lane1_use_global = !USE_GSHARE ? 1'b1 :
+        (lane1_chooser_valid ? lane1_chooser[1] : lane1_global_confident);
+    wire [1:0] lane0_selected_counter = lane0_use_global ?
         lane0_bht_counter : lane0_local_bht_counter;
-    wire [1:0] lane1_selected_counter = !USE_GSHARE || lane1_global_confident ?
+    wire [1:0] lane1_selected_counter = lane1_use_global ?
         lane1_bht_counter : lane1_local_bht_counter;
 
     wire lane0_btb_hit = lane0_btb_valid && (lane0_btb_epoch == epoch_q) &&
@@ -474,22 +509,26 @@ import ydrasil_pkg::*;
         (lane1_btb_tag == predict_btb_tag1_q);
 
     assign predict_hit_o = predict_ready && lane0_btb_hit;
-    assign predict_counter_o = predict_hit_o ? lane0_selected_counter : 2'b01;
+    // Carry chooser state through the existing two-bit counter field. It is
+    // consumed only by GShare training; non-GShare keeps the old interface.
+    assign predict_counter_o = predict_hit_o ?
+        (USE_GSHARE ? lane0_chooser : lane0_selected_counter) : 2'b01;
     assign predict_global_counter_o = predict_hit_o ? lane0_bht_counter : 2'b01;
     assign predict_local_counter_o = predict_hit_o ? lane0_local_bht_counter :
         2'b01;
-    assign predict_taken_o = predict_hit_o && predict_counter_o[1];
+    assign predict_taken_o = predict_hit_o && lane0_selected_counter[1];
     assign predict_target_o = lane0_btb_target;
     assign predict_bht_index_o = ydrasil_pkg::BP_BHT_INDEX_WIDTH'(predict_bht_index_q);
     assign predict_ghr_checkpoint_o =
         ydrasil_pkg::BP_GHR_WIDTH'(predict_ghr_q);
 
     assign predict1_hit_o = predict_ready && lane1_btb_hit;
-    assign predict1_counter_o = predict1_hit_o ? lane1_selected_counter : 2'b01;
+    assign predict1_counter_o = predict1_hit_o ?
+        (USE_GSHARE ? lane1_chooser : lane1_selected_counter) : 2'b01;
     assign predict1_global_counter_o = predict1_hit_o ? lane1_bht_counter : 2'b01;
     assign predict1_local_counter_o = predict1_hit_o ? lane1_local_bht_counter :
         2'b01;
-    assign predict1_taken_o = predict1_hit_o && predict1_counter_o[1];
+    assign predict1_taken_o = predict1_hit_o && lane1_selected_counter[1];
     assign predict1_target_o = lane1_btb_target;
     assign predict1_bht_index_o = ydrasil_pkg::BP_BHT_INDEX_WIDTH'(predict_bht_index1_q);
     assign predict1_ghr_checkpoint_o =
