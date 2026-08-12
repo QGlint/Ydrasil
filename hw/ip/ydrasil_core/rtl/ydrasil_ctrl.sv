@@ -401,14 +401,6 @@ import ydrasil_pkg::*;
     // these predicates for indexed clears.
     wire [REGS_ADDR_WIDTH-1:0] retire_rd0 = producer_rd_q[queue_head_q];
     wire [REGS_ADDR_WIDTH-1:0] retire_rd1 = producer_rd_q[queue_head1];
-    wire latest_retire_match0 = queue_commit0 &&
-        producer_writes_gpr_q[queue_head_q] && (retire_rd0 != '0) &&
-        latest_valid_q[retire_rd0] &&
-        (latest_id_q[retire_rd0] == queue_head_id);
-    wire latest_retire_match1 = queue_commit1 &&
-        producer_writes_gpr_q[queue_head1] && (retire_rd1 != '0) &&
-        latest_valid_q[retire_rd1] &&
-        (latest_id_q[retire_rd1] == queue_head1_id);
     assign backend_empty_o = queue_count_q == '0;
 
 	    producer_slot_t completion_slot0;
@@ -640,7 +632,6 @@ import ydrasil_pkg::*;
         !rebuild_retiring1;
 
     integer slot_idx;
-    integer reg_idx;
     wire [PRODUCER_EXT_WIDTH-1:0] queue_tail_alloc_sum =
         {1'b0, queue_tail_q} + PRODUCER_EXT_WIDTH'(queue_alloc_count);
     wire producer_slot_t queue_tail_after_alloc =
@@ -715,12 +706,87 @@ import ydrasil_pkg::*;
         end
     endgenerate
 
+    // Keep each architectural mapping in an independent update cell. Dynamic
+    // writes to latest_*[rd] otherwise create one shared decoder/priority MUX
+    // that feeds the D/CE pins of all 32 mappings. The local priority exactly
+    // follows the former procedural write order: recovery clears valid after
+    // normal writes; rebuild1 is younger than rebuild0; allocation1 is younger
+    // than allocation0; and either allocation wins over a same-cycle retire.
+    genvar latest_reg_idx;
+    generate
+        for (latest_reg_idx = 0; latest_reg_idx < REGS_NUM;
+             latest_reg_idx++) begin : g_latest_map
+            localparam logic [REGS_ADDR_WIDTH-1:0] LATEST_REG =
+                REGS_ADDR_WIDTH'(latest_reg_idx);
+            wire retire0_local = queue_commit0 &&
+                producer_writes_gpr_q[queue_head_q] &&
+                (retire_rd0 != '0) && (retire_rd0 == LATEST_REG) &&
+                latest_valid_q[latest_reg_idx] &&
+                (latest_id_q[latest_reg_idx] == queue_head_id);
+            wire retire1_local = queue_commit1 &&
+                producer_writes_gpr_q[queue_head1] &&
+                (retire_rd1 != '0) && (retire_rd1 == LATEST_REG) &&
+                latest_valid_q[latest_reg_idx] &&
+                (latest_id_q[latest_reg_idx] == queue_head1_id);
+            wire alloc0_local = queue_alloc0 &&
+                dispatch_pkt_i.dst.writes_gpr &&
+                (dispatch_pkt_i.dst.rd_addr == LATEST_REG);
+            wire alloc1_local = queue_alloc1 &&
+                dispatch_pkt1_i.dst.writes_gpr &&
+                (dispatch_pkt1_i.dst.rd_addr == LATEST_REG);
+            wire rebuild0_local = !recovery_event && recovering_q &&
+                rebuild_do0 && rebuild_live0 &&
+                (rebuild_rd0 == LATEST_REG);
+            wire rebuild1_local = !recovery_event && recovering_q &&
+                rebuild_do1 && rebuild_live1 &&
+                (rebuild_rd1 == LATEST_REG);
+
+            always_ff @(posedge clk) begin
+                if (!rst_n || ex_hzd_i.interrupt_pending) begin
+                    latest_valid_q[latest_reg_idx] <= 1'b0;
+                    latest_id_q[latest_reg_idx] <= '0;
+                    latest_class_q[latest_reg_idx] <= RESULT_NONE;
+                end else begin
+                    if (recovery_event)
+                        latest_valid_q[latest_reg_idx] <= 1'b0;
+                    else if (rebuild1_local)
+                        latest_valid_q[latest_reg_idx] <= 1'b1;
+                    else if (rebuild0_local)
+                        latest_valid_q[latest_reg_idx] <= 1'b1;
+                    else if (alloc1_local)
+                        latest_valid_q[latest_reg_idx] <= 1'b1;
+                    else if (alloc0_local)
+                        latest_valid_q[latest_reg_idx] <= 1'b1;
+                    else if (retire1_local || retire0_local)
+                        latest_valid_q[latest_reg_idx] <= 1'b0;
+
+                    if (rebuild1_local) begin
+                        latest_id_q[latest_reg_idx] <= rebuild_id1;
+                        latest_class_q[latest_reg_idx] <=
+                            producer_result_class_q[rebuild_ptr1];
+                    end else if (rebuild0_local) begin
+                        latest_id_q[latest_reg_idx] <= rebuild_id0;
+                        latest_class_q[latest_reg_idx] <=
+                            producer_result_class_q[rebuild_ptr0];
+                    end else if (alloc1_local) begin
+                        latest_id_q[latest_reg_idx] <= producer_alloc_id1;
+                        latest_class_q[latest_reg_idx] <=
+                            dispatch1_result_class;
+                    end else if (alloc0_local) begin
+                        latest_id_q[latest_reg_idx] <= producer_alloc_id;
+                        latest_class_q[latest_reg_idx] <=
+                            dispatch_result_class;
+                    end
+                end
+            end
+        end
+    endgenerate
+
     always_ff @(posedge clk) begin
         if (!rst_n || ex_hzd_i.interrupt_pending) begin
             producer_valid_q <= '0;
             producer_writes_gpr_q <= '0;
             producer_epoch_q <= '0;
-            latest_valid_q <= '0;
             queue_head_q <= '0;
             queue_tail_q <= '0;
             queue_count_q <= '0;
@@ -737,10 +803,6 @@ import ydrasil_pkg::*;
                 dbg_producer_kind_q[slot_idx] <= '0;
 `endif
             end
-            for (reg_idx = 0; reg_idx < REGS_NUM; reg_idx++) begin
-                latest_id_q[reg_idx] <= '0;
-                latest_class_q[reg_idx] <= RESULT_NONE;
-            end
         end else begin
             if (ex_branch_jump_i || serial_accept)
                 serial_pending_q <= 1'b0;
@@ -754,11 +816,6 @@ import ydrasil_pkg::*;
             queue_count_q <= queue_count_q +
                 QUEUE_COUNT_WIDTH'(queue_alloc_count) -
                 QUEUE_COUNT_WIDTH'(queue_commit_count);
-
-            if (latest_retire_match0)
-                latest_valid_q[retire_rd0] <= 1'b0;
-            if (latest_retire_match1)
-                latest_valid_q[retire_rd1] <= 1'b0;
 
             if (queue_commit0) begin
                 producer_valid_q[queue_head_q] <= 1'b0;
@@ -779,12 +836,6 @@ import ydrasil_pkg::*;
                 producer_pc_q[alloc_slot0] <= dispatch_pkt_i.decode.pc;
                 producer_result_class_q[alloc_slot0] <=
                     dispatch_result_class;
-                if (dispatch_pkt_i.dst.writes_gpr) begin
-                    latest_valid_q[dispatch_pkt_i.dst.rd_addr] <= 1'b1;
-                    latest_id_q[dispatch_pkt_i.dst.rd_addr] <= producer_alloc_id;
-                    latest_class_q[dispatch_pkt_i.dst.rd_addr] <=
-                        dispatch_result_class;
-                end
 `ifndef SYNTHESIS
                 producer_op_class_q[alloc_slot0] <= {
                     dispatch_pkt_i.uop_class == UOP_CLASS_BJP,
@@ -810,12 +861,6 @@ import ydrasil_pkg::*;
                 producer_pc_q[alloc_slot1] <= dispatch_pkt1_i.decode.pc;
                 producer_result_class_q[alloc_slot1] <=
                     dispatch1_result_class;
-                if (dispatch_pkt1_i.dst.writes_gpr) begin
-                    latest_valid_q[dispatch_pkt1_i.dst.rd_addr] <= 1'b1;
-                    latest_id_q[dispatch_pkt1_i.dst.rd_addr] <= producer_alloc_id1;
-                    latest_class_q[dispatch_pkt1_i.dst.rd_addr] <=
-                        dispatch1_result_class;
-                end
 `ifndef SYNTHESIS
                 producer_op_class_q[alloc_slot1] <= {
                     dispatch_pkt1_i.uop_class == UOP_CLASS_BJP,
@@ -837,23 +882,10 @@ import ydrasil_pkg::*;
                 queue_head_q <= queue_head_after_commit;
                 queue_tail_q <= recovery_next;
                 queue_count_q <= recovery_count;
-                latest_valid_q <= '0;
                 recovering_q <= (recovery_count != '0);
                 rebuild_ptr_q <= queue_head_after_commit;
                 rebuild_remaining_q <= recovery_count;
             end else if (recovering_q) begin
-                if (rebuild_do0 && rebuild_live0) begin
-                    latest_valid_q[rebuild_rd0] <= 1'b1;
-                    latest_id_q[rebuild_rd0] <= rebuild_id0;
-                    latest_class_q[rebuild_rd0] <=
-                        producer_result_class_q[rebuild_ptr0];
-                end
-                if (rebuild_do1 && rebuild_live1) begin
-                    latest_valid_q[rebuild_rd1] <= 1'b1;
-                    latest_id_q[rebuild_rd1] <= rebuild_id1;
-                    latest_class_q[rebuild_rd1] <=
-                        producer_result_class_q[rebuild_ptr1];
-                end
                 if (rebuild_remaining_q <= QUEUE_COUNT_WIDTH'(2)) begin
                     recovering_q <= 1'b0;
                     rebuild_remaining_q <= '0;

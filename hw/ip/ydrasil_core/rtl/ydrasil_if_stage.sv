@@ -550,11 +550,14 @@ import ydrasil_pkg::*;
     // to the fetch queue on the following cycle.
     wire fetch_issue = !flush_fetch && !bp_invalidate_i && pair_capacity;
 
-    // A conditional is recognized locally only after the instruction response
-    // is present. Lane 1 is speculative only when lane 0 was retained by the
-    // fetch packet; a lane-0 taken prediction suppresses it from FetchQ.
-    wire response_conditional0 = push_branch0;
-    wire response_conditional1 = push_branch1;
+    // Keep the GShare history inputs independent from the full FetchQ
+    // predecoder. Each physical instruction lane needs only one B-type opcode
+    // compare, while domain/serial/source classification remains local to the
+    // payload write path below.
+    (* keep = "true", max_fanout = 4 *) wire response_conditional0 =
+        if_mem_rdata_i[6:0] == RV32I_INS_TYPE_B;
+    (* keep = "true", max_fanout = 4 *) wire response_conditional1 =
+        if_mem_rdata1_i[6:0] == RV32I_INS_TYPE_B;
     assign bp_speculate0_valid_o = mem_resp_valid && mem_req_lane_valid_q[0];
     assign bp_speculate0_conditional_o = response_conditional0;
     assign bp_speculate1_valid_o = mem_resp_valid && mem_req_lane_valid_q[1];
