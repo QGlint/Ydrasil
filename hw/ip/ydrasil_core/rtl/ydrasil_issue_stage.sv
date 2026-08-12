@@ -285,8 +285,11 @@ import ydrasil_pkg::*;
     // Select->Operand queue path, so it does not qualify these bypass tokens.
     (* max_fanout = 8 *) reg select_fast_wakeup_valid_q [0:2][0:1];
     (* max_fanout = 8 *) producer_id_t select_fast_wakeup_id_q [0:2][0:1];
-    reg dtcm_launch_wakeup_valid_q;
-    producer_id_t dtcm_launch_wakeup_id_q;
+    // Keep one registered DTCM launch token beside each four-entry RS bank.
+    // The raw AGU/LSU launch qualification only drives these registers; both
+    // Select bypass matching and persistent RS readiness use the local copy.
+    (* max_fanout = 8 *) reg dtcm_launch_wakeup_valid_q [0:2];
+    (* max_fanout = 8 *) producer_id_t dtcm_launch_wakeup_id_q [0:2];
     reg dtcm_result_replay_valid_q;
     producer_id_t dtcm_result_replay_id_q;
     reg mdu_div_available_q;
@@ -333,6 +336,8 @@ import ydrasil_pkg::*;
     wire [ISSUE_WINDOW_DEPTH-1:0] issue_src0_fast_dual;
     wire [ISSUE_WINDOW_DEPTH-1:0] issue_src1_fast_main;
     wire [ISSUE_WINDOW_DEPTH-1:0] issue_src1_fast_dual;
+    wire [ISSUE_WINDOW_DEPTH-1:0] issue_src0_dtcm_launch;
+    wire [ISSUE_WINDOW_DEPTH-1:0] issue_src1_dtcm_launch;
     wire [ISSUE_WINDOW_DEPTH-1:0] issue_src0_alloc_wakeup;
     wire [ISSUE_WINDOW_DEPTH-1:0] issue_src1_alloc_wakeup;
     wire [ISSUE_WINDOW_DEPTH-1:0] issue_src0_ready_for_select;
@@ -562,6 +567,16 @@ import ydrasil_pkg::*;
                 select_fast_wakeup_valid_q[SELECT_BANK][1] &&
                 (select_fast_wakeup_id_q[SELECT_BANK][1] ==
                  issue_window_q[select_due_idx].src1.producer_tag);
+            assign issue_src0_dtcm_launch[select_due_idx] =
+                issue_window_q[select_due_idx].src0.tag_valid &&
+                dtcm_launch_wakeup_valid_q[SELECT_BANK] &&
+                (dtcm_launch_wakeup_id_q[SELECT_BANK] ==
+                 issue_window_q[select_due_idx].src0.producer_tag);
+            assign issue_src1_dtcm_launch[select_due_idx] =
+                issue_window_q[select_due_idx].src1.tag_valid &&
+                dtcm_launch_wakeup_valid_q[SELECT_BANK] &&
+                (dtcm_launch_wakeup_id_q[SELECT_BANK] ==
+                 issue_window_q[select_due_idx].src1.producer_tag);
             assign issue_src0_alloc_wakeup[select_due_idx] =
                 (alloc_wakeup_valid_q[0] &&
                  issue_window_q[select_due_idx].src0.tag_valid &&
@@ -585,11 +600,13 @@ import ydrasil_pkg::*;
             assign issue_src0_ready_for_select[select_due_idx] =
                 issue_window_src0_ready_q[select_due_idx] ||
                 issue_src0_fast_main[select_due_idx] ||
-                issue_src0_fast_dual[select_due_idx];
+                issue_src0_fast_dual[select_due_idx] ||
+                issue_src0_dtcm_launch[select_due_idx];
             assign issue_src1_ready_for_select[select_due_idx] =
                 issue_window_src1_ready_q[select_due_idx] ||
                 issue_src1_fast_main[select_due_idx] ||
-                issue_src1_fast_dual[select_due_idx];
+                issue_src1_fast_dual[select_due_idx] ||
+                issue_src1_dtcm_launch[select_due_idx];
         end
     endgenerate
 
@@ -1193,13 +1210,6 @@ import ydrasil_pkg::*;
     // Every P0 entry is an LSU operation.  Its credit reservation is local to
     // the P0 pick and must not depend on the combined P0/P1/ALU select mask.
     wire lsu_select_pick = p0_issue_grant;
-    // Preserve the zero-backlog launch wakeup: a newly selected consumer lands
-    // on the response cycle without crossing an occupied Operand cell. Busy
-    // Operand cases use the registered token and response history instead.
-    wire dtcm_launch_fast_wakeup_to_rs = dtcm_launch_wakeup_valid_i &&
-        !select_head_valid_q && !select_skid_valid_q && !select_buf_push;
-    wire dtcm_launch_wakeup_to_rs = dtcm_launch_wakeup_valid_q;
-
     // Registered pending releases are visible to Dispatch without exposing the
     // current Select mask or live RS valid bits to frontend ready.
     wire [2:0] alu_alloc_count =
@@ -1312,8 +1322,12 @@ import ydrasil_pkg::*;
             select_fast_wakeup_id_q[2][1] <= '0;
             select_wakeup_id_q[0] <= '0;
             select_wakeup_id_q[1] <= '0;
-            dtcm_launch_wakeup_valid_q <= 1'b0;
-            dtcm_launch_wakeup_id_q <= '0;
+            dtcm_launch_wakeup_valid_q[0] <= 1'b0;
+            dtcm_launch_wakeup_valid_q[1] <= 1'b0;
+            dtcm_launch_wakeup_valid_q[2] <= 1'b0;
+            dtcm_launch_wakeup_id_q[0] <= '0;
+            dtcm_launch_wakeup_id_q[1] <= '0;
+            dtcm_launch_wakeup_id_q[2] <= '0;
             dtcm_result_replay_valid_q <= 1'b0;
             dtcm_result_replay_id_q <= '0;
             mdu_div_available_q <= 1'b1;
@@ -1349,8 +1363,12 @@ import ydrasil_pkg::*;
             select_fast_wakeup_id_q[2][1] <= selected_dual_due_id;
             select_wakeup_id_q[0] <= selected_main_due_id;
             select_wakeup_id_q[1] <= selected_dual_due_id;
-            dtcm_launch_wakeup_valid_q <= dtcm_launch_wakeup_valid_i;
-            dtcm_launch_wakeup_id_q <= dtcm_launch_wakeup_id_i;
+            dtcm_launch_wakeup_valid_q[0] <= dtcm_launch_wakeup_valid_i;
+            dtcm_launch_wakeup_valid_q[1] <= dtcm_launch_wakeup_valid_i;
+            dtcm_launch_wakeup_valid_q[2] <= dtcm_launch_wakeup_valid_i;
+            dtcm_launch_wakeup_id_q[0] <= dtcm_launch_wakeup_id_i;
+            dtcm_launch_wakeup_id_q[1] <= dtcm_launch_wakeup_id_i;
+            dtcm_launch_wakeup_id_q[2] <= dtcm_launch_wakeup_id_i;
             dtcm_result_replay_valid_q <= dtcm_reservation_i.valid &&
                 dtcm_reservation_i.producer_tracked;
             dtcm_result_replay_id_q <= dtcm_reservation_i.producer_id;
@@ -1422,14 +1440,10 @@ import ydrasil_pkg::*;
                 .wakeup1_id_i(select_wakeup_id_q[1]),
                 .alloc_wakeup_src0_i(issue_src0_alloc_wakeup[rs_entry_idx]),
                 .alloc_wakeup_src1_i(issue_src1_alloc_wakeup[rs_entry_idx]),
-		                .dtcm_launch_fast_wakeup_valid_i(
-		                    dtcm_launch_fast_wakeup_to_rs),
-		                .dtcm_launch_fast_wakeup_id_i(
-		                    dtcm_launch_wakeup_id_i),
 		                .dtcm_launch_wakeup_valid_i(
-		                    dtcm_launch_wakeup_to_rs),
+		                    dtcm_launch_wakeup_valid_q[rs_entry_idx / 4]),
 		                .dtcm_launch_wakeup_id_i(
-		                    dtcm_launch_wakeup_id_q),
+		                    dtcm_launch_wakeup_id_q[rs_entry_idx / 4]),
 		                .dtcm_result_wakeup_valid_i(
 		                    dtcm_reservation_i.valid &&
 	                    dtcm_reservation_i.producer_tracked),
@@ -2444,8 +2458,6 @@ import ydrasil_pkg::*;
     input  producer_id_t                wakeup1_id_i,
     input  wire                         alloc_wakeup_src0_i,
     input  wire                         alloc_wakeup_src1_i,
-	    input  wire                         dtcm_launch_fast_wakeup_valid_i,
-	    input  producer_id_t                dtcm_launch_fast_wakeup_id_i,
 	    input  wire                         dtcm_launch_wakeup_valid_i,
 	    input  producer_id_t                dtcm_launch_wakeup_id_i,
 	    input  wire                         dtcm_result_wakeup_valid_i,
@@ -2511,8 +2523,6 @@ import ydrasil_pkg::*;
     wire current_src0_wakeup = alloc_wakeup_src0_i ||
         (wakeup0_valid_i && (wakeup0_id_i == uop_q.src0.producer_tag)) ||
         (wakeup1_valid_i && (wakeup1_id_i == uop_q.src0.producer_tag)) ||
-	        (dtcm_launch_fast_wakeup_valid_i &&
-	         (dtcm_launch_fast_wakeup_id_i == uop_q.src0.producer_tag)) ||
 	        (dtcm_launch_wakeup_valid_i &&
 	         (dtcm_launch_wakeup_id_i == uop_q.src0.producer_tag)) ||
 	        (dtcm_result_wakeup_valid_i &&
@@ -2525,8 +2535,6 @@ import ydrasil_pkg::*;
     wire current_src1_wakeup = alloc_wakeup_src1_i ||
         (wakeup0_valid_i && (wakeup0_id_i == uop_q.src1.producer_tag)) ||
         (wakeup1_valid_i && (wakeup1_id_i == uop_q.src1.producer_tag)) ||
-	        (dtcm_launch_fast_wakeup_valid_i &&
-	         (dtcm_launch_fast_wakeup_id_i == uop_q.src1.producer_tag)) ||
 	        (dtcm_launch_wakeup_valid_i &&
 	         (dtcm_launch_wakeup_id_i == uop_q.src1.producer_tag)) ||
 	        (dtcm_result_wakeup_valid_i &&
