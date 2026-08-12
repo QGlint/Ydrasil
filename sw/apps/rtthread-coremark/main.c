@@ -3,6 +3,8 @@
 
 #include "board.h"
 #include "core_portme.h"
+#include "monitor_bus.h"
+#include "sensor.h"
 
 extern int coremark_entry(void);
 extern volatile rt_int32_t seed4_volatile;
@@ -76,7 +78,14 @@ MSH_CMD_EXPORT_ALIAS(coremark_command, coremark, Run CoreMark with hardware LED 
 
 int main(void)
 {
+    int display_result = sensor_display_startup();
+
+    if (display_result != YDRASIL_DRIVER_OK)
+    {
+        rt_kprintf("OLED startup thread failed: %d\n", display_result);
+    }
     rt_kprintf("Ydrasil RT-Thread monitor ready\n");
-    rt_kprintf("commands: help, coremark [iterations], sensor [all|temp|imu]\n");
+    rt_kprintf("commands: help, coremark [iterations], "
+               "sensor [all|imu|stop], oled_test [profile]\n");
     return 0;
 }

@@ -19,7 +19,9 @@
 #define SPI_STATUS_READY       (1U << 0)
 #define SPI_STATUS_START_WRITE (1U << 1)
 #define SPI_STATUS_CLEAR_FIFO  (1U << 4)
-#define SPI_FIFO_BYTES         64U
+#define SPI_FIFO_BYTES         4U
+#define SPI_SAFE_CLKDIV        24U
+#define BUS_TIMEOUT_LOOPS      20000U
 
 #define I2C_PRESCALE    MMIO32(YDRASIL_I2C0_BASE + 0x00UL)
 #define I2C_CONTROL     MMIO32(YDRASIL_I2C0_BASE + 0x04UL)
@@ -54,7 +56,7 @@ struct ydrasil_uart_regs
 
 static int i2c_wait_complete(void)
 {
-    uint32_t timeout = 1000000U;
+    uint32_t timeout = BUS_TIMEOUT_LOOPS;
 
     while ((I2C_STATUS & I2C_STATUS_TIP) != 0U && timeout != 0U)
     {
@@ -96,17 +98,26 @@ static int i2c_read_byte(uint32_t command, uint8_t *value)
     return result;
 }
 
-static void i2c_stop_after_error(void)
+static int i2c_stop_after_error(void)
 {
+    int result;
+
     if ((I2C_STATUS & (I2C_STATUS_BUSY | I2C_STATUS_TIP)) !=
         I2C_STATUS_BUSY)
     {
-        return;
+        return YDRASIL_DRIVER_OK;
     }
 
     I2C_TRANSMIT = 0xffU;
     I2C_COMMAND = I2C_CMD_WRITE | I2C_CMD_STOP;
-    (void)i2c_wait_complete();
+    result = i2c_wait_complete();
+    if (result != YDRASIL_DRIVER_OK ||
+        (I2C_STATUS & (I2C_STATUS_BUSY | I2C_STATUS_TIP)) != 0U)
+    {
+        return YDRASIL_DRIVER_ETIMEOUT;
+    }
+    I2C_CONTROL = 0U;
+    return YDRASIL_DRIVER_OK;
 }
 
 int ydrasil_bus_i2c_read_register(uint8_t address,
@@ -149,7 +160,16 @@ int ydrasil_bus_i2c_read_register(uint8_t address,
     }
     if (result != YDRASIL_DRIVER_OK)
     {
-        i2c_stop_after_error();
+        int recovery_result = i2c_stop_after_error();
+
+        /* A stuck external device may leave TIP asserted forever.  Disable
+         * the controller so the monitor never starts another transaction. */
+        I2C_CONTROL = 0U;
+
+        if (recovery_result != YDRASIL_DRIVER_OK)
+        {
+            return recovery_result;
+        }
     }
     return result;
 }
@@ -208,7 +228,7 @@ void ydrasil_bus_gpio_write(uint32_t pin, int high)
 
 static int spi_wait_idle(void)
 {
-    uint32_t timeout = 1000000U;
+    uint32_t timeout = BUS_TIMEOUT_LOOPS;
 
     while ((SPI_STATUS & SPI_STATUS_READY) == 0U && timeout != 0U)
     {
@@ -231,7 +251,7 @@ static int spi_write_chunk(const uint8_t *data,
     }
 
     SPI_STATUS = SPI_STATUS_CLEAR_FIFO;
-    SPI_CLKDIV = 4U;
+    SPI_CLKDIV = SPI_SAFE_CLKDIV;
     SPI_COMMAND = 0U;
     SPI_ADDRESS = 0U;
     SPI_DUMMY = 0U;

@@ -55,7 +55,6 @@ LINK_SCRIPT = os.path.abspath(os.getenv('RTT_LINKER', '../link.lds'))
 CPU_FREQ_HZ = int(os.getenv('RTT_CPU_FREQ_HZ', '150000000'), 10)
 if CPU_FREQ_HZ <= 0 or CPU_FREQ_HZ > 0xffffffff:
     raise ValueError('RTT_CPU_FREQ_HZ must be in the range 1..4294967295')
-
 CFLAGS = COMMON + ' ' + OPTIMIZATION + CONTROL_FLOW_ALIGNMENT + ' -g -Wall -Wno-unused-function -fno-builtin'
 CFLAGS += ' -DYDRASIL_CPU_FREQ_HZ={}UL'.format(CPU_FREQ_HZ)
 if os.getenv('RTT_APP') == 'rtthread-utest':

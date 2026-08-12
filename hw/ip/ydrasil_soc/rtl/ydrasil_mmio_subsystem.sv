@@ -29,9 +29,10 @@ import ydrasil_soc_pkg::*;
     output wire                       uart0_tx_o,
     input  wire                       uart1_rx_i,
     output wire                       uart1_tx_o,
-    input  wire                       spi_miso_i,
+    input  wire                       spi_sdio_i,
     output wire                       spi_sclk_o,
-    output wire                       spi_mosi_o,
+    output wire                       spi_sdio_o,
+    output wire                       spi_sdio_oe_o,
     output wire [3:0]                 spi_cs_n_o,
     input  wire                       i2c_scl_i,
     input  wire                       i2c_sda_i,
@@ -163,8 +164,9 @@ import ydrasil_soc_pkg::*;
     ydrasil_apb_spi #(.NUM_CS(4)) u_spi0 (
         .clk(apb_clk_i), .rst_n(apb_rst_n_i),
         .apb_req_i(spi_req), .apb_rsp_o(spi_rsp),
-        .miso_i(spi_miso_i), .sclk_o(spi_sclk_o),
-        .mosi_o(spi_mosi_o), .cs_n_o(spi_cs_n_o), .irq_o(spi_irq)
+        .sdio_i(spi_sdio_i), .sclk_o(spi_sclk_o),
+        .sdio_o(spi_sdio_o), .sdio_oe_o(spi_sdio_oe_o),
+        .cs_n_o(spi_cs_n_o), .irq_o(spi_irq)
     );
 
     ydrasil_apb_i2c u_i2c0 (

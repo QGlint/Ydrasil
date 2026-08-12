@@ -10,7 +10,6 @@ CFLAGS ?= -O2 -g -std=c11 -Wall -Wextra -Werror
 SOURCES := \
 	driver_sim.c \
 	mock_monitor_bus.c \
-	$(DRIVER_DIR)/lm75b.c \
 	$(DRIVER_DIR)/atk_ms601m.c \
 	$(DRIVER_DIR)/font_small.c \
 	$(DRIVER_DIR)/ssd1306.c

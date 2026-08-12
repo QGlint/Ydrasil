@@ -1,4 +1,5 @@
 #include "coremark.h"
+#include <stdarg.h>
 #include <rthw.h>
 #include "board.h"
 
@@ -90,7 +91,31 @@ CORE_TICKS get_time(void)
 
 secs_ret time_in_secs(CORE_TICKS ticks)
 {
+#if HAS_FLOAT
     return (secs_ret)ticks / (secs_ret)YDRASIL_CPU_FREQ_HZ;
+#else
+    return (secs_ret)(ticks / (CORE_TICKS)YDRASIL_CPU_FREQ_HZ);
+#endif
+}
+
+int ydrasil_coremark_printf(const char *format, ...)
+{
+    static const char tick_format[] = "Total ticks      : %lu\n";
+    static char buffer[256];
+    va_list args;
+    int length;
+
+    if (rt_strcmp(format, tick_format) == 0)
+    {
+        return rt_kprintf("Total ticks      : %llu\n",
+                          (unsigned long long)get_time());
+    }
+
+    va_start(args, format);
+    length = rt_vsnprintf(buffer, sizeof(buffer), format, args);
+    va_end(args);
+    rt_kputs(buffer);
+    return length;
 }
 
 void portable_init(core_portable *port, int *argc, char *argv[])

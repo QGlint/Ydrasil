@@ -11,22 +11,6 @@
 #define SPI_LENGTH      MMIO32(YDRASIL_SPI0_BASE + 0x10UL)
 #define SPI_TXFIFO      MMIO32(YDRASIL_SPI0_BASE + 0x18UL)
 
-#define I2C_PRESCALE    MMIO32(YDRASIL_I2C0_BASE + 0x00UL)
-#define I2C_CONTROL     MMIO32(YDRASIL_I2C0_BASE + 0x04UL)
-#define I2C_RECEIVE     MMIO32(YDRASIL_I2C0_BASE + 0x08UL)
-#define I2C_STATUS      MMIO32(YDRASIL_I2C0_BASE + 0x0cUL)
-#define I2C_TRANSMIT    MMIO32(YDRASIL_I2C0_BASE + 0x10UL)
-#define I2C_COMMAND     MMIO32(YDRASIL_I2C0_BASE + 0x14UL)
-
-#define I2C_STATUS_NACK (1U << 7)
-#define I2C_STATUS_TIP  (1U << 1)
-#define I2C_CMD_START   (1U << 7)
-#define I2C_CMD_STOP    (1U << 6)
-#define I2C_CMD_READ    (1U << 5)
-#define I2C_CMD_WRITE   (1U << 4)
-#define I2C_CMD_NACK    (1U << 3)
-#define I2C_CMD_ACK_IRQ (1U << 0)
-
 #define UART_LSR_DATA_READY (1U << 0)
 
 struct ydrasil_uart_regs
@@ -120,102 +104,6 @@ static int spi_screen_command(int argc, char **argv)
     return RT_EOK;
 }
 MSH_CMD_EXPORT_ALIAS(spi_screen_command, spi_screen, Wake an SPI screen);
-
-static int i2c_wait_complete(void)
-{
-    rt_uint32_t timeout = 1000000U;
-
-    while ((I2C_STATUS & I2C_STATUS_TIP) != 0U && timeout != 0U)
-    {
-        timeout--;
-    }
-    if (timeout == 0U)
-    {
-        return -RT_ETIMEOUT;
-    }
-    I2C_COMMAND = I2C_CMD_ACK_IRQ;
-    return RT_EOK;
-}
-
-static int i2c_write_byte(rt_uint8_t value, rt_uint32_t command)
-{
-    int result;
-
-    I2C_TRANSMIT = value;
-    I2C_COMMAND = command;
-    result = i2c_wait_complete();
-    if (result != RT_EOK)
-    {
-        return result;
-    }
-    return (I2C_STATUS & I2C_STATUS_NACK) != 0U ? -RT_EIO : RT_EOK;
-}
-
-static int i2c_read_byte(rt_uint32_t command, rt_uint8_t *value)
-{
-    int result;
-
-    I2C_COMMAND = command;
-    result = i2c_wait_complete();
-    if (result == RT_EOK)
-    {
-        *value = (rt_uint8_t)I2C_RECEIVE;
-    }
-    return result;
-}
-
-static int i2c_temp_command(int argc, char **argv)
-{
-    rt_uint32_t address = 0x48U;
-    rt_uint8_t msb;
-    rt_uint8_t lsb;
-    rt_int32_t half_degrees;
-    int result;
-
-    if (argc > 1 && (parse_u32(argv[1], &address) != RT_EOK ||
-                     address > 0x7fU))
-    {
-        rt_kprintf("usage: i2c_temp [7-bit-address-decimal]\n");
-        return -RT_EINVAL;
-    }
-
-    I2C_PRESCALE = (YDRASIL_APB_FREQ_HZ / (5U * 100000U)) - 1U;
-    I2C_CONTROL = 1U << 7;
-
-    result = i2c_write_byte((rt_uint8_t)(address << 1),
-                            I2C_CMD_START | I2C_CMD_WRITE);
-    if (result == RT_EOK)
-    {
-        result = i2c_write_byte(0x00U, I2C_CMD_WRITE);
-    }
-    if (result == RT_EOK)
-    {
-        result = i2c_write_byte((rt_uint8_t)((address << 1) | 1U),
-                                I2C_CMD_START | I2C_CMD_WRITE);
-    }
-    if (result == RT_EOK)
-    {
-        result = i2c_read_byte(I2C_CMD_READ, &msb);
-    }
-    if (result == RT_EOK)
-    {
-        result = i2c_read_byte(I2C_CMD_READ | I2C_CMD_STOP | I2C_CMD_NACK,
-                               &lsb);
-    }
-    if (result != RT_EOK)
-    {
-        rt_kprintf("I2C temperature sensor at 0x%02x did not respond (%d)\n",
-                   address, result);
-        return result;
-    }
-
-    half_degrees = ((rt_int16_t)(((rt_uint16_t)msb << 8) | lsb)) >> 7;
-    rt_kprintf("temperature: %d.%d C (raw 0x%02x%02x)\n",
-               half_degrees / 2, (half_degrees < 0 ? -half_degrees : half_degrees) % 2 * 5,
-               msb, lsb);
-    return RT_EOK;
-}
-MSH_CMD_EXPORT_ALIAS(i2c_temp_command, i2c_temp, Read an I2C temperature sensor);
 
 static void uart1_configure(struct ydrasil_uart_regs *uart)
 {
