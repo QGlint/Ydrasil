@@ -1603,7 +1603,11 @@ import ydrasil_pkg::*;
     reg [DATA_WIDTH-1:0] lane_a_pc_q;
 	reg agu_in_valid_q;
 	reg [DATA_WIDTH-1:0] agu_in_operand_a_q, agu_in_operand_b_q;
-	reg [DTCM_ADDR_WIDTH+1:0] agu_in_dtcm_byte_addr_q;
+	reg [DTCM_ADDR_WIDTH+1:0] agu_in_dtcm_addr_normal_q;
+	reg [DTCM_ADDR_WIDTH+1:0] agu_in_dtcm_addr_current_q;
+	reg [DTCM_ADDR_WIDTH+1:0] agu_in_dtcm_addr_history_q;
+	reg agu_in_dtcm_current_hit_q;
+	reg agu_in_dtcm_history_hit_q;
 	ydrasil_lsu_req_pkt_t agu_in_req_q;
     reg csr_in_valid_q;
     reg [DATA_WIDTH-1:0] csr_in_operand_a_q;
@@ -1939,6 +1943,18 @@ import ydrasil_pkg::*;
         lane_b_src0_dtcm_data : lane_b_src0_local;
     wire [DATA_WIDTH-1:0] lane_b_src1_capture = lane_b_src1_dtcm_hit ?
         lane_b_src1_dtcm_data : lane_b_src1_local;
+    // The speculative DTCM request needs only the low byte address. Form the
+    // three source cases in parallel so a fixed-latency response does not
+    // traverse the generic 32-bit source mux before entering the carry chain.
+    wire [DTCM_ADDR_WIDTH+1:0] agu_dtcm_addr_normal =
+        lane_a_src0_local[DTCM_ADDR_WIDTH+1:0] +
+        lane_a_uop.imm[DTCM_ADDR_WIDTH+1:0];
+    wire [DTCM_ADDR_WIDTH+1:0] agu_dtcm_addr_current =
+        dtcm_operand_current_data[DTCM_ADDR_WIDTH+1:0] +
+        lane_a_uop.imm[DTCM_ADDR_WIDTH+1:0];
+    wire [DTCM_ADDR_WIDTH+1:0] agu_dtcm_addr_history =
+        dtcm_operand_history_data_q[DTCM_ADDR_WIDTH+1:0] +
+        lane_a_uop.imm[DTCM_ADDR_WIDTH+1:0];
     wire lane_a_accept = id_advance && lane_a_valid;
     wire lane_b_accept = id_advance && lane_b_valid;
     wire lane_a_op_a_src = !lane_a_uop.operand_a_pc_sel &&
@@ -2124,7 +2140,11 @@ import ydrasil_pkg::*;
             agu_in_valid_q <= 1'b0;
 	        agu_in_operand_a_q <= '0;
 	        agu_in_operand_b_q <= '0;
-	        agu_in_dtcm_byte_addr_q <= '0;
+	        agu_in_dtcm_addr_normal_q <= '0;
+	        agu_in_dtcm_addr_current_q <= '0;
+	        agu_in_dtcm_addr_history_q <= '0;
+	        agu_in_dtcm_current_hit_q <= 1'b0;
+	        agu_in_dtcm_history_hit_q <= 1'b0;
 	        agu_in_req_q <= '0;
             csr_in_valid_q <= 1'b0;
             csr_in_operand_a_q <= '0;
@@ -2175,9 +2195,13 @@ import ydrasil_pkg::*;
 	                        // shared PC/zimm/jump operand muxes.
 	                        agu_in_operand_a_q <= lane_a_src0_capture;
 	                        agu_in_operand_b_q <= lane_a_uop.imm;
-	                        agu_in_dtcm_byte_addr_q <=
-	                            lane_a_src0_capture[DTCM_ADDR_WIDTH+1:0] +
-	                            lane_a_uop.imm[DTCM_ADDR_WIDTH+1:0];
+	                        agu_in_dtcm_addr_normal_q <= agu_dtcm_addr_normal;
+	                        agu_in_dtcm_addr_current_q <= agu_dtcm_addr_current;
+	                        agu_in_dtcm_addr_history_q <= agu_dtcm_addr_history;
+	                        agu_in_dtcm_current_hit_q <=
+	                            slot0_src0_dtcm_current_hit;
+	                        agu_in_dtcm_history_hit_q <=
+	                            slot0_src0_dtcm_history_hit;
 	                        agu_in_req_q <= shared_agu_req_d;
                     end else begin
                         agu_in_req_q.valid <= 1'b0;
@@ -2231,7 +2255,11 @@ import ydrasil_pkg::*;
     assign agu_in_operand_b_o = agu_in_operand_b_q;
 	assign agu_in_req_o = agu_in_req_q;
 	assign agu_in_dtcm_word_addr_o =
-	    agu_in_dtcm_byte_addr_q[DTCM_ADDR_WIDTH+1:2];
+	    agu_in_dtcm_current_hit_q ?
+	        agu_in_dtcm_addr_current_q[DTCM_ADDR_WIDTH+1:2] :
+	    agu_in_dtcm_history_hit_q ?
+	        agu_in_dtcm_addr_history_q[DTCM_ADDR_WIDTH+1:2] :
+	        agu_in_dtcm_addr_normal_q[DTCM_ADDR_WIDTH+1:2];
 	assign agu_in_store_data_o = agu_in_req_q.store_data;
     assign csr_in_valid_o = csr_in_valid_q;
 	assign csr_in_operand_a_o = csr_in_operand_a_q;
