@@ -106,28 +106,42 @@ import ydrasil_pkg::*;
     wire predict_bht_bank = predict_pc_i[2];
     wire [BHT_ROW_WIDTH-1:0] predict_pc_row =
         BHT_ROW_WIDTH'(predict_pc_i >> 3);
-    wire [BHT_ROW_WIDTH-1:0] predict_bht_row;
+    // The two BHT BRAMs are independent physical consumers. Preserve one
+    // equivalent bit-local history selector beside each address port so the
+    // FPGA mapper does not rebuild a shared, routed row mux between banks.
+    // Both rows intentionally implement the same history/PC hash.
+    wire [BHT_ROW_WIDTH-1:0] predict_bht_row0;
+    wire [BHT_ROW_WIDTH-1:0] predict_bht_row1;
     for (genvar ghr_bit = 0; ghr_bit < BHT_ROW_WIDTH; ghr_bit++) begin : g_bht_row
-        wire selected_history;
+        (* keep = "true" *) wire selected_history0;
+        (* keep = "true" *) wire selected_history1;
         if (ghr_bit == 0) begin : g_bit0
-            assign selected_history = spec1_advance ? lane1_pred_taken :
+            assign selected_history0 = spec1_advance ? lane1_pred_taken :
+                (spec0_advance ? lane0_pred_taken : ghr_q[0]);
+            assign selected_history1 = spec1_advance ? lane1_pred_taken :
                 (spec0_advance ? lane0_pred_taken : ghr_q[0]);
         end else if (ghr_bit == 1) begin : g_bit1
-            assign selected_history = spec1_advance ?
+            assign selected_history0 = spec1_advance ?
+                (spec0_advance ? lane0_pred_taken : ghr_q[0]) :
+                (spec0_advance ? ghr_q[0] : ghr_q[1]);
+            assign selected_history1 = spec1_advance ?
                 (spec0_advance ? lane0_pred_taken : ghr_q[0]) :
                 (spec0_advance ? ghr_q[0] : ghr_q[1]);
         end else begin : g_bitn
-            assign selected_history = spec1_advance ?
+            assign selected_history0 = spec1_advance ?
+                (spec0_advance ? ghr_q[ghr_bit-2] : ghr_q[ghr_bit-1]) :
+                (spec0_advance ? ghr_q[ghr_bit-1] : ghr_q[ghr_bit]);
+            assign selected_history1 = spec1_advance ?
                 (spec0_advance ? ghr_q[ghr_bit-2] : ghr_q[ghr_bit-1]) :
                 (spec0_advance ? ghr_q[ghr_bit-1] : ghr_q[ghr_bit]);
         end
-        assign predict_bht_row[ghr_bit] = predict_pc_row[ghr_bit] ^
-            (USE_GSHARE ? selected_history : 1'b0);
+        assign predict_bht_row0[ghr_bit] = predict_pc_row[ghr_bit] ^
+            (USE_GSHARE ? selected_history0 : 1'b0);
+        assign predict_bht_row1[ghr_bit] = predict_pc_row[ghr_bit] ^
+            (USE_GSHARE ? selected_history1 : 1'b0);
     end
     wire [BHT_INDEX_WIDTH-1:0] predict_bht_index =
-        {predict_bht_row, predict_bht_bank};
-    wire [BHT_INDEX_WIDTH-1:0] predict_bht_index1 =
-        {predict_bht_row, !predict_bht_bank};
+        {predict_bht_row0, predict_bht_bank};
 
     // Preserve a PC-indexed direction table beside GShare.  Its address uses
     // the same registered BRAM lookup boundary and physical bank split, so the
@@ -155,8 +169,10 @@ import ydrasil_pkg::*;
     // therefore use the same row; an odd-bank request carries no valid lane 1.
     wire [BTB_ROW_WIDTH-1:0] btb_read_row0 = predict_btb_row;
     wire [BTB_ROW_WIDTH-1:0] btb_read_row1 = predict_btb_row;
-    wire [BHT_ROW_WIDTH-1:0] bht_read_row0 = predict_bht_row;
-    wire [BHT_ROW_WIDTH-1:0] bht_read_row1 = predict_bht_row;
+    (* keep = "true" *) wire [BHT_ROW_WIDTH-1:0] bht_read_row0 =
+        predict_bht_row0;
+    (* keep = "true" *) wire [BHT_ROW_WIDTH-1:0] bht_read_row1 =
+        predict_bht_row1;
     wire [BHT_ROW_WIDTH-1:0] local_bht_read_row0 = predict_local_bht_row;
     wire [BHT_ROW_WIDTH-1:0] local_bht_read_row1 = predict_local_bht_row;
 
@@ -292,27 +308,24 @@ import ydrasil_pkg::*;
     );
 
     logic predict_btb_bank_q;
-    logic predict_btb_bank1_q;
     logic [BTB_TAG_WIDTH-1:0] predict_btb_tag_q;
     logic [BTB_TAG_WIDTH-1:0] predict_btb_tag1_q;
     logic [BHT_INDEX_WIDTH-1:0] predict_bht_index_q;
-    logic [BHT_INDEX_WIDTH-1:0] predict_bht_index1_q;
+    logic [BHT_ROW_WIDTH-1:0] predict1_bht_row_q;
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             predict_btb_bank_q <= 1'b0;
-            predict_btb_bank1_q <= 1'b1;
             predict_btb_tag_q <= '0;
             predict_btb_tag1_q <= '0;
             predict_bht_index_q <= '0;
-            predict_bht_index1_q <= '0;
+            predict1_bht_row_q <= '0;
         end else begin
             predict_btb_bank_q <= predict_btb_bank;
-            predict_btb_bank1_q <= !predict_btb_bank;
             predict_btb_tag_q <= predict_btb_tag;
             predict_btb_tag1_q <= predict_btb_tag;
             predict_bht_index_q <= predict_bht_index;
-            predict_bht_index1_q <= predict_bht_index1;
+            predict1_bht_row_q <= predict_bht_row1;
         end
     end
 
@@ -375,8 +388,12 @@ import ydrasil_pkg::*;
 
     wire [BTB_DATA_WIDTH-1:0] lane0_btb_data = predict_btb_bank_q ?
         btb_mem_rdata1[BTB_DATA_WIDTH-1:0] : btb_mem_rdata0[BTB_DATA_WIDTH-1:0];
-    wire [BTB_DATA_WIDTH-1:0] lane1_btb_data = predict_btb_bank1_q ?
-        btb_mem_rdata1[BTB_DATA_WIDTH-1:0] : btb_mem_rdata0[BTB_DATA_WIDTH-1:0];
+    // A valid lane 1 exists only for an 8-byte-aligned pair lookup, so it is
+    // physically bank 1. Odd-PC requests contain only lane 0 and discard every
+    // lane-1 output. Keep the lane-1 response local to bank 1 instead of
+    // rebuilding three bank muxes on the predictor-to-FetchQ/history paths.
+    wire [BTB_DATA_WIDTH-1:0] lane1_btb_data =
+        btb_mem_rdata1[BTB_DATA_WIDTH-1:0];
     wire lane0_btb_valid;
     wire lane1_btb_valid;
     wire [EPOCH_WIDTH-1:0] lane0_btb_epoch;
@@ -406,26 +423,23 @@ import ydrasil_pkg::*;
 
     wire [BHT_DATA_WIDTH-1:0] lane0_bht_data = predict_bht_index_q[0] ?
         bht_mem_rdata1[BHT_DATA_WIDTH-1:0] : bht_mem_rdata0[BHT_DATA_WIDTH-1:0];
-    wire [BHT_DATA_WIDTH-1:0] lane1_bht_data = predict_bht_index1_q[0] ?
-        bht_mem_rdata1[BHT_DATA_WIDTH-1:0] : bht_mem_rdata0[BHT_DATA_WIDTH-1:0];
+    wire [BHT_DATA_WIDTH-1:0] lane1_bht_data =
+        bht_mem_rdata1[BHT_DATA_WIDTH-1:0];
     wire [1:0] lane0_chooser = predict_bht_index_q[0] ?
         bht_mem_rdata1[BHT_CHOOSER_LSB +: 2] :
         bht_mem_rdata0[BHT_CHOOSER_LSB +: 2];
-    wire [1:0] lane1_chooser = predict_bht_index1_q[0] ?
-        bht_mem_rdata1[BHT_CHOOSER_LSB +: 2] :
-        bht_mem_rdata0[BHT_CHOOSER_LSB +: 2];
+    wire [1:0] lane1_chooser =
+        bht_mem_rdata1[BHT_CHOOSER_LSB +: 2];
     wire lane0_chooser_valid = predict_bht_index_q[0] ?
         bht_mem_rdata1[BHT_USED_WIDTH-1] : bht_mem_rdata0[BHT_USED_WIDTH-1];
-    wire lane1_chooser_valid = predict_bht_index1_q[0] ?
-        bht_mem_rdata1[BHT_USED_WIDTH-1] : bht_mem_rdata0[BHT_USED_WIDTH-1];
+    wire lane1_chooser_valid = bht_mem_rdata1[BHT_USED_WIDTH-1];
     wire [1:0] lane0_bht_counter = lane0_bht_data ^ 2'b01;
     wire [1:0] lane1_bht_counter = lane1_bht_data ^ 2'b01;
     wire [BHT_DATA_WIDTH-1:0] lane0_local_bht_data = predict_bht_index_q[0] ?
         local_bht_mem_rdata1[BHT_DATA_WIDTH-1:0] :
         local_bht_mem_rdata0[BHT_DATA_WIDTH-1:0];
-    wire [BHT_DATA_WIDTH-1:0] lane1_local_bht_data = predict_bht_index1_q[0] ?
-        local_bht_mem_rdata1[BHT_DATA_WIDTH-1:0] :
-        local_bht_mem_rdata0[BHT_DATA_WIDTH-1:0];
+    wire [BHT_DATA_WIDTH-1:0] lane1_local_bht_data =
+        local_bht_mem_rdata1[BHT_DATA_WIDTH-1:0];
     wire [1:0] lane0_local_bht_counter = lane0_local_bht_data ^ 2'b01;
     wire [1:0] lane1_local_bht_counter = lane1_local_bht_data ^ 2'b01;
     wire lane0_global_confident =
@@ -482,7 +496,7 @@ import ydrasil_pkg::*;
     assign predict1_taken_o = lane1_pred_taken;
     assign predict1_target_o = lane1_btb_target;
     assign predict1_bht_index_o = ydrasil_pkg::BP_BHT_INDEX_WIDTH'(
-        {predict_bht_index1_q[BHT_INDEX_WIDTH-1:1], 1'b0});
+        {predict1_bht_row_q, 1'b0});
 
 `ifndef SYNTHESIS
     always_ff @(posedge clk) begin

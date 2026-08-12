@@ -361,7 +361,6 @@ import ydrasil_pkg::*;
 
     // Two age-ordered entries cover the measured forwarding use while
     // removing half of the address CAM and its newest-store priority tree.
-    integer byte_scan_load;
 	    wire store_hit0 = (store_buf_count_q > STORE_COUNT_WIDTH'(0)) &&
 	        store_buf0_q.valid &&
 	        (store_buf0_q.addr[BUS_ADDR_WIDTH-1:2] ==
@@ -458,32 +457,79 @@ import ydrasil_pkg::*;
     assign mmio_req_o.wmask = (mmio_req_valid_q && !mmio_is_load_q) ?
         mmio_wmask_q : 4'b0;
 
-    reg [31:0] load_merged_word;
-    reg [31:0] load_shifted;
+    wire [7:0] dtcm_load_byte0 = load_s1_forward_mask_q[0] ?
+        load_s1_forward_data_q[7:0] : dtcm_rdata_i[7:0];
+    wire [7:0] dtcm_load_byte1 = load_s1_forward_mask_q[1] ?
+        load_s1_forward_data_q[15:8] : dtcm_rdata_i[15:8];
+    wire [7:0] dtcm_load_byte2 = load_s1_forward_mask_q[2] ?
+        load_s1_forward_data_q[23:16] : dtcm_rdata_i[23:16];
+    wire [7:0] dtcm_load_byte3 = load_s1_forward_mask_q[3] ?
+        load_s1_forward_data_q[31:24] : dtcm_rdata_i[31:24];
+    reg [7:0] dtcm_load_low_byte;
+    reg [7:0] dtcm_load_high_byte;
+    reg [31:0] dtcm_load_shifted_word;
     reg [31:0] dtcm_load_result;
     reg [31:0] mmio_load_result;
+
+    // Select the bytes that each architectural result actually consumes.
+    // This preserves the old zero-filled right-shift behavior for every low
+    // address value, including a halfword at offset three, while avoiding a
+    // shared 32-bit barrel shifter between the DTCM BRAM and all FU inputs.
     always_comb begin
-        load_merged_word = dtcm_rdata_i;
-        for (byte_scan_load = 0; byte_scan_load < 4; byte_scan_load++) begin
-            if (load_s1_forward_mask_q[byte_scan_load])
-                load_merged_word[byte_scan_load*8 +: 8] =
-                    load_s1_forward_data_q[byte_scan_load*8 +: 8];
-        end
-        load_shifted = load_merged_word >>
-            ({3'b000, load_s1_addr_index_q} << 3);
-        dtcm_load_result = load_shifted;
-        unique case (1'b1)
-            load_s1_op_q[OP_LSU_LB]:
-                dtcm_load_result = {{24{load_shifted[7]}}, load_shifted[7:0]};
-            load_s1_op_q[OP_LSU_LBU]:
-                dtcm_load_result = {24'b0, load_shifted[7:0]};
-            load_s1_op_q[OP_LSU_LH]:
-                dtcm_load_result = {{16{load_shifted[15]}}, load_shifted[15:0]};
-            load_s1_op_q[OP_LSU_LHU]:
-                dtcm_load_result = {16'b0, load_shifted[15:0]};
-            default: dtcm_load_result = load_shifted;
+        dtcm_load_low_byte = dtcm_load_byte0;
+        dtcm_load_high_byte = dtcm_load_byte1;
+        dtcm_load_shifted_word = {
+            dtcm_load_byte3, dtcm_load_byte2,
+            dtcm_load_byte1, dtcm_load_byte0
+        };
+        unique case (load_s1_addr_index_q)
+            2'b01: begin
+                dtcm_load_low_byte = dtcm_load_byte1;
+                dtcm_load_high_byte = dtcm_load_byte2;
+                dtcm_load_shifted_word = {
+                    8'b0, dtcm_load_byte3,
+                    dtcm_load_byte2, dtcm_load_byte1
+                };
+            end
+            2'b10: begin
+                dtcm_load_low_byte = dtcm_load_byte2;
+                dtcm_load_high_byte = dtcm_load_byte3;
+                dtcm_load_shifted_word = {
+                    16'b0, dtcm_load_byte3, dtcm_load_byte2
+                };
+            end
+            2'b11: begin
+                dtcm_load_low_byte = dtcm_load_byte3;
+                dtcm_load_high_byte = 8'b0;
+                dtcm_load_shifted_word = {24'b0, dtcm_load_byte3};
+            end
+            default: begin end
         endcase
 
+        dtcm_load_result = dtcm_load_shifted_word;
+        unique case (1'b1)
+            load_s1_op_q[OP_LSU_LB]:
+                dtcm_load_result = {
+                    {24{dtcm_load_low_byte[7]}}, dtcm_load_low_byte
+                };
+            load_s1_op_q[OP_LSU_LBU]:
+                dtcm_load_result = {24'b0, dtcm_load_low_byte};
+            load_s1_op_q[OP_LSU_LH]:
+                dtcm_load_result = {
+                    {16{dtcm_load_high_byte[7]}},
+                    dtcm_load_high_byte, dtcm_load_low_byte
+                };
+            load_s1_op_q[OP_LSU_LHU]:
+                dtcm_load_result = {
+                    16'b0, dtcm_load_high_byte, dtcm_load_low_byte
+                };
+            default: begin end
+        endcase
+    end
+
+    // MMIO is variable latency and already crosses its own response register.
+    // Keep its formatter physically independent from the DTCM fast-load cone.
+    always_comb begin
         mmio_load_result = mmio_rsp_i.rdata >>
             ({3'b000, mmio_addr_index_q} << 3);
         unique case (1'b1)

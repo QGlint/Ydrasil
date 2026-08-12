@@ -641,17 +641,83 @@ import ydrasil_pkg::*;
 
     integer slot_idx;
     integer reg_idx;
-    integer fence_idx;
     wire [PRODUCER_EXT_WIDTH-1:0] queue_tail_alloc_sum =
         {1'b0, queue_tail_q} + PRODUCER_EXT_WIDTH'(queue_alloc_count);
     wire producer_slot_t queue_tail_after_alloc =
         (queue_tail_alloc_sum >= PRODUCER_NUM_EXT) ?
         producer_slot_t'(queue_tail_alloc_sum - PRODUCER_NUM_EXT) :
         producer_slot_t'(queue_tail_alloc_sum);
+
+    // Keep completion state beside each physical producer slot. A dynamic
+    // write such as producer_done_q[completion_slot] makes the FPGA build a
+    // full decoder plus a priority mux at every done FF. Each local cell
+    // instead compares the narrow producer token with its constant slot and
+    // local epoch. Allocation remains the final priority, followed by a valid
+    // completion and then retirement, exactly matching the old write order.
+    genvar producer_done_idx;
+    generate
+        for (producer_done_idx = 0; producer_done_idx < PRODUCER_NUM;
+             producer_done_idx++) begin : g_producer_done
+            localparam producer_slot_t DONE_SLOT =
+                producer_slot_t'(producer_done_idx);
+            wire producer_id_t done_id = {
+                producer_epoch_q[producer_done_idx], DONE_SLOT
+            };
+            wire completion0_local = completion_write0 &&
+                producer_valid_q[producer_done_idx] &&
+                (completion_meta_i[COMPLETION_ALU].producer_id == done_id);
+            wire completion1_local = completion_write1 &&
+                producer_valid_q[producer_done_idx] &&
+                (completion_meta_i[COMPLETION_LSU].producer_id == done_id);
+            wire completion2_local = completion_write2 &&
+                producer_valid_q[producer_done_idx] &&
+                (completion_meta_i[COMPLETION_MUL].producer_id == done_id);
+            wire completion3_local = completion_write3 &&
+                producer_valid_q[producer_done_idx] &&
+                (completion_meta_i[COMPLETION_DUAL_ALU].producer_id ==
+                 done_id);
+            wire no_result0_local = ex_no_result_due0_valid_i &&
+                producer_valid_q[producer_done_idx] &&
+                (ex_no_result_due0_id_i == done_id);
+            wire no_result1_local = ex_no_result_due1_valid_i &&
+                producer_valid_q[producer_done_idx] &&
+                (ex_no_result_due1_id_i == done_id);
+            wire branch_due_local = branch_retire_due_valid_q &&
+                !queue_head_branch_due &&
+                producer_valid_q[producer_done_idx] &&
+                (branch_retire_due_id_q == done_id);
+            wire branch_resolve_local = ex_branch_resolve_i &&
+                producer_valid_q[producer_done_idx] &&
+                (resolved_branch_tag == done_id);
+            wire fence_local = issue_fence_i &&
+                issue_fence_hit_mask[producer_done_idx];
+            wire completion_local = completion0_local || completion1_local ||
+                completion2_local || completion3_local || no_result0_local ||
+                no_result1_local || branch_due_local || branch_resolve_local ||
+                fence_local;
+            wire retire_local =
+                (queue_commit0 && (queue_head_q == DONE_SLOT)) ||
+                (queue_commit1 && (queue_head1 == DONE_SLOT));
+            wire allocate_local =
+                (queue_alloc0 && (alloc_slot0 == DONE_SLOT)) ||
+                (queue_alloc1 && (alloc_slot1 == DONE_SLOT));
+
+            always_ff @(posedge clk) begin
+                if (!rst_n || ex_hzd_i.interrupt_pending)
+                    producer_done_q[producer_done_idx] <= 1'b0;
+                else if (allocate_local)
+                    producer_done_q[producer_done_idx] <= 1'b0;
+                else if (completion_local)
+                    producer_done_q[producer_done_idx] <= 1'b1;
+                else if (retire_local)
+                    producer_done_q[producer_done_idx] <= 1'b0;
+            end
+        end
+    endgenerate
+
     always_ff @(posedge clk) begin
         if (!rst_n || ex_hzd_i.interrupt_pending) begin
             producer_valid_q <= '0;
-            producer_done_q <= '0;
             producer_writes_gpr_q <= '0;
             producer_epoch_q <= '0;
             latest_valid_q <= '0;
@@ -696,44 +762,15 @@ import ydrasil_pkg::*;
 
             if (queue_commit0) begin
                 producer_valid_q[queue_head_q] <= 1'b0;
-                producer_done_q[queue_head_q] <= 1'b0;
                 producer_writes_gpr_q[queue_head_q] <= 1'b0;
             end
             if (queue_commit1) begin
                 producer_valid_q[queue_head1] <= 1'b0;
-                producer_done_q[queue_head1] <= 1'b0;
                 producer_writes_gpr_q[queue_head1] <= 1'b0;
-            end
-
-            if (completion_hit0) begin
-				producer_done_q[completion_slot0] <= 1'b1;
-			end
-	            if (completion_hit1) begin
-	                producer_done_q[completion_slot1] <= 1'b1;
-			end
-	            if (completion_hit2) begin
-	                producer_done_q[completion_slot2] <= 1'b1;
-			end
-	            if (completion_hit3) begin
-				producer_done_q[completion_slot3] <= 1'b1;
-			end
-
-	            if (no_result_hit0)
-	                producer_done_q[no_result_slot0] <= 1'b1;
-	            if (no_result_hit1)
-	                producer_done_q[no_result_slot1] <= 1'b1;
-		            if (branch_due_hit && !queue_head_branch_due)
-		                producer_done_q[branch_due_slot] <= 1'b1;
-            if (ex_branch_resolve_i && resolved_branch_live)
-                producer_done_q[resolved_branch_slot] <= 1'b1;
-            for (fence_idx = 0; fence_idx < PRODUCER_NUM; fence_idx++) begin
-                if (issue_fence_i && issue_fence_hit_mask[fence_idx])
-                    producer_done_q[fence_idx] <= 1'b1;
             end
 
             if (queue_alloc0) begin
                 producer_valid_q[alloc_slot0] <= 1'b1;
-                producer_done_q[alloc_slot0] <= 1'b0;
                 producer_writes_gpr_q[alloc_slot0] <=
                     dispatch_pkt_i.dst.writes_gpr;
                 producer_rd_q[alloc_slot0] <= dispatch_pkt_i.dst.rd_addr;
@@ -765,7 +802,6 @@ import ydrasil_pkg::*;
             end
             if (queue_alloc1) begin
                 producer_valid_q[alloc_slot1] <= 1'b1;
-                producer_done_q[alloc_slot1] <= 1'b0;
                 producer_writes_gpr_q[alloc_slot1] <=
                     dispatch_pkt1_i.dst.writes_gpr;
                 producer_rd_q[alloc_slot1] <= dispatch_pkt1_i.dst.rd_addr;

@@ -308,6 +308,11 @@ import ydrasil_pkg::*;
     logic [ISSUE_WINDOW_DEPTH-1:0] issue_select_mask;
     logic [ISSUE_WINDOW_DEPTH-1:0] selected0_mask;
     logic [ISSUE_WINDOW_DEPTH-1:0] selected1_mask;
+    logic [3:0] lane_a_p0_mask;
+    logic [3:0] lane_a_alu0_mask;
+    logic [3:0] lane_b_p1_mask;
+    logic [3:0] lane_b_alu0_mask;
+    logic [3:0] lane_b_alu1_mask;
     ydrasil_compact_uop_t selected_uop0, selected_uop1;
     logic selected_valid0, selected_valid1;
     wire free_valid0, free_valid1;
@@ -874,23 +879,34 @@ import ydrasil_pkg::*;
         selected_valid1 = 1'b0;
         selected0_mask = '0;
         selected1_mask = '0;
+        lane_a_p0_mask = '0;
+        lane_a_alu0_mask = '0;
+        lane_b_p1_mask = '0;
+        lane_b_alu0_mask = '0;
+        lane_b_alu1_mask = '0;
         if (|p1_serial_select_local) begin
             selected_valid0 = 1'b1;
             selected0_mask[11:8] = p1_serial_select_local;
+            lane_b_p1_mask = p1_serial_select_local;
         end else if (p0_select_valid) begin
             selected_valid0 = 1'b1;
             selected0_mask[7:4] = p0_select_local;
+            lane_a_p0_mask = p0_select_local;
             if (p1_select_valid) begin
                 selected_valid1 = 1'b1;
                 selected1_mask[11:8] = p1_select_local;
+                lane_b_p1_mask = p1_select_local;
             end else if (alu_select0_valid) begin
                 selected_valid1 = 1'b1;
                 selected1_mask[3:0] = alu_select0_local;
+                lane_b_alu0_mask = alu_select0_local;
             end
         end else if (p1_select_valid) begin
+            lane_b_p1_mask = p1_select_local;
             if (alu_select0_valid) begin
                 selected_valid0 = 1'b1;
                 selected0_mask[3:0] = alu_select0_local;
+                lane_a_alu0_mask = alu_select0_local;
                 selected_valid1 = 1'b1;
                 selected1_mask[11:8] = p1_select_local;
             end else begin
@@ -900,12 +916,18 @@ import ydrasil_pkg::*;
         end else if (alu_select0_valid) begin
             selected_valid0 = 1'b1;
             selected0_mask[3:0] = alu_select0_local;
+            lane_a_alu0_mask = alu_select0_local;
             if (alu_select1_valid) begin
                 selected_valid1 = 1'b1;
                 selected1_mask[3:0] = alu_select1_local;
+                lane_b_alu1_mask = alu_select1_local;
             end
         end
-        issue_select_mask = selected0_mask | selected1_mask;
+        issue_select_mask = {
+            lane_b_p1_mask,
+            lane_a_p0_mask,
+            lane_a_alu0_mask | lane_b_alu0_mask | lane_b_alu1_mask
+        };
     end
 
     // The final masks are one-hot. Select each bank in parallel, then combine
@@ -937,10 +959,45 @@ import ydrasil_pkg::*;
         ({COMPACT_UOP_WIDTH{selected1_mask[9]}} & issue_window_bits[9]) |
         ({COMPACT_UOP_WIDTH{selected1_mask[10]}} & issue_window_bits[10]) |
         ({COMPACT_UOP_WIDTH{selected1_mask[11]}} & issue_window_bits[11]);
-    wire selected_lane_a_valid = |selected0_mask[7:0];
-    wire selected_lane_b_valid = (|selected0_mask[11:8]) || selected_valid1;
-    wire [ISSUE_WINDOW_DEPTH-1:0] selected_lane_b_mask = selected1_mask |
-        (selected0_mask & {4'b1111, 8'b0});
+    // Wide Select payloads are written by physical destination, not by the
+    // logical first/second issue ordering above. Each tree therefore sees only
+    // one four-entry RS bank and one physical head cell; the cross-bank policy
+    // remains entirely in the narrow masks.
+    wire [COMPACT_UOP_WIDTH-1:0] lane_a_alu0_bits =
+        ({COMPACT_UOP_WIDTH{lane_a_alu0_mask[0]}} & issue_window_bits[0]) |
+        ({COMPACT_UOP_WIDTH{lane_a_alu0_mask[1]}} & issue_window_bits[1]) |
+        ({COMPACT_UOP_WIDTH{lane_a_alu0_mask[2]}} & issue_window_bits[2]) |
+        ({COMPACT_UOP_WIDTH{lane_a_alu0_mask[3]}} & issue_window_bits[3]);
+    wire [COMPACT_UOP_WIDTH-1:0] lane_a_p0_bits =
+        ({COMPACT_UOP_WIDTH{lane_a_p0_mask[0]}} & issue_window_bits[4]) |
+        ({COMPACT_UOP_WIDTH{lane_a_p0_mask[1]}} & issue_window_bits[5]) |
+        ({COMPACT_UOP_WIDTH{lane_a_p0_mask[2]}} & issue_window_bits[6]) |
+        ({COMPACT_UOP_WIDTH{lane_a_p0_mask[3]}} & issue_window_bits[7]);
+    wire [COMPACT_UOP_WIDTH-1:0] lane_b_p1_bits =
+        ({COMPACT_UOP_WIDTH{lane_b_p1_mask[0]}} & issue_window_bits[8]) |
+        ({COMPACT_UOP_WIDTH{lane_b_p1_mask[1]}} & issue_window_bits[9]) |
+        ({COMPACT_UOP_WIDTH{lane_b_p1_mask[2]}} & issue_window_bits[10]) |
+        ({COMPACT_UOP_WIDTH{lane_b_p1_mask[3]}} & issue_window_bits[11]);
+    wire [COMPACT_UOP_WIDTH-1:0] lane_b_alu0_bits =
+        ({COMPACT_UOP_WIDTH{lane_b_alu0_mask[0]}} & issue_window_bits[0]) |
+        ({COMPACT_UOP_WIDTH{lane_b_alu0_mask[1]}} & issue_window_bits[1]) |
+        ({COMPACT_UOP_WIDTH{lane_b_alu0_mask[2]}} & issue_window_bits[2]) |
+        ({COMPACT_UOP_WIDTH{lane_b_alu0_mask[3]}} & issue_window_bits[3]);
+    wire [COMPACT_UOP_WIDTH-1:0] lane_b_alu1_bits =
+        ({COMPACT_UOP_WIDTH{lane_b_alu1_mask[0]}} & issue_window_bits[0]) |
+        ({COMPACT_UOP_WIDTH{lane_b_alu1_mask[1]}} & issue_window_bits[1]) |
+        ({COMPACT_UOP_WIDTH{lane_b_alu1_mask[2]}} & issue_window_bits[2]) |
+        ({COMPACT_UOP_WIDTH{lane_b_alu1_mask[3]}} & issue_window_bits[3]);
+    wire selected_lane_a_valid = (|lane_a_p0_mask) || (|lane_a_alu0_mask);
+    wire selected_lane_b_valid = (|lane_b_p1_mask) ||
+        (|lane_b_alu0_mask) || (|lane_b_alu1_mask);
+    wire [ISSUE_WINDOW_DEPTH-1:0] selected_lane_a_mask =
+        {4'b0, lane_a_p0_mask, lane_a_alu0_mask};
+    wire [ISSUE_WINDOW_DEPTH-1:0] selected_lane_b_mask = {
+        lane_b_p1_mask,
+        4'b0,
+        lane_b_alu0_mask | lane_b_alu1_mask
+    };
     wire p0_selected_src1_due =
         (p0_select_local[0] && issue_src1_ready_for_select[4]) ||
         (p0_select_local[1] && issue_src1_ready_for_select[5]) ||
@@ -983,23 +1040,23 @@ import ydrasil_pkg::*;
         // one-hot trees. This avoids moving a full-uop logical-slot mux onto
         // the Select register D path.
         selected_lane_a_uop = ydrasil_compact_uop_t'(
-            selected0_alu_bits | selected0_p0_bits);
+            lane_a_alu0_bits | lane_a_p0_bits);
         selected_lane_a_uop.valid = selected_lane_a_valid;
         selected_lane_a_uop.lane_mask = selected_lane_a_valid ? 2'b01 : '0;
         selected_lane_a_uop.src0.ready = selected_lane_a_valid;
         selected_lane_a_uop.src1.ready = selected_lane_a_valid &&
-            ((|selected0_mask[7:4]) ? p0_selected_src1_due : 1'b1);
+            ((|lane_a_p0_mask) ? p0_selected_src1_due : 1'b1);
         selected_lane_a_uop.src0_bypass =
-            (|(selected0_mask & issue_src0_fast_main)) ? BYPASS_LANE0 :
-            (|(selected0_mask & issue_src0_fast_dual)) ? BYPASS_LANE1 :
+            (|(selected_lane_a_mask & issue_src0_fast_main)) ? BYPASS_LANE0 :
+            (|(selected_lane_a_mask & issue_src0_fast_dual)) ? BYPASS_LANE1 :
             BYPASS_NONE;
         selected_lane_a_uop.src1_bypass =
-            (|(selected0_mask & issue_src1_fast_main)) ? BYPASS_LANE0 :
-            (|(selected0_mask & issue_src1_fast_dual)) ? BYPASS_LANE1 :
+            (|(selected_lane_a_mask & issue_src1_fast_main)) ? BYPASS_LANE0 :
+            (|(selected_lane_a_mask & issue_src1_fast_dual)) ? BYPASS_LANE1 :
             BYPASS_NONE;
 
         selected_lane_b_uop = ydrasil_compact_uop_t'(
-            selected0_p1_bits | selected1_alu_bits | selected1_p1_bits);
+            lane_b_p1_bits | lane_b_alu0_bits | lane_b_alu1_bits);
         selected_lane_b_uop.valid = selected_lane_b_valid;
         selected_lane_b_uop.lane_mask = selected_lane_b_valid ? 2'b10 : '0;
         selected_lane_b_uop.src0.ready = selected_lane_b_valid;
@@ -1880,6 +1937,64 @@ import ydrasil_pkg::*;
         lane_b_src0_dtcm_data : lane_b_src0_local;
     wire [DATA_WIDTH-1:0] lane_b_src1_capture = lane_b_src1_dtcm_hit ?
         lane_b_src1_dtcm_data : lane_b_src1_local;
+
+    // FPGA synthesis otherwise shares these identical source selectors across
+    // every FU input register and rebuilds one high-fanout, wide operand mux.
+    // Keep a private data cone per physical consumer.  All cones preserve the
+    // same current-DTCM, history-DTCM, then normal-source priority and cross the
+    // same Operand/EX register boundary.
+    (* keep = "true" *) wire [DATA_WIDTH-1:0] lane_a_alu_src0_capture =
+        slot0_src0_dtcm_current_hit ? dtcm_operand_current_data :
+        slot0_src0_dtcm_history_hit ? dtcm_operand_history_data_q :
+        lane_a_src0_local;
+    (* keep = "true" *) wire [DATA_WIDTH-1:0] lane_a_alu_src1_capture =
+        slot0_src1_dtcm_current_hit ? dtcm_operand_current_data :
+        slot0_src1_dtcm_history_hit ? dtcm_operand_history_data_q :
+        lane_a_src1_local;
+    (* keep = "true" *) wire [DATA_WIDTH-1:0] lane_a_agu_src0_capture =
+        slot0_src0_dtcm_current_hit ? dtcm_operand_current_data :
+        slot0_src0_dtcm_history_hit ? dtcm_operand_history_data_q :
+        lane_a_src0_local;
+    (* keep = "true" *) wire [DATA_WIDTH-1:0] lane_a_store_src1_capture =
+        slot0_src1_dtcm_current_hit ? dtcm_operand_current_data :
+        slot0_src1_dtcm_history_hit ? dtcm_operand_history_data_q :
+        lane_a_src1_local;
+    (* keep = "true" *) wire [DATA_WIDTH-1:0] lane_b_alu_src0_capture =
+        slot1_src0_dtcm_current_hit ? dtcm_operand_current_data :
+        slot1_src0_dtcm_history_hit ? dtcm_operand_history_data_q :
+        lane_b_src0_local;
+    (* keep = "true" *) wire [DATA_WIDTH-1:0] lane_b_alu_src1_capture =
+        slot1_src1_dtcm_current_hit ? dtcm_operand_current_data :
+        slot1_src1_dtcm_history_hit ? dtcm_operand_history_data_q :
+        lane_b_src1_local;
+    (* keep = "true" *) wire [DATA_WIDTH-1:0] lane_b_bit_src0_capture =
+        slot1_src0_dtcm_current_hit ? dtcm_operand_current_data :
+        slot1_src0_dtcm_history_hit ? dtcm_operand_history_data_q :
+        lane_b_src0_local;
+    (* keep = "true" *) wire [DATA_WIDTH-1:0] lane_b_bit_src1_capture =
+        slot1_src1_dtcm_current_hit ? dtcm_operand_current_data :
+        slot1_src1_dtcm_history_hit ? dtcm_operand_history_data_q :
+        lane_b_src1_local;
+    (* keep = "true" *) wire [DATA_WIDTH-1:0] lane_b_bru_src0_capture =
+        slot1_src0_dtcm_current_hit ? dtcm_operand_current_data :
+        slot1_src0_dtcm_history_hit ? dtcm_operand_history_data_q :
+        lane_b_src0_local;
+    (* keep = "true" *) wire [DATA_WIDTH-1:0] lane_b_bru_src1_capture =
+        slot1_src1_dtcm_current_hit ? dtcm_operand_current_data :
+        slot1_src1_dtcm_history_hit ? dtcm_operand_history_data_q :
+        lane_b_src1_local;
+    (* keep = "true" *) wire [DATA_WIDTH-1:0] lane_b_mdu_src0_capture =
+        slot1_src0_dtcm_current_hit ? dtcm_operand_current_data :
+        slot1_src0_dtcm_history_hit ? dtcm_operand_history_data_q :
+        lane_b_src0_local;
+    (* keep = "true" *) wire [DATA_WIDTH-1:0] lane_b_mdu_src1_capture =
+        slot1_src1_dtcm_current_hit ? dtcm_operand_current_data :
+        slot1_src1_dtcm_history_hit ? dtcm_operand_history_data_q :
+        lane_b_src1_local;
+    (* keep = "true" *) wire [DATA_WIDTH-1:0] lane_b_csr_src0_capture =
+        slot1_src0_dtcm_current_hit ? dtcm_operand_current_data :
+        slot1_src0_dtcm_history_hit ? dtcm_operand_history_data_q :
+        lane_b_src0_local;
     // The speculative DTCM request needs only the low byte address. Form the
     // three source cases in parallel so a fixed-latency response does not
     // traverse the generic 32-bit source mux before entering the carry chain.
@@ -1930,6 +2045,22 @@ import ydrasil_pkg::*;
         lane_b_uop.operand_b_jump_sel ? 32'd4 :
         lane_b_uop.operand_b_rs_sel ? lane_b_src1_capture :
         lane_b_uop.imm;
+    (* keep = "true" *) wire [DATA_WIDTH-1:0] lane_b_alu_operand_a_capture =
+        lane_b_uop.operand_a_pc_sel ? lane_b_uop.pc :
+        lane_b_uop.operand_a_imm_sel ? lane_b_uop.imm :
+        lane_b_alu_src0_capture;
+    (* keep = "true" *) wire [DATA_WIDTH-1:0] lane_b_alu_operand_b_capture =
+        lane_b_uop.operand_b_jump_sel ? 32'd4 :
+        lane_b_uop.operand_b_rs_sel ? lane_b_alu_src1_capture :
+        lane_b_uop.imm;
+    (* keep = "true" *) wire [DATA_WIDTH-1:0] lane_b_bit_operand_a_capture =
+        lane_b_uop.operand_a_pc_sel ? lane_b_uop.pc :
+        lane_b_uop.operand_a_imm_sel ? lane_b_uop.imm :
+        lane_b_bit_src0_capture;
+    (* keep = "true" *) wire [DATA_WIDTH-1:0] lane_b_bit_operand_b_capture =
+        lane_b_uop.operand_b_jump_sel ? 32'd4 :
+        lane_b_uop.operand_b_rs_sel ? lane_b_bit_src1_capture :
+        lane_b_uop.imm;
     wire [DATA_WIDTH-1:0] lane_a_operand_a_capture =
         lane_a_uop.operand_a_pc_sel ? lane_a_uop.pc :
         lane_a_uop.operand_a_imm_sel ? lane_a_uop.imm :
@@ -1937,6 +2068,14 @@ import ydrasil_pkg::*;
     wire [DATA_WIDTH-1:0] lane_a_operand_b_capture =
         lane_a_uop.operand_b_jump_sel ? 32'd4 :
         lane_a_uop.operand_b_rs_sel ? lane_a_src1_capture :
+        lane_a_uop.imm;
+    (* keep = "true" *) wire [DATA_WIDTH-1:0] lane_a_alu_operand_a_capture =
+        lane_a_uop.operand_a_pc_sel ? lane_a_uop.pc :
+        lane_a_uop.operand_a_imm_sel ? lane_a_uop.imm :
+        lane_a_alu_src0_capture;
+    (* keep = "true" *) wire [DATA_WIDTH-1:0] lane_a_alu_operand_b_capture =
+        lane_a_uop.operand_b_jump_sel ? 32'd4 :
+        lane_a_uop.operand_b_rs_sel ? lane_a_alu_src1_capture :
         lane_a_uop.imm;
 
     wire lane_a_fu_valid = lane_a_accept && !lane_a_uop.fence_i;
@@ -1994,7 +2133,7 @@ import ydrasil_pkg::*;
 	    shared_agu_req_d.rd_addr = lane_a_uop.dst.rd_addr;
         shared_agu_req_d.producer_id = lane_a_uop.dst.rob_tag;
         shared_agu_req_d.producer_tracked = lane_a_agu_accept;
-        shared_agu_req_d.store_data = lane_a_src1_capture;
+        shared_agu_req_d.store_data = lane_a_store_src1_capture;
         shared_agu_req_d.store_data_valid = lane_a_agu_accept &&
             (!shared_agu_req_d.is_store || lane_a_src1_value_ready);
         shared_agu_req_d.store_producer_id =
@@ -2016,18 +2155,18 @@ import ydrasil_pkg::*;
 
         dual_alu_payload_d = '0;
         dual_alu_payload_d.subop = lane_b_uop.subop;
-        dual_alu_payload_d.operand_a = lane_b_operand_a_capture;
-        dual_alu_payload_d.operand_b = lane_b_operand_b_capture;
+        dual_alu_payload_d.operand_a = lane_b_alu_operand_a_capture;
+        dual_alu_payload_d.operand_b = lane_b_alu_operand_b_capture;
 
         dual_bit_payload_d = '0;
         dual_bit_payload_d.subop = lane_b_uop.subop;
-        dual_bit_payload_d.operand_a = lane_b_operand_a_capture;
-        dual_bit_payload_d.operand_b = lane_b_operand_b_capture;
+        dual_bit_payload_d.operand_a = lane_b_bit_operand_a_capture;
+        dual_bit_payload_d.operand_b = lane_b_bit_operand_b_capture;
 
         dual_bru_payload_d = '0;
         dual_bru_payload_d.subop = lane_b_uop.subop;
-        dual_bru_payload_d.operand_a = lane_b_src0_capture;
-        dual_bru_payload_d.operand_b = lane_b_src1_capture;
+        dual_bru_payload_d.operand_a = lane_b_bru_src0_capture;
+        dual_bru_payload_d.operand_b = lane_b_bru_src1_capture;
         dual_bru_payload_d.imm = lane_b_uop.imm;
         dual_bru_payload_d.jalr = lane_b_uop.bt_a_rs_sel;
         dual_bru_payload_d.pred_hit = lane_b_uop.pred_hit;
@@ -2113,8 +2252,8 @@ import ydrasil_pkg::*;
                     // their metadata through this boundary, but must not make
                     // the generic ALU operand flops part of the LSU data cone.
                     if (lane_a_alu_accept) begin
-                        alu_in_operand_a_q <= lane_a_operand_a_capture;
-                        alu_in_operand_b_q <= lane_a_operand_b_capture;
+                        alu_in_operand_a_q <= lane_a_alu_operand_a_capture;
+                        alu_in_operand_b_q <= lane_a_alu_operand_b_capture;
                     end
                     alu_in_operator_q <= lane_a_operator_info;
                     alu_in_operator_type_q <= lane_a_operator_type;
@@ -2128,7 +2267,7 @@ import ydrasil_pkg::*;
 	                        // Loads/stores are always rs1 + immediate. Capture
 	                        // those leaves directly instead of traversing the
 	                        // shared PC/zimm/jump operand muxes.
-	                        agu_in_operand_a_q <= lane_a_src0_capture;
+                            agu_in_operand_a_q <= lane_a_agu_src0_capture;
 	                        agu_in_operand_b_q <= lane_a_uop.imm;
 	                        agu_in_dtcm_addr_normal_q <= agu_dtcm_addr_normal;
 	                        agu_in_dtcm_addr_current_q <= agu_dtcm_addr_current;
@@ -2144,7 +2283,7 @@ import ydrasil_pkg::*;
                     csr_in_valid_q <= lane_b_csr_accept;
                     if (lane_b_csr_accept) begin
                         csr_in_operand_a_q <= lane_b_uop.operand_a_imm_sel ?
-                            lane_b_uop.imm : lane_b_src0_capture;
+                            lane_b_uop.imm : lane_b_csr_src0_capture;
                         csr_in_operator_type_q <= lane_b_operator_type;
                         csr_in_raddr_q <= lane_b_uop.csr_raddr;
                         csr_in_waddr_q <= lane_b_uop.csr_waddr;
@@ -2156,8 +2295,8 @@ import ydrasil_pkg::*;
                         // MDU instructions always consume rs1 and rs2. Its
                         // independent input cell does not need the generic
                         // lane-B PC/immediate operand mux.
-                        mul_in_operand_a_q <= lane_b_src0_capture;
-                        mul_in_operand_b_q <= lane_b_src1_capture;
+                        mul_in_operand_a_q <= lane_b_mdu_src0_capture;
+                        mul_in_operand_b_q <= lane_b_mdu_src1_capture;
                         mul_in_operator_q <= lane_b_operator_info;
                         mul_in_operator_type_q <= lane_b_operator_type;
                     end
