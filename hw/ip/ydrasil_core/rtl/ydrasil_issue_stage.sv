@@ -2154,8 +2154,13 @@ import ydrasil_pkg::*;
 					// Their local completion result supplies
                     // the matching registered early token in the next cycle.
                     alu_in_valid_q <= lane_a_fu_valid;
-                    alu_in_operand_a_q <= lane_a_operand_a_capture;
-                    alu_in_operand_b_q <= lane_a_operand_b_capture;
+                    // Keep each FU's data cell local. P0 requests still carry
+                    // their metadata through this boundary, but must not make
+                    // the generic ALU operand flops part of the LSU data cone.
+                    if (lane_a_alu_accept) begin
+                        alu_in_operand_a_q <= lane_a_operand_a_capture;
+                        alu_in_operand_b_q <= lane_a_operand_b_capture;
+                    end
                     alu_in_operator_q <= lane_a_operator_info;
                     alu_in_operator_type_q <= lane_a_operator_type;
                     alu_in_rd_wen_q <= lane_a_fu_valid &&
@@ -2165,18 +2170,22 @@ import ydrasil_pkg::*;
                     lane_a_pc_q <= lane_a_uop.pc;
                     agu_in_valid_q <= lane_a_agu_accept;
 	                    if (lane_a_agu_accept) begin
-	                        agu_in_operand_a_q <= lane_a_operand_a_capture;
-	                        agu_in_operand_b_q <= lane_a_operand_b_capture;
+	                        // Loads/stores are always rs1 + immediate. Capture
+	                        // those leaves directly instead of traversing the
+	                        // shared PC/zimm/jump operand muxes.
+	                        agu_in_operand_a_q <= lane_a_src0_capture;
+	                        agu_in_operand_b_q <= lane_a_uop.imm;
 	                        agu_in_dtcm_byte_addr_q <=
-	                            lane_a_operand_a_capture[DTCM_ADDR_WIDTH+1:0] +
-	                            lane_a_operand_b_capture[DTCM_ADDR_WIDTH+1:0];
+	                            lane_a_src0_capture[DTCM_ADDR_WIDTH+1:0] +
+	                            lane_a_uop.imm[DTCM_ADDR_WIDTH+1:0];
 	                        agu_in_req_q <= shared_agu_req_d;
                     end else begin
                         agu_in_req_q.valid <= 1'b0;
                     end
                     csr_in_valid_q <= lane_b_csr_accept;
                     if (lane_b_csr_accept) begin
-                        csr_in_operand_a_q <= lane_b_operand_a_capture;
+                        csr_in_operand_a_q <= lane_b_uop.operand_a_imm_sel ?
+                            lane_b_uop.imm : lane_b_src0_capture;
                         csr_in_operator_type_q <= lane_b_operator_type;
                         csr_in_raddr_q <= lane_b_uop.csr_raddr;
                         csr_in_waddr_q <= lane_b_uop.csr_waddr;
@@ -2185,8 +2194,11 @@ import ydrasil_pkg::*;
                     end
                     mul_in_valid_q <= lane_b_mul_accept;
                     if (lane_b_mul_accept) begin
-                        mul_in_operand_a_q <= lane_b_operand_a_capture;
-                        mul_in_operand_b_q <= lane_b_operand_b_capture;
+                        // MDU instructions always consume rs1 and rs2. Its
+                        // independent input cell does not need the generic
+                        // lane-B PC/immediate operand mux.
+                        mul_in_operand_a_q <= lane_b_src0_capture;
+                        mul_in_operand_b_q <= lane_b_src1_capture;
                         mul_in_operator_q <= lane_b_operator_info;
                         mul_in_operator_type_q <= lane_b_operator_type;
                     end
