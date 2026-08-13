@@ -317,6 +317,7 @@ import ydrasil_axi_pkg::*;
 	wire [4:0]                      fpu_result_fflags;
 	wire [INST_ADDR_WIDTH-1:0]      fpu_result_pc;
 	wire [INST_DATA_WIDTH-1:0]      fpu_result_instr;
+	wire [2:0]                      fpu_frm;
 	wire                            fpr_write_valid;
 	wire [REGS_ADDR_WIDTH-1:0]      fpr_write_addr;
 	wire [FPU_DATA_WIDTH-1:0]       fpr_write_data;
@@ -885,7 +886,7 @@ import ydrasil_axi_pkg::*;
 		.dual_bru_operand_b_i(dual_bru_operand_b),
 		.dual_fpu_valid_i  (dual_fpu_valid),
 		.dual_fpu_payload_i(dual_fpu_payload),
-		.fpu_frm_i        (3'b0),
+		.fpu_frm_i        (fpu_frm),
 		.ex_hzd_o           (ex_hzd_pkt),
 		.ex_hzd1_o          (ex_hzd_pkt1),
 		.lsu_req_o          (lsu_req_pkt),
@@ -1063,10 +1064,13 @@ import ydrasil_axi_pkg::*;
 		.id_csr_raddr_i    (csr_in_raddr),
 		.ex_csr_waddr_i    (ex_csr_waddr),
 		.ex_csr_data_i     (ex_csr_wdata),
+		.fpu_flags_valid_i(fpu_result_valid),
+		.fpu_fflags_i     (fpu_result_fflags),
 		.trap_csr_write_i (trap_csr_write_pkt),
 		.irq_i            (irq_i),
 		.trap_state_o     (trap_csr_state_pkt),
-		.csr_ex_data_o    (csr_ex_rdata)
+		.csr_ex_data_o    (csr_ex_rdata),
+		.fpu_frm_o        (fpu_frm)
 	);
 
 	ydrasil_exception_stage u_ydrasil_exception_stage (
