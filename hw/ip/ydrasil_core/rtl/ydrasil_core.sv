@@ -183,6 +183,8 @@ import ydrasil_axi_pkg::*;
 	// Branch predictor
 	wire                        bp_predict_taken;
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] bp_predict_target;
+	wire [ydrasil_pkg::ITCM_ADDR_WIDTH:0] bp_predict_target_token;
+	wire [ydrasil_pkg::ITCM_ADDR_WIDTH:0] bp_predict1_target_token;
 	wire [1:0]                  bp_predict_counter;
 	wire                        bp_predict1_taken;
 	wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] bp_predict1_target;
@@ -529,7 +531,8 @@ import ydrasil_axi_pkg::*;
 			.predict_pc_i     (bp_lookup_pc),
 			.predict_hit_o    (bp_bram_predict_hit),
 			.predict_taken_o  (bp_bram_predict_taken),
-			.predict_target_o (bp_bram_predict_target),
+				.predict_target_o (bp_bram_predict_target),
+				.predict_target_token_o(bp_predict_target_token),
 			.predict_counter_o(bp_bram_predict_counter),
 			.predict_global_counter_o(bp_bram_predict_global_counter),
 			.predict_local_counter_o(bp_bram_predict_local_counter),
@@ -539,7 +542,8 @@ import ydrasil_axi_pkg::*;
 			.predict_pc1_i    (if_mem_addr1),
 			.predict1_hit_o   (bp_bram_predict_hit1),
 			.predict1_taken_o (bp_bram_predict1_taken),
-			.predict1_target_o(bp_bram_predict1_target),
+				.predict1_target_o(bp_bram_predict1_target),
+				.predict1_target_token_o(bp_predict1_target_token),
 			.predict1_counter_o(bp_bram_predict1_counter),
 			.predict1_global_counter_o(bp_bram_predict1_global_counter),
 			.predict1_local_counter_o(bp_bram_predict1_local_counter),
@@ -563,14 +567,16 @@ import ydrasil_axi_pkg::*;
 			.branch_target_i (branch_target),
 				.bp_predict_taken_i(bp_bram_predict_taken),
 				.bp_predict_hit_i(bp_bram_predict_hit),
-				.bp_predict_target_i(bp_bram_predict_target),
+					.bp_predict_target_i(bp_bram_predict_target),
+					.bp_predict_target_token_i(bp_predict_target_token),
 				.bp_predict_counter_i(bp_bram_predict_counter),
 				.bp_predict_global_counter_i(bp_bram_predict_global_counter),
 				.bp_predict_local_counter_i(bp_bram_predict_local_counter),
 				.bp_predict_bht_index_i(bp_bram_predict_bht_index),
 				.bp_predict1_taken_i(bp_bram_predict1_taken),
 				.bp_predict1_hit_i(bp_bram_predict_hit1),
-				.bp_predict1_target_i(bp_bram_predict1_target),
+					.bp_predict1_target_i(bp_bram_predict1_target),
+					.bp_predict1_target_token_i(bp_predict1_target_token),
 				.bp_predict1_counter_i(bp_bram_predict1_counter),
 				.bp_predict1_global_counter_i(bp_bram_predict1_global_counter),
 				.bp_predict1_local_counter_i(bp_bram_predict1_local_counter),

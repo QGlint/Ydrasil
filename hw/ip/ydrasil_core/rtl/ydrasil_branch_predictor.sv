@@ -13,6 +13,7 @@ import ydrasil_pkg::*;
     output wire                            predict_hit_o,
     output wire                            predict_taken_o,
     output wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] predict_target_o,
+    output wire [ydrasil_pkg::ITCM_ADDR_WIDTH:0] predict_target_token_o,
     output wire [1:0]                      predict_counter_o,
     output wire [1:0]                      predict_global_counter_o,
     output wire [1:0]                      predict_local_counter_o,
@@ -24,6 +25,7 @@ import ydrasil_pkg::*;
     output wire                            predict1_hit_o,
     output wire                            predict1_taken_o,
     output wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] predict1_target_o,
+    output wire [ydrasil_pkg::ITCM_ADDR_WIDTH:0] predict1_target_token_o,
     output wire [1:0]                      predict1_counter_o,
     output wire [1:0]                      predict1_global_counter_o,
     output wire [1:0]                      predict1_local_counter_o,
@@ -482,6 +484,7 @@ import ydrasil_pkg::*;
         2'b01;
     assign predict_taken_o = lane0_pred_taken;
     assign predict_target_o = lane0_btb_target;
+    assign predict_target_token_o = lane0_btb_target_token;
     // The physical bank is recovered from branch PC at training. Carried bit
     // zero is reserved for IF's lane-1 checkpoint marker.
     assign predict_bht_index_o = ydrasil_pkg::BP_BHT_INDEX_WIDTH'(
@@ -495,6 +498,7 @@ import ydrasil_pkg::*;
         2'b01;
     assign predict1_taken_o = lane1_pred_taken;
     assign predict1_target_o = lane1_btb_target;
+    assign predict1_target_token_o = lane1_btb_target_token;
     assign predict1_bht_index_o = ydrasil_pkg::BP_BHT_INDEX_WIDTH'(
         {predict1_bht_row_q, 1'b0});
 

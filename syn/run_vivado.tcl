@@ -111,14 +111,15 @@ proc prepare_implementation_runs {count mode sweep_post_route_physopt way} {
     }
 
     set strategies [list \
-        Performance_Explore \
         Performance_ExplorePostRoutePhysOpt \
-        Performance_NetDelay_high \
-        Performance_ExploreWithRemap]
+        Performance_ExtraTimingOpt \
+        Performance_Retiming \
+        Performance_ExploreWithRemap \
+        Performance_Explore \
+        Performance_NetDelay_high ]
     # Keep way 3 available for an explicit single run, but exclude it from
     # the routine full sweep.
     set candidate_strategies [list \
-        Performance_ExtraTimingOpt \
         Performance_Retiming \
         Performance_RefinePlacement]
 

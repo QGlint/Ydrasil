@@ -378,9 +378,9 @@ ifeq ($(filter $(SYN_WAY),$(SYN_VALID_WAYS)),)
 $(error Unsupported SYN_WAY=$(SYN_WAY); supported values: $(SYN_VALID_WAYS))
 endif
 ifeq ($(HOSTNAME),servera437)
-SYN_JOBS ?= $(if $(filter full,$(SYN_WAY)),39,16)
-SYN_IMPL_RUNS ?= $(if $(filter full,$(SYN_WAY)),3,1)
-SYN_THREADS_PER_RUN ?= $(if $(filter full,$(SYN_WAY)),13,16)
+SYN_JOBS ?= $(if $(filter full,$(SYN_WAY)),40,16)
+SYN_IMPL_RUNS ?= $(if $(filter full,$(SYN_WAY)),4,1)
+SYN_THREADS_PER_RUN ?= $(if $(filter full,$(SYN_WAY)),10,16)
 else ifeq ($(HOSTNAME),QGlint-Ar)
 SYN_JOBS ?= 16
 SYN_IMPL_RUNS ?= 1

@@ -190,7 +190,12 @@ import ydrasil_pkg::*;
         end else if ((old_remaining == COUNT_WIDTH'(1)) &&
                      (push_count_i != 2'd0)) begin
             payload1_d = push_payload0_i;
-        end else if ((old_remaining == '0) && (push_count_i == 2'd2)) begin
+        end else if ((old_remaining == '0) &&
+                     (physical_push_count_i == 2'd2)) begin
+            // Lane 1 is architecturally hidden when lane 0 predicts taken,
+            // but writing its physical response here keeps that prediction
+            // out of the wide payload hold/write mux. The logical count still
+            // suppresses the entry and preserves the visible queue contents.
             payload1_d = push_payload1_i;
         end
     end
@@ -334,6 +339,7 @@ import ydrasil_pkg::*;
     input  wire        bp_predict_taken_i,
     input  wire        bp_predict_hit_i,
     input  wire [31:0] bp_predict_target_i,
+    input  wire [ITCM_ADDR_WIDTH:0] bp_predict_target_token_i,
     input  wire [1:0]  bp_predict_counter_i,
     input  wire [1:0]  bp_predict_global_counter_i,
     input  wire [1:0]  bp_predict_local_counter_i,
@@ -341,6 +347,7 @@ import ydrasil_pkg::*;
     input  wire        bp_predict1_taken_i,
     input  wire        bp_predict1_hit_i,
     input  wire [31:0] bp_predict1_target_i,
+    input  wire [ITCM_ADDR_WIDTH:0] bp_predict1_target_token_i,
     input  wire [1:0]  bp_predict1_counter_i,
     input  wire [1:0]  bp_predict1_global_counter_i,
     input  wire [1:0]  bp_predict1_local_counter_i,
@@ -513,10 +520,21 @@ import ydrasil_pkg::*;
     // selected using the established lane0-over-lane1 priority.
     wire [31:0] predict_next_pc = bp_predict_taken_i ? bp_predict_target_i :
         (lane1_pred_taken ? bp_predict1_target_i : sequential_next_pc);
+    wire fetch_addr_token_t mem_req_next_pc_token = {
+        mem_req_next_pc_q[31:ITCM_ADDR_WIDTH+2] ==
+            DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2],
+        mem_req_next_pc_q[ITCM_ADDR_WIDTH+1:2]};
+    wire mem_req_next_pc_in_fetch_domain =
+        (mem_req_next_pc_q[31:ITCM_ADDR_WIDTH+2] ==
+         ITCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2]) ||
+        (mem_req_next_pc_q[31:ITCM_ADDR_WIDTH+2] ==
+         DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2]);
     (* keep = "true" *) wire lane0_target_mismatch =
-        bp_predict_target_i != mem_req_next_pc_q;
+        !mem_req_next_pc_in_fetch_domain ||
+        (bp_predict_target_token_i != mem_req_next_pc_token);
     (* keep = "true" *) wire lane1_target_mismatch =
-        bp_predict1_target_i != mem_req_next_pc_q;
+        !mem_req_next_pc_in_fetch_domain ||
+        (bp_predict1_target_token_i != mem_req_next_pc_token);
     (* keep = "true" *) wire seq_target_mismatch =
         sequential_next_pc != mem_req_next_pc_q;
     (* keep = "true" *) wire bram_next_pc_mismatch = bp_predict_taken_i ?
@@ -602,10 +620,7 @@ import ydrasil_pkg::*;
         fetchq_push_payload0.instr = if_mem_rdata_i;
         fetchq_push_payload0.pred_hit = bp_predict_hit_i;
         fetchq_push_payload0.pred_taken = bp_predict_taken_i;
-        fetchq_push_payload0.pred_target = {
-            bp_predict_target_i[31:ITCM_ADDR_WIDTH+2] ==
-                DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2],
-            bp_predict_target_i[ITCM_ADDR_WIDTH+1:2]};
+        fetchq_push_payload0.pred_target = bp_predict_target_token_i;
         fetchq_push_payload0.pred_counter = bp_predict_counter_i;
         fetchq_push_payload0.pred_global_counter =
             bp_predict_global_counter_i;
@@ -625,10 +640,7 @@ import ydrasil_pkg::*;
         fetchq_push_payload1.instr = if_mem_rdata1_i;
         fetchq_push_payload1.pred_hit = bp_predict1_hit_i;
         fetchq_push_payload1.pred_taken = bp_predict1_taken_i;
-        fetchq_push_payload1.pred_target = {
-            bp_predict1_target_i[31:ITCM_ADDR_WIDTH+2] ==
-                DTCM_BASE_ADDR[31:ITCM_ADDR_WIDTH+2],
-            bp_predict1_target_i[ITCM_ADDR_WIDTH+1:2]};
+        fetchq_push_payload1.pred_target = bp_predict1_target_token_i;
         fetchq_push_payload1.pred_counter = bp_predict1_counter_i;
         fetchq_push_payload1.pred_global_counter =
             bp_predict1_global_counter_i;
