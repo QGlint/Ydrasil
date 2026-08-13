@@ -58,11 +58,12 @@ import ydrasil_pkg::*;
     localparam S_INT_MRET = 4'b1000;  // 中断返回状态
 
     // CSR write state machine
-    localparam S_CSR_IDLE = 5'b00001;  // CSR写入空闲状态
-    localparam S_CSR_MSTATUS = 5'b00010;  // 写入mstatus寄存器状态
-    localparam S_CSR_MEPC = 5'b00100;  // 写入mepc寄存器状态
-    localparam S_CSR_MSTATUS_MRET = 5'b01000;  // 中断返回时写入mstatus寄存器状态
-    localparam S_CSR_MCAUSE = 5'b10000;  // 写入mcause寄存器状态
+    localparam S_CSR_IDLE = 6'b000001;  // CSR写入空闲状态
+    localparam S_CSR_MSTATUS = 6'b000010;  // 写入mstatus寄存器状态
+    localparam S_CSR_MEPC = 6'b000100;  // 写入mepc寄存器状态
+    localparam S_CSR_MSTATUS_MRET = 6'b001000;  // 中断返回时写入mstatus寄存器状态
+    localparam S_CSR_MCAUSE = 6'b010000;  // 写入mcause寄存器状态
+    localparam S_CSR_FLUSH_WAIT = 6'b100000;  // 等待流水线刷新的状态
 
     reg [ydrasil_pkg::INST_ADDR_WIDTH-1:0] int_addr;
     reg                         int_assert;
@@ -70,12 +71,12 @@ import ydrasil_pkg::*;
 
     // 状态机和相关信号声明
     wire [                 3:0] int_state;  // 中断状态机当前状态
-    reg  [                 4:0] csr_state;  // CSR写状态机当前状态
+    reg  [                 5:0] csr_state;  // CSR写状态机当前状态
     reg  [ydrasil_pkg::INST_ADDR_WIDTH-1:0] instr_addr;  // 保存的指令地址
     reg  [                31:0] cause;  // 中断原因代码
 
     // 下一个状态信号声明
-    wire [                 4:0] next_csr_state;  // CSR写状态机下一状态
+    wire [                 5:0] next_csr_state;  // CSR写状态机下一状态
     wire [ydrasil_pkg::INST_ADDR_WIDTH-1:0] next_instr_addr;  // 下一个保存的指令地址
     wire [                31:0] next_cause;  // 下一个中断原因代码
 
@@ -92,18 +93,21 @@ import ydrasil_pkg::*;
 
     // CSR写状态机的并行选择逻辑
     assign next_csr_state = 
-        ({5{!rst_n}} & S_CSR_IDLE) |
-        ({5{csr_state == S_CSR_IDLE && int_state == S_INT_SYNC_ASSERT}} & S_CSR_MEPC) |
-        ({5{csr_state == S_CSR_IDLE && int_state == S_INT_MRET}} & S_CSR_MSTATUS_MRET) |
-        ({5{csr_state == S_CSR_MEPC}} & S_CSR_MSTATUS) |
-        ({5{csr_state == S_CSR_MSTATUS}} & S_CSR_MCAUSE) |
-        ({5{csr_state == S_CSR_MCAUSE || csr_state == S_CSR_MSTATUS_MRET}} & S_CSR_IDLE) |
-        ({5{!(!rst_n || 
+        ({6{!rst_n}} & S_CSR_IDLE) |
+        ({6{csr_state == S_CSR_IDLE && int_state == S_INT_SYNC_ASSERT}} & S_CSR_MEPC) |
+        ({6{csr_state == S_CSR_IDLE && int_state == S_INT_MRET}} & S_CSR_MSTATUS_MRET) |
+        ({6{csr_state == S_CSR_MEPC}} & S_CSR_MSTATUS) |
+        ({6{csr_state == S_CSR_MSTATUS}} & S_CSR_MCAUSE) |
+        ({6{csr_state == S_CSR_MCAUSE || csr_state == S_CSR_MSTATUS_MRET}} & S_CSR_FLUSH_WAIT) |
+        ({6{csr_state == S_CSR_FLUSH_WAIT}} & S_CSR_IDLE) |
+        ({6{!(!rst_n || 
              (csr_state == S_CSR_IDLE && int_state == S_INT_SYNC_ASSERT) || 
              (csr_state == S_CSR_IDLE && int_state == S_INT_MRET) || 
              csr_state == S_CSR_MEPC || 
              csr_state == S_CSR_MSTATUS || 
-             (csr_state == S_CSR_MCAUSE || csr_state == S_CSR_MSTATUS_MRET))}} & S_CSR_IDLE);
+             csr_state == S_CSR_MCAUSE || 
+             csr_state == S_CSR_MSTATUS_MRET || 
+             csr_state == S_CSR_FLUSH_WAIT)}} & S_CSR_IDLE);
 
     // 下一个中断原因cause值的并行选择逻辑
     assign next_cause = 
@@ -116,8 +120,8 @@ import ydrasil_pkg::*;
     // 下一个保存的指令地址instr_addr值的并行选择逻辑
     assign next_instr_addr = 
         ({ydrasil_pkg::INST_ADDR_WIDTH{!rst_n}} & '0) |
+        ({ydrasil_pkg::INST_ADDR_WIDTH{csr_state == S_CSR_IDLE && int_state == S_INT_SYNC_ASSERT && !ex_branch_jump_i}} & instr_addr_i) |
         ({ydrasil_pkg::INST_ADDR_WIDTH{csr_state == S_CSR_IDLE && int_state == S_INT_SYNC_ASSERT && ex_branch_jump_i}} & (ex_branch_target_i - 32'h4)) |
-        ({ydrasil_pkg::INST_ADDR_WIDTH{csr_state == S_CSR_IDLE && int_state == S_INT_SYNC_ASSERT && ex_branch_jump_i}} & instr_addr_i) |
         ({ydrasil_pkg::INST_ADDR_WIDTH{!(!rst_n || (csr_state == S_CSR_IDLE && int_state == S_INT_SYNC_ASSERT))}} & instr_addr);
 
     // 写入CSR寄存器的组合逻辑 - 计算下一个写使能信号
@@ -142,8 +146,10 @@ import ydrasil_pkg::*;
     assign next_data_o = (!rst_n) ? '0 :
                         (csr_state == S_CSR_MEPC) ? instr_addr :                     // 保存当前指令地址到mepc
         (csr_state == S_CSR_MCAUSE) ? cause :  // 写入中断原因到mcause
-        (csr_state == S_CSR_MSTATUS) ? {csr_clint_mstatus[31:4], 1'b0, csr_clint_mstatus[2:0]} :      // 中断发生时修改mstatus，关闭全局中断
-        (csr_state == S_CSR_MSTATUS_MRET) ? {csr_clint_mstatus[31:4], csr_clint_mstatus[7], csr_clint_mstatus[2:0]} : // 中断返回时恢复mstatus
+        // Trap entry: MPIE = MIE, MIE = 0
+        (csr_state == S_CSR_MSTATUS) ? {csr_clint_mstatus[31:8], csr_clint_mstatus[3], csr_clint_mstatus[6:4], 1'b0, csr_clint_mstatus[2:0]} :
+        // MRET: MIE = MPIE, MPIE = 1
+        (csr_state == S_CSR_MSTATUS_MRET) ? {csr_clint_mstatus[31:8], 1'b1, csr_clint_mstatus[6:4], csr_clint_mstatus[7], csr_clint_mstatus[2:0]} :
         '0;
 
     // 发送中断信号到ex模块的组合逻辑

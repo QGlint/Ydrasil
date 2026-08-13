@@ -202,7 +202,7 @@ VERILATOR_COVERAGE ?= $(COVERAGE)
 
 BOUNDARY_APP_DIR := $(PROJECT_ROOT)/sw/apps/boundary
 BOUNDARY_APP_NAMES := $(sort $(basename $(notdir $(wildcard $(BOUNDARY_APP_DIR)/*.c))))
-BOUNDARY_APP_EXCLUDE ?= csr_trap_edges ebreak_trap_edges exception_stress trap_lsu_token_edges trap_pipeline_edges
+BOUNDARY_APP_EXCLUDE ?= csr_trap_edges ebreak_trap_edges exception_stress trap_lsu_token_edges
 BOUNDARY_APP_INCLUDE := $(filter-out $(BOUNDARY_APP_EXCLUDE),$(BOUNDARY_APP_NAMES))
 BOUNDARY_SIM_TARGETS := $(addprefix boundary_sim_,$(BOUNDARY_APP_INCLUDE))
 BOUNDARY_RESULT_DIR ?= $(BUILD_DIR)/boundary_results
