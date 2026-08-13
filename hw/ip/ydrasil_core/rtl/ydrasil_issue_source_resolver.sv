@@ -68,19 +68,23 @@ import ydrasil_pkg::*;
     wire commit1_hit = commit1_arch_hit &&
         (!source_i.tag_valid ||
          (source_i.producer_tag == commit_pkt1_i.producer_id));
-    wire [COMPLETION_LANES-1:0] completion_hit;
-    genvar completion_idx;
-    generate
-        for (completion_idx = 0; completion_idx < COMPLETION_LANES;
-             completion_idx = completion_idx + 1) begin : g_completion_hit
-            assign completion_hit[completion_idx] = source_i.used &&
-                source_nonzero && source_i.tag_valid &&
-                completion_meta_i[completion_idx].valid &&
-                completion_meta_i[completion_idx].producer_tracked &&
-                (source_i.producer_tag ==
-                 completion_meta_i[completion_idx].producer_id);
-        end
-    endgenerate
+    // ALU producers wake consumers before their registered completion reaches
+    // the Value File, so both execution lanes retain a same-cycle data path.
+    // Loads use the fixed-latency current/history DTCM paths below and are in
+    // the Value File afterwards; routing LSU completion through this generic
+    // resolver only rebuilds the BRAM-to-all-FU broadcast cone.
+    wire completion_alu_hit = source_i.used && source_nonzero &&
+        source_i.tag_valid &&
+        completion_meta_i[COMPLETION_ALU].valid &&
+        completion_meta_i[COMPLETION_ALU].producer_tracked &&
+        (source_i.producer_tag ==
+         completion_meta_i[COMPLETION_ALU].producer_id);
+    wire completion_dual_alu_hit = source_i.used && source_nonzero &&
+        source_i.tag_valid &&
+        completion_meta_i[COMPLETION_DUAL_ALU].valid &&
+        completion_meta_i[COMPLETION_DUAL_ALU].producer_tracked &&
+        (source_i.producer_tag ==
+         completion_meta_i[COMPLETION_DUAL_ALU].producer_id);
     assign dtcm_hit_o = &{source_i.used, source_nonzero, source_i.tag_valid,
         dtcm_reservation_i.valid, dtcm_reservation_i.producer_tracked,
         source_dtcm_key_match};
@@ -94,12 +98,10 @@ import ydrasil_pkg::*;
     assign ready_o = !source_i.used || (source_i.arch_addr == '0) ||
         !source_i.tag_valid || source_i.ready;
     assign data_o = mdu_hit_o ? mdu_bypass_data_i :
-        completion_hit[COMPLETION_DUAL_ALU] ?
+        completion_dual_alu_hit ?
             completion_data_i[COMPLETION_DUAL_ALU] :
-        completion_hit[COMPLETION_ALU] ?
+        completion_alu_hit ?
             completion_data_i[COMPLETION_ALU] :
-        completion_hit[COMPLETION_LSU] ?
-            completion_data_i[COMPLETION_LSU] :
         source_value_hit ? value_i :
         commit1_hit ? commit_pkt1_i.value :
         commit0_hit ? commit_pkt_i.value : arf_i;
@@ -107,9 +109,7 @@ import ydrasil_pkg::*;
     // ARF is not a legal fallback for a still-tagged source in this cycle.
     assign data_valid_o = !source_i.used || !source_nonzero ||
         !source_i.tag_valid || mdu_hit_o || dtcm_history_hit_o ||
-        completion_hit[COMPLETION_DUAL_ALU] ||
-        completion_hit[COMPLETION_ALU] ||
-        completion_hit[COMPLETION_LSU] ||
+        completion_dual_alu_hit || completion_alu_hit ||
         source_value_hit || source_slot_reallocated ||
         commit0_hit || commit1_hit;
 
