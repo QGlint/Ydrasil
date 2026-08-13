@@ -429,7 +429,7 @@ import ydrasil_pkg::*;
     assign dual_completion_producer_tracked_o = fpu_result_valid_o ?
         fpu_result_producer_tracked_o : dual_alu_completion_producer_tracked;
     assign dual_completion_addr_o = fpu_result_valid_o ?
-        (fpu_result_gpr_o ? fpu_result_addr_o : '0) :
+        fpu_result_addr_o :
         dual_alu_completion_addr;
     assign dual_completion_data_o = fpu_result_valid_o ?
         fpu_result_o[REGS_DATA_WIDTH-1:0] : dual_alu_completion_data;

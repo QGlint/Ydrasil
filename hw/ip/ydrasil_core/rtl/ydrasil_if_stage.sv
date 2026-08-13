@@ -337,7 +337,6 @@ import ydrasil_pkg::*;
     end
 
     assign serial_o = (opcode == RV32I_INS_CSR) || explicit_illegal ||
-        (fp_enabled && fp_opcode) ||
         ((opcode == RV32I_INS_FENCE) && (funct3 == 3'b001));
     assign branch_o = branch;
     // Rename only needs architectural source/destination presence.  All
