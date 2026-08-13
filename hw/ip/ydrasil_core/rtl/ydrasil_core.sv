@@ -304,6 +304,7 @@ import ydrasil_axi_pkg::*;
 	wire                            dual_completion_producer_tracked;
 	wire [REGS_ADDR_WIDTH-1:0]      dual_completion_addr;
 	wire [REGS_DATA_WIDTH-1:0]      dual_completion_data;
+	wire                            dual_completion_bus_valid;
 	wire                            fpu_busy;
 	wire                            fpu_req_ready;
 	wire                            fpu_result_valid;
@@ -316,6 +317,17 @@ import ydrasil_axi_pkg::*;
 	wire [4:0]                      fpu_result_fflags;
 	wire [INST_ADDR_WIDTH-1:0]      fpu_result_pc;
 	wire [INST_DATA_WIDTH-1:0]      fpu_result_instr;
+	wire                            fpr_write_valid;
+	wire [REGS_ADDR_WIDTH-1:0]      fpr_write_addr;
+	wire [FPU_DATA_WIDTH-1:0]       fpr_write_data;
+	assign fpr_write_valid = (fpu_result_valid && fpu_result_fpr) ||
+		lsu_fp_completion_valid;
+	assign fpr_write_addr = lsu_fp_completion_valid ?
+		lsu_fp_completion_addr : fpu_result_addr;
+	assign fpr_write_data = lsu_fp_completion_valid ?
+		lsu_fp_completion_data : fpu_result;
+	assign dual_completion_bus_valid = dual_completion_valid &&
+		(!fpu_result_valid || fpu_result_gpr);
 	producer_id_t                   retire_value_id0;
 	producer_id_t                   retire_value_id1;
 	wire                            retire_valid;
@@ -430,12 +442,13 @@ import ydrasil_axi_pkg::*;
 	// captures the data; retirement observes producer_done_q one cycle later and
 	// can then use the registered completion lane for its value bypass.
 	assign completion_ready_meta[COMPLETION_LSU].valid =
-		lsu_completion_valid;
+		lsu_completion_valid || lsu_fp_completion_valid;
 	assign completion_ready_meta[COMPLETION_LSU].producer_id =
 		lsu_completion_producer_id;
 	assign completion_ready_meta[COMPLETION_LSU].producer_tracked =
 		lsu_completion_producer_tracked;
-	assign completion_ready_rd[COMPLETION_LSU] = lsu_completion_addr;
+	assign completion_ready_rd[COMPLETION_LSU] = lsu_fp_completion_valid ?
+		lsu_fp_completion_addr : lsu_completion_addr;
 	assign completion_ready_meta[COMPLETION_MUL].valid =
 		mdu_result_reservation.valid;
 	assign completion_ready_meta[COMPLETION_MUL].producer_id =
@@ -446,12 +459,12 @@ import ydrasil_axi_pkg::*;
 	assign completion_ready_rd[COMPLETION_MUL] =
 		mdu_result_reservation.arch_addr;
 	assign completion_ready_meta[COMPLETION_DUAL_ALU].valid =
-		lane_b_due_valid;
+		dual_completion_valid;
 	assign completion_ready_meta[COMPLETION_DUAL_ALU].producer_id =
-		dual_meta.producer_id;
+		dual_completion_producer_id;
 	assign completion_ready_meta[COMPLETION_DUAL_ALU].producer_tracked =
-		lane_b_due_valid;
-	assign completion_ready_rd[COMPLETION_DUAL_ALU] = dual_meta.rd_addr;
+		dual_completion_producer_tracked;
+	assign completion_ready_rd[COMPLETION_DUAL_ALU] = dual_completion_addr;
 
 	ydrasil_completion_ctrl u_completion_ctrl (
 		.clk               (clk),
@@ -470,7 +483,7 @@ import ydrasil_axi_pkg::*;
 		.mul_producer_id_i (mul_producer_id),
 		.mul_addr_i        (mul_rf_waddr_rd),
 		.mul_data_i        (mul_wb_result),
-		.dual_valid_i      (dual_completion_valid),
+		.dual_valid_i      (dual_completion_bus_valid),
 		.dual_producer_id_i(dual_completion_producer_id),
 		.dual_producer_tracked_i(dual_completion_producer_tracked),
 		.dual_addr_i       (dual_completion_addr),
@@ -751,9 +764,9 @@ import ydrasil_axi_pkg::*;
 		.dtcm_resp_data_i   (dtcm_resp_data),
 		.issue_at_rob_head_i (issue_at_rob_head),
 		.rob_head_id_i       (rob_head_id),
-		.fpr_write_valid_i   (1'b0),
-		.fpr_write_addr_i    ('0),
-		.fpr_write_data_i    ('0),
+		.fpr_write_valid_i   (fpr_write_valid),
+		.fpr_write_addr_i    (fpr_write_addr),
+		.fpr_write_data_i    (fpr_write_data),
 		.decode_ready_o      (issue_pipe_has_room),
 			.decode_consume_two_o(decode_consume_two),
 		.dispatch_accept_o   (issue_pipe_push),
