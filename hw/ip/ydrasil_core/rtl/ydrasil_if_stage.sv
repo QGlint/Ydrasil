@@ -568,11 +568,15 @@ import ydrasil_pkg::*;
     // to the fetch queue on the following cycle.
     wire fetch_issue = !flush_fetch && !bp_invalidate_i && pair_capacity;
 
-    // Reuse the lane-local predecode result. Keeping a second forced opcode
-    // comparator caused Vivado to retain and route two ITCM response cones to
-    // the predictor without reducing the speculative-history logic depth.
-    wire response_conditional0 = push_branch0;
-    wire response_conditional1 = push_branch1;
+    // All supported instructions use the standard 32-bit encoding with low
+    // opcode bits 2'b11. Detect the five-bit branch major opcode and fold the
+    // response/lane qualification into the same LUT. The full decoder remains
+    // authoritative for illegal encodings; this signal only advances GShare.
+    wire response_conditional0 = mem_resp_valid &&
+        (if_mem_rdata_i[6:2] == RV32I_INS_TYPE_B[6:2]);
+    wire response_conditional1 = mem_resp_valid &&
+        mem_req_lane_valid_q[1] &&
+        (if_mem_rdata1_i[6:2] == RV32I_INS_TYPE_B[6:2]);
     assign bp_speculate0_valid_o = mem_resp_valid && mem_req_lane_valid_q[0];
     assign bp_speculate0_conditional_o = response_conditional0;
     assign bp_speculate1_valid_o = mem_resp_valid && mem_req_lane_valid_q[1];

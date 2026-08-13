@@ -416,6 +416,12 @@ import ydrasil_pkg::*;
     wire queue_has_room_after_dequeue = !queue_full || queue_dequeue;
 	    wire queue_enqueue = req_i.valid && queue_has_room_after_dequeue &&
 	        !fast_dtcm_load_fire;
+	    // A fast empty-queue load is consumed directly and does not advance the
+	    // logical FIFO. Still write its payload into the physically free tail
+	    // cell. The entry remains hidden by queue_count_q and is overwritten by
+	    // the next logical enqueue, while the wide queue register enables no
+	    // longer depend on address-space qualification or fast-load selection.
+	    wire queue_physical_write = req_i.valid && queue_has_room_after_dequeue;
     wire store_buf_enqueue = dtcm_store_fire;
 `ifndef SYNTHESIS
     reg [31:0] perf_stb_lookup_q;
@@ -901,21 +907,42 @@ import ydrasil_pkg::*;
 	                    PRODUCER_SLOT_WIDTH-1:0], recovery_head_slot_q,
 	                    recovery_branch_slot_q);
             mmio_wb_valid_q <= 1'b0;
-        end else begin
-		            queue_q[0] <= patched_queue0;
-	            queue_q[1] <= patched_queue1;
+	        end else begin
+	            // Only retirement and unresolved store data mutate in place.
+	            // Keeping immutable request payloads out of the normal hold/patch
+	            // assignment removes the full-packet self-write priority mux.
+	            if (patched_queue0.retired)
+	                queue_q[0].retired <= 1'b1;
+	            if (patched_queue1.retired)
+	                queue_q[1].retired <= 1'b1;
+	            if (patched_queue0.store_data_valid &&
+	                !queue_q[0].store_data_valid) begin
+	                queue_q[0].store_data <= patched_queue0.store_data;
+	                queue_q[0].store_data_valid <= 1'b1;
+	                queue_q[0].store_producer_tracked <= 1'b0;
+	            end
+	            if (patched_queue1.store_data_valid &&
+	                !queue_q[1].store_data_valid) begin
+	                queue_q[1].store_data <= patched_queue1.store_data;
+	                queue_q[1].store_data_valid <= 1'b1;
+	                queue_q[1].store_producer_tracked <= 1'b0;
+	            end
 	            if (queue_age_repair) begin
 	                queue_q[queue_head_q] <= patched_second_pkt;
 	                queue_q[queue_second_index] <= patched_active_pkt;
 	            end
 	            if (queue_dequeue) begin
-                queue_q[queue_head_q] <= '0;
-                queue_head_q <= queue_head_q + 1'b1;
-            end
-            if (queue_enqueue) begin
-                queue_q[queue_tail_q] <= enqueue_pkt;
-                queue_tail_q <= queue_tail_q + 1'b1;
-            end
+	                // queue_count_q suppresses every stale payload field. Clear
+	                // only validity instead of routing a zero packet to all bits.
+	                queue_q[queue_head_q].valid <= 1'b0;
+	                queue_head_q <= queue_head_q + 1'b1;
+	            end
+	            if (queue_physical_write) begin
+	                queue_q[queue_tail_q] <= enqueue_pkt;
+	            end
+	            if (queue_enqueue) begin
+	                queue_tail_q <= queue_tail_q + 1'b1;
+	            end
             unique case ({queue_enqueue, queue_dequeue})
                 2'b10: begin
                     queue_count_q <= queue_count_q + 1'b1;

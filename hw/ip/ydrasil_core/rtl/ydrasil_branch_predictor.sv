@@ -108,39 +108,42 @@ import ydrasil_pkg::*;
     wire predict_bht_bank = predict_pc_i[2];
     wire [BHT_ROW_WIDTH-1:0] predict_pc_row =
         BHT_ROW_WIDTH'(predict_pc_i >> 3);
-    // The two BHT BRAMs are independent physical consumers. Preserve one
-    // equivalent bit-local history selector beside each address port so the
-    // FPGA mapper does not rebuild a shared, routed row mux between banks.
-    // Both rows intentionally implement the same history/PC hash.
+    // Fold the PC XOR into each bit-local speculative-history selector. The
+    // previous kept intermediate forced a history LUT followed by a separate
+    // XOR LUT on every synchronous BHT address bit. Both physical bank rows
+    // remain independently described, but each row bit now fits one LUT6.
     wire [BHT_ROW_WIDTH-1:0] predict_bht_row0;
     wire [BHT_ROW_WIDTH-1:0] predict_bht_row1;
     for (genvar ghr_bit = 0; ghr_bit < BHT_ROW_WIDTH; ghr_bit++) begin : g_bht_row
-        (* keep = "true" *) wire selected_history0;
-        (* keep = "true" *) wire selected_history1;
-        if (ghr_bit == 0) begin : g_bit0
-            assign selected_history0 = spec1_advance ? lane1_pred_taken :
-                (spec0_advance ? lane0_pred_taken : ghr_q[0]);
-            assign selected_history1 = spec1_advance ? lane1_pred_taken :
-                (spec0_advance ? lane0_pred_taken : ghr_q[0]);
+        if (!USE_GSHARE) begin : g_pc_indexed
+            assign predict_bht_row0[ghr_bit] = predict_pc_row[ghr_bit];
+            assign predict_bht_row1[ghr_bit] = predict_pc_row[ghr_bit];
+        end else if (ghr_bit == 0) begin : g_bit0
+            assign predict_bht_row0[ghr_bit] = predict_pc_row[ghr_bit] ^
+                (spec1_advance ? lane1_pred_taken :
+                 (spec0_advance ? lane0_pred_taken : ghr_q[0]));
+            assign predict_bht_row1[ghr_bit] = predict_pc_row[ghr_bit] ^
+                (spec1_advance ? lane1_pred_taken :
+                 (spec0_advance ? lane0_pred_taken : ghr_q[0]));
         end else if (ghr_bit == 1) begin : g_bit1
-            assign selected_history0 = spec1_advance ?
-                (spec0_advance ? lane0_pred_taken : ghr_q[0]) :
-                (spec0_advance ? ghr_q[0] : ghr_q[1]);
-            assign selected_history1 = spec1_advance ?
-                (spec0_advance ? lane0_pred_taken : ghr_q[0]) :
-                (spec0_advance ? ghr_q[0] : ghr_q[1]);
+            assign predict_bht_row0[ghr_bit] = predict_pc_row[ghr_bit] ^
+                (spec1_advance ?
+                 (spec0_advance ? lane0_pred_taken : ghr_q[0]) :
+                 (spec0_advance ? ghr_q[0] : ghr_q[1]));
+            assign predict_bht_row1[ghr_bit] = predict_pc_row[ghr_bit] ^
+                (spec1_advance ?
+                 (spec0_advance ? lane0_pred_taken : ghr_q[0]) :
+                 (spec0_advance ? ghr_q[0] : ghr_q[1]));
         end else begin : g_bitn
-            assign selected_history0 = spec1_advance ?
-                (spec0_advance ? ghr_q[ghr_bit-2] : ghr_q[ghr_bit-1]) :
-                (spec0_advance ? ghr_q[ghr_bit-1] : ghr_q[ghr_bit]);
-            assign selected_history1 = spec1_advance ?
-                (spec0_advance ? ghr_q[ghr_bit-2] : ghr_q[ghr_bit-1]) :
-                (spec0_advance ? ghr_q[ghr_bit-1] : ghr_q[ghr_bit]);
+            assign predict_bht_row0[ghr_bit] = predict_pc_row[ghr_bit] ^
+                (spec1_advance ?
+                 (spec0_advance ? ghr_q[ghr_bit-2] : ghr_q[ghr_bit-1]) :
+                 (spec0_advance ? ghr_q[ghr_bit-1] : ghr_q[ghr_bit]));
+            assign predict_bht_row1[ghr_bit] = predict_pc_row[ghr_bit] ^
+                (spec1_advance ?
+                 (spec0_advance ? ghr_q[ghr_bit-2] : ghr_q[ghr_bit-1]) :
+                 (spec0_advance ? ghr_q[ghr_bit-1] : ghr_q[ghr_bit]));
         end
-        assign predict_bht_row0[ghr_bit] = predict_pc_row[ghr_bit] ^
-            (USE_GSHARE ? selected_history0 : 1'b0);
-        assign predict_bht_row1[ghr_bit] = predict_pc_row[ghr_bit] ^
-            (USE_GSHARE ? selected_history1 : 1'b0);
     end
     wire [BHT_INDEX_WIDTH-1:0] predict_bht_index =
         {predict_bht_row0, predict_bht_bank};
