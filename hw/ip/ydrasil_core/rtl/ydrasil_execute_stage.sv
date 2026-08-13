@@ -52,6 +52,9 @@ import ydrasil_pkg::*;
     input  ydrasil_lane_b_bru_payload_t dual_bru_payload_i,
     input  wire [REGS_DATA_WIDTH-1:0] dual_bru_operand_a_i,
     input  wire [REGS_DATA_WIDTH-1:0] dual_bru_operand_b_i,
+    input  wire dual_fpu_valid_i,
+    input  ydrasil_lane_b_fpu_payload_t dual_fpu_payload_i,
+    input  wire [2:0] fpu_frm_i,
 
     output ydrasil_ex_hzd_pkt_t ex_hzd_o,
     output ydrasil_ex_hzd_pkt_t ex_hzd1_o,
@@ -94,6 +97,18 @@ import ydrasil_pkg::*;
     output wire [REGS_ADDR_WIDTH-1:0] dual_completion_addr_o,
     output wire [REGS_DATA_WIDTH-1:0] dual_completion_data_o,
     output wire [REGS_DATA_WIDTH-1:0] dual_early_bypass_data_o,
+    output wire fpu_busy_o,
+    output wire fpu_req_ready_o,
+    output wire fpu_result_valid_o,
+    output wire [FPU_DATA_WIDTH-1:0] fpu_result_o,
+    output wire [REGS_ADDR_WIDTH-1:0] fpu_result_addr_o,
+    output wire fpu_result_fpr_o,
+    output wire fpu_result_gpr_o,
+    output producer_id_t fpu_result_producer_id_o,
+    output wire fpu_result_producer_tracked_o,
+    output wire [4:0] fpu_result_fflags_o,
+    output wire [INST_ADDR_WIDTH-1:0] fpu_result_pc_o,
+    output wire [INST_DATA_WIDTH-1:0] fpu_result_instr_o,
     output wire ex_branch_jump_o,
     output wire [INST_ADDR_WIDTH-1:0] ex_branch_target_o,
     output wire ex_pc_redirect_o,
@@ -120,7 +135,7 @@ import ydrasil_pkg::*;
     logic [OPERATOR_WIDTH-1:0] dual_hzd_operator;
     logic [OPERATOR_TYPE_WIDTH-1:0] dual_hzd_operator_type;
     wire dual_valid = dual_alu_valid_i || dual_bit_valid_i ||
-        dual_bru_valid_i || mul_valid_i || csr_valid_i;
+        dual_bru_valid_i || dual_fpu_valid_i || mul_valid_i || csr_valid_i;
 	    wire [BUS_ADDR_WIDTH-1:0] lsu_mem_addr;
     wire [REGS_DATA_WIDTH-1:0] lsu_store_result;
     wire unused_instret;
@@ -138,6 +153,71 @@ import ydrasil_pkg::*;
         (!branch_recovery || !main_recovery_keep);
     wire dual_flush = flush_i &&
         (!branch_recovery || !dual_recovery_keep);
+    wire dual_alu_completion_valid;
+    producer_id_t dual_alu_completion_producer_id;
+    wire dual_alu_completion_producer_tracked;
+    wire [REGS_ADDR_WIDTH-1:0] dual_alu_completion_addr;
+    wire [REGS_DATA_WIDTH-1:0] dual_alu_completion_data;
+    wire [REGS_DATA_WIDTH-1:0] dual_alu_early_bypass_data;
+
+    ydrasil_fpu_req_pkt_t fpu_req_pkt;
+`ifdef YDRASIL_ENABLE_FPU
+    always_comb begin
+        fpu_req_pkt = '0;
+        fpu_req_pkt.valid = dual_fpu_valid_i && !trap_redirect_i &&
+            !dual_flush;
+        fpu_req_pkt.illegal = 1'b0;
+        fpu_req_pkt.op = dual_fpu_payload_i.op;
+        fpu_req_pkt.fmt = dual_fpu_payload_i.fmt;
+        fpu_req_pkt.dst_fmt = dual_fpu_payload_i.dst_fmt;
+        fpu_req_pkt.rm = dual_fpu_payload_i.rm;
+        fpu_req_pkt.operand_a = dual_fpu_payload_i.operand_a;
+        fpu_req_pkt.operand_b = dual_fpu_payload_i.operand_b;
+        fpu_req_pkt.operand_c = dual_fpu_payload_i.operand_c;
+        fpu_req_pkt.rd_addr = dual_fpu_payload_i.rd_addr;
+        fpu_req_pkt.rd_fpr = dual_fpu_payload_i.rd_fpr;
+        fpu_req_pkt.rd_gpr = dual_fpu_payload_i.rd_gpr;
+        fpu_req_pkt.producer_id = dual_fpu_payload_i.producer_id;
+        fpu_req_pkt.producer_tracked = dual_fpu_payload_i.producer_tracked;
+        fpu_req_pkt.pc = dual_fpu_payload_i.pc;
+        fpu_req_pkt.instr = dual_fpu_payload_i.instr;
+    end
+    ydrasil_fpu u_ydrasil_fpu (
+        .clk(clk),
+        .rst_n(rst_n),
+        .req_i(fpu_req_pkt),
+        .req_ready_o(fpu_req_ready_o),
+        .frm_i(fpu_frm_i),
+        .result_ready_i(1'b1),
+        .busy_o(fpu_busy_o),
+        .result_valid_o(fpu_result_valid_o),
+        .result_o(fpu_result_o),
+        .result_addr_o(fpu_result_addr_o),
+        .result_fpr_o(fpu_result_fpr_o),
+        .result_gpr_o(fpu_result_gpr_o),
+        .result_producer_id_o(fpu_result_producer_id_o),
+        .result_producer_tracked_o(fpu_result_producer_tracked_o),
+        .result_fflags_o(fpu_result_fflags_o),
+        .result_pc_o(fpu_result_pc_o),
+        .result_instr_o(fpu_result_instr_o)
+    );
+`else
+    always_comb begin
+        fpu_req_pkt = '0;
+    end
+    assign fpu_req_ready_o = 1'b1;
+    assign fpu_busy_o = 1'b0;
+    assign fpu_result_valid_o = 1'b0;
+    assign fpu_result_o = '0;
+    assign fpu_result_addr_o = '0;
+    assign fpu_result_fpr_o = 1'b0;
+    assign fpu_result_gpr_o = 1'b0;
+    assign fpu_result_producer_id_o = '0;
+    assign fpu_result_producer_tracked_o = 1'b0;
+    assign fpu_result_fflags_o = '0;
+    assign fpu_result_pc_o = '0;
+    assign fpu_result_instr_o = '0;
+`endif
 
     always_comb begin
         dual_hzd_operator = '0;
@@ -150,6 +230,8 @@ import ydrasil_pkg::*;
             dual_hzd_operator_type = mul_operator_type_i;
         end else if (csr_valid_i) begin
             dual_hzd_operator_type = csr_operator_type_i;
+        end else if (dual_fpu_valid_i) begin
+            dual_hzd_operator_type[OPERATOR_TYPE_FPU] = 1'b1;
         end else if (dual_bit_valid_i) begin
             dual_hzd_operator[dual_bit_payload_i.subop] = 1'b1;
             dual_hzd_operator_type[OPERATOR_TYPE_BITMANIP] = 1'b1;
@@ -310,12 +392,12 @@ import ydrasil_pkg::*;
         .pred_local_counter_i   (dual_bru_payload_i.pred_local_counter),
         .pred_bht_index_i       (dual_bru_payload_i.pred_bht_index),
         .trap_redirect_addr_i   (trap_redirect_addr_i),
-        .completion_valid_o     (dual_completion_valid_o),
-        .completion_producer_id_o(dual_completion_producer_id_o),
-        .completion_producer_tracked_o(dual_completion_producer_tracked_o),
-        .completion_addr_o      (dual_completion_addr_o),
-        .completion_data_o      (dual_completion_data_o),
-        .early_bypass_data_o    (dual_early_bypass_data_o),
+        .completion_valid_o     (dual_alu_completion_valid),
+        .completion_producer_id_o(dual_alu_completion_producer_id),
+        .completion_producer_tracked_o(dual_alu_completion_producer_tracked),
+        .completion_addr_o      (dual_alu_completion_addr),
+        .completion_data_o      (dual_alu_completion_data),
+        .early_bypass_data_o    (dual_alu_early_bypass_data),
         .ex_branch_jump_o       (ex_branch_jump_o),
         .ex_branch_target_o     (ex_branch_target_o),
         .ex_pc_redirect_o       (ex_pc_redirect_o),
@@ -339,6 +421,19 @@ import ydrasil_pkg::*;
         ,.dbg_bp_mispredict_o(dbg_bp_mispredict_o)
 `endif
     );
+
+    assign dual_completion_valid_o = fpu_result_valid_o ?
+        fpu_result_producer_tracked_o : dual_alu_completion_valid;
+    assign dual_completion_producer_id_o = fpu_result_valid_o ?
+        fpu_result_producer_id_o : dual_alu_completion_producer_id;
+    assign dual_completion_producer_tracked_o = fpu_result_valid_o ?
+        fpu_result_producer_tracked_o : dual_alu_completion_producer_tracked;
+    assign dual_completion_addr_o = fpu_result_valid_o ?
+        (fpu_result_gpr_o ? fpu_result_addr_o : '0) :
+        dual_alu_completion_addr;
+    assign dual_completion_data_o = fpu_result_valid_o ?
+        fpu_result_o[REGS_DATA_WIDTH-1:0] : dual_alu_completion_data;
+    assign dual_early_bypass_data_o = dual_alu_early_bypass_data;
 
     wire unused = &{1'b0, lsu_store_result};
 endmodule

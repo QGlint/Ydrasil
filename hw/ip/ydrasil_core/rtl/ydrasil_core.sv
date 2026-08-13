@@ -301,6 +301,18 @@ import ydrasil_axi_pkg::*;
 	wire                            dual_completion_producer_tracked;
 	wire [REGS_ADDR_WIDTH-1:0]      dual_completion_addr;
 	wire [REGS_DATA_WIDTH-1:0]      dual_completion_data;
+	wire                            fpu_busy;
+	wire                            fpu_req_ready;
+	wire                            fpu_result_valid;
+	wire [FPU_DATA_WIDTH-1:0]       fpu_result;
+	wire [REGS_ADDR_WIDTH-1:0]      fpu_result_addr;
+	wire                            fpu_result_fpr;
+	wire                            fpu_result_gpr;
+	producer_id_t                   fpu_result_producer_id;
+	wire                            fpu_result_producer_tracked;
+	wire [4:0]                      fpu_result_fflags;
+	wire [INST_ADDR_WIDTH-1:0]      fpu_result_pc;
+	wire [INST_DATA_WIDTH-1:0]      fpu_result_instr;
 	producer_id_t                   retire_value_id0;
 	producer_id_t                   retire_value_id1;
 	wire                            retire_valid;
@@ -852,6 +864,9 @@ import ydrasil_axi_pkg::*;
 		.dual_bru_payload_i (dual_bru_payload),
 		.dual_bru_operand_a_i(dual_bru_operand_a),
 		.dual_bru_operand_b_i(dual_bru_operand_b),
+		.dual_fpu_valid_i  (dual_fpu_valid),
+		.dual_fpu_payload_i(dual_fpu_payload),
+		.fpu_frm_i        (3'b0),
 		.ex_hzd_o           (ex_hzd_pkt),
 		.ex_hzd1_o          (ex_hzd_pkt1),
 		.lsu_req_o          (lsu_req_pkt),
@@ -891,6 +906,18 @@ import ydrasil_axi_pkg::*;
 		.dual_completion_addr_o(dual_completion_addr),
 		.dual_completion_data_o(dual_completion_data),
 		.dual_early_bypass_data_o(dual_early_bypass_data),
+		.fpu_busy_o        (fpu_busy),
+		.fpu_req_ready_o   (fpu_req_ready),
+		.fpu_result_valid_o(fpu_result_valid),
+		.fpu_result_o      (fpu_result),
+		.fpu_result_addr_o (fpu_result_addr),
+		.fpu_result_fpr_o  (fpu_result_fpr),
+		.fpu_result_gpr_o  (fpu_result_gpr),
+		.fpu_result_producer_id_o(fpu_result_producer_id),
+		.fpu_result_producer_tracked_o(fpu_result_producer_tracked),
+		.fpu_result_fflags_o(fpu_result_fflags),
+		.fpu_result_pc_o   (fpu_result_pc),
+		.fpu_result_instr_o(fpu_result_instr),
 		.ex_branch_jump_o  (ex_branch_jump),
 		.ex_branch_target_o(ex_branch_target),
 		.ex_pc_redirect_o  (ex_pc_redirect),
