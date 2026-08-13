@@ -134,6 +134,12 @@ import ydrasil_pkg::*;
     output wire [DATA_WIDTH-1:0]       dual_bru_operand_b_o
 );
     localparam int ISSUE_WINDOW_DEPTH = 12;
+    // Preserve the three four-slot bank address ranges, but physically omit
+    // the fourth entry in each bank.  Keeping the sparse numbering avoids a
+    // cross-bank remap while reducing every local payload tree and order mask
+    // to three inputs.
+    localparam logic [ISSUE_WINDOW_DEPTH-1:0] ACTIVE_SLOT_MASK =
+        12'b0111_0111_0111;
     wire ydrasil_compact_uop_t issue_window_q [0:ISSUE_WINDOW_DEPTH-1];
     wire [ISSUE_WINDOW_DEPTH-1:0] issue_window_valid_q;
     wire issue_window_src0_ready_q [0:ISSUE_WINDOW_DEPTH-1];
@@ -430,16 +436,19 @@ import ydrasil_pkg::*;
     wire dispatch1_alu = decode_domain1_i == DISPATCH_DOMAIN_ALU;
     wire dispatch0_p0 = decode_domain_i == DISPATCH_DOMAIN_P0;
     wire dispatch1_p0 = decode_domain1_i == DISPATCH_DOMAIN_P0;
-    wire [3:0] alu_free_local = ~issue_window_valid_q[3:0];
+    wire [3:0] alu_free_local =
+        ~issue_window_valid_q[3:0] & ACTIVE_SLOT_MASK[3:0];
     // A P0 issue grant removes exactly the selected RS bit at this edge.  By
     // exposing that bit only to the local allocation decoder, a full P0 bank
     // can accept a replacement without creating a Select->Fetch ready path.
     wire [3:0] p0_release_local =
         (P0_SAME_CYCLE_REPLACE_EN && select_commit) ?
         issue_select_mask[7:4] : 4'b0;
-    wire [3:0] p0_free_local = ~issue_window_valid_q[7:4] |
-        p0_release_local;
-    wire [3:0] p1_free_local = ~issue_window_valid_q[11:8];
+    wire [3:0] p0_free_local =
+        (~issue_window_valid_q[7:4] | p0_release_local) &
+        ACTIVE_SLOT_MASK[7:4];
+    wire [3:0] p1_free_local =
+        ~issue_window_valid_q[11:8] & ACTIVE_SLOT_MASK[11:8];
     wire [3:0] alu_alloc0_local;
     wire [3:0] p0_alloc0_local;
     wire [3:0] p1_alloc0_local;
@@ -618,23 +627,20 @@ import ydrasil_pkg::*;
         issue_src0_ready_for_select[1] && issue_src1_ready_for_select[1];
     assign alu_candidate_local[2] = issue_window_valid_q[2] &&
         issue_src0_ready_for_select[2] && issue_src1_ready_for_select[2];
-    assign alu_candidate_local[3] = issue_window_valid_q[3] &&
-        issue_src0_ready_for_select[3] && issue_src1_ready_for_select[3];
+    assign alu_candidate_local[3] = 1'b0;
     assign alu_select0_local[0] = alu_candidate_local[0];
     assign alu_select0_local[1] = alu_candidate_local[1] &&
         !alu_candidate_local[0];
     assign alu_select0_local[2] = alu_candidate_local[2] &&
         !(|alu_candidate_local[1:0]);
-    assign alu_select0_local[3] = alu_candidate_local[3] &&
-        !(|alu_candidate_local[2:0]);
+    assign alu_select0_local[3] = 1'b0;
     assign alu_after_first_local = alu_candidate_local & ~alu_select0_local;
     assign alu_select1_local[0] = alu_after_first_local[0];
     assign alu_select1_local[1] = alu_after_first_local[1] &&
         !alu_after_first_local[0];
     assign alu_select1_local[2] = alu_after_first_local[2] &&
         !(|alu_after_first_local[1:0]);
-    assign alu_select1_local[3] = alu_after_first_local[3] &&
-        !(|alu_after_first_local[2:0]);
+    assign alu_select1_local[3] = 1'b0;
 
     assign p0_candidate_local[0] = issue_window_valid_q[4] &&
         issue_src0_ready_for_select[4] &&
@@ -654,16 +660,11 @@ import ydrasil_pkg::*;
         (!issue_memory_q[6] ||
          ({1'b0, lsu_credit_i} > {1'b0, lsu_select_reserved_q})) &&
         !issue_order_blocked[6];
-    assign p0_candidate_local[3] = issue_window_valid_q[7] &&
-        issue_src0_ready_for_select[7] &&
-        (issue_src1_ready_for_select[7] || issue_store_q[7]) &&
-        (!issue_memory_q[7] ||
-         ({1'b0, lsu_credit_i} > {1'b0, lsu_select_reserved_q})) &&
-        !issue_order_blocked[7];
+    assign p0_candidate_local[3] = 1'b0;
     // P0 loads may pass older loads, but a fixed RS-slot priority can keep an
     // older ready load from ever launching while younger independent loads
     // consume both LSU credits.  Select the oldest ready P0 entry using the
-    // registered ROB-head token; this keeps the age compare local to the four
+    // registered ROB-head token; this keeps the age compare local to the three
     // P0 candidates and avoids a current ROB-to-Select control path.
     function automatic [PRODUCER_SLOT_WIDTH:0] p0_age_from_head(
         input producer_id_t producer_id
@@ -687,23 +688,16 @@ import ydrasil_pkg::*;
         p0_age_from_head(issue_window_q[5].dst.rob_tag);
     wire [PRODUCER_SLOT_WIDTH:0] p0_age2 =
         p0_age_from_head(issue_window_q[6].dst.rob_tag);
-    wire [PRODUCER_SLOT_WIDTH:0] p0_age3 =
-        p0_age_from_head(issue_window_q[7].dst.rob_tag);
     wire [3:0] p0_oldest_local;
     assign p0_oldest_local[0] = p0_candidate_local[0] &&
         (!p0_candidate_local[1] || (p0_age0 <= p0_age1)) &&
-        (!p0_candidate_local[2] || (p0_age0 <= p0_age2)) &&
-        (!p0_candidate_local[3] || (p0_age0 <= p0_age3));
+        (!p0_candidate_local[2] || (p0_age0 <= p0_age2));
     assign p0_oldest_local[1] = p0_candidate_local[1] &&
         !p0_oldest_local[0] &&
-        (!p0_candidate_local[2] || (p0_age1 <= p0_age2)) &&
-        (!p0_candidate_local[3] || (p0_age1 <= p0_age3));
+        (!p0_candidate_local[2] || (p0_age1 <= p0_age2));
     assign p0_oldest_local[2] = p0_candidate_local[2] &&
-        !p0_oldest_local[0] && !p0_oldest_local[1] &&
-        (!p0_candidate_local[3] || (p0_age2 <= p0_age3));
-    assign p0_oldest_local[3] = p0_candidate_local[3] &&
-        !p0_oldest_local[0] && !p0_oldest_local[1] &&
-        !p0_oldest_local[2];
+        !p0_oldest_local[0] && !p0_oldest_local[1];
+    assign p0_oldest_local[3] = 1'b0;
     assign p0_select_local = p0_oldest_local;
 
     assign p1_candidate_local[0] = issue_window_valid_q[8] &&
@@ -724,19 +718,13 @@ import ydrasil_pkg::*;
         !issue_order_blocked[10] &&
         (!issue_divrem_q[10] ||
          (mdu_div_available_q && !div_select_reserved_q));
-    assign p1_candidate_local[3] = issue_window_valid_q[11] &&
-        issue_src0_ready_for_select[11] && issue_src1_ready_for_select[11] &&
-        !issue_serial_q[11] &&
-        !issue_order_blocked[11] &&
-        (!issue_divrem_q[11] ||
-         (mdu_div_available_q && !div_select_reserved_q));
+    assign p1_candidate_local[3] = 1'b0;
     assign p1_select_local[0] = p1_candidate_local[0];
     assign p1_select_local[1] = p1_candidate_local[1] &&
         !p1_candidate_local[0];
     assign p1_select_local[2] = p1_candidate_local[2] &&
         !(|p1_candidate_local[1:0]);
-    assign p1_select_local[3] = p1_candidate_local[3] &&
-        !(|p1_candidate_local[2:0]);
+    assign p1_select_local[3] = 1'b0;
 
     assign p1_serial_candidate_local[0] = issue_window_valid_q[8] &&
         issue_src0_ready_for_select[8] && issue_src1_ready_for_select[8] &&
@@ -753,18 +741,13 @@ import ydrasil_pkg::*;
         issue_serial_q[10] && !issue_order_blocked[10] &&
         (issue_window_q[10].dst.rob_tag == rob_head_select_q) &&
         lsu_idle_select_q;
-    assign p1_serial_candidate_local[3] = issue_window_valid_q[11] &&
-        issue_src0_ready_for_select[11] && issue_src1_ready_for_select[11] &&
-        issue_serial_q[11] && !issue_order_blocked[11] &&
-        (issue_window_q[11].dst.rob_tag == rob_head_select_q) &&
-        lsu_idle_select_q;
+    assign p1_serial_candidate_local[3] = 1'b0;
     assign p1_serial_select_local[0] = p1_serial_candidate_local[0];
     assign p1_serial_select_local[1] = p1_serial_candidate_local[1] &&
         !p1_serial_candidate_local[0];
     assign p1_serial_select_local[2] = p1_serial_candidate_local[2] &&
         !(|p1_serial_candidate_local[1:0]);
-    assign p1_serial_select_local[3] = p1_serial_candidate_local[3] &&
-        !(|p1_serial_candidate_local[2:0]);
+    assign p1_serial_select_local[3] = 1'b0;
 
     assign p0_select_valid = |p0_select_local;
     assign p1_select_valid = |p1_select_local;
@@ -786,20 +769,16 @@ import ydrasil_pkg::*;
 
     wire producer_id_t alu_selected_id0 = alu_select0_local[0] ?
         issue_window_q[0].dst.rob_tag : alu_select0_local[1] ?
-        issue_window_q[1].dst.rob_tag : alu_select0_local[2] ?
-        issue_window_q[2].dst.rob_tag : issue_window_q[3].dst.rob_tag;
+        issue_window_q[1].dst.rob_tag : issue_window_q[2].dst.rob_tag;
     wire producer_id_t alu_selected_id1 = alu_select1_local[0] ?
         issue_window_q[0].dst.rob_tag : alu_select1_local[1] ?
-        issue_window_q[1].dst.rob_tag : alu_select1_local[2] ?
-        issue_window_q[2].dst.rob_tag : issue_window_q[3].dst.rob_tag;
+        issue_window_q[1].dst.rob_tag : issue_window_q[2].dst.rob_tag;
     wire producer_id_t p1_selected_id = p1_select_local[0] ?
         issue_window_q[8].dst.rob_tag : p1_select_local[1] ?
-        issue_window_q[9].dst.rob_tag : p1_select_local[2] ?
-        issue_window_q[10].dst.rob_tag : issue_window_q[11].dst.rob_tag;
+        issue_window_q[9].dst.rob_tag : issue_window_q[10].dst.rob_tag;
     wire producer_id_t p1_serial_selected_id = p1_serial_select_local[0] ?
         issue_window_q[8].dst.rob_tag : p1_serial_select_local[1] ?
-        issue_window_q[9].dst.rob_tag : p1_serial_select_local[2] ?
-        issue_window_q[10].dst.rob_tag : issue_window_q[11].dst.rob_tag;
+        issue_window_q[9].dst.rob_tag : issue_window_q[10].dst.rob_tag;
     wire alu_selected0_early =
         |(alu_select0_local & issue_early_writes_q[3:0]);
     wire alu_selected1_early =
@@ -813,51 +792,45 @@ import ydrasil_pkg::*;
     assign alu_alloc0_local[1] = alu_free_local[1] && !alu_free_local[0];
     assign alu_alloc0_local[2] = alu_free_local[2] &&
         !(|alu_free_local[1:0]);
-    assign alu_alloc0_local[3] = alu_free_local[3] &&
-        !(|alu_free_local[2:0]);
+    assign alu_alloc0_local[3] = 1'b0;
     assign p0_alloc0_local[0] = p0_free_local[0];
     assign p0_alloc0_local[1] = p0_free_local[1] && !p0_free_local[0];
     assign p0_alloc0_local[2] = p0_free_local[2] &&
         !(|p0_free_local[1:0]);
-    assign p0_alloc0_local[3] = p0_free_local[3] &&
-        !(|p0_free_local[2:0]);
+    assign p0_alloc0_local[3] = 1'b0;
     assign p1_alloc0_local[0] = p1_free_local[0];
     assign p1_alloc0_local[1] = p1_free_local[1] && !p1_free_local[0];
     assign p1_alloc0_local[2] = p1_free_local[2] &&
         !(|p1_free_local[1:0]);
-    assign p1_alloc0_local[3] = p1_free_local[3] &&
-        !(|p1_free_local[2:0]);
+    assign p1_alloc0_local[3] = 1'b0;
 
     assign alu_alloc1_local[0] = alu_free1_local[0];
     assign alu_alloc1_local[1] = alu_free1_local[1] && !alu_free1_local[0];
     assign alu_alloc1_local[2] = alu_free1_local[2] &&
         !(|alu_free1_local[1:0]);
-    assign alu_alloc1_local[3] = alu_free1_local[3] &&
-        !(|alu_free1_local[2:0]);
+    assign alu_alloc1_local[3] = 1'b0;
     assign p0_alloc1_local[0] = p0_free1_local[0];
     assign p0_alloc1_local[1] = p0_free1_local[1] && !p0_free1_local[0];
     assign p0_alloc1_local[2] = p0_free1_local[2] &&
         !(|p0_free1_local[1:0]);
-    assign p0_alloc1_local[3] = p0_free1_local[3] &&
-        !(|p0_free1_local[2:0]);
+    assign p0_alloc1_local[3] = 1'b0;
     assign p1_alloc1_local[0] = p1_free1_local[0];
     assign p1_alloc1_local[1] = p1_free1_local[1] && !p1_free1_local[0];
     assign p1_alloc1_local[2] = p1_free1_local[2] &&
         !(|p1_free1_local[1:0]);
-    assign p1_alloc1_local[3] = p1_free1_local[3] &&
-        !(|p1_free1_local[2:0]);
+    assign p1_alloc1_local[3] = 1'b0;
 
     assign free_valid0 = |free_select0_vec;
     assign free_valid1 = |free_select1_vec;
     wire [2:0] alu_free_count =
         3'(alu_free_local[0]) + 3'(alu_free_local[1]) +
-        3'(alu_free_local[2]) + 3'(alu_free_local[3]);
+        3'(alu_free_local[2]);
     wire [2:0] p0_free_count =
         3'(p0_free_local[0]) + 3'(p0_free_local[1]) +
-        3'(p0_free_local[2]) + 3'(p0_free_local[3]);
+        3'(p0_free_local[2]);
     wire [2:0] p1_free_count =
         3'(p1_free_local[0]) + 3'(p1_free_local[1]) +
-        3'(p1_free_local[2]) + 3'(p1_free_local[3]);
+        3'(p1_free_local[2]);
     // This is a two-entry capacity contract, not an accept decision. Count
     // both decoded domains unconditionally so FetchQ valid/count cannot feed
     // through Issue and back into its own pop/write controls.
@@ -954,57 +927,47 @@ import ydrasil_pkg::*;
     wire [COMPACT_UOP_WIDTH-1:0] selected0_alu_bits =
         ({COMPACT_UOP_WIDTH{selected0_mask[0]}} & issue_window_bits[0]) |
         ({COMPACT_UOP_WIDTH{selected0_mask[1]}} & issue_window_bits[1]) |
-        ({COMPACT_UOP_WIDTH{selected0_mask[2]}} & issue_window_bits[2]) |
-        ({COMPACT_UOP_WIDTH{selected0_mask[3]}} & issue_window_bits[3]);
+        ({COMPACT_UOP_WIDTH{selected0_mask[2]}} & issue_window_bits[2]);
     wire [COMPACT_UOP_WIDTH-1:0] selected0_p0_bits =
         ({COMPACT_UOP_WIDTH{selected0_mask[4]}} & issue_window_bits[4]) |
         ({COMPACT_UOP_WIDTH{selected0_mask[5]}} & issue_window_bits[5]) |
-        ({COMPACT_UOP_WIDTH{selected0_mask[6]}} & issue_window_bits[6]) |
-        ({COMPACT_UOP_WIDTH{selected0_mask[7]}} & issue_window_bits[7]);
+        ({COMPACT_UOP_WIDTH{selected0_mask[6]}} & issue_window_bits[6]);
     wire [COMPACT_UOP_WIDTH-1:0] selected0_p1_bits =
         ({COMPACT_UOP_WIDTH{selected0_mask[8]}} & issue_window_bits[8]) |
         ({COMPACT_UOP_WIDTH{selected0_mask[9]}} & issue_window_bits[9]) |
-        ({COMPACT_UOP_WIDTH{selected0_mask[10]}} & issue_window_bits[10]) |
-        ({COMPACT_UOP_WIDTH{selected0_mask[11]}} & issue_window_bits[11]);
+        ({COMPACT_UOP_WIDTH{selected0_mask[10]}} & issue_window_bits[10]);
     wire [COMPACT_UOP_WIDTH-1:0] selected1_alu_bits =
         ({COMPACT_UOP_WIDTH{selected1_mask[0]}} & issue_window_bits[0]) |
         ({COMPACT_UOP_WIDTH{selected1_mask[1]}} & issue_window_bits[1]) |
-        ({COMPACT_UOP_WIDTH{selected1_mask[2]}} & issue_window_bits[2]) |
-        ({COMPACT_UOP_WIDTH{selected1_mask[3]}} & issue_window_bits[3]);
+        ({COMPACT_UOP_WIDTH{selected1_mask[2]}} & issue_window_bits[2]);
     wire [COMPACT_UOP_WIDTH-1:0] selected1_p1_bits =
         ({COMPACT_UOP_WIDTH{selected1_mask[8]}} & issue_window_bits[8]) |
         ({COMPACT_UOP_WIDTH{selected1_mask[9]}} & issue_window_bits[9]) |
-        ({COMPACT_UOP_WIDTH{selected1_mask[10]}} & issue_window_bits[10]) |
-        ({COMPACT_UOP_WIDTH{selected1_mask[11]}} & issue_window_bits[11]);
+        ({COMPACT_UOP_WIDTH{selected1_mask[10]}} & issue_window_bits[10]);
     // Wide Select payloads are written by physical destination, not by the
     // logical first/second issue ordering above. Each tree therefore sees only
-    // one four-entry RS bank and one physical head cell; the cross-bank policy
+    // one three-entry RS bank and one physical head cell; the cross-bank policy
     // remains entirely in the narrow masks.
     wire [COMPACT_UOP_WIDTH-1:0] lane_a_alu0_bits =
         ({COMPACT_UOP_WIDTH{lane_a_alu0_mask[0]}} & issue_window_bits[0]) |
         ({COMPACT_UOP_WIDTH{lane_a_alu0_mask[1]}} & issue_window_bits[1]) |
-        ({COMPACT_UOP_WIDTH{lane_a_alu0_mask[2]}} & issue_window_bits[2]) |
-        ({COMPACT_UOP_WIDTH{lane_a_alu0_mask[3]}} & issue_window_bits[3]);
+        ({COMPACT_UOP_WIDTH{lane_a_alu0_mask[2]}} & issue_window_bits[2]);
     wire [COMPACT_UOP_WIDTH-1:0] lane_a_p0_bits =
         ({COMPACT_UOP_WIDTH{lane_a_p0_mask[0]}} & issue_window_bits[4]) |
         ({COMPACT_UOP_WIDTH{lane_a_p0_mask[1]}} & issue_window_bits[5]) |
-        ({COMPACT_UOP_WIDTH{lane_a_p0_mask[2]}} & issue_window_bits[6]) |
-        ({COMPACT_UOP_WIDTH{lane_a_p0_mask[3]}} & issue_window_bits[7]);
+        ({COMPACT_UOP_WIDTH{lane_a_p0_mask[2]}} & issue_window_bits[6]);
     wire [COMPACT_UOP_WIDTH-1:0] lane_b_p1_bits =
         ({COMPACT_UOP_WIDTH{lane_b_p1_mask[0]}} & issue_window_bits[8]) |
         ({COMPACT_UOP_WIDTH{lane_b_p1_mask[1]}} & issue_window_bits[9]) |
-        ({COMPACT_UOP_WIDTH{lane_b_p1_mask[2]}} & issue_window_bits[10]) |
-        ({COMPACT_UOP_WIDTH{lane_b_p1_mask[3]}} & issue_window_bits[11]);
+        ({COMPACT_UOP_WIDTH{lane_b_p1_mask[2]}} & issue_window_bits[10]);
     wire [COMPACT_UOP_WIDTH-1:0] lane_b_alu0_bits =
         ({COMPACT_UOP_WIDTH{lane_b_alu0_mask[0]}} & issue_window_bits[0]) |
         ({COMPACT_UOP_WIDTH{lane_b_alu0_mask[1]}} & issue_window_bits[1]) |
-        ({COMPACT_UOP_WIDTH{lane_b_alu0_mask[2]}} & issue_window_bits[2]) |
-        ({COMPACT_UOP_WIDTH{lane_b_alu0_mask[3]}} & issue_window_bits[3]);
+        ({COMPACT_UOP_WIDTH{lane_b_alu0_mask[2]}} & issue_window_bits[2]);
     wire [COMPACT_UOP_WIDTH-1:0] lane_b_alu1_bits =
         ({COMPACT_UOP_WIDTH{lane_b_alu1_mask[0]}} & issue_window_bits[0]) |
         ({COMPACT_UOP_WIDTH{lane_b_alu1_mask[1]}} & issue_window_bits[1]) |
-        ({COMPACT_UOP_WIDTH{lane_b_alu1_mask[2]}} & issue_window_bits[2]) |
-        ({COMPACT_UOP_WIDTH{lane_b_alu1_mask[3]}} & issue_window_bits[3]);
+        ({COMPACT_UOP_WIDTH{lane_b_alu1_mask[2]}} & issue_window_bits[2]);
     wire selected_lane_a_valid = (|lane_a_p0_mask) || (|lane_a_alu0_mask);
     wire selected_lane_b_valid = (|lane_b_p1_mask) ||
         (|lane_b_alu0_mask) || (|lane_b_alu1_mask);
@@ -1018,8 +981,7 @@ import ydrasil_pkg::*;
     wire p0_selected_src1_due =
         (p0_select_local[0] && issue_src1_ready_for_select[4]) ||
         (p0_select_local[1] && issue_src1_ready_for_select[5]) ||
-        (p0_select_local[2] && issue_src1_ready_for_select[6]) ||
-        (p0_select_local[3] && issue_src1_ready_for_select[7]);
+        (p0_select_local[2] && issue_src1_ready_for_select[6]);
 
     always_comb begin
         selected_uop0 = ydrasil_compact_uop_t'(
@@ -1228,9 +1190,9 @@ import ydrasil_pkg::*;
     always_ff @(posedge clk) begin
         if (!rst_n || trap_flush_i ||
             (flush_id_i && !branch_recovery_i)) begin
-            alu_free_credit_q <= 3'd4;
-            p0_free_credit_q <= 3'd4;
-            p1_free_credit_q <= 3'd4;
+            alu_free_credit_q <= 3'd3;
+            p0_free_credit_q <= 3'd3;
+            p1_free_credit_q <= 3'd3;
             alu_release_credit_q <= '0;
             p0_release_credit_q <= '0;
             p1_release_credit_q <= '0;
@@ -1391,10 +1353,11 @@ import ydrasil_pkg::*;
     generate
         for (rs_entry_idx = 0; rs_entry_idx < ISSUE_WINDOW_DEPTH;
              rs_entry_idx = rs_entry_idx + 1) begin : g_rs_entry
+          if ((rs_entry_idx % 4) < 3) begin : g_active
             ydrasil_issue_rs_entry #(
                 .SLOT_COUNT(ISSUE_WINDOW_DEPTH),
                 .BANK_BASE((rs_entry_idx / 4) * 4),
-                .BANK_SIZE(4)
+                .BANK_SIZE(3)
             ) u_entry (
                 .clk(clk),
                 .rst_n(rst_n),
@@ -1478,6 +1441,22 @@ import ydrasil_pkg::*;
                 .completion_wakeup_src1_o(
                     issue_src1_completion_wakeup[rs_entry_idx])
             );
+          end else begin : g_inactive
+            assign issue_window_q[rs_entry_idx] = '0;
+            assign issue_window_valid_q[rs_entry_idx] = 1'b0;
+            assign issue_window_src0_ready_q[rs_entry_idx] = 1'b0;
+            assign issue_window_src1_ready_q[rs_entry_idx] = 1'b0;
+            assign issue_order_mask_q[rs_entry_idx] = '0;
+            assign issue_order_blocked[rs_entry_idx] = 1'b0;
+            assign issue_memory_q[rs_entry_idx] = 1'b0;
+            assign issue_store_q[rs_entry_idx] = 1'b0;
+            assign issue_mul_q[rs_entry_idx] = 1'b0;
+            assign issue_divrem_q[rs_entry_idx] = 1'b0;
+            assign issue_serial_q[rs_entry_idx] = 1'b0;
+            assign issue_early_writes_q[rs_entry_idx] = 1'b0;
+            assign issue_src0_completion_wakeup[rs_entry_idx] = 1'b0;
+            assign issue_src1_completion_wakeup[rs_entry_idx] = 1'b0;
+          end
         end
     endgenerate
 
