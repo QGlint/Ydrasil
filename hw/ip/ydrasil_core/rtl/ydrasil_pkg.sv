@@ -54,6 +54,11 @@ package ydrasil_pkg;
 	localparam int REGS_ADDR_WIDTH = 5;
 	localparam int REGS_DATA_WIDTH = 32;
 	localparam int DOUBLE_REGS_WIDTH = 64;
+	`ifdef YDRASIL_FPU_DOUBLE
+	localparam int FPU_DATA_WIDTH = 64;
+	`else
+	localparam int FPU_DATA_WIDTH = 32;
+	`endif
 	localparam int REGS_NUM = 32;
 	localparam int CSR_ADDR_WIDTH = 12;
 
@@ -86,6 +91,9 @@ package ydrasil_pkg;
 	localparam logic [11:0] CSR_MIMPID        = 12'hf13;
 	localparam logic [31:0] MARCHID_VALUE     = 32'd5;
 	localparam logic [11:0] CSR_MHARTID       = 12'hf14;
+	localparam logic [11:0] CSR_FFLAGS        = 12'h001;
+	localparam logic [11:0] CSR_FRM           = 12'h002;
+	localparam logic [11:0] CSR_FCSR          = 12'h003;
 
 	// RV32I instruction encodings
 	localparam logic [6:0] RV32I_INS_TYPE_I   = 7'b0010011;
@@ -161,7 +169,7 @@ package ydrasil_pkg;
 	localparam logic [2:0] RV32I_INS_CSRRCI   = 3'b111;
 
 	// Decode constants
-	localparam int OPERATOR_TYPE_WIDTH = 8;
+	localparam int OPERATOR_TYPE_WIDTH = 9;
 	localparam int OPERATOR_TYPE_ALU   = 0;
 	localparam int OPERATOR_TYPE_BJP   = 1;
 	localparam int OPERATOR_TYPE_LOAD  = 2;
@@ -170,6 +178,7 @@ package ydrasil_pkg;
 	localparam int OPERATOR_TYPE_SYS   = 5;
 	localparam int OPERATOR_TYPE_MUL   = 6;
 	localparam int OPERATOR_TYPE_BITMANIP = 7;
+	localparam int OPERATOR_TYPE_FPU   = 8;
 		localparam int OPERATOR_TYPE_LSU_BASE = 2;
 		localparam int RESOURCE_WIDTH = 6;
 		localparam int RESOURCE_ALU = 0;
@@ -183,17 +192,18 @@ package ydrasil_pkg;
 		localparam logic [RESOURCE_WIDTH-1:0] RESOURCE_EXCLUSIVE_MASK = 6'b11_1100;
 
 	localparam int OPERATOR_WIDTH = 40;
-	localparam int UOP_CLASS_WIDTH = 3;
+	localparam int UOP_CLASS_WIDTH = 4;
 	localparam int UOP_SUBOP_WIDTH = 6;
 	localparam int UOP_LSU_SUBOP_WIDTH = 3;
-	localparam logic [UOP_CLASS_WIDTH-1:0] UOP_CLASS_ALU       = 3'd0;
-	localparam logic [UOP_CLASS_WIDTH-1:0] UOP_CLASS_BJP       = 3'd1;
-	localparam logic [UOP_CLASS_WIDTH-1:0] UOP_CLASS_LOAD      = 3'd2;
-	localparam logic [UOP_CLASS_WIDTH-1:0] UOP_CLASS_STORE     = 3'd3;
-	localparam logic [UOP_CLASS_WIDTH-1:0] UOP_CLASS_CSR       = 3'd4;
-	localparam logic [UOP_CLASS_WIDTH-1:0] UOP_CLASS_SYS       = 3'd5;
-	localparam logic [UOP_CLASS_WIDTH-1:0] UOP_CLASS_MUL       = 3'd6;
-	localparam logic [UOP_CLASS_WIDTH-1:0] UOP_CLASS_BITMANIP  = 3'd7;
+	localparam logic [UOP_CLASS_WIDTH-1:0] UOP_CLASS_ALU       = 4'd0;
+	localparam logic [UOP_CLASS_WIDTH-1:0] UOP_CLASS_BJP       = 4'd1;
+	localparam logic [UOP_CLASS_WIDTH-1:0] UOP_CLASS_LOAD      = 4'd2;
+	localparam logic [UOP_CLASS_WIDTH-1:0] UOP_CLASS_STORE     = 4'd3;
+	localparam logic [UOP_CLASS_WIDTH-1:0] UOP_CLASS_CSR       = 4'd4;
+	localparam logic [UOP_CLASS_WIDTH-1:0] UOP_CLASS_SYS       = 4'd5;
+	localparam logic [UOP_CLASS_WIDTH-1:0] UOP_CLASS_MUL       = 4'd6;
+	localparam logic [UOP_CLASS_WIDTH-1:0] UOP_CLASS_BITMANIP  = 4'd7;
+	localparam logic [UOP_CLASS_WIDTH-1:0] UOP_CLASS_FPU       = 4'd8;
 
 	localparam int OP_ALU_INFO_WIDTH = 12;
 	localparam int OP_ALU_LUI   = 0;
@@ -291,6 +301,18 @@ package ydrasil_pkg;
 	localparam int OP_B_XPERM4 = 37;
 	localparam int OP_B_XPERM8 = 38;
 	localparam int OP_B_RSVD   = 39;
+
+	typedef enum logic [5:0] {
+		FPU_OP_FMADD, FPU_OP_FMSUB, FPU_OP_FNMSUB, FPU_OP_FNMADD,
+		FPU_OP_ADD, FPU_OP_SUB, FPU_OP_MUL, FPU_OP_DIV, FPU_OP_SQRT,
+		FPU_OP_SGNJ, FPU_OP_SGNJN, FPU_OP_SGNJX, FPU_OP_MIN, FPU_OP_MAX,
+		FPU_OP_EQ, FPU_OP_LT, FPU_OP_LE, FPU_OP_CLASS,
+		FPU_OP_CVT_W_S, FPU_OP_CVT_WU_S, FPU_OP_CVT_S_W, FPU_OP_CVT_S_WU,
+		FPU_OP_CVT_W_D, FPU_OP_CVT_WU_D, FPU_OP_CVT_D_W, FPU_OP_CVT_D_WU,
+		FPU_OP_CVT_S_D, FPU_OP_CVT_D_S,
+		FPU_OP_MV_X_W, FPU_OP_MV_W_X, FPU_OP_FLW, FPU_OP_FSW,
+		FPU_OP_FLD, FPU_OP_FSD
+	} ydrasil_fpu_op_t;
 
 	localparam int OPSEL_INFO_WIDTH = 3;
 	localparam int ASELRS   = 0;
@@ -419,7 +441,41 @@ package ydrasil_pkg;
 		logic [OP_SYS_INFO_WIDTH-1:0]        sys_op_info;
 		logic                                fence_i;
 		logic                                illegal_instr;
+		logic                                fp_valid;
+		logic                                fp_illegal;
+		ydrasil_fpu_op_t                     fp_op;
+		logic                                fp_fmt;
+		logic                                fp_dst_fmt;
+		logic [2:0]                          fp_rm;
+		logic [REGS_ADDR_WIDTH-1:0]          fp_rs1_addr;
+		logic [REGS_ADDR_WIDTH-1:0]          fp_rs2_addr;
+		logic [REGS_ADDR_WIDTH-1:0]          fp_rs3_addr;
+		logic [REGS_ADDR_WIDTH-1:0]          fp_rd_addr;
+		logic                                fp_rs1_fpr;
+		logic                                fp_rs2_fpr;
+		logic                                fp_rs3_fpr;
+		logic                                fp_rd_fpr;
+		logic                                fp_rd_gpr;
 	} ydrasil_decode_pkt_t;
+
+	typedef struct packed {
+		logic                                valid;
+		logic                                illegal;
+		ydrasil_fpu_op_t                     op;
+		logic                                fmt;
+		logic                                dst_fmt;
+		logic [2:0]                          rm;
+		logic [FPU_DATA_WIDTH-1:0]           operand_a;
+		logic [FPU_DATA_WIDTH-1:0]           operand_b;
+		logic [FPU_DATA_WIDTH-1:0]           operand_c;
+		logic [REGS_ADDR_WIDTH-1:0]          rd_addr;
+		logic                                rd_fpr;
+		logic                                rd_gpr;
+		producer_id_t                        producer_id;
+		logic                                producer_tracked;
+		logic [INST_ADDR_WIDTH-1:0]          pc;
+		logic [INST_DATA_WIDTH-1:0]          instr;
+	} ydrasil_fpu_req_pkt_t;
 
 	typedef struct packed {
 		logic                                valid;
@@ -496,10 +552,14 @@ package ydrasil_pkg;
 		producer_id_t                        producer_id;
 		logic                                producer_tracked;
 		logic [BUS_DATA_WIDTH-1:0]           store_data;
+		logic [FPU_DATA_WIDTH-1:0]           fp_store_data;
 		logic [3:0]                          store_mask;
 		logic                                store_data_valid;
 		producer_id_t                        store_producer_id;
 		logic                                store_producer_tracked;
+		logic                                fp_load;
+		logic                                fp_double;
+		logic [REGS_ADDR_WIDTH-1:0]          fp_rd_addr;
 		logic                                retired;
 	} ydrasil_lsu_req_pkt_t;
 
@@ -619,6 +679,21 @@ package ydrasil_pkg;
 		logic [OP_SYS_INFO_WIDTH-1:0]          sys_op_info;
 		logic                                  fence_i;
 		logic                                  illegal_instr;
+		logic                                  fp_valid;
+		logic                                  fp_illegal;
+		ydrasil_fpu_op_t                       fp_op;
+		logic                                  fp_fmt;
+		logic                                  fp_dst_fmt;
+		logic [2:0]                            fp_rm;
+		logic [REGS_ADDR_WIDTH-1:0]            fp_rs1_addr;
+		logic [REGS_ADDR_WIDTH-1:0]            fp_rs2_addr;
+		logic [REGS_ADDR_WIDTH-1:0]            fp_rs3_addr;
+		logic [REGS_ADDR_WIDTH-1:0]            fp_rd_addr;
+		logic                                  fp_rs1_fpr;
+		logic                                  fp_rs2_fpr;
+		logic                                  fp_rs3_fpr;
+		logic                                  fp_rd_fpr;
+		logic                                  fp_rd_gpr;
 	} ydrasil_compact_uop_t;
 
 	// Lane B keeps common identity separate from class-local execution data.
@@ -658,5 +733,23 @@ package ydrasil_pkg;
 		logic [1:0]                          pred_local_counter;
 		bp_bht_index_t                       pred_bht_index;
 	} ydrasil_lane_b_bru_payload_t;
+
+	typedef struct packed {
+		logic                                valid;
+		ydrasil_fpu_op_t                     op;
+		logic                                fmt;
+		logic                                dst_fmt;
+		logic [2:0]                          rm;
+		logic [FPU_DATA_WIDTH-1:0]           operand_a;
+		logic [FPU_DATA_WIDTH-1:0]           operand_b;
+		logic [FPU_DATA_WIDTH-1:0]           operand_c;
+		logic [REGS_ADDR_WIDTH-1:0]          rd_addr;
+		logic                                rd_fpr;
+		logic                                rd_gpr;
+		producer_id_t                        producer_id;
+		logic                                producer_tracked;
+		logic [INST_ADDR_WIDTH-1:0]          pc;
+		logic [INST_DATA_WIDTH-1:0]          instr;
+	} ydrasil_lane_b_fpu_payload_t;
 
 endpackage

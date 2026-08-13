@@ -11,6 +11,11 @@ USE_BENDER ?= 1
 BENDER ?= $(HOME)/.cargo/bin/bender
 VERILATOR_TRACE ?= 1
 DIV_IMPL ?= lzc
+FPU ?= 0
+FPU_PRECISION ?= single
+FPU_PROFILE_SUFFIX := $(if $(filter 1,$(FPU)),-fpu-$(FPU_PRECISION))
+WAVE_DIR := $(BUILD_DIR)/wave$(FPU_PROFILE_SUFFIX)
+LOG_DIR := $(BUILD_DIR)/log$(FPU_PROFILE_SUFFIX)
 YDRASIL_PRODUCER_NUM ?= 12
 YDRASIL_ENABLE_I2C ?= 0
 ifeq ($(YDRASIL_ENABLE_I2C),0)
@@ -80,7 +85,7 @@ SPIKE ?= $(SPIKE_INSTALL_DIR)/bin/spike
 SPIKE_RUN_ENV ?= LD_LIBRARY_PATH=$(SPIKE_INSTALL_DIR)/lib:$(LD_LIBRARY_PATH)
 SPIKE_CHECK_ARGS ?= --help
 SPIKE_ELF ?= $(RVTESTS_OUT_ROOT)/rv32ui/elf/rv32ui_lh.elf
-SIM_OUT_DIR ?= $(BUILD_DIR)/sim
+SIM_OUT_DIR ?= $(BUILD_DIR)/sim$(FPU_PROFILE_SUFFIX)
 SPIKE_OUT_DIR ?= $(SIM_OUT_DIR)/spike
 SPIKE_LOG ?= rv32ui_lh
 SPIKE_MAXSTEPS ?= 1000000
@@ -93,7 +98,7 @@ SPIKE_MEM_BASE ?= $(patsubst %/elf/,%/mem/,$(dir $(SPIKE_ELF)))$(basename $(notd
 HW_TRACE_OUT_DIR ?= $(SIM_OUT_DIR)/hw
 HW_TRACE_LOG ?= $(HW_TRACE_OUT_DIR)/$(SPIKE_LOG)/hw.log
 HW_TRACE_CSV ?= $(HW_TRACE_OUT_DIR)/$(SPIKE_LOG)/hw.csv
-VERIF_DIR ?= $(BUILD_DIR)/verif
+VERIF_DIR ?= $(BUILD_DIR)/verif$(FPU_PROFILE_SUFFIX)
 COVERAGE_DIR ?= $(VERIF_DIR)/coverage
 COVERAGE_DATA_DIR ?= $(COVERAGE_DIR)/data
 COVERAGE_MERGED ?= $(COVERAGE_DIR)/merged.dat
@@ -102,7 +107,7 @@ COVERAGE_SUMMARY ?= $(COVERAGE_DIR)/summary.log
 COVERAGE_ANNOTATE_DIR ?= $(COVERAGE_DIR)/annotated
 COVERAGE ?= 0
 VERILATOR_COVERAGE ?= $(COVERAGE)
-SW_TEST_OUT_ROOT ?= $(BUILD_DIR)/sw_tests
+SW_TEST_OUT_ROOT ?= $(BUILD_DIR)/sw_tests$(FPU_PROFILE_SUFFIX)
 SW_BOUNDARY_DIR ?= $(BUILD_DIR)/sw_boundary
 SW_COVERAGE_DIR ?= $(VERIF_DIR)/sw_coverage
 SW_COVERAGE_DATA_DIR ?= $(SW_COVERAGE_DIR)/data
@@ -254,6 +259,8 @@ RTL_QC_BENDER_DIR ?= $(PROJECT_ROOT)/hw/ip/ydrasil_core
 RTL_QC_BENDER_TARGETS ?= verilator
 RTL_QC_WRAPPER_DIR ?= $(PROJECT_ROOT)/hw/ip/Xilinx_ip_wrapper/rtl
 RTL_QC_DEFINES ?= SYNTHESIS YDRASIL_PRODUCER_NUM=$(YDRASIL_PRODUCER_NUM)
+RTL_QC_DEFINES += $(if $(filter 1,$(FPU)),YDRASIL_ENABLE_FPU)
+RTL_QC_DEFINES += $(if $(and $(filter 1,$(FPU)),$(filter double,$(FPU_PRECISION))),YDRASIL_FPU_DOUBLE)
 RTL_QC_SOURCE_DEPS ?= $(shell find $(PROJECT_ROOT)/hw/ip -type f \( -name '*.sv' -o -name '*.svh' -o -name 'Bender.yml' -o -name 'Bender.yaml' -o -name 'Bender.lock' \) 2>/dev/null)
 RTL_QC_FLIST ?= $(RTL_QC_DIR)/$(RTL_QC_TOP).f
 RTL_QC_METADATA ?= $(RTL_QC_DIR)/$(RTL_QC_TOP).sources.json
@@ -310,6 +317,9 @@ RTL_QC_WARNING_PERIOD_NS ?= $(RTL_QC_WARNING_PERIOD_NS_$(RTL_QC_FREQ_MHZ))
 RTL_QC_TIMING_POSSIBLE_DEPTH ?= $(RTL_QC_TIMING_POSSIBLE_DEPTH_$(RTL_QC_FREQ_MHZ))
 RTL_QC_TIMING_DEFINITE_DEPTH ?= $(RTL_QC_TIMING_DEFINITE_DEPTH_$(RTL_QC_FREQ_MHZ))
 RTL_QC_TIMING_WEIGHTED_VIOLATION_LIMIT ?= $(RTL_QC_TIMING_WEIGHTED_VIOLATION_LIMIT_$(RTL_QC_FREQ_MHZ))
+ifeq ($(FPU),1)
+override RTL_QC_TIMING_WEIGHTED_VIOLATION_LIMIT := 1799
+endif
 RTL_QC_LUTRAM_POSSIBLE_DEPTH ?= $(RTL_QC_LUTRAM_POSSIBLE_DEPTH_$(RTL_QC_FREQ_MHZ))
 RTL_QC_FANOUT_TIMING_MIN_DEPTH ?= 3
 RTL_QC_BRAM_LAUNCH_PENALTY_DEPTH ?= 6
@@ -338,6 +348,8 @@ YOSYS_RUN ?= coarse:map_luts
 # simulation uses the technology-independent hw/ip/ydrasil_sim models.
 YOSYS_WITH_WRAPPERS ?= 1
 YOSYS_DEFINES ?= SYNTHESIS TARGET_SYNTHESIS YDRASIL_PRODUCER_NUM=$(YDRASIL_PRODUCER_NUM)
+YOSYS_DEFINES += $(if $(filter 1,$(FPU)),YDRASIL_ENABLE_FPU)
+YOSYS_DEFINES += $(if $(and $(filter 1,$(FPU)),$(filter double,$(FPU_PRECISION))),YDRASIL_FPU_DOUBLE)
 YOSYS_DIR ?= $(BUILD_DIR)/yosys-slang/$(YOSYS_TOP)
 YOSYS_FLIST ?= $(YOSYS_DIR)/$(YOSYS_TOP).f
 YOSYS_METADATA ?= $(YOSYS_DIR)/sources.json
@@ -361,13 +373,29 @@ VIVADO_OOC_PERIOD_NS ?= 5.0
 VIVADO_OOC_SYNTH_DIRECTIVE ?= PerformanceOptimized
 VIVADO_OOC_WITH_WRAPPERS ?= 1
 VIVADO_OOC_DEFINES ?= SYNTHESIS TARGET_SYNTHESIS TARGET_VIVADO TARGET_XILINX
+VIVADO_OOC_DEFINES += $(if $(filter 1,$(FPU)),YDRASIL_ENABLE_FPU)
+VIVADO_OOC_DEFINES += $(if $(and $(filter 1,$(FPU)),$(filter double,$(FPU_PRECISION))),YDRASIL_FPU_DOUBLE)
 # Issue pipeline OOC is intentionally split by top.  Keep this list
 # configurable because a focused run may only need one stage.
 VIVADO_OOC_ISSUE_MODULES ?= ydrasil_id_stage ydrasil_issue_stage ydrasil_ctrl ydrasil_ex_block
 VIVADO_OOC_ISSUE_DIR ?= $(BUILD_DIR)/vivado-ooc/issue
 
+ifeq ($(FPU),1)
+ifeq ($(FPU_PRECISION),double)
+ARCH := rv32imfd_zicsr_zifencei_zba_zbb_zbc_zbkb_zbkx_zbs
+ABI  := ilp32d
+else ifeq ($(FPU_PRECISION),single)
+ARCH := rv32imf_zicsr_zifencei_zba_zbb_zbc_zbkb_zbkx_zbs
+ABI  := ilp32f
+else
+$(error Unsupported FPU_PRECISION '$(FPU_PRECISION)'. Use single or double)
+endif
+else ifeq ($(FPU),0)
 ARCH := rv32im_zicsr_zifencei_zba_zbb_zbc_zbkb_zbkx_zbs
 ABI  := ilp32
+else
+$(error Unsupported FPU '$(FPU)'. Use FPU=0 or FPU=1)
+endif
 PRIV := m
 
 RISCV_CFLAGS := \
@@ -383,10 +411,16 @@ RISCV_CFLAGS := \
     -falign-loops=8
 
 RVTESTS_TYPE := rv32ui rv32um rv32uzba rv32uzbb rv32uzbc rv32uzbkb rv32uzbkx rv32uzbs rv32mi
+ifeq ($(FPU),1)
+RVTESTS_TYPE += rv32uf
+ifeq ($(FPU_PRECISION),double)
+RVTESTS_TYPE += rv32ud
+endif
+endif
 RV32MI_TESTS ?= csr mcsr
 RVTESTS_EXCLUDE ?= rv32ui/ma_data
 
-RVTESTS_OUT_ROOT := $(BUILD_DIR)/riscv_tests
+RVTESTS_OUT_ROOT := $(BUILD_DIR)/riscv_tests$(FPU_PROFILE_SUFFIX)
 
 RVTESTS_RESULT_DIR := $(VERIF_DIR)/rvtest_results
 

@@ -55,3 +55,12 @@ sources:
       - dv/ydrasil_bht_clear_tb.sv
       - dv/ydrasil_gshare_recovery_tb.sv
       - dv/ydrasil_bus_irq_tb.sv
+
+  - target: fpu
+    files:
+      - rtl/ydrasil_fpu_math_pkg.sv
+      - rtl/ydrasil_fpu_fma.sv
+      - rtl/ydrasil_fpu_to_int.sv
+      - rtl/ydrasil_fpu_divsqrt.sv
+      - rtl/ydrasil_fpu_registers.sv
+      - rtl/ydrasil_fpu.sv
