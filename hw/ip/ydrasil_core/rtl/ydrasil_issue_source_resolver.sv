@@ -24,14 +24,6 @@ import ydrasil_pkg::*;
     output wire                          mdu_hit_o
 );
     wire source_nonzero = source_i.arch_addr != '0;
-    // The generation-qualified producer ID is the functional identity. Class
-    // and architectural destination are metadata checks, not mux selectors.
-    // Producer IDs contain a slot plus a one-bit generation.  A long-running
-    // OoO stream can legitimately revisit the same encoded ID while an old
-    // LSU/MDU reservation is still held for one registered transit cycle.
-    // Destination and result class are therefore part of the reservation
-    // qualification; matching the ID alone can feed an older load value to a
-    // new architectural source after ID wrap.
     wire source_dtcm_key_match =
         (source_i.producer_tag == dtcm_reservation_i.producer_id) &&
         (source_i.arch_addr == dtcm_reservation_i.arch_addr) &&
@@ -40,6 +32,14 @@ import ydrasil_pkg::*;
         (source_i.producer_tag == dtcm_history_reservation_i.producer_id) &&
         (source_i.arch_addr == dtcm_history_reservation_i.arch_addr) &&
         (source_i.producer_class == dtcm_history_reservation_i.result_class);
+    // The generation-qualified producer ID is the functional identity. Class
+    // and architectural destination are metadata checks, not mux selectors.
+    // Producer IDs contain a slot plus a one-bit generation.  A long-running
+    // OoO stream can legitimately revisit the same encoded ID while an old
+    // LSU/MDU reservation is still held for one registered transit cycle.
+    // Destination and result class are therefore part of the reservation
+    // qualification; matching the ID alone can feed an older load value to a
+    // new architectural source after ID wrap.
     wire source_mdu_key_match =
         (source_i.producer_tag == mdu_reservation_i.producer_id) &&
         (source_i.arch_addr == mdu_reservation_i.arch_addr) &&
@@ -81,6 +81,9 @@ import ydrasil_pkg::*;
                  completion_meta_i[completion_idx].producer_id);
         end
     endgenerate
+    assign mdu_hit_o = &{source_i.used, source_nonzero, source_i.tag_valid,
+        mdu_reservation_i.valid, mdu_reservation_i.producer_tracked,
+        source_mdu_key_match};
     assign dtcm_hit_o = &{source_i.used, source_nonzero, source_i.tag_valid,
         dtcm_reservation_i.valid, dtcm_reservation_i.producer_tracked,
         source_dtcm_key_match};
@@ -88,9 +91,6 @@ import ydrasil_pkg::*;
         source_i.tag_valid, dtcm_history_reservation_i.valid,
         dtcm_history_reservation_i.producer_tracked,
         source_dtcm_history_key_match};
-    assign mdu_hit_o = &{source_i.used, source_nonzero, source_i.tag_valid,
-        mdu_reservation_i.valid, mdu_reservation_i.producer_tracked,
-        source_mdu_key_match};
     assign ready_o = !source_i.used || (source_i.arch_addr == '0) ||
         !source_i.tag_valid || source_i.ready;
     assign data_o = mdu_hit_o ? mdu_bypass_data_i :
