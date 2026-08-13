@@ -515,8 +515,6 @@ import ydrasil_pkg::*;
             value_alloc_valid_q <= '0;
             value_alloc_id_q[0] <= '0;
             value_alloc_id_q[1] <= '0;
-            alloc_fast_uop_q[0] <= '0;
-            alloc_fast_uop_q[1] <= '0;
         end else begin
             alloc_wakeup_valid_q[0] <= issue_pipe_push && free_valid0;
             alloc_wakeup_valid_q[1] <= issue_pipe_push_two && free_valid1;
@@ -530,9 +528,15 @@ import ydrasil_pkg::*;
             value_alloc_valid_q[1] <= issue_pipe_push_two;
             value_alloc_id_q[0] <= dispatch_compact_uop.dst.rob_tag;
             value_alloc_id_q[1] <= dispatch_compact_uop1.dst.rob_tag;
-            alloc_fast_uop_q[0] <= dispatch_compact_uop;
-            alloc_fast_uop_q[1] <= dispatch_compact_uop1;
         end
+    end
+
+    // These payloads are consumed only when the separately reset allocation
+    // token is valid.  Updating them without reset keeps the high-fanout reset
+    // tree off two complete compact-uop register banks.
+    always_ff @(posedge clk) begin
+        alloc_fast_uop_q[0] <= dispatch_compact_uop;
+        alloc_fast_uop_q[1] <= dispatch_compact_uop1;
     end
 
     // Single-cycle ALU dependencies use the two registered lane tokens so a
@@ -1496,8 +1500,6 @@ import ydrasil_pkg::*;
 
     always_ff @(posedge clk) begin
         if (!rst_n) begin
-            select_head_uop0_q <= '0;
-            select_head_uop1_q <= '0;
             select_head_pair_q <= 1'b0;
             select_head_valid_q <= 1'b0;
             select_head_lane_a_valid_q <= 1'b0;
@@ -1513,10 +1515,6 @@ import ydrasil_pkg::*;
             // compacted at the bundle level, so a surviving lane-B uop never
             // traverses a full-uop B-to-A mux.
             if (select_recovery_keep0 || select_recovery_keep1) begin
-                select_head_uop0_q.src0_bypass <= BYPASS_NONE;
-                select_head_uop0_q.src1_bypass <= BYPASS_NONE;
-                select_head_uop1_q.src0_bypass <= BYPASS_NONE;
-                select_head_uop1_q.src1_bypass <= BYPASS_NONE;
                 select_head_lane_a_valid_q <= select_recovery_keep0;
                 select_head_lane_b_valid_q <= select_recovery_keep1;
                 select_head_pair_q <= select_recovery_keep0 &&
@@ -1530,8 +1528,6 @@ import ydrasil_pkg::*;
             end
         end else begin
             if (select_buf_push) begin
-                select_head_uop0_q <= selected_lane_a_uop;
-                select_head_uop1_q <= selected_lane_b_uop;
                 select_head_lane_a_valid_q <= selected_lane_a_valid;
                 select_head_lane_b_valid_q <= selected_lane_b_valid;
                 select_head_pair_q <= selected_lane_a_valid &&
@@ -1543,6 +1539,24 @@ import ydrasil_pkg::*;
                 select_head_lane_a_valid_q <= 1'b0;
                 select_head_lane_b_valid_q <= 1'b0;
             end
+        end
+    end
+
+
+    // Head validity owns all observability of these wide payload cells.  Keep
+    // recovery's bypass cleanup, but do not distribute reset/flush to either
+    // complete uop bank.
+    always_ff @(posedge clk) begin
+        if (branch_recovery_i) begin
+            if (select_recovery_keep0 || select_recovery_keep1) begin
+                select_head_uop0_q.src0_bypass <= BYPASS_NONE;
+                select_head_uop0_q.src1_bypass <= BYPASS_NONE;
+                select_head_uop1_q.src0_bypass <= BYPASS_NONE;
+                select_head_uop1_q.src1_bypass <= BYPASS_NONE;
+            end
+        end else if (select_buf_push) begin
+            select_head_uop0_q <= selected_lane_a_uop;
+            select_head_uop1_q <= selected_lane_b_uop;
         end
     end
 
@@ -2582,7 +2596,6 @@ import ydrasil_pkg::*;
         !src1_ready_q && (|current_src1_completion_hit);
     always_ff @(posedge clk) begin
         if (!rst_n || hard_flush_i) begin
-            uop_q <= '0;
             valid_q <= 1'b0;
             src0_ready_q <= 1'b0;
             src1_ready_q <= 1'b0;
@@ -2606,13 +2619,9 @@ import ydrasil_pkg::*;
                 if (current_src1_wakeup)
                     src1_ready_q <= 1'b1;
                 if (current_src0_retire) begin
-                    uop_q.src0.tag_valid <= 1'b0;
-                    uop_q.src0.ready <= 1'b1;
                     src0_ready_q <= 1'b1;
                 end
                 if (current_src1_retire) begin
-                    uop_q.src1.tag_valid <= 1'b0;
-                    uop_q.src1.ready <= 1'b1;
                     src1_ready_q <= 1'b1;
                 end
             end else begin
@@ -2634,33 +2643,20 @@ import ydrasil_pkg::*;
                 if (current_src1_wakeup)
                     src1_ready_q <= 1'b1;
                 if (current_src0_retire) begin
-                    uop_q.src0.tag_valid <= 1'b0;
-                    uop_q.src0.ready <= 1'b1;
                     src0_ready_q <= 1'b1;
                 end
                 if (current_src1_retire) begin
-                    uop_q.src1.tag_valid <= 1'b0;
-                    uop_q.src1.ready <= 1'b1;
                     src1_ready_q <= 1'b1;
                 end
                 if (remove_i)
                     valid_q <= 1'b0;
             end
             if (dispatch0_write_i) begin
-                uop_q <= dispatch0_uop_i;
                 valid_q <= 1'b1;
                 src0_ready_q <= dispatch0_src0_ready_i ||
                     dispatch0_src0_retire;
                 src1_ready_q <= dispatch0_src1_ready_i ||
                     dispatch0_src1_retire;
-                if (dispatch0_src0_retire) begin
-                    uop_q.src0.tag_valid <= 1'b0;
-                    uop_q.src0.ready <= 1'b1;
-                end
-                if (dispatch0_src1_retire) begin
-                    uop_q.src1.tag_valid <= 1'b0;
-                    uop_q.src1.ready <= 1'b1;
-                end
                 order_mask_q <=
                     dispatch0_order_mask_i[BANK_BASE +: BANK_SIZE];
                 memory_q <= dispatch0_memory_i;
@@ -2670,20 +2666,11 @@ import ydrasil_pkg::*;
                 serial_q <= dispatch0_serial_i;
                 early_writes_q <= dispatch0_early_writes_i;
             end else if (dispatch1_write_i) begin
-                uop_q <= dispatch1_uop_i;
                 valid_q <= 1'b1;
                 src0_ready_q <= dispatch1_src0_ready_i ||
                     dispatch1_src0_retire;
                 src1_ready_q <= dispatch1_src1_ready_i ||
                     dispatch1_src1_retire;
-                if (dispatch1_src0_retire) begin
-                    uop_q.src0.tag_valid <= 1'b0;
-                    uop_q.src0.ready <= 1'b1;
-                end
-                if (dispatch1_src1_retire) begin
-                    uop_q.src1.tag_valid <= 1'b0;
-                    uop_q.src1.ready <= 1'b1;
-                end
                 order_mask_q <=
                     dispatch1_order_mask_i[BANK_BASE +: BANK_SIZE];
                 memory_q <= dispatch1_memory_i;
@@ -2692,6 +2679,57 @@ import ydrasil_pkg::*;
                 divrem_q <= dispatch1_divrem_i;
                 serial_q <= dispatch1_serial_i;
                 early_writes_q <= dispatch1_early_writes_i;
+            end
+        end
+    end
+
+
+    // An invalid RS entry cannot participate in selection, wakeup, recovery,
+    // or completion matching.  Store its wide payload in unreset FFs and keep
+    // only validity/readiness/order state on the reset tree.
+    always_ff @(posedge clk) begin
+        if (branch_recovery_i) begin
+            if (valid_q && recovery_keep_i) begin
+                if (current_src0_retire) begin
+                    uop_q.src0.tag_valid <= 1'b0;
+                    uop_q.src0.ready <= 1'b1;
+                end
+                if (current_src1_retire) begin
+                    uop_q.src1.tag_valid <= 1'b0;
+                    uop_q.src1.ready <= 1'b1;
+                end
+            end
+        end else begin
+            if (valid_q) begin
+                if (current_src0_retire) begin
+                    uop_q.src0.tag_valid <= 1'b0;
+                    uop_q.src0.ready <= 1'b1;
+                end
+                if (current_src1_retire) begin
+                    uop_q.src1.tag_valid <= 1'b0;
+                    uop_q.src1.ready <= 1'b1;
+                end
+            end
+            if (dispatch0_write_i) begin
+                uop_q <= dispatch0_uop_i;
+                if (dispatch0_src0_retire) begin
+                    uop_q.src0.tag_valid <= 1'b0;
+                    uop_q.src0.ready <= 1'b1;
+                end
+                if (dispatch0_src1_retire) begin
+                    uop_q.src1.tag_valid <= 1'b0;
+                    uop_q.src1.ready <= 1'b1;
+                end
+            end else if (dispatch1_write_i) begin
+                uop_q <= dispatch1_uop_i;
+                if (dispatch1_src0_retire) begin
+                    uop_q.src0.tag_valid <= 1'b0;
+                    uop_q.src0.ready <= 1'b1;
+                end
+                if (dispatch1_src1_retire) begin
+                    uop_q.src1.tag_valid <= 1'b0;
+                    uop_q.src1.ready <= 1'b1;
+                end
             end
         end
     end
