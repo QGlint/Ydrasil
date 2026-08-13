@@ -41,5 +41,20 @@ import ydrasil_pkg::*;
         compact_uop_o.sys_op_info = issue_pkt_i.decode.sys_op_info;
         compact_uop_o.fence_i = issue_pkt_i.decode.fence_i;
 		compact_uop_o.illegal_instr = issue_pkt_i.decode.illegal_instr;
+        compact_uop_o.fp_valid = issue_pkt_i.decode.fp_valid;
+        compact_uop_o.fp_illegal = issue_pkt_i.decode.fp_illegal;
+        compact_uop_o.fp_op = issue_pkt_i.decode.fp_op;
+        compact_uop_o.fp_fmt = issue_pkt_i.decode.fp_fmt;
+        compact_uop_o.fp_dst_fmt = issue_pkt_i.decode.fp_dst_fmt;
+        compact_uop_o.fp_rm = issue_pkt_i.decode.fp_rm;
+        compact_uop_o.fp_rs1_addr = issue_pkt_i.decode.fp_rs1_addr;
+        compact_uop_o.fp_rs2_addr = issue_pkt_i.decode.fp_rs2_addr;
+        compact_uop_o.fp_rs3_addr = issue_pkt_i.decode.fp_rs3_addr;
+        compact_uop_o.fp_rd_addr = issue_pkt_i.decode.fp_rd_addr;
+        compact_uop_o.fp_rs1_fpr = issue_pkt_i.decode.fp_rs1_fpr;
+        compact_uop_o.fp_rs2_fpr = issue_pkt_i.decode.fp_rs2_fpr;
+        compact_uop_o.fp_rs3_fpr = issue_pkt_i.decode.fp_rs3_fpr;
+        compact_uop_o.fp_rd_fpr = issue_pkt_i.decode.fp_rd_fpr;
+        compact_uop_o.fp_rd_gpr = issue_pkt_i.decode.fp_rd_gpr;
     end
 endmodule

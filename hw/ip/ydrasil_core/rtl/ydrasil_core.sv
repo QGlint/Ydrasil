@@ -136,6 +136,8 @@ import ydrasil_axi_pkg::*;
 	ydrasil_lane_b_bru_payload_t        dual_bru_payload;
 	wire [31:0]                         dual_bru_operand_a;
 	wire [31:0]                         dual_bru_operand_b;
+	wire                                dual_fpu_valid;
+	ydrasil_lane_b_fpu_payload_t        dual_fpu_payload;
 	ydrasil_lsu_req_pkt_t         lsu_req_pkt;
 	wire                           illegal_instr_ex;
 
@@ -731,6 +733,9 @@ import ydrasil_axi_pkg::*;
 		.dtcm_resp_data_i   (dtcm_resp_data),
 		.issue_at_rob_head_i (issue_at_rob_head),
 		.rob_head_id_i       (rob_head_id),
+		.fpr_write_valid_i   (1'b0),
+		.fpr_write_addr_i    ('0),
+		.fpr_write_data_i    ('0),
 		.decode_ready_o      (issue_pipe_has_room),
 			.decode_consume_two_o(decode_consume_two),
 		.dispatch_accept_o   (issue_pipe_push),
@@ -794,7 +799,9 @@ import ydrasil_axi_pkg::*;
 			.dual_bru_valid_o  (dual_bru_valid),
 			.dual_bru_payload_o(dual_bru_payload),
 				.dual_bru_operand_a_o(dual_bru_operand_a),
-				.dual_bru_operand_b_o(dual_bru_operand_b)
+				.dual_bru_operand_b_o(dual_bru_operand_b),
+			.dual_fpu_valid_o  (dual_fpu_valid),
+			.dual_fpu_payload_o(dual_fpu_payload)
 		);
 
 	ydrasil_execute_stage u_ydrasil_execute_stage (

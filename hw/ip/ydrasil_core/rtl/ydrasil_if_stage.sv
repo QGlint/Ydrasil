@@ -291,21 +291,53 @@ import ydrasil_pkg::*;
     wire base_alu = base_r || base_i ||
         (opcode == RV32I_INS_LUI) || (opcode == RV32I_INS_AUIPC);
     wire memory = load || store;
-    wire explicit_illegal =
-        (opcode == 7'b0000111) || (opcode == 7'b0100111) ||
-        (opcode == 7'b1000011) || (opcode == 7'b1000111) ||
-        (opcode == 7'b1001011) || (opcode == 7'b1001111) ||
-        (opcode == 7'b1010011);
+    wire fp_load = (opcode == 7'b0000111) &&
+        ((funct3 == 3'b010) || (funct3 == 3'b011));
+    wire fp_store = (opcode == 7'b0100111) &&
+        ((funct3 == 3'b010) || (funct3 == 3'b011));
+    wire fp_op = opcode == 7'b1010011;
+    wire fp_fma = ((opcode == 7'b1000011) ||
+                   (opcode == 7'b1000111) ||
+                   (opcode == 7'b1001011) ||
+                   (opcode == 7'b1001111)) &&
+        ((instr_i[26:25] == 2'b00) || (instr_i[26:25] == 2'b01));
+    wire fp_opcode = fp_load || fp_store || fp_op || fp_fma;
+    wire fp_is_double = (fp_load || fp_store) ? (funct3 == 3'b011) :
+        fp_fma ? (instr_i[26:25] == 2'b01) : funct7[0];
+`ifdef YDRASIL_ENABLE_FPU
+    wire fp_enabled = fp_opcode;
+`else
+    wire fp_enabled = 1'b0;
+`endif
+`ifdef YDRASIL_FPU_DOUBLE
+    wire fp_width_supported = !fp_is_double || fp_enabled;
+`else
+    wire fp_width_supported = !fp_is_double;
+`endif
+    wire fp_memory = (fp_load || fp_store) && fp_enabled &&
+        fp_width_supported;
+    wire fp_int_source = fp_op &&
+        ((funct7[6:1] == 6'b110100) ||
+         (funct7[6:1] == 6'b111100));
+    wire fp_gpr_destination = fp_op &&
+        ((funct7[6:1] == 6'b101000) ||
+         (funct7[6:1] == 6'b111000) ||
+         (funct7[6:1] == 6'b110000));
+    wire explicit_illegal = fp_opcode && !fp_enabled;
 
     always_comb begin
         domain_o = DISPATCH_DOMAIN_P1;
-        if (memory)
+        if (fp_memory)
+            domain_o = fp_load || fp_store ? DISPATCH_DOMAIN_P0 :
+                DISPATCH_DOMAIN_P1;
+        else if (memory)
             domain_o = DISPATCH_DOMAIN_P0;
         else if (base_alu)
             domain_o = DISPATCH_DOMAIN_ALU;
     end
 
     assign serial_o = (opcode == RV32I_INS_CSR) || explicit_illegal ||
+        (fp_enabled && fp_opcode) ||
         ((opcode == RV32I_INS_FENCE) && (funct3 == 3'b001));
     assign branch_o = branch;
     // Rename only needs architectural source/destination presence.  All
@@ -313,10 +345,13 @@ import ydrasil_pkg::*;
     // operations use the I-type opcode, so this classification is independent
     // of the long per-operation Zb decoder.
     assign src0_used_o = !explicit_illegal &&
-        (type_r || type_i || load || store || branch || jalr || csr_register);
-    assign src1_used_o = !explicit_illegal && (type_r || store || branch);
+        (fp_enabled ? ((fp_load || fp_store) || fp_int_source) :
+         (type_r || type_i || load || store || branch || jalr || csr_register));
+    assign src1_used_o = !explicit_illegal &&
+        (fp_enabled ? 1'b0 : (type_r || store || branch));
     assign dst_writes_o = !explicit_illegal &&
-        (type_r || type_i || load || jal || jalr || lui || auipc || csr);
+        (fp_enabled ? fp_gpr_destination :
+         (type_r || type_i || load || jal || jalr || lui || auipc || csr));
 
     wire unused = &{1'b0, fence};
 endmodule

@@ -42,13 +42,40 @@ import ydrasil_pkg::*;
 	logic [UOP_LSU_SUBOP_WIDTH-1:0] lsu_subop;
 	wire full_bitmanip;
 	wire divrem;
-	wire illegal_instr = (instr_i[6:0] == 7'b0000111) ||
-		(instr_i[6:0] == 7'b0100111) ||
-		(instr_i[6:0] == 7'b1000011) ||
+	wire fp_load = (instr_i[6:0] == 7'b0000111) &&
+		((instr_i[14:12] == 3'b010) || (instr_i[14:12] == 3'b011));
+	wire fp_store = (instr_i[6:0] == 7'b0100111) &&
+		((instr_i[14:12] == 3'b010) || (instr_i[14:12] == 3'b011));
+	wire fp_op = instr_i[6:0] == 7'b1010011;
+	wire fp_fma = ((instr_i[6:0] == 7'b1000011) ||
 		(instr_i[6:0] == 7'b1000111) ||
 		(instr_i[6:0] == 7'b1001011) ||
-		(instr_i[6:0] == 7'b1001111) ||
-		(instr_i[6:0] == 7'b1010011);
+		(instr_i[6:0] == 7'b1001111)) &&
+		((instr_i[26:25] == 2'b00) || (instr_i[26:25] == 2'b01));
+	wire fp_opcode = fp_load || fp_store || fp_fma || fp_op;
+	wire fp_is_double = (fp_load || fp_store) ? (instr_i[14:12] == 3'b011) :
+		fp_fma ? (instr_i[26:25] == 2'b01) : instr_i[25];
+	wire fp_int_source = fp_op &&
+		((instr_i[31:26] == 6'b110100) ||
+		 (instr_i[31:26] == 6'b111100));
+	wire fp_gpr_destination = fp_op &&
+		((instr_i[31:26] == 6'b101000) ||
+		 (instr_i[31:26] == 6'b111000) ||
+		 (instr_i[31:26] == 6'b110000));
+	wire fp_gpr_src0 = fp_load || fp_store || fp_int_source;
+	wire fp_gpr_dst = fp_gpr_destination;
+`ifdef YDRASIL_ENABLE_FPU
+	wire illegal_instr = 1'b0;
+`else
+	wire illegal_instr = fp_opcode;
+`endif
+	logic fp_known;
+	logic fp_rm_used;
+	logic fp_double_enabled;
+	logic [6:0] fp_funct7;
+	logic [2:0] fp_funct3;
+	logic [4:0] fp_rs2;
+	logic fp_illegal;
 
     ydrasil_ins_decoder u_decoder (
         .instr_i(instr_i),
@@ -79,11 +106,26 @@ import ydrasil_pkg::*;
     );
 
     assign src0_arch_addr_o = rs1_addr;
-    assign src0_used_o = rs1_ren && !illegal_instr;
+    assign src0_used_o = illegal_instr ? 1'b0 :
+`ifdef YDRASIL_ENABLE_FPU
+        (fp_opcode ? fp_gpr_src0 : rs1_ren);
+`else
+        rs1_ren;
+`endif
     assign src1_arch_addr_o = rs2_addr;
-    assign src1_used_o = rs2_ren && !illegal_instr;
+    assign src1_used_o = illegal_instr ? 1'b0 :
+`ifdef YDRASIL_ENABLE_FPU
+        (fp_opcode ? 1'b0 : rs2_ren);
+`else
+        rs2_ren;
+`endif
     assign dst_arch_addr_o = rd_addr;
-    assign dst_writes_o = rd_wen && !illegal_instr;
+    assign dst_writes_o = illegal_instr ? 1'b0 :
+`ifdef YDRASIL_ENABLE_FPU
+        (fp_opcode ? fp_gpr_dst : rd_wen);
+`else
+        rd_wen;
+`endif
 
     always_comb begin
 		decode_pkt_o = '0;
@@ -115,13 +157,149 @@ import ydrasil_pkg::*;
 		decode_pkt_o.divrem = divrem;
         decode_pkt_o.csr_raddr = csr_raddr;
         decode_pkt_o.csr_waddr = csr_waddr;
-        decode_pkt_o.csr_op_info = csr_op_info;
-        decode_pkt_o.sys_op_info = sys_op_info;
+		decode_pkt_o.csr_op_info = csr_op_info;
+		decode_pkt_o.sys_op_info = sys_op_info;
         decode_pkt_o.fence_i = (instr_i[6:0] == RV32I_INS_FENCE) &&
             (instr_i[14:12] == 3'b001);
 
-		decode_pkt_o.illegal_instr = illegal_instr;
-		if (illegal_instr) begin
+		fp_funct7 = instr_i[31:25];
+		fp_funct3 = instr_i[14:12];
+		fp_rs2 = instr_i[24:20];
+`ifdef YDRASIL_FPU_DOUBLE
+		fp_double_enabled = 1'b1;
+`else
+		fp_double_enabled = 1'b0;
+`endif
+		fp_known = (fp_load || fp_store || fp_fma) &&
+			(!fp_is_double || fp_double_enabled);
+		fp_rm_used = 1'b0;
+		decode_pkt_o.fp_op = FPU_OP_ADD;
+		decode_pkt_o.fp_fmt = fp_is_double;
+		decode_pkt_o.fp_dst_fmt = fp_is_double;
+		if (fp_fma) begin
+			fp_rm_used = 1'b1;
+			case (instr_i[6:0])
+				7'b1000011: decode_pkt_o.fp_op = FPU_OP_FMADD;
+				7'b1000111: decode_pkt_o.fp_op = FPU_OP_FMSUB;
+				7'b1001011: decode_pkt_o.fp_op = FPU_OP_FNMSUB;
+				default:    decode_pkt_o.fp_op = FPU_OP_FNMADD;
+			endcase
+		end else if (fp_op) begin
+			case (fp_funct7[6:1])
+				6'b000000: begin fp_known = !fp_is_double || fp_double_enabled; fp_rm_used = 1'b1; decode_pkt_o.fp_op = FPU_OP_ADD; end
+				6'b000010: begin fp_known = !fp_is_double || fp_double_enabled; fp_rm_used = 1'b1; decode_pkt_o.fp_op = FPU_OP_SUB; end
+				6'b000100: begin fp_known = !fp_is_double || fp_double_enabled; fp_rm_used = 1'b1; decode_pkt_o.fp_op = FPU_OP_MUL; end
+				6'b000110: begin fp_known = !fp_is_double || fp_double_enabled; fp_rm_used = 1'b1; decode_pkt_o.fp_op = FPU_OP_DIV; end
+				6'b010110: begin fp_known = (fp_rs2 == 5'd0) && (!fp_is_double || fp_double_enabled); fp_rm_used = 1'b1; decode_pkt_o.fp_op = FPU_OP_SQRT; end
+				6'b001000: begin
+					fp_known = (fp_funct3 <= 3'b010) && (!fp_is_double || fp_double_enabled);
+					case (fp_funct3)
+						3'b000: decode_pkt_o.fp_op = FPU_OP_SGNJ;
+						3'b001: decode_pkt_o.fp_op = FPU_OP_SGNJN;
+						default: decode_pkt_o.fp_op = FPU_OP_SGNJX;
+					endcase
+				end
+				6'b001010: begin
+					fp_known = (fp_funct3 <= 3'b001) && (!fp_is_double || fp_double_enabled);
+					decode_pkt_o.fp_op = fp_funct3[0] ? FPU_OP_MAX : FPU_OP_MIN;
+				end
+				6'b101000: begin
+					fp_known = ((fp_funct3 == 3'b000) || (fp_funct3 == 3'b001) ||
+						(fp_funct3 == 3'b010)) && (!fp_is_double || fp_double_enabled);
+					case (fp_funct3)
+						3'b010: decode_pkt_o.fp_op = FPU_OP_EQ;
+						3'b001: decode_pkt_o.fp_op = FPU_OP_LT;
+						default: decode_pkt_o.fp_op = FPU_OP_LE;
+					endcase
+				end
+				6'b111000: begin
+					fp_known = (fp_rs2 == 5'd0) &&
+						(fp_funct3 == 3'b001 || (!fp_is_double && fp_funct3 == 3'b000)) &&
+						(!fp_is_double || fp_double_enabled);
+					decode_pkt_o.fp_op = fp_funct3[0] ? FPU_OP_CLASS : FPU_OP_MV_X_W;
+				end
+				6'b110000: begin
+					fp_known = (fp_rs2 <= 5'd1) && (!fp_is_double || fp_double_enabled);
+					fp_rm_used = 1'b1;
+					if (fp_is_double)
+						decode_pkt_o.fp_op = fp_rs2[0] ? FPU_OP_CVT_WU_D : FPU_OP_CVT_W_D;
+					else
+						decode_pkt_o.fp_op = fp_rs2[0] ? FPU_OP_CVT_WU_S : FPU_OP_CVT_W_S;
+				end
+				6'b110100: begin
+					fp_known = (fp_rs2 <= 5'd1) && (!fp_is_double || fp_double_enabled);
+					fp_rm_used = 1'b1;
+					if (fp_is_double)
+						decode_pkt_o.fp_op = fp_rs2[0] ? FPU_OP_CVT_D_WU : FPU_OP_CVT_D_W;
+					else
+						decode_pkt_o.fp_op = fp_rs2[0] ? FPU_OP_CVT_S_WU : FPU_OP_CVT_S_W;
+				end
+				6'b010000: begin
+					fp_rm_used = 1'b1;
+					if (!fp_funct7[0]) begin
+						fp_known = fp_double_enabled && (fp_rs2 == 5'd1);
+						decode_pkt_o.fp_op = FPU_OP_CVT_S_D;
+						decode_pkt_o.fp_fmt = 1'b1;
+						decode_pkt_o.fp_dst_fmt = 1'b0;
+					end else begin
+						fp_known = fp_double_enabled && (fp_rs2 == 5'd0);
+						decode_pkt_o.fp_op = FPU_OP_CVT_D_S;
+						decode_pkt_o.fp_fmt = 1'b0;
+						decode_pkt_o.fp_dst_fmt = 1'b1;
+					end
+				end
+				6'b111100: begin
+					fp_known = !fp_is_double && (fp_rs2 == 5'd0) && (fp_funct3 == 3'b000);
+					decode_pkt_o.fp_op = FPU_OP_MV_W_X;
+				end
+				default: fp_known = 1'b0;
+			endcase
+		end else if (fp_load) begin
+			decode_pkt_o.fp_op = fp_is_double ? FPU_OP_FLD : FPU_OP_FLW;
+		end else if (fp_store) begin
+			decode_pkt_o.fp_op = fp_is_double ? FPU_OP_FSD : FPU_OP_FSW;
+		end
+
+		decode_pkt_o.fp_valid = fp_opcode;
+		decode_pkt_o.fp_rm = fp_funct3;
+		decode_pkt_o.fp_rs1_addr = instr_i[19:15];
+		decode_pkt_o.fp_rs2_addr = instr_i[24:20];
+		decode_pkt_o.fp_rs3_addr = instr_i[31:27];
+		decode_pkt_o.fp_rd_addr = instr_i[11:7];
+		decode_pkt_o.fp_rs1_fpr = fp_fma || (fp_op && !fp_int_source);
+		decode_pkt_o.fp_rs2_fpr = fp_fma || fp_store || (fp_op &&
+			((fp_funct7[6:1] == 6'b000000) || (fp_funct7[6:1] == 6'b000010) ||
+			 (fp_funct7[6:1] == 6'b000100) || (fp_funct7[6:1] == 6'b000110) ||
+			 (fp_funct7[6:1] == 6'b001000) || (fp_funct7[6:1] == 6'b001010) ||
+			 (fp_funct7[6:1] == 6'b101000)));
+		decode_pkt_o.fp_rs3_fpr = fp_fma;
+		decode_pkt_o.fp_rd_gpr = fp_gpr_destination;
+		decode_pkt_o.fp_rd_fpr = decode_pkt_o.fp_valid && !fp_store &&
+			!decode_pkt_o.fp_rd_gpr;
+		fp_illegal = fp_opcode && (!fp_known ||
+			(fp_rm_used && (fp_funct3 > 3'b100) && (fp_funct3 != 3'b111)));
+		decode_pkt_o.fp_illegal = fp_illegal;
+		decode_pkt_o.illegal_instr = illegal_instr || fp_illegal;
+
+`ifdef YDRASIL_ENABLE_FPU
+		if (fp_opcode && !fp_illegal) begin
+			decode_pkt_o.op_class = fp_load ? UOP_CLASS_LOAD :
+				fp_store ? UOP_CLASS_STORE : UOP_CLASS_FPU;
+			decode_pkt_o.lsu_subop = fp_load ?
+				UOP_LSU_SUBOP_WIDTH'(OP_LSU_LW) : fp_store ?
+				UOP_LSU_SUBOP_WIDTH'(OP_LSU_SW) : '0;
+			decode_pkt_o.rs1_addr = instr_i[19:15];
+			decode_pkt_o.rs2_addr = instr_i[24:20];
+			decode_pkt_o.rd_addr = instr_i[11:7];
+			decode_pkt_o.rs1_ren = fp_gpr_src0;
+			decode_pkt_o.rs2_ren = 1'b0;
+			decode_pkt_o.rd_wen = fp_gpr_dst;
+			decode_pkt_o.imm = fp_load ? {{20{instr_i[31]}}, instr_i[31:20]} :
+				fp_store ? {{20{instr_i[31]}}, instr_i[31:25], instr_i[11:7]} : '0;
+		end
+`endif
+
+		if (decode_pkt_o.illegal_instr) begin
 			decode_pkt_o.rs1_addr = '0;
 			decode_pkt_o.rs2_addr = '0;
 			decode_pkt_o.rd_addr = '0;

@@ -68,6 +68,9 @@ import ydrasil_pkg::*;
     input  wire [DATA_WIDTH-1:0]       dtcm_resp_data_i,
     input  wire                        issue_at_rob_head_i,
     input  producer_id_t               rob_head_id_i,
+    input  wire                        fpr_write_valid_i,
+    input  wire [REGS_ADDR_WIDTH-1:0]  fpr_write_addr_i,
+    input  wire [FPU_DATA_WIDTH-1:0]   fpr_write_data_i,
     output wire                        decode_ready_o,
     output wire                        decode_consume_two_o,
     output wire                        dispatch_accept_o,
@@ -131,7 +134,9 @@ import ydrasil_pkg::*;
     output wire                        dual_bru_valid_o,
     output ydrasil_lane_b_bru_payload_t dual_bru_payload_o,
     output wire [DATA_WIDTH-1:0]       dual_bru_operand_a_o,
-    output wire [DATA_WIDTH-1:0]       dual_bru_operand_b_o
+    output wire [DATA_WIDTH-1:0]       dual_bru_operand_b_o,
+    output wire                        dual_fpu_valid_o,
+    output ydrasil_lane_b_fpu_payload_t dual_fpu_payload_o
 );
     localparam int ISSUE_WINDOW_DEPTH = 12;
     wire ydrasil_compact_uop_t issue_window_q [0:ISSUE_WINDOW_DEPTH-1];
@@ -1640,9 +1645,11 @@ import ydrasil_pkg::*;
     reg [OPERATOR_TYPE_WIDTH-1:0] mul_in_operator_type_q;
     ydrasil_lane_b_meta_t dual_meta_q;
     reg dual_alu_valid_q, dual_bit_valid_q, dual_bru_valid_q;
+    reg dual_fpu_valid_q;
     ydrasil_lane_b_alu_payload_t dual_alu_payload_q;
     ydrasil_lane_b_bit_payload_t dual_bit_payload_q;
     ydrasil_lane_b_bru_payload_t dual_bru_payload_q;
+    ydrasil_lane_b_fpu_payload_t dual_fpu_payload_q;
     ydrasil_reservation_pkt_t dtcm_operand_history_q;
     reg [DATA_WIDTH-1:0] dtcm_operand_history_data_q;
     ydrasil_reservation_pkt_t mdu_operand_reservation_q;
@@ -1762,10 +1769,12 @@ import ydrasil_pkg::*;
         (!src2_ready || (!src3_ready && !slot1_store));
     wire lane_a_serial = issue_pkt_i.valid &&
         ((issue_pkt_i.op_class == UOP_CLASS_CSR) ||
-         (issue_pkt_i.op_class == UOP_CLASS_SYS) || issue_pkt_i.fence_i);
+         (issue_pkt_i.op_class == UOP_CLASS_SYS) ||
+         (issue_pkt_i.op_class == UOP_CLASS_FPU) || issue_pkt_i.fence_i);
     wire lane_b_serial = issue_pkt1_i.valid &&
         ((issue_pkt1_i.op_class == UOP_CLASS_CSR) ||
-         (issue_pkt1_i.op_class == UOP_CLASS_SYS) || issue_pkt1_i.fence_i);
+         (issue_pkt1_i.op_class == UOP_CLASS_SYS) ||
+         (issue_pkt1_i.op_class == UOP_CLASS_FPU) || issue_pkt1_i.fence_i);
     wire serialize_stall = (lane_a_serial || lane_b_serial) &&
         (!lsu_idle_q || !issue_at_rob_head_q);
     // Select admits only source-ready uops and reserves structural resources.
@@ -1819,6 +1828,34 @@ import ydrasil_pkg::*;
         !src3_ready;
     ydrasil_compact_uop_t lane_a_uop;
     ydrasil_compact_uop_t lane_b_uop;
+    wire [REGS_ADDR_WIDTH-1:0] fpr_raddr1 = lane_b_uop.fp_valid ?
+        lane_b_uop.fp_rs1_addr : lane_a_uop.fp_rs1_addr;
+    wire [REGS_ADDR_WIDTH-1:0] fpr_raddr2 = lane_b_uop.fp_valid ?
+        lane_b_uop.fp_rs2_addr : lane_a_uop.fp_rs2_addr;
+    wire [REGS_ADDR_WIDTH-1:0] fpr_raddr3 = lane_b_uop.fp_valid ?
+        lane_b_uop.fp_rs3_addr : lane_a_uop.fp_rs3_addr;
+    wire [FPU_DATA_WIDTH-1:0] fpr_rdata1;
+    wire [FPU_DATA_WIDTH-1:0] fpr_rdata2;
+    wire [FPU_DATA_WIDTH-1:0] fpr_rdata3;
+`ifdef YDRASIL_ENABLE_FPU
+    ydrasil_fpu_registers u_issue_fpu_registers (
+        .clk(clk),
+        .rst_n(rst_n),
+        .write_valid_i(fpr_write_valid_i),
+        .write_addr_i(fpr_write_addr_i),
+        .write_data_i(fpr_write_data_i),
+        .read_addr1_i(fpr_raddr1),
+        .read_addr2_i(fpr_raddr2),
+        .read_addr3_i(fpr_raddr3),
+        .read_data1_o(fpr_rdata1),
+        .read_data2_o(fpr_rdata2),
+        .read_data3_o(fpr_rdata3)
+    );
+`else
+    assign fpr_rdata1 = '0;
+    assign fpr_rdata2 = '0;
+    assign fpr_rdata3 = '0;
+`endif
     reg lane_a_valid;
     reg lane_b_valid;
     logic [OPERATOR_WIDTH-1:0] lane_a_operator_info;
@@ -1845,9 +1882,17 @@ import ydrasil_pkg::*;
             UOP_CLASS_BJP:
                 lane_a_operator_type[OPERATOR_TYPE_BJP] = 1'b1;
             UOP_CLASS_LOAD:
-                lane_a_operator_type[OPERATOR_TYPE_LOAD] = 1'b1;
+                begin
+                    lane_a_operator_type[OPERATOR_TYPE_LOAD] = 1'b1;
+                    lane_a_operator_type[OPERATOR_TYPE_FPU] =
+                        lane_a_uop.fp_valid;
+                end
             UOP_CLASS_STORE:
-                lane_a_operator_type[OPERATOR_TYPE_STORE] = 1'b1;
+                begin
+                    lane_a_operator_type[OPERATOR_TYPE_STORE] = 1'b1;
+                    lane_a_operator_type[OPERATOR_TYPE_FPU] =
+                        lane_a_uop.fp_valid;
+                end
             UOP_CLASS_CSR:
                 lane_a_operator_type[OPERATOR_TYPE_CSR] = 1'b1;
             UOP_CLASS_SYS: begin
@@ -1858,6 +1903,8 @@ import ydrasil_pkg::*;
                 lane_a_operator_type[OPERATOR_TYPE_MUL] = 1'b1;
             UOP_CLASS_BITMANIP:
                 lane_a_operator_type[OPERATOR_TYPE_BITMANIP] = 1'b1;
+            UOP_CLASS_FPU:
+                lane_a_operator_type[OPERATOR_TYPE_FPU] = 1'b1;
             default:
                 lane_a_operator_type[OPERATOR_TYPE_ALU] = 1'b1;
         endcase
@@ -1867,9 +1914,17 @@ import ydrasil_pkg::*;
             UOP_CLASS_BJP:
                 lane_b_operator_type[OPERATOR_TYPE_BJP] = 1'b1;
             UOP_CLASS_LOAD:
-                lane_b_operator_type[OPERATOR_TYPE_LOAD] = 1'b1;
+                begin
+                    lane_b_operator_type[OPERATOR_TYPE_LOAD] = 1'b1;
+                    lane_b_operator_type[OPERATOR_TYPE_FPU] =
+                        lane_b_uop.fp_valid;
+                end
             UOP_CLASS_STORE:
-                lane_b_operator_type[OPERATOR_TYPE_STORE] = 1'b1;
+                begin
+                    lane_b_operator_type[OPERATOR_TYPE_STORE] = 1'b1;
+                    lane_b_operator_type[OPERATOR_TYPE_FPU] =
+                        lane_b_uop.fp_valid;
+                end
             UOP_CLASS_CSR:
                 lane_b_operator_type[OPERATOR_TYPE_CSR] = 1'b1;
             UOP_CLASS_SYS: begin
@@ -1880,6 +1935,8 @@ import ydrasil_pkg::*;
                 lane_b_operator_type[OPERATOR_TYPE_MUL] = 1'b1;
             UOP_CLASS_BITMANIP:
                 lane_b_operator_type[OPERATOR_TYPE_BITMANIP] = 1'b1;
+            UOP_CLASS_FPU:
+                lane_b_operator_type[OPERATOR_TYPE_FPU] = 1'b1;
             default:
                 lane_b_operator_type[OPERATOR_TYPE_ALU] = 1'b1;
         endcase
@@ -2110,6 +2167,9 @@ import ydrasil_pkg::*;
     wire lane_b_csr_accept = lane_b_accept &&
         ((lane_b_uop.op_class == UOP_CLASS_CSR) ||
          (lane_b_uop.op_class == UOP_CLASS_SYS));
+    wire lane_b_fpu_accept = lane_b_accept &&
+        (lane_b_uop.op_class == UOP_CLASS_FPU) &&
+        lane_b_uop.fp_valid && !lane_b_uop.fp_illegal;
 
     always_ff @(posedge clk) begin
         if (!rst_n || trap_flush_i ||
@@ -2138,6 +2198,7 @@ import ydrasil_pkg::*;
     ydrasil_lane_b_alu_payload_t dual_alu_payload_d;
     ydrasil_lane_b_bit_payload_t dual_bit_payload_d;
     ydrasil_lane_b_bru_payload_t dual_bru_payload_d;
+    ydrasil_lane_b_fpu_payload_t dual_fpu_payload_d;
     always_comb begin
         shared_agu_req_d = '0;
         shared_agu_req_d.valid = lane_a_agu_accept;
@@ -2147,7 +2208,13 @@ import ydrasil_pkg::*;
 	    shared_agu_req_d.rd_addr = lane_a_uop.dst.rd_addr;
         shared_agu_req_d.producer_id = lane_a_uop.dst.rob_tag;
         shared_agu_req_d.producer_tracked = lane_a_agu_accept;
-        shared_agu_req_d.store_data = lane_a_store_src1_capture;
+	    shared_agu_req_d.store_data = lane_a_store_src1_capture;
+	    shared_agu_req_d.fp_store_data = lane_a_uop.fp_rs2_fpr ? fpr_rdata2 :
+	        {{(FPU_DATA_WIDTH-DATA_WIDTH){1'b0}}, lane_a_store_src1_capture};
+	    shared_agu_req_d.fp_load = lane_a_uop.fp_valid &&
+	        (lane_a_uop.op_class == UOP_CLASS_LOAD);
+	    shared_agu_req_d.fp_double = lane_a_uop.fp_fmt;
+	    shared_agu_req_d.fp_rd_addr = lane_a_uop.fp_rd_addr;
         shared_agu_req_d.store_data_valid = lane_a_agu_accept &&
             (!shared_agu_req_d.is_store || lane_a_src1_value_ready);
         shared_agu_req_d.store_producer_id =
@@ -2191,6 +2258,25 @@ import ydrasil_pkg::*;
             lane_b_uop.pred_global_counter;
         dual_bru_payload_d.pred_local_counter = lane_b_uop.pred_local_counter;
         dual_bru_payload_d.pred_bht_index = lane_b_uop.pred_bht_index;
+
+        dual_fpu_payload_d = '0;
+        dual_fpu_payload_d.valid = lane_b_fpu_accept;
+        dual_fpu_payload_d.op = lane_b_uop.fp_op;
+        dual_fpu_payload_d.fmt = lane_b_uop.fp_fmt;
+        dual_fpu_payload_d.dst_fmt = lane_b_uop.fp_dst_fmt;
+        dual_fpu_payload_d.rm = lane_b_uop.fp_rm;
+        dual_fpu_payload_d.operand_a = lane_b_uop.fp_rs1_fpr ? fpr_rdata1 :
+            {{(FPU_DATA_WIDTH-DATA_WIDTH){1'b0}}, lane_b_src0_capture};
+        dual_fpu_payload_d.operand_b = lane_b_uop.fp_rs2_fpr ? fpr_rdata2 :
+            {{(FPU_DATA_WIDTH-DATA_WIDTH){1'b0}}, lane_b_src1_capture};
+        dual_fpu_payload_d.operand_c = fpr_rdata3;
+        dual_fpu_payload_d.rd_addr = lane_b_uop.fp_rd_addr;
+        dual_fpu_payload_d.rd_fpr = lane_b_uop.fp_rd_fpr;
+        dual_fpu_payload_d.rd_gpr = lane_b_uop.fp_rd_gpr;
+        dual_fpu_payload_d.producer_id = lane_b_uop.dst.rob_tag;
+        dual_fpu_payload_d.producer_tracked = lane_b_fpu_accept;
+        dual_fpu_payload_d.pc = lane_b_uop.pc;
+        dual_fpu_payload_d.instr = lane_b_uop.instr;
     end
 
     // Return-channel identity and data cross into Operand together. No live
@@ -2253,6 +2339,8 @@ import ydrasil_pkg::*;
             dual_bit_payload_q <= '0;
             dual_bru_valid_q <= 1'b0;
             dual_bru_payload_q <= '0;
+            dual_fpu_valid_q <= 1'b0;
+            dual_fpu_payload_q <= '0;
         end else begin
             lsu_idle_q <= lsu_idle_i;
             issue_at_rob_head_q <= issue_at_rob_head_i;
@@ -2317,6 +2405,7 @@ import ydrasil_pkg::*;
                     dual_alu_valid_q <= lane_b_alu_accept;
                     dual_bit_valid_q <= lane_b_bit_accept;
                     dual_bru_valid_q <= lane_b_bru_accept;
+                    dual_fpu_valid_q <= lane_b_fpu_accept;
                     if (lane_b_accept)
                         dual_meta_q <= dual_meta_d;
                     if (lane_b_alu_accept)
@@ -2325,6 +2414,8 @@ import ydrasil_pkg::*;
                         dual_bit_payload_q <= dual_bit_payload_d;
                     if (lane_b_bru_accept)
                         dual_bru_payload_q <= dual_bru_payload_d;
+                    if (lane_b_fpu_accept)
+                        dual_fpu_payload_q <= dual_fpu_payload_d;
         end
     end
 
@@ -2374,6 +2465,8 @@ import ydrasil_pkg::*;
 	assign dual_bru_payload_o = dual_bru_payload_q;
 	assign dual_bru_operand_a_o = dual_bru_payload_q.operand_a;
 	assign dual_bru_operand_b_o = dual_bru_payload_q.operand_b;
+	assign dual_fpu_valid_o = dual_fpu_valid_q;
+	assign dual_fpu_payload_o = dual_fpu_payload_q;
 
 `ifndef SYNTHESIS
     wire issue_valid_ff = issue_pkt_i.valid;
