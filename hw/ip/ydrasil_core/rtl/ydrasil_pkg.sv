@@ -558,6 +558,7 @@ package ydrasil_pkg;
 		producer_id_t                        store_producer_id;
 		logic                                store_producer_tracked;
 		logic                                fp_load;
+		logic                                fp_store;
 		logic                                fp_double;
 		logic [REGS_ADDR_WIDTH-1:0]          fp_rd_addr;
 		logic                                retired;

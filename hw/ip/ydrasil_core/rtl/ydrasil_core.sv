@@ -296,6 +296,9 @@ import ydrasil_axi_pkg::*;
 	wire                            lsu_completion_producer_tracked;
 	wire [REGS_ADDR_WIDTH-1:0]      lsu_completion_addr;
 	wire [REGS_DATA_WIDTH-1:0]      lsu_completion_data;
+	wire                            lsu_fp_completion_valid;
+	wire [REGS_ADDR_WIDTH-1:0]      lsu_fp_completion_addr;
+	wire [FPU_DATA_WIDTH-1:0]       lsu_fp_completion_data;
 	wire                            dual_completion_valid;
 	producer_id_t                   dual_completion_producer_id;
 	wire                            dual_completion_producer_tracked;
@@ -515,7 +518,10 @@ import ydrasil_axi_pkg::*;
 		.completion_data_o  (lsu_completion_data),
 		.completion_addr_o  (lsu_completion_addr),
 		.completion_producer_id_o(lsu_completion_producer_id),
-		.completion_producer_tracked_o(lsu_completion_producer_tracked)
+		.completion_producer_tracked_o(lsu_completion_producer_tracked),
+		.fp_completion_valid_o(lsu_fp_completion_valid),
+		.fp_completion_addr_o(lsu_fp_completion_addr),
+		.fp_completion_data_o(lsu_fp_completion_data)
 	);
 
 	ydrasil_axi_lite_master u_ydrasil_axi_lite_master (

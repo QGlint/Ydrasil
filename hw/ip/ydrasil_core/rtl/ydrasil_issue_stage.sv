@@ -2213,6 +2213,8 @@ import ydrasil_pkg::*;
 	        {{(FPU_DATA_WIDTH-DATA_WIDTH){1'b0}}, lane_a_store_src1_capture};
 	    shared_agu_req_d.fp_load = lane_a_uop.fp_valid &&
 	        (lane_a_uop.op_class == UOP_CLASS_LOAD);
+	    shared_agu_req_d.fp_store = lane_a_uop.fp_valid &&
+	        (lane_a_uop.op_class == UOP_CLASS_STORE);
 	    shared_agu_req_d.fp_double = lane_a_uop.fp_fmt;
 	    shared_agu_req_d.fp_rd_addr = lane_a_uop.fp_rd_addr;
         shared_agu_req_d.store_data_valid = lane_a_agu_accept &&

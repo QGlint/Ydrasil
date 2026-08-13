@@ -41,8 +41,11 @@ import ydrasil_pkg::*;
 	output wire                            completion_valid_o,
 	output wire [REGS_DATA_WIDTH-1:0]      completion_data_o,
 	output wire [REGS_ADDR_WIDTH-1:0]      completion_addr_o,
-	output producer_id_t                   completion_producer_id_o,
-	output wire                            completion_producer_tracked_o
+		output producer_id_t                   completion_producer_id_o,
+		output wire                            completion_producer_tracked_o,
+		output wire                            fp_completion_valid_o,
+		output wire [REGS_ADDR_WIDTH-1:0]      fp_completion_addr_o,
+		output wire [FPU_DATA_WIDTH-1:0]       fp_completion_data_o
 );
     localparam int QUEUE_DEPTH = 2;
     localparam int STORE_BUFFER_DEPTH = 2;
@@ -270,16 +273,30 @@ import ydrasil_pkg::*;
     wire [REGS_ADDR_WIDTH-1:0] active_rd_addr = active_pkt.rd_addr;
     wire [PRODUCER_ID_WIDTH-1:0] active_producer_id = active_pkt.producer_id;
     wire active_producer_tracked = active_pkt.producer_tracked;
+    wire active_fp_load = active_pkt.fp_load;
+    wire active_fp_store = active_pkt.fp_store;
+    wire active_fp_memory = active_fp_load || active_fp_store;
+    wire active_fp_double = active_fp_memory && active_pkt.fp_double;
+    wire [REGS_ADDR_WIDTH-1:0] active_fp_rd_addr = active_pkt.fp_rd_addr;
+    wire [FPU_DATA_WIDTH-1:0] active_fp_store_data = active_pkt.fp_store_data;
+    wire [63:0] active_fp_store_data64 =
+        {{(64-FPU_DATA_WIDTH){1'b0}}, active_fp_store_data};
     wire [BUS_DATA_WIDTH-1:0] active_store_data = active_pkt.store_data;
-    wire [3:0] active_store_mask = active_pkt.store_mask;
+    wire [3:0] active_store_mask = active_fp_store ? 4'b1111 :
+        active_pkt.store_mask;
     wire active_store_data_valid = active_pkt.store_data_valid;
     wire active_dtcm_load = active_valid && active_addr_is_dtcm && active_is_load;
     wire active_dtcm_store = active_valid && active_addr_is_dtcm && active_is_store;
 	    wire active_mmio = active_valid && !active_addr_is_dtcm;
 	    wire active_at_rob_head =
 	        active_pkt.producer_id == rob_head_id_i;
-	    wire active_mmio_order_safe = active_at_rob_head ||
-	        (active_is_store && active_pkt.retired);
+    wire active_mmio_order_safe = active_at_rob_head ||
+        (active_is_store && active_pkt.retired);
+    reg fp_double_phase_q;
+    wire [BUS_ADDR_WIDTH-1:0] active_beat_addr = active_addr +
+        (active_fp_double && fp_double_phase_q ? 32'd4 : 32'd0);
+    wire [1:0] active_addr_index = active_beat_addr[1:0];
+    wire active_sequence_done = !active_fp_double || fp_double_phase_q;
 	    wire second_is_older =
 	        producer_age_from_head(second_pkt.producer_id) <
 	        producer_age_from_head(active_pkt.producer_id);
@@ -304,11 +321,18 @@ import ydrasil_pkg::*;
     reg [REGS_ADDR_WIDTH-1:0] mmio_rd_addr_q;
     producer_id_t mmio_producer_id_q;
     reg mmio_producer_tracked_q;
+    reg mmio_fp_load_q;
+    reg mmio_fp_double_q;
+    reg mmio_fp_second_q;
+    reg [REGS_ADDR_WIDTH-1:0] mmio_fp_rd_addr_q;
     reg mmio_wb_valid_q;
     reg [31:0] mmio_wb_result_q;
     reg [REGS_ADDR_WIDTH-1:0] mmio_wb_rd_addr_q;
     producer_id_t mmio_wb_producer_id_q;
     reg mmio_wb_producer_tracked_q;
+    reg mmio_wb_fp_load_q;
+    reg [63:0] mmio_wb_fp_data_q;
+    reg [REGS_ADDR_WIDTH-1:0] mmio_wb_fp_rd_addr_q;
     wire mmio_busy = mmio_req_valid_q || mmio_wb_valid_q;
 
     reg load_s1_valid_q;
@@ -319,6 +343,11 @@ import ydrasil_pkg::*;
     reg [1:0] load_s1_addr_index_q;
     reg [3:0] load_s1_forward_mask_q;
     reg [31:0] load_s1_forward_data_q;
+    reg load_s1_fp_load_q;
+    reg load_s1_fp_double_q;
+    reg load_s1_fp_second_q;
+    reg [REGS_ADDR_WIDTH-1:0] load_s1_fp_rd_addr_q;
+    reg [31:0] fp_double_low_q;
     reg store_launch_valid_q;
     reg [BUS_ADDR_WIDTH-1:0] store_launch_addr_q;
     reg [BUS_DATA_WIDTH-1:0] store_launch_data_q;
@@ -337,44 +366,53 @@ import ydrasil_pkg::*;
 	    // registered empty state; recovery, the DTCM range compare and the store
 	    // forwarding CAM remain off the BRAM control path.  A non-DTCM request
 	    // merely causes an ignored read and still enters the normal MMIO queue.
-	    wire fast_dtcm_probe = queue_empty && req_raw_valid_i && req_i.is_load &&
-	        store_buf_empty && !store_launch_valid_q && !load_issue_hold;
+    wire fast_dtcm_probe = queue_empty && req_raw_valid_i && req_i.is_load &&
+        !req_i.fp_load && store_buf_empty && !store_launch_valid_q &&
+        !load_issue_hold;
 	    wire fast_dtcm_load_fire = fast_dtcm_probe && req_i.valid &&
 	        req_i.addr_is_dtcm;
 	    wire queued_dtcm_load_candidate = active_dtcm_load && !load_issue_hold;
 	    // The BRAM address path has only the registered queue-empty select.  All
 	    // other qualification applies to response metadata, not to the RAM pin.
-	    wire [BUS_ADDR_WIDTH-1:0] dtcm_read_addr = queue_empty ?
-	        req_i.addr : active_addr;
-	    wire [DTCM_ADDR_WIDTH-1:0] dtcm_read_word_addr = queue_empty ?
-	        req_dtcm_word_addr_i : active_addr[DTCM_ADDR_WIDTH+1:2];
-	    wire [BUS_ADDR_WIDTH-1:0] load_launch_addr = fast_dtcm_load_fire ?
-	        req_i.addr : active_addr;
+    wire [BUS_ADDR_WIDTH-1:0] dtcm_read_addr = queue_empty ?
+        req_i.addr : active_beat_addr;
+    wire [DTCM_ADDR_WIDTH-1:0] dtcm_read_word_addr = queue_empty ?
+        req_dtcm_word_addr_i : active_beat_addr[DTCM_ADDR_WIDTH+1:2];
+    wire [BUS_ADDR_WIDTH-1:0] load_launch_addr = fast_dtcm_load_fire ?
+        req_i.addr : active_beat_addr;
 	    wire [REGS_ADDR_WIDTH-1:0] load_launch_rd_addr = fast_dtcm_load_fire ?
 	        req_i.rd_addr : active_rd_addr;
 	    wire producer_id_t load_launch_producer_id = fast_dtcm_load_fire ?
 	        req_i.producer_id : active_producer_id;
 	    wire load_launch_producer_tracked = fast_dtcm_load_fire ?
 	        req_i.producer_tracked : active_producer_tracked;
-	    wire [OP_LSU_INFO_WIDTH-1:0] load_launch_op = fast_dtcm_load_fire ?
-	        req_i.op : active_op;
+    wire [OP_LSU_INFO_WIDTH-1:0] load_launch_op = fast_dtcm_load_fire ?
+        req_i.op : active_op;
+    wire load_launch_fp_load = fast_dtcm_load_fire ? req_i.fp_load :
+        active_fp_load;
+    wire load_launch_fp_double = fast_dtcm_load_fire ? req_i.fp_double :
+        active_fp_double;
+    wire [REGS_ADDR_WIDTH-1:0] load_launch_fp_rd_addr =
+        fast_dtcm_load_fire ? req_i.fp_rd_addr : active_fp_rd_addr;
+    wire load_launch_fp_second = fast_dtcm_load_fire ? 1'b0 :
+        (active_fp_double && fp_double_phase_q);
 
     // Two age-ordered entries cover the measured forwarding use while
     // removing half of the address CAM and its newest-store priority tree.
 	    wire store_hit0 = (store_buf_count_q > STORE_COUNT_WIDTH'(0)) &&
 	        store_buf0_q.valid &&
-	        (store_buf0_q.addr[BUS_ADDR_WIDTH-1:2] ==
-	         active_addr[BUS_ADDR_WIDTH-1:2]);
+        (store_buf0_q.addr[BUS_ADDR_WIDTH-1:2] ==
+         active_beat_addr[BUS_ADDR_WIDTH-1:2]);
 	    wire store_hit1 = (store_buf_count_q > STORE_COUNT_WIDTH'(1)) &&
 	        store_buf1_q.valid &&
-	        (store_buf1_q.addr[BUS_ADDR_WIDTH-1:2] ==
-	         active_addr[BUS_ADDR_WIDTH-1:2]);
+        (store_buf1_q.addr[BUS_ADDR_WIDTH-1:2] ==
+         active_beat_addr[BUS_ADDR_WIDTH-1:2]);
 	    // A retired store spends one cycle in the launch register after leaving
 	    // the buffer. A same-word load in that cycle must not observe the
 	    // read-before-write value returned by the DTCM.
 	    wire store_launch_hit = store_launch_valid_q &&
-	        (store_launch_addr_q[BUS_ADDR_WIDTH-1:2] ==
-	         active_addr[BUS_ADDR_WIDTH-1:2]);
+        (store_launch_addr_q[BUS_ADDR_WIDTH-1:2] ==
+         active_beat_addr[BUS_ADDR_WIDTH-1:2]);
 	    wire load_store_data_block =
 	        (store_hit0 && !store_buf0_q.store_data_valid) ||
 	        (store_hit1 && !store_buf1_q.store_data_valid);
@@ -412,7 +450,8 @@ import ydrasil_pkg::*;
 	    wire mmio_fire = active_mmio && active_mmio_order_safe &&
 	        !mmio_busy && mmio_ready_i && store_buf_empty &&
         (!active_is_store || active_store_data_valid);
-    wire queue_dequeue = queued_dtcm_load_fire || dtcm_store_fire || mmio_fire;
+    wire queue_dequeue = (queued_dtcm_load_fire || dtcm_store_fire ||
+        mmio_fire) && active_sequence_done;
     wire queue_has_room_after_dequeue = !queue_full || queue_dequeue;
 	    wire queue_enqueue = req_i.valid && queue_has_room_after_dequeue &&
 	        !fast_dtcm_load_fire;
@@ -566,17 +605,32 @@ import ydrasil_pkg::*;
             load_s1_producer_id_q[PRODUCER_SLOT_WIDTH-1:0],
             recovery_head_slot_q, recovery_branch_slot_q));
     wire mmio_wb_out_valid = mmio_wb_valid_q && !dtcm_wb_valid;
-    assign completion_valid_o = dtcm_wb_valid ?
-        load_s1_producer_tracked_q :
-        (mmio_wb_out_valid && mmio_wb_producer_tracked_q);
+    wire selected_wb_fp_load = dtcm_wb_valid ? load_s1_fp_load_q :
+        mmio_wb_fp_load_q;
+    wire selected_wb_producer_tracked = dtcm_wb_valid ?
+        load_s1_producer_tracked_q : mmio_wb_producer_tracked_q;
+    wire [REGS_ADDR_WIDTH-1:0] selected_wb_fp_rd_addr = dtcm_wb_valid ?
+        load_s1_fp_rd_addr_q : mmio_wb_fp_rd_addr_q;
+    wire dtcm_fp_complete = dtcm_wb_valid && load_s1_fp_load_q &&
+        (!load_s1_fp_double_q || load_s1_fp_second_q);
+    wire [63:0] dtcm_fp_data64 = load_s1_fp_double_q ?
+        {dtcm_load_result, fp_double_low_q} :
+        {32'hffff_ffff, dtcm_load_result};
+    wire [63:0] selected_fp_data64 = dtcm_wb_valid ? dtcm_fp_data64 :
+        mmio_wb_fp_data_q;
+    assign completion_valid_o = (dtcm_wb_valid || mmio_wb_out_valid) &&
+        selected_wb_producer_tracked && !selected_wb_fp_load;
     assign completion_data_o = dtcm_wb_valid ?
         dtcm_load_result : mmio_wb_result_q;
     assign completion_addr_o = dtcm_wb_valid ?
         load_s1_rd_addr_q : mmio_wb_rd_addr_q;
     assign completion_producer_id_o = dtcm_wb_valid ?
         load_s1_producer_id_q : mmio_wb_producer_id_q;
-    assign completion_producer_tracked_o = dtcm_wb_valid ?
-        load_s1_producer_tracked_q : mmio_wb_producer_tracked_q;
+    assign completion_producer_tracked_o = selected_wb_producer_tracked;
+    assign fp_completion_valid_o = dtcm_fp_complete ||
+        (mmio_wb_out_valid && selected_wb_fp_load);
+    assign fp_completion_addr_o = selected_wb_fp_rd_addr;
+    assign fp_completion_data_o = selected_fp_data64[FPU_DATA_WIDTH-1:0];
 
     // DTCM is fixed-latency. Its registered identity is separate from the
     // MMIO/LSU completion stream; data is only a matched local operand bypass.
@@ -620,24 +674,27 @@ import ydrasil_pkg::*;
 		enqueue_pkt.valid = 1'b1;
 	end
 
+    wire [31:0] active_store_raw_data = active_fp_store ?
+        (fp_double_phase_q ? active_fp_store_data64[63:32] :
+         active_fp_store_data64[31:0]) : active_store_data;
     reg [31:0] active_aligned_store_data;
     always_comb begin
-        active_aligned_store_data = active_store_data;
+        active_aligned_store_data = active_store_raw_data;
         if (active_op[OP_LSU_SB]) begin
-            unique case (active_addr[1:0])
+            unique case (active_addr_index)
                 2'b00: active_aligned_store_data =
-                    {24'b0, active_store_data[7:0]};
+                    {24'b0, active_store_raw_data[7:0]};
                 2'b01: active_aligned_store_data =
-                    {16'b0, active_store_data[7:0], 8'b0};
+                    {16'b0, active_store_raw_data[7:0], 8'b0};
                 2'b10: active_aligned_store_data =
-                    {8'b0, active_store_data[7:0], 16'b0};
+                    {8'b0, active_store_raw_data[7:0], 16'b0};
                 default: active_aligned_store_data =
-                    {active_store_data[7:0], 24'b0};
+                    {active_store_raw_data[7:0], 24'b0};
             endcase
         end else if (active_op[OP_LSU_SH]) begin
-            active_aligned_store_data = active_addr[1] ?
-                {active_store_data[15:0], 16'b0} :
-                {16'b0, active_store_data[15:0]};
+            active_aligned_store_data = active_addr_index[1] ?
+                {active_store_raw_data[15:0], 16'b0} :
+                {16'b0, active_store_raw_data[15:0]};
         end
     end
 
@@ -647,7 +704,7 @@ import ydrasil_pkg::*;
 		        store_enqueue_pkt.retired = queue_head_q[0] ?
 		            patched_queue1.retired : patched_queue0.retired;
 	        store_enqueue_pkt.producer_id = active_pkt.producer_id;
-        store_enqueue_pkt.addr = active_addr;
+        store_enqueue_pkt.addr = active_beat_addr;
         store_enqueue_pkt.store_data = active_aligned_store_data;
         store_enqueue_pkt.store_mask = active_store_mask;
 	        store_enqueue_pkt.store_data_valid = active_store_data_valid;
@@ -830,6 +887,7 @@ import ydrasil_pkg::*;
             queue_head_q <= '0;
             queue_tail_q <= '0;
             store_buf_count_q <= '0;
+            fp_double_phase_q <= 1'b0;
             for (queue_idx = 0; queue_idx < QUEUE_DEPTH; queue_idx++)
                 queue_q[queue_idx] <= '0;
             store_buf0_q <= '0;
@@ -842,6 +900,11 @@ import ydrasil_pkg::*;
             load_s1_addr_index_q <= '0;
             load_s1_forward_mask_q <= '0;
             load_s1_forward_data_q <= '0;
+            load_s1_fp_load_q <= 1'b0;
+            load_s1_fp_double_q <= 1'b0;
+            load_s1_fp_second_q <= 1'b0;
+            load_s1_fp_rd_addr_q <= '0;
+            fp_double_low_q <= '0;
             store_launch_valid_q <= 1'b0;
             store_launch_addr_q <= '0;
             store_launch_data_q <= '0;
@@ -856,11 +919,18 @@ import ydrasil_pkg::*;
             mmio_rd_addr_q <= '0;
             mmio_producer_id_q <= '0;
             mmio_producer_tracked_q <= 1'b0;
+            mmio_fp_load_q <= 1'b0;
+            mmio_fp_double_q <= 1'b0;
+            mmio_fp_second_q <= 1'b0;
+            mmio_fp_rd_addr_q <= '0;
             mmio_wb_valid_q <= 1'b0;
             mmio_wb_result_q <= '0;
             mmio_wb_rd_addr_q <= '0;
             mmio_wb_producer_id_q <= '0;
             mmio_wb_producer_tracked_q <= 1'b0;
+            mmio_wb_fp_load_q <= 1'b0;
+            mmio_wb_fp_data_q <= '0;
+            mmio_wb_fp_rd_addr_q <= '0;
 `ifndef SYNTHESIS
             perf_stb_lookup_q <= '0;
             perf_stb_hit_q <= '0;
@@ -876,12 +946,17 @@ import ydrasil_pkg::*;
 	            queue_q[0] <= '0;
 	            queue_q[1] <= '0;
 	            store_buf0_q <= '0;
-	            store_buf1_q <= '0;
+            store_buf1_q <= '0;
+            fp_double_phase_q <= 1'b0;
             load_s1_valid_q <= 1'b0;
             store_launch_valid_q <= 1'b0;
             mmio_req_valid_q <= 1'b0;
             mmio_wb_valid_q <= 1'b0;
-		        end else if (recovery_pending_q) begin
+            mmio_fp_load_q <= 1'b0;
+            mmio_fp_double_q <= 1'b0;
+            mmio_fp_second_q <= 1'b0;
+            mmio_wb_fp_load_q <= 1'b0;
+			end else if (recovery_pending_q) begin
 	            queue_head_q <= '0;
 	            queue_tail_q <= recovery_queue_count[
 	                $clog2(QUEUE_DEPTH)-1:0];
@@ -906,8 +981,15 @@ import ydrasil_pkg::*;
 		                producer_slot_in_window(mmio_producer_id_q[
 	                    PRODUCER_SLOT_WIDTH-1:0], recovery_head_slot_q,
 	                    recovery_branch_slot_q);
-            mmio_wb_valid_q <= 1'b0;
-	        end else begin
+		            mmio_wb_valid_q <= 1'b0;
+		            fp_double_phase_q <= 1'b0;
+		        end else begin
+	            if (active_valid && (dtcm_load_fire || dtcm_store_fire ||
+                mmio_fire) && active_fp_double)
+                fp_double_phase_q <= !fp_double_phase_q;
+            else if (active_valid && (dtcm_load_fire || dtcm_store_fire ||
+                mmio_fire))
+                fp_double_phase_q <= 1'b0;
 	            // Only retirement and unresolved store data mutate in place.
 	            // Keeping immutable request payloads out of the normal hold/patch
 	            // assignment removes the full-packet self-write priority mux.
@@ -1006,30 +1088,51 @@ import ydrasil_pkg::*;
                 load_s1_addr_index_q <= load_launch_addr[1:0];
                 load_s1_forward_mask_q <= load_forward_mask;
                 load_s1_forward_data_q <= load_forward_data;
+                load_s1_fp_load_q <= load_launch_fp_load;
+                load_s1_fp_double_q <= load_launch_fp_double;
+                load_s1_fp_second_q <= load_launch_fp_second;
+                load_s1_fp_rd_addr_q <= load_launch_fp_rd_addr;
             end
+            if (load_s1_valid_q && load_s1_fp_load_q &&
+                load_s1_fp_double_q && !load_s1_fp_second_q)
+                fp_double_low_q <= dtcm_load_result;
             if (mmio_wb_valid_q && !load_s1_valid_q)
                 mmio_wb_valid_q <= 1'b0;
             if (mmio_req_valid_q && mmio_rsp_i.valid) begin
                 mmio_req_valid_q <= 1'b0;
                 if (mmio_is_load_q) begin
-                    mmio_wb_valid_q <= 1'b1;
-                    mmio_wb_result_q <= mmio_load_result;
-                    mmio_wb_rd_addr_q <= mmio_rd_addr_q;
-                    mmio_wb_producer_id_q <= mmio_producer_id_q;
-                    mmio_wb_producer_tracked_q <= mmio_producer_tracked_q;
+                    if (mmio_fp_load_q && mmio_fp_double_q &&
+                        !mmio_fp_second_q) begin
+                        fp_double_low_q <= mmio_load_result;
+                    end else begin
+                        mmio_wb_valid_q <= 1'b1;
+                        mmio_wb_result_q <= mmio_load_result;
+                        mmio_wb_rd_addr_q <= mmio_rd_addr_q;
+                        mmio_wb_producer_id_q <= mmio_producer_id_q;
+                        mmio_wb_producer_tracked_q <= mmio_producer_tracked_q;
+                        mmio_wb_fp_load_q <= mmio_fp_load_q;
+                        mmio_wb_fp_rd_addr_q <= mmio_fp_rd_addr_q;
+                        mmio_wb_fp_data_q <= mmio_fp_double_q ?
+                            {mmio_load_result, fp_double_low_q} :
+                            {32'hffff_ffff, mmio_load_result};
+                    end
                 end
             end
             if (mmio_fire) begin
                 mmio_req_valid_q <= 1'b1;
                 mmio_is_load_q <= active_is_load;
-                mmio_addr_q <= active_addr;
+                mmio_addr_q <= active_beat_addr;
                 mmio_wdata_q <= active_aligned_store_data;
                 mmio_wmask_q <= active_store_mask;
-                mmio_addr_index_q <= active_addr[1:0];
+                mmio_addr_index_q <= active_addr_index;
                 mmio_operator_lsu_q <= active_op;
                 mmio_rd_addr_q <= active_rd_addr;
                 mmio_producer_id_q <= active_producer_id;
                 mmio_producer_tracked_q <= active_producer_tracked;
+                mmio_fp_load_q <= active_fp_load;
+                mmio_fp_double_q <= active_fp_double;
+                mmio_fp_second_q <= active_fp_double && fp_double_phase_q;
+                mmio_fp_rd_addr_q <= active_fp_rd_addr;
             end
 
 `ifndef SYNTHESIS
