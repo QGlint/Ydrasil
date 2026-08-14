@@ -14,8 +14,9 @@ make -C sw rtthread
 ```
 
 The competition image can be checked end to end with the 16-APB-cycle UART
-model. The test boots Nano 3.1.5, sends `coremark 1` through MSH, and checks the
-version, floating-point time, CRC validation and completion markers:
+model. The test boots Nano 3.1.5, sends `coremark 1` and then `sensor all`
+through MSH, and checks the version, floating-point time, CRC validation,
+sensor-thread startup and completion markers:
 
 ```sh
 make rtthread-uart16-smoke
@@ -69,10 +70,14 @@ synthesis, use either the repository CoreMark or organizer CoreMark flow:
 ```sh
 make updatemem BIT=/path/to/ydrasil_soc.bit MMI=/path/to/ydrasil_soc.mmi
 make contest-updatemem BIT=/path/to/ydrasil_soc.bit MMI=/path/to/ydrasil_soc.mmi
+make rtthread-5.2.2-updatemem SYN_PLL_FREQ_MHZ=200 \
+    BIT=/path/to/ydrasil_soc.bit MMI=/path/to/ydrasil_soc.mmi
 ```
 
-Both commands update ITCM and DTCM sequentially, preserve the input bitstream,
+These commands update ITCM and DTCM sequentially, preserve the input bitstream,
 and write the new bitstream plus `manifest.sha256` below `build/updatemem/`.
+The 5.2.2 target is retained as a separately named fallback image. Both
+RT-Thread targets build their reported CPU frequency from `SYN_PLL_FREQ_MHZ`.
 
 ## Monitor wiring
 
