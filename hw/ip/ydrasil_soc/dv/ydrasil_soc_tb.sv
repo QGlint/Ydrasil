@@ -31,7 +31,9 @@ module ydrasil_soc_tb #(
     string itcm_file;
     string dtcm_file;
     string uart0_rx_text;
+    integer uart0_coremark_iterations = 0;
     integer uart_start_apb_cycles = 100000;
+    integer coremark_finish_grace_cycles = 0;
     integer max_cpu_cycles = 200000;
     integer local_wave_start = -1;
     integer local_wave_end = -1;
@@ -40,9 +42,12 @@ module ydrasil_soc_tb #(
     logic [31:0] stop_pc = '0;
     bit stop_pc_enable = 1'b0;
     bit coremark_seen = 1'b0;
+    bit coremark_done_seen = 1'b0;
     bit finish_on_coremark = 1'b0;
+    integer coremark_done_cycle = 0;
     bit uart_debug = 1'b0;
     bit core_debug = 1'b0;
+    bit uart0_coremark_command = 1'b0;
     logic [2:0] uart_rx_state_prev = '0;
 
     always #3.333 cpu_clk = ~cpu_clk;
@@ -94,7 +99,13 @@ module ydrasil_soc_tb #(
         logic [31:0] stop_pc_arg;
         void'($value$plusargs("uart_start_apb_cycles=%d",
             uart_start_apb_cycles));
+        uart0_coremark_command = $value$plusargs(
+            "uart0_coremark_iterations=%d", uart0_coremark_iterations);
+        if (uart0_coremark_command && uart0_coremark_iterations <= 0)
+            $fatal(1, "uart0_coremark_iterations must be positive");
         void'($value$plusargs("max_cpu_cycles=%d", max_cpu_cycles));
+        void'($value$plusargs("coremark_finish_grace_cycles=%d",
+            coremark_finish_grace_cycles));
         void'($value$plusargs("local_wave_start=%d", local_wave_start));
         void'($value$plusargs("local_wave_end=%d", local_wave_end));
         void'($value$plusargs("gpio_input=%h", gpio_external));
@@ -190,7 +201,14 @@ module ydrasil_soc_tb #(
     initial begin : uart0_stimulus
         integer char_index;
         wait (cpu_rst_n && apb_rst_n);
-        if ($value$plusargs("uart0_rx_text=%s", uart0_rx_text)) begin
+        if (uart0_coremark_command) begin
+            uart0_rx_text = $sformatf(
+                "coremark %0d\r", uart0_coremark_iterations);
+            repeat (uart_start_apb_cycles) @(posedge apb_clk);
+            for (char_index = 0; char_index < uart0_rx_text.len();
+                 char_index++)
+                uart0_send_byte(uart0_rx_text[char_index]);
+        end else if ($value$plusargs("uart0_rx_text=%s", uart0_rx_text)) begin
             repeat (uart_start_apb_cycles) @(posedge apb_clk);
             for (char_index = 0; char_index < uart0_rx_text.len();
                  char_index++)
@@ -218,6 +236,7 @@ module ydrasil_soc_tb #(
             cpu_cycles <= 0;
             retired_instructions <= 0;
             coremark_seen <= 1'b0;
+            coremark_done_seen <= 1'b0;
         end else begin
             cpu_cycles <= cpu_cycles + 1;
             retired_instructions <= retired_instructions +
@@ -232,9 +251,21 @@ module ydrasil_soc_tb #(
                     stop_pc, cpu_cycles);
                 $finish;
             end
-            if (finish_on_coremark && coremark_seen && !coremark_active) begin
+            if (finish_on_coremark && coremark_seen && !coremark_active &&
+                !coremark_done_seen) begin
+                coremark_done_seen <= 1'b1;
+                coremark_done_cycle <= cpu_cycles;
+                if (coremark_finish_grace_cycles == 0) begin
+                    $display("\n[SOC TB] CoreMark completed after %0d total cycles, workload cycles=%0d",
+                        cpu_cycles, u_soc.coremark_cycles);
+                    $finish;
+                end
+            end
+            if (finish_on_coremark && coremark_done_seen &&
+                cpu_cycles - coremark_done_cycle >=
+                    coremark_finish_grace_cycles) begin
                 $display("\n[SOC TB] CoreMark completed after %0d total cycles, workload cycles=%0d",
-                    cpu_cycles, u_soc.coremark_cycles);
+                    coremark_done_cycle, u_soc.coremark_cycles);
                 $finish;
             end
             if (cpu_cycles >= max_cpu_cycles) begin

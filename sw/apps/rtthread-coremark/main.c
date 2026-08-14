@@ -9,7 +9,10 @@
 extern int coremark_entry(void);
 extern volatile rt_int32_t seed4_volatile;
 
-#define COREMARK_DEFAULT_ITERATIONS 10000U
+#ifndef ITERATIONS
+#define ITERATIONS 15000
+#endif
+#define COREMARK_DEFAULT_ITERATIONS ((rt_uint32_t)ITERATIONS)
 
 static int parse_unsigned(const char *text, rt_uint32_t limit,
                           rt_uint32_t *parsed)

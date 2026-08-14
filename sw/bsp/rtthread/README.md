@@ -1,6 +1,8 @@
 # Ydrasil RT-Thread monitor BSP
 
-This external BSP uses the trimmed RT-Thread 5.2.2 tree under `sw/`.
+This shared external BSP uses the frozen, trimmed RT-Thread Nano 3.1.5 tree
+under `sw/` by default. The retained RT-Thread 5.2.2 runtime is available only
+through the explicit `make rtthread-5.2.2` developer command.
 
 ## Build
 
@@ -9,6 +11,14 @@ Required host tools are SCons 4.x and the repository's
 
 ```sh
 make -C sw rtthread
+```
+
+The competition image can be checked end to end with the 16-APB-cycle UART
+model. The test boots Nano 3.1.5, sends `coremark 1` through MSH, and checks the
+version, floating-point time, CRC validation and completion markers:
+
+```sh
+make rtthread-uart16-smoke
 ```
 
 The default image uses RV32IM with the `ilp32` ABI. RT-Thread, MSH and device
@@ -24,7 +34,7 @@ formatting use software double precision. Outputs are written below
 ## Shell commands
 
 - `help`: list built-in and board commands.
-- `coremark [iterations]`: run CoreMark. With no argument it runs 10000
+- `coremark [iterations]`: run CoreMark. With no argument it runs 15000
   iterations; a positive decimal argument selects the exact iteration count.
 - `sensor [all|imu]`: start the MS601M angle monitor in a background thread.
   It checks for display updates every 200 ms and reports changed data to the PC
@@ -38,6 +48,31 @@ formatting use software double precision. Outputs are written below
 
 The BSP remains reusable. Set `RTTHREAD_APP=<directory-name>` to select another
 manifest under `sw/apps/`.
+
+## Competition CoreMark sources
+
+Place the organizer-provided, unmodified files in `sw/coremark-jyd/`, then run:
+
+```sh
+make contest-coremark
+```
+
+The target requires `core_list_join.c`, `core_main.c`, `core_matrix.c`,
+`core_state.c`, `core_util.c` and `coremark.h`. It builds them in place without
+copying or editing them, uses 15000 iterations, and rejects the build if their
+pre-build and post-build SHA-256 manifests differ. Outputs are isolated under
+`build/app/rtthread-contest/`.
+
+To update an existing implemented bitstream and matching MMI without rerunning
+synthesis, use either the repository CoreMark or organizer CoreMark flow:
+
+```sh
+make updatemem BIT=/path/to/ydrasil_soc.bit MMI=/path/to/ydrasil_soc.mmi
+make contest-updatemem BIT=/path/to/ydrasil_soc.bit MMI=/path/to/ydrasil_soc.mmi
+```
+
+Both commands update ITCM and DTCM sequentially, preserve the input bitstream,
+and write the new bitstream plus `manifest.sha256` below `build/updatemem/`.
 
 ## Monitor wiring
 

@@ -30,6 +30,12 @@ struct ydrasil_uart_device
 
 static struct ydrasil_uart_device uart0;
 
+#if RTTHREAD_VERSION >= 50000
+typedef rt_ssize_t ydrasil_device_size_t;
+#else
+typedef rt_size_t ydrasil_device_size_t;
+#endif
+
 void ydrasil_console_putc(char ch)
 {
     volatile struct ydrasil_uart_regs *regs =
@@ -39,6 +45,17 @@ void ydrasil_console_putc(char ch)
     {
     }
     regs->rbr_thr_dll = (rt_uint8_t)ch;
+}
+
+char rt_hw_console_getchar(void)
+{
+    volatile struct ydrasil_uart_regs *regs =
+        (volatile struct ydrasil_uart_regs *)YDRASIL_UART0_BASE;
+
+    while ((regs->lsr & UART_LSR_DATA_READY) == 0)
+    {
+    }
+    return (char)(rt_uint8_t)regs->rbr_thr_dll;
 }
 
 static void uart_hw_configure(volatile struct ydrasil_uart_regs *regs)
@@ -71,7 +88,7 @@ static rt_err_t uart_open(rt_device_t device, rt_uint16_t oflag)
     struct ydrasil_uart_device *uart =
         rt_container_of(device, struct ydrasil_uart_device, parent);
 
-    RT_UNUSED(oflag);
+    (void)oflag;
     uart->regs->ier_dlm |= 0x01;
     return RT_EOK;
 }
@@ -85,15 +102,15 @@ static rt_err_t uart_close(rt_device_t device)
     return RT_EOK;
 }
 
-static rt_ssize_t uart_read(rt_device_t device, rt_off_t position,
-                            void *buffer, rt_size_t size)
+static ydrasil_device_size_t uart_read(rt_device_t device, rt_off_t position,
+                                       void *buffer, rt_size_t size)
 {
     struct ydrasil_uart_device *uart =
         rt_container_of(device, struct ydrasil_uart_device, parent);
     rt_uint8_t *bytes = buffer;
     rt_size_t count = 0;
 
-    RT_UNUSED(position);
+    (void)position;
     while (count < size && uart->rx_tail != uart->rx_head)
     {
         bytes[count++] = uart->rx_buffer[uart->rx_tail];
@@ -102,14 +119,14 @@ static rt_ssize_t uart_read(rt_device_t device, rt_off_t position,
     return count;
 }
 
-static rt_ssize_t uart_write(rt_device_t device, rt_off_t position,
-                             const void *buffer, rt_size_t size)
+static ydrasil_device_size_t uart_write(rt_device_t device, rt_off_t position,
+                                        const void *buffer, rt_size_t size)
 {
     const rt_uint8_t *bytes = buffer;
     rt_size_t index;
 
-    RT_UNUSED(device);
-    RT_UNUSED(position);
+    (void)device;
+    (void)position;
     for (index = 0; index < size; index++)
     {
         if (bytes[index] == '\n')
@@ -123,9 +140,9 @@ static rt_ssize_t uart_write(rt_device_t device, rt_off_t position,
 
 static rt_err_t uart_control(rt_device_t device, int command, void *argument)
 {
-    RT_UNUSED(device);
-    RT_UNUSED(command);
-    RT_UNUSED(argument);
+    (void)device;
+    (void)command;
+    (void)argument;
     return -RT_ENOSYS;
 }
 

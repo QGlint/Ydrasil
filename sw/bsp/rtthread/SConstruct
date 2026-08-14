@@ -3,9 +3,22 @@ import sys
 
 BSP_ROOT = os.path.abspath(os.getcwd())
 RTT_APP = os.getenv('RTT_APP', 'rtthread-coremark')
+RTT_VERSION = os.getenv('RTT_VERSION', '3.1.5')
+RTT_RUNTIME_DIRS = {
+    '3.1.5': 'rt-thread-nano-3.1.5',
+    '5.2.2': 'rt-thread-5.2.2',
+}
+if RTT_VERSION not in RTT_RUNTIME_DIRS:
+    raise RuntimeError(
+        'Unsupported RTT_VERSION=%s; choose one of: %s' %
+        (RTT_VERSION, ', '.join(sorted(RTT_RUNTIME_DIRS))))
+
 RTT_ROOT = os.path.abspath(os.path.join(
-    BSP_ROOT, '..', '..', 'rt-thread-5.2.2'))
-RTT_TOOLS_ROOT = os.path.join(RTT_ROOT, 'tools')
+    BSP_ROOT, '..', '..', RTT_RUNTIME_DIRS[RTT_VERSION]))
+# Nano intentionally has no build system. Reuse only the established SCons
+# helpers; all linked runtime sources still come from RTT_ROOT above.
+RTT_TOOLS_ROOT = os.path.abspath(os.path.join(
+    BSP_ROOT, '..', '..', 'rt-thread-5.2.2', 'tools'))
 
 sys.path.insert(0, RTT_TOOLS_ROOT)
 
@@ -22,14 +35,19 @@ import inspect
 import building as _building
 
 # building.py parses rtconfig.h independently of the compiler command line.
-# Seed the same profile macro that rtconfig.py passes to GCC so dependency
-# selection and C preprocessing agree for the RT-Thread 5.2.2 utest build.
+# Seed the same selection macros that rtconfig.py passes to GCC.
+_preprocessor_defines = {}
+if RTT_VERSION == '5.2.2':
+    _preprocessor_defines['RTT_LEGACY_522_BUILD'] = 1
 if RTT_APP == 'rtthread-utest':
+    _preprocessor_defines['RTT_UTEST_BUILD'] = 1
+
+if _preprocessor_defines:
     _create_preprocessor_instance = _building.create_preprocessor_instance
 
     def _create_profile_preprocessor():
         preprocessor = _create_preprocessor_instance()
-        preprocessor.cpp_namespace['RTT_UTEST_BUILD'] = 1
+        preprocessor.cpp_namespace.update(_preprocessor_defines)
         return preprocessor
 
     _building.create_preprocessor_instance = _create_profile_preprocessor
@@ -67,6 +85,7 @@ env = Environment(AS=rtconfig.AS, ASFLAGS=rtconfig.AFLAGS,
 env.PrependENVPath('PATH', rtconfig.EXEC_PATH)
 
 Export('RTT_ROOT')
+Export('RTT_VERSION')
 Export('rtconfig')
 
 objects = PrepareBuilding(env, RTT_ROOT)

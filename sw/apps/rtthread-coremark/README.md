@@ -3,8 +3,8 @@
 This application manifest builds the upstream CoreMark sources directly and
 renames its entry point for the MSH `coremark` command.
 
-The default monitor build keeps RT-Thread and application glue at `-O2`, runs
-10000 iterations and applies the repository's measured best compiler flag set
+The default Nano 3.1.5 monitor build keeps RT-Thread and application glue at
+`-O2`, runs 15000 iterations and applies the measured best compiler flag set
 only to the five CoreMark sources:
 
 ```sh
@@ -18,7 +18,7 @@ the CPU-domain monitor count to seconds. For example:
 make -C sw rtthread RTTHREAD_CPU_FREQ_HZ=200000000
 ```
 
-The MSH command is `coremark [iterations]`. With no argument it runs 10000
+The MSH command is `coremark [iterations]`. With no argument it runs 15000
 iterations; a positive decimal argument selects the exact iteration count.
 The raw 64-bit cycle count is always printed. Elapsed seconds and iterations
 per second use software double precision on RV32IM; no FPU instructions or
