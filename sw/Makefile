@@ -163,7 +163,10 @@ RTTHREAD_COREMARK_BEST_CFLAGS ?= -O3 -funroll-loops \
 	-fno-branch-count-reg -fno-crossjumping \
 	-fno-if-conversion -fno-if-conversion2 -fno-code-hoisting \
 	-fno-tree-dse -fno-section-anchors \
-	-fno-tree-forwprop -fno-tree-partial-pre
+	-fno-tree-forwprop -fno-tree-partial-pre \
+	-funroll-all-loops -mbranch-cost=1 \
+	-fno-tree-sra -ftree-dse -fcode-hoisting -fno-gcse \
+	-mtune=size -fcaller-saves
 # Apply the measured best flags only to CoreMark. The RT-Thread kernel,
 # monitor glue, drivers, and sensor code retain the selected profile flags.
 RTTHREAD_COREMARK_CORE_CFLAGS ?= $(RTTHREAD_COREMARK_BEST_CFLAGS)

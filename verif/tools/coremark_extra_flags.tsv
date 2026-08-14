@@ -1,0 +1,78 @@
+# case<TAB>additional CFLAGS appended to the measured default baseline.
+# Every entry is a single independent delta for the first expansion screen.
+branch_cost_0	-mbranch-cost=0
+branch_cost_4	-mbranch-cost=4
+branch_cost_6	-mbranch-cost=6
+branch_cost_7	-mbranch-cost=7
+branch_cost_8	-mbranch-cost=8
+branch_cost_10	-mbranch-cost=10
+tune_rocket	-mtune=rocket
+tune_sifive3	-mtune=sifive-3-series
+tune_sifive5	-mtune=sifive-5-series
+tune_u74	-mtune=sifive-u74
+tune_size	-mtune=size
+tune_andes45	-mtune=andes-45-series
+tune_c906	-mtune=thead-c906
+tune_nanhu	-mtune=xiangshan-nanhu
+tune_kunminghu	-mtune=xiangshan-kunminghu
+tune_xtc910	-mtune=xt-c910
+no_shorten_memrefs	-mno-shorten-memrefs
+save_restore	-msave-restore
+omit_leaf_frame_pointer	-momit-leaf-frame-pointer
+small_data_0	-msmall-data-limit=0
+small_data_16	-msmall-data-limit=16
+small_data_32	-msmall-data-limit=32
+align_2	-falign-functions=2 -falign-jumps=2 -falign-labels=2 -falign-loops=2
+align_4	-falign-functions=4 -falign-jumps=4 -falign-labels=4 -falign-loops=4
+align_16	-falign-functions=16 -falign-jumps=16 -falign-labels=16 -falign-loops=16
+align_32	-falign-functions=32 -falign-jumps=32 -falign-labels=32 -falign-loops=32
+no_rename_registers	-fno-rename-registers
+no_web	-fno-web
+caller_saves	-fcaller-saves
+keep_frame_pointer	-fno-omit-frame-pointer
+no_schedule_insns	-fno-schedule-insns
+no_schedule_insns2	-fno-schedule-insns2
+no_schedule_fusion	-fno-schedule-fusion
+no_peephole2	-fno-peephole2
+ira_priority	-fira-algorithm=priority
+ira_region_all	-fira-region=all
+ira_region_mixed	-fira-region=mixed
+ira_loop_pressure	-fira-loop-pressure
+no_ira_hoist_pressure	-fno-ira-hoist-pressure
+if_conversion	-fif-conversion
+if_conversion_pair	-fif-conversion -fif-conversion2
+code_hoisting	-fcode-hoisting
+crossjumping	-fcrossjumping
+branch_count_reg	-fbranch-count-reg
+tree_dse	-ftree-dse
+section_anchors	-fsection-anchors
+tree_forwprop	-ftree-forwprop
+tree_partial_pre	-ftree-partial-pre
+loop_distribute_patterns	-ftree-loop-distribute-patterns
+loop_vectorize	-ftree-loop-vectorize -ftree-slp-vectorize
+peel_loops	-fpeel-loops
+split_loops	-fsplit-loops
+no_unswitch_loops	-fno-unswitch-loops
+no_loop_interchange	-fno-loop-interchange
+no_loop_unroll_and_jam	-fno-loop-unroll-and-jam
+no_split_ivs_unroller	-fno-split-ivs-in-unroller
+no_version_loops_strides	-fno-version-loops-for-strides
+no_move_loop_invariants	-fno-move-loop-invariants
+no_gcse	-fno-gcse
+no_gcse_after_reload	-fno-gcse-after-reload
+no_rerun_cse_after_loop	-fno-rerun-cse-after-loop
+no_predictive_commoning	-fno-predictive-commoning
+no_tree_pre	-fno-tree-pre
+no_tree_sra	-fno-tree-sra
+no_ipa_sra	-fno-ipa-sra
+no_ipa_cp	-fno-ipa-cp
+no_ipa_cp_clone	-fno-ipa-cp-clone
+no_ipa_ra	-fno-ipa-ra
+no_ipa_icf	-fno-ipa-icf
+no_ipa_modref	-fno-ipa-modref
+no_reorder_blocks	-fno-reorder-blocks
+reorder_blocks_simple	-freorder-blocks-algorithm=simple
+no_reorder_functions	-fno-reorder-functions
+no_toplevel_reorder	-fno-toplevel-reorder
+no_shrink_wrap	-fno-shrink-wrap
+no_shrink_wrap_separate	-fno-shrink-wrap-separate

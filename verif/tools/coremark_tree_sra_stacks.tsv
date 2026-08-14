@@ -1,0 +1,52 @@
+# All non-empty subsets of the five small positive deltas on -fno-tree-sra.
+tree_sra_dse	-fno-tree-sra -ftree-dse
+tree_sra_ifconv	-fno-tree-sra -fif-conversion -fif-conversion2
+tree_sra_hoist	-fno-tree-sra -fcode-hoisting
+tree_sra_no_reorder	-fno-tree-sra -fno-reorder-functions
+tree_sra_no_version	-fno-tree-sra -fno-version-loops-for-strides
+tree_sra_dse_ifconv	-fno-tree-sra -ftree-dse -fif-conversion -fif-conversion2
+tree_sra_dse_hoist	-fno-tree-sra -ftree-dse -fcode-hoisting
+tree_sra_dse_no_reorder	-fno-tree-sra -ftree-dse -fno-reorder-functions
+tree_sra_dse_no_version	-fno-tree-sra -ftree-dse -fno-version-loops-for-strides
+tree_sra_ifconv_hoist	-fno-tree-sra -fif-conversion -fif-conversion2 -fcode-hoisting
+tree_sra_ifconv_no_reorder	-fno-tree-sra -fif-conversion -fif-conversion2 -fno-reorder-functions
+tree_sra_ifconv_no_version	-fno-tree-sra -fif-conversion -fif-conversion2 -fno-version-loops-for-strides
+tree_sra_hoist_no_reorder	-fno-tree-sra -fcode-hoisting -fno-reorder-functions
+tree_sra_hoist_no_version	-fno-tree-sra -fcode-hoisting -fno-version-loops-for-strides
+tree_sra_no_reorder_no_version	-fno-tree-sra -fno-reorder-functions -fno-version-loops-for-strides
+tree_sra_dse_ifconv_hoist	-fno-tree-sra -ftree-dse -fif-conversion -fif-conversion2 -fcode-hoisting
+tree_sra_dse_ifconv_no_reorder	-fno-tree-sra -ftree-dse -fif-conversion -fif-conversion2 -fno-reorder-functions
+tree_sra_dse_ifconv_no_version	-fno-tree-sra -ftree-dse -fif-conversion -fif-conversion2 -fno-version-loops-for-strides
+tree_sra_dse_hoist_no_reorder	-fno-tree-sra -ftree-dse -fcode-hoisting -fno-reorder-functions
+tree_sra_dse_hoist_no_version	-fno-tree-sra -ftree-dse -fcode-hoisting -fno-version-loops-for-strides
+tree_sra_dse_no_reorder_no_version	-fno-tree-sra -ftree-dse -fno-reorder-functions -fno-version-loops-for-strides
+tree_sra_ifconv_hoist_no_reorder	-fno-tree-sra -fif-conversion -fif-conversion2 -fcode-hoisting -fno-reorder-functions
+tree_sra_ifconv_hoist_no_version	-fno-tree-sra -fif-conversion -fif-conversion2 -fcode-hoisting -fno-version-loops-for-strides
+tree_sra_ifconv_no_reorder_no_version	-fno-tree-sra -fif-conversion -fif-conversion2 -fno-reorder-functions -fno-version-loops-for-strides
+tree_sra_hoist_no_reorder_no_version	-fno-tree-sra -fcode-hoisting -fno-reorder-functions -fno-version-loops-for-strides
+tree_sra_dse_ifconv_hoist_no_reorder	-fno-tree-sra -ftree-dse -fif-conversion -fif-conversion2 -fcode-hoisting -fno-reorder-functions
+tree_sra_dse_ifconv_hoist_no_version	-fno-tree-sra -ftree-dse -fif-conversion -fif-conversion2 -fcode-hoisting -fno-version-loops-for-strides
+tree_sra_dse_ifconv_no_reorder_no_version	-fno-tree-sra -ftree-dse -fif-conversion -fif-conversion2 -fno-reorder-functions -fno-version-loops-for-strides
+tree_sra_dse_hoist_no_reorder_no_version	-fno-tree-sra -ftree-dse -fcode-hoisting -fno-reorder-functions -fno-version-loops-for-strides
+tree_sra_ifconv_hoist_no_reorder_no_version	-fno-tree-sra -fif-conversion -fif-conversion2 -fcode-hoisting -fno-reorder-functions -fno-version-loops-for-strides
+tree_sra_all	-fno-tree-sra -ftree-dse -fif-conversion -fif-conversion2 -fcode-hoisting -fno-reorder-functions -fno-version-loops-for-strides
+# Re-evaluate code layout, prediction cost, and target scheduling after SRA changes code shape.
+tree_sra_branch_0	-fno-tree-sra -mbranch-cost=0
+tree_sra_branch_2	-fno-tree-sra -mbranch-cost=2
+tree_sra_branch_3	-fno-tree-sra -mbranch-cost=3
+tree_sra_branch_4	-fno-tree-sra -mbranch-cost=4
+tree_sra_branch_5	-fno-tree-sra -mbranch-cost=5
+tree_sra_branch_6	-fno-tree-sra -mbranch-cost=6
+tree_sra_branch_7	-fno-tree-sra -mbranch-cost=7
+tree_sra_branch_8	-fno-tree-sra -mbranch-cost=8
+tree_sra_branch_10	-fno-tree-sra -mbranch-cost=10
+tree_sra_align_2	-fno-tree-sra -falign-functions=2 -falign-jumps=2 -falign-labels=2 -falign-loops=2
+tree_sra_align_4	-fno-tree-sra -falign-functions=4 -falign-jumps=4 -falign-labels=4 -falign-loops=4
+tree_sra_align_16	-fno-tree-sra -falign-functions=16 -falign-jumps=16 -falign-labels=16 -falign-loops=16
+tree_sra_align_32	-fno-tree-sra -falign-functions=32 -falign-jumps=32 -falign-labels=32 -falign-loops=32
+tree_sra_tune_generic	-fno-tree-sra -mtune=generic
+tree_sra_tune_generic_ooo	-fno-tree-sra -mtune=generic-ooo
+tree_sra_tune_ydrasil	-fno-tree-sra -mtune=ydrasil
+tree_sra_tune_s7	-fno-tree-sra -mtune=sifive-7-series
+tree_sra_tune_u74	-fno-tree-sra -mtune=sifive-u74
+tree_sra_tune_nanhu	-fno-tree-sra -mtune=xiangshan-nanhu

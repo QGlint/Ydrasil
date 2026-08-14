@@ -72,15 +72,23 @@ COREMARK_SWOPT_CFLAGS_tree_shape = \
 	-fno-tree-dse -fno-section-anchors \
 	-fno-tree-forwprop -fno-tree-partial-pre
 COREMARK_SWOPT_CFLAGS_unroll_all = -funroll-all-loops
+COREMARK_SWOPT_CFLAGS_no_tree_sra = -fno-tree-sra
+COREMARK_SWOPT_CFLAGS_tree_dse = -ftree-dse
+COREMARK_SWOPT_CFLAGS_code_hoisting = -fcode-hoisting
+COREMARK_SWOPT_CFLAGS_no_gcse = -fno-gcse
+COREMARK_SWOPT_CFLAGS_mtune_size = -mtune=size
+COREMARK_SWOPT_CFLAGS_caller_saves = -fcaller-saves
 COREMARK_SWOPT_CFLAGS_no_strict_alias = -fno-strict-aliasing
 COREMARK_SWOPT_CFLAGS_lto = -flto
 COREMARK_SWOPT_CFLAGS_mtune_s7 = -mtune=sifive-7-series
 COREMARK_SWOPT_CFLAGS_mtune_ydrasil = -mtune=ydrasil
+COREMARK_SWOPT_CFLAGS_branch_cost_1 = -mbranch-cost=1
 COREMARK_SWOPT_CFLAGS_branch_cost_2 = -mbranch-cost=2
 COREMARK_SWOPT_CFLAGS_branch_cost_3 = -mbranch-cost=3
 COREMARK_SWOPT_CFLAGS_branch_cost_5 = -mbranch-cost=5
-COREMARK_SWOPT_AVAILABLE_GROUPS := inline register loop_shape control_shape tree_shape unroll_all no_strict_alias lto mtune_s7 mtune_ydrasil branch_cost_2 branch_cost_3 branch_cost_5
-COREMARK_SWOPT_DEFAULT_GROUPS ?= inline register loop_shape control_shape tree_shape
+COREMARK_SWOPT_AVAILABLE_GROUPS := inline register loop_shape control_shape tree_shape unroll_all no_tree_sra tree_dse code_hoisting no_gcse mtune_size caller_saves no_strict_alias lto mtune_s7 mtune_ydrasil branch_cost_1 branch_cost_2 branch_cost_3 branch_cost_5
+# Exact 9-atom subset scan validated on the current dual-issue, shallow-window core.
+COREMARK_SWOPT_DEFAULT_GROUPS ?= inline register loop_shape control_shape tree_shape unroll_all branch_cost_1 no_tree_sra tree_dse code_hoisting no_gcse mtune_size caller_saves
 COREMARK_SWOPT_GROUPS ?= $(COREMARK_SWOPT_DEFAULT_GROUPS)
 COREMARK_SWOPT_UNKNOWN_GROUPS := $(filter-out $(COREMARK_SWOPT_AVAILABLE_GROUPS),$(COREMARK_SWOPT_GROUPS))
 ifneq ($(strip $(COREMARK_SWOPT_UNKNOWN_GROUPS)),)
@@ -98,6 +106,7 @@ COREMARK_PROFILE ?= O3_app_unroll
 COREMARK_BSP_CFLAGS ?= $(if $(COREMARK_OPT_BSP_CFLAGS_$(COREMARK_PROFILE)),$(COREMARK_OPT_BSP_CFLAGS_$(COREMARK_PROFILE)),$(APP_OPT_CFLAGS_$(COREMARK_PROFILE)))
 COREMARK_APP_CFLAGS ?= $(COREMARK_OPT_APP_CFLAGS_$(COREMARK_PROFILE))
 COREMARK_LINKER ?= $(APP_OPT_EXPANDED_LINKER)
+COREMARK_OUT ?= $(BUILD_DIR)/app/coremark
 COREMARK_SIM_ITCM_ADDR_WIDTH ?= $(APP_OPT_EXPANDED_ITCM_ADDR_WIDTH)
 COREMARK_SIM_OBJ_DIR ?= $(BUILD_DIR)/ydrasil_core_tb-coremark
 COREMARK_SIM_LOG_DIR ?= $(BUILD_DIR)/log/coremark
@@ -1551,6 +1560,7 @@ COREMARK_SW_MAKE_ARGS = \
 		RISCV_PREFIX=$(RISCV_PREFIX) \
 		ARCH=rv32im_zicsr_zifencei_zba_zbb_zbc_zbkb_zbkx_zbs \
 		ABI=$(ABI) \
+		COREMARK_OUT=$(COREMARK_OUT) \
 		CONTROL_FLOW_ALIGN_CFLAGS="$(COREMARK_SWOPT_ALIGN_CFLAGS)"
 COREMARK_SW_PROFILE_ARGS = \
 		BSP_LINKER_SCRIPT="$(COREMARK_LINKER)" \
@@ -1573,7 +1583,7 @@ coremark_swopt_show:
 	@printf 'COREMARK_SWOPT_GROUPS=%s\n' '$(COREMARK_SWOPT_GROUPS)'
 	@printf 'COREMARK_SWOPT_ALIGN_BYTES=%s\n' '$(COREMARK_SWOPT_ALIGN_BYTES)'
 	@printf 'COREMARK_OPT_APP_CFLAGS_O3_app_unroll=%s\n' '$(COREMARK_OPT_APP_CFLAGS_O3_app_unroll)'
-COREMARK_DIFF_STOP_PC = $(shell $(NM) -n "$(BUILD_DIR)/app/coremark/coremark.elf" 2>/dev/null | awk '$$3 == "$(COREMARK_DIFF_STOP_SYMBOL)" { print "0x" $$1; exit }')
+COREMARK_DIFF_STOP_PC = $(shell $(NM) -n "$(COREMARK_OUT)/coremark.elf" 2>/dev/null | awk '$$3 == "$(COREMARK_DIFF_STOP_SYMBOL)" { print "0x" $$1; exit }')
 COMPARE_TRACE_DEFINES = $(if $(filter none,$(SIM_COMPARE)),,$(if $(findstring +commit_trace,$(COMPARE_SIM_EXTRA_DEFINES)),,+commit_trace))
 COMPARE_SIM_DEFINES = $(strip $(COMPARE_SIM_EXTRA_DEFINES) $(COMPARE_TRACE_DEFINES))
 
@@ -1710,9 +1720,9 @@ coremark_sim: coremark
 	rm -f $(COREMARK_RESULT_LOG); \
 	$(MAKE) sim_compare \
 		COMPARE_NAME=coremark \
-		COMPARE_ELF=$(BUILD_DIR)/app/coremark/coremark.elf \
-		COMPARE_ITCM=$(BUILD_DIR)/app/coremark/coremark.itcm \
-		COMPARE_DTCM=$(BUILD_DIR)/app/coremark/coremark.dtcm \
+		COMPARE_ELF=$(COREMARK_OUT)/coremark.elf \
+		COMPARE_ITCM=$(COREMARK_OUT)/coremark.itcm \
+		COMPARE_DTCM=$(COREMARK_OUT)/coremark.dtcm \
 		SIM_COMPARE=$(COREMARK_SIM_COMPARE) \
 		COMPARE_COMPLETE_PROGRAM=1 \
 		COMPARE_TRACE_STOP_PC=$(COREMARK_DIFF_STOP_PC) \

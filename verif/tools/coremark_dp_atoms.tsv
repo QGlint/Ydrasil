@@ -1,0 +1,10 @@
+# Independent atoms for the exact subset dynamic-programming search.
+no_tree_sra	-fno-tree-sra
+tree_dse	-ftree-dse
+code_hoisting	-fcode-hoisting
+no_reorder_functions	-fno-reorder-functions
+no_gcse	-fno-gcse
+tune_size	-mtune=size
+caller_saves	-fcaller-saves
+no_rename_registers	-fno-rename-registers
+no_version_loops_strides	-fno-version-loops-for-strides
