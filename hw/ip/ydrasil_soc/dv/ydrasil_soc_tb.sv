@@ -33,6 +33,7 @@ module ydrasil_soc_tb #(
     string uart0_rx_text;
     integer uart0_coremark_iterations = 0;
     integer uart_start_apb_cycles = 100000;
+    integer uart_post_coremark_apb_cycles = 100000;
     integer coremark_finish_grace_cycles = 0;
     integer max_cpu_cycles = 200000;
     integer local_wave_start = -1;
@@ -48,6 +49,7 @@ module ydrasil_soc_tb #(
     bit uart_debug = 1'b0;
     bit core_debug = 1'b0;
     bit uart0_coremark_command = 1'b0;
+    bit uart0_sensor_after_coremark = 1'b0;
     logic [2:0] uart_rx_state_prev = '0;
 
     always #3.333 cpu_clk = ~cpu_clk;
@@ -99,6 +101,8 @@ module ydrasil_soc_tb #(
         logic [31:0] stop_pc_arg;
         void'($value$plusargs("uart_start_apb_cycles=%d",
             uart_start_apb_cycles));
+        void'($value$plusargs("uart_post_coremark_apb_cycles=%d",
+            uart_post_coremark_apb_cycles));
         uart0_coremark_command = $value$plusargs(
             "uart0_coremark_iterations=%d", uart0_coremark_iterations);
         if (uart0_coremark_command && uart0_coremark_iterations <= 0)
@@ -110,6 +114,12 @@ module ydrasil_soc_tb #(
         void'($value$plusargs("local_wave_end=%d", local_wave_end));
         void'($value$plusargs("gpio_input=%h", gpio_external));
         finish_on_coremark = $test$plusargs("finish_on_coremark");
+        uart0_sensor_after_coremark =
+            $test$plusargs("uart0_sensor_after_coremark");
+        if (uart0_sensor_after_coremark &&
+            (!uart0_coremark_command || !finish_on_coremark))
+            $fatal(1,
+                "uart0_sensor_after_coremark requires CoreMark command and finish monitor");
         uart_debug = $test$plusargs("uart_debug");
         core_debug = $test$plusargs("core_debug");
         if ($value$plusargs("stop_pc=%h", stop_pc_arg)) begin
@@ -208,6 +218,14 @@ module ydrasil_soc_tb #(
             for (char_index = 0; char_index < uart0_rx_text.len();
                  char_index++)
                 uart0_send_byte(uart0_rx_text[char_index]);
+            if (uart0_sensor_after_coremark) begin
+                wait (coremark_done_seen);
+                repeat (uart_post_coremark_apb_cycles) @(posedge apb_clk);
+                uart0_rx_text = "sensor all\r";
+                for (char_index = 0; char_index < uart0_rx_text.len();
+                     char_index++)
+                    uart0_send_byte(uart0_rx_text[char_index]);
+            end
         end else if ($value$plusargs("uart0_rx_text=%s", uart0_rx_text)) begin
             repeat (uart_start_apb_cycles) @(posedge apb_clk);
             for (char_index = 0; char_index < uart0_rx_text.len();

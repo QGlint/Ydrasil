@@ -12,6 +12,9 @@ extern volatile rt_int32_t seed4_volatile;
 #ifndef ITERATIONS
 #define ITERATIONS 15000
 #endif
+#ifndef YDRASIL_DISPLAY_STARTUP
+#define YDRASIL_DISPLAY_STARTUP 1
+#endif
 #define COREMARK_DEFAULT_ITERATIONS ((rt_uint32_t)ITERATIONS)
 
 static int parse_unsigned(const char *text, rt_uint32_t limit,
@@ -49,6 +52,7 @@ static int coremark_command(int argc, char **argv)
     rt_uint32_t cycle_high;
     rt_uint32_t cycle_low;
     int result;
+    int display_result;
 
     if (argc > 2 ||
         (argc >= 2 &&
@@ -66,6 +70,12 @@ static int coremark_command(int argc, char **argv)
         return -RT_EBUSY;
     }
 
+    display_result = sensor_display_wait_ready();
+    if (display_result != YDRASIL_DRIVER_OK)
+    {
+        rt_kprintf("OLED is unavailable: %d\n", display_result);
+    }
+
     seed4_volatile = (rt_int32_t)iterations;
     rt_kprintf("CoreMark iterations: %u\n", iterations);
     rt_kprintf("CoreMark CPU frequency: %u Hz\n",
@@ -81,12 +91,14 @@ MSH_CMD_EXPORT_ALIAS(coremark_command, coremark, Run CoreMark with hardware LED 
 
 int main(void)
 {
+#if YDRASIL_DISPLAY_STARTUP
     int display_result = sensor_display_startup();
 
     if (display_result != YDRASIL_DRIVER_OK)
     {
-        rt_kprintf("OLED startup thread failed: %d\n", display_result);
+        rt_kprintf("OLED startup failed: %d\n", display_result);
     }
+#endif
     rt_kprintf("Ydrasil RT-Thread monitor ready\n");
     rt_kprintf("commands: help, coremark [iterations], "
                "sensor [all|imu|stop], oled_test [profile]\n");

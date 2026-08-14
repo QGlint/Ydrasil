@@ -51,6 +51,9 @@ iterations = int(os.getenv('RTT_APP_ITERATIONS',
 has_float = int(os.getenv('RTT_COREMARK_HAS_FLOAT', '1'))
 if has_float not in (0, 1):
     raise ValueError('RTT_COREMARK_HAS_FLOAT must be 0 or 1')
+display_startup = int(os.getenv('RTT_DISPLAY_STARTUP', '1'))
+if display_startup not in (0, 1):
+    raise ValueError('RTT_DISPLAY_STARTUP must be 0 or 1')
 
 defines = [
     ('ITERATIONS', iterations),
@@ -59,6 +62,7 @@ defines = [
     # The RV32IM target has no FPU. HAS_FLOAT selects CoreMark's software
     # double-precision reporting path; libgcc supplies the arithmetic helpers.
     ('HAS_FLOAT', has_float),
+    ('YDRASIL_DISPLAY_STARTUP', display_startup),
     ('MAIN_HAS_NORETURN', 0),
     ('FLAGS_STR', '\\"RT-Thread-' + profile + '\\"'),
 ]
