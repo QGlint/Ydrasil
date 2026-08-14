@@ -62,6 +62,21 @@ FPU 综合产物与默认基线隔离，位于 `build/syn/pll200m-fpu/`；200MHz
 
 ## 常用命令
 
+决赛 RT-Thread Nano 3.1.5、现场 CoreMark 和快速更新 bitstream：
+
+```sh
+make rtthread
+make rtthread-uart16-smoke
+make contest-coremark
+make contest-updatemem BIT=/path/to/ydrasil_soc.bit MMI=/path/to/ydrasil_soc.mmi
+```
+
+`contest-coremark` 直接编译 `sw/coremark-jyd/` 中主办方提供的六个核心文件，
+按 15000 次迭代构建，并校验编译前后 SHA-256 不变。`contest-updatemem`
+依次更新 ITCM 和 DTCM，不覆盖输入 bitstream。旧 5.2.2 环境保留为自用命令
+`make rtthread-5.2.2`。完整说明见
+[`sw/bsp/rtthread/README.md`](sw/bsp/rtthread/README.md)。
+
 初始化子模块：
 
 ```sh

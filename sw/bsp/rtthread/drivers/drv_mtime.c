@@ -42,8 +42,8 @@ static void mtime_program_next(void)
 
 static void mtime_isr(int vector, void *param)
 {
-    RT_UNUSED(vector);
-    RT_UNUSED(param);
+    (void)vector;
+    (void)param;
 
     mtime_program_next();
     rt_tick_increase();

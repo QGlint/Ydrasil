@@ -5,7 +5,20 @@ from building import *
 
 app_root = GetCurrentDir()
 sw_root = os.path.abspath(os.path.join(app_root, '..', '..'))
-coremark_root = os.path.join(sw_root, 'coremark')
+coremark_root = os.path.abspath(os.getenv(
+    'RTT_COREMARK_SOURCE_DIR', os.path.join(sw_root, 'coremark')))
+coremark_required = [
+    'core_list_join.c', 'core_main.c', 'core_matrix.c', 'core_state.c',
+    'core_util.c', 'coremark.h',
+]
+coremark_missing = [
+    name for name in coremark_required
+    if not os.path.isfile(os.path.join(coremark_root, name))
+]
+if coremark_missing:
+    raise RuntimeError(
+        'CoreMark source directory %s is missing: %s' %
+        (coremark_root, ', '.join(coremark_missing)))
 driver_root = os.path.join(sw_root, 'app', 'driver')
 sensor_root = os.path.join(sw_root, 'app', 'sensor')
 board_root = os.path.join(sw_root, 'bsp', 'rtthread', 'board')
@@ -34,7 +47,7 @@ sensor_sources = [os.path.join(sensor_variant, 'sensor.c')]
 profile = os.getenv('RTT_APP_PROFILE',
                     os.getenv('RTT_COREMARK_PROFILE', 'custom'))
 iterations = int(os.getenv('RTT_APP_ITERATIONS',
-                           os.getenv('RTT_COREMARK_ITERATIONS', '10000')))
+                           os.getenv('RTT_COREMARK_ITERATIONS', '15000')))
 has_float = int(os.getenv('RTT_COREMARK_HAS_FLOAT', '1'))
 if has_float not in (0, 1):
     raise ValueError('RTT_COREMARK_HAS_FLOAT must be 0 or 1')

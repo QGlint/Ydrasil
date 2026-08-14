@@ -1,9 +1,12 @@
 import os
 from building import *
+Import('RTT_VERSION')
 
 cwd = GetCurrentDir()
 bsp_common = os.path.abspath(os.path.join(cwd, '..', '..'))
 src = ['board.c', 'trap_gcc.S', 'startup.S']
+if RTT_VERSION == '3.1.5':
+    src += ['interrupt.c', 'interrupt_gcc.S']
 inc = [cwd, os.path.join(bsp_common, 'include')]
 
 group = DefineGroup('Ydrasil BSP', src, depend=[''], CPPPATH=inc)
