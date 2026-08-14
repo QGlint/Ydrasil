@@ -1,0 +1,13 @@
+from building import *
+
+cwd = GetCurrentDir()
+src = Split('''
+cpuport.c
+context_gcc.S
+''')
+
+group = DefineGroup(
+    'CPU', src, depend=[''], CPPPATH=[cwd], ASFLAGS='')
+
+Return('group')
+

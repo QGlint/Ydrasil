@@ -1,0 +1,7 @@
+import os
+from building import *
+
+group = SConscript(os.path.join('common', 'SConscript'))
+
+Return('group')
+
