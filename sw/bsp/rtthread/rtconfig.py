@@ -4,6 +4,9 @@ ARCH = 'risc-v'
 CPU = 'ydrasil'
 CROSS_TOOL = 'gcc'
 PLATFORM = 'gcc'
+RTT_VERSION = os.getenv('RTT_VERSION', '3.1.5')
+if RTT_VERSION not in ('3.1.5', '5.2.2'):
+    raise ValueError('RTT_VERSION must be 3.1.5 or 5.2.2')
 
 BSP_DIR = os.path.dirname(os.path.abspath(__file__))
 TOOLCHAIN_BIN = os.path.abspath(os.path.join(BSP_DIR, '..', '..', '..', 'tools', 'riscv', 'bin'))
@@ -57,11 +60,15 @@ if CPU_FREQ_HZ <= 0 or CPU_FREQ_HZ > 0xffffffff:
     raise ValueError('RTT_CPU_FREQ_HZ must be in the range 1..4294967295')
 CFLAGS = COMMON + ' ' + OPTIMIZATION + CONTROL_FLOW_ALIGNMENT + ' -g -Wall -Wno-unused-function -fno-builtin'
 CFLAGS += ' -DYDRASIL_CPU_FREQ_HZ={}UL'.format(CPU_FREQ_HZ)
+if RTT_VERSION == '5.2.2':
+    CFLAGS += ' -DRTT_LEGACY_522_BUILD=1'
 if os.getenv('RTT_APP') == 'rtthread-utest':
     CFLAGS += ' -DRTT_UTEST_BUILD=1'
 if os.getenv('RTT_APP') == 'rtthread-coremark' or os.getenv('RTT_COREMARK') == '1':
     CFLAGS += ' -DRTT_COREMARK_BUILD=1'
 AFLAGS = COMMON + ' -x assembler-with-cpp -DRTOS_RTTHREAD'
+if RTT_VERSION == '5.2.2':
+    AFLAGS += ' -DRTT_LEGACY_522_BUILD=1'
 if os.getenv('RTT_APP') == 'rtthread-utest':
     AFLAGS += ' -DRTT_UTEST_BUILD=1'
 CXXFLAGS = CFLAGS + ' -fno-exceptions -fno-rtti'

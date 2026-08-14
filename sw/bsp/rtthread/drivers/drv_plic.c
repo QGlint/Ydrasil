@@ -42,8 +42,8 @@ static void mext_isr(int vector, void *parameter)
     unsigned int source;
     unsigned int dispatch_count = 0;
 
-    RT_UNUSED(vector);
-    RT_UNUSED(parameter);
+    (void)vector;
+    (void)parameter;
 
     while ((claim = PLIC_CLAIM) != 0 && dispatch_count < YDRASIL_IRQ_COUNT * 2)
     {

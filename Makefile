@@ -111,6 +111,13 @@ RTTHREAD_COREMARK_PROFILES ?= Os O2 O3
 RTTHREAD_CPU_FREQ_HZ ?= 150000000
 RTTHREAD_COREMARK_PROFILE_BUILD_TARGETS := $(addprefix rtthread-coremark-build-,$(RTTHREAD_COREMARK_PROFILES))
 RTTHREAD_COREMARK_PROFILE_SIM_TARGETS := $(addprefix rtthread-coremark-sim-,$(RTTHREAD_COREMARK_PROFILES))
+RTTHREAD_UART16_IMAGE_DIR ?= $(BUILD_DIR)/app/rtthread-uart16-smoke
+RTTHREAD_UART16_OBJ_DIR ?= $(BUILD_DIR)/ydrasil_soc_tb-rtt315-uart16
+RTTHREAD_UART16_LOG_DIR ?= $(BUILD_DIR)/log/ydrasil_soc_tb-rtt315-uart16
+RTTHREAD_UART16_WAVE_DIR ?= $(BUILD_DIR)/wave/ydrasil_soc_tb-rtt315-uart16
+RTTHREAD_UART16_MAX_CPU_CYCLES ?= 10000000
+RTTHREAD_UART16_CPP_TIMEOUT ?= 100000000
+RTTHREAD_UART16_COMMAND_DELAY ?= 500000
 COREMARK_OPT_TIMEOUT ?= 2000000
 COREMARK_OPT_TIMEOUT_O0 ?= 5000000
 SORT_OPT_ROOT ?= $(BUILD_DIR)/app/sort-opt
@@ -369,6 +376,18 @@ SYN_ITCM_WORDS ?= 16384
 SYN_DTCM_WORDS ?= 16384
 SYN_ITCM_WIDTH ?= 64
 SYN_DTCM_WIDTH ?= 32
+BIT ?=
+MMI ?=
+UPDATEMEM_TOOL ?= updatemem
+UPDATEMEM_SCRIPT ?= $(SYN_DIR)/updatemem_xpm.py
+UPDATEMEM_BASE_BIT ?= $(if $(strip $(BIT)),$(abspath $(BIT)),$(SYN_ARTIFACT_DIR)/$(SYN_TOP).bit)
+UPDATEMEM_MMI ?= $(if $(strip $(MMI)),$(abspath $(MMI)),$(SYN_ARTIFACT_DIR)/$(SYN_TOP).mmi)
+UPDATEMEM_IMAGE_DIR ?= $(BUILD_DIR)/app/rtthread-coremark/O2
+UPDATEMEM_ITCM ?= $(UPDATEMEM_IMAGE_DIR)/rtthread_coremark.itcm
+UPDATEMEM_DTCM ?= $(UPDATEMEM_IMAGE_DIR)/rtthread_coremark.dtcm
+UPDATEMEM_OUTPUT_DIR ?= $(BUILD_DIR)/updatemem/$(SYN_PLL_FREQ_TAG)$(SYN_PROFILE_SUFFIX)
+UPDATEMEM_INTERMEDIATE_BIT ?= $(UPDATEMEM_OUTPUT_DIR)/$(SYN_TOP)-itcm.bit
+UPDATEMEM_OUTPUT_BIT ?= $(UPDATEMEM_OUTPUT_DIR)/$(SYN_TOP)-rtthread-3.1.5.bit
 SYN_TIMING_SUMMARY_MAX_PATHS ?= 5000
 SYN_TIMING_PATH_MAX_PATHS ?= 5000
 SYN_TIMING_NWORST ?= 1
@@ -420,9 +439,10 @@ $(error Unsupported SYN_PLL_FREQ_MHZ=$(SYN_PLL_FREQ_MHZ); supported values: $(SY
 endif
 
 .PHONY: all comp sim clean wave resim test_all rvtest rvtest_wave rvtest_clean run_all_tests regression regression_all regression_status regression_stop regression_clean regression_sort regression_sort_opt regression_suite_coverage_merge regression_coverage_report init install-bender get_spike download_and_extract_spike check_spike_prebuilt_abi build_spike_from_source check_deps spike spike_wave_to_csv sim_compare commit_check commit_spike_csv commit_hw_trace commit_hw_csv commit_compare rv_test_comp_genmem ppa_rvtest_report ppa_perf_report coe_simple coe_smoke coe_smoke_led coe_isa_probes coverage_all coverage_all_run coverage_quick coverage_closure coverage_closure_merge coverage_clean coverage_report bus_irq_test bus_irq_coverage sw_boundary_test sw_coverage sw_coverage_clean sw_run_mode sw_coverage_report driver_sim_test
-.PHONY: coremark coremark_sim coremark_run coremark_result coremark-rebuild coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map coremark_swopt_show coremark_opt_all coremark_opt_build_all coremark_opt_sim_all coremark_opt_report coremark_opt_clean $(COREMARK_OPT_BUILD_TARGETS) $(COREMARK_OPT_SIM_TARGETS) sort_app sort_all sort_sim_all sort_report sort_app_sim sort_app-rebuild sort_app-clean sort_opt_all sort_opt_build_all sort_opt_sim_all sort_opt_report sort_opt_clean $(SORT_OPT_BUILD_TARGETS) $(SORT_OPT_SIM_TARGETS) boundary_app boundary_all boundary_sim_all boundary_report boundary_app-rebuild boundary_app-clean boundary_opt_all boundary_opt_build_all boundary_opt_sim_all boundary_opt_report boundary_opt_clean $(BOUNDARY_OPT_BUILD_TARGETS) $(BOUNDARY_OPT_SIM_TARGETS) coe_m3_force coe_loop2_gen coe_loop5 coe_loop5_gen coe_loop_lina coe_loop_lina_gen loop_lina coe_MFlina coe_MFlina_gen coe_mflina coe_mflina_gen rtthread rtthread-build rtthread-clean rtthread-coremark rtthread-coremark-build rtthread-coremark-build-all rtthread-coremark-sim rtthread-coremark-sim-all rtthread-coremark-report rtthread-coremark-compare rtthread-coremark-clean rtthread-utest rtthread-utest-build rtthread-utest-sim rtthread-utest-report rtthread-utest-clean $(RTTHREAD_COREMARK_PROFILE_BUILD_TARGETS) $(RTTHREAD_COREMARK_PROFILE_SIM_TARGETS)
+.PHONY: coremark coremark_sim coremark_run coremark_result coremark-rebuild coremark-clean coremark-clean-all coremark-clean-elf coremark-clean-bin coremark-clean-dump coremark-clean-mem coremark-clean-map coremark_swopt_show coremark_opt_all coremark_opt_build_all coremark_opt_sim_all coremark_opt_report coremark_opt_clean $(COREMARK_OPT_BUILD_TARGETS) $(COREMARK_OPT_SIM_TARGETS) sort_app sort_all sort_sim_all sort_report sort_app_sim sort_app-rebuild sort_app-clean sort_opt_all sort_opt_build_all sort_opt_sim_all sort_opt_report sort_opt_clean $(SORT_OPT_BUILD_TARGETS) $(SORT_OPT_SIM_TARGETS) boundary_app boundary_all boundary_sim_all boundary_report boundary_app-rebuild boundary_app-clean boundary_opt_all boundary_opt_build_all boundary_opt_sim_all boundary_opt_report boundary_opt_clean $(BOUNDARY_OPT_BUILD_TARGETS) $(BOUNDARY_OPT_SIM_TARGETS) coe_m3_force coe_loop2_gen coe_loop5 coe_loop5_gen coe_loop_lina coe_loop_lina_gen loop_lina coe_MFlina coe_MFlina_gen coe_mflina coe_mflina_gen rtthread rtthread-build rtthread-clean rtthread-5.2.2 rtthread-5.2.2-clean contest-coremark rtthread-coremark rtthread-coremark-build rtthread-coremark-build-all rtthread-coremark-sim rtthread-coremark-sim-all rtthread-coremark-report rtthread-coremark-compare rtthread-coremark-clean rtthread-uart16-smoke rtthread-uart16-smoke-build rtthread-uart16-smoke-model rtthread-utest rtthread-utest-build rtthread-utest-sim rtthread-utest-report rtthread-utest-clean $(RTTHREAD_COREMARK_PROFILE_BUILD_TARGETS) $(RTTHREAD_COREMARK_PROFILE_SIM_TARGETS)
 .PHONY: riscv_dv_venv riscv_dv_model riscv_dv_prepare riscv_dv_run riscv_dv_random riscv_dv_random_status riscv_dv_regression riscv_dv_count riscv_dv_repro riscv_dv_estimate riscv_dv_stop riscv_dv_coverage_report riscv_dv_cleanup riscv_dv_distclean
 .PHONY: syn synf syn225 syn240 syn250 syn260 syn270 syn275 syn280 syn290 syn290625 syn300 syn-board synf-board syn-extreme syn-reports syn-dedup syn-lowmem-synth syn-lowmem-impl syn-venv syn-prep syn-stage-xpr syn-stage-memory syn-reuse-stage-check syn-vivado syn-analyze syn-clean
+.PHONY: updatemem rtthread-updatemem updatemem-apply contest-updatemem
 .PHONY: rtl-quickcheck rtl-strict rtl-xml rtl-structure-report rtl-structure rtl-vivado-compare rtl-vivado-cross-validate rtl-vivado-archive verilator-strict verilator-xml slang-ast
 .PHONY: yosys-slang yosys-slang-gate yosys-slang-baseline yosys-slang-quick vivado-ooc vivado-ooc-synth vivado-ooc-issue
 
@@ -1241,6 +1261,45 @@ syn-analyze: syn-venv
 syn-clean:
 	rm -rf $(SYN_BUILD_DIR)
 
+updatemem rtthread-updatemem: rtthread-coremark-build-O2
+	@$(MAKE) --no-print-directory updatemem-apply
+
+contest-updatemem: contest-coremark
+	@$(MAKE) --no-print-directory updatemem-apply \
+		UPDATEMEM_IMAGE_DIR="$(BUILD_DIR)/app/rtthread-contest" \
+		UPDATEMEM_ITCM="$(BUILD_DIR)/app/rtthread-contest/rtthread_contest.itcm" \
+		UPDATEMEM_DTCM="$(BUILD_DIR)/app/rtthread-contest/rtthread_contest.dtcm" \
+		UPDATEMEM_OUTPUT_BIT="$(UPDATEMEM_OUTPUT_DIR)/$(SYN_TOP)-contest-3.1.5.bit"
+
+updatemem-apply:
+	@test -f "$(UPDATEMEM_BASE_BIT)" || { \
+		echo "Missing base bitstream: $(UPDATEMEM_BASE_BIT)"; \
+		echo "Set BIT=/path/to/implemented.bit"; exit 2; }
+	@test -f "$(UPDATEMEM_MMI)" || { \
+		echo "Missing memory map: $(UPDATEMEM_MMI)"; \
+		echo "Set MMI=/path/to/matching.mmi"; exit 2; }
+	@test -f "$(UPDATEMEM_ITCM)" || { echo "Missing ITCM image: $(UPDATEMEM_ITCM)"; exit 2; }
+	@test -f "$(UPDATEMEM_DTCM)" || { echo "Missing DTCM image: $(UPDATEMEM_DTCM)"; exit 2; }
+	@mkdir -p "$(UPDATEMEM_OUTPUT_DIR)"
+	@set -e; \
+	if [ -n "$(VIVADO_SETTINGS)" ]; then \
+		test -f "$(VIVADO_SETTINGS)" || { echo "VIVADO_SETTINGS not found: $(VIVADO_SETTINGS)"; exit 2; }; \
+		. "$(VIVADO_SETTINGS)"; \
+	fi; \
+	command -v "$(UPDATEMEM_TOOL)" >/dev/null || { echo "updatemem tool not found"; exit 2; }; \
+	$(PYTHON) "$(UPDATEMEM_SCRIPT)" --memory itcm \
+		--mmi "$(UPDATEMEM_MMI)" --mem "$(UPDATEMEM_ITCM)" \
+		--bit "$(UPDATEMEM_BASE_BIT)" --out "$(UPDATEMEM_INTERMEDIATE_BIT)" \
+		--updatemem "$(UPDATEMEM_TOOL)"; \
+	$(PYTHON) "$(UPDATEMEM_SCRIPT)" --memory dtcm \
+		--mmi "$(UPDATEMEM_MMI)" --mem "$(UPDATEMEM_DTCM)" \
+		--bit "$(UPDATEMEM_INTERMEDIATE_BIT)" --out "$(UPDATEMEM_OUTPUT_BIT)" \
+		--updatemem "$(UPDATEMEM_TOOL)"; \
+	sha256sum "$(UPDATEMEM_BASE_BIT)" "$(UPDATEMEM_MMI)" \
+		"$(UPDATEMEM_ITCM)" "$(UPDATEMEM_DTCM)" "$(UPDATEMEM_OUTPUT_BIT)" \
+		> "$(UPDATEMEM_OUTPUT_DIR)/manifest.sha256"; \
+	echo "Updated RT-Thread bitstream: $(UPDATEMEM_OUTPUT_BIT)"
+
 # -----------------------------------------------------------------------------
 # Architecture quick-checks
 # -----------------------------------------------------------------------------
@@ -1522,6 +1581,16 @@ rtthread-build:
 rtthread-clean:
 	@$(MAKE) --no-print-directory -C sw rtthread-clean
 
+rtthread-5.2.2:
+	@$(MAKE) --no-print-directory -C sw rtthread-5.2.2
+
+rtthread-5.2.2-clean:
+	@$(MAKE) --no-print-directory -C sw rtthread-5.2.2-clean
+
+contest-coremark:
+	@$(MAKE) --no-print-directory -C sw contest-coremark \
+		CONTEST_COREMARK_DIR="$(PROJECT_ROOT)/sw/coremark-jyd"
+
 rtthread-coremark:
 	@$(MAKE) --no-print-directory -C sw rtthread-coremark \
 		RTTHREAD_CPU_FREQ_HZ="$(RTTHREAD_CPU_FREQ_HZ)"
@@ -1550,6 +1619,42 @@ rtthread-coremark-compare:
 
 rtthread-coremark-clean:
 	@$(MAKE) --no-print-directory -C sw rtthread-coremark-clean
+
+rtthread-uart16-smoke-build:
+	@$(MAKE) --no-print-directory -C sw rtthread \
+		RTTHREAD_VERSION=3.1.5 RTTHREAD_ITERATIONS=15000 \
+		RTTHREAD_OUTPUT_DIR="$(RTTHREAD_UART16_IMAGE_DIR)" \
+		RTTHREAD_BUILD_DIR="$(RTTHREAD_UART16_IMAGE_DIR)/objects" \
+		RTTHREAD_OUTPUT_BASENAME=rtthread_uart16
+
+rtthread-uart16-smoke-model:
+	@$(MAKE) --no-print-directory comp \
+		IP=ydrasil_soc TOP=ydrasil_soc_tb BENDER_TB_TARGET=soc_test \
+		OBJ_DIR="$(RTTHREAD_UART16_OBJ_DIR)" \
+		LOG_DIR="$(RTTHREAD_UART16_LOG_DIR)" \
+		WAVE_DIR="$(RTTHREAD_UART16_WAVE_DIR)" \
+		VERILATOR_MOD=sv VERILATOR_TRACE=0 VERILATOR_IGNORE_FULL=1
+
+rtthread-uart16-smoke: rtthread-uart16-smoke-build rtthread-uart16-smoke-model
+	@$(MAKE) --no-print-directory sim \
+		IP=ydrasil_soc TOP=ydrasil_soc_tb BENDER_TB_TARGET=soc_test \
+		OBJ_DIR="$(RTTHREAD_UART16_OBJ_DIR)" \
+		LOG_DIR="$(RTTHREAD_UART16_LOG_DIR)" \
+		WAVE_DIR="$(RTTHREAD_UART16_WAVE_DIR)" \
+		ITCM_FILE="$(RTTHREAD_UART16_IMAGE_DIR)/rtthread_uart16.itcm" \
+		DTCM_FILE="$(RTTHREAD_UART16_IMAGE_DIR)/rtthread_uart16.dtcm" \
+		LOG_OUTPUT=1 VERILATOR_MOD=sv VERILATOR_TRACE=0 \
+		SIM_EXTRA_DEFINES="+uart0_coremark_iterations=1 +uart_start_apb_cycles=$(RTTHREAD_UART16_COMMAND_DELAY) +finish_on_coremark +coremark_finish_grace_cycles=1000000 +max_cpu_cycles=$(RTTHREAD_UART16_MAX_CPU_CYCLES) +cpp_timeout=$(RTTHREAD_UART16_CPP_TIMEOUT)"
+	@log="$(RTTHREAD_UART16_LOG_DIR)/ydrasil_soc_tb.ver.sim.log"; \
+		grep -q '3.1.5 build' "$$log" && \
+		grep -q 'CoreMark iterations: 1' "$$log" && \
+		grep -Eq 'Total time \(secs\): [0-9]+\.[0-9]+' "$$log" && \
+		grep -q 'Correct operation validated' "$$log" && \
+		grep -q '\[SOC TB\] CoreMark completed' "$$log" || { \
+			echo "RT-Thread Nano 3.1.5 UART16 smoke test failed: $$log"; \
+			exit 1; \
+		}; \
+		echo "RT-Thread Nano 3.1.5 UART16 coremark 1: PASS ($$log)"
 
 rtthread-utest:
 	@$(MAKE) --no-print-directory -C sw/bsp/rtthread utest

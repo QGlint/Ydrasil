@@ -123,19 +123,22 @@ rtthread_abs = $(abspath $(if $(filter /%,$(1)),$(1),$(PROJECT_ROOT)/$(1)))
 RTTHREAD_BSP_DIR := $(PROJECT_ROOT)/sw/bsp/rtthread
 RTTHREAD_SCONS ?= $(if $(strip $(SCONS)),$(SCONS),scons)
 RTTHREAD_JOBS ?= $(shell nproc 2>/dev/null || echo 1)
+RTTHREAD_VERSION ?= 3.1.5
 RTTHREAD_APP ?= rtthread-coremark
 RTTHREAD_PROFILE ?= monitor
 RTTHREAD_OPT ?= -O2
-RTTHREAD_ITERATIONS ?= 10000
+RTTHREAD_ITERATIONS ?= 15000
 RTTHREAD_CPU_FREQ_HZ ?= 150000000
 RTTHREAD_OUTPUT_DIR ?= $(PROJECT_ROOT)/build/app/rtthread
 RTTHREAD_OUTPUT_BASENAME ?= rtthread
 RTTHREAD_LINKER ?= $(BSP_LINKER_SCRIPT)
 RTTHREAD_BUILD_DIR ?= $(RTTHREAD_OUTPUT_DIR)/objects
+RTTHREAD_COREMARK_SOURCE_DIR ?= $(PROJECT_ROOT)/sw/coremark
 RTTHREAD_SCONS_ARGS ?=
 override RTTHREAD_OUTPUT_DIR := $(call rtthread_abs,$(RTTHREAD_OUTPUT_DIR))
 override RTTHREAD_LINKER := $(call rtthread_abs,$(RTTHREAD_LINKER))
 override RTTHREAD_BUILD_DIR := $(call rtthread_abs,$(RTTHREAD_BUILD_DIR))
+override RTTHREAD_COREMARK_SOURCE_DIR := $(call rtthread_abs,$(RTTHREAD_COREMARK_SOURCE_DIR))
 
 RTTHREAD_COREMARK_PROFILES ?= Os O2 O3
 RTTHREAD_COREMARK_OPT_Os := -Os
@@ -165,7 +168,7 @@ RTTHREAD_COREMARK_BEST_CFLAGS ?= -O3 -funroll-loops \
 RTTHREAD_COREMARK_CORE_CFLAGS ?= $(RTTHREAD_COREMARK_BEST_CFLAGS)
 RTTHREAD_COREMARK_OUTPUT_ROOT ?= $(PROJECT_ROOT)/build/app/rtthread-coremark
 RTTHREAD_COREMARK_LINKER ?= $(BSP_LINKER_SCRIPT)
-RTTHREAD_COREMARK_ITERATIONS ?= 10000
+RTTHREAD_COREMARK_ITERATIONS ?= 15000
 override RTTHREAD_COREMARK_OUTPUT_ROOT := $(call rtthread_abs,$(RTTHREAD_COREMARK_OUTPUT_ROOT))
 override RTTHREAD_COREMARK_LINKER := $(call rtthread_abs,$(RTTHREAD_COREMARK_LINKER))
 RTTHREAD_COREMARK_BUILD_TARGETS := $(addprefix rtthread-coremark-build-,$(RTTHREAD_COREMARK_PROFILES))
@@ -174,6 +177,10 @@ RTTHREAD_UTEST_OUTPUT_ROOT ?= $(PROJECT_ROOT)/build/app/rtthread-utest
 RTTHREAD_UTEST_LINKER ?= $(BSP_LINKER_SCRIPT)
 override RTTHREAD_UTEST_OUTPUT_ROOT := $(call rtthread_abs,$(RTTHREAD_UTEST_OUTPUT_ROOT))
 override RTTHREAD_UTEST_LINKER := $(call rtthread_abs,$(RTTHREAD_UTEST_LINKER))
+RTTHREAD_522_OUTPUT_DIR ?= $(PROJECT_ROOT)/build/app/rtthread-5.2.2
+CONTEST_COREMARK_DIR ?= $(PROJECT_ROOT)/sw/coremark-jyd
+CONTEST_RTTHREAD_OUTPUT_DIR ?= $(PROJECT_ROOT)/build/app/rtthread-contest
+CONTEST_COREMARK_FILES := core_list_join.c core_main.c core_matrix.c core_state.c core_util.c coremark.h
 COREMARK_C_SRCS := \
 	$(COREMARK_DIR)/core_list_join.c \
 	$(COREMARK_DIR)/core_main.c \
@@ -480,7 +487,9 @@ boundary_app-rebuild: boundary_app-clean
 boundary_app-clean:
 	rm -rf $(BOUNDARY_APP_OUT)
 
-.PHONY: rtthread rtthread-build rtthread-clean rtthread-coremark \
+.PHONY: rtthread rtthread-build rtthread-clean rtthread-5.2.2 \
+	rtthread-5.2.2-build rtthread-5.2.2-clean \
+	rtthread-contest contest-coremark rtthread-coremark \
 	rtthread-coremark-build rtthread-coremark-build-all rtthread-coremark-clean \
 	rtthread-utest rtthread-utest-build rtthread-utest-clean \
 	$(RTTHREAD_COREMARK_BUILD_TARGETS)
@@ -491,6 +500,7 @@ rtthread-build:
 	@mkdir -p "$(RTTHREAD_OUTPUT_DIR)"
 	@cd "$(RTTHREAD_BSP_DIR)" && \
 		PYTHONDONTWRITEBYTECODE=1 \
+		RTT_VERSION="$(RTTHREAD_VERSION)" \
 		RTT_APP="$(RTTHREAD_APP)" \
 		RTT_APP_PROFILE="$(RTTHREAD_PROFILE)" \
 		RTT_APP_ITERATIONS="$(RTTHREAD_ITERATIONS)" \
@@ -500,6 +510,7 @@ rtthread-build:
 		RTT_OUTPUT_BASENAME="$(RTTHREAD_OUTPUT_BASENAME)" \
 		RTT_LINKER="$(RTTHREAD_LINKER)" \
 		RTT_BUILD_DIR="$(RTTHREAD_BUILD_DIR)" \
+		RTT_COREMARK_SOURCE_DIR="$(RTTHREAD_COREMARK_SOURCE_DIR)" \
 		RTT_COREMARK_CORE_CFLAGS="$(RTTHREAD_COREMARK_CORE_CFLAGS)" \
 		RTT_CC_PREFIX="$(RISCV_TOOLCHAIN_PREFIX)-" \
 		RTT_EXEC_PATH="$(RISCV_TOOLCHAIN_BIN)" \
@@ -507,6 +518,46 @@ rtthread-build:
 
 rtthread-clean:
 	rm -rf "$(RTTHREAD_OUTPUT_DIR)"
+
+rtthread-5.2.2: rtthread-5.2.2-build
+
+rtthread-5.2.2-build:
+	@$(MAKE) --no-print-directory rtthread \
+		RTTHREAD_VERSION=5.2.2 \
+		RTTHREAD_OUTPUT_DIR="$(RTTHREAD_522_OUTPUT_DIR)" \
+		RTTHREAD_BUILD_DIR="$(RTTHREAD_522_OUTPUT_DIR)/objects" \
+		RTTHREAD_OUTPUT_BASENAME=rtthread_5_2_2
+
+rtthread-5.2.2-clean:
+	rm -rf "$(RTTHREAD_522_OUTPUT_DIR)"
+
+contest-coremark: rtthread-contest
+
+rtthread-contest:
+	@set -e; src="$(abspath $(CONTEST_COREMARK_DIR))"; \
+	for file in $(CONTEST_COREMARK_FILES); do \
+		test -f "$$src/$$file" || { echo "Missing organizer file: $$src/$$file"; exit 2; }; \
+	done; \
+	$(MAKE) --no-print-directory rtthread-clean \
+		RTTHREAD_OUTPUT_DIR="$(CONTEST_RTTHREAD_OUTPUT_DIR)"; \
+	mkdir -p "$(CONTEST_RTTHREAD_OUTPUT_DIR)"; \
+	(cd "$$src" && sha256sum $(CONTEST_COREMARK_FILES)) \
+		> "$(CONTEST_RTTHREAD_OUTPUT_DIR)/coremark.sha256.before"; \
+	$(MAKE) --no-print-directory rtthread \
+		RTTHREAD_VERSION=3.1.5 \
+		RTTHREAD_ITERATIONS=15000 \
+		RTTHREAD_COREMARK_SOURCE_DIR="$$src" \
+		RTTHREAD_OUTPUT_DIR="$(CONTEST_RTTHREAD_OUTPUT_DIR)" \
+		RTTHREAD_BUILD_DIR="$(CONTEST_RTTHREAD_OUTPUT_DIR)/objects" \
+		RTTHREAD_OUTPUT_BASENAME=rtthread_contest; \
+	(cd "$$src" && sha256sum $(CONTEST_COREMARK_FILES)) \
+		> "$(CONTEST_RTTHREAD_OUTPUT_DIR)/coremark.sha256.after"; \
+	cmp "$(CONTEST_RTTHREAD_OUTPUT_DIR)/coremark.sha256.before" \
+		"$(CONTEST_RTTHREAD_OUTPUT_DIR)/coremark.sha256.after"; \
+	mv "$(CONTEST_RTTHREAD_OUTPUT_DIR)/coremark.sha256.after" \
+		"$(CONTEST_RTTHREAD_OUTPUT_DIR)/coremark.sha256"; \
+	rm "$(CONTEST_RTTHREAD_OUTPUT_DIR)/coremark.sha256.before"; \
+	echo "Organizer CoreMark files unchanged; hashes: $(CONTEST_RTTHREAD_OUTPUT_DIR)/coremark.sha256"
 
 rtthread-coremark: rtthread-coremark-build
 
@@ -535,6 +586,7 @@ rtthread-utest: rtthread-utest-build
 
 rtthread-utest-build: $(RTTHREAD_UTEST_LINKER)
 	@$(MAKE) --no-print-directory rtthread \
+		RTTHREAD_VERSION=5.2.2 \
 		RTTHREAD_APP=rtthread-utest \
 		RTTHREAD_PROFILE=utest \
 		RTTHREAD_OPT="$(RTTHREAD_UTEST_OPT)" \

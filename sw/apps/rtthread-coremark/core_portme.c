@@ -1,5 +1,6 @@
 #include "coremark.h"
 #include <stdarg.h>
+#include <stdio.h>
 #include <rthw.h>
 #include "board.h"
 
@@ -107,12 +108,17 @@ int ydrasil_coremark_printf(const char *format, ...)
 
     if (rt_strcmp(format, tick_format) == 0)
     {
-        return rt_kprintf("Total ticks      : %llu\n",
+        length = snprintf(buffer, sizeof(buffer),
+                          "Total ticks      : %llu\n",
                           (unsigned long long)get_time());
+        rt_kputs(buffer);
+        return length;
     }
 
     va_start(args, format);
-    length = rt_vsnprintf(buffer, sizeof(buffer), format, args);
+    /* Nano 3.1.5's kernel formatter has no floating-point conversion. Use
+     * Newlib in this port layer so the required elapsed time stays a float. */
+    length = vsnprintf(buffer, sizeof(buffer), format, args);
     va_end(args);
     rt_kputs(buffer);
     return length;
@@ -120,8 +126,8 @@ int ydrasil_coremark_printf(const char *format, ...)
 
 void portable_init(core_portable *port, int *argc, char *argv[])
 {
-    RT_UNUSED(argc);
-    RT_UNUSED(argv);
+    (void)argc;
+    (void)argv;
     port->portable_id = 1;
 }
 

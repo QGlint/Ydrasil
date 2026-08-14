@@ -14,7 +14,7 @@ static struct ydrasil_irq_entry irq_table[YDRASIL_IRQ_VECTOR_COUNT];
 
 static void unhandled_irq(int vector, void *parameter)
 {
-    RT_UNUSED(parameter);
+    (void)parameter;
     rt_kprintf("unhandled interrupt %d\n", vector);
 }
 
@@ -36,7 +36,7 @@ rt_isr_handler_t rt_hw_interrupt_install(int vector,
 {
     rt_isr_handler_t previous = RT_NULL;
 
-    RT_UNUSED(name);
+    (void)name;
     if (vector >= 0 && vector < (int)YDRASIL_IRQ_VECTOR_COUNT)
     {
         previous = irq_table[vector].handler;
