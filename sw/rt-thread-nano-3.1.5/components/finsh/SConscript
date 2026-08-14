@@ -1,0 +1,17 @@
+import os
+from building import *
+
+cwd = GetCurrentDir()
+bsp_root = os.path.abspath(os.getcwd())
+src = Split('''
+shell.c
+msh.c
+''')
+
+if GetDepend('MSH_USING_BUILT_IN_COMMANDS'):
+    src += ['cmd.c']
+
+group = DefineGroup(
+    'FinSH', src, depend=['RT_USING_FINSH'], CPPPATH=[bsp_root, cwd])
+
+Return('group')

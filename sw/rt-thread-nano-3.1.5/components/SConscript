@@ -1,0 +1,18 @@
+import os
+Import('remove_components')
+from building import *
+
+objects = []
+cwd = GetCurrentDir()
+
+for item in os.listdir(cwd):
+    if item in remove_components:
+        continue
+    script = os.path.join(cwd, item, 'SConscript')
+    if os.path.isfile(script):
+        objects += SConscript(
+            script,
+            variant_dir=os.path.join('build/kernel/components', item),
+            duplicate=0)
+
+Return('objects')

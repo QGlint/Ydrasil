@@ -1,0 +1,14 @@
+import os
+from building import *
+
+Import('rtconfig')
+
+cwd = GetCurrentDir()
+group = []
+architectures = os.listdir(cwd)
+
+if rtconfig.ARCH in architectures:
+    group += SConscript(os.path.join(rtconfig.ARCH, 'SConscript'))
+
+Return('group')
+
