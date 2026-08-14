@@ -1,0 +1,10 @@
+from building import *
+
+cwd = GetCurrentDir()
+src = ['newlib_nano.c']
+inc = [cwd]
+
+group = DefineGroup('Ydrasil Nano libc adapter', src, depend=[''],
+                    CPPPATH=inc)
+
+Return('group')

@@ -1,8 +1,11 @@
 from building import *
+Import('RTT_VERSION')
 
 objects = []
 objects += SConscript('applications/SConscript')
 objects += SConscript('board/SConscript')
 objects += SConscript('drivers/SConscript')
+if RTT_VERSION == '3.1.5':
+    objects += SConscript('libc/SConscript')
 
 Return('objects')

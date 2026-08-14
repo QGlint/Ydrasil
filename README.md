@@ -74,7 +74,8 @@ make contest-updatemem BIT=/path/to/ydrasil_soc.bit MMI=/path/to/ydrasil_soc.mmi
 `contest-coremark` 直接编译 `sw/coremark-jyd/` 中主办方提供的六个核心文件，
 按 15000 次迭代构建，并校验编译前后 SHA-256 不变。`contest-updatemem`
 依次更新 ITCM 和 DTCM，不覆盖输入 bitstream。旧 5.2.2 环境保留为自用命令
-`make rtthread-5.2.2`。完整说明见
+`make rtthread-5.2.2`；需要生成保留的旧版 bitstream 时使用
+`make rtthread-5.2.2-updatemem SYN_PLL_FREQ_MHZ=200`。完整说明见
 [`sw/bsp/rtthread/README.md`](sw/bsp/rtthread/README.md)。
 
 初始化子模块：

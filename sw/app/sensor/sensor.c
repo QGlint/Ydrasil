@@ -14,13 +14,11 @@
 #define SENSOR_THREAD_PRIORITY   22U
 #define SENSOR_THREAD_TIMESLICE  10U
 #define SENSOR_STOP_POLL_MS      10U
-#define DISPLAY_STARTUP_STACK_SIZE 2048U
-#define DISPLAY_STARTUP_PRIORITY   21U
-#define DISPLAY_STARTUP_TIMESLICE  10U
 
 static rt_thread_t sensor_thread;
 static volatile rt_bool_t sensor_stop_requested;
 static volatile rt_bool_t display_startup_pending;
+static volatile int display_startup_result = YDRASIL_DRIVER_OK;
 
 struct sensor_refresh_state
 {
@@ -81,22 +79,8 @@ static int display_idle_screen(void)
     return ssd1306_show_frame("Ydrsail", "RT-Thread", "", "");
 }
 
-static void display_startup_worker(void *parameter)
-{
-    int result;
-
-    (void)parameter;
-    result = display_lines("Ydrsail", "RT-Thread", "", "");
-    display_startup_pending = RT_FALSE;
-    if (result != YDRASIL_DRIVER_OK)
-    {
-        rt_kprintf("OLED startup display failed: %d\n", result);
-    }
-}
-
 int sensor_display_startup(void)
 {
-    rt_thread_t thread;
     int result;
 
     if (display_startup_pending != RT_FALSE)
@@ -105,23 +89,19 @@ int sensor_display_startup(void)
     }
 
     display_startup_pending = RT_TRUE;
-    thread = rt_thread_create("oled_init", display_startup_worker, RT_NULL,
-                              DISPLAY_STARTUP_STACK_SIZE,
-                              DISPLAY_STARTUP_PRIORITY,
-                              DISPLAY_STARTUP_TIMESLICE);
-    if (thread == RT_NULL)
+    result = display_lines("Ydrsail", "RT-Thread", "", "");
+    display_startup_result = result;
+    display_startup_pending = RT_FALSE;
+    return result;
+}
+
+int sensor_display_wait_ready(void)
+{
+    while (display_startup_pending != RT_FALSE)
     {
-        display_startup_pending = RT_FALSE;
-        return -RT_ENOMEM;
+        rt_thread_mdelay(1);
     }
-    result = rt_thread_startup(thread);
-    if (result != RT_EOK)
-    {
-        display_startup_pending = RT_FALSE;
-        rt_thread_delete(thread);
-        return result;
-    }
-    return YDRASIL_DRIVER_OK;
+    return display_startup_result;
 }
 
 static int display_attitude(const struct ms601m_attitude *attitude,
