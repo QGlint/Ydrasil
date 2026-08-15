@@ -44,7 +44,7 @@ DTCM_BIN = os.path.join(OUTPUT_DIR, OUTPUT_BASENAME + '_dtcm.bin')
 ITCM = os.path.join(OUTPUT_DIR, OUTPUT_BASENAME + '.itcm')
 DTCM = os.path.join(OUTPUT_DIR, OUTPUT_BASENAME + '.dtcm')
 
-DEVICE = ' -march=rv32im_zicsr_zifencei_zba_zbb_zbc_zbkb_zbkx_zbs -mabi=ilp32 -mcmodel=medany'
+DEVICE = ' -march=rv32im_zicsr_zifencei_zba_zbb_zbc_zbkb_zbs -mabi=ilp32 -mcmodel=medany'
 # The current simulation path has a known branch-loop issue during early BSS
 # clearing. Load zero-initialized objects from DTCM instead so reset can skip it.
 # The repository toolchain ships Newlib, not the distro's picolibc specs.

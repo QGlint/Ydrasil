@@ -82,10 +82,6 @@ import ydrasil_pkg::*;
     reg [REGS_DATA_WIDTH-1:0] ror_result;
     reg [REGS_DATA_WIDTH-1:0] zip_result;
     reg [REGS_DATA_WIDTH-1:0] unzip_result;
-    reg [REGS_DATA_WIDTH-1:0] xperm4_result;
-    reg [REGS_DATA_WIDTH-1:0] xperm8_result;
-    reg [3:0] xperm4_sel;
-    reg [7:0] xperm8_sel;
     integer bit_idx;
     integer byte_idx;
     integer item_idx;
@@ -104,10 +100,6 @@ import ydrasil_pkg::*;
             ((operand_a_i >> shamt) | (operand_a_i << rotate_inv_shamt[4:0]));
         zip_result = '0;
         unzip_result = '0;
-        xperm4_result = '0;
-        xperm8_result = '0;
-        xperm4_sel = 4'b0;
-        xperm8_sel = 8'b0;
 
         for (bit_idx = REGS_DATA_WIDTH - 1; bit_idx >= 0; bit_idx = bit_idx - 1) begin
             if (operand_a_i[bit_idx] && (clz_result == REGS_DATA_WIDTH'(REGS_DATA_WIDTH))) begin
@@ -138,19 +130,6 @@ import ydrasil_pkg::*;
             unzip_result[16 + item_idx] = operand_a_i[2 * item_idx + 1];
         end
 
-        for (item_idx = 0; item_idx < REGS_DATA_WIDTH / 4; item_idx = item_idx + 1) begin
-            xperm4_sel = operand_b_i[item_idx * 4 +: 4];
-            if (xperm4_sel < 4'd8) begin
-                xperm4_result[item_idx * 4 +: 4] = operand_a_i[xperm4_sel * 4 +: 4];
-            end
-        end
-
-        for (item_idx = 0; item_idx < REGS_DATA_WIDTH / 8; item_idx = item_idx + 1) begin
-            xperm8_sel = operand_b_i[item_idx * 8 +: 8];
-            if (xperm8_sel < 8'd4) begin
-                xperm8_result[item_idx * 8 +: 8] = operand_a_i[xperm8_sel * 8 +: 8];
-            end
-        end
     end
 
     always_comb begin
@@ -195,8 +174,6 @@ import ydrasil_pkg::*;
                 operator_i[OP_B_PACKH]:  result_o = {16'b0, operand_b_i[7:0], operand_a_i[7:0]};
                 operator_i[OP_B_ZIP]:    result_o = zip_result;
                 operator_i[OP_B_UNZIP]:  result_o = unzip_result;
-                operator_i[OP_B_XPERM4]: result_o = xperm4_result;
-                operator_i[OP_B_XPERM8]: result_o = xperm8_result;
                 default:                 result_o = '0;
             endcase
         end

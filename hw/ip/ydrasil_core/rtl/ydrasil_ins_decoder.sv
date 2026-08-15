@@ -258,8 +258,6 @@ import ydrasil_pkg::*;
 	wire is_packh;
 	wire is_zip;
 	wire is_unzip;
-	wire is_xperm4;
-	wire is_xperm8;
 
 	assign is_shift = is_slli | is_srli | is_srai;
 	assign is_add   = is_op_r_m & (funct3 == ydrasil_pkg::RV32I_INS_ADD_SUB) 	& funct7_is_0000000;
@@ -317,8 +315,6 @@ import ydrasil_pkg::*;
 	assign is_packh  = is_op_r_m & (funct3 == 3'b111) & funct7_is_0000100;
 	assign is_zip    = is_op_imm & funct3_is_001 & funct7_is_0000100 & rs2_is_01111;
 	assign is_unzip  = is_op_imm & funct3_is_101 & funct7_is_0000100 & rs2_is_01111;
-	assign is_xperm4 = is_op_r_m & (funct3 == 3'b010) & funct7_is_0010100;
-	assign is_xperm8 = is_op_r_m & (funct3 == 3'b100) & funct7_is_0010100;
 
 	wire r_alu_group0 = is_add | is_sub | is_sll | is_slt;
 	wire r_alu_group1 = is_sltu | is_xor | is_srl | is_sra;
@@ -332,7 +328,7 @@ import ydrasil_pkg::*;
 	wire bitmanip_rs2_group2 = is_orn | is_rol | is_ror | is_xnor;
 	wire bitmanip_rs2_group3 = is_clmul | is_clmulh | is_clmulr | is_bclr;
 	wire bitmanip_rs2_group4 = is_bext | is_binv | is_bset | is_pack;
-	wire bitmanip_rs2_group5 = is_packh | is_xperm4 | is_xperm8;
+	wire bitmanip_rs2_group5 = is_packh;
 	wire bitmanip_rs2_half0 = bitmanip_rs2_group0 |
 		bitmanip_rs2_group1 | bitmanip_rs2_group2;
 	wire bitmanip_rs2_half1 = bitmanip_rs2_group3 |
@@ -468,8 +464,6 @@ import ydrasil_pkg::*;
 	assign bitmanip_op_info[ydrasil_pkg::OP_B_PACKH]  = is_packh;
 	assign bitmanip_op_info[ydrasil_pkg::OP_B_ZIP]    = is_zip;
 	assign bitmanip_op_info[ydrasil_pkg::OP_B_UNZIP]  = is_unzip;
-	assign bitmanip_op_info[ydrasil_pkg::OP_B_XPERM4] = is_xperm4;
-	assign bitmanip_op_info[ydrasil_pkg::OP_B_XPERM8] = is_xperm8;
 	assign bitmanip_op_info[ydrasil_pkg::OP_B_RSVD]   = 1'b0;
 
 
@@ -586,8 +580,6 @@ import ydrasil_pkg::*;
 					is_packh:  uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_PACKH);
 					is_zip:    uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_ZIP);
 					is_unzip:  uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_UNZIP);
-					is_xperm4: uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_XPERM4);
-					is_xperm8: uop_subop_o = ydrasil_pkg::UOP_SUBOP_WIDTH'(ydrasil_pkg::OP_B_XPERM8);
 					default: uop_subop_o = '0;
 				endcase
 			end

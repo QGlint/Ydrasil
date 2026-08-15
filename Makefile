@@ -1557,7 +1557,7 @@ comp_and_sim_cpu: comp
 COREMARK_SW_MAKE_ARGS = \
 		PROJECT_ROOT=$(PROJECT_ROOT) \
 		RISCV_PREFIX=$(RISCV_PREFIX) \
-		ARCH=rv32im_zicsr_zifencei_zba_zbb_zbc_zbkb_zbkx_zbs \
+		ARCH=rv32im_zicsr_zifencei_zba_zbb_zbc_zbkb_zbs \
 		ABI=$(ABI) \
 		CONTROL_FLOW_ALIGN_CFLAGS="$(COREMARK_SWOPT_ALIGN_CFLAGS)"
 COREMARK_SW_PROFILE_ARGS = \
