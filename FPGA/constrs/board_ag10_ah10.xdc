@@ -5,6 +5,14 @@ set_property IOSTANDARD DIFF_SSTL15 [get_ports {clk_in1_p clk_in1_n}]
 create_clock -period 5.000 -name clk_in1_p [get_ports clk_in1_p]
 set_input_jitter [get_clocks clk_in1_p] 0.050
 
+# Only the asynchronous input of each two-flop CDC synchronizer is untimed.
+# Keep the sync_meta_q -> sync_q path timed so the synchronizer resolution
+# interval remains visible to implementation and timing analysis.
+set_false_path -to [get_pins -quiet -of_objects \
+    [get_cells -quiet -hier -filter {
+        ASYNC_REG == TRUE && NAME =~ */sync_meta_q_reg*
+    }] -filter {REF_PIN_NAME == D}]
+
 set_property PACKAGE_PIN H12 [get_ports uart_rx]
 set_property PACKAGE_PIN J12 [get_ports uart_tx]
 set_property IOSTANDARD LVCMOS33 [get_ports {uart_rx uart_tx}]
